@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { arabicWeekday } from '../../utils/formatters';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
-import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
+import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
 import { getEmployeeDaySchedule, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
 import { getCycleDateRange } from '../../utils/periodEngine';
 import PendingRosterModal from './PendingRosterModal';
@@ -357,7 +357,8 @@ export default function EmployeeRosterModule({
 
     const targetBranch = activeFormBranchId || selectedBranchId || primaryBranch;
 
-    const isDirectAdmin = shouldRouteDirectToAdmin(emp, targetBranch, state, { type: 'roster_update' });
+    const noBranchMgr = isBranchWithoutManager(targetBranch, state);
+    const isDirectAdmin = noBranchMgr || shouldRouteDirectToAdmin(emp, targetBranch, state, { type: 'roster_update' });
     const targetApproval = isDirectAdmin ? 'admin_only' : 'branch_and_admin';
 
     const newRosterReq = {
@@ -374,6 +375,10 @@ export default function EmployeeRosterModule({
       targetApproval,
       isDirectToAdmin: isDirectAdmin,
       branchNotRequired: isDirectAdmin,
+      managerStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : 'pending'),
+      branchApprovalStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : undefined),
+      managerComment: noBranchMgr ? 'الفرع بدون مدير' : undefined,
+      branchApprovalNote: noBranchMgr ? 'الفرع بدون مدير' : undefined,
       status: 'pending',
       createdAt: new Date().toISOString()
     };
@@ -384,7 +389,7 @@ export default function EmployeeRosterModule({
     // Instant Optimistic UI Update (No lagging or waiting)
     setState(updatedState);
     setShowRosterModal(false);
-    showToast(isDirectAdmin ? 'تم إرسال جدول الشيفتات الشهري للاعتماد من الإدارة العليا مباشرة 📅' : 'تم إرسال جدول الشيفتات الشهري للاعتماد من مدير الفرع والإدارة العليا 📅');
+    showToast(noBranchMgr ? 'تم إرسال جدول الشيفتات الشهري للإدارة العليا مباشرة (الفرع بدون مدير) 📅' : isDirectAdmin ? 'تم إرسال جدول الشيفتات الشهري للاعتماد من الإدارة العليا مباشرة 📅' : 'تم إرسال جدول الشيفتات الشهري للاعتماد من مدير الفرع والإدارة العليا 📅');
 
     // Asynchronous background persistence and notifications
     try {

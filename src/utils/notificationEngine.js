@@ -332,12 +332,20 @@ import { shouldShowRequestToBranch } from './formatters';
  */
 export function filterAdminNotifications(notifications = [], state = null) {
   const deletedIdsSet = new Set((state?._deletedIds || []).map(String));
+  const clearedAtTimestamp = state?._notificationsClearedAt ? new Date(state._notificationsClearedAt).getTime() : 0;
 
   // 1. Filter explicit notifications from state.notifications
   const explicitNotifs = (notifications || []).filter((n) => {
     if (!n) return false;
     const notifIdStr = String(n.id || '');
     if (deletedIdsSet.has(notifIdStr)) return false;
+    if (n.requestId && (deletedIdsSet.has(String(n.requestId)) || deletedIdsSet.has(`notif_${String(n.requestId)}`))) return false;
+
+    // Respect bulk clear timestamp
+    if (clearedAtTimestamp > 0) {
+      const nTime = new Date(n.createdAt || n.timestamp || n.date || 0).getTime();
+      if (!isNaN(nTime) && nTime <= clearedAtTimestamp) return false;
+    }
 
     // A. Filter out notifications cleared or deleted specifically by Admin
     if (n.clearedByAdmin === true || n.deletedByAdmin === true || n.hiddenFromAdmin === true) {
@@ -405,10 +413,14 @@ export function filterAdminNotifications(notifications = [], state = null) {
     const addIfAdminPending = (r, defaultType) => {
       if (!r || !r.id) return;
       const rId = String(r.id);
-      if (seenReqs.has(rId) || deletedIdsSet.has(rId)) return;
+      if (seenReqs.has(rId) || deletedIdsSet.has(rId) || deletedIdsSet.has(`notif_${rId}`) || deletedIdsSet.has(`notif_pending_${rId}`)) return;
       seenReqs.add(rId);
 
-      if (r.hiddenFromAdmin || r.clearedByAdmin) return;
+      if (r.notifDismissedByAdmin || r.clearedByAdmin || r.hiddenFromAdmin || r.notifDismissed) return;
+      if (clearedAtTimestamp > 0) {
+        const reqTime = new Date(r.createdAt || r.date || 0).getTime();
+        if (!isNaN(reqTime) && reqTime <= clearedAtTimestamp) return;
+      }
       if (r.adminApproved === true || r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled' || r.status === 'paid' || r.status === 'partial') return;
 
       const isLoan = r.type === 'loan' || r.type === 'meds' || r.type === 'credit_medicine' || r.type === 'advance';
@@ -686,9 +698,11 @@ export function filterBranchManagerNotifications(notifications = [], currentBran
 
     allBranchRequests.forEach((r) => {
       const rId = String(r.id);
-      if (r.managerStatus === 'approved' || r.managerStatus === 'rejected' || r.branchApproved) return;
+      if (r.managerStatus === 'approved' || r.managerStatus === 'rejected' || r.managerStatus === 'skipped' || r.branchApproved) return;
+      if (r.managerComment === 'الفرع بدون مدير' || r.branchApprovalStatus === 'skipped') return;
       if (r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled') return;
-      if (r.isDirectToAdmin) return;
+      if (r.isDirectToAdmin || r.branchNotRequired) return;
+      if (deletedIdsSet.has(rId) || deletedIdsSet.has(`notif_${rId}`) || deletedIdsSet.has(`notif_pending_${rId}`)) return;
       if (!existingReqIds.has(rId) && !existingReqIds.has(`notif_pending_${rId}`)) {
         const emp = (state.employees || []).find((e) => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
         const empName = emp?.name || r.employeeName || 'موظف';

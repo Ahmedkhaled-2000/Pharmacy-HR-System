@@ -11,6 +11,7 @@ import {
 } from '../utils/notificationEngine';
 import { isApprovedPermissionForDate } from '../utils/latePenaltyEngine';
 import { shouldRouteDirectToAdmin } from '../utils/jobsHelper';
+import { hardDeleteEntityFast } from '../utils/offlineSync';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 import { useUI } from './UIContext';
@@ -391,82 +392,93 @@ export function NotificationProvider({ children }) {
     if (!notifId) return;
     const notifIdStr = String(notifId);
     persistDeletedNotifId(notifIdStr);
-    let updatedNotifs = [];
 
-    if (authRole === 'admin' || authRole === 'owner') {
-      updatedNotifs = (state.notifications || []).map((n) => {
-        if (String(n.id) === notifIdStr || String(n.requestId) === notifIdStr) {
-          return { ...n, deletedByAdmin: true, hiddenFromAdmin: true };
-        }
-        return n;
-      }).filter((n) => {
-        if ((String(n.id) === notifIdStr || String(n.requestId) === notifIdStr) && (n.targetRole === 'admin' || n.targetRole === 'owner')) return false;
-        return true;
-      });
-    } else if (authRole === 'branch' && currentBranch) {
-      const bId = String(currentBranch.id);
-      const bCode = String(currentBranch.branchCode || currentBranch.code || '');
-      updatedNotifs = (state.notifications || []).map((n) => {
-        if (String(n.id) === notifIdStr || String(n.requestId) === notifIdStr) {
-          const deletedBranches = Array.isArray(n.deletedForBranches) ? [...n.deletedForBranches] : [];
-          if (bId && !deletedBranches.includes(bId)) deletedBranches.push(bId);
-          if (bCode && !deletedBranches.includes(bCode)) deletedBranches.push(bCode);
-          return { ...n, deletedForBranches: deletedBranches };
-        }
-        return n;
-      });
-    } else {
-      updatedNotifs = (state.notifications || []).filter((n) => String(n.id) !== notifIdStr && String(n.requestId) !== notifIdStr);
-    }
+    const cleanReqId = notifIdStr.replace(/^(notif_pending_|notif_)/, '');
+    const tombstoneIds = [
+      notifIdStr,
+      `notif_${notifIdStr}`,
+      `notif_pending_${notifIdStr}`,
+      cleanReqId,
+      `notif_${cleanReqId}`,
+      `notif_pending_${cleanReqId}`
+    ];
 
-    const updatedState = { ...state, notifications: updatedNotifs };
+    const currentDeleted = state._deletedIds || [];
+    const updatedDeletedIds = Array.from(new Set([...currentDeleted, ...tombstoneIds]));
+
+    const dismissRequest = (r) => {
+      if (!r) return r;
+      if (String(r.id) === notifIdStr || String(r.id) === cleanReqId) {
+        return { ...r, notifDismissedByAdmin: true, clearedByAdmin: true, hiddenFromAdmin: true };
+      }
+      return r;
+    };
+
+    const updatedNotifs = (state.notifications || []).filter((n) => {
+      const nId = String(n.id || '');
+      const rId = String(n.requestId || '');
+      return nId !== notifIdStr && nId !== cleanReqId && rId !== notifIdStr && rId !== cleanReqId;
+    });
+
+    const updatedState = {
+      ...state,
+      notifications: updatedNotifs,
+      requests: (state.requests || []).map(dismissRequest),
+      leaveRequests: (state.leaveRequests || []).map(dismissRequest),
+      permissions: (state.permissions || []).map(dismissRequest),
+      shiftSwaps: (state.shiftSwaps || []).map(dismissRequest),
+      loans: (state.loans || []).map(dismissRequest),
+      resignationRequests: (state.resignationRequests || []).map(dismissRequest),
+      _deletedIds: updatedDeletedIds
+    };
+
     setState(updatedState);
     saveState(updatedState).catch(() => {});
+    hardDeleteEntityFast('notification', notifIdStr).catch(() => {});
+    if (cleanReqId !== notifIdStr) {
+      hardDeleteEntityFast('notification', cleanReqId).catch(() => {});
+    }
     showToast('🗑️ تم حذف الإشعار');
   };
 
   const handleClearReadNotifications = async () => {
-    let updatedNotifs = [];
+    const nowIso = new Date().toISOString();
     const readIdsToRecord = [];
+    const tombstoneIds = [];
 
-    if (authRole === 'admin' || authRole === 'owner') {
-      updatedNotifs = (state.notifications || []).map((n) => {
-        const isAdminRead = isNotificationReadForAdmin(n);
-        if (isAdminRead) {
-          readIdsToRecord.push(n.id);
-          return { ...n, clearedByAdmin: true, hiddenFromAdmin: true };
+    (state.notifications || []).forEach((n) => {
+      const isRead = (authRole === 'admin' || authRole === 'owner')
+        ? isNotificationReadForAdmin(n)
+        : (authRole === 'branch' && currentBranch)
+        ? isNotificationReadForBranch(n, currentBranch)
+        : Boolean(n.read);
+
+      if (isRead) {
+        readIdsToRecord.push(n.id);
+        tombstoneIds.push(String(n.id));
+        if (n.requestId) {
+          tombstoneIds.push(String(n.requestId));
+          tombstoneIds.push(`notif_${n.requestId}`);
+          tombstoneIds.push(`notif_pending_${n.requestId}`);
         }
-        return n;
-      }).filter((n) => {
-        if ((n.targetRole === 'admin' || n.targetRole === 'owner') && n.clearedByAdmin) return false;
-        return true;
-      });
-    } else if (authRole === 'branch' && currentBranch) {
-      const bId = String(currentBranch.id);
-      const bCode = String(currentBranch.branchCode || currentBranch.code || '');
-      updatedNotifs = (state.notifications || []).map((n) => {
-        const isBranchRead = isNotificationReadForBranch(n, currentBranch);
-        if (isBranchRead) {
-          readIdsToRecord.push(n.id);
-          const clearedBranches = Array.isArray(n.clearedForBranches) ? [...n.clearedForBranches] : [];
-          if (bId && !clearedBranches.includes(bId)) clearedBranches.push(bId);
-          if (bCode && !clearedBranches.includes(bCode)) clearedBranches.push(bCode);
-          return { ...n, clearedForBranches: clearedBranches };
-        }
-        return n;
-      });
-    } else {
-      updatedNotifs = (state.notifications || []).filter((n) => {
-        if (n.read) {
-          readIdsToRecord.push(n.id);
-          return false;
-        }
-        return true;
-      });
-    }
+      }
+    });
 
     persistReadNotifIds(readIdsToRecord);
-    const updatedState = { ...state, notifications: updatedNotifs };
+    readIdsToRecord.forEach(id => persistDeletedNotifId(id));
+
+    const currentDeleted = state._deletedIds || [];
+    const updatedDeletedIds = Array.from(new Set([...currentDeleted, ...tombstoneIds]));
+
+    const updatedNotifs = (state.notifications || []).filter((n) => !readIdsToRecord.includes(n.id));
+
+    const updatedState = {
+      ...state,
+      notifications: updatedNotifs,
+      _deletedIds: updatedDeletedIds,
+      _notificationsClearedAt: nowIso
+    };
+
     setState(updatedState);
     saveState(updatedState).catch(() => {});
     showToast('🗑️ تم مسح الإشعارات المقروءة بنجاح');

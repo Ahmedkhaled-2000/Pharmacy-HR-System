@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
-import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
+import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
 import { useUI } from '../../context/UIContext';
 import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 
@@ -166,8 +166,9 @@ export default function EmployeePermissionsModule({
     }
 
     const reqBranchId = selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId;
-    const isDirectAdmin = shouldRouteDirectToAdmin(emp, reqBranchId, state);
-    const targetApproval = isDirectAdmin ? 'admin_only' : 'branch_and_admin';
+    const noBranchMgr = isBranchWithoutManager(reqBranchId, state);
+    const isDirectAdmin = noBranchMgr || shouldRouteDirectToAdmin(emp, reqBranchId, state);
+    const targetApproval = (noBranchMgr || isDirectAdmin) ? 'admin_only' : 'branch_and_admin';
 
     const newPermReq = {
       id: 'perm_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -188,6 +189,10 @@ export default function EmployeePermissionsModule({
       targetApproval,
       isDirectToAdmin: isDirectAdmin,
       branchNotRequired: isDirectAdmin,
+      managerStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : 'pending'),
+      branchApprovalStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : undefined),
+      managerComment: noBranchMgr ? 'الفرع بدون مدير' : undefined,
+      branchApprovalNote: noBranchMgr ? 'الفرع بدون مدير' : undefined,
       status: 'pending',
       createdAt: new Date().toISOString()
     };
@@ -196,7 +201,7 @@ export default function EmployeePermissionsModule({
       id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       requestId: newPermReq.id,
       type: 'permission',
-      targetRole: isDirectAdmin ? 'admin' : 'branch_and_admin',
+      targetRole: (noBranchMgr || isDirectAdmin) ? 'admin' : 'branch_and_admin',
       title: `⏰ طلب إذن جديد: ${emp.name}`,
       message: `طلب إذن ${permType === 'late' ? 'تأخير صباحي' : 'خروج مبكر'} لمدة ${durationObj.text} بتاريخ ${date} (${startTime} - ${endTime}). السبب: ${reason.trim() || '—'}`,
       employeeId: emp.id,
@@ -208,7 +213,9 @@ export default function EmployeePermissionsModule({
       read: false
     };
 
-    const successMsg = isDirectAdmin
+    const successMsg = noBranchMgr
+      ? 'تم إرسال طلب الإذن مباشرة إلى الإدارة العليا (الفرع بدون مدير) ⏰'
+      : isDirectAdmin
       ? 'تم إرسال طلب الإذن مباشرة إلى الإدارة العليا للاعتماد ⏰'
       : 'تم إرسال طلب الإذن للاعتماد (لا يؤثر على الراتب وتحتسب وردية كاملة عند الموافقة) ⏰';
 

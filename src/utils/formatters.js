@@ -627,9 +627,17 @@ export function normalizeState(parsed) {
       ...e,
       employeeId: remapEmpId(e.employeeId)
     }));
-  // ── Remove old automated cycle reminder spam and keep only management notifications ──
+  // ── Remove old automated cycle reminder spam, deleted notifications, and cleared notifications ──
+  const notifClearedAtTime = parsed._notificationsClearedAt ? new Date(parsed._notificationsClearedAt).getTime() : 0;
   const notifications = toSafeArray(parsed.notifications).filter((n) => {
     if (!n) return false;
+    const nIdStr = String(n.id || '').trim().toLowerCase();
+    if (deletedSet.has(nIdStr)) return false;
+    if (n.requestId && (deletedSet.has(String(n.requestId).trim().toLowerCase()) || deletedSet.has(`notif_${String(n.requestId).trim().toLowerCase()}`))) return false;
+    if (notifClearedAtTime > 0) {
+      const nTime = new Date(n.createdAt || n.timestamp || n.date || 0).getTime();
+      if (!isNaN(nTime) && nTime <= notifClearedAtTime) return false;
+    }
     const isOldAutoReminder = (
       n.title?.includes('تذكير دورة الرواتب') ||
       n.message?.includes('اقتربت/انتهت دورة العمل الحالية')
@@ -960,6 +968,7 @@ export function normalizeState(parsed) {
     },
     branchDirectives: toSafeArray(parsed.branchDirectives),
     adminDirectives: toSafeArray(parsed.adminDirectives),
+    _notificationsClearedAt: parsed._notificationsClearedAt || null,
     _deletedIds: Array.from(deletedSet).slice(-3000)
   };
 }

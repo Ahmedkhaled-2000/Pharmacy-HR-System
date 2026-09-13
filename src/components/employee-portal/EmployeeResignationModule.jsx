@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { uid } from '../../utils/formatters';
 import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnResignationRequest, notifyAdminOnNewRequest } from '../../utils/gmailService';
-import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
+import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
 import { useUI } from '../../context/UIContext';
 import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 
@@ -144,7 +144,8 @@ export default function EmployeeResignationModule({
     }
 
     const reqBranchId = selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId;
-    const isDirectAdmin = shouldRouteDirectToAdmin(emp, reqBranchId, state);
+    const noBranchMgr = isBranchWithoutManager(reqBranchId, state);
+    const isDirectAdmin = noBranchMgr || shouldRouteDirectToAdmin(emp, reqBranchId, state);
 
     const newReq = {
       id: 'res_' + Date.now() + '_' + uid(),
@@ -163,11 +164,13 @@ export default function EmployeeResignationModule({
       requiredNoticeDays,
       isNoticeCompliant: requestType === 'resignation' ? isNoticeCompliant : true,
       status: 'pending',
-      managerStatus: isDirectAdmin ? 'skipped' : 'pending',
-      managerComment: isDirectAdmin ? 'تم التحويل للإدارة العليا مباشرة (وظيفة إدارية / فرع بدون مدير)' : '',
+      managerStatus: (noBranchMgr || isDirectAdmin) ? 'skipped' : 'pending',
+      managerComment: noBranchMgr ? 'الفرع بدون مدير' : (isDirectAdmin ? 'تم التحويل للإدارة العليا مباشرة' : ''),
+      branchApprovalStatus: (noBranchMgr || isDirectAdmin) ? 'skipped' : undefined,
+      branchApprovalNote: noBranchMgr ? 'الفرع بدون مدير' : undefined,
       adminStatus: 'pending',
       adminComment: '',
-      targetApproval: isDirectAdmin ? 'admin_only' : 'branch_and_admin',
+      targetApproval: (noBranchMgr || isDirectAdmin) ? 'admin_only' : 'branch_and_admin',
       isDirectToAdmin: isDirectAdmin,
       branchNotRequired: isDirectAdmin,
       conditionsDaysRemaining: 0,

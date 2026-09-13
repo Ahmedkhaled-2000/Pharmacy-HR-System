@@ -12,6 +12,7 @@ import {
   isNotificationReadForBranch
 } from '../../utils/notificationEngine';
 import { useUI } from '../../context/UIContext';
+import { hardDeleteEntityFast } from '../../utils/offlineSync';
 
 export default function NotificationCenterModule({
   state,
@@ -532,54 +533,103 @@ export default function NotificationCenterModule({
     showToast?.('✓ تم تحديد جميع الإشعارات وتأخيرات اللائحة كمقروءة');
   };
 
-  const handleClearNotifications = async () => {
-    const isConfirmed = await showConfirm({
-      title: 'مسح الإشعارات المقروءة',
-      message: 'هل أنت متأكد من مسح وإخفاء جميع الإشعارات المقروءة؟',
-      confirmText: 'مسح الإشعارات',
-      cancelText: 'إلغاء وتراجع',
-      type: 'warning',
-      icon: '🧹'
-    });
-    if (!isConfirmed) return;
+  const handleDeleteSingleNotification = async (notifId) => {
+    if (!notifId) return;
+    const notifIdStr = String(notifId);
+    const cleanReqId = notifIdStr.replace(/^(notif_pending_|notif_)/, '');
 
-    let updatedNotifs = [];
-    if (authRole === 'admin' || authRole === 'owner') {
-      updatedNotifs = (state.notifications || []).map((n) => {
-        const isAdminRead = isNotificationReadForAdmin(n);
-        if (isAdminRead) {
-          return { ...n, clearedByAdmin: true, hiddenFromAdmin: true };
-        }
-        return n;
-      }).filter((n) => {
-        if ((n.targetRole === 'admin' || n.targetRole === 'owner') && n.clearedByAdmin) return false;
-        return true;
-      });
-    } else if (authRole === 'branch' && currentBranch) {
-      const bId = String(currentBranch.id);
-      const bCode = String(currentBranch.branchCode || currentBranch.code || '');
-      updatedNotifs = (state.notifications || []).map((n) => {
-        const isBranchRead = isNotificationReadForBranch(n, currentBranch);
-        if (isBranchRead) {
-          const clearedBranches = Array.isArray(n.clearedForBranches) ? [...n.clearedForBranches] : [];
-          if (bId && !clearedBranches.includes(bId)) clearedBranches.push(bId);
-          if (bCode && !clearedBranches.includes(bCode)) clearedBranches.push(bCode);
-          return { ...n, clearedForBranches: clearedBranches };
-        }
-        return n;
-      });
-    } else {
-      updatedNotifs = (state.notifications || []).filter((n) => !n.read);
-    }
+    const tombstoneIds = [
+      notifIdStr,
+      `notif_${notifIdStr}`,
+      `notif_pending_${notifIdStr}`,
+      cleanReqId,
+      `notif_${cleanReqId}`,
+      `notif_pending_${cleanReqId}`
+    ];
+
+    const currentDeleted = state._deletedIds || [];
+    const updatedDeletedIds = Array.from(new Set([...currentDeleted, ...tombstoneIds]));
+
+    const dismissRequest = (r) => {
+      if (!r) return r;
+      if (String(r.id) === notifIdStr || String(r.id) === cleanReqId) {
+        return { ...r, notifDismissedByAdmin: true, clearedByAdmin: true, hiddenFromAdmin: true };
+      }
+      return r;
+    };
+
+    const updatedNotifs = (state.notifications || []).filter((n) => {
+      const nId = String(n.id || '');
+      const rId = String(n.requestId || '');
+      return nId !== notifIdStr && nId !== cleanReqId && rId !== notifIdStr && rId !== cleanReqId;
+    });
 
     const updatedState = {
       ...state,
-      notifications: updatedNotifs
+      notifications: updatedNotifs,
+      requests: (state.requests || []).map(dismissRequest),
+      leaveRequests: (state.leaveRequests || []).map(dismissRequest),
+      permissions: (state.permissions || []).map(dismissRequest),
+      shiftSwaps: (state.shiftSwaps || []).map(dismissRequest),
+      loans: (state.loans || []).map(dismissRequest),
+      resignationRequests: (state.resignationRequests || []).map(dismissRequest),
+      _deletedIds: updatedDeletedIds
     };
 
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🗑️ تم مسح الإشعارات بنجاح');
+    hardDeleteEntityFast('notification', notifIdStr).catch(() => {});
+    if (cleanReqId !== notifIdStr) {
+      hardDeleteEntityFast('notification', cleanReqId).catch(() => {});
+    }
+    showToast?.('🗑️ تم حذف الإشعار نهائياً');
+  };
+
+  const handleClearNotifications = async () => {
+    const isConfirmed = await showConfirm({
+      title: 'مسح وتفريغ سجل الإشعارات',
+      message: 'هل أنت متأكد من مسح وتفريغ سجل الإشعارات والتنبيهات بالكامل وتثبيت ذلك لمنع عودتها؟',
+      confirmText: 'مسح السجل بالكامل',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🧹'
+    });
+    if (!isConfirmed) return;
+
+    const nowIso = new Date().toISOString();
+    const existingDeleted = state._deletedIds || [];
+    const notifIdsToDelete = [];
+
+    (state.notifications || []).forEach((n) => {
+      if (n && n.id) {
+        notifIdsToDelete.push(String(n.id));
+        if (n.requestId) {
+          notifIdsToDelete.push(String(n.requestId));
+          notifIdsToDelete.push(`notif_${n.requestId}`);
+          notifIdsToDelete.push(`notif_pending_${n.requestId}`);
+        }
+      }
+    });
+
+    const updatedDeletedIds = Array.from(new Set([...existingDeleted, ...notifIdsToDelete]));
+    const markDismissed = (arr) => (arr || []).map((r) => ({ ...r, notifDismissedByAdmin: true, clearedByAdmin: true }));
+
+    const updatedState = {
+      ...state,
+      notifications: [],
+      requests: markDismissed(state.requests),
+      leaveRequests: markDismissed(state.leaveRequests),
+      permissions: markDismissed(state.permissions),
+      shiftSwaps: markDismissed(state.shiftSwaps),
+      loans: markDismissed(state.loans),
+      resignationRequests: markDismissed(state.resignationRequests),
+      _deletedIds: updatedDeletedIds,
+      _notificationsClearedAt: nowIso
+    };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('🗑️ تم مسح وتفريغ سجل الإشعارات بالكامل');
   };
 
   // KPI Counts
@@ -1362,6 +1412,15 @@ export default function NotificationCenterModule({
                         onClick={handleNavigateToItem}
                       >
                         الانتقال للقسم 🔗
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ fontSize: '12px', padding: '5px 10px', border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626', fontWeight: 'bold' }}
+                        onClick={() => handleDeleteSingleNotification(item.id)}
+                        title="حذف هذا الإشعار نهائياً من السجل"
+                      >
+                        🗑️ حذف
                       </button>
                     </div>
                   </div>

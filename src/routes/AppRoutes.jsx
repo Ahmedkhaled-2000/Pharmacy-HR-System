@@ -53,10 +53,10 @@ export default function AppRoutes() {
   const location = useLocation();
   const [selectedRosterBranchId, setSelectedRosterBranchId] = useState('');
 
-  // حالة إيقاف النظام مؤقتاً (Scroll Lock)
+  // حالة إيقاف النظام مؤقتاً (Scroll Lock) - تستمر سارية حتى بعد إغلاق التطبيق أو المتصفح أو إعادة تشغيل الجهاز
   const [isSystemLocked, setIsSystemLocked] = useState(() => {
     try {
-      return sessionStorage.getItem('app_system_locked') === 'true';
+      return localStorage.getItem('app_system_locked') === 'true' || sessionStorage.getItem('app_system_locked') === 'true';
     } catch {
       return false;
     }
@@ -157,14 +157,17 @@ export default function AppRoutes() {
   // Run Daily Digest & Alert Background Automated Cron
   useDailyDigestCron();
 
-  // تفعيل إيقاف وقفل النظام مؤقتاً عبر زر Scroll Lock أو حدث app:lock-system
+  // تفعيل إيقاف وقفل النظام مؤقتاً عبر زر Scroll Lock أو حدث app:lock-system (حفظ دائم)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'ScrollLock' || e.code === 'ScrollLock' || e.keyCode === 145) {
         e.preventDefault();
         if (authRole && authRole !== 'none') {
           setIsSystemLocked(true);
-          try { sessionStorage.setItem('app_system_locked', 'true'); } catch {}
+          try {
+            localStorage.setItem('app_system_locked', 'true');
+            sessionStorage.setItem('app_system_locked', 'true');
+          } catch {}
         }
       }
     };
@@ -172,7 +175,10 @@ export default function AppRoutes() {
     const handleLockEvent = () => {
       if (authRole && authRole !== 'none') {
         setIsSystemLocked(true);
-        try { sessionStorage.setItem('app_system_locked', 'true'); } catch {}
+        try {
+          localStorage.setItem('app_system_locked', 'true');
+          sessionStorage.setItem('app_system_locked', 'true');
+        } catch {}
       }
     };
 
@@ -1528,11 +1534,17 @@ export default function AppRoutes() {
           state={state}
           onUnlock={() => {
             setIsSystemLocked(false);
-            try { sessionStorage.removeItem('app_system_locked'); } catch {}
+            try {
+              localStorage.removeItem('app_system_locked');
+              sessionStorage.removeItem('app_system_locked');
+            } catch {}
           }}
           onLogout={() => {
             setIsSystemLocked(false);
-            try { sessionStorage.removeItem('app_system_locked'); } catch {}
+            try {
+              localStorage.removeItem('app_system_locked');
+              sessionStorage.removeItem('app_system_locked');
+            } catch {}
             handleLogout();
           }}
           themeMode={themeMode}

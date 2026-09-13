@@ -304,8 +304,10 @@ export default function PendingRosterModal({
                 <div style={{ fontSize: '11px', color: isDirectAdmin ? '#64748b' : (branchApproved ? '#166534' : '#92400e'), fontWeight: 700 }}>
                   2. مدير الفرع:
                 </div>
-                <div style={{ fontWeight: 800, color: isDirectAdmin ? '#64748b' : (branchApproved ? '#15803d' : '#b45309'), fontSize: '12.5px', marginTop: '2px' }}>
-                  {isDirectAdmin 
+                <div style={{ fontWeight: 800, color: (pendingReq.managerComment === 'الفرع بدون مدير' || pendingReq.managerStatus === 'skipped') ? '#0284c7' : (isDirectAdmin ? '#64748b' : (branchApproved ? '#15803d' : '#b45309')), fontSize: '12.5px', marginTop: '2px' }}>
+                  {(pendingReq.managerComment === 'الفرع بدون مدير' || pendingReq.managerStatus === 'skipped')
+                    ? '🏢 الفرع بدون مدير (محال للإدارة العليا مباشرة)'
+                    : isDirectAdmin 
                     ? '🔒 موجه للإدارة العليا مباشرة' 
                     : branchApproved 
                       ? '🟢 تم اعتماد وموافقة مدير الفرع' 

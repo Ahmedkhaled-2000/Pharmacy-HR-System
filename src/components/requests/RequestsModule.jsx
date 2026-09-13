@@ -130,9 +130,9 @@ export default function RequestsModule({
 }) {
   const effectiveRole = currentRole || authRole || 'admin';
   const { showConfirm } = useUI();
-  const [inboxTab, setInboxTab] = useState('all'); // 'all' | 'pending' | 'urgent' | 'completed' | 'rejected' | 'outbox'
+  const [inboxTab, setInboxTab] = useState('pending'); // 'all' | 'pending' | 'urgent' | 'completed' | 'rejected' | 'outbox'
   const [filterType, setFilterType] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all'); // يتم ضبطه بالتوافق مع التبويب
+  const [filterStatus, setFilterStatus] = useState('pending'); // افتراضي قيد الاعتماد بناءً على طلب الإدارة
   const [filterEmp, setFilterEmp] = useState('all');
   const [filterDate, setFilterDate] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -2173,7 +2173,7 @@ export default function RequestsModule({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          {/* Button: Instant Cloud Sync & Refresh */}
+          {/* Button: Instant Cloud Sync & Refresh (Green) */}
           <button
             type="button"
             className="btn"
@@ -2200,59 +2200,33 @@ export default function RequestsModule({
             <span>{isRefreshing ? 'جاري المزامنة...' : 'تحديث الطلبات'}</span>
           </button>
 
-          {/* Button: Toggle Hidden/Archived Requests */}
-          {hiddenAdminCount > 0 && (
-            <button
-              type="button"
-              className="btn"
-              onClick={() => setShowHiddenAdminRequests(!showHiddenAdminRequests)}
-              style={{
-                background: showHiddenAdminRequests ? '#8b5cf6' : '#f5f3ff',
-                color: showHiddenAdminRequests ? '#ffffff' : '#6d28d9',
-                border: '1px solid #c4b5fd',
-                padding: '8px 14px',
-                fontSize: '12px',
-                fontWeight: '800',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
-            >
-              <span>{showHiddenAdminRequests ? '👁️‍🗨️ إخفاء المؤرشف' : '👁️ عرض المؤرشف'}</span>
-              <span style={{ background: 'rgba(0,0,0,0.15)', padding: '2px 7px', borderRadius: '99px', fontSize: '11px' }}>
-                {hiddenAdminCount}
-              </span>
-            </button>
-          )}
-
-          {/* Button 1: Clear Admin View Only (New Requested Button) */}
+          {/* Button 1: Clear Admin View Only (Blue) */}
           <button
             type="button"
             className="btn"
             onClick={handleClearAdminViewOnly}
             disabled={visibleAdminRequests.length === 0}
             style={{
-              background: visibleAdminRequests.length > 0 ? '#2563eb' : 'var(--surface-muted)',
-              color: visibleAdminRequests.length > 0 ? '#ffffff' : 'var(--muted)',
-              border: '1px solid ' + (visibleAdminRequests.length > 0 ? '#1d4ed8' : 'var(--border)'),
+              background: '#2563eb',
+              color: '#ffffff',
+              border: '1px solid #1d4ed8',
+              opacity: visibleAdminRequests.length === 0 ? 0.75 : 1,
               padding: '8px 14px',
               fontSize: '12px',
               fontWeight: '800',
               borderRadius: '8px',
-              cursor: visibleAdminRequests.length > 0 ? 'pointer' : 'not-allowed',
+              cursor: visibleAdminRequests.length > 0 ? 'pointer' : 'default',
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              boxShadow: visibleAdminRequests.length > 0 ? '0 2px 8px rgba(37, 99, 235, 0.25)' : 'none',
+              boxShadow: '0 2px 8px rgba(37, 99, 235, 0.25)',
               transition: 'all 0.2s ease'
             }}
             title="مسح وتفريغ الطلبات من شاشة الإدارة العليا فقط دون حذفها أو التأثير على شاشة الموظف أو مدير الفرع"
           >
             <span>🧹 مسح شاشة الإدارة فقط</span>
             <span style={{
-              background: visibleAdminRequests.length > 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)',
+              background: 'rgba(0,0,0,0.25)',
               padding: '2px 7px',
               borderRadius: '99px',
               fontSize: '11px'
@@ -2261,32 +2235,33 @@ export default function RequestsModule({
             </span>
           </button>
 
-          {/* Button 2: Clear Entire System Requests List */}
+          {/* Button 2: Clear Entire System Requests List (Red) */}
           <button
             type="button"
             className="btn"
             onClick={handleClearAllRequests}
             disabled={allRequests.length === 0}
             style={{
-              background: allRequests.length > 0 ? '#ef4444' : 'var(--surface-muted)',
-              color: allRequests.length > 0 ? '#ffffff' : 'var(--muted)',
-              border: '1px solid ' + (allRequests.length > 0 ? '#dc2626' : 'var(--border)'),
+              background: '#ef4444',
+              color: '#ffffff',
+              border: '1px solid #dc2626',
+              opacity: allRequests.length === 0 ? 0.75 : 1,
               padding: '8px 14px',
               fontSize: '12px',
               fontWeight: '800',
               borderRadius: '8px',
-              cursor: allRequests.length > 0 ? 'pointer' : 'not-allowed',
+              cursor: allRequests.length > 0 ? 'pointer' : 'default',
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              boxShadow: allRequests.length > 0 ? '0 2px 8px rgba(239, 68, 68, 0.25)' : 'none',
+              boxShadow: '0 2px 8px rgba(239, 68, 68, 0.25)',
               transition: 'all 0.2s ease'
             }}
             title="مسح وتفريغ السجل العام للطلبات نهائياً من كافة شاشات النظام"
           >
             <span>🗑️ مسح السجل العام للطلبات</span>
             <span style={{
-              background: allRequests.length > 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)',
+              background: 'rgba(0,0,0,0.25)',
               padding: '2px 7px',
               borderRadius: '99px',
               fontSize: '11px'
@@ -2295,7 +2270,7 @@ export default function RequestsModule({
             </span>
           </button>
 
-          {/* Toggle / Restore Hidden Requests if any */}
+          {/* Button: Toggle Hidden/Archived Requests (Placed after the 3 fixed main buttons) */}
           {hiddenAdminCount > 0 && (
             <button
               type="button"
@@ -2305,8 +2280,8 @@ export default function RequestsModule({
                 fontSize: '12px',
                 fontWeight: '700',
                 padding: '6px 12px',
-                color: showHiddenAdminRequests ? '#2563eb' : 'var(--muted)',
-                border: '1px dashed var(--border)',
+                color: showHiddenAdminRequests ? '#8b5cf6' : '#6d28d9',
+                border: '1px dashed #c4b5fd',
                 borderRadius: '8px',
                 cursor: 'pointer',
                 display: 'flex',
@@ -2315,7 +2290,7 @@ export default function RequestsModule({
               }}
               title="عرض أو إخفاء الطلبات التي تم مسحها من شاشة الإدارة سابقاً"
             >
-              <span>{showHiddenAdminRequests ? '👁️ إخفاء الممسوح من الإدارة' : `👁️ عرض الممسوح من الإدارة (${hiddenAdminCount})`}</span>
+              <span>{showHiddenAdminRequests ? '👁️ إخفاء المؤرشف' : `👁️ عرض المؤرشف (${hiddenAdminCount})`}</span>
             </button>
           )}
 
@@ -2408,141 +2383,7 @@ export default function RequestsModule({
         })}
       </div>
 
-      {/* ── Executive KPI Stats Ribbon ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '22px' }}>
-        {/* KPI 1: Pending Requests */}
-        <div
-          onClick={() => { setFilterStatus('pending'); setFilterType('all'); }}
-          style={{
-            background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(217, 119, 6, 0.15) 100%)',
-            border: '1.5px solid #f59e0b',
-            borderRadius: '14px',
-            padding: '14px 16px',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            boxShadow: filterStatus === 'pending' ? '0 0 0 2px #f59e0b' : 'none'
-          }}
-        >
-          <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
-            ⏳
-          </div>
-          <div>
-            <div style={{ fontSize: '12px', fontWeight: '700', color: '#b45309' }}>طلبات قيد الاعتماد</div>
-            <div style={{ fontSize: '22px', fontWeight: '900', color: '#92400e', marginTop: '2px' }}>
-              {kpis.pendingCount}
-            </div>
-          </div>
-        </div>
 
-        {/* KPI 2: Biometric Verification */}
-        <div
-          onClick={() => { setFilterType('biometric'); setFilterStatus('pending'); }}
-          style={{
-            background: 'linear-gradient(135deg, rgba(13, 148, 136, 0.08) 0%, rgba(15, 118, 110, 0.15) 100%)',
-            border: '1.5px solid #0d9488',
-            borderRadius: '14px',
-            padding: '14px 16px',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            boxShadow: filterType === 'biometric' ? '0 0 0 2px #0d9488' : 'none'
-          }}
-        >
-          <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#ccfbf1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
-            📸
-          </div>
-          <div>
-            <div style={{ fontSize: '12px', fontWeight: '700', color: '#0f766e' }}>اعتمادات البصمة والكشك</div>
-            <div style={{ fontSize: '22px', fontWeight: '900', color: '#115e59', marginTop: '2px' }}>
-              {kpis.biometricCount}
-            </div>
-          </div>
-        </div>
-
-        {/* KPI 3: Approved this month */}
-        <div
-          onClick={() => { setFilterStatus('approved'); setFilterType('all'); }}
-          style={{
-            background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(21, 128, 61, 0.15) 100%)',
-            border: '1.5px solid #22c55e',
-            borderRadius: '14px',
-            padding: '14px 16px',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            boxShadow: filterStatus === 'approved' ? '0 0 0 2px #22c55e' : 'none'
-          }}
-        >
-          <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
-            🟢
-          </div>
-          <div>
-            <div style={{ fontSize: '12px', fontWeight: '700', color: '#15803d' }}>معتمد هذا الشهر</div>
-            <div style={{ fontSize: '22px', fontWeight: '900', color: '#166534', marginTop: '2px' }}>
-              {kpis.approvedMonthCount}
-            </div>
-          </div>
-        </div>
-
-        {/* KPI 4: Today's Leaves & Permissions */}
-        <div
-          onClick={() => { setFilterType('leave'); }}
-          style={{
-            background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(29, 78, 216, 0.15) 100%)',
-            border: '1.5px solid #3b82f6',
-            borderRadius: '14px',
-            padding: '14px 16px',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px'
-          }}
-        >
-          <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
-            🏖️
-          </div>
-          <div>
-            <div style={{ fontSize: '12px', fontWeight: '700', color: '#1d4ed8' }}>إجازات وأذون اليوم</div>
-            <div style={{ fontSize: '22px', fontWeight: '900', color: '#1e40af', marginTop: '2px' }}>
-              {kpis.todayLeavePermCount}
-            </div>
-          </div>
-        </div>
-
-        {/* KPI 5: Pending Loans & Meds */}
-        <div
-          onClick={() => { setFilterType('loan'); setFilterStatus('pending'); }}
-          style={{
-            background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.08) 0%, rgba(126, 34, 206, 0.15) 100%)',
-            border: '1.5px solid #a855f7',
-            borderRadius: '14px',
-            padding: '14px 16px',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px'
-          }}
-        >
-          <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#f3e8ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
-            💳
-          </div>
-          <div>
-            <div style={{ fontSize: '12px', fontWeight: '700', color: '#7e22ce' }}>سلف ومستحقات معلقة</div>
-            <div style={{ fontSize: '22px', fontWeight: '900', color: '#6b21a8', marginTop: '2px' }}>
-              {kpis.pendingLoansCount}
-            </div>
-          </div>
-        </div>
-      </div>
 
       {/* ── Search & Filter Controls Bar ── */}
       <div style={{ display: 'flex', gap: '12px', marginBottom: '18px', flexWrap: 'wrap', alignItems: 'center', background: 'var(--surface)', padding: '14px', borderRadius: '14px', border: '1px solid var(--border)' }}>
@@ -2764,10 +2605,12 @@ export default function RequestsModule({
                       {(() => {
                         const emp = employees.find(e => e.id === req.employeeId || e.code === req.employeeCode);
                         const effectiveBranchId = req.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId;
+                        const noManager = isBranchWithoutManager(effectiveBranchId, state) || req.managerComment === 'الفرع بدون مدير' || req.branchApprovalStatus === 'skipped' || req.managerStatus === 'skipped';
                         const isDual = isDualApprovalRequest(req, state);
                         const isDirectAdmin = isDual
-                          ? (emp && (isEmployeeBranchManager(emp, effectiveBranchId, state) || isUpperManagementEmp(emp)))
+                          ? (noManager || (emp && (isEmployeeBranchManager(emp, effectiveBranchId, state) || isUpperManagementEmp(emp))))
                           : (
+                              noManager ||
                               req.targetApproval === 'admin_only' ||
                               req.targetApproval === 'admin' ||
                               ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint', 'penalty_objection', 'objection', 'biometric_registration', 'biometric_reset'].includes(req.type) ||
@@ -2776,6 +2619,13 @@ export default function RequestsModule({
                               shouldRouteDirectToAdmin(emp, effectiveBranchId, state, req)
                             );
 
+                        if (noManager) {
+                          return (
+                            <span style={{ color: '#0284c7', fontWeight: '800', background: '#e0f2fe', padding: '4px 8px', borderRadius: '6px', border: '1px solid #bae6fd', fontSize: '12px' }}>
+                              🏢 الفرع بدون مدير
+                            </span>
+                          );
+                        }
                         if (req.type === 'disciplinary_penalty' || req.createdRole === 'branch' || req.createdRole === 'branch_manager' || req.submittedByBranchManager) {
                           return (
                             <span style={{ color: '#15803d', fontWeight: '800', background: '#f0fdf4', padding: '4px 8px', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '12px' }}>
@@ -3016,7 +2866,9 @@ export default function RequestsModule({
                   <div style={{ background: 'var(--surface)', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
                     <span style={{ fontSize: '12px', color: 'var(--muted)' }}>موقف موافقة مدير الفرع:</span>
                     <div style={{ marginTop: '4px', fontWeight: 'bold', fontSize: '13.5px' }}>
-                      {isBranchNotReq ? (
+                      {previewModalReq.managerComment === 'الفرع بدون مدير' || previewModalReq.managerStatus === 'skipped' || previewModalReq.branchApprovalStatus === 'skipped' || isBranchWithoutManager(effectiveReqBranchId, state) ? (
+                        <span style={{ color: '#0284c7' }}>🏢 الفرع بدون مدير (محال للإدارة العليا مباشرة)</span>
+                      ) : isBranchNotReq ? (
                         <span style={{ color: 'var(--muted)' }}>🔒 موجهة للإدارة العليا فقط (لا تتطلب موافقة الفرع)</span>
                       ) : (previewModalReq.branchApproved || previewModalReq.branchApprovalStatus === 'approved' || previewModalReq.managerStatus === 'approved' || previewModalReq.branchDecision === 'approved') ? (
                         <span style={{ color: 'var(--success)' }}>🟢 معتمد وموافق عليه من مدير الفرع</span>

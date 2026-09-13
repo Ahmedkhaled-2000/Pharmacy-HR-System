@@ -1015,6 +1015,39 @@ try {
                     $appId = (string)($n['applicationId'] ?? '');
                     return $nId !== $entityId && $nId !== "notif_{$entityId}" && $appId !== $entityId && $appId !== $rawAppId;
                 }));
+            } elseif ($entityType === 'notification' || $entityType === 'notifications') {
+                $rawNotifId = preg_replace('/^notif_/', '', $entityId);
+                $deletedKeys[] = $rawNotifId;
+                $deletedKeys[] = "notif_{$rawNotifId}";
+                $deletedKeys[] = "notif_pending_{$rawNotifId}";
+
+                $appState['notifications'] = array_values(array_filter((array)($appState['notifications'] ?? []), function($n) use ($entityId, $rawNotifId) {
+                    if (!is_array($n)) return false;
+                    $nId = (string)($n['id'] ?? '');
+                    $rId = (string)($n['requestId'] ?? '');
+                    $cleanNId = preg_replace('/^notif_/', '', $nId);
+                    return $nId !== $entityId && $nId !== $rawNotifId && $cleanNId !== $rawNotifId && $rId !== $entityId && $rId !== $rawNotifId;
+                }));
+
+                // وضع علامة notifDismissedByAdmin على الطلب المرتبط إن وُجد لمنع إعادة توليد الإشعار ديناميكياً
+                $markRequestDismissed = function(&$list) use ($rawNotifId, $entityId) {
+                    if (!is_array($list)) return;
+                    foreach ($list as &$r) {
+                        if (!is_array($r)) continue;
+                        $rId = (string)($r['id'] ?? '');
+                        $cleanRId = preg_replace('/^(req_|leave_|swap_|res_|loan_|notif_)/', '', $rId);
+                        if ($rId === $entityId || $rId === $rawNotifId || $cleanRId === $rawNotifId) {
+                            $r['notifDismissedByAdmin'] = true;
+                        }
+                    }
+                    unset($r);
+                };
+                $markRequestDismissed($appState['requests']);
+                $markRequestDismissed($appState['leaveRequests']);
+                $markRequestDismissed($appState['loans']);
+                $markRequestDismissed($appState['shiftSwaps']);
+                $markRequestDismissed($appState['permissionRequests']);
+                $markRequestDismissed($appState['resignationRequests']);
             }
 
             // تحديث سجل شواهد القبور _deletedIds

@@ -699,11 +699,29 @@ function mergeServerState(array $existing, array $incoming): array
         $merged['bylaws'] = array_merge($eBylaws, $iBylaws);
     }
 
-    // تقليص حجم الإشعارات بحذف الصور المكررة وتحديد السقف بـ 100 إشعار حديث لحماية Egress
+    // الحفاظ على ختم مسح الإشعارات الزمني الأحدث
+    $inClr = $incoming['_notificationsClearedAt'] ?? null;
+    $exClr = $existing['_notificationsClearedAt'] ?? null;
+    if ($inClr && $exClr) {
+        $merged['_notificationsClearedAt'] = (strtotime((string)$inClr) >= strtotime((string)$exClr)) ? $inClr : $exClr;
+    } else {
+        $merged['_notificationsClearedAt'] = $inClr ?: $exClr ?: null;
+    }
+
+    // تقليص حجم الإشعارات بحذف الصور المكررة وتصفية الممسوحة وتحديد السقف بـ 100 إشعار حديث لحماية Egress
     if (isset($merged['notifications']) && is_array($merged['notifications'])) {
         $cleanNotifs = [];
+        $notifClearedAt = $merged['_notificationsClearedAt'] ?? null;
+        $clearedTimestamp = $notifClearedAt ? strtotime((string)$notifClearedAt) : null;
+
         foreach (array_slice($merged['notifications'], 0, 100) as $notif) {
             if (is_array($notif)) {
+                if ($clearedTimestamp && !empty($notif['timestamp'])) {
+                    $notifTime = strtotime((string)$notif['timestamp']);
+                    if ($notifTime && $notifTime <= $clearedTimestamp) {
+                        continue;
+                    }
+                }
                 if (isset($notif['photoUrl']) && strlen((string)$notif['photoUrl']) > 500) {
                     unset($notif['photoUrl']);
                 }

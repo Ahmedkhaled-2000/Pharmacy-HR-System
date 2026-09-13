@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
-import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
+import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
 import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 import { apiSubmitRequestAtomic } from '../../utils/apiClient';
 
@@ -126,8 +126,9 @@ export default function EmployeeShiftSwapModule({
       return;
     }
     const targetEmpObj = employees.find((e) => String(e.id) === String(targetEmpId));
-    const isDirectAdmin = shouldRouteDirectToAdmin(emp, currentBranchId, state) || (targetEmpObj && shouldRouteDirectToAdmin(targetEmpObj, targetEmpObj.branchId || currentBranchId, state));
-    const targetApproval = isDirectAdmin ? 'admin_only' : 'branch_and_admin';
+    const noBranchMgr = isBranchWithoutManager(currentBranchId, state);
+    const isDirectAdmin = noBranchMgr || shouldRouteDirectToAdmin(emp, currentBranchId, state) || (targetEmpObj && shouldRouteDirectToAdmin(targetEmpObj, targetEmpObj.branchId || currentBranchId, state));
+    const targetApproval = (noBranchMgr || isDirectAdmin) ? 'admin_only' : 'branch_and_admin';
 
     const newSwapReq = {
       id: 'swap_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -145,6 +146,10 @@ export default function EmployeeShiftSwapModule({
       targetApproval,
       isDirectToAdmin: isDirectAdmin,
       branchNotRequired: isDirectAdmin,
+      managerStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : 'pending'),
+      branchApprovalStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : undefined),
+      managerComment: noBranchMgr ? 'الفرع بدون مدير' : undefined,
+      branchApprovalNote: noBranchMgr ? 'الفرع بدون مدير' : undefined,
       status: 'pending_target',
       createdAt: new Date().toISOString()
     };
@@ -186,15 +191,27 @@ export default function EmployeeShiftSwapModule({
   // Handle Employee B Action (Accept/Reject incoming swap request)
   const handleTargetSwapAction = async (swapId, action) => {
     const targetStatus = action === 'accept' ? 'pending_admin' : 'rejected';
+    const targetSwapReq = (state.shiftSwaps || []).find(s => s.id === swapId);
+    const effectiveBId = targetSwapReq?.branchId || currentBranchId;
+    const noBranchMgr = isBranchWithoutManager(effectiveBId, state);
+
+    const updateObj = {
+      status: targetStatus,
+      targetRespondedAt: new Date().toISOString(),
+      ...(noBranchMgr ? {
+        managerStatus: 'skipped',
+        branchApprovalStatus: 'skipped',
+        managerComment: 'الفرع بدون مدير',
+        branchApprovalNote: 'الفرع بدون مدير'
+      } : {})
+    };
 
     const updatedSwaps = (state.shiftSwaps || []).map((s) =>
-      s.id === swapId ? { ...s, status: targetStatus, targetRespondedAt: new Date().toISOString() } : s
+      s.id === swapId ? { ...s, ...updateObj } : s
     );
     const updatedRequests = (state.requests || []).map((r) =>
-      r.id === swapId ? { ...r, status: targetStatus, targetRespondedAt: new Date().toISOString() } : r
+      r.id === swapId ? { ...r, ...updateObj } : r
     );
-
-    const targetSwapReq = (state.shiftSwaps || []).find(s => s.id === swapId);
     let updatedNotifs = [...(state.notifications || [])];
     if (action === 'accept' && targetSwapReq) {
       // 1. Notification to Admin for final approval

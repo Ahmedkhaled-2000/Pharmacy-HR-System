@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { fmt, parseAnnualLeaveBalance } from '../../utils/formatters';
 import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
-import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
+import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
 import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 
 export default function EmployeeLeaveModule({
@@ -168,7 +168,8 @@ export default function EmployeeLeaveModule({
 
     const daysCount = currentDaysCount;
     const reqBranchId = selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId;
-    const isDirectAdmin = shouldRouteDirectToAdmin(emp, reqBranchId, state);
+    const noBranchMgr = isBranchWithoutManager(reqBranchId, state);
+    const isDirectAdmin = noBranchMgr || shouldRouteDirectToAdmin(emp, reqBranchId, state);
     const targetApproval = (isDirectAdmin || willExceedThreeDays) ? 'admin_only' : 'branch_and_admin';
 
     const newRequest = {
@@ -186,6 +187,10 @@ export default function EmployeeLeaveModule({
       targetApproval, // 'branch_and_admin' or 'admin_only'
       isDirectToAdmin: isDirectAdmin,
       branchNotRequired: isDirectAdmin,
+      managerStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : 'pending'),
+      branchApprovalStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : undefined),
+      managerComment: noBranchMgr ? 'الفرع بدون مدير' : undefined,
+      branchApprovalNote: noBranchMgr ? 'الفرع بدون مدير' : undefined,
       status: 'pending',
       branchApproved: false,
       adminApproved: false,
@@ -199,7 +204,7 @@ export default function EmployeeLeaveModule({
       id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       requestId: newRequest.id,
       type: 'leave',
-      targetRole: (isDirectAdmin || willExceedThreeDays) ? 'admin' : 'branch_and_admin',
+      targetRole: (isDirectAdmin || willExceedThreeDays || noBranchMgr) ? 'admin' : 'branch_and_admin',
       title: `🏖️ طلب إجازة جديد: ${emp.name}`,
       message: `طلب إجازة (${newRequest.leaveType === 'annual' ? 'سنوية' : newRequest.leaveType === 'sick' ? 'مرضية' : 'اعتيادية'}) لمدة ${daysCount} يوم من ${startDate} إلى ${endDate}. السبب: ${reason.trim() || '—'}`,
       employeeId: emp.id,
@@ -211,7 +216,9 @@ export default function EmployeeLeaveModule({
       read: false
     };
 
-    const successMsg = isDirectAdmin
+    const successMsg = noBranchMgr
+      ? 'تم إرسال طلب الإجازة مباشرة إلى الإدارة العليا (الفرع بدون مدير) 🏖️'
+      : isDirectAdmin
       ? 'تم إرسال طلب الإجازة مباشرة إلى الإدارة العليا للاعتماد 🏖️'
       : willExceedThreeDays
       ? 'تم إرسال طلب الإجازة للإدارة العليا فقط (لتجاوزه 3 أيام في الشهر) 🏖️'

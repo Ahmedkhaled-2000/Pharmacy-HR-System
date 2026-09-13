@@ -310,18 +310,24 @@ export function isDualApprovalRequest(reqOrType, state = null) {
 export function shouldRouteDirectToAdmin(emp, branchId, state, req = null) {
   if (!emp) return false;
 
-  // If this is a Dual Approval request, staff requests must NEVER route direct to admin
-  if (req && isDualApprovalRequest(req, state)) {
-    return isEmployeeBranchManager(emp, branchId, state) || isUpperManagementEmp(emp);
+  // 1. إذا كان الفرع بدون مدير معين، يتم إرسال الطلب مباشرة للإدارة العليا وتجاوز الفرع
+  const effectiveBranchId = branchId || emp.branchId || emp.branchesDetails?.[0]?.branchId;
+  if (effectiveBranchId && state && isBranchWithoutManager(effectiveBranchId, state)) {
+    return true;
   }
 
-  // If employee is Upper Management (Admin / Owner / GM / HR Head)
+  // 2. If this is a Dual Approval request, staff requests must NEVER route direct to admin
+  if (req && isDualApprovalRequest(req, state)) {
+    return isEmployeeBranchManager(emp, effectiveBranchId, state) || isUpperManagementEmp(emp);
+  }
+
+  // 3. If employee is Upper Management (Admin / Owner / GM / HR Head)
   if (isUpperManagementEmp(emp)) {
     return true;
   }
 
-  // If employee is the Branch Manager of this branch
-  if (isEmployeeBranchManager(emp, branchId, state)) {
+  // 4. If employee is the Branch Manager of this branch
+  if (isEmployeeBranchManager(emp, effectiveBranchId, state)) {
     return true;
   }
 

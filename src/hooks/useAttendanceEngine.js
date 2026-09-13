@@ -19,7 +19,7 @@ import {
   notifyOnPenaltyApplied,
   getAuthoritativeGmailConfig
 } from '../utils/gmailService';
-import { shouldRouteDirectToAdmin } from '../utils/jobsHelper';
+import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../utils/jobsHelper';
 import { apiArchiveDeleteEmployee } from '../utils/archiveApiClient';
 import { hardDeleteEntityFast } from '../utils/offlineSync';
 import { useData } from '../context/DataContext';
@@ -725,7 +725,8 @@ export function useAttendanceEngine() {
     let updatedNotifications = state.notifications || [];
 
     if (overtimeHours > 0) {
-      const isDirectAdmin = shouldRouteDirectToAdmin(emp, bId, state);
+      const noBranchMgr = isBranchWithoutManager(bId, state);
+      const isDirectAdmin = noBranchMgr || shouldRouteDirectToAdmin(emp, bId, state);
       const targetApproval = isDirectAdmin ? 'admin_only' : 'both';
       const reqId = `req_ot_${empId}_${active.date}_${shiftId}`;
 
@@ -753,6 +754,10 @@ export function useAttendanceEngine() {
         targetApproval,
         isDirectToAdmin: isDirectAdmin,
         branchNotRequired: isDirectAdmin,
+        managerStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : 'pending'),
+        branchApprovalStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : undefined),
+        managerComment: noBranchMgr ? 'الفرع بدون مدير' : undefined,
+        branchApprovalNote: noBranchMgr ? 'الفرع بدون مدير' : undefined,
         branchApproved: false,
         adminApproved: false,
         status: 'pending',

@@ -340,22 +340,24 @@ export default function ApprovalCenterModule({
                     {/* Dual Approval Status Indicators */}
                     {(() => {
                       const effectiveBranchId = req.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId;
+                      const hasNoManager = isBranchWithoutManager(effectiveBranchId, state) || req.managerComment === 'الفرع بدون مدير' || req.managerStatus === 'skipped' || req.branchApprovalStatus === 'skipped';
                       const isDual = isDualApprovalRequest(req);
-                      const isBranchNotReq = !isDual && (
+                      const isBranchNotReq = hasNoManager || (!isDual && (
                         req.targetApproval === 'admin_only' ||
                         req.targetApproval === 'admin' ||
                         ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint'].includes(req.type) ||
                         req.branchNotRequired ||
                         req.isDirectToAdmin ||
-                        shouldRouteDirectToAdmin(emp, effectiveBranchId, state, req) ||
-                        isBranchWithoutManager(effectiveBranchId, state)
-                      );
+                        shouldRouteDirectToAdmin(emp, effectiveBranchId, state, req)
+                      ));
 
                       return (
                         <div style={{ display: 'flex', gap: '12px', marginTop: '8px', flexWrap: 'wrap' }}>
                           <div className={`approval-status-badge ${isBranchNotReq ? 'na' : isBranchApproved ? 'approved' : req.branchRejected ? 'rejected' : 'pending'}`}>
-                            {isBranchNotReq
-                              ? '🔒 مدير الفرع: غير موجهة إليه (فرع بدون مدير / إدارة)'
+                            {hasNoManager
+                              ? '🏢 مدير الفرع: الفرع بدون مدير'
+                              : isBranchNotReq
+                              ? '🔒 مدير الفرع: غير موجهة إليه (إدارة)'
                               : isBranchApproved
                                 ? '✅ مدير الفرع: معتمد'
                                 : req.branchRejected
