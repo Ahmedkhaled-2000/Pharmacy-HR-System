@@ -9,18 +9,22 @@ DirectoryIndex index.html index.php
   RewriteEngine On
   RewriteBase /
 
-  # 1. خدمة الملفات والمجلدات الحقيقية مباشرة (ملفات assets والـ PHP والصور والأيقونات)
+  # 1. إذا كان الملف أو المجلد موجوداً بالفعل، يتم تقديمه مباشرة
   RewriteCond %{REQUEST_FILENAME} -f [OR]
   RewriteCond %{REQUEST_FILENAME} -d
   RewriteRule ^ - [L]
 
-  # 2. توجيه طلبات الـ API إلى api/index.php مباشرة
+  # 2. توجيه طلبات الـ API إلى api/index.php
   RewriteRule ^api/(.*)$ api/index.php?endpoint=$1 [QSA,L]
   RewriteRule ^api/?$ api/index.php?endpoint=health [QSA,L]
 
-  # 3. توجيه جميع صفحات الواجهة إلى index.html
+  # 3. استثناء index.html من أي إعادة توجيه لمنع الحلقات التكرارية تماماً
   RewriteRule ^index\.html$ - [L]
-  RewriteRule . /index.html [L]
+
+  # 4. توجيه كافة مسارات الواجهة (SPA) إلى index.html إذا لم يكن الملف أو المجلد موجوداً
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^(.*)$ /index.html [L]
 </IfModule>
 
 # ------------------------------------------------------------------------------
