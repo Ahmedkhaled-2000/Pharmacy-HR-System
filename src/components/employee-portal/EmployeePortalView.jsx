@@ -1700,7 +1700,6 @@ export default function EmployeePortalView({
         requestId: requestId,
         employeeId: empId,
         employeeName: empName,
-        photoUrl: thumbnailPhoto || null,
         createdAt: now.toISOString(),
         read: false,
         readBy: []

@@ -51,10 +51,11 @@ define('DB_PASS', getenv('DB_PASS') ?: 'M00Bje1rkK8hqZbV');                   //
 define('DB_SSLMODE', getenv('DB_SSLMODE') ?: 'require');                       // SSL Mode
 
 // إعدادات التخزين المؤقت المصغر على مستوى الخادم (Server-Side Micro-Cache)
-// لحماية كوتة Supabase وخفض استهلاك الـ Egress والاتصالات بنسبة 95%+
+// لحماية كوتة Supabase وخفض استهلاك الـ Egress والاتصالات بنسبة 99%+
 define('MICRO_CACHE_ENABLED', true);
-define('MICRO_CACHE_TTL', 8); // 8 ثوانٍ كافية لتجميع مئات الطلبات من المتصفحات في استعلام واحد فقط لـ Supabase
-define('MICRO_CACHE_DIR', sys_get_temp_dir() . '/pharmacy_hr_cache');
+define('MICRO_CACHE_TTL', 3600); // كاش دائم لمدة ساعة يُبطل فورياً ولحظياً عند أي عملية كتابة أو تعديل
+define('MICRO_CACHE_VERSION_TTL', 30); // كاش فحص رقم الإصدار لمدة 30 ثانية
+define('MICRO_CACHE_DIR', __DIR__ . '/cache');
 
 // المفتاح الافتراضي لحفظ بيانات وحالة النظام
 define('DEFAULT_STORAGE_KEY', 'pharmacy-tracker-data');
@@ -534,6 +535,20 @@ function mergeServerState(array $existing, array $incoming): array
         $eBylaws = is_array($existing['bylaws'] ?? null) ? $existing['bylaws'] : [];
         $iBylaws = is_array($incoming['bylaws'] ?? null) ? $incoming['bylaws'] : [];
         $merged['bylaws'] = array_merge($eBylaws, $iBylaws);
+    }
+
+    // تقليص حجم الإشعارات بحذف الصور المكررة وتحديد السقف بـ 100 إشعار حديث لحماية Egress
+    if (isset($merged['notifications']) && is_array($merged['notifications'])) {
+        $cleanNotifs = [];
+        foreach (array_slice($merged['notifications'], 0, 100) as $notif) {
+            if (is_array($notif)) {
+                if (isset($notif['photoUrl']) && strlen((string)$notif['photoUrl']) > 500) {
+                    unset($notif['photoUrl']);
+                }
+                $cleanNotifs[] = $notif;
+            }
+        }
+        $merged['notifications'] = $cleanNotifs;
     }
 
     $merged['_deletedIds'] = array_slice(array_keys($deletedSet), -3000);

@@ -71,15 +71,19 @@ try {
             $password = (string)($payload['password'] ?? '');
             $role = (string)($payload['role'] ?? 'admin');
 
-            // جلب إعدادات المنشأة للتحقق من كلمات المرور (مع دعم MicroCache)
+            // جلب إعدادات المنشأة للتحقق من كلمات المرور (مع دعم MicroCache وفحص خفيف الحجم)
             $cachedSettings = MicroCache::get('settings_' . DEFAULT_STORAGE_KEY);
             if ($cachedSettings && isset($cachedSettings['value'])) {
                 $appState = $cachedSettings['value'];
             } else {
-                $settingsRow = Database::queryOne("SELECT value_data FROM app_settings WHERE key_name = ? LIMIT 1", [DEFAULT_STORAGE_KEY]);
-                $appState = $settingsRow && !empty($settingsRow['value_data'])
-                    ? (is_string($settingsRow['value_data']) ? json_decode($settingsRow['value_data'], true) : $settingsRow['value_data'])
+                $settingsRow = Database::queryOne("SELECT value_data->'orgSettings' AS org_settings, value_data->'branches' AS branches FROM app_settings WHERE key_name = ? LIMIT 1", [DEFAULT_STORAGE_KEY]);
+                $orgSettings = $settingsRow && !empty($settingsRow['org_settings'])
+                    ? (is_string($settingsRow['org_settings']) ? json_decode($settingsRow['org_settings'], true) : $settingsRow['org_settings'])
                     : [];
+                $branches = $settingsRow && !empty($settingsRow['branches'])
+                    ? (is_string($settingsRow['branches']) ? json_decode($settingsRow['branches'], true) : $settingsRow['branches'])
+                    : [];
+                $appState = ['orgSettings' => $orgSettings, 'branches' => $branches];
             }
 
             $orgSettings = is_array($appState['orgSettings'] ?? null) ? $appState['orgSettings'] : [];
@@ -366,7 +370,8 @@ try {
                 'updated_at' => $row['updated_at'] ?? null
             ];
 
-            MicroCache::set('version_' . $key, $verResponse, MICRO_CACHE_TTL);
+            $verTtl = defined('MICRO_CACHE_VERSION_TTL') ? MICRO_CACHE_VERSION_TTL : 30;
+            MicroCache::set('version_' . $key, $verResponse, $verTtl);
             jsonResponse($verResponse);
             break;
 

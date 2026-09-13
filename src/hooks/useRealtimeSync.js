@@ -293,11 +293,11 @@ export function useRealtimeSync(props = {}) {
       if (timerId) clearTimeout(timerId);
 
       const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
-      let delay = customDelay !== null ? customDelay : (isVisible ? 2000 : 5000);
+      let delay = customDelay !== null ? customDelay : (isVisible ? 10000 : 30000);
 
       if (customDelay === null && pollFailures > 0) {
-        // فترات تراجع ذكية عند تعثر السيرفر (2ث -> 4ث -> 8ث -> 15ث كحد أقصى)
-        delay = Math.min(15000, 2000 * Math.pow(1.5, Math.min(pollFailures, 4)));
+        // فترات تراجع ذكية عند تعثر السيرفر (10ث -> 20ث -> 30ث كحد أقصى)
+        delay = Math.min(30000, 10000 * Math.pow(1.5, Math.min(pollFailures, 3)));
       }
 
       timerId = setTimeout(async () => {

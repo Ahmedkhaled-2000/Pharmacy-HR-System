@@ -37,6 +37,8 @@ jobs:
           mkdir -p deploy_package
           cp -r dist/* deploy_package/
           cp -r api deploy_package/api
+          mkdir -p deploy_package/api/cache
+          chmod -R 777 deploy_package/api/cache
           if [ -f public/.htaccess ]; then
             cp public/.htaccess deploy_package/.htaccess
           fi
