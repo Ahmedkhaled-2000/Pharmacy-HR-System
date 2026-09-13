@@ -4,7 +4,7 @@ import { notifyEmployeeEarlyExitWarning, notifyOnPenaltyApplied } from '../../ut
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { shouldRouteDirectToAdmin, isBranchWithoutManager, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from '../../utils/jobsHelper';
 import { normalizeSchedule } from '../roster/RosterModule';
-import { syncNow, fetchRemoteState } from '../../utils/offlineSync';
+import { syncNow, fetchRemoteState, hardDeleteEntityFast } from '../../utils/offlineSync';
 import { createRequestDecisionNotification } from '../../utils/notificationEngine';
 import { useUI } from '../../context/UIContext';
 import { saveFaceDescriptor, saveHandDescriptor, deleteFaceDescriptor, deleteHandDescriptor } from '../../utils/faceStorage';
@@ -129,10 +129,18 @@ export default function RequestsModule({
   const effectiveRole = currentRole || authRole || 'admin';
   const { showConfirm } = useUI();
   const [filterType, setFilterType] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('pending'); // الافتراضي قيد الاعتماد
   const [filterEmp, setFilterEmp] = useState('all');
   const [filterDate, setFilterDate] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedIds, setSelectedIds] = useState(new Set());
   const [previewModalReq, setPreviewModalReq] = useState(null);
+
+  // Modern In-App Lightbox & Photo Comparison State (Zero window.open)
+  const [lightboxPhoto, setLightboxPhoto] = useState(null);
+  const [photoZoom, setPhotoZoom] = useState(1);
+  const [photoRotation, setPhotoRotation] = useState(0);
+  const [showSideBySide, setShowSideBySide] = useState(false);
 
   // Loan Modification State for Higher Management before approval
   const [loanCustomAmount, setLoanCustomAmount] = useState('');
@@ -201,44 +209,67 @@ export default function RequestsModule({
   }, [state._deletedIds]);
 
   const allRequests = useMemo(() => {
-    const list = (state.requests || []).filter(
-      (r) =>
-        r &&
-        r.type !== 'resignation' &&
-        r.type !== 'withdraw' &&
-        r.type !== 'resignation_request' &&
-        !String(r.id || '').startsWith('res_')
-    );
-    const existingIds = new Set(list.map((r) => String(r.id)));
+    const isIdDeleted = (id) => {
+      if (!id) return false;
+      const s = String(id);
+      const raw = s.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+      return (
+        deletedIdsSet.has(s) ||
+        deletedIdsSet.has(raw) ||
+        deletedIdsSet.has(`req_${s}`) ||
+        deletedIdsSet.has(`req_${raw}`) ||
+        deletedIdsSet.has(`leave_${raw}`) ||
+        deletedIdsSet.has(`swap_${raw}`) ||
+        deletedIdsSet.has(`loan_${raw}`)
+      );
+    };
 
-    (state.leaveRequests || []).forEach((lr) => {
-      if (lr && !existingIds.has(String(lr.id))) {
-        list.push({ ...lr, type: lr.type || 'leave' });
-        existingIds.add(String(lr.id));
-      }
-    });
+    const existingIds = new Set();
+    const seenSignatures = new Set();
+    const list = [];
 
-    (state.shiftSwaps || []).forEach((sw) => {
-      if (sw && !existingIds.has(String(sw.id))) {
-        list.push({ ...sw, type: 'swap' });
-        existingIds.add(String(sw.id));
-      }
-    });
+    const addIfUnique = (r, defaultType = null) => {
+      if (!r || !r.id) return;
+      const idStr = String(r.id);
+      const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
 
-    (state.loans || []).forEach((ln) => {
-      if (ln && !existingIds.has(String(ln.id))) {
-        list.push({ ...ln, type: ln.type || 'loan' });
-        existingIds.add(String(ln.id));
+      if (isIdDeleted(idStr) || isIdDeleted(rawId)) return;
+      if (existingIds.has(idStr) || existingIds.has(rawId)) return;
+
+      // Resignations are managed exclusively in their dedicated module
+      if (r.type === 'resignation' || r.type === 'withdraw' || r.type === 'resignation_request' || idStr.startsWith('res_')) return;
+
+      // Semantic deduplication for double submissions / rapid multi-clicks
+      const empKey = String(r.employeeId || r.employeeCode || '');
+      const typeKey = String(r.type || defaultType || 'gen');
+      const dateKey = String(r.date || r.startDate || (r.createdAt ? r.createdAt.substring(0, 10) : ''));
+      const timeKey = r.time ? String(r.time).substring(0, 4) : (r.createdAt ? r.createdAt.substring(11, 16) : '');
+      const amtKey = String(r.amount || r.totalAmount || r.leaveType || r.targetEmployeeId || '');
+      const sigKey = `${empKey}_${typeKey}_${dateKey}_${timeKey}_${amtKey}`;
+
+      if (sigKey.length > 8 && seenSignatures.has(sigKey)) {
+        return;
       }
-    });
+
+      existingIds.add(idStr);
+      existingIds.add(rawId);
+      if (sigKey.length > 8) seenSignatures.add(sigKey);
+
+      list.push(defaultType && !r.type ? { ...r, type: defaultType } : r);
+    };
+
+    (state.requests || []).forEach((r) => addIfUnique(r));
+    (state.leaveRequests || []).forEach((lr) => addIfUnique(lr, 'leave'));
+    (state.shiftSwaps || []).forEach((sw) => addIfUnique(sw, 'swap'));
+    (state.loans || []).forEach((ln) => addIfUnique(ln, 'loan'));
 
     // Aggregate any pending/resolved employee penalty objections from late incidents
     (state.lateIncidents || []).forEach((inc) => {
       if (inc && inc.objection && (inc.objection.status || inc.status === 'objection_pending')) {
         const objReqId = `obj_inc_${inc.id}`;
-        if (!existingIds.has(objReqId) && !existingIds.has(String(inc.id))) {
+        if (!existingIds.has(objReqId) && !existingIds.has(String(inc.id)) && !isIdDeleted(objReqId)) {
           const emp = (state.employees || []).find((e) => String(e.id) === String(inc.employeeId) || (inc.employeeCode && String(e.code) === String(inc.employeeCode)));
-          list.push({
+          addIfUnique({
             id: objReqId,
             penaltyId: inc.id,
             sourceType: 'late_incident',
@@ -258,7 +289,6 @@ export default function RequestsModule({
             adminApproved: inc.objection.status === 'approved',
             createdAt: inc.objection.submittedAt || inc.date || new Date().toISOString()
           });
-          existingIds.add(objReqId);
         }
       }
     });
@@ -267,9 +297,9 @@ export default function RequestsModule({
     (state.adjustments || []).forEach((adj) => {
       if (adj && adj.objection && adj.objection.status) {
         const objReqId = `obj_adj_${adj.id}`;
-        if (!existingIds.has(objReqId) && !existingIds.has(String(adj.id))) {
+        if (!existingIds.has(objReqId) && !existingIds.has(String(adj.id)) && !isIdDeleted(objReqId)) {
           const emp = (state.employees || []).find((e) => String(e.id) === String(adj.employeeId) || (adj.employeeCode && String(e.code) === String(adj.employeeCode)));
-          list.push({
+          addIfUnique({
             id: objReqId,
             penaltyId: adj.id,
             sourceType: 'adjustment',
@@ -287,7 +317,6 @@ export default function RequestsModule({
             adminApproved: adj.objection.status === 'approved',
             createdAt: adj.objection.submittedAt || adj.date || new Date().toISOString()
           });
-          existingIds.add(objReqId);
         }
       }
     });
@@ -349,7 +378,7 @@ export default function RequestsModule({
     }).filter((r) => {
       if (!r || !r.id) return false;
       const idStr = String(r.id);
-      if (deletedIdsSet.has(idStr) || deletedIdsSet.has(`req_${idStr}`)) {
+      if (isIdDeleted(idStr)) {
         return false;
       }
       if (isBranch) {
@@ -469,6 +498,9 @@ export default function RequestsModule({
         if (r.type !== 'complaint' && r.type !== 'eval_edit_request') return false;
       } else if (filterType === 'penalty_objection') {
         if (r.type !== 'penalty_objection' && r.type !== 'objection' && !r.penaltyId && !r.objection) return false;
+      } else if (filterType === 'biometric') {
+        const isBio = r.type === 'biometric_verification' || r.type === 'biometric_registration' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
+        if (!isBio) return false;
       } else if (r.type !== filterType) {
         return false;
       }
@@ -486,6 +518,19 @@ export default function RequestsModule({
     }
     if (filterEmp !== 'all') {
       if (String(r.employeeId) !== String(filterEmp)) return false;
+    }
+
+    // Live Search across Employee Name, Code, Request ID, Branch, Details
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const emp = (state.employees || []).find(e => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
+      const empName = (emp ? getEmpDisplayName(emp) : (r.employeeName || '')).toLowerCase();
+      const empCode = String(r.employeeCode || emp?.code || '').toLowerCase();
+      const reqIdStr = String(r.id || '').toLowerCase();
+      const detailsStr = String(r.details || r.reason || r.typeLabel || r.type || '').toLowerCase();
+      const branchStr = String(r.branchName || emp?.branchName || '').toLowerCase();
+      const matchesSearch = empName.includes(q) || empCode.includes(q) || reqIdStr.includes(q) || detailsStr.includes(q) || branchStr.includes(q);
+      if (!matchesSearch) return false;
     }
 
     const rDate = getRequestDate(r);
@@ -506,6 +551,58 @@ export default function RequestsModule({
     }
     return true;
   });
+
+  // Calculate Executive KPI Stats across allRequests
+  const kpis = useMemo(() => {
+    let pendingCount = 0;
+    let biometricCount = 0;
+    let approvedMonthCount = 0;
+    let todayLeavePermCount = 0;
+    let pendingLoansCount = 0;
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const thisMonthStr = todayStr.slice(0, 7);
+
+    (allRequests || []).forEach((r) => {
+      if (!r) return;
+      const isPending = !r.status || r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_target';
+      const isApproved = r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.adminApproved;
+      const rDate = getRequestDate(r);
+      const isBio = r.type === 'biometric_verification' || r.type === 'biometric_registration' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
+
+      if (isPending) pendingCount++;
+      if (isBio && isPending) biometricCount++;
+      if (isApproved && rDate && rDate.startsWith(thisMonthStr)) approvedMonthCount++;
+      if ((r.type === 'leave' || r.type === 'permission' || r.type === 'late_permission') && (r.startDate === todayStr || r.date === todayStr)) todayLeavePermCount++;
+      if ((r.type === 'loan' || r.type === 'advance' || r.type === 'meds') && isPending) pendingLoansCount++;
+    });
+
+    return {
+      pendingCount,
+      biometricCount,
+      approvedMonthCount,
+      todayLeavePermCount,
+      pendingLoansCount
+    };
+  }, [allRequests]);
+
+  // Bulk Selection Handlers
+  const handleToggleSelectAll = () => {
+    if (selectedIds.size === filteredRequests.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredRequests.map(r => r.id)));
+    }
+  };
+
+  const handleToggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Sort descending by newest request first
   filteredRequests.sort((a, b) => {
@@ -1614,6 +1711,10 @@ export default function RequestsModule({
         _deletedIds: updatedDeleted
       };
 
+      try {
+        hardDeleteEntityFast('request', reqId).catch(() => {});
+      } catch {}
+
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
       if (previewModalReq?.id === reqId || matchesId(previewModalReq)) setPreviewModalReq(null);
@@ -1952,6 +2053,64 @@ export default function RequestsModule({
     }
   };
 
+  // Batch Operations Handlers
+  const handleBatchApprove = async () => {
+    if (selectedIds.size === 0) return;
+    const isConfirmed = await showConfirm({
+      title: 'اعتماد جماعي للطلبات',
+      message: `هل أنت متأكد من اعتماد وموافقة جميع الطلبات المحددة (${selectedIds.size} طلب) دفعة واحدة؟`,
+      confirmText: 'تأكيد الاعتماد الجماعي',
+      cancelText: 'إلغاء',
+      type: 'primary',
+      icon: '✓'
+    });
+    if (!isConfirmed) return;
+    const targetIds = Array.from(selectedIds);
+    for (const id of targetIds) {
+      await handleApprove(id);
+    }
+    setSelectedIds(new Set());
+    showToast?.(`✅ تم اعتماد (${targetIds.length}) طلب بنجاح`);
+  };
+
+  const handleBatchReject = async () => {
+    if (selectedIds.size === 0) return;
+    const isConfirmed = await showConfirm({
+      title: 'رفض جماعي للطلبات',
+      message: `هل أنت متأكد من رفض جميع الطلبات المحددة (${selectedIds.size} طلب)؟`,
+      confirmText: 'تأكيد الرفض',
+      cancelText: 'إلغاء',
+      type: 'danger',
+      icon: '✕'
+    });
+    if (!isConfirmed) return;
+    const targetIds = Array.from(selectedIds);
+    for (const id of targetIds) {
+      await handleReject(id);
+    }
+    setSelectedIds(new Set());
+    showToast?.(`❌ تم رفض (${targetIds.length}) طلب`);
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف جماعي للطلبات',
+      message: `هل أنت متأكد من حذف جميع الطلبات المحددة (${selectedIds.size} طلب) نهائياً من قاعدة البيانات والسجلات؟ لا يمكن التراجع.`,
+      confirmText: 'تأكيد الحذف النهائي',
+      cancelText: 'إلغاء',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
+    const targetIds = Array.from(selectedIds);
+    for (const id of targetIds) {
+      await handleDeleteSingleRequest(id);
+    }
+    setSelectedIds(new Set());
+    showToast?.(`🗑️ تم حذف (${targetIds.length}) طلب نهائياً`);
+  };
+
   return (
     <div className="bylaws-card fade-in">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
@@ -2133,10 +2292,168 @@ export default function RequestsModule({
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '14px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center', background: 'var(--surface)', padding: '14px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+      {/* ── Executive KPI Stats Ribbon ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '22px' }}>
+        {/* KPI 1: Pending Requests */}
+        <div
+          onClick={() => { setFilterStatus('pending'); setFilterType('all'); }}
+          style={{
+            background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(217, 119, 6, 0.15) 100%)',
+            border: '1.5px solid #f59e0b',
+            borderRadius: '14px',
+            padding: '14px 16px',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            boxShadow: filterStatus === 'pending' ? '0 0 0 2px #f59e0b' : 'none'
+          }}
+        >
+          <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
+            ⏳
+          </div>
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: '700', color: '#b45309' }}>طلبات قيد الاعتماد</div>
+            <div style={{ fontSize: '22px', fontWeight: '900', color: '#92400e', marginTop: '2px' }}>
+              {kpis.pendingCount}
+            </div>
+          </div>
+        </div>
+
+        {/* KPI 2: Biometric Verification */}
+        <div
+          onClick={() => { setFilterType('biometric'); setFilterStatus('pending'); }}
+          style={{
+            background: 'linear-gradient(135deg, rgba(13, 148, 136, 0.08) 0%, rgba(15, 118, 110, 0.15) 100%)',
+            border: '1.5px solid #0d9488',
+            borderRadius: '14px',
+            padding: '14px 16px',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            boxShadow: filterType === 'biometric' ? '0 0 0 2px #0d9488' : 'none'
+          }}
+        >
+          <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#ccfbf1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
+            📸
+          </div>
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: '700', color: '#0f766e' }}>اعتمادات البصمة والكشك</div>
+            <div style={{ fontSize: '22px', fontWeight: '900', color: '#115e59', marginTop: '2px' }}>
+              {kpis.biometricCount}
+            </div>
+          </div>
+        </div>
+
+        {/* KPI 3: Approved this month */}
+        <div
+          onClick={() => { setFilterStatus('approved'); setFilterType('all'); }}
+          style={{
+            background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(21, 128, 61, 0.15) 100%)',
+            border: '1.5px solid #22c55e',
+            borderRadius: '14px',
+            padding: '14px 16px',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            boxShadow: filterStatus === 'approved' ? '0 0 0 2px #22c55e' : 'none'
+          }}
+        >
+          <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
+            🟢
+          </div>
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: '700', color: '#15803d' }}>معتمد هذا الشهر</div>
+            <div style={{ fontSize: '22px', fontWeight: '900', color: '#166534', marginTop: '2px' }}>
+              {kpis.approvedMonthCount}
+            </div>
+          </div>
+        </div>
+
+        {/* KPI 4: Today's Leaves & Permissions */}
+        <div
+          onClick={() => { setFilterType('leave'); }}
+          style={{
+            background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(29, 78, 216, 0.15) 100%)',
+            border: '1.5px solid #3b82f6',
+            borderRadius: '14px',
+            padding: '14px 16px',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px'
+          }}
+        >
+          <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
+            🏖️
+          </div>
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: '700', color: '#1d4ed8' }}>إجازات وأذون اليوم</div>
+            <div style={{ fontSize: '22px', fontWeight: '900', color: '#1e40af', marginTop: '2px' }}>
+              {kpis.todayLeavePermCount}
+            </div>
+          </div>
+        </div>
+
+        {/* KPI 5: Pending Loans & Meds */}
+        <div
+          onClick={() => { setFilterType('loan'); setFilterStatus('pending'); }}
+          style={{
+            background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.08) 0%, rgba(126, 34, 206, 0.15) 100%)',
+            border: '1.5px solid #a855f7',
+            borderRadius: '14px',
+            padding: '14px 16px',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px'
+          }}
+        >
+          <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#f3e8ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
+            💳
+          </div>
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: '700', color: '#7e22ce' }}>سلف ومستحقات معلقة</div>
+            <div style={{ fontSize: '22px', fontWeight: '900', color: '#6b21a8', marginTop: '2px' }}>
+              {kpis.pendingLoansCount}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Search & Filter Controls Bar ── */}
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '18px', flexWrap: 'wrap', alignItems: 'center', background: 'var(--surface)', padding: '14px', borderRadius: '14px', border: '1px solid var(--border)' }}>
+        {/* Instant Live Search */}
+        <div style={{ flex: '1 1 240px', minWidth: '220px', position: 'relative' }}>
+          <input
+            type="text"
+            placeholder="🔍 بحث فوري بالاسم، الكود، الفرع، أو التفاصيل..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{ width: '100%', padding: '8px 12px 8px 32px', borderRadius: '8px', border: '1.5px solid var(--border)', fontSize: '13px', background: 'var(--surface-muted)' }}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '12px' }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Filter Employee */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <label style={{ fontSize: '13px', fontWeight: 'bold' }}>👤 الموظف:</label>
-          <select value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}>
+          <select value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)} style={{ padding: '7px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}>
             <option value="all">-- جميع الموظفين --</option>
             {employees.filter(isEmployeeActive).map((e) => (
               <option key={e.id} value={e.id}>{getEmpDisplayName(e)} ({e.code})</option>
@@ -2144,41 +2461,45 @@ export default function RequestsModule({
           </select>
         </div>
 
+        {/* Filter Date */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <label style={{ fontSize: '13px', fontWeight: 'bold' }}>📅 التاريخ:</label>
           <input
             type="date"
             value={filterDate}
             onChange={(e) => setFilterDate(e.target.value)}
-            style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}
+            style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
           />
           {filterDate && (
-            <button className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: '11px', color: 'var(--danger)' }} onClick={() => setFilterDate('')}>✕ مسح</button>
+            <button className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: '11px', color: 'var(--danger)' }} onClick={() => setFilterDate('')}>✕</button>
           )}
         </div>
 
+        {/* Filter Type */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <label style={{ fontSize: '13px', fontWeight: 'bold' }}>نوع الطلب:</label>
-          <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+          <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ padding: '7px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}>
             <option value="all">-- جميع أنواع الطلبات --</option>
-            <option value="penalty_objection">✋ تظلمات الجزاءات واللائحة</option>
+            <option value="biometric">📸 اعتمادات البصمة والكشك</option>
             <option value="leave">🏖️ إجازات (&lt;= 3 أيام)</option>
             <option value="long_leave">🏖️ إجازات أكثر من 3 أيام</option>
             <option value="permission">⏰ أذون خروج/دخول</option>
             <option value="loan">💳 سلف مالية</option>
             <option value="meds">💊 أدوية آجل</option>
             <option value="swap">🔄 تبديل شفتات</option>
+            <option value="penalty_objection">✋ تظلمات الجزاءات واللائحة</option>
             <option value="roster_edit">📅 تعديل جدول شهري</option>
             <option value="complaint">📋 شكاوي وملاحظات</option>
             <option value="penalty">⚠️ جزاءات ومخالفات لائحية</option>
           </select>
         </div>
 
+        {/* Filter Status (Default: pending) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <label style={{ fontSize: '13px', fontWeight: 'bold' }}>حالة الاعتماد:</label>
-          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={{ padding: '7px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', fontWeight: 'bold', color: filterStatus === 'pending' ? '#b45309' : 'inherit' }}>
+            <option value="pending">⏳ قيد الاعتماد (الافتراضي)</option>
             <option value="all">-- جميع الحالات --</option>
-            <option value="pending">⏳ قيد الاعتماد</option>
             <option value="pending_admin">🟡 بانتظار الإدارة العليا</option>
             <option value="approved">🟢 معتمد نهائياً</option>
             <option value="rejected">🔴 مرفوض</option>
@@ -2186,10 +2507,78 @@ export default function RequestsModule({
         </div>
       </div>
 
+      {/* ── Batch Action Bar (العمليات الجماعية) ── */}
+      {selectedIds.size > 0 && (
+        <div style={{
+          background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+          color: '#fff',
+          padding: '12px 20px',
+          borderRadius: '12px',
+          marginBottom: '16px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+          border: '1px solid rgba(255,255,255,0.1)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '18px' }}>⚡</span>
+            <span style={{ fontWeight: 'bold', fontSize: '14px' }}>
+              تم تحديد ({selectedIds.size}) طلب
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              className="btn"
+              onClick={handleBatchApprove}
+              style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12.5px', cursor: 'pointer' }}
+            >
+              ✓ اعتماد المحدد ({selectedIds.size})
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={handleBatchReject}
+              style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12.5px', cursor: 'pointer' }}
+            >
+              ✕ رفض المحدد ({selectedIds.size})
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={handleBatchDelete}
+              style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12.5px', cursor: 'pointer' }}
+            >
+              🗑️ حذف المحدد نهائياً
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setSelectedIds(new Set())}
+              style={{ color: '#cbd5e1', border: '1px solid #475569', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
+            >
+              إلغاء التحديد
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="table-responsive">
         <table className="bylaws-table">
           <thead>
             <tr>
+              <th style={{ width: '40px', textAlign: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={filteredRequests.length > 0 && selectedIds.size === filteredRequests.length}
+                  onChange={handleToggleSelectAll}
+                  style={{ cursor: 'pointer', transform: 'scale(1.2)' }}
+                  title="تحديد الكل"
+                />
+              </th>
               <th>تاريخ ووقت الإرسال</th>
               <th>الموظف المقدم</th>
               <th>نوع الطلب</th>
@@ -2200,13 +2589,21 @@ export default function RequestsModule({
           </thead>
           <tbody>
             {filteredRequests.length === 0 ? (
-              <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا توجد طلبات تطابق خيارات التصفية.</td></tr>
+              <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا توجد طلبات تطابق خيارات التصفية.</td></tr>
             ) : (
               filteredRequests.map((req) => {
                 const isOldProcessed = req.status === 'approved' || req.status === 'rejected';
 
                 return (
-                  <tr key={req.id}>
+                  <tr key={req.id} style={{ background: selectedIds.has(req.id) ? 'rgba(59, 130, 246, 0.06)' : undefined }}>
+                    <td style={{ textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(req.id)}
+                        onChange={() => handleToggleSelect(req.id)}
+                        style={{ cursor: 'pointer', transform: 'scale(1.15)' }}
+                      />
+                    </td>
                     <td style={{ whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '3px', background: 'var(--surface-muted)', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                         <span style={{ fontWeight: '900', color: 'var(--primary-dark)', fontSize: '13px' }}>
@@ -2223,7 +2620,30 @@ export default function RequestsModule({
                         return emp ? getEmpDisplayName(emp) : (req.employeeName || 'موظف');
                       })()}
                     </td>
-                    <td>{getFormattedRequestBadge(req.type, req.leaveType)}</td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        {getFormattedRequestBadge(req.type, req.leaveType)}
+                        {(req.photoUrl || req.drivePhotoUrl || req.type === 'biometric_verification' || req.type === 'biometric_registration' || req.type === 'تأكيد بصمة الوجه' || req.type === 'تأكيد بصمة اليد') && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const emp = employees.find(e => e.id === req.employeeId || e.code === req.employeeCode);
+                              setLightboxPhoto({
+                                url: req.photoUrl || req.drivePhotoUrl || emp?.photoUrl,
+                                title: `معاينة بصمة وصورة: ${emp ? getEmpDisplayName(emp) : (req.employeeName || '')}`,
+                                subtitle: `تاريخ التوثيق: ${getRequestDate(req)} • ${getRequestTime(req)}`,
+                                compareUrl: emp?.photoUrl || null,
+                                compareTitle: 'الصورة الرسمية المسجلة للموظف'
+                              });
+                            }}
+                            title="معاينة الصورة الحية بالحجم الكامل ومطابقتها"
+                            style={{ background: '#ccfbf1', border: '1px solid #0d9488', color: '#0f766e', borderRadius: '6px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            📸 صورة
+                          </button>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       {(() => {
                         const emp = employees.find(e => e.id === req.employeeId || e.code === req.employeeCode);
@@ -2962,7 +3382,14 @@ export default function RequestsModule({
                           <img
                             src={empObj.photoUrl}
                             alt="الصورة الرسمية"
-                            style={{ width: '130px', height: '130px', objectFit: 'cover', borderRadius: '12px', border: '2px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+                            style={{ width: '130px', height: '130px', objectFit: 'cover', borderRadius: '12px', border: '2px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', cursor: 'pointer' }}
+                            title="انقر لتكبير الصورة ومقارنتها"
+                            onClick={() => setLightboxPhoto({
+                              url: empObj.photoUrl,
+                              title: `الصورة الرسمية المسجلة - ${empObj.name || previewModalReq.employeeName || ''}`,
+                              compareUrl: (previewModalReq.photoUrl || previewModalReq.drivePhotoUrl) || null,
+                              compareTitle: 'صورة الكشك الملتقطة'
+                            })}
                           />
                         ) : (
                           <div style={{ width: '130px', height: '130px', borderRadius: '12px', background: '#f1f5f9', color: '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '36px', margin: '0 auto', border: '2px dashed #cbd5e1' }}>
@@ -2987,7 +3414,14 @@ export default function RequestsModule({
                           <img
                             src={previewModalReq.photoUrl || previewModalReq.drivePhotoUrl}
                             alt="صورة الكشك"
-                            style={{ width: '100%', maxHeight: '180px', objectFit: 'contain', borderRadius: '12px', border: '2px solid #0d9488', background: '#000' }}
+                            style={{ width: '100%', maxHeight: '180px', objectFit: 'contain', borderRadius: '12px', border: '2px solid #0d9488', background: '#000', cursor: 'pointer' }}
+                            title="انقر لتكبير صورة الكشك ومقارنتها"
+                            onClick={() => setLightboxPhoto({
+                              url: previewModalReq.photoUrl || previewModalReq.drivePhotoUrl,
+                              title: `صورة الكشك الحية - ${previewModalReq.employeeName || ''} (${previewModalReq.date || ''} ${previewModalReq.time || ''})`,
+                              compareUrl: empObj?.photoUrl || null,
+                              compareTitle: 'الصورة الرسمية للموظف'
+                            })}
                           />
                         ) : (
                           <div style={{ height: '130px', borderRadius: '12px', background: '#f8fafc', color: '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px dashed #cbd5e1' }}>
@@ -3450,8 +3884,17 @@ export default function RequestsModule({
                               </span>
                               <div
                                 style={{ width: '65px', height: '65px', borderRadius: '50%', overflow: 'hidden', border: hasPhotoChange ? '3px solid #10b981' : '2px dashed #cbd5e1', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto', boxShadow: hasPhotoChange ? '0 4px 10px rgba(16,185,129,0.3)' : 'none', cursor: newPhoto ? 'pointer' : 'default' }}
-                                onClick={() => { if (newPhoto) window.open(newPhoto, '_blank'); }}
-                                title={newPhoto ? 'انقر لتكبير الصورة' : ''}
+                                onClick={() => {
+                                  if (newPhoto) {
+                                    setLightboxPhoto({
+                                      url: newPhoto,
+                                      title: `الصورة الشخصية الجديدة المقترحة - ${previewModalReq.employeeName || ''}`,
+                                      compareUrl: prevPhoto || null,
+                                      compareTitle: 'الصورة الحالية المسجلة'
+                                    });
+                                  }
+                                }}
+                                title={newPhoto ? 'انقر لتكبير الصورة ومقارنتها' : ''}
                               >
                                 {newPhoto ? (
                                   <img src={newPhoto} alt="الجديدة" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -3460,8 +3903,16 @@ export default function RequestsModule({
                                 )}
                               </div>
                               {newPhoto && (
-                                <span style={{ fontSize: '10.5px', color: '#0d9488', display: 'block', marginTop: '3px', cursor: 'pointer' }} onClick={() => window.open(newPhoto, '_blank')}>
-                                  🔍 تكبير الصورة
+                                <span
+                                  style={{ fontSize: '10.5px', color: '#0d9488', display: 'block', marginTop: '3px', cursor: 'pointer' }}
+                                  onClick={() => setLightboxPhoto({
+                                    url: newPhoto,
+                                    title: `الصورة الشخصية الجديدة المقترحة - ${previewModalReq.employeeName || ''}`,
+                                    compareUrl: prevPhoto || null,
+                                    compareTitle: 'الصورة الحالية المسجلة'
+                                  })}
+                                >
+                                  🔍 تكبير ومقارنة الصورة
                                 </span>
                               )}
                             </div>
@@ -3590,8 +4041,12 @@ export default function RequestsModule({
                               src={attData}
                               alt={attName}
                               style={{ maxWidth: '100%', maxHeight: '350px', objectFit: 'contain', borderRadius: '6px', cursor: 'pointer' }}
-                              onClick={() => window.open(attData, '_blank')}
-                              title="انقر لفتح الصورة بالحجم الكامل"
+                              onClick={() => setLightboxPhoto({
+                                url: attData,
+                                title: attName || `مرفق الطلب - ${previewModalReq.employeeName || ''}`,
+                                compareUrl: null
+                              })}
+                              title="انقر لفتح الصورة بالحجم الكامل داخل التطبيق"
                             />
                             <div style={{ color: '#94a3b8', fontSize: '11px', marginTop: '6px' }}>🔍 انقر على الصورة لفتحها بالحجم الكامل</div>
                             {previewModalReq.drivePhotoUrl && (
@@ -3822,6 +4277,190 @@ export default function RequestsModule({
           </div>
         );
       })()}
+
+      {/* ── HIGH-FIDELITY IN-APP LIGHTBOX & COMPARISON MODAL (Zero White Windows) ── */}
+      {lightboxPhoto && (
+        <div
+          className="lightbox-overlay"
+          onClick={() => { setLightboxPhoto(null); setPhotoZoom(1); setPhotoRotation(0); setShowSideBySide(false); }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(10, 15, 29, 0.92)',
+            backdropFilter: 'blur(10px)',
+            zIndex: 99999,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            animation: 'fadeIn 0.2s ease-out'
+          }}
+        >
+          {/* Header Bar */}
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: '920px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '14px',
+              color: '#fff',
+              flexWrap: 'wrap',
+              gap: '10px'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '20px' }}>📸</span>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#f8fafc' }}>
+                  {lightboxPhoto.title || 'معاينة الصورة بالحجم الكامل'}
+                </h4>
+                {lightboxPhoto.compareUrl && (
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                    {showSideBySide ? 'وضع المقارنة جنباً إلى جنب نشط' : 'يتوفر مقارنة مع الصورة الرسمية'}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Toolbar Buttons */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {lightboxPhoto.compareUrl && (
+                <button
+                  type="button"
+                  onClick={() => setShowSideBySide(!showSideBySide)}
+                  className="btn"
+                  style={{
+                    background: showSideBySide ? '#0d9488' : 'rgba(255,255,255,0.12)',
+                    color: '#fff',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    padding: '6px 14px',
+                    borderRadius: '8px',
+                    fontSize: '12.5px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  ⚖️ {showSideBySide ? 'إلغاء المقارنة' : 'مقارنة الصورتين'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setPhotoZoom(z => Math.min(3, z + 0.25))}
+                className="btn"
+                style={{ background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}
+                title="تكبير"
+              >
+                🔍+
+              </button>
+              <button
+                type="button"
+                onClick={() => setPhotoZoom(z => Math.max(0.5, z - 0.25))}
+                className="btn"
+                style={{ background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}
+                title="تصغير"
+              >
+                🔍-
+              </button>
+              <button
+                type="button"
+                onClick={() => setPhotoRotation(r => (r + 90) % 360)}
+                className="btn"
+                style={{ background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}
+                title="تدوير الصورة"
+              >
+                🔄
+              </button>
+              <button
+                type="button"
+                onClick={() => { setLightboxPhoto(null); setPhotoZoom(1); setPhotoRotation(0); setShowSideBySide(false); }}
+                className="btn"
+                style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}
+              >
+                ✕ إغلاق
+              </button>
+            </div>
+          </div>
+
+          {/* Photo Container */}
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: showSideBySide ? '1100px' : '850px',
+              maxHeight: '80vh',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '20px',
+              overflow: 'auto',
+              padding: '10px'
+            }}
+          >
+            {showSideBySide && lightboxPhoto.compareUrl ? (
+              <>
+                <div style={{ flex: 1, textAlign: 'center', background: 'rgba(0,0,0,0.5)', padding: '12px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.15)' }}>
+                  <div style={{ color: '#38bdf8', fontWeight: 800, fontSize: '13px', marginBottom: '8px' }}>
+                    {lightboxPhoto.compareTitle || 'الصورة المسجلة الرسمية'}
+                  </div>
+                  <img
+                    src={lightboxPhoto.compareUrl}
+                    alt="الصورة المقارنة"
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '65vh',
+                      objectFit: 'contain',
+                      borderRadius: '8px',
+                      transform: `scale(${photoZoom}) rotate(${photoRotation}deg)`,
+                      transition: 'transform 0.2s ease'
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1, textAlign: 'center', background: 'rgba(0,0,0,0.5)', padding: '12px', borderRadius: '12px', border: '2px solid #0d9488' }}>
+                  <div style={{ color: '#2dd4bf', fontWeight: 800, fontSize: '13px', marginBottom: '8px' }}>
+                    📸 الصورة الحية / المطلوب اعتمادها
+                  </div>
+                  <img
+                    src={lightboxPhoto.url}
+                    alt="الصورة الحالية"
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '65vh',
+                      objectFit: 'contain',
+                      borderRadius: '8px',
+                      transform: `scale(${photoZoom}) rotate(${photoRotation}deg)`,
+                      transition: 'transform 0.2s ease'
+                    }}
+                  />
+                </div>
+              </>
+            ) : (
+              <div style={{ textAlign: 'center' }}>
+                <img
+                  src={lightboxPhoto.url}
+                  alt={lightboxPhoto.title || 'صورة'}
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '75vh',
+                    objectFit: 'contain',
+                    borderRadius: '12px',
+                    boxShadow: '0 10px 35px rgba(0,0,0,0.6)',
+                    border: '2px solid rgba(255,255,255,0.15)',
+                    transform: `scale(${photoZoom}) rotate(${photoRotation}deg)`,
+                    transition: 'transform 0.2s ease'
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

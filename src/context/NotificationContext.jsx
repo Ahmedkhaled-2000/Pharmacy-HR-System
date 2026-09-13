@@ -17,6 +17,38 @@ import { useUI } from './UIContext';
 
 const NotificationContext = createContext(null);
 
+const persistReadNotifId = (id) => {
+  try {
+    if (!id) return;
+    const raw = localStorage.getItem('app_read_notification_ids');
+    const set = new Set(raw ? JSON.parse(raw) : []);
+    set.add(String(id));
+    localStorage.setItem('app_read_notification_ids', JSON.stringify(Array.from(set).slice(-500)));
+  } catch (_) {}
+};
+
+const persistReadNotifIds = (ids) => {
+  try {
+    if (!ids || !ids.length) return;
+    const raw = localStorage.getItem('app_read_notification_ids');
+    const set = new Set(raw ? JSON.parse(raw) : []);
+    ids.forEach((id) => { if (id) set.add(String(id)); });
+    localStorage.setItem('app_read_notification_ids', JSON.stringify(Array.from(set).slice(-500)));
+  } catch (_) {}
+};
+
+const persistDeletedNotifId = (id) => {
+  try {
+    if (!id) return;
+    persistReadNotifId(id);
+    const raw = localStorage.getItem('app_deleted_ids_snapshot');
+    const set = new Set(raw ? JSON.parse(raw) : []);
+    set.add(String(id));
+    set.add(`notif_${id}`);
+    localStorage.setItem('app_deleted_ids_snapshot', JSON.stringify(Array.from(set).slice(-500)));
+  } catch (_) {}
+};
+
 export function NotificationProvider({ children }) {
   const { authRole, currentBranch, currentEmpUser } = useAuth();
   const { state, setState, saveState } = useData();
@@ -270,6 +302,7 @@ export function NotificationProvider({ children }) {
   const handleMarkNotificationRead = async (notifId) => {
     if (!notifId) return;
     const notifIdStr = String(notifId);
+    persistReadNotifId(notifIdStr);
     let updatedNotifs = [...(state.notifications || [])];
     const foundIndex = updatedNotifs.findIndex((n) => String(n.id) === notifIdStr || String(n.requestId) === notifIdStr);
 
@@ -320,6 +353,8 @@ export function NotificationProvider({ children }) {
   };
 
   const handleMarkAllNotificationsRead = async () => {
+    const allIds = (state.notifications || []).map((n) => n && n.id).filter(Boolean);
+    persistReadNotifIds(allIds);
     const updatedNotifs = (state.notifications || []).map((n) => {
       const existingReadBy = Array.isArray(n.readBy) ? [...n.readBy] : [];
       const existingReadByBranches = Array.isArray(n.readByBranches) ? [...n.readByBranches] : [];
@@ -355,6 +390,7 @@ export function NotificationProvider({ children }) {
   const handleDeleteNotification = async (notifId) => {
     if (!notifId) return;
     const notifIdStr = String(notifId);
+    persistDeletedNotifId(notifIdStr);
     let updatedNotifs = [];
 
     if (authRole === 'admin' || authRole === 'owner') {
@@ -391,11 +427,13 @@ export function NotificationProvider({ children }) {
 
   const handleClearReadNotifications = async () => {
     let updatedNotifs = [];
+    const readIdsToRecord = [];
 
     if (authRole === 'admin' || authRole === 'owner') {
       updatedNotifs = (state.notifications || []).map((n) => {
         const isAdminRead = isNotificationReadForAdmin(n);
         if (isAdminRead) {
+          readIdsToRecord.push(n.id);
           return { ...n, clearedByAdmin: true, hiddenFromAdmin: true };
         }
         return n;
@@ -409,6 +447,7 @@ export function NotificationProvider({ children }) {
       updatedNotifs = (state.notifications || []).map((n) => {
         const isBranchRead = isNotificationReadForBranch(n, currentBranch);
         if (isBranchRead) {
+          readIdsToRecord.push(n.id);
           const clearedBranches = Array.isArray(n.clearedForBranches) ? [...n.clearedForBranches] : [];
           if (bId && !clearedBranches.includes(bId)) clearedBranches.push(bId);
           if (bCode && !clearedBranches.includes(bCode)) clearedBranches.push(bCode);
@@ -417,9 +456,16 @@ export function NotificationProvider({ children }) {
         return n;
       });
     } else {
-      updatedNotifs = (state.notifications || []).filter((n) => !n.read);
+      updatedNotifs = (state.notifications || []).filter((n) => {
+        if (n.read) {
+          readIdsToRecord.push(n.id);
+          return false;
+        }
+        return true;
+      });
     }
 
+    persistReadNotifIds(readIdsToRecord);
     const updatedState = { ...state, notifications: updatedNotifs };
     setState(updatedState);
     saveState(updatedState).catch(() => {});

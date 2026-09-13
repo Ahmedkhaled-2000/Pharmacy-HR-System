@@ -4,7 +4,7 @@
  * تشمل إدارة النوافذ، قاعدة البيانات المحلية المحمية، ومحرك التحديث التلقائي الصامت
  */
 
-const { app, BrowserWindow, ipcMain, Menu, dialog, powerMonitor, net, protocol, utilityProcess } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog, powerMonitor, net, protocol, utilityProcess, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const url = require('url');
@@ -98,7 +98,16 @@ function createMainWindow() {
       webSecurity: false, // للسماح بتحميل نماذج الذكاء الاصطناعي وبصمة الوجه وملفات WASM المحلية
       allowRunningInsecureContent: false,
       spellcheck: false,
+      backgroundThrottling: false, // يمنع تجميد أو إبطاء المؤقتات واستطلاع المزامنة عند تشغيل التطبيق في الخلفية
     },
+  });
+
+  // معالجة فتح النوافذ والروابط الخارجية لمنع فتح شاشات بيضاء فارغة
+  mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+    if (targetUrl && (targetUrl.startsWith('http:') || targetUrl.startsWith('https:'))) {
+      shell.openExternal(targetUrl).catch(() => {});
+    }
+    return { action: 'deny' }; // منع فتح أي نوافذ Electron بيضاء فارغة نهائياً
   });
 
   // إخفاء شريط القوائم الافتراضي لإعطاء مظهر برمجي عالمي فخم

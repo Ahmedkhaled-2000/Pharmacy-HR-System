@@ -133,13 +133,18 @@ export function isItemDeleted(item, key, deletedIds, options = {}) {
   if (item.id !== undefined && item.id !== null && item.id !== '') {
     const idStr = String(item.id).trim();
     const idLower = idStr.toLowerCase();
+    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
     if (deletedIds.has(idStr) || deletedIds.has(idLower)) return true;
+    if (rawId && (deletedIds.has(rawId) || deletedIds.has(rawId.toLowerCase()))) return true;
     if (prefix && (deletedIds.has(`${prefix}_${idStr}`) || deletedIds.has(`${prefix}_${idLower}`))) return true;
+    if (rawId && (deletedIds.has(`req_${rawId}`) || deletedIds.has(`leave_${rawId}`) || deletedIds.has(`loan_${rawId}`) || deletedIds.has(`swap_${rawId}`) || deletedIds.has(`notif_${rawId}`))) return true;
   }
   if (item._id !== undefined && item._id !== null && item._id !== '') {
     const idStr = String(item._id).trim();
     const idLower = idStr.toLowerCase();
+    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
     if (deletedIds.has(idStr) || deletedIds.has(idLower)) return true;
+    if (rawId && (deletedIds.has(rawId) || deletedIds.has(rawId.toLowerCase()))) return true;
     if (prefix && (deletedIds.has(`${prefix}_${idStr}`) || deletedIds.has(`${prefix}_${idLower}`))) return true;
   }
 
@@ -180,7 +185,7 @@ export function isItemDeleted(item, key, deletedIds, options = {}) {
   return false;
 }
 
-// دمج مصفوفتين حسب المفتاح الفريد وحسم التعارضات مع مراعاة العناصر المحذوفة نهائياً
+// دمج مصفوفتين حسب المفتاح الفريد وحسم التعارضات مع مراعاة العناصر المحذوفة نهائياً ومنع التكرار
 export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
   const localList = toSafeArray(localArr);
   const remoteList = toSafeArray(remoteArr);
@@ -196,12 +201,24 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
   }
 
   const map = new Map();
+  const isRequestEntity = ['req', 'leave', 'loan', 'swap', 'perm'].includes(options.prefix || '');
+  const seenSigMap = new Map();
 
   // 1. إضافة كل عناصر السحابة (Remote) ما لم تكن محذوفة
   for (const item of remoteList) {
     if (!item || typeof item !== 'object') continue;
     const key = getItemKey(item, options.prefix || 'rem');
     if (key && !isItemDeleted(item, key, deletedIds, options)) {
+      if (isRequestEntity) {
+        const empId = String(item.employeeId || item.employeeCode || '');
+        const rType = String(item.type || item.requestType || options.prefix || '');
+        const rDate = String(item.createdAt || item.date || item.timestamp || '').slice(0, 16);
+        if (empId && rDate) {
+          const sig = `${empId}_${rType}_${rDate}`;
+          if (seenSigMap.has(sig)) continue; // تخطي التكرار المباشر
+          seenSigMap.set(sig, key);
+        }
+      }
       map.set(key, item);
     }
   }
@@ -211,6 +228,17 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
     if (!item || typeof item !== 'object') continue;
     const key = getItemKey(item, options.prefix || 'loc');
     if (!key || isItemDeleted(item, key, deletedIds, options)) continue;
+
+    if (isRequestEntity) {
+      const empId = String(item.employeeId || item.employeeCode || '');
+      const rType = String(item.type || item.requestType || options.prefix || '');
+      const rDate = String(item.createdAt || item.date || item.timestamp || '').slice(0, 16);
+      if (empId && rDate) {
+        const sig = `${empId}_${rType}_${rDate}`;
+        if (seenSigMap.has(sig)) continue; // تخطي التكرار من المحلي
+        seenSigMap.set(sig, key);
+      }
+    }
 
     if (!map.has(key)) {
       // عنصر جديد غير موجود في السحابة أضيف محلياً -> الحفاظ عليه

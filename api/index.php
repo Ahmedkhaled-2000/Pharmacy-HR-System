@@ -449,6 +449,208 @@ try {
             break;
 
         // ==================================================================
+        // 6.1 الإرسال الذري الخفيف للطلبات (Ultra-Lightweight Request Submit < 2KB)
+        // ==================================================================
+        case 'requests/submit':
+        case 'request/submit':
+            if ($method !== 'POST') {
+                jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
+            }
+
+            $payload = getRequestData();
+            $targetKey = (string)($payload['key'] ?? DEFAULT_STORAGE_KEY);
+            $newReq = $payload['request'] ?? null;
+            $newNotif = $payload['notification'] ?? null;
+
+            if (!is_array($newReq) || empty($newReq['id'])) {
+                jsonResponse(['success' => false, 'error' => 'بيانات الطلب غير مكتملة (Missing request payload)'], 400);
+            }
+
+            $row = Database::queryOne("SELECT value_data, version FROM app_settings WHERE key_name = ? LIMIT 1", [$targetKey]);
+            if (!$row || empty($row['value_data'])) {
+                jsonResponse(['success' => false, 'error' => 'قاعدة البيانات غير مهيأة'], 500);
+            }
+
+            $appState = is_string($row['value_data']) ? json_decode($row['value_data'], true) : $row['value_data'];
+            if (!is_array($appState)) $appState = [];
+
+            $reqIdStr = (string)$newReq['id'];
+            $reqType = (string)($newReq['type'] ?? $newReq['requestType'] ?? 'general');
+
+            // 1. منع التكرار الصارم
+            $existingReqs = is_array($appState['requests'] ?? null) ? $appState['requests'] : [];
+            $alreadyExists = false;
+            foreach ($existingReqs as $r) {
+                if (is_array($r) && (string)($r['id'] ?? '') === $reqIdStr) {
+                    $alreadyExists = true;
+                    break;
+                }
+            }
+
+            if (!$alreadyExists) {
+                // إضافة للطلبات العامة
+                array_unshift($existingReqs, $newReq);
+                $appState['requests'] = array_values($existingReqs);
+
+                // إضافة للمصفوفات التخصصية إن وجدت
+                if (in_array($reqType, ['leave', 'leave_request', 'annual_leave', 'sick_leave', 'unpaid_leave'], true)) {
+                    $lReqs = is_array($appState['leaveRequests'] ?? null) ? $appState['leaveRequests'] : [];
+                    array_unshift($lReqs, $newReq);
+                    $appState['leaveRequests'] = array_values($lReqs);
+                } elseif (in_array($reqType, ['loan', 'advance', 'meds', 'credit_medicine'], true)) {
+                    $loans = is_array($appState['loans'] ?? null) ? $appState['loans'] : [];
+                    array_unshift($loans, $newReq);
+                    $appState['loans'] = array_values($loans);
+                } elseif (in_array($reqType, ['swap', 'shift_swap'], true)) {
+                    $swaps = is_array($appState['shiftSwaps'] ?? null) ? $appState['shiftSwaps'] : [];
+                    array_unshift($swaps, $newReq);
+                    $appState['shiftSwaps'] = array_values($swaps);
+                } elseif (in_array($reqType, ['permission', 'late_permission', 'early_leave'], true)) {
+                    $perms = is_array($appState['permissionRequests'] ?? null) ? $appState['permissionRequests'] : [];
+                    array_unshift($perms, $newReq);
+                    $appState['permissionRequests'] = array_values($perms);
+                }
+
+                // إضافة الإشعار
+                if (is_array($newNotif) && !empty($newNotif['id'])) {
+                    $notifs = is_array($appState['notifications'] ?? null) ? $appState['notifications'] : [];
+                    array_unshift($notifs, $newNotif);
+                    $appState['notifications'] = array_values(array_slice($notifs, 0, 300));
+                }
+
+                $appState['_requestsUpdatedAt'] = date('Y-m-d\TH:i:s.v\Z');
+
+                $jsonString = json_encode($appState, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+                $updateSql = "UPDATE app_settings SET value_data = ?::jsonb, version = version + 1, updated_at = NOW() WHERE key_name = ?";
+                Database::execute($updateSql, [$jsonString, $targetKey]);
+
+                MicroCache::invalidate('settings_' . $targetKey);
+                MicroCache::invalidate('version_' . $targetKey);
+            }
+
+            $freshRow = Database::queryOne("SELECT version, updated_at FROM app_settings WHERE key_name = ?", [$targetKey]);
+            $newVer = (int)($freshRow['version'] ?? ($row['version'] + 1));
+
+            jsonResponse([
+                'success' => true,
+                'message' => 'تم استلام وحفظ الطلب بنجاح في قاعدة البيانات',
+                'requestId' => $reqIdStr,
+                'version' => $newVer,
+                'updated_at' => $freshRow['updated_at'] ?? date('Y-m-d H:i:s')
+            ]);
+            break;
+
+        // ==================================================================
+        // 6.2 الحذف النهائي البات من قاعدة البيانات (Permanent Hard Delete)
+        // ==================================================================
+        case 'entity/delete':
+        case 'entity/hard-delete':
+            if ($method !== 'POST' && $method !== 'DELETE') {
+                jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
+            }
+
+            $payload = getRequestData();
+            $targetKey = (string)($payload['key'] ?? DEFAULT_STORAGE_KEY);
+            $entityType = (string)($payload['type'] ?? $_GET['type'] ?? '');
+            $entityId = (string)($payload['id'] ?? $_GET['id'] ?? '');
+
+            if (empty($entityType) || empty($entityId)) {
+                jsonResponse(['success' => false, 'error' => 'Missing entity type or id for hard delete'], 400);
+            }
+
+            $row = Database::queryOne("SELECT value_data, version FROM app_settings WHERE key_name = ? LIMIT 1", [$targetKey]);
+            if (!$row || empty($row['value_data'])) {
+                jsonResponse(['success' => false, 'error' => 'State not found'], 404);
+            }
+
+            $appState = is_string($row['value_data']) ? json_decode($row['value_data'], true) : $row['value_data'];
+            if (!is_array($appState)) $appState = [];
+
+            $deletedKeys = [
+                $entityId,
+                strtolower($entityId)
+            ];
+
+            if ($entityType === 'employee') {
+                $rawEmpId = preg_replace('/^emp_/', '', $entityId);
+                $deletedKeys[] = "emp_{$rawEmpId}";
+                $deletedKeys[] = "emp_del_{$rawEmpId}";
+                $deletedKeys[] = $rawEmpId;
+
+                // 1. حذف الموظف نهائياً من مصفوفة الموظفين
+                $appState['employees'] = array_values(array_filter((array)($appState['employees'] ?? []), function($e) use ($rawEmpId, $entityId) {
+                    if (!is_array($e)) return false;
+                    $eId = (string)($e['id'] ?? '');
+                    return $eId !== $entityId && $eId !== $rawEmpId && $eId !== "emp_{$rawEmpId}";
+                }));
+
+                // 2. حذف الموظف من جدول البصمات في Supabase
+                try {
+                    Database::execute("DELETE FROM employee_faces WHERE employee_id = ? OR employee_id = ?", [$entityId, $rawEmpId]);
+                    MicroCache::invalidate('all_faces');
+                } catch (Throwable) {}
+
+                // 3. حذف الشفت النشط
+                if (isset($appState['activeShifts'][$entityId])) unset($appState['activeShifts'][$entityId]);
+                if (isset($appState['activeShifts'][$rawEmpId])) unset($appState['activeShifts'][$rawEmpId]);
+
+            } elseif ($entityType === 'request') {
+                $rawReqId = preg_replace('/^(req_|leave_|swap_|res_|loan_|notif_)/', '', $entityId);
+                $deletedKeys[] = $rawReqId;
+                $deletedKeys[] = "req_{$rawReqId}";
+                $deletedKeys[] = "leave_{$rawReqId}";
+                $deletedKeys[] = "swap_{$rawReqId}";
+                $deletedKeys[] = "loan_{$rawReqId}";
+                $deletedKeys[] = "notif_{$rawReqId}";
+
+                $filterReq = function($list) use ($entityId, $rawReqId) {
+                    return array_values(array_filter((array)$list, function($r) use ($entityId, $rawReqId) {
+                        if (!is_array($r)) return false;
+                        $rId = (string)($r['id'] ?? '');
+                        $clean = preg_replace('/^(req_|leave_|swap_|res_|loan_|notif_)/', '', $rId);
+                        return $rId !== $entityId && $rId !== $rawReqId && $clean !== $rawReqId && $clean !== $entityId;
+                    }));
+                };
+
+                $appState['requests'] = $filterReq($appState['requests'] ?? []);
+                $appState['leaveRequests'] = $filterReq($appState['leaveRequests'] ?? []);
+                $appState['loans'] = $filterReq($appState['loans'] ?? []);
+                $appState['shiftSwaps'] = $filterReq($appState['shiftSwaps'] ?? []);
+                $appState['permissionRequests'] = $filterReq($appState['permissionRequests'] ?? []);
+                $appState['resignationRequests'] = $filterReq($appState['resignationRequests'] ?? []);
+
+                // مسح الإشعار المرتبط
+                $appState['notifications'] = array_values(array_filter((array)($appState['notifications'] ?? []), function($n) use ($entityId, $rawReqId) {
+                    if (!is_array($n)) return false;
+                    $nId = (string)($n['id'] ?? '');
+                    $rId = (string)($n['requestId'] ?? '');
+                    return $nId !== $entityId && $nId !== $rawReqId && $rId !== $entityId && $rId !== $rawReqId;
+                }));
+            }
+
+            // تحديث سجل شواهد القبور _deletedIds
+            $existingDeleted = (array)($appState['_deletedIds'] ?? []);
+            $appState['_deletedIds'] = array_values(array_slice(array_unique(array_merge($existingDeleted, $deletedKeys)), -5000));
+
+            $jsonString = json_encode($appState, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+            $updateSql = "UPDATE app_settings SET value_data = ?::jsonb, version = version + 1, updated_at = NOW() WHERE key_name = ?";
+            Database::execute($updateSql, [$jsonString, $targetKey]);
+
+            MicroCache::invalidate('settings_' . $targetKey);
+            MicroCache::invalidate('version_' . $targetKey);
+
+            $freshRow = Database::queryOne("SELECT version, updated_at FROM app_settings WHERE key_name = ?", [$targetKey]);
+            $newVer = (int)($freshRow['version'] ?? ($row['version'] + 1));
+
+            jsonResponse([
+                'success' => true,
+                'message' => "Entity {$entityType} ({$entityId}) deleted permanently from database",
+                'version' => $newVer,
+                'updated_at' => $freshRow['updated_at'] ?? date('Y-m-d H:i:s')
+            ]);
+            break;
+
+        // ==================================================================
         // 7. النسخ الاحتياطي والاستعادة الكاملة (Full Backup & Restore)
         // ==================================================================
         case 'backup/export':

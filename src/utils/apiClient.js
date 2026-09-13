@@ -209,6 +209,30 @@ export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
   });
 }
 
+// ── 1.1 الإرسال الذري الخفيف للطلبات (< 2KB) لضمان الوصول الفوري دون إرسال كامل قاعدة البيانات ──
+export async function apiSubmitRequestAtomic(requestObj, notificationObj = null, key = STORAGE_KEY) {
+  return await request('requests/submit', {
+    method: 'POST',
+    body: JSON.stringify({ key, request: requestObj, notification: notificationObj }),
+    timeout: 10000,
+    retries: 2,
+    noCache: true,
+    isBackground: false
+  });
+}
+
+// ── 1.2 الحذف النهائي البات للكيانات (موظف / طلب) من قاعدة البيانات السحابية ──
+export async function apiHardDeleteEntity(type, id, key = STORAGE_KEY) {
+  return await request('entity/delete', {
+    method: 'POST',
+    body: JSON.stringify({ key, type, id }),
+    timeout: 12000,
+    retries: 2,
+    noCache: true,
+    isBackground: false
+  });
+}
+
 // ── 2. فحص الإصدار للمزامنة الخفيفة (Ultra-Fast Smart Polling & Realtime SSE) ────
 export async function apiFetchVersion(key = STORAGE_KEY, options = {}) {
   return await request(`sync/version?key=${encodeURIComponent(key)}`, {

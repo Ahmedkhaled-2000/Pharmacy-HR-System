@@ -293,11 +293,15 @@ function mergeServerState(array $existing, array $incoming): array
                 if ($prefix === 'emp') {
                     $empId = isset($item['id']) ? (string)$item['id'] : '';
                     $empCode = isset($item['code']) ? strtolower(trim((string)$item['code'])) : '';
-                    if ($empId !== '' && isset($deletedSet[$empId]) && str_starts_with($empId, 'emp_')) {
+                    $empUser = isset($item['username']) ? strtolower(trim((string)$item['username'])) : '';
+                    $empNid = isset($item['nationalId']) ? preg_replace('/\D/', '', (string)$item['nationalId']) : '';
+                    if ($empId !== '' && (isset($deletedSet[$empId]) || isset($deletedSet[strtolower($empId)]) || isset($deletedSet['emp_' . $empId]) || isset($deletedSet['emp_del_' . $empId]))) {
                         $isDeleted = true;
-                    } elseif ($empId !== '' && isset($deletedSet['emp_' . $empId])) {
+                    } elseif ($empCode !== '' && (isset($deletedSet['emp_code_' . $empCode]) || isset($deletedSet['emp_' . $empCode]) || isset($deletedSet[$empCode]))) {
                         $isDeleted = true;
-                    } elseif ($empCode !== '' && (isset($deletedSet['emp_code_' . $empCode]) || isset($deletedSet['emp_' . $empCode]))) {
+                    } elseif ($empUser !== '' && (isset($deletedSet['emp_user_' . $empUser]) || isset($deletedSet['user_' . $empUser]))) {
+                        $isDeleted = true;
+                    } elseif ($empNid !== '' && (isset($deletedSet['emp_nid_' . $empNid]) || isset($deletedSet['nid_' . $empNid]))) {
                         $isDeleted = true;
                     }
                 } elseif ($prefix === 'app') {
@@ -311,13 +315,39 @@ function mergeServerState(array $existing, array $incoming): array
                         $isDeleted = true;
                     }
                 } else {
-                    if (isset($deletedSet[$key]) || (isset($item['id']) && isset($deletedSet[(string)$item['id']]))) {
+                    $rawId = isset($item['id']) ? (string)$item['id'] : '';
+                    $cleanRaw = preg_replace('/^(req_|leave_|swap_|res_|loan_|notif_)/', '', $rawId);
+                    if (
+                        isset($deletedSet[$key]) ||
+                        ($rawId !== '' && (isset($deletedSet[$rawId]) || isset($deletedSet[strtolower($rawId)]) || isset($deletedSet["{$prefix}_{$rawId}"]))) ||
+                        ($cleanRaw !== '' && (
+                            isset($deletedSet[$cleanRaw]) ||
+                            isset($deletedSet["req_{$cleanRaw}"]) ||
+                            isset($deletedSet["leave_{$cleanRaw}"]) ||
+                            isset($deletedSet["swap_{$cleanRaw}"]) ||
+                            isset($deletedSet["loan_{$cleanRaw}"]) ||
+                            isset($deletedSet["notif_{$cleanRaw}"])
+                        ))
+                    ) {
                         $isDeleted = true;
                     }
                 }
 
                 if ($isDeleted) {
                     continue;
+                }
+
+                // منع التكرار الدلالي للطلبات الصادرة بنفس الدقيقة والموظف والمحتوى
+                if (in_array($prefix, ['req', 'leave', 'loan', 'swap', 'perm'], true)) {
+                    $eId = (string)($item['employeeId'] ?? $item['employeeCode'] ?? '');
+                    $rType = (string)($item['type'] ?? $item['requestType'] ?? $prefix);
+                    $rDate = substr((string)($item['createdAt'] ?? $item['date'] ?? $item['timestamp'] ?? ''), 0, 16);
+                    if ($eId !== '' && $rDate !== '') {
+                        $sigKey = "sig_{$eId}_{$rType}_{$rDate}";
+                        if (isset($map[$sigKey])) {
+                            continue; // طلب مطابق تم تسجيله في نفس الدقيقة لنفس الموظف
+                        }
+                    }
                 }
 
                 if (!isset($map[$key])) {

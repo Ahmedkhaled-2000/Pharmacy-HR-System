@@ -21,6 +21,7 @@ import {
 } from '../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../utils/jobsHelper';
 import { apiArchiveDeleteEmployee } from '../utils/archiveApiClient';
+import { hardDeleteEntityFast } from '../utils/offlineSync';
 import { useData } from '../context/DataContext';
 import { useUI } from '../context/UIContext';
 
@@ -1176,6 +1177,7 @@ export function useAttendanceEngine() {
 
       try {
         apiArchiveDeleteEmployee(empId).catch(() => {});
+        hardDeleteEntityFast('employee', empIdStr).catch(() => {});
       } catch {}
 
       const updatedState = {

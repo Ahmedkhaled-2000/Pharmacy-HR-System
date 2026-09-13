@@ -9,6 +9,8 @@ import {
   apiFetchSettings,
   apiSaveSettings,
   apiFetchVersion,
+  apiSubmitRequestAtomic,
+  apiHardDeleteEntity
 } from './apiClient';
 import {
   saveStateLocally,
@@ -257,17 +259,115 @@ export function listenToConnectionChanges(onOnline, onOffline) {
   };
 }
 
-// ── قراءة الحالة المحلية فورياً بدون أي تأخير (0ms Instant Load) ───────────
+// ── قراءة الحالة المحلية فورياً وتطهيرها استباقياً لمنع الوميض (0ms Sanitized Instant Load) ───
 export async function loadLocalStateFast() {
   try {
     const localData = await loadStateLocally();
     if (localData && typeof localData === 'object') {
-      return normalizeState(localData);
+      const normalized = normalizeState(localData);
+
+      // استخراج كافة المعرفات المحذوفة نهائياً لتنقيتها فوراً قبل العرض
+      const deletedSet = new Set((normalized._deletedIds || []).map(String));
+      try {
+        const rawLocalDeleted = localStorage.getItem('app_deleted_ids_snapshot');
+        if (rawLocalDeleted) {
+          const arr = JSON.parse(rawLocalDeleted);
+          if (Array.isArray(arr)) arr.forEach(id => deletedSet.add(String(id)));
+        }
+      } catch {}
+
+      if (deletedSet.size > 0) {
+        normalized.requests = (normalized.requests || []).filter(r => {
+          if (!r || !r.id) return false;
+          const idStr = String(r.id);
+          const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+          return !deletedSet.has(idStr) && !deletedSet.has(rawId) && !deletedSet.has(`req_${rawId}`);
+        });
+
+        normalized.leaveRequests = (normalized.leaveRequests || []).filter(r => {
+          if (!r || !r.id) return false;
+          const idStr = String(r.id);
+          const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+          return !deletedSet.has(idStr) && !deletedSet.has(rawId) && !deletedSet.has(`leave_${rawId}`);
+        });
+
+        normalized.employees = (normalized.employees || []).filter(e => {
+          if (!e || !e.id) return false;
+          const idStr = String(e.id);
+          const rawId = idStr.replace(/^emp_/, '');
+          return !deletedSet.has(idStr) && !deletedSet.has(rawId) && !deletedSet.has(`emp_${rawId}`) && !deletedSet.has(`emp_del_${rawId}`);
+        });
+      }
+
+      // تنقية الإشعارات المقروءة مسبقاً لمنع ظهور وميض غير مقروء
+      try {
+        const rawReadNotifs = localStorage.getItem('app_read_notification_ids');
+        if (rawReadNotifs) {
+          const readIds = new Set(JSON.parse(rawReadNotifs));
+          if (readIds.size > 0 && Array.isArray(normalized.notifications)) {
+            normalized.notifications = normalized.notifications.map(n => {
+              if (n && n.id && readIds.has(String(n.id))) {
+                return { ...n, read: true };
+              }
+              return n;
+            });
+          }
+        }
+      } catch {}
+
+      return normalized;
     }
   } catch (e) {
     console.warn('[Sync] Local storage load error:', e);
   }
   return null;
+}
+
+// ── إرسال ذري فائق السرعة للطلبات والإشعارات (< 2KB) مع حماية ضد السقوط ───────
+export async function submitRequestFast(requestObj, notificationObj = null, options = {}) {
+  const { onOptimisticUpdate } = options;
+
+  // 1. تحديث وتنبيه الواجهة محلياً فورياً (0ms Optimistic UI)
+  onOptimisticUpdate?.();
+
+  try {
+    const res = await apiSubmitRequestAtomic(requestObj, notificationObj, STORAGE_KEY);
+    if (res?.success) {
+      console.log('⚡ [AtomicSubmit] تم إرسال الطلب بنجاح فوري لقاعدة البيانات:', requestObj.id);
+      return { success: true, mode: 'atomic', requestId: requestObj.id };
+    }
+    throw new Error(res?.error || 'Atomic submit returned unsuccessful');
+  } catch (err) {
+    console.warn('[AtomicSubmit] تعثر الإرسال الذري، جاري الإدراج بطابور المزامنة:', err.message);
+    await addToPendingQueue({
+      type: 'SUBMIT_REQUEST',
+      request: requestObj,
+      notification: notificationObj,
+      timestamp: Date.now()
+    }).catch(() => {});
+    return { success: true, queued: true, mode: 'offline', requestId: requestObj.id };
+  }
+}
+
+// ── تنفيذ الحذف النهائي البات للكيان من قاعدة البيانات السحابية والمحلية ──────
+export async function hardDeleteEntityFast(type, id) {
+  // 1. تسجيل فوري في localStorage لمنع أي وميض محلي
+  try {
+    const rawLocalDeleted = localStorage.getItem('app_deleted_ids_snapshot');
+    const list = rawLocalDeleted ? JSON.parse(rawLocalDeleted) : [];
+    const idStr = String(id);
+    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_|emp_)/, '');
+    const set = new Set([...list, idStr, rawId, `req_${rawId}`, `leave_${rawId}`, `emp_${rawId}`, `emp_del_${rawId}`]);
+    localStorage.setItem('app_deleted_ids_snapshot', JSON.stringify(Array.from(set).slice(-3000)));
+  } catch {}
+
+  // 2. إرسال أمر الحذف النهائي البات للسيرفر
+  try {
+    await apiHardDeleteEntity(type, id, STORAGE_KEY);
+    console.log(`🗑️ [HardDelete] تم تنفيذ الحذف النهائي للـ ${type} (${id}) بنجاح.`);
+  } catch (err) {
+    console.warn(`[HardDelete] فشل إرسال أمر الحذف النهائي للسيرفر:`, err.message);
+  }
 }
 
 // ── تحميل الحالة السحابية فائق السرعة مع مهلة ذكية وإعادة محاولة تلقائية ─────

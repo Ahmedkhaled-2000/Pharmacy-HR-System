@@ -180,7 +180,11 @@ export function useRealtimeSync(props = {}) {
 
     setState((prev) => {
       setLastSyncTime(nowTimeStr());
-      const merged = normalizeState(smartMergeStates(prev, normalized));
+      const pendingCount = Number(localStorage.getItem('app_pending_sync_count') || 0);
+      // إذا لم تكن هناك تعديلات محلية معلقة، فإن البيانات السحابية هي المرجع النهائي لمنع إحياء المحذوفات
+      const merged = (pendingCount === 0)
+        ? normalized
+        : normalizeState(smartMergeStates(prev, normalized));
 
       // تحديث بيانات الموظف المسجل حالياً إذا طرأت تغييرات
       setCurrentEmpUser((prevEmp) => {
@@ -289,11 +293,11 @@ export function useRealtimeSync(props = {}) {
       if (timerId) clearTimeout(timerId);
 
       const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
-      let delay = customDelay !== null ? customDelay : (isVisible ? 6000 : 25000);
+      let delay = customDelay !== null ? customDelay : (isVisible ? 2000 : 5000);
 
       if (customDelay === null && pollFailures > 0) {
-        // فترات تراجع أسرع (3ث -> 6ث -> 12ث -> 20ث كحد أقصى) لتسريع التقاط عودة الإنترنت
-        delay = Math.min(20000, 3000 * Math.pow(1.5, Math.min(pollFailures, 4)));
+        // فترات تراجع ذكية عند تعثر السيرفر (2ث -> 4ث -> 8ث -> 15ث كحد أقصى)
+        delay = Math.min(15000, 2000 * Math.pow(1.5, Math.min(pollFailures, 4)));
       }
 
       timerId = setTimeout(async () => {
@@ -352,7 +356,13 @@ export function useRealtimeSync(props = {}) {
   // 4. مستمع التنبيهات الصوتية الفورية للطلبات الجديدة الواصلة لحظياً
   useEffect(() => {
     if (!state) return;
-    const reqs = state?.requests || [];
+    const reqs = [
+      ...(state?.requests || []),
+      ...(state?.leaveRequests || []),
+      ...(state?.loans || []),
+      ...(state?.shiftSwaps || []),
+      ...(state?.permissionRequests || [])
+    ];
 
     if (!isInitialLoadDoneRef.current) {
       if (reqs.length > 0) {
@@ -402,8 +412,19 @@ export function useRealtimeSync(props = {}) {
       });
 
       if (branchPendingReqs.length > 0) {
+        playNotificationChime();
         showToast('🔔 يوجد طلب جديد لموظف بالفرع يحتاج للمراجعة');
       }
     }
-  }, [state?.requests, authRole, currentBranch, state?.employees, showToast]);
+  }, [
+    state?.requests,
+    state?.leaveRequests,
+    state?.loans,
+    state?.shiftSwaps,
+    state?.permissionRequests,
+    authRole,
+    currentBranch,
+    state?.employees,
+    showToast
+  ]);
 }

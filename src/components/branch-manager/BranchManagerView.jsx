@@ -177,6 +177,7 @@ export default function BranchManagerView({
   // Roster & Request Modal Preview states
   const [previewRosterEmp, setPreviewRosterEmp] = useState(null);
   const [previewModalReq, setPreviewModalReq] = useState(null);
+  const [lightboxPhoto, setLightboxPhoto] = useState(null);
   const [branchReqEmpFilter, setBranchReqEmpFilter] = useState('all');
   const [branchReqDateFilter, setBranchReqDateFilter] = useState('');
 
@@ -2817,7 +2818,12 @@ export default function BranchManagerView({
                         <img
                           src={previewModalReq.photoUrl || previewModalReq.drivePhotoUrl}
                           alt="صورة الحضور"
-                          style={{ maxHeight: '220px', maxWidth: '100%', objectFit: 'contain', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#000' }}
+                          style={{ maxHeight: '220px', maxWidth: '100%', objectFit: 'contain', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#000', cursor: 'pointer' }}
+                          title="انقر لتكبير صورة الحضور بالحجم الكامل"
+                          onClick={() => setLightboxPhoto({
+                            url: previewModalReq.photoUrl || previewModalReq.drivePhotoUrl,
+                            title: `صورة الحضور - ${previewModalReq.employeeName || ''} (${previewModalReq.date || ''})`
+                          })}
                         />
                       </div>
                     )}
@@ -3137,7 +3143,10 @@ export default function BranchManagerView({
                               src={attData}
                               alt={attName}
                               style={{ maxWidth: '100%', maxHeight: '350px', objectFit: 'contain', borderRadius: '6px', cursor: 'pointer' }}
-                              onClick={() => window.open(attData, '_blank')}
+                              onClick={() => setLightboxPhoto({
+                                url: attData,
+                                title: attName || `مرفق الطلب - ${previewModalReq.employeeName || ''}`
+                              })}
                               title="انقر لفتح الصورة بالحجم الكامل"
                             />
                             <div style={{ color: '#94a3b8', fontSize: '11px', marginTop: '6px' }}>🔍 انقر على الصورة لفتحها بالحجم الكامل</div>
@@ -5618,6 +5627,46 @@ export default function BranchManagerView({
           preselectedBranchId={currentBranch?.id}
           isBranchManager={true}
         />
+      )}
+
+      {lightboxPhoto && (
+        <div
+          className="lightbox-overlay"
+          onClick={() => setLightboxPhoto(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(10, 15, 29, 0.92)',
+            backdropFilter: 'blur(10px)',
+            zIndex: 99999,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '850px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <h4 style={{ margin: 0, color: '#f8fafc', fontSize: '15px', fontWeight: 800 }}>
+              📸 {lightboxPhoto.title || 'معاينة الصورة'}
+            </h4>
+            <button
+              type="button"
+              onClick={() => setLightboxPhoto(null)}
+              className="btn"
+              style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}
+            >
+              ✕ إغلاق
+            </button>
+          </div>
+          <div onClick={e => e.stopPropagation()} style={{ maxWidth: '850px', maxHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <img
+              src={lightboxPhoto.url}
+              alt="صورة"
+              style={{ maxWidth: '100%', maxHeight: '78vh', objectFit: 'contain', borderRadius: '12px', boxShadow: '0 10px 30px rgba(0,0,0,0.6)', border: '2px solid rgba(255,255,255,0.15)' }}
+            />
+          </div>
+        </div>
       )}
 
     </div>
