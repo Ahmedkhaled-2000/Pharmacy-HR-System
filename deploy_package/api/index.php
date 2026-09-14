@@ -513,6 +513,40 @@ try {
 
                 Database::execute($sql, [$targetKey, $jsonString]);
 
+                // 6.5 مزامنة جدول public.requests تلقائياً مع الطلبات لضمان التطابق التام
+                if (is_array($finalValueData) && !empty($finalValueData['requests']) && is_array($finalValueData['requests'])) {
+                    try {
+                        $driver = Database::getDriver();
+                        foreach ($finalValueData['requests'] as $req) {
+                            if (!is_array($req) || empty($req['id'])) continue;
+                            $rId = (string)$req['id'];
+                            $rStatus = strtoupper(trim((string)($req['status'] ?? 'PENDING')));
+                            $rPayload = json_encode($req, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                            if ($driver === 'pgsql') {
+                                Database::execute("
+                                    UPDATE public.requests 
+                                    SET status = ?,
+                                        payload = ?::jsonb,
+                                        completed_at = CASE WHEN ? IN ('APPROVED', 'REJECTED', 'COMPLETED') THEN COALESCE(completed_at, NOW()) ELSE completed_at END,
+                                        updated_at = NOW()
+                                    WHERE id = ?
+                                ", [$rStatus, $rPayload, $rStatus, $rId]);
+                            } else {
+                                Database::execute("
+                                    UPDATE requests 
+                                    SET status = ?,
+                                        payload = ?,
+                                        completed_at = CASE WHEN ? IN ('APPROVED', 'REJECTED', 'COMPLETED') THEN COALESCE(completed_at, CURRENT_TIMESTAMP) ELSE completed_at END,
+                                        updated_at = CURRENT_TIMESTAMP
+                                    WHERE id = ?
+                                ", [$rStatus, $rPayload, $rStatus, $rId]);
+                            }
+                        }
+                    } catch (Throwable $e) {
+                        error_log('[Sync Requests Table Error]: ' . $e->getMessage());
+                    }
+                }
+
                 // 7. جلب النسخة والتاريخ وتفريغ الكاش فوراً
                 $versionRow = Database::queryOne("SELECT version, updated_at FROM app_settings WHERE key_name = ?", [$targetKey]);
                 $currentVersion = (int)($versionRow['version'] ?? 1);

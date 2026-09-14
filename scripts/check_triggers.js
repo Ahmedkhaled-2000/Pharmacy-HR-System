@@ -9,14 +9,12 @@ const client = new pg.Client({
 });
 
 async function checkTriggers() {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   await client.connect();
-  const res = await client.query(`
-    SELECT event_object_table, trigger_name, event_manipulation, action_statement
-    FROM information_schema.triggers
-    WHERE event_object_schema = 'public'
-  `);
-  console.log('Triggers in public schema:');
-  console.table(res.rows);
+  const fnRes = await client.query(`SELECT proname, prosrc FROM pg_proc WHERE proname LIKE '%request%' OR proname LIKE '%change%'`);
+  for (const r of fnRes.rows) {
+    console.log(`=== ${r.proname} ===\n`, r.prosrc);
+  }
   await client.end();
 }
 checkTriggers().catch(console.error);

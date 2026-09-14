@@ -831,7 +831,7 @@ app.post('/api/sync/push', async (req, res) => {
       if (!op || typeof op !== 'object') continue;
       const opId = String(op.operation_id || op.id || '');
       let idempKey = String(op.idempotency_key || '');
-      const opType = String(op.type || '').toUpperCase();
+      const opType = String(op.type || op.action || '').toUpperCase();
       const opPayload = op.payload || {};
 
       if (!idempKey) {
@@ -892,27 +892,65 @@ app.post('/api/sync/push', async (req, res) => {
             bId, deptId, targetRole, priority, status, JSON.stringify(reqData)
           ]);
           serverSeq = parseInt(r.rows[0]?.change_sequence || maxSequence, 10);
-        } else if (opType === 'UPDATE_STATUS' || opType === 'APPROVE_REQUEST' || opType === 'REJECT_REQUEST') {
+        } else if (opType === 'UPDATE_STATUS' || opType === 'APPROVE_REQUEST' || opType === 'REJECT_REQUEST' || opType === 'APPROVE' || opType === 'REJECT' || opType === 'UPDATE_REQUEST_STATUS') {
           const reqId = String(opPayload.request_id || opPayload.id || '');
           entityId = reqId;
-          const newStatus = String(opPayload.status || (opType === 'APPROVE_REQUEST' ? 'APPROVED' : 'REJECTED')).toUpperCase();
-          const comment = String(opPayload.comment || '');
-          const actorRole = String(opPayload.actor_role || 'admin');
-          const actorName = String(opPayload.actor_name || 'الإدارة');
+          const rawStatus = String(opPayload.status || opPayload.new_status || '');
+          const newStatus = (rawStatus ? rawStatus : (opType.includes('APPROVE') ? 'APPROVED' : (opType.includes('REJECT') ? 'REJECTED' : 'PENDING'))).toUpperCase();
+          const comment = String(opPayload.comment || opPayload.reason || '');
+          const actorRole = String(opPayload.actor_role || opPayload.reviewer?.role || 'admin');
+          const actorName = String(opPayload.actor_name || opPayload.reviewer?.name || 'الإدارة');
 
           if (reqId) {
-            const curReq = await db.query('SELECT status, branch_id FROM public.requests WHERE id = $1 LIMIT 1', [reqId]);
+            const curReq = await db.query('SELECT status, branch_id, payload FROM public.requests WHERE id = $1 LIMIT 1', [reqId]);
             const fromStatus = curReq.rows[0]?.status || 'PENDING';
             const bId = curReq.rows[0]?.branch_id || branch_id;
+            const curPayload = (curReq.rows[0]?.payload && typeof curReq.rows[0].payload === 'object') ? curReq.rows[0].payload : {};
+            const cleanStatus = newStatus.toLowerCase();
+            curPayload.status = cleanStatus;
+            const isAdminApproved = ['approved', 'completed', 'paid', 'partial'].includes(cleanStatus);
+            curPayload.adminApproved = isAdminApproved;
+            if (isAdminApproved) {
+              curPayload.approvedAt = new Date().toISOString();
+              curPayload.approvedBy = actorName;
+            } else if (cleanStatus === 'rejected') {
+              curPayload.rejectedAt = new Date().toISOString();
+              curPayload.rejectedBy = actorName;
+              if (comment) curPayload.rejectionReason = comment;
+            }
 
             await db.query(
               `UPDATE public.requests 
                SET status = $1, 
+                   payload = $2::jsonb,
                    completed_at = CASE WHEN $1 IN ('APPROVED', 'REJECTED', 'COMPLETED') THEN NOW() ELSE completed_at END,
                    updated_at = NOW()
-               WHERE id = $2`,
-              [newStatus, reqId]
+               WHERE id = $3`,
+              [newStatus, JSON.stringify(curPayload), reqId]
             );
+
+            // مزامنة فورية مع app_settings إن وجد
+            try {
+              await db.query(`
+                UPDATE public.app_settings
+                SET value_data = jsonb_set(
+                  value_data,
+                  '{requests}',
+                  (
+                    SELECT COALESCE(jsonb_agg(
+                      CASE 
+                        WHEN (elem->>'id') = $1 THEN elem || jsonb_build_object('status', $2::text, 'adminApproved', $3::boolean)
+                        ELSE elem 
+                      END
+                    ), '[]'::jsonb)
+                    FROM jsonb_array_elements(COALESCE(value_data->'requests', '[]'::jsonb)) AS elem
+                  )
+                ),
+                updated_at = NOW(),
+                version = version + 1
+                WHERE key_name = 'pharmacy-tracker-data' AND value_data->'requests' IS NOT NULL
+              `, [reqId, cleanStatus, isAdminApproved]);
+            } catch {}
 
             await db.query(
               `INSERT INTO public.request_status_history (request_id, from_status, to_status, actor_id, actor_name, actor_role, comment)

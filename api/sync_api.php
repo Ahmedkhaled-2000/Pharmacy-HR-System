@@ -53,7 +53,7 @@ function handleSyncPush(): void
 
         $opId = trim((string)($op['operation_id'] ?? $op['id'] ?? ''));
         $idempKey = trim((string)($op['idempotency_key'] ?? ''));
-        $opType = strtoupper(trim((string)($op['type'] ?? '')));
+        $opType = strtoupper(trim((string)($op['type'] ?? $op['action'] ?? '')));
         $opPayload = is_array($op['payload'] ?? null) ? $op['payload'] : [];
 
         if (empty($idempKey)) {
@@ -165,12 +165,16 @@ function handleSyncPush(): void
 
                 $opSuccess = true;
 
-            } elseif ($opType === 'UPDATE_STATUS' || $opType === 'APPROVE_REQUEST' || $opType === 'REJECT_REQUEST') {
+            } elseif ($opType === 'UPDATE_STATUS' || $opType === 'APPROVE_REQUEST' || $opType === 'REJECT_REQUEST' || $opType === 'APPROVE' || $opType === 'REJECT' || $opType === 'UPDATE_REQUEST_STATUS') {
                 $reqId = trim((string)($opPayload['request_id'] ?? $opPayload['id'] ?? ''));
-                $newStatus = strtoupper(trim((string)($opPayload['status'] ?? ($opType === 'APPROVE_REQUEST' ? 'APPROVED' : 'REJECTED'))));
-                $comment = trim((string)($opPayload['comment'] ?? ''));
-                $actorRole = trim((string)($opPayload['actor_role'] ?? 'admin'));
-                $actorName = trim((string)($opPayload['actor_name'] ?? 'الإدارة'));
+                $rawStatus = (string)($opPayload['status'] ?? $opPayload['new_status'] ?? '');
+                if (empty($rawStatus)) {
+                    $rawStatus = (str_contains($opType, 'APPROVE')) ? 'APPROVED' : ((str_contains($opType, 'REJECT')) ? 'REJECTED' : 'PENDING');
+                }
+                $newStatus = strtoupper(trim($rawStatus));
+                $comment = trim((string)($opPayload['comment'] ?? $opPayload['reason'] ?? ''));
+                $actorRole = trim((string)($opPayload['actor_role'] ?? ($opPayload['reviewer']['role'] ?? 'admin')));
+                $actorName = trim((string)($opPayload['actor_name'] ?? ($opPayload['reviewer']['name'] ?? 'الإدارة')));
                 $entityId = $reqId;
 
                 if (!empty($reqId)) {
@@ -178,25 +182,81 @@ function handleSyncPush(): void
                     $fromStatus = $currentReq['status'] ?? 'PENDING';
                     $bId = $currentReq['branch_id'] ?? $branchId;
 
-                    Database::execute("
-                        UPDATE requests 
-                        SET status = ?, 
-                            completed_at = CASE WHEN ? IN ('APPROVED', 'REJECTED', 'COMPLETED') THEN CURRENT_TIMESTAMP ELSE completed_at END,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
-                    ", [$newStatus, $newStatus, $reqId]);
+                    $curPayload = [];
+                    if (!empty($currentReq['payload'])) {
+                        $curPayload = is_array($currentReq['payload']) ? $currentReq['payload'] : json_decode((string)$currentReq['payload'], true);
+                        if (!is_array($curPayload)) $curPayload = [];
+                    }
+                    $cleanStatus = strtolower($newStatus);
+                    $curPayload['status'] = $cleanStatus;
+                    $isAdminApproved = in_array($cleanStatus, ['approved', 'completed', 'paid', 'partial'], true);
+                    $curPayload['adminApproved'] = $isAdminApproved;
+                    if ($isAdminApproved) {
+                        $curPayload['approvedAt'] = date('Y-m-d\TH:i:s.v\Z');
+                        $curPayload['approvedBy'] = $actorName;
+                    } elseif ($cleanStatus === 'rejected') {
+                        $curPayload['rejectedAt'] = date('Y-m-d\TH:i:s.v\Z');
+                        $curPayload['rejectedBy'] = $actorName;
+                        if (!empty($comment)) $curPayload['rejectionReason'] = $comment;
+                    }
+                    $updatedPayloadJson = json_encode($curPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+                    if ($driver === 'pgsql') {
+                        Database::execute("
+                            UPDATE public.requests 
+                            SET status = ?, 
+                                payload = ?::jsonb,
+                                completed_at = CASE WHEN ? IN ('APPROVED', 'REJECTED', 'COMPLETED') THEN NOW() ELSE completed_at END,
+                                updated_at = NOW()
+                            WHERE id = ?
+                        ", [$newStatus, $updatedPayloadJson, $newStatus, $reqId]);
+
+                        // المزامنة الفورية مع app_settings إن وجد الطلب بداخله
+                        try {
+                            Database::execute("
+                                UPDATE public.app_settings
+                                SET value_data = jsonb_set(
+                                    value_data,
+                                    '{requests}',
+                                    (
+                                        SELECT COALESCE(jsonb_agg(
+                                            CASE 
+                                                WHEN (elem->>'id') = ? THEN elem || jsonb_build_object('status', ?::text, 'adminApproved', ?::boolean)
+                                                ELSE elem 
+                                            END
+                                        ), '[]'::jsonb)
+                                        FROM jsonb_array_elements(COALESCE(value_data->'requests', '[]'::jsonb)) AS elem
+                                    )
+                                ),
+                                updated_at = NOW(),
+                                version = version + 1
+                                WHERE key_name = 'pharmacy-tracker-data' AND value_data->'requests' IS NOT NULL
+                            ", [$reqId, $cleanStatus, $isAdminApproved ? 'true' : 'false']);
+                        } catch (Throwable) {}
+                    } else {
+                        Database::execute("
+                            UPDATE requests 
+                            SET status = ?, 
+                                payload = ?,
+                                completed_at = CASE WHEN ? IN ('APPROVED', 'REJECTED', 'COMPLETED') THEN CURRENT_TIMESTAMP ELSE completed_at END,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        ", [$newStatus, $updatedPayloadJson, $newStatus, $reqId]);
+                    }
 
                     Database::execute("
                         INSERT INTO request_status_history (request_id, from_status, to_status, actor_id, actor_name, actor_role, comment)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                     ", [$reqId, $fromStatus, $newStatus, $userId, $actorName, $actorRole, $comment]);
 
-                    $deltaJson = json_encode(['id' => $reqId, 'status' => $newStatus, 'updated_at' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE);
-                    $clRes = Database::execute("
-                        INSERT INTO change_log (entity_type, entity_id, branch_id, operation, delta_payload)
-                        VALUES ('request', ?, ?, 'UPDATE', ?)
-                    ", [$reqId, $bId, $deltaJson]);
-                    if ($clRes['insert_id'] > 0) $serverSeq = $clRes['insert_id'];
+                    if ($driver !== 'pgsql') {
+                        $deltaJson = json_encode(['id' => $reqId, 'status' => $newStatus, 'updated_at' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE);
+                        $clRes = Database::execute("
+                            INSERT INTO change_log (entity_type, entity_id, branch_id, operation, delta_payload)
+                            VALUES ('request', ?, ?, 'UPDATE', ?)
+                        ", [$reqId, $bId, $deltaJson]);
+                        if ($clRes['insert_id'] > 0) $serverSeq = $clRes['insert_id'];
+                    }
 
                     $opSuccess = true;
                 }

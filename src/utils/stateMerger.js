@@ -213,7 +213,7 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
   }
 
   const map = new Map();
-  const isRequestEntity = ['req', 'leave', 'loan', 'swap', 'perm'].includes(options.prefix || '');
+  const isRequestEntity = ['req', 'leave', 'loan', 'swap', 'perm', 'res'].includes(options.prefix || '');
   const seenSigMap = new Map();
 
   // 1. إضافة كل عناصر السحابة (Remote) ما لم تكن محذوفة
@@ -481,24 +481,88 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
     mergedBase.readConfirmations = Array.from(cMap.values());
   }
 
-  // 5. حماية حالة الاعتماد والسداد للسلف والطلبات من الارتداد لحالة معلقة
-  if (options.prefix === 'loan' || options.prefix === 'req') {
-    const isApprovedOrPaid = localItem.adminApproved === true || remoteItem.adminApproved === true ||
-                             localItem.status === 'approved' || remoteItem.status === 'approved' ||
-                             localItem.status === 'paid' || remoteItem.status === 'paid' ||
-                             localItem.status === 'partial' || remoteItem.status === 'partial' ||
-                             (mergedPaidAmount !== undefined && mergedPaidAmount > 0);
+  // 5. حماية حالة الاعتماد والرفض والسداد للطلبات من الارتداد لحالة معلقة (Terminal Decision Immunity)
+  const isReqType = ['req', 'leave', 'loan', 'swap', 'perm', 'res'].includes(options.prefix) ||
+                    Boolean(localItem.requestType || remoteItem.requestType || localItem.employeeId || remoteItem.employeeId);
 
-    if (isApprovedOrPaid) {
-      mergedBase.adminApproved = true;
-      const totalAmt = parseFloat(mergedBase.amount || mergedBase.totalAmount) || 0;
-      const paid = mergedPaidAmount !== undefined ? mergedPaidAmount : (parseFloat(mergedBase.paidAmount) || 0);
-      if (paid >= totalAmt && totalAmt > 0) {
-        mergedBase.status = 'paid';
-      } else if (paid > 0) {
-        mergedBase.status = 'partial';
-      } else if (localItem.status === 'approved' || remoteItem.status === 'approved' || mergedBase.status === 'pending') {
-        mergedBase.status = 'approved';
+  if (isReqType) {
+    const normalizeStatus = (s) => String(s || '').trim().toLowerCase();
+    const lStatus = normalizeStatus(localItem.status);
+    const rStatus = normalizeStatus(remoteItem.status);
+    
+    // الحالات الباتة / المعتمدة والنهائية التي لا يجوز ارتدادها لمعلق
+    const TERMINAL_STATUSES = ['approved', 'rejected', 'paid', 'partial', 'cancelled', 'waived', 'completed'];
+    const isLocalTerminal = TERMINAL_STATUSES.includes(lStatus);
+    const isRemoteTerminal = TERMINAL_STATUSES.includes(rStatus);
+
+    if (isLocalTerminal && !isRemoteTerminal) {
+      // المحلي اتخذ قراراً نهائياً بينما السحابة ما زالت معلقة -> القرار المحلي يكسب دائماً
+      mergedBase.status = localItem.status;
+      if (localItem.adminApproved !== undefined) mergedBase.adminApproved = localItem.adminApproved;
+      if (localItem.rejectionReason) mergedBase.rejectionReason = localItem.rejectionReason;
+      if (localItem.rejectedAt) mergedBase.rejectedAt = localItem.rejectedAt;
+      if (localItem.rejectedBy) mergedBase.rejectedBy = localItem.rejectedBy;
+      if (localItem.approvedAt) mergedBase.approvedAt = localItem.approvedAt;
+      if (localItem.approvedBy) mergedBase.approvedBy = localItem.approvedBy;
+      if (localItem.decided_at) mergedBase.decided_at = localItem.decided_at;
+      if (localItem.decided_by) mergedBase.decided_by = localItem.decided_by;
+      if (localItem.decision_reason) mergedBase.decision_reason = localItem.decision_reason;
+    } else if (isRemoteTerminal && !isLocalTerminal) {
+      // السحابة اتخذت قراراً نهائياً بينما المحلي ما زال معلقاً -> قرار السحابة يكسب دائماً
+      mergedBase.status = remoteItem.status;
+      if (remoteItem.adminApproved !== undefined) mergedBase.adminApproved = remoteItem.adminApproved;
+      if (remoteItem.rejectionReason) mergedBase.rejectionReason = remoteItem.rejectionReason;
+      if (remoteItem.rejectedAt) mergedBase.rejectedAt = remoteItem.rejectedAt;
+      if (remoteItem.rejectedBy) mergedBase.rejectedBy = remoteItem.rejectedBy;
+      if (remoteItem.approvedAt) mergedBase.approvedAt = remoteItem.approvedAt;
+      if (remoteItem.approvedBy) mergedBase.approvedBy = remoteItem.approvedBy;
+      if (remoteItem.decided_at) mergedBase.decided_at = remoteItem.decided_at;
+      if (remoteItem.decided_by) mergedBase.decided_by = remoteItem.decided_by;
+      if (remoteItem.decision_reason) mergedBase.decision_reason = remoteItem.decision_reason;
+    } else if (isLocalTerminal && isRemoteTerminal) {
+      // كلاهما قرارات نهائية (مثلاً أحدهما وافق والآخر رفض أو سدد) -> القرار الأحدث زمنياً يحسم
+      const lDecidedTime = Math.max(
+        getItemTime(localItem.decided_at),
+        getItemTime(localItem.approvedAt),
+        getItemTime(localItem.rejectedAt),
+        getItemTime(localItem.updatedAt)
+      );
+      const rDecidedTime = Math.max(
+        getItemTime(remoteItem.decided_at),
+        getItemTime(remoteItem.approvedAt),
+        getItemTime(remoteItem.rejectedAt),
+        getItemTime(remoteItem.updatedAt)
+      );
+      const winner = lDecidedTime >= rDecidedTime ? localItem : remoteItem;
+      mergedBase.status = winner.status;
+      if (winner.adminApproved !== undefined) mergedBase.adminApproved = winner.adminApproved;
+      if (winner.rejectionReason) mergedBase.rejectionReason = winner.rejectionReason;
+      if (winner.rejectedAt) mergedBase.rejectedAt = winner.rejectedAt;
+      if (winner.rejectedBy) mergedBase.rejectedBy = winner.rejectedBy;
+      if (winner.approvedAt) mergedBase.approvedAt = winner.approvedAt;
+      if (winner.approvedBy) mergedBase.approvedBy = winner.approvedBy;
+      if (winner.decided_at) mergedBase.decided_at = winner.decided_at;
+      if (winner.decided_by) mergedBase.decided_by = winner.decided_by;
+      if (winner.decision_reason) mergedBase.decision_reason = winner.decision_reason;
+    }
+
+    // صيانة السلف والمدفوعات للسلف المعتمدة
+    if (options.prefix === 'loan' || mergedBase.type === 'loan' || mergedBase.requestType === 'loan') {
+      const isApprovedOrPaid = mergedBase.adminApproved === true ||
+                               ['approved', 'paid', 'partial'].includes(normalizeStatus(mergedBase.status)) ||
+                               (mergedPaidAmount !== undefined && mergedPaidAmount > 0);
+
+      if (isApprovedOrPaid) {
+        mergedBase.adminApproved = true;
+        const totalAmt = parseFloat(mergedBase.amount || mergedBase.totalAmount) || 0;
+        const paid = mergedPaidAmount !== undefined ? mergedPaidAmount : (parseFloat(mergedBase.paidAmount) || 0);
+        if (paid >= totalAmt && totalAmt > 0) {
+          mergedBase.status = 'paid';
+        } else if (paid > 0) {
+          mergedBase.status = 'partial';
+        } else if (['approved', 'pending'].includes(normalizeStatus(mergedBase.status))) {
+          mergedBase.status = 'approved';
+        }
       }
     }
   }

@@ -480,8 +480,15 @@ function mergeServerState(array $existing, array $incoming): array
                     $tOld = strtotime((string)($old['updatedAt'] ?? $old['approvedAt'] ?? $old['createdAt'] ?? $old['timestamp'] ?? $old['date'] ?? '1970-01-01'));
                     $tNew = strtotime((string)($item['updatedAt'] ?? $item['approvedAt'] ?? $item['createdAt'] ?? $item['timestamp'] ?? $item['date'] ?? '1970-01-01'));
 
-                    $isOldApproved = in_array($old['status'] ?? '', ['approved', 'paid', 'partial'], true) || ($old['adminApproved'] ?? false);
-                    $isNewApproved = in_array($item['status'] ?? '', ['approved', 'paid', 'partial'], true) || ($item['adminApproved'] ?? false);
+                    $oldStatus = strtolower(trim((string)($old['status'] ?? '')));
+                    $newStatus = strtolower(trim((string)($item['status'] ?? '')));
+                    $terminalStatuses = ['approved', 'rejected', 'paid', 'partial', 'cancelled', 'waived', 'completed'];
+                    $isOldTerminal = in_array($oldStatus, $terminalStatuses, true) || !empty($old['adminApproved']);
+                    $isNewTerminal = in_array($newStatus, $terminalStatuses, true) || !empty($item['adminApproved']);
+                    $isRequestPrefix = in_array($prefix, ['req', 'leave', 'loan', 'swap', 'perm', 'res'], true) || !empty($old['employeeId']) || !empty($item['employeeId']);
+
+                    $isOldApproved = in_array($oldStatus, ['approved', 'paid', 'partial'], true) || ($old['adminApproved'] ?? false);
+                    $isNewApproved = in_array($newStatus, ['approved', 'paid', 'partial'], true) || ($item['adminApproved'] ?? false);
 
                     if ($prefix === 'app') {
                         // لطلبات التوظيف: إذا تم قبول وتعيين المرشح كموظف (hired) فله الأولوية المطلقة الدائمة لمنع ارتداده إلى جديد
@@ -530,12 +537,31 @@ function mergeServerState(array $existing, array $incoming): array
                                 $merged['archivedBranchesDetails'] = $item['archivedBranchesDetails'];
                             }
                         }
-                    } elseif ($isOldApproved && !$isNewApproved) {
+                    } elseif ($isRequestPrefix && $isOldTerminal && !$isNewTerminal) {
+                        // الحالة المسجلة بالسيرفر تم البت فيها (معتمدة/مرفوضة) بينما الواردة معلقة -> الحفاظ على القرار النهائي
+                        $merged = array_merge($item, $old);
+                    } elseif ($isRequestPrefix && $isNewTerminal && !$isOldTerminal) {
+                        // الواردة تم البت فيها بينما السيرفر معلق -> اعتماد القرار النهائي
+                        $merged = array_merge($old, $item);
+                    } elseif ($isOldTerminal && !$isNewTerminal) {
                         $merged = array_merge($item, $old);
                     } elseif ($tNew >= $tOld) {
                         $merged = array_merge($old, $item);
                     } else {
                         $merged = array_merge($item, $old);
+                    }
+
+                    if ($isRequestPrefix && ($isOldTerminal || $isNewTerminal)) {
+                        $decidedItem = ($isOldTerminal && !$isNewTerminal) ? $old : (($isNewTerminal && !$isOldTerminal) ? $item : ($tNew >= $tOld ? $item : $old));
+                        if (!empty($decidedItem['rejectionReason'])) $merged['rejectionReason'] = $decidedItem['rejectionReason'];
+                        if (!empty($decidedItem['rejectedAt'])) $merged['rejectedAt'] = $decidedItem['rejectedAt'];
+                        if (!empty($decidedItem['rejectedBy'])) $merged['rejectedBy'] = $decidedItem['rejectedBy'];
+                        if (!empty($decidedItem['approvedAt'])) $merged['approvedAt'] = $decidedItem['approvedAt'];
+                        if (!empty($decidedItem['approvedBy'])) $merged['approvedBy'] = $decidedItem['approvedBy'];
+                        if (!empty($decidedItem['decided_at'])) $merged['decided_at'] = $decidedItem['decided_at'];
+                        if (!empty($decidedItem['decided_by'])) $merged['decided_by'] = $decidedItem['decided_by'];
+                        if (!empty($decidedItem['decision_reason'])) $merged['decision_reason'] = $decidedItem['decision_reason'];
+                        if (isset($decidedItem['adminApproved'])) $merged['adminApproved'] = $decidedItem['adminApproved'];
                     }
 
                     // الحفاظ على معرف مستقر لا يتغير للموظف

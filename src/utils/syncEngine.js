@@ -160,18 +160,27 @@ export async function enqueueRequestDecision({
 
   await putRequest(updatedRequest);
 
+  const opType = decision === 'approve' ? 'APPROVE_REQUEST' : decision === 'reject' ? 'REJECT_REQUEST' : 'UPDATE_STATUS';
+  const opAction = decision === 'approve' ? 'approve_request' : decision === 'reject' ? 'reject_request' : 'update_status';
+
   await enqueueOutboxOperation({
     idempotency_key: idempotencyKey,
-    action: decision === 'approve' ? 'approve_request' : decision === 'reject' ? 'reject_request' : 'update_status',
+    type: opType,
+    action: opAction,
     entity_type: 'request',
     entity_id: String(requestId),
     branch_id: branchId || updatedRequest.branch_id || null,
     payload: {
+      id: String(requestId),
       request_id: String(requestId),
+      status: targetStatus,
       new_status: targetStatus,
       decision,
-      reason,
+      reason: reason || '',
+      comment: reason || '',
       reviewer,
+      actor_role: reviewer.role || 'admin',
+      actor_name: reviewer.name || reviewer.id || 'Admin',
       additional_data: additionalData,
       updated_at: now
     }
@@ -318,7 +327,28 @@ export async function pullDeltaSync(branchId = null) {
             // التحقق من منع معالجة التكرار
             const alreadyDone = await hasProcessedInbox(change.idempotency_key);
             if (!alreadyDone) {
-              await putRequest(payload);
+              const existingLocal = await getRequestById(payload.id);
+              let finalPayload = payload;
+              if (existingLocal) {
+                const curStatus = String(existingLocal.status || '').toLowerCase();
+                const incStatus = String(payload.status || '').toLowerCase();
+                const TERMINAL_STATUSES = ['approved', 'rejected', 'paid', 'partial', 'cancelled', 'waived', 'completed'];
+                if (TERMINAL_STATUSES.includes(curStatus) && !TERMINAL_STATUSES.includes(incStatus)) {
+                  // حماية الحالة المعتمدة أو المرفوضة محلياً من الارتداد لمعلقة
+                  finalPayload = {
+                    ...payload,
+                    status: existingLocal.status,
+                    adminApproved: existingLocal.adminApproved !== undefined ? existingLocal.adminApproved : (curStatus === 'approved'),
+                    decision_reason: existingLocal.decision_reason || payload.decision_reason,
+                    decided_by: existingLocal.decided_by || payload.decided_by,
+                    decided_at: existingLocal.decided_at || payload.decided_at,
+                    rejectionReason: existingLocal.rejectionReason || payload.rejectionReason,
+                    rejectedAt: existingLocal.rejectedAt || payload.rejectedAt,
+                    rejectedBy: existingLocal.rejectedBy || payload.rejectedBy
+                  };
+                }
+              }
+              await putRequest(finalPayload);
               await markProcessedInbox(change.idempotency_key, change.sequence);
               appliedCount++;
             }

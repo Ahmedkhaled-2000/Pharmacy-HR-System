@@ -585,9 +585,22 @@ export function DataProvider({ children, showToast = () => {} }) {
           if (localReqs && localReqs.length > 0) {
             setState((prev) => {
               const map = new Map((prev.requests || []).map((r) => [String(r.id), r]));
+              const TERMINAL_STATUSES = new Set(['approved', 'rejected', 'paid', 'partial', 'cancelled', 'waived', 'completed']);
+
               localReqs.forEach((lr) => {
                 if (lr && lr.id) {
-                  map.set(String(lr.id), { ...(map.get(String(lr.id)) || {}), ...lr });
+                  const idStr = String(lr.id);
+                  const current = map.get(idStr);
+                  if (current) {
+                    const curStatus = String(current.status || '').toLowerCase();
+                    const lrStatus = String(lr.status || '').toLowerCase();
+                    // إذا كان الطلب في الحالة الحالية معتمداً أو مرفوضاً، والوارد معلقاً، لا يتم الرجوع للحالة المعلقة أبداً
+                    if (TERMINAL_STATUSES.has(curStatus) && !TERMINAL_STATUSES.has(lrStatus)) {
+                      map.set(idStr, { ...lr, ...current, status: current.status, adminApproved: current.adminApproved });
+                      return;
+                    }
+                  }
+                  map.set(idStr, { ...(current || {}), ...lr });
                 }
               });
               return { ...prev, requests: Array.from(map.values()) };
