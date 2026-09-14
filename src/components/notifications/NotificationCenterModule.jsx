@@ -1315,6 +1315,13 @@ export default function NotificationCenterModule({
                         }));
                       }, 50);
                     }
+                    if (target.filterType) {
+                      setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent('requests:set-filter-type', {
+                          detail: { filterType: target.filterType }
+                        }));
+                      }, 50);
+                    }
                     showToast?.(`الانتقال إلى: ${tabLabel}`);
                   }
                 };
@@ -1508,6 +1515,13 @@ export default function NotificationCenterModule({
                             applicantCode: item.applicantCode,
                             applicantName: item.employeeName
                           }
+                        }));
+                      }, 50);
+                    }
+                    if (target.filterType) {
+                      setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent('requests:set-filter-type', {
+                          detail: { filterType: target.filterType }
                         }));
                       }, 50);
                     }

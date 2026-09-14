@@ -164,9 +164,14 @@ export function NotificationProvider({ children }) {
 
       if (r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled') return false;
 
-      // طلبات اعتماد الحضور بالصورة (تأكيد بصمة الوجه/اليد) تظهر فورياً في عداد الإدارة العليا للمطابقة والاعتماد
-      const isBiometricVerification = r.type === 'biometric_verification' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
-      if (isBiometricVerification) {
+      // طلبات البصمة الإلكترونية (تسجيل جديد ذاتي، إعادة ضبط ومسح، أو اعتماد الحضور بالصورة) تظهر فورياً في عداد الإدارة العليا
+      const isBiometricAdminDirect =
+        r.type === 'biometric_registration' ||
+        r.type === 'biometric_reset' ||
+        r.type === 'biometric_verification' ||
+        r.type === 'تأكيد بصمة الوجه' ||
+        r.type === 'تأكيد بصمة اليد';
+      if (isBiometricAdminDirect) {
         return !r.adminApproved;
       }
 

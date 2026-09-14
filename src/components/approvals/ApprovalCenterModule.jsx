@@ -341,11 +341,11 @@ export default function ApprovalCenterModule({
                     {(() => {
                       const effectiveBranchId = req.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId;
                       const hasNoManager = isBranchWithoutManager(effectiveBranchId, state) || req.managerComment === 'الفرع بدون مدير' || req.managerStatus === 'skipped' || req.branchApprovalStatus === 'skipped';
-                      const isDual = isDualApprovalRequest(req);
+                      const isDual = isDualApprovalRequest(req, state);
                       const isBranchNotReq = hasNoManager || (!isDual && (
                         req.targetApproval === 'admin_only' ||
                         req.targetApproval === 'admin' ||
-                        ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint'].includes(req.type) ||
+                        ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint', 'penalty_objection', 'objection', 'biometric_registration', 'biometric_reset'].includes(req.type) ||
                         req.branchNotRequired ||
                         req.isDirectToAdmin ||
                         shouldRouteDirectToAdmin(emp, effectiveBranchId, state, req)

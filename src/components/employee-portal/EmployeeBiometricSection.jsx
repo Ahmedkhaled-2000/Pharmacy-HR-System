@@ -33,11 +33,27 @@ export default function EmployeeBiometricSection({
   };
 
   // Check pending requests
+  const localPendingBio = (() => {
+    try {
+      const raw = localStorage.getItem('pending_bio_reg_' + employee?.id);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  })();
+
+  const isResolvedInRequests = (state?.requests || []).some(
+    r => isEmpMatch(r) &&
+         r.type === 'biometric_registration' &&
+         (r.status === 'approved' || r.status === 'rejected')
+  );
+  if ((hasBiometric || isResolvedInRequests) && localPendingBio) {
+    try { localStorage.removeItem('pending_bio_reg_' + employee?.id); } catch {}
+  }
+
   const pendingRegistration = (state?.requests || []).find(
     r => isEmpMatch(r) &&
          r.type === 'biometric_registration' &&
          (r.status === 'pending' || r.status === 'pending_admin')
-  );
+  ) || (!hasBiometric && !isResolvedInRequests ? localPendingBio : null);
 
   const pendingReset = (state?.requests || []).find(
     r => isEmpMatch(r) &&

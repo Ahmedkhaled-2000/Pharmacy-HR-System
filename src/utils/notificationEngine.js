@@ -2,6 +2,7 @@
  * Notification Engine for HR Pharmacy System
  * Handles creation, filtering, and marking of notifications across Admin, Branch, and Employee Portals.
  */
+import { isDualApprovalRequest, isBranchWithoutManager, isEmployeeBranchManager, isUpperManagementEmp } from './jobsHelper';
 
 export const REQUEST_TYPE_LABELS = {
   leave: 'طلب إجازة',
@@ -299,6 +300,12 @@ export function filterEmployeeNotifications(notifications = [], employeeId = nul
       return true;
     }
 
+    // 4.5. Role update, administrative status, or biometric notifications addressing this employee
+    if ((n.type === 'role_update' || n.type === 'biometric_cleared' || n.id?.startsWith('NOTIF-ADMIN-ROLE-') || n.id?.startsWith('NOTIF-BIO-DELETED-') || n.title?.includes('تم تعيينك') || n.title?.includes('تم مسح بصمتك')) &&
+        (String(n.employeeId).trim() === empIdStr || String(n.targetEmployeeId).trim() === empIdStr || (empCodeStr && String(n.employeeCode).trim() === empCodeStr))) {
+      return true;
+    }
+
     // 5. Evaluation notification for this employee (even if created before targetRole was saved)
     if ((n.type === 'eval_pending_employee' || n.type === 'eval_finalized' || n.evalId || (n.linkTab === 'evaluations' && n.title?.includes('تقييم'))) && 
         (String(n.employeeId).trim() === empIdStr || String(n.targetEmployeeId).trim() === empIdStr ||
@@ -352,32 +359,48 @@ export function filterAdminNotifications(notifications = [], state = null) {
       return false;
     }
 
-    // B. Never show notifications created by Admin for employees (e.g. self confirmations)
+    // B. Never show notifications created by Admin for employees (e.g. self confirmations, decisions, role updates)
     if (n.creatorRole === 'admin' || n.createdBy === 'admin' || n.isAdminCreated === true || n.submittedByAdmin === true) {
       return false;
     }
 
-    // C. Never show employee-targeted notifications or self decision confirmations
-    if (n.targetRole === 'employee' || n.targetRole === 'all_employees') {
+    // C. Never show employee-targeted notifications or personal employee alerts
+    if (n.targetRole === 'employee' || n.targetRole === 'all_employees' || n.targetRole === 'staff') {
       return false;
     }
-    // Never show evaluation notifications sent to employee for employee review
-    if (n.type === 'eval_pending_employee' || n.type === 'eval_finalized' || (n.title && n.title.includes('برصد تقييم أدائك')) || (n.message && n.message.includes('برصد تقييم أدائك')) || (n.title && n.title.includes('تقييم شهري جديد') && !n.title.includes('رد الموظف'))) {
+    if (n.type === 'role_update' || n.type === 'biometric_cleared' || n.type === 'eval_pending_employee' || n.type === 'eval_finalized') {
+      return false;
+    }
+    if (n.targetEmployeeId && n.targetRole !== 'admin' && n.targetRole !== 'owner' && n.targetRole !== 'branch_and_admin') {
       return false;
     }
     if (n.targetEmployeeId && (n.action === 'approved' || n.action === 'rejected' || n.action === 'decision' || n.action === 'penalty' || n.action === 'bonus' || n.action === 'punch' || n.action === 'manual_punch')) {
       return false;
     }
-    if (n.title && (
-      n.title.includes('الخاص بك') ||
-      n.message?.includes('الخاص بك') ||
-      n.title.includes('موافقة الإدارة العليا') ||
-      n.title.includes('رفض الطلب من الإدارة العليا') ||
-      n.title.includes('تم تسجيل بصمة') ||
-      n.title.includes('تم تطبيق خصم') ||
-      n.title.includes('تمت إضافة مكافأة') ||
-      n.title.includes('تم اعتماد السلفة')
-    )) {
+
+    // C2. Strict linguistic filtering for Arabic second-person phrases addressed directly to an individual employee
+    const textToCheck = `${n.title || ''} ${n.message || ''} ${n.body || ''}`;
+    if (
+      textToCheck.includes('تم تعيينك') ||
+      textToCheck.includes('تم منحك') ||
+      textToCheck.includes('تم مسح بصمتك') ||
+      textToCheck.includes('تمت ترقيتك') ||
+      textToCheck.includes('تم تعديل بياناتك') ||
+      textToCheck.includes('تم قبول طلبك') ||
+      textToCheck.includes('تم رفض طلبك') ||
+      textToCheck.includes('تمت الموافقة على طلبك') ||
+      textToCheck.includes('تم اعتماد طلبك') ||
+      textToCheck.includes('بصمتك') ||
+      textToCheck.includes('الخاص بك') ||
+      textToCheck.includes('حسابك الشخصي') ||
+      textToCheck.includes('برصد تقييم أدائك') ||
+      textToCheck.includes('موافقة الإدارة العليا') ||
+      textToCheck.includes('رفض الطلب من الإدارة العليا') ||
+      textToCheck.includes('تم تسجيل بصمة') ||
+      textToCheck.includes('تم تطبيق خصم') ||
+      textToCheck.includes('تمت إضافة مكافأة') ||
+      textToCheck.includes('تم اعتماد السلفة')
+    ) {
       return false;
     }
 
@@ -387,13 +410,15 @@ export function filterAdminNotifications(notifications = [], state = null) {
     }
 
     // E. Explicitly targeted to Admin / Owner / Management
-    if (n.targetRole === 'admin' || n.targetRole === 'owner' || n.targetRole === 'branch_and_admin' || !n.targetRole) {
+    if (n.targetRole === 'admin' || n.targetRole === 'owner' || n.targetRole === 'branch_and_admin') {
       return true;
     }
 
-    // F. Default incoming request notifications from employees or branch managers (waiting for admin action)
-    if (!n.action || n.action === 'pending' || n.action === 'submitted') {
-      return true;
+    // F. Default incoming requests from employees or branch managers waiting for admin action (must have a valid requestId and not be targeted to an employee)
+    if (!n.targetRole && (n.requestId || notifIdStr.startsWith('REQ-') || notifIdStr.startsWith('req_') || (notifIdStr.startsWith('NOTIF-BIO-') && !notifIdStr.startsWith('NOTIF-BIO-DELETED-'))) && !n.targetEmployeeId) {
+      if (!n.action || n.action === 'pending' || n.action === 'submitted') {
+        return true;
+      }
     }
 
     return false;
@@ -436,16 +461,40 @@ export function filterAdminNotifications(notifications = [], state = null) {
       if (isPending) {
         const finalType = r.type || defaultType;
 
-        // Resignation requests must go to Branch Manager first; do not synthesize actionable admin notification until branch responds
-        if (finalType === 'resignation' || finalType === 'withdraw') {
-          const isBranchDone = r.isDirectToAdmin || r.managerStatus === 'approved' || r.managerStatus === 'rejected' || r.branchApproved;
-          if (!isBranchDone) return;
-        }
-
         const emp = (state.employees || []).find(
           (e) => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode))
         );
         const empName = emp?.name || r.employeeName || 'موظف';
+        const effectiveBranchId = r.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId;
+        const isBranchEmpty = effectiveBranchId && isBranchWithoutManager(effectiveBranchId, state);
+        const isBranchMgrOrAdmin = emp && (isEmployeeBranchManager(emp, effectiveBranchId, state) || isUpperManagementEmp(emp));
+
+        // Enforce dual approval workflow sequence:
+        // Operational requests requiring dual approval (leaves <= 3d, permissions, roster edits, swaps, bonuses, manual punches)
+        // MUST be reviewed by Branch Manager first, UNLESS the branch has no manager or employee is branch manager / admin.
+        const isDual = isDualApprovalRequest(r, state);
+        if (isDual) {
+          const isBranchDone =
+            r.isDirectToAdmin ||
+            isBranchEmpty ||
+            isBranchMgrOrAdmin ||
+            r.branchApproved ||
+            r.branchApprovalStatus === 'approved' ||
+            r.branchApprovalStatus === 'rejected' ||
+            r.managerStatus === 'approved' ||
+            r.managerStatus === 'rejected' ||
+            r.submittedByBranchManager ||
+            r.createdRole === 'branch' ||
+            r.createdRole === 'admin';
+          if (!isBranchDone) return;
+        }
+
+        // Resignation requests must go to Branch Manager first; do not synthesize actionable admin notification until branch responds
+        if (finalType === 'resignation' || finalType === 'withdraw') {
+          const isBranchDone = r.isDirectToAdmin || isBranchEmpty || isBranchMgrOrAdmin || r.managerStatus === 'approved' || r.managerStatus === 'rejected' || r.branchApproved;
+          if (!isBranchDone) return;
+        }
+
         const typeLabel = getRequestTypeArabicLabel(finalType);
         const isResignation = finalType === 'resignation' || finalType === 'withdraw';
         const iconMap = {
@@ -459,8 +508,24 @@ export function filterAdminNotifications(notifications = [], state = null) {
           swap: '🔄',
           shift_swap: '🔄',
           resignation: '🚪',
-          penalty_objection: '✋'
+          penalty_objection: '✋',
+          biometric_registration: '📸',
+          biometric_reset: '🔄',
+          biometric_verification: '📸'
         };
+
+        let notifTitle = isResignation ? `🚪 استقالة بحاجة لقرار الإدارة النهائي: ${empName}` : `📋 طلب وارد ينتظر قرار الإدارة: ${empName}`;
+        let notifMessage = isResignation
+          ? `طلب استقالة للموظف (${empName}) تمت مراجعته من مدير الفرع (${r.managerStatus === 'approved' ? 'موافقة' : r.managerStatus === 'rejected' ? 'رفض' : 'مراجعة'}) وينتظر قرار الإدارة النهائي. ${r.managerComment ? 'ملاحظة الفرع: ' + r.managerComment : ''}`
+          : `${typeLabel} للموظف (${empName}) ينتظر الاعتماد والمراجعة. ${r.reason || r.details || ''}`;
+
+        if (finalType === 'biometric_registration') {
+          notifTitle = `📸 تسجيل بصمة جديدة: ${empName}`;
+          notifMessage = `قام الموظف (${empName}) بالتقاط بصمته ذاتياً وبانتظار مراجعة واعتماد الإدارة العليا لتفعيلها.`;
+        } else if (finalType === 'biometric_reset') {
+          notifTitle = `🔄 طلب مسح وإعادة تسجيل بصمة: ${empName}`;
+          notifMessage = `طلب الموظف (${empName}) مسح بصمته الحالية وإعادة التسجيل. السبب: ${r.reason || 'لم يحدد'}`;
+        }
 
         if (!existingReqIds.has(rId) && !existingReqIds.has(`notif_pending_${rId}`)) {
           synthesizedPendingNotifs.push({
@@ -827,8 +892,23 @@ export function getNotificationTarget(notification, role = 'admin') {
   }
 
   // طلبات البصمات وتصحيح البصمة اليدوية
-  if (type.includes('manual_punch') || type.includes('punch_correction') || title.includes('طلب بصمة') || title.includes('بصمة يدوي')) {
-    return { tab: 'requests', subTab: null };
+  if (
+    type.includes('manual_punch') ||
+    type.includes('punch_correction') ||
+    type.includes('biometric_registration') ||
+    type.includes('biometric_reset') ||
+    type.includes('biometric_verification') ||
+    type === 'تأكيد بصمة الوجه' ||
+    type === 'تأكيد بصمة اليد' ||
+    reqId.startsWith('notif-bio') ||
+    reqId.startsWith('req-bio') ||
+    title.includes('طلب بصمة') ||
+    title.includes('بصمة يدوي') ||
+    title.includes('تسجيل بصمة') ||
+    title.includes('إعادة تسجيل بصمة') ||
+    title.includes('اعتماد [')
+  ) {
+    return { tab: 'requests', subTab: null, filterType: 'biometric' };
   }
 
   // طلبات الموظفين العامة (إجازات، أذونات، سلف، تبديل، استقالة) -> توجيه لمركز موافقات الطلبات
@@ -837,6 +917,7 @@ export function getNotificationTarget(notification, role = 'admin') {
   if (type.includes('loan') || type.includes('med') || type.includes('advance') || reqId.startsWith('loan_') || reqId.startsWith('medreq_') || title.includes('سلف') || title.includes('أدوي') || title.includes('ادوي') || title.includes('آجل')) return { tab: 'requests', subTab: null };
   if (type.includes('swap') || reqId.startsWith('swap_') || title.includes('تبديل')) return { tab: 'requests', subTab: null };
   if (type.includes('resign') || reqId.startsWith('res_') || title.includes('استقال')) return { tab: 'resignation', subTab: null };
+  if (type.includes('penalty_appeal') || type.includes('penalty_objection') || type.includes('objection') || title.includes('تظلم')) return { tab: 'requests', subTab: null };
   if (type.includes('request') || reqId.startsWith('req_') || title.includes('طلب ')) return { tab: 'requests', subTab: null };
 
   // التقييمات والشكاوى
@@ -845,8 +926,8 @@ export function getNotificationTarget(notification, role = 'admin') {
   // الجداول والورديات
   if (type.includes('roster') || title.includes('جدول')) return { tab: 'roster', subTab: null };
 
-  // الحضور والبصمات
-  if (type.includes('punch') || type.includes('shift') || type.includes('biometric') || type.includes('early_departure') || title.includes('بصم') || title.includes('حضور') || title.includes('إغلاق الفرع')) return { tab: 'attendance', subTab: null };
+  // الحضور وتنبيهات الورديات العامة (التي ليست طلبات)
+  if (type.includes('shift') || type.includes('early_departure') || title.includes('إغلاق الفرع') || title.includes('تسجيل حضور وانصراف')) return { tab: 'attendance', subTab: null };
 
   // لائحة العمل والجزاءات والتأخير
   if (type.includes('late') || type.includes('early_exit') || type.includes('bylaw') || title.includes('تأخير') || title.includes('خروج') || title.includes('لائح')) return { tab: 'bylaws', subTab: null };

@@ -28,6 +28,7 @@ import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import { apiSubmitRequestAtomic } from '../../utils/apiClient';
 import { broadcastStateChange } from '../../utils/offlineSync';
+import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 import '../../portal.css';
 
 // ─────────────────────────────────────────
@@ -1687,8 +1688,13 @@ export default function EmployeePortalView({
         date: dateStr,
         createdAt: now.toISOString(),
         status: 'pending',
+        isDirectToAdmin: true,
+        targetRole: 'admin',
+        targetApproval: 'admin_only',
         requiresSuperAdmin: true,
         requiresBranchManager: false,
+        branchApproved: true,
+        targetCategory: 'biometric',
         adminApproved: false,
         notes: `قام الموظف ${empName} بتسجيل ${bioLabel} ذاتياً من حسابه وبانتظار مراجعة واعتماد الإدارة العليا لتفعيلها.`
       };
@@ -1707,26 +1713,27 @@ export default function EmployeePortalView({
         readBy: []
       };
 
-      const updatedState = {
-        ...state,
-        requests: [requestData, ...(state.requests || [])],
-        notifications: [newNotif, ...(state.notifications || [])],
-        _requestsUpdatedAt: now.toISOString()
-      };
-
-      setState(updatedState);
       try {
-        broadcastStateChange(updatedState);
+        localStorage.setItem('pending_bio_reg_' + empId, JSON.stringify({
+          id: requestId,
+          type: 'biometric_registration',
+          employeeId: empId,
+          employeeCode: empCode,
+          date: dateStr,
+          createdAt: now.toISOString(),
+          status: 'pending'
+        }));
       } catch {}
-      if (showToast) {
-        showToast('🎉 تم التقاط البصمة بنجاح وإرسالها للإدارة العليا للاعتماد!');
-      }
 
-      apiSubmitRequestAtomic(requestData, newNotif).catch(err => console.warn('Atomic request sync warning:', err));
-
-      if (saveState) {
-        saveState(updatedState).catch(err => console.warn('Save state background warning:', err));
-      }
+      await dispatchEmployeeRequest({
+        request: requestData,
+        notification: newNotif,
+        state,
+        setState,
+        saveState,
+        showToast,
+        successMessage: '🎉 تم التقاط البصمة بنجاح وإرسالها للإدارة العليا للاعتماد!'
+      });
 
       // Non-blocking background sync for Drive upload & Gmail notification
       (async () => {
@@ -1805,8 +1812,13 @@ export default function EmployeePortalView({
         date: dateStr,
         createdAt: now.toISOString(),
         status: 'pending',
+        isDirectToAdmin: true,
+        targetRole: 'admin',
+        targetApproval: 'admin_only',
         requiresSuperAdmin: true,
         requiresBranchManager: false,
+        branchApproved: true,
+        targetCategory: 'biometric',
         adminApproved: false,
         notes: `طلب الموظف ${empName} مسح بصمته الحالية وإعادة تسجيل بصمة جديدة. السبب: ${reason}`
       };
@@ -1825,24 +1837,15 @@ export default function EmployeePortalView({
         readBy: []
       };
 
-      const updatedState = {
-        ...state,
-        requests: [requestData, ...(state.requests || [])],
-        notifications: [newNotif, ...(state.notifications || [])],
-        _requestsUpdatedAt: now.toISOString()
-      };
-
-      setState(updatedState);
-      try {
-        broadcastStateChange(updatedState);
-      } catch {}
-      if (showToast) showToast('✅ تم إرسال طلب إعادة تسجيل البصمة للإدارة العليا بنجاح');
-
-      apiSubmitRequestAtomic(requestData, newNotif).catch(err => console.warn('Atomic request sync warning:', err));
-
-      if (saveState) {
-        saveState(updatedState).catch(err => console.warn('Save state warning:', err));
-      }
+      await dispatchEmployeeRequest({
+        request: requestData,
+        notification: newNotif,
+        state,
+        setState,
+        saveState,
+        showToast,
+        successMessage: '✅ تم إرسال طلب إعادة تسجيل البصمة للإدارة العليا بنجاح'
+      });
 
       const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
       if (gmailConfig && (gmailConfig.enabled || gmailConfig.serviceUrl)) {
@@ -3720,11 +3723,27 @@ export default function EmployeePortalView({
               emp?.has_face_descriptor || emp?.face_descriptor ||
               emp?.has_hand_descriptor || emp?.hand_descriptor
             );
+            const localPendingBio = (() => {
+              try {
+                const raw = localStorage.getItem('pending_bio_reg_' + emp?.id);
+                return raw ? JSON.parse(raw) : null;
+              } catch { return null; }
+            })();
+
+            const isResolvedInRequests = (state?.requests || []).some(
+              r => isEmpRequestMatch(r, emp) &&
+                   r.type === 'biometric_registration' &&
+                   (r.status === 'approved' || r.status === 'rejected')
+            );
+            if ((hasBio || isResolvedInRequests) && localPendingBio) {
+              try { localStorage.removeItem('pending_bio_reg_' + emp?.id); } catch {}
+            }
+
             const pendingBioReg = (state?.requests || []).find(
               r => isEmpRequestMatch(r, emp) &&
                    r.type === 'biometric_registration' &&
                    (r.status === 'pending' || r.status === 'pending_admin')
-            );
+            ) || (!hasBio && !isResolvedInRequests ? localPendingBio : null);
 
             if (!hasBio && !pendingBioReg) {
               return (

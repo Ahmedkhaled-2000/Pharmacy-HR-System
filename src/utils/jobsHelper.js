@@ -310,23 +310,46 @@ export function isDualApprovalRequest(reqOrType, state = null) {
 export function shouldRouteDirectToAdmin(emp, branchId, state, req = null) {
   if (!emp) return false;
 
-  // 1. إذا كان الفرع بدون مدير معين، يتم إرسال الطلب مباشرة للإدارة العليا وتجاوز الفرع
   const effectiveBranchId = branchId || emp.branchId || emp.branchesDetails?.[0]?.branchId;
+
+  // 1. الطلبات الأحادية التابعة للإدارة العليا حصراً (بصمات، سلف، مشتريات أدوية، تظلمات، شكاوى) تذهب للإدارة العليا مباشرة
+  const normType = req ? normalizeRequestType(typeof req === 'string' ? req : req.type) : '';
+  const adminOnlyTypes = [
+    'loan',
+    'advance',
+    'credit_medicine',
+    'meds',
+    'complaint',
+    'eval_edit_request',
+    'profile_update',
+    'penalty_objection',
+    'objection',
+    'biometric_registration',
+    'biometric_reset'
+  ];
+  if (normType && adminOnlyTypes.includes(normType)) {
+    return true;
+  }
+  if (req && typeof req === 'object' && (req.isDirectToAdmin || req.targetApproval === 'admin_only')) {
+    return true;
+  }
+
+  // 2. إذا كان الفرع بدون مدير معين، يتم إرسال الطلب مباشرة للإدارة العليا وتجاوز الفرع
   if (effectiveBranchId && state && isBranchWithoutManager(effectiveBranchId, state)) {
     return true;
   }
 
-  // 2. If this is a Dual Approval request, staff requests must NEVER route direct to admin
+  // 3. If this is a Dual Approval request, staff requests must NEVER route direct to admin
   if (req && isDualApprovalRequest(req, state)) {
     return isEmployeeBranchManager(emp, effectiveBranchId, state) || isUpperManagementEmp(emp);
   }
 
-  // 3. If employee is Upper Management (Admin / Owner / GM / HR Head)
+  // 4. If employee is Upper Management (Admin / Owner / GM / HR Head)
   if (isUpperManagementEmp(emp)) {
     return true;
   }
 
-  // 4. If employee is the Branch Manager of this branch
+  // 5. If employee is the Branch Manager of this branch
   if (isEmployeeBranchManager(emp, effectiveBranchId, state)) {
     return true;
   }

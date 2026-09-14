@@ -1808,6 +1808,13 @@ return (
                           }));
                         }, 50);
                       }
+                      if (target.filterType) {
+                        setTimeout(() => {
+                          window.dispatchEvent(new CustomEvent('requests:set-filter-type', {
+                            detail: { filterType: target.filterType }
+                          }));
+                        }, 50);
+                      }
                     };
 
                     return (
@@ -2354,6 +2361,13 @@ return (
                               applicantCode: n.applicantCode,
                               applicantName: n.employeeName
                             }
+                          }));
+                        }, 50);
+                      }
+                      if (target.filterType) {
+                        setTimeout(() => {
+                          window.dispatchEvent(new CustomEvent('requests:set-filter-type', {
+                            detail: { filterType: target.filterType }
                           }));
                         }, 50);
                       }

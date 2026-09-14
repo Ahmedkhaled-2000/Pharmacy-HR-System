@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
-import { getNotificationTargetTab } from '../../utils/notificationEngine';
+import { getNotificationTarget, getNotificationTargetTab } from '../../utils/notificationEngine';
 
 export default function GlobalNavbar({
   orgSettings,
@@ -175,8 +175,15 @@ export default function GlobalNavbar({
                         onClick={() => {
                           setShowNotifMenu(false);
                           if (onMarkNotificationRead) onMarkNotificationRead(n.id);
-                          const targetTab = getNotificationTargetTab(n, 'admin');
-                          if (onNavigateTab) onNavigateTab(targetTab);
+                          const target = getNotificationTarget(n, 'admin');
+                          if (onNavigateTab) onNavigateTab(target.tab);
+                          if (target.filterType) {
+                            setTimeout(() => {
+                              window.dispatchEvent(new CustomEvent('requests:set-filter-type', {
+                                detail: { filterType: target.filterType }
+                              }));
+                            }, 50);
+                          }
                         }}
                         style={{
                           padding: '9px 12px',

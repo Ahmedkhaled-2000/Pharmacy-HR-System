@@ -156,6 +156,19 @@ export default function RequestsModule({
   const [showHiddenAdminRequests, setShowHiddenAdminRequests] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  useEffect(() => {
+    const handleSetFilter = (e) => {
+      if (e?.detail?.filterType) {
+        setFilterType(e.detail.filterType);
+      }
+      if (e?.detail?.inboxTab) {
+        setInboxTab(e.detail.inboxTab);
+      }
+    };
+    window.addEventListener('requests:set-filter-type', handleSetFilter);
+    return () => window.removeEventListener('requests:set-filter-type', handleSetFilter);
+  }, []);
+
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     try {
@@ -517,7 +530,7 @@ export default function RequestsModule({
       } else if (filterType === 'penalty_objection') {
         if (r.type !== 'penalty_objection' && r.type !== 'objection' && !r.penaltyId && !r.objection) return false;
       } else if (filterType === 'biometric') {
-        const isBio = r.type === 'biometric_verification' || r.type === 'biometric_registration' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
+        const isBio = r.type === 'biometric_verification' || r.type === 'biometric_registration' || r.type === 'biometric_reset' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
         if (!isBio) return false;
       } else if (r.type !== filterType) {
         return false;
@@ -593,7 +606,7 @@ export default function RequestsModule({
       const isUrgent = r.type === 'complaint' || r.type === 'penalty_objection' || r.type === 'biometric_verification' || r.urgent;
       const isOutbox = r.status === 'pending_local' || r.status === 'queued' || r.status === 'syncing';
       const rDate = getRequestDate(r);
-      const isBio = r.type === 'biometric_verification' || r.type === 'biometric_registration' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
+      const isBio = r.type === 'biometric_verification' || r.type === 'biometric_registration' || r.type === 'biometric_reset' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
 
       if (isPending) pendingCount++;
       if (isBio && isPending) biometricCount++;

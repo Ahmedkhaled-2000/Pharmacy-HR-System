@@ -9,6 +9,8 @@ import { sendBiometricAttendanceEmail, notifyAdminOnEarlyDepartureBeforeClosing,
 import { preWarmFaceModels } from '../../utils/faceApiHelper';
 import { normalizeDigits, getRealTodayStr } from '../../utils/formatters';
 import { getActiveShortcuts, matchesShortcutEvent } from '../../utils/shortcutsConfig';
+import { apiSubmitRequestAtomic } from '../../utils/apiClient';
+import { enqueueNewRequest } from '../../utils/syncEngine';
 import '../../kiosk-modern.css';
 
 export default function ElectronicKioskView({
@@ -824,6 +826,14 @@ export default function ElectronicKioskView({
     if (submitRequest) {
       submitRequest(requestData);
     }
+
+    // ⚡ إرسال ذري فوري للسيرفر السحابي + إدراج في صندوق الإرسال التزايدي الموثوق
+    apiSubmitRequestAtomic(requestData, newNotif).catch(err => {
+      console.warn('[Kiosk Photo Attendance] Atomic request submission warning:', err);
+    });
+    enqueueNewRequest(requestData, effectiveBranchId).catch(err => {
+      console.warn('[Kiosk Photo Attendance] Outbox enqueue warning:', err);
+    });
 
     // ⚡ 4. المهام الخلفية المستقلة تماماً (رفع Drive وإشعارات Gmail)
     (async () => {
