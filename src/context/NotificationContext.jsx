@@ -60,6 +60,44 @@ export function NotificationProvider({ children }) {
   // 1. حساب عدد الطلبات المعلقة (Pending Requests Badge Count)
   const pendingRequestsCount = useMemo(() => {
     if (!state) return 0;
+    const deletedIdsSet = new Set((state._deletedIds || []).map(String));
+    const loansList = state.loans || [];
+
+    // دالة فحص ما إذا كان الطلب جزاءً تلقائياً معتمداً من النظام (مكانه في شاشة اللائحة وليس الطلبات)
+    const isSystemAutoPenalty = (r, idStr) => {
+      if (r.type === 'penalty_objection' || idStr.startsWith('obj_')) return false;
+      return (
+        (r.type === 'penalty' || r.type === 'late_penalty' || r.subType === 'lateness' || idStr.startsWith('req_late_inc_') || idStr.startsWith('req_inc_')) &&
+        (r.source === 'system' || r.source === 'late_penalty_engine' || r.subType === 'lateness' || idStr.startsWith('req_late_inc_') || r.adminApproved || r.status === 'approved')
+      );
+    };
+
+    // دالة فحص ما إذا كان طلب السلفة أو الدواء معتمداً بالفعل في سجل السلف
+    const isLoanReconciledApproved = (r, idStr) => {
+      const isLoanType = r.type === 'loan' || r.type === 'meds' || r.type === 'credit_medicine' || r.type === 'advance';
+      if (!isLoanType) return false;
+      const rAmt = parseFloat(r.amount || r.totalAmount) || 0;
+      const matchingLoan = loansList.find((l) => {
+        if (!l) return false;
+        if (String(l.id) === idStr || String(l.requestId) === idStr || String(r.requestId) === String(l.id)) return true;
+        if (String(l.employeeId) === String(r.employeeId)) {
+          const lAmt = parseFloat(l.amount || l.totalAmount) || 0;
+          if (rAmt > 0 && lAmt > 0 && Math.abs(rAmt - lAmt) < 0.01) return true;
+        }
+        return false;
+      });
+      if (matchingLoan) {
+        return (
+          matchingLoan.status === 'approved' ||
+          matchingLoan.status === 'paid' ||
+          matchingLoan.status === 'partial' ||
+          matchingLoan.adminApproved === true ||
+          parseFloat(matchingLoan.paidAmount) > 0 ||
+          (Array.isArray(matchingLoan.paymentsHistory) && matchingLoan.paymentsHistory.length > 0)
+        );
+      }
+      return parseFloat(r.paidAmount) > 0 || (Array.isArray(r.paymentsHistory) && r.paymentsHistory.length > 0);
+    };
 
     if (authRole === 'branch') {
       const cIdStr = currentBranch?.id ? String(currentBranch.id) : null;
@@ -73,29 +111,47 @@ export function NotificationProvider({ children }) {
       const branchEmpIdSet = new Set(
         branchEmployees.flatMap((e) => [String(e.id), String(e.code || '')]).filter(Boolean)
       );
-      const deletedIdsSet = new Set((state._deletedIds || []).map(String));
 
-      const rawList = [...(state.requests || [])];
-      const seen = new Set(rawList.map((r) => String(r.id)));
-      (state.leaveRequests || []).forEach((r) => {
-        if (r && !seen.has(String(r.id))) {
-          rawList.push(r);
-          seen.add(String(r.id));
-        }
-      });
-      (state.shiftSwaps || []).forEach((r) => {
-        if (r && !seen.has(String(r.id))) {
-          rawList.push(r);
-          seen.add(String(r.id));
-        }
-      });
+      const rawList = [];
+      const seen = new Set();
+      const seenSignatures = new Set();
+      const addUnique = (r, defaultType = null) => {
+        if (!r || !r.id) return;
+        const idStr = String(r.id);
+        const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_)/, '');
+        if (seen.has(idStr) || seen.has(rawId) || seen.has(`req_${rawId}`)) return;
+
+        const empKey = String(r.employeeId || r.employeeCode || '');
+        const typeKey = String(r.type || defaultType || 'gen');
+        const dateKey = String(r.date || r.startDate || (r.createdAt ? r.createdAt.substring(0, 10) : ''));
+        const timeKey = r.time ? String(r.time).substring(0, 4) : (r.createdAt ? r.createdAt.substring(11, 16) : '');
+        const amtKey = String(r.amount || r.totalAmount || r.leaveType || r.targetEmployeeId || '');
+        const sigKey = `${empKey}_${typeKey}_${dateKey}_${timeKey}_${amtKey}`;
+
+        if (sigKey.length > 8 && seenSignatures.has(sigKey)) return;
+
+        seen.add(idStr);
+        seen.add(rawId);
+        if (sigKey.length > 8) seenSignatures.add(sigKey);
+        rawList.push(r);
+      };
+
+      (state.requests || []).forEach((r) => addUnique(r));
+      (state.leaveRequests || []).forEach((lr) => addUnique(lr, 'leave'));
+      (state.shiftSwaps || []).forEach((sw) => addUnique(sw, 'swap'));
+      (state.loans || []).forEach((ln) => addUnique(ln, 'loan'));
 
       return rawList.filter((r) => {
         if (!r || !r.id) return false;
         const idStr = String(r.id);
         if (deletedIdsSet.has(idStr)) return false;
-        // Resignations are managed exclusively in their dedicated module
         if (r.type === 'resignation' || r.type === 'withdraw' || r.isResignation || idStr.startsWith('res_')) return false;
+        if (isSystemAutoPenalty(r, idStr)) return false;
+        if (isLoanReconciledApproved(r, idStr)) return false;
+
+        const isApproved = r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.adminApproved === true;
+        const isRejected = r.status === 'rejected' || r.status === 'rejected_photo' || (typeof r.status === 'string' && r.status.includes('rejected')) || r.isRejected || r.rejected || r.status === 'cancelled' || r.isCancelled;
+        if (isApproved || isRejected) return false;
 
         if (!shouldShowRequestToBranch(r, state)) return false;
 
@@ -110,51 +166,53 @@ export function NotificationProvider({ children }) {
         if (r.branchApproved || r.branchApprovalStatus === 'approved' || r.branchApprovalStatus === 'rejected') return false;
         if (r.status === 'pending_admin' || r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled') return false;
 
-        return r.status === 'pending';
+        return r.status === 'pending' || !r.status;
       }).length;
     }
 
     // Super Admin / Owner
-    const rawReqList = [...(state.requests || [])];
-    const seen = new Set(rawReqList.map((r) => String(r.id)));
-    (state.leaveRequests || []).forEach((r) => {
-      if (r && !seen.has(String(r.id))) {
-        rawReqList.push(r);
-        seen.add(String(r.id));
-      }
-    });
-    (state.shiftSwaps || []).forEach((r) => {
-      if (r && !seen.has(String(r.id))) {
-        rawReqList.push(r);
-        seen.add(String(r.id));
-      }
-    });
-    (state.loans || []).forEach((r) => {
-      if (r && !seen.has(String(r.id))) {
-        rawReqList.push(r);
-        seen.add(String(r.id));
-      }
-    });
+    const rawReqList = [];
+    const seen = new Set();
+    const seenSignaturesAdmin = new Set();
+    const addUniqueAdmin = (r, defaultType = null) => {
+      if (!r || !r.id) return;
+      const idStr = String(r.id);
+      const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_)/, '');
+      if (seen.has(idStr) || seen.has(rawId) || seen.has(`req_${rawId}`)) return;
+
+      const empKey = String(r.employeeId || r.employeeCode || '');
+      const typeKey = String(r.type || defaultType || 'gen');
+      const dateKey = String(r.date || r.startDate || (r.createdAt ? r.createdAt.substring(0, 10) : ''));
+      const timeKey = r.time ? String(r.time).substring(0, 4) : (r.createdAt ? r.createdAt.substring(11, 16) : '');
+      const amtKey = String(r.amount || r.totalAmount || r.leaveType || r.targetEmployeeId || '');
+      const sigKey = `${empKey}_${typeKey}_${dateKey}_${timeKey}_${amtKey}`;
+
+      if (sigKey.length > 8 && seenSignaturesAdmin.has(sigKey)) return;
+
+      seen.add(idStr);
+      seen.add(rawId);
+      if (sigKey.length > 8) seenSignaturesAdmin.add(sigKey);
+      rawReqList.push(r);
+    };
+
+    (state.requests || []).forEach((r) => addUniqueAdmin(r));
+    (state.leaveRequests || []).forEach((lr) => addUniqueAdmin(lr, 'leave'));
+    (state.shiftSwaps || []).forEach((sw) => addUniqueAdmin(sw, 'swap'));
+    (state.loans || []).forEach((ln) => addUniqueAdmin(ln, 'loan'));
+
     (state.lateIncidents || []).forEach((inc) => {
       if (inc && inc.objection && (inc.objection.status === 'pending' || inc.status === 'objection_pending')) {
         const objId = `obj_inc_${inc.id}`;
-        if (!seen.has(objId)) {
-          rawReqList.push({ id: objId, status: 'pending', type: 'penalty_objection' });
-          seen.add(objId);
-        }
+        addUniqueAdmin({ id: objId, status: 'pending', type: 'penalty_objection' });
       }
     });
     (state.adjustments || []).forEach((adj) => {
       if (adj && adj.objection && adj.objection.status === 'pending') {
         const objId = `obj_adj_${adj.id}`;
-        if (!seen.has(objId)) {
-          rawReqList.push({ id: objId, status: 'pending', type: 'adj_objection' });
-          seen.add(objId);
-        }
+        addUniqueAdmin({ id: objId, status: 'pending', type: 'adj_objection' });
       }
     });
 
-    const deletedIdsSet = new Set((state._deletedIds || []).map(String));
     return rawReqList.filter((r) => {
       if (!r || !r.id) return false;
       const idStr = String(r.id);
@@ -162,10 +220,14 @@ export function NotificationProvider({ children }) {
       // Resignations are managed exclusively in their dedicated module
       if (r.type === 'resignation' || r.type === 'withdraw' || r.isResignation || idStr.startsWith('res_')) return false;
       if (r.hiddenFromAdmin) return false;
+      if (isSystemAutoPenalty(r, idStr)) return false;
+      if (isLoanReconciledApproved(r, idStr)) return false;
 
-      if (r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled') return false;
+      const isApproved = r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.adminApproved === true;
+      const isRejected = r.status === 'rejected' || r.status === 'rejected_photo' || (typeof r.status === 'string' && r.status.includes('rejected')) || r.isRejected || r.rejected || r.status === 'cancelled' || r.isCancelled;
+      if (isApproved || isRejected) return false;
 
-      // طلبات البصمة الإلكترونية (تسجيل جديد ذاتي، إعادة ضبط ومسح، أو اعتماد الحضور بالصورة) تظهر فورياً في عداد الإدارة العليا
+      // طلبات البصمة الإلكترونية تظهر فورياً في عداد الإدارة طالما لم يتم اعتمادها أو رفضها
       const isBiometricAdminDirect =
         r.type === 'biometric_registration' ||
         r.type === 'biometric_reset' ||
@@ -187,7 +249,7 @@ export function NotificationProvider({ children }) {
         r.createdRole === 'admin' ||
         !r.requiresBranchManager;
 
-      return r.status === 'pending_admin' || (r.status === 'pending' && isBranchDone);
+      return r.status === 'pending_admin' || ((r.status === 'pending' || !r.status) && isBranchDone);
     }).length;
   }, [state, authRole, currentBranch]);
 
