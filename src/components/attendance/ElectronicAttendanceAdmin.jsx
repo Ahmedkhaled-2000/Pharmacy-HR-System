@@ -63,14 +63,29 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
         await deleteFaceDescriptor(empId);
       }
 
+      const now = new Date().toISOString();
       const updatedEmployees = employees.map(emp => {
         if (emp.id === empId) {
           if (isHand) {
-            const { hand_descriptor, has_hand_descriptor, ...rest } = emp;
-            return rest;
+            return {
+              ...emp,
+              hand_descriptor: null,
+              has_hand_descriptor: false,
+              hand_registered_at: null,
+              biometricHandResetAt: now,
+              biometricResetAt: now,
+              updatedAt: now
+            };
           } else {
-            const { face_descriptor, has_face_descriptor, ...rest } = emp;
-            return rest;
+            return {
+              ...emp,
+              face_descriptor: null,
+              has_face_descriptor: false,
+              face_registered_at: null,
+              biometricFaceResetAt: now,
+              biometricResetAt: now,
+              updatedAt: now
+            };
           }
         }
         return emp;
@@ -134,6 +149,7 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
   const handleRegisterSuccess = async (empId, descriptor, type) => {
     const isHand = type === 'hand';
 
+    const now = new Date().toISOString();
     // 1. Save to local employee state immediately
     const updatedEmployees = employees.map(e => {
       if (e.id === empId) {
@@ -142,14 +158,24 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
             ...e, 
             has_hand_descriptor: true, 
             hand_descriptor: descriptor, 
-            preferred_biometric: 'hand' 
+            preferred_biometric: 'hand',
+            biometricHandApprovedAt: now,
+            biometricApprovedAt: now,
+            biometricHandResetAt: null,
+            biometricResetAt: null,
+            updatedAt: now
           };
         }
         return { 
           ...e, 
           has_face_descriptor: true, 
           face_descriptor: descriptor, 
-          preferred_biometric: 'face' 
+          preferred_biometric: 'face',
+          biometricFaceApprovedAt: now,
+          biometricApprovedAt: now,
+          biometricFaceResetAt: null,
+          biometricResetAt: null,
+          updatedAt: now
         };
       }
       return e;

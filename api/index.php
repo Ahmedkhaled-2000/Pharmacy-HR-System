@@ -446,6 +446,22 @@ try {
                     } catch (Throwable) {}
                 }
 
+                if (is_array($finalValueData)) {
+                    if (isset($finalValueData['activeShifts'])) {
+                        if (is_array($finalValueData['activeShifts'])) {
+                            if (empty($finalValueData['activeShifts'])) {
+                                $finalValueData['activeShifts'] = (object)[];
+                            } else {
+                                $keyed = [];
+                                foreach ($finalValueData['activeShifts'] as $ak => $av) {
+                                    $keyed[(string)$ak] = $av;
+                                }
+                                $finalValueData['activeShifts'] = (object)$keyed;
+                            }
+                        }
+                    }
+                }
+
                 $jsonString = is_string($finalValueData)
                     ? $finalValueData
                     : json_encode($finalValueData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
@@ -575,20 +591,39 @@ try {
                     jsonResponse(['success' => false, 'error' => 'Missing employee_id'], 400);
                 }
 
-                $descriptor = isset($payload['descriptor']) ? (is_string($payload['descriptor']) ? $payload['descriptor'] : json_encode($payload['descriptor'])) : null;
-                $handDescriptor = isset($payload['hand_descriptor']) ? (is_string($payload['hand_descriptor']) ? $payload['hand_descriptor'] : json_encode($payload['hand_descriptor'])) : null;
+                $clearFace = !empty($payload['clear_face']) || (array_key_exists('descriptor', $payload) && $payload['descriptor'] === null);
+                $clearHand = !empty($payload['clear_hand']) || (array_key_exists('hand_descriptor', $payload) && $payload['hand_descriptor'] === null);
+
+                $descriptor = isset($payload['descriptor']) && $payload['descriptor'] !== null ? (is_string($payload['descriptor']) ? $payload['descriptor'] : json_encode($payload['descriptor'])) : null;
+                $handDescriptor = isset($payload['hand_descriptor']) && $payload['hand_descriptor'] !== null ? (is_string($payload['hand_descriptor']) ? $payload['hand_descriptor'] : json_encode($payload['hand_descriptor'])) : null;
                 $biometricType = (string)($payload['biometric_type'] ?? 'face');
+
+                $clearFaceInt = $clearFace ? 1 : 0;
+                $clearHandInt = $clearHand ? 1 : 0;
 
                 $sql = "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
                         VALUES (?, ?::jsonb, ?::jsonb, ?, NOW())
                         ON CONFLICT (employee_id) DO UPDATE
-                        SET descriptor = COALESCE(EXCLUDED.descriptor, employee_faces.descriptor),
-                            hand_descriptor = COALESCE(EXCLUDED.hand_descriptor, employee_faces.hand_descriptor),
+                        SET descriptor = CASE 
+                                WHEN ? = 1 THEN NULL 
+                                WHEN EXCLUDED.descriptor IS NOT NULL THEN EXCLUDED.descriptor 
+                                ELSE employee_faces.descriptor 
+                            END,
+                            hand_descriptor = CASE 
+                                WHEN ? = 1 THEN NULL 
+                                WHEN EXCLUDED.hand_descriptor IS NOT NULL THEN EXCLUDED.hand_descriptor 
+                                ELSE employee_faces.hand_descriptor 
+                            END,
                             biometric_type = EXCLUDED.biometric_type,
                             updated_at = NOW()";
 
-                Database::execute($sql, [$employeeId, $descriptor, $handDescriptor, $biometricType]);
+                Database::execute($sql, [$employeeId, $descriptor, $handDescriptor, $biometricType, $clearFaceInt, $clearHandInt]);
+
+                // حذف الصف تلقائياً إذا كانت كلتا البصمتين فارغتين
+                Database::execute("DELETE FROM employee_faces WHERE employee_id = ? AND descriptor IS NULL AND hand_descriptor IS NULL", [$employeeId]);
+
                 MicroCache::invalidate('all_faces');
+                MicroCache::invalidate('faces_' . $employeeId);
 
                 jsonResponse([
                     'success' => true,
@@ -596,15 +631,42 @@ try {
                     'employee_id' => $employeeId
                 ]);
             } elseif ($method === 'DELETE') {
-                requireAuth(['admin', 'owner']);
-                $deleteId = (string)($_GET['employee_id'] ?? getRequestData()['employee_id'] ?? '');
+                requireAuth(['admin', 'owner', 'branch']);
+                $deleteData = getRequestData();
+                $deleteId = (string)($_GET['employee_id'] ?? $deleteData['employee_id'] ?? '');
+                $type = (string)($_GET['type'] ?? $deleteData['type'] ?? 'all');
+
                 if (empty($deleteId)) {
                     jsonResponse(['success' => false, 'error' => 'Missing employee_id for deletion'], 400);
                 }
 
-                Database::execute("DELETE FROM employee_faces WHERE employee_id = ?", [$deleteId]);
+                if ($type === 'face') {
+                    Database::execute(
+                        "UPDATE employee_faces 
+                         SET descriptor = NULL, 
+                             biometric_type = CASE WHEN hand_descriptor IS NOT NULL THEN 'hand' ELSE 'face' END,
+                             updated_at = NOW() 
+                         WHERE employee_id = ?",
+                        [$deleteId]
+                    );
+                    Database::execute("DELETE FROM employee_faces WHERE employee_id = ? AND descriptor IS NULL AND hand_descriptor IS NULL", [$deleteId]);
+                } elseif ($type === 'hand') {
+                    Database::execute(
+                        "UPDATE employee_faces 
+                         SET hand_descriptor = NULL, 
+                             biometric_type = CASE WHEN descriptor IS NOT NULL THEN 'face' ELSE 'hand' END,
+                             updated_at = NOW() 
+                         WHERE employee_id = ?",
+                        [$deleteId]
+                    );
+                    Database::execute("DELETE FROM employee_faces WHERE employee_id = ? AND descriptor IS NULL AND hand_descriptor IS NULL", [$deleteId]);
+                } else {
+                    Database::execute("DELETE FROM employee_faces WHERE employee_id = ?", [$deleteId]);
+                }
+
                 MicroCache::invalidate('all_faces');
-                jsonResponse(['success' => true, 'message' => "Biometrics deleted for employee {$deleteId}"]);
+                MicroCache::invalidate('faces_' . $deleteId);
+                jsonResponse(['success' => true, 'message' => "Biometrics deleted for employee {$deleteId} (type: {$type})"]);
             }
             break;
 

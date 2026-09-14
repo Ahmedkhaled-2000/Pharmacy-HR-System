@@ -95,11 +95,10 @@ export async function loadHandDescriptor(employeeId) {
 export async function deleteFaceDescriptor(employeeId) {
   try {
     const existing = await apiFetchFaces(employeeId);
-    if (existing) {
-      await apiSaveFace(employeeId, {
-        descriptor: null,
-        hand_descriptor: existing.hand_descriptor || null,
-      });
+    if (existing && existing.hand_descriptor) {
+      await apiDeleteFace(employeeId, 'face');
+    } else {
+      await apiDeleteFace(employeeId, 'all');
     }
     return { success: true };
   } catch (err) {
@@ -114,11 +113,10 @@ export async function deleteFaceDescriptor(employeeId) {
 export async function deleteHandDescriptor(employeeId) {
   try {
     const existing = await apiFetchFaces(employeeId);
-    if (existing) {
-      await apiSaveFace(employeeId, {
-        descriptor: existing.descriptor || null,
-        hand_descriptor: null,
-      });
+    if (existing && existing.descriptor) {
+      await apiDeleteFace(employeeId, 'hand');
+    } else {
+      await apiDeleteFace(employeeId, 'all');
     }
     return { success: true };
   } catch (err) {
@@ -132,7 +130,7 @@ export async function deleteHandDescriptor(employeeId) {
  */
 export async function deleteBiometricData(employeeId) {
   try {
-    await apiDeleteFace(employeeId);
+    await apiDeleteFace(employeeId, 'all');
     return { success: true };
   } catch (err) {
     console.error('[FaceStorage] Exception deleting biometrics:', err);

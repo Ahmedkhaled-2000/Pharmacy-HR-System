@@ -544,13 +544,16 @@ export function useRequestsManager() {
               (e.code && String(e.code) === String(empId)));
 
             if (isMatch) {
+              const now = new Date().toISOString();
               return {
                 ...e,
                 has_face_descriptor: false,
                 face_descriptor: null,
                 has_hand_descriptor: false,
                 hand_descriptor: null,
-                biometricResetAt: new Date().toISOString()
+                biometricFaceResetAt: now,
+                biometricHandResetAt: now,
+                biometricResetAt: now
               };
             }
             return e;

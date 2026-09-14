@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
 import { recalculateEmployeeCycleLateness, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
-import { getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount } from '../../utils/formatters';
+import { getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, getRealTodayStr } from '../../utils/formatters';
 
 export default function AttendanceModule({
   state,
@@ -418,16 +418,24 @@ export default function AttendanceModule({
                 });
 
                 // فحص ما إذا كان الموظف لديه بصمة حضور نشطة اليوم (Live Active Shift)
-                const activeShift = state.activeShifts?.[emp.id] || state.activeShifts?.[String(emp.id)];
+                const todayStrNow = typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
+                const openShiftInShifts = (state.shifts || []).find(s =>
+                  (String(s.employeeId) === String(emp.id) || String(s.employeeCode) === String(emp.code)) &&
+                  s.date === todayStrNow &&
+                  Boolean(s.timeIn && s.timeIn !== '—' && (!s.timeOut || s.timeOut === '—' || s.timeOut === '' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive)) &&
+                  s.status !== 'cancelled' && !s.isCancelled
+                );
+                const activeShift = state.activeShifts?.[emp.id] || state.activeShifts?.[String(emp.id)] || openShiftInShifts;
                 const hasLiveShift = Boolean(activeShift && activePeriodFilter(activeShift.date));
                 const liveElapsedHours = hasLiveShift
-                  ? Math.max(0, Math.round(((Date.now() - (activeShift.startEpoch || Date.now())) / 3600000) * 10) / 10)
+                  ? Math.max(0, Math.round(((Date.now() - (activeShift.startEpoch || (activeShift.createdAt ? new Date(activeShift.createdAt).getTime() : Date.now()))) / 3600000) * 10) / 10)
                   : 0;
 
                 const validPunches = empPunches.filter((p) => !p.isRejectedPhoto && p.status !== 'rejected_photo');
                 const totalCompletedHours = validPunches.reduce((acc, p) => acc + (getEffectiveShiftHours(p, state) || 0), 0);
                 const totalHours = (totalCompletedHours + liveElapsedHours).toFixed(1);
-                const totalShiftsCount = validPunches.length + (hasLiveShift ? 1 : 0);
+                const hasLiveAlreadyInValidPunches = validPunches.some(p => p.isLiveActive || (!p.timeOut || p.timeOut === '—' || p.timeOut === '' || p.timeOut === 'قيد العمل الآن'));
+                const totalShiftsCount = validPunches.length + (hasLiveShift && !hasLiveAlreadyInValidPunches ? 1 : 0);
                 const manualCount = getEmployeeManualPunchesCount(emp.id, state, activePeriodFilter);
 
                 return (

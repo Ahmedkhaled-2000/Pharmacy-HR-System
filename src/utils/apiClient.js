@@ -436,8 +436,11 @@ export async function apiSaveFace(employeeId, data = {}) {
   });
 }
 
-export async function apiDeleteFace(employeeId) {
-  return await request(`faces?employee_id=${encodeURIComponent(employeeId)}`, {
+export async function apiDeleteFace(employeeId, type = 'all') {
+  const query = type && type !== 'all'
+    ? `faces?employee_id=${encodeURIComponent(employeeId)}&type=${encodeURIComponent(type)}`
+    : `faces?employee_id=${encodeURIComponent(employeeId)}`;
+  return await request(query, {
     method: 'DELETE',
   });
 }

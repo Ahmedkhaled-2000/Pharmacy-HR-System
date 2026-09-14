@@ -321,37 +321,84 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
     // ── حماية وصيانة البصمة الإلكترونية من المسح العرضي أثناء الدمج ──
     const localHasFace = Boolean(localItem.has_face_descriptor && localItem.face_descriptor);
     const remoteHasFace = Boolean(remoteItem.has_face_descriptor && remoteItem.face_descriptor);
-    const localFaceReset = localItem.biometricResetAt ? new Date(localItem.biometricResetAt).getTime() : 0;
-    const remoteFaceReset = remoteItem.biometricResetAt ? new Date(remoteItem.biometricResetAt).getTime() : 0;
-    const localFaceApproved = localItem.biometricApprovedAt ? new Date(localItem.biometricApprovedAt).getTime() : 0;
-    const remoteFaceApproved = remoteItem.biometricApprovedAt ? new Date(remoteItem.biometricApprovedAt).getTime() : 0;
+    const localFaceReset = Math.max(
+      localItem.biometricFaceResetAt ? new Date(localItem.biometricFaceResetAt).getTime() : 0,
+      localItem.biometricResetAt ? new Date(localItem.biometricResetAt).getTime() : 0
+    );
+    const remoteFaceReset = Math.max(
+      remoteItem.biometricFaceResetAt ? new Date(remoteItem.biometricFaceResetAt).getTime() : 0,
+      remoteItem.biometricResetAt ? new Date(remoteItem.biometricResetAt).getTime() : 0
+    );
+    const localFaceApproved = localItem.biometricFaceApprovedAt ? new Date(localItem.biometricFaceApprovedAt).getTime() : (localItem.biometricApprovedAt ? new Date(localItem.biometricApprovedAt).getTime() : 0);
+    const remoteFaceApproved = remoteItem.biometricFaceApprovedAt ? new Date(remoteItem.biometricFaceApprovedAt).getTime() : (remoteItem.biometricApprovedAt ? new Date(remoteItem.biometricApprovedAt).getTime() : 0);
 
     if (localHasFace && !remoteHasFace) {
       if (remoteFaceReset <= localFaceApproved) {
         mergedEmp.has_face_descriptor = true;
         mergedEmp.face_descriptor = localItem.face_descriptor;
         if (localItem.preferred_biometric) mergedEmp.preferred_biometric = localItem.preferred_biometric;
+      } else {
+        mergedEmp.has_face_descriptor = false;
+        mergedEmp.face_descriptor = null;
       }
     } else if (remoteHasFace && !localHasFace) {
-      if (localFaceReset <= remoteFaceApproved) {
+      if (localFaceReset <= remoteFaceApproved && localFaceReset === 0) {
         mergedEmp.has_face_descriptor = true;
         mergedEmp.face_descriptor = remoteItem.face_descriptor;
         if (remoteItem.preferred_biometric) mergedEmp.preferred_biometric = remoteItem.preferred_biometric;
+      } else {
+        mergedEmp.has_face_descriptor = false;
+        mergedEmp.face_descriptor = null;
       }
+    } else if (!localHasFace && !remoteHasFace) {
+      mergedEmp.has_face_descriptor = false;
+      mergedEmp.face_descriptor = null;
     }
 
     const localHasHand = Boolean(localItem.has_hand_descriptor && localItem.hand_descriptor);
     const remoteHasHand = Boolean(remoteItem.has_hand_descriptor && remoteItem.hand_descriptor);
+    const localHandReset = Math.max(
+      localItem.biometricHandResetAt ? new Date(localItem.biometricHandResetAt).getTime() : 0,
+      localItem.biometricResetAt ? new Date(localItem.biometricResetAt).getTime() : 0
+    );
+    const remoteHandReset = Math.max(
+      remoteItem.biometricHandResetAt ? new Date(remoteItem.biometricHandResetAt).getTime() : 0,
+      remoteItem.biometricResetAt ? new Date(remoteItem.biometricResetAt).getTime() : 0
+    );
+    const localHandApproved = localItem.biometricHandApprovedAt ? new Date(localItem.biometricHandApprovedAt).getTime() : (localItem.biometricApprovedAt ? new Date(localItem.biometricApprovedAt).getTime() : 0);
+    const remoteHandApproved = remoteItem.biometricHandApprovedAt ? new Date(remoteItem.biometricHandApprovedAt).getTime() : (remoteItem.biometricApprovedAt ? new Date(remoteItem.biometricApprovedAt).getTime() : 0);
+
     if (localHasHand && !remoteHasHand) {
-      if (remoteFaceReset <= localFaceApproved) {
+      if (remoteHandReset <= localHandApproved) {
         mergedEmp.has_hand_descriptor = true;
         mergedEmp.hand_descriptor = localItem.hand_descriptor;
+      } else {
+        mergedEmp.has_hand_descriptor = false;
+        mergedEmp.hand_descriptor = null;
       }
     } else if (remoteHasHand && !localHasHand) {
-      if (localFaceReset <= remoteFaceApproved) {
+      if (localHandReset <= remoteHandApproved && localHandReset === 0) {
         mergedEmp.has_hand_descriptor = true;
         mergedEmp.hand_descriptor = remoteItem.hand_descriptor;
+      } else {
+        mergedEmp.has_hand_descriptor = false;
+        mergedEmp.hand_descriptor = null;
       }
+    } else if (!localHasHand && !remoteHasHand) {
+      mergedEmp.has_hand_descriptor = false;
+      mergedEmp.hand_descriptor = null;
+    }
+
+    if (localItem.biometricFaceResetAt || remoteItem.biometricFaceResetAt) {
+      mergedEmp.biometricFaceResetAt = localFaceReset >= remoteFaceReset ? localItem.biometricFaceResetAt : remoteItem.biometricFaceResetAt;
+    }
+    if (localItem.biometricHandResetAt || remoteItem.biometricHandResetAt) {
+      mergedEmp.biometricHandResetAt = localHandReset >= remoteHandReset ? localItem.biometricHandResetAt : remoteItem.biometricHandResetAt;
+    }
+    if (localItem.biometricResetAt || remoteItem.biometricResetAt) {
+      const lR = localItem.biometricResetAt ? new Date(localItem.biometricResetAt).getTime() : 0;
+      const rR = remoteItem.biometricResetAt ? new Date(remoteItem.biometricResetAt).getTime() : 0;
+      mergedEmp.biometricResetAt = lR >= rR ? localItem.biometricResetAt : remoteItem.biometricResetAt;
     }
 
     return mergedEmp;
@@ -523,15 +570,39 @@ export function mergeRosters(localRosters = [], remoteRosters = [], options = {}
 
 // دمج الشفتات النشطة (activeShifts) مع منع استعادة الشفتات المنتهية أو المحذوفة
 export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShifts = [], options = {}) {
-  const local = typeof localShifts === 'object' && localShifts && !Array.isArray(localShifts) ? localShifts : {};
-  const remote = typeof remoteShifts === 'object' && remoteShifts && !Array.isArray(remoteShifts) ? remoteShifts : {};
+  const toActiveMap = (raw) => {
+    if (!raw) return {};
+    if (Array.isArray(raw)) {
+      const map = {};
+      raw.forEach((item) => {
+        if (item && typeof item === 'object') {
+          const k = String(item.employeeId || item.id || '');
+          if (k) map[k] = item;
+        }
+      });
+      return map;
+    }
+    if (typeof raw === 'object') return { ...raw };
+    return {};
+  };
+
+  const local = toActiveMap(localShifts);
+  const remote = toActiveMap(remoteShifts);
   const deletedIds = options.deletedIds instanceof Set ? options.deletedIds : new Set(toSafeArray(options.deletedIds).map(String));
+
+  // فحص دقيق للوردية المنتهية فعلياً فقط (ليست نشطة ولا قيد العمل ولها انصراف صريح)
+  const isShiftTrulyClosed = (s) => {
+    if (!s || typeof s !== 'object') return false;
+    if (s.isLiveActive || s.status === 'active') return false;
+    const hasValidTimeOut = Boolean(s.timeOut && s.timeOut !== '—' && s.timeOut !== '' && s.timeOut !== 'قيد العمل الآن');
+    return hasValidTimeOut;
+  };
 
   // بناء مجموعة لتواقيع الشفتات المكتملة والمغلقة
   const closedShiftSignatures = new Set();
   if (Array.isArray(mergedShifts)) {
     for (const s of mergedShifts) {
-      if (s && s.employeeId && s.date && s.timeIn && (s.timeOut || s.hours !== undefined)) {
+      if (s && s.employeeId && s.date && s.timeIn && isShiftTrulyClosed(s)) {
         closedShiftSignatures.add(`${String(s.employeeId)}_${s.date}_${s.timeIn}`);
       }
     }
@@ -560,7 +631,7 @@ export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShi
 
     if (!merged[empId]) {
       const hasClosedShiftAfter = Array.isArray(mergedShifts) && mergedShifts.some(
-        s => String(s.employeeId) === String(empId) && s.date === act.date && s.timeIn >= act.timeIn
+        s => String(s.employeeId) === String(empId) && s.date === act.date && s.timeIn > act.timeIn && isShiftTrulyClosed(s)
       );
       if (!hasClosedShiftAfter) {
         merged[empId] = act;
@@ -569,6 +640,34 @@ export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShi
       const localTime = getItemTime(local[empId]);
       const remoteTime = getItemTime(remote[empId]);
       merged[empId] = localTime >= remoteTime ? local[empId] : remote[empId];
+    }
+  }
+
+  // 3. الاسترداد الذاتي من الورديات المفتوحة في mergedShifts إن وجدت
+  if (Array.isArray(mergedShifts)) {
+    for (const s of mergedShifts) {
+      if (!s || !s.employeeId || !s.date || !s.timeIn) continue;
+      if (deletedIds.has(String(s.employeeId)) || deletedIds.has(`emp_${s.employeeId}`)) continue;
+      if (s.status === 'cancelled' || s.isCancelled) continue;
+      if (!isShiftTrulyClosed(s) && (s.isLiveActive || !s.timeOut || s.timeOut === '—' || s.timeOut === '')) {
+        const empId = String(s.employeeId);
+        if (!merged[empId]) {
+          merged[empId] = {
+            shiftId: s.id,
+            branchId: s.branchId || '',
+            branchName: s.branchName || '',
+            date: s.date,
+            timeIn: s.timeIn,
+            startEpoch: s.createdAt ? new Date(s.createdAt).getTime() : Date.now(),
+            isPaused: Boolean(s.isPaused),
+            isOnBreak: Boolean(s.isOnBreak),
+            breakStartTime: s.breakStartTime || null,
+            pauseStartEpoch: s.pauseStartEpoch || null,
+            accumulatedPauseMs: s.accumulatedPauseMs || 0,
+            updatedAt: Date.now()
+          };
+        }
+      }
     }
   }
 

@@ -151,7 +151,8 @@ export default function ElectronicKioskView({
   const empOpenShift = matchedEmp ? (state.shifts || []).find(s => 
     (String(s.employeeId) === String(matchedEmp.id) || (matchedEmp.code && String(s.employeeCode) === String(matchedEmp.code))) &&
     s.date === todayStr &&
-    Boolean(s.timeIn && s.timeIn !== '—' && (!s.timeOut || s.timeOut === '—' || s.timeOut === '') && (!s.endTime || s.endTime === '—' || s.endTime === ''))
+    Boolean(s.timeIn && s.timeIn !== '—' && (!s.timeOut || s.timeOut === '—' || s.timeOut === '' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive) && (!s.endTime || s.endTime === '—' || s.endTime === '')) &&
+    s.status !== 'cancelled' && !s.isCancelled
   ) : null;
 
   // تحديد الوردية النشطة: إما من الوردية الحالية بالذاكرة (إذا كانت لليوم) أو من سجل الوردية المفتوحة اليوم

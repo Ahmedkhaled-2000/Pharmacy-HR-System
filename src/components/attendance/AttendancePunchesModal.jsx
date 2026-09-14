@@ -76,7 +76,25 @@ export default function AttendancePunchesModal({
     return isMatch && activePeriodFilter(p.date);
   });
 
-  const monthPunches = livePunch ? [livePunch, ...rawMonthPunches] : rawMonthPunches;
+  // إثراء الورديات الحية في القائمة بالساعات المنقضية الحية ووسم "قيد العمل الآن"
+  const enrichedMonthPunches = rawMonthPunches.map(p => {
+    const isLive = p.isLiveActive || (!p.timeOut || p.timeOut === '—' || p.timeOut === '' || p.timeOut === 'قيد العمل الآن');
+    if (isLive) {
+      const liveElapsed = p.createdAt ? Math.max(0, Math.round(((Date.now() - new Date(p.createdAt).getTime()) / 3600000) * 10) / 10) : activeElapsedHours;
+      return {
+        ...p,
+        isLiveActive: true,
+        timeOut: 'قيد العمل الآن',
+        hours: p.hours || liveElapsed,
+        netHours: p.netHours || liveElapsed
+      };
+    }
+    return p;
+  });
+
+  // فحص ما إذا كان السجل الحي موجوداً بالفعل لتجنب التكرار
+  const alreadyHasLivePunch = enrichedMonthPunches.some(p => p.isLiveActive || (activeShift && p.date === activeShift.date && p.timeIn === activeShift.timeIn));
+  const monthPunches = (livePunch && !alreadyHasLivePunch) ? [livePunch, ...enrichedMonthPunches] : enrichedMonthPunches;
 
   // Group or process punches into rows
   const shiftsCount = monthPunches.length;

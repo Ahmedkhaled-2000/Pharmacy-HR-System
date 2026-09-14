@@ -427,21 +427,31 @@ export function useAttendanceEngine() {
     let currentActiveShifts = { ...state.activeShifts };
     let currentShifts = [...(state.shifts || [])];
 
-    if (existingActive) {
-      if (existingActive.date && existingActive.date !== punchDate) {
+    // فحص إضافي في currentShifts إن وجد سجل مفتوح للموظف لليوم
+    const existingOpenShiftInRecords = currentShifts.find(s =>
+      (String(s.employeeId) === String(empId) || (emp.code && String(s.employeeCode) === String(emp.code))) &&
+      s.date === punchDate &&
+      Boolean(s.timeIn && s.timeIn !== '—' && (!s.timeOut || s.timeOut === '—' || s.timeOut === '' || s.isLiveActive)) &&
+      s.status !== 'cancelled' && !s.isCancelled
+    );
+
+    if (existingActive || existingOpenShiftInRecords) {
+      const activeDate = existingActive?.date || existingOpenShiftInRecords?.date;
+      if (activeDate && activeDate !== punchDate) {
         // إذا كانت الوردية المفتوحة من يوم سابق، يتم إغلاقها تلقائياً لإتاحة بدء وردية اليوم
-        console.warn(`[startShift] Auto-closing stale shift from ${existingActive.date} for emp ${empId}`);
-        const staleShiftId = uid();
-        const bObjOld = (state.branches || []).find((b) => String(b.id) === String(existingActive.branchId || effectiveBranchId));
+        console.warn(`[startShift] Auto-closing stale shift from ${activeDate} for emp ${empId}`);
+        const staleShiftId = existingOpenShiftInRecords?.id || uid();
+        const bObjOld = (state.branches || []).find((b) => String(b.id) === String(existingActive?.branchId || existingOpenShiftInRecords?.branchId || effectiveBranchId));
         const autoClosedShift = {
+          ...(existingOpenShiftInRecords || {}),
           id: staleShiftId,
           employeeId: empId,
           employeeCode: emp.code || '',
           employeeName: emp.name || '',
-          branchId: existingActive.branchId || effectiveBranchId,
+          branchId: existingActive?.branchId || existingOpenShiftInRecords?.branchId || effectiveBranchId,
           branchName: bObjOld?.name || '',
-          date: existingActive.date,
-          timeIn: existingActive.timeIn,
+          date: activeDate,
+          timeIn: existingActive?.timeIn || existingOpenShiftInRecords?.timeIn || '09:00',
           timeOut: '17:00',
           hours: parseFloat(emp.workHoursPerDay) || 8,
           actualWorkedHours: parseFloat(emp.workHoursPerDay) || 8,
@@ -452,9 +462,15 @@ export function useAttendanceEngine() {
           breakHours: 0,
           note: 'إغلاق تلقائي لوردية سابقة لم يتم تسجيل انصرافها',
           statusLabel: 'حضور حي',
-          createdAt: new Date().toISOString()
+          isLiveActive: false,
+          status: 'completed',
+          createdAt: existingOpenShiftInRecords?.createdAt || new Date().toISOString()
         };
-        currentShifts = [autoClosedShift, ...currentShifts];
+        if (existingOpenShiftInRecords) {
+          currentShifts = currentShifts.map(s => s.id === existingOpenShiftInRecords.id ? autoClosedShift : s);
+        } else {
+          currentShifts = [autoClosedShift, ...currentShifts];
+        }
         delete currentActiveShifts[empId];
         delete currentActiveShifts[String(empId)];
       } else {
@@ -464,8 +480,13 @@ export function useAttendanceEngine() {
       }
     }
 
+    const newShiftId = 'shift_' + empId + '_' + Date.now();
+    const bObj = (state.branches || []).find((b) => String(b.id) === String(effectiveBranchId));
+
     const shiftData = {
+      shiftId: newShiftId,
       branchId: effectiveBranchId,
+      branchName: bObj?.name || '',
       date: punchDate,
       timeIn: punchTime,
       startEpoch: Date.now(),
@@ -476,6 +497,36 @@ export function useAttendanceEngine() {
       accumulatedPauseMs: 0,
       updatedAt: Date.now()
     };
+
+    const openShiftRecord = {
+      id: newShiftId,
+      employeeId: empId,
+      employeeCode: emp.code || '',
+      employeeName: emp.name || '',
+      branchId: effectiveBranchId,
+      branchName: bObj?.name || '',
+      date: punchDate,
+      timeIn: punchTime,
+      timeOut: '',
+      hours: 0,
+      actualWorkedHours: 0,
+      scheduledHours: parseFloat(emp.workHoursPerDay) || 8,
+      regularHours: 0,
+      overtimeHours: 0,
+      overtimeStatus: 'none',
+      breakHours: 0,
+      source: source || 'kiosk',
+      isLiveActive: true,
+      status: 'active',
+      statusLabel: 'حضور حي (قيد العمل)',
+      note: `تسجيل حضور حي في تمام الساعة ${punchTime} - قيد العمل الآن`,
+      createdAt: new Date().toISOString()
+    };
+
+    currentShifts = [
+      openShiftRecord,
+      ...currentShifts.filter(s => !(String(s.employeeId) === String(empId) && s.date === punchDate && s.isLiveActive))
+    ];
 
     const updatedActive = {
       ...currentActiveShifts,
@@ -492,7 +543,6 @@ export function useAttendanceEngine() {
 
     setState(updatedState);
 
-    const bObj = (state.branches || []).find((b) => String(b.id) === String(effectiveBranchId));
     const branchNameStr = bObj ? ` (فرع ${bObj.name})` : '';
     const msg = `تم تسجيل حضور ${emp ? emp.name : ''}${branchNameStr} بنجاح الساعة ${punchTime}`;
     
@@ -545,7 +595,24 @@ export function useAttendanceEngine() {
       [empId]: pausedData,
       [String(empId)]: pausedData
     };
-    const updatedState = { ...state, activeShifts: updatedActive };
+
+    let currentShifts = [...(state.shifts || [])];
+    const openIdx = currentShifts.findIndex(s =>
+      (active.shiftId && s.id === active.shiftId) ||
+      (String(s.employeeId) === String(empId) && s.date === active.date && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive))
+    );
+    if (openIdx >= 0) {
+      currentShifts[openIdx] = {
+        ...currentShifts[openIdx],
+        isPaused: true,
+        isOnBreak: true,
+        breakStartTime: nowTime,
+        pauseStartEpoch: Date.now(),
+        updatedAt: new Date().toISOString()
+      };
+    }
+
+    const updatedState = { ...state, activeShifts: updatedActive, shifts: currentShifts };
     setState(updatedState);
 
     if (source === 'kiosk') {
@@ -598,7 +665,25 @@ export function useAttendanceEngine() {
       [empId]: resumedData,
       [String(empId)]: resumedData
     };
-    const updatedState = { ...state, activeShifts: updatedActive };
+
+    let currentShifts = [...(state.shifts || [])];
+    const openIdx = currentShifts.findIndex(s =>
+      (active.shiftId && s.id === active.shiftId) ||
+      (String(s.employeeId) === String(empId) && s.date === active.date && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive))
+    );
+    if (openIdx >= 0) {
+      currentShifts[openIdx] = {
+        ...currentShifts[openIdx],
+        isPaused: false,
+        isOnBreak: false,
+        breakStartTime: null,
+        pauseStartEpoch: null,
+        accumulatedPauseMs: (currentShifts[openIdx].accumulatedPauseMs || 0) + pauseDuration,
+        updatedAt: new Date().toISOString()
+      };
+    }
+
+    const updatedState = { ...state, activeShifts: updatedActive, shifts: currentShifts };
     setState(updatedState);
 
     if (source === 'kiosk') {
@@ -689,16 +774,24 @@ export function useAttendanceEngine() {
       overtimeStatus = 'pending';
     }
 
-    const shiftId = uid();
+    let existingShifts = [...(state.shifts || [])];
+    const openShiftIdx = existingShifts.findIndex(
+      (s) => (active.shiftId && s.id === active.shiftId) ||
+             (String(s.employeeId) === String(empId) && s.date === active.date && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive))
+    );
+    const shiftId = openShiftIdx >= 0 ? existingShifts[openShiftIdx].id : (active.shiftId || uid());
+
     // التحقق مما إذا كان للموظف وردية سابقة في نفس اليوم بفرع آخر لحصر البدل اليومي على أول فرع فقط
-    const sameDateShifts = (state.shifts || []).filter(
+    const sameDateShifts = existingShifts.filter(
       (s) => String(s.employeeId) === String(empId) && s.date === active.date && s.id !== shiftId
     );
     const hasEarlierShiftInAnotherBranch = sameDateShifts.some(
       (s) => s.branchId && String(s.branchId) !== String(bId) && ((s.timeIn || '') <= (active.timeIn || ''))
     );
 
+    const baseShift = openShiftIdx >= 0 ? existingShifts[openShiftIdx] : {};
     const newShift = {
+      ...baseShift,
       id: shiftId,
       employeeId: empId,
       employeeCode: emp?.code || '',
@@ -718,8 +811,18 @@ export function useAttendanceEngine() {
       excludeDailyAllowance: Boolean(hasEarlierShiftInAnotherBranch),
       note: overtimeHours > 0 ? `ساعات إضافية (+${overtimeHours} س) بانتظار الاعتماد` : 'تسجيل انصراف بلمسة واحدة',
       statusLabel: 'حضور حي',
-      createdAt: new Date().toISOString()
+      isLiveActive: false,
+      status: 'completed',
+      createdAt: baseShift.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
+
+    let updatedShifts = existingShifts;
+    if (openShiftIdx >= 0) {
+      updatedShifts[openShiftIdx] = newShift;
+    } else {
+      updatedShifts = [newShift, ...existingShifts];
+    }
 
     let updatedRequests = state.requests || [];
     let updatedNotifications = state.notifications || [];
@@ -798,7 +901,6 @@ export function useAttendanceEngine() {
       }).catch((e) => console.warn('Overtime email alert error:', e));
     }
 
-    const updatedShifts = [newShift, ...(state.shifts || [])];
     const updatedActive = { ...state.activeShifts };
     delete updatedActive[empId];
     delete updatedActive[String(empId)];

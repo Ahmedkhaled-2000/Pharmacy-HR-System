@@ -1,7 +1,7 @@
 import { isManagementJob, isBranchWithoutManager, getJobsList, shouldRouteDirectToAdmin, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from './jobsHelper.js';
 import { getActivePayrollMonth } from './periodEngine.js';
 export { getRealDate, getRealTodayStr, getRealNowTimeStr } from './timeEngine.js';
-import { getRealDate } from './timeEngine.js';
+import { getRealDate, getRealTodayStr } from './timeEngine.js';
 
 export const AR_MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
 export const AR_WEEKDAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
@@ -239,14 +239,16 @@ export function deduplicateAndConsolidateEmployees(rawEmployees = [], stateObj =
       updatedAt: latestEmp.updatedAt || (Math.max(...group.map(getEmpTime), 0) > 0 ? new Date(Math.max(...group.map(getEmpTime))).toISOString() : new Date().toISOString())
     };
 
-    // حماية البصمات الحيوية من الفقدان العرضي ما لم يتم طلب تصفيرها
+    // حماية البصمات الحيوية من الفقدان العرضي ما لم يتم طلب تصفيرها صراحة
+    const faceReset = mergedEmp.biometricFaceResetAt || mergedEmp.biometricResetAt;
     const withFace = group.find(e => e.has_face_descriptor && e.face_descriptor);
-    if (withFace && !mergedEmp.face_descriptor && !mergedEmp.biometricResetAt) {
+    if (withFace && !mergedEmp.face_descriptor && !faceReset) {
       mergedEmp.has_face_descriptor = true;
       mergedEmp.face_descriptor = withFace.face_descriptor;
     }
+    const handReset = mergedEmp.biometricHandResetAt || mergedEmp.biometricResetAt;
     const withHand = group.find(e => e.has_hand_descriptor && e.hand_descriptor);
-    if (withHand && !mergedEmp.hand_descriptor && !mergedEmp.biometricResetAt) {
+    if (withHand && !mergedEmp.hand_descriptor && !handReset) {
       mergedEmp.has_hand_descriptor = true;
       mergedEmp.hand_descriptor = withHand.hand_descriptor;
     }
@@ -876,9 +878,55 @@ export function normalizeState(parsed) {
     });
   }
 
-  let rawActiveShifts = (parsed.activeShifts && typeof parsed.activeShifts === 'object' && !Array.isArray(parsed.activeShifts))
-    ? parsed.activeShifts
-    : {};
+  let rawActiveShifts = {};
+  if (parsed.activeShifts) {
+    if (Array.isArray(parsed.activeShifts)) {
+      parsed.activeShifts.forEach(item => {
+        if (item && typeof item === 'object') {
+          const key = String(item.employeeId || item.id || '');
+          if (key) rawActiveShifts[key] = item;
+        }
+      });
+    } else if (typeof parsed.activeShifts === 'object') {
+      rawActiveShifts = { ...parsed.activeShifts };
+    }
+  }
+
+  // ── الاسترداد الذاتي الوقائي للورديات الحية (Self-Healing from Open Shifts) ──
+  // إذا فُقدت الوردية النشطة من الذاكرة المؤقتة، يتم ترميمها واستعادتها فوراً من أي وردية مفتوحة لليوم
+  const currentTodayStr = typeof getRealTodayStr === 'function' ? getRealTodayStr() : todayStr();
+  if (Array.isArray(shifts)) {
+    shifts.forEach(s => {
+      if (
+        s &&
+        s.date === currentTodayStr &&
+        s.timeIn &&
+        s.timeIn !== '—' &&
+        (!s.timeOut || s.timeOut === '—' || s.timeOut === '' || s.isLiveActive) &&
+        s.status !== 'cancelled' &&
+        !s.isCancelled
+      ) {
+        const empIdKey = String(s.employeeId || '');
+        if (empIdKey && !rawActiveShifts[empIdKey]) {
+          rawActiveShifts[empIdKey] = {
+            shiftId: s.id,
+            branchId: s.branchId || '',
+            branchName: s.branchName || '',
+            date: s.date,
+            timeIn: s.timeIn,
+            startEpoch: s.createdAt ? new Date(s.createdAt).getTime() : Date.now(),
+            isPaused: Boolean(s.isPaused),
+            isOnBreak: Boolean(s.isOnBreak),
+            breakStartTime: s.breakStartTime || null,
+            pauseStartEpoch: s.pauseStartEpoch || null,
+            accumulatedPauseMs: s.accumulatedPauseMs || 0,
+            updatedAt: Date.now()
+          };
+        }
+      }
+    });
+  }
+
   let activeShifts = rawActiveShifts;
   if (idRemap && idRemap.size > 0) {
     activeShifts = {};

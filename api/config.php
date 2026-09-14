@@ -553,27 +553,37 @@ function mergeServerState(array $existing, array $incoming): array
                         $merged['paymentsHistory'] = array_values($pMap);
                     }
 
-                    // الحفاظ على بصمة الوجه واليد للموظف من التصفير غير المقصود أثناء دمج الخادم
+                    // الحفاظ على بصمة الوجه واليد للموظف من التصفير غير المقصود أثناء دمج الخادم مع احترام طلبات الحذف الصريحة
                     if ($prefix === 'emp') {
                         $oldHasFace = !empty($old['has_face_descriptor']) && !empty($old['face_descriptor']);
                         $newHasFace = !empty($item['has_face_descriptor']) && !empty($item['face_descriptor']);
-                        if ($oldHasFace && !$newHasFace && empty($item['biometricResetAt'])) {
+                        $faceReset = !empty($item['biometricFaceResetAt']) ? $item['biometricFaceResetAt'] : (!empty($item['biometricResetAt']) ? $item['biometricResetAt'] : null);
+
+                        if ($oldHasFace && !$newHasFace && empty($faceReset)) {
                             $merged['has_face_descriptor'] = true;
                             $merged['face_descriptor'] = $old['face_descriptor'];
                             if (!empty($old['preferred_biometric'])) $merged['preferred_biometric'] = $old['preferred_biometric'];
                         } elseif ($newHasFace) {
                             $merged['has_face_descriptor'] = true;
                             $merged['face_descriptor'] = $item['face_descriptor'];
+                        } else {
+                            $merged['has_face_descriptor'] = false;
+                            $merged['face_descriptor'] = null;
                         }
 
                         $oldHasHand = !empty($old['has_hand_descriptor']) && !empty($old['hand_descriptor']);
                         $newHasHand = !empty($item['has_hand_descriptor']) && !empty($item['hand_descriptor']);
-                        if ($oldHasHand && !$newHasHand && empty($item['biometricResetAt'])) {
+                        $handReset = !empty($item['biometricHandResetAt']) ? $item['biometricHandResetAt'] : (!empty($item['biometricResetAt']) ? $item['biometricResetAt'] : null);
+
+                        if ($oldHasHand && !$newHasHand && empty($handReset)) {
                             $merged['has_hand_descriptor'] = true;
                             $merged['hand_descriptor'] = $old['hand_descriptor'];
                         } elseif ($newHasHand) {
                             $merged['has_hand_descriptor'] = true;
                             $merged['hand_descriptor'] = $item['hand_descriptor'];
+                        } else {
+                            $merged['has_hand_descriptor'] = false;
+                            $merged['hand_descriptor'] = null;
                         }
                     }
 
@@ -617,6 +627,22 @@ function mergeServerState(array $existing, array $incoming): array
 
         $merged[$k] = $mergeArrayEntities($eList, $iList, $p);
     }
+
+    // دمج الورديات النشطة (activeShifts) مع الحفاظ الصارم على المفاتيح النصية ومنع إعادة الفهرسة الرقمية من PHP
+    $eActive = is_array($existing['activeShifts'] ?? null) ? $existing['activeShifts'] : [];
+    $iActive = is_array($incoming['activeShifts'] ?? null) ? $incoming['activeShifts'] : [];
+    $mergedActive = [];
+    foreach ($eActive as $k => $v) {
+        if (is_array($v) || is_object($v)) {
+            $mergedActive[(string)$k] = $v;
+        }
+    }
+    foreach ($iActive as $k => $v) {
+        if (is_array($v) || is_object($v)) {
+            $mergedActive[(string)$k] = $v;
+        }
+    }
+    $merged['activeShifts'] = empty($mergedActive) ? (object)[] : (object)$mergedActive;
 
     // الحفاظ الكامل والعميق على إعدادات المنظومة ولائحة الجزاءات والتاخيرات
     if (isset($existing['orgSettings']) || isset($incoming['orgSettings'])) {
