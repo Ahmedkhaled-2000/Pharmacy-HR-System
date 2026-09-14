@@ -3,22 +3,28 @@
 # ZERO BROWSER CACHE GUARANTEE + INSTANT UPDATES + HIGH PERFORMANCE
 # ==============================================================================
 
+DirectoryIndex index.html index.php
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
 
-  # 1. توجيه طلبات الـ API إلى api/index.php مباشرة
-  RewriteRule ^api/(.*)$ api/index.php?endpoint=$1 [QSA,L]
-  RewriteRule ^api/?$ api/index.php?endpoint=health [QSA,L]
-
-  # 2. خدمة الملفات والمجلدات الحقيقية مباشرة (ملفات assets والـ PHP والأيقونات)
+  # 1. إذا كان الملف أو المجلد موجوداً بالفعل، يتم تقديمه مباشرة
   RewriteCond %{REQUEST_FILENAME} -f [OR]
   RewriteCond %{REQUEST_FILENAME} -d
   RewriteRule ^ - [L]
 
-  # 3. توجيه جميع صفحات الواجهة إلى index.html
+  # 2. توجيه طلبات الـ API إلى api/index.php
+  RewriteRule ^api/(.*)$ api/index.php?endpoint=$1 [QSA,L]
+  RewriteRule ^api/?$ api/index.php?endpoint=health [QSA,L]
+
+  # 3. استثناء index.html من أي إعادة توجيه لمنع الحلقات التكرارية تماماً
   RewriteRule ^index\.html$ - [L]
-  RewriteRule . /index.html [L]
+
+  # 4. توجيه كافة مسارات الواجهة (SPA) إلى index.html إذا لم يكن الملف أو المجلد موجوداً
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^(.*)$ /index.html [L]
 </IfModule>
 
 # ------------------------------------------------------------------------------
@@ -62,4 +68,28 @@
   AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json application/xml image/svg+xml
 </IfModule>
 
-Options -Indexes
+# ------------------------------------------------------------------------------
+# 🛡️ ترويسات الأمان والدفاع في العمق (HTTP Defense Headers)
+# ------------------------------------------------------------------------------
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "SAMEORIGIN"
+  Header set X-XSS-Protection "1; mode=block"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+  Header unset Server
+  Header unset X-Powered-By
+</IfModule>
+
+# منع استعراض أو تحميل أي ملفات حساسة أو إعدادات
+<FilesMatch "(?i)\.(sqlite|sqlite3|db|cache|sql|log|env|bak|backup|gs|sh|bash|tmp|lock|git|yml|yaml|ini|conf)$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order Allow,Deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+Options -Indexes -MultiViews
+

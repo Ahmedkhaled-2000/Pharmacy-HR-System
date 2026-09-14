@@ -309,7 +309,7 @@ export async function pullDeltaSync(branchId = null) {
           await deleteRequestLocal(change.entity_id);
           appliedCount++;
         } else if (change.operation === 'INSERT' || change.operation === 'UPDATE') {
-          let payload = change.payload;
+          let payload = change.payload || change.data;
           if (typeof payload === 'string') {
             try { payload = JSON.parse(payload); } catch { payload = null; }
           }
@@ -326,19 +326,20 @@ export async function pullDeltaSync(branchId = null) {
         }
       }
 
-      if (res.latest_sequence !== undefined && res.latest_sequence !== null) {
-        await setSyncCursor(cursorKey, res.latest_sequence);
+      const nextCursor = res.latest_sequence ?? res.latest_cursor ?? res.cursor;
+      if (nextCursor !== undefined && nextCursor !== null) {
+        await setSyncCursor(cursorKey, Number(nextCursor));
       }
 
       if (appliedCount > 0) {
         notifySubscribers({
           type: 'DELTA_CHANGES_APPLIED',
           appliedCount,
-          latestSequence: res.latest_sequence
+          latestSequence: nextCursor
         });
       }
 
-      return { success: true, count: appliedCount, latestSequence: res.latest_sequence };
+      return { success: true, count: appliedCount, latestSequence: nextCursor };
     }
   } catch (err) {
     console.warn('[SyncEngine] Delta pull warning:', err.message);

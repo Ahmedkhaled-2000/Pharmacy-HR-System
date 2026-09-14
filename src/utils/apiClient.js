@@ -120,6 +120,10 @@ async function request(endpoint, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const isMutation = method === 'POST' || method === 'PUT' || method === 'DELETE';
 
+  if (isMutation) {
+    resetBackendCircuitBreaker();
+  }
+
   // إذا كان السيرفر في وضع التبريد والحماية من الانهيار، نسمح دائماً بعمليات الحفظ
   if (Date.now() < circuitBreakerCoolingUntil && options.isBackground && !isMutation) {
     throw new Error(`[CircuitBreaker] الخادم قيد إعادة التشغيل والتبريد مؤقتاً.`);
@@ -133,7 +137,7 @@ async function request(endpoint, options = {}) {
 
   const executeRequest = async () => {
     const maxRetries = options.retries !== undefined ? options.retries : (isMutation ? 2 : 1);
-    const baseTimeoutMs = options.timeout || (isMutation ? 25000 : 12000);
+    const baseTimeoutMs = options.timeout || (isMutation ? 45000 : 25000);
     
     let lastError = null;
 
@@ -317,7 +321,7 @@ export async function apiLogin(usernameOrCreds, password = '', role = 'admin') {
 export async function apiFetchSettings(key = STORAGE_KEY, options = {}) {
   const res = await request(`settings?key=${encodeURIComponent(key)}`, {
     method: 'GET',
-    timeout: options.timeout || 15000,
+    timeout: options.timeout || 35000,
     retries: options.retries !== undefined ? options.retries : 1,
     useETag: options.useETag !== undefined ? options.useETag : true,
     noCache: options.noCache !== undefined ? options.noCache : false,
@@ -328,10 +332,11 @@ export async function apiFetchSettings(key = STORAGE_KEY, options = {}) {
 }
 
 export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
+  resetBackendCircuitBreaker();
   return await request('settings', {
     method: 'POST',
     body: JSON.stringify({ key, value }),
-    timeout: options.timeout || 25000,
+    timeout: options.timeout || 60000,
     retries: options.retries !== undefined ? options.retries : 2,
     noCache: true,
     isBackground: false
@@ -340,10 +345,11 @@ export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
 
 // ── 1.1 الإرسال الذري الخفيف للطلبات (< 2KB) لضمان الوصول الفوري دون إرسال كامل قاعدة البيانات ──
 export async function apiSubmitRequestAtomic(requestObj, notificationObj = null, key = STORAGE_KEY) {
+  resetBackendCircuitBreaker();
   return await request('requests/submit', {
     method: 'POST',
     body: JSON.stringify({ key, request: requestObj, notification: notificationObj }),
-    timeout: 10000,
+    timeout: 25000,
     retries: 2,
     noCache: true,
     isBackground: false
@@ -352,10 +358,11 @@ export async function apiSubmitRequestAtomic(requestObj, notificationObj = null,
 
 // ── 1.1.1 الإرسال الذري لطلبات التعيين والتوظيف العامة من بوابة الوظائف ──
 export async function apiSubmitRecruitmentApplication(applicationObj, notificationObj = null, key = STORAGE_KEY) {
+  resetBackendCircuitBreaker();
   return await request('recruitment/apply', {
     method: 'POST',
     body: JSON.stringify({ key, application: applicationObj, notification: notificationObj }),
-    timeout: 15000,
+    timeout: 25000,
     retries: 2,
     noCache: true,
     isBackground: false
@@ -364,10 +371,11 @@ export async function apiSubmitRecruitmentApplication(applicationObj, notificati
 
 // ── 1.2 الحذف النهائي البات للكيانات (موظف / طلب) من قاعدة البيانات السحابية ──
 export async function apiHardDeleteEntity(type, id, key = STORAGE_KEY) {
+  resetBackendCircuitBreaker();
   return await request('entity/delete', {
     method: 'POST',
     body: JSON.stringify({ key, type, id }),
-    timeout: 12000,
+    timeout: 20000,
     retries: 2,
     noCache: true,
     isBackground: false
@@ -376,10 +384,11 @@ export async function apiHardDeleteEntity(type, id, key = STORAGE_KEY) {
 
 // ── 1.3 المزامنة التزايدية الذكية للطلبات (Incremental Delta Sync & Batch Push) ──
 export async function apiPushSyncBatch(operationsBatch) {
+  resetBackendCircuitBreaker();
   return await request('sync/push', {
     method: 'POST',
     body: JSON.stringify({ operations: operationsBatch }),
-    timeout: 15000,
+    timeout: 25000,
     retries: 2,
     noCache: true,
     isBackground: false
@@ -394,7 +403,7 @@ export async function apiFetchDeltaSync(sinceSequence = 0, branchId = null) {
 
   return await request(`sync/delta${qs}`, {
     method: 'GET',
-    timeout: 10000,
+    timeout: 25000,
     retries: 2,
     noCache: true,
     isBackground: true

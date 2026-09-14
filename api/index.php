@@ -218,9 +218,34 @@ try {
             $key = $_GET['key'] ?? DEFAULT_STORAGE_KEY;
 
             if ($method === 'GET') {
+                $ifNoneMatch = trim($_SERVER['HTTP_IF_NONE_MATCH'] ?? '');
+
+                // فحص سريع لرقم الإصدار لمقارنته مع ETag قبل تحميل الـ 5.4MB من قاعدة البيانات
+                $verRow = Database::queryOne("SELECT version, updated_at FROM app_settings WHERE key_name = ? LIMIT 1", [$key]);
+                if ($verRow) {
+                    $vNum = (int)($verRow['version'] ?? 0);
+                    $vUpdated = (string)($verRow['updated_at'] ?? '');
+                    $etag = '"v' . $vNum . '_' . md5($vUpdated) . '"';
+
+                    if (!empty($ifNoneMatch)) {
+                        $cleanClient = trim($ifNoneMatch, '" \t\n\r\0\x0B');
+                        $cleanServer = trim($etag, '"');
+                        if ($cleanClient === $cleanServer || str_contains($ifNoneMatch, 'v' . $vNum) || str_contains($ifNoneMatch, md5($vUpdated))) {
+                            header('ETag: ' . $etag);
+                            header('Cache-Control: no-cache, must-revalidate, max-age=0');
+                            header('Content-Length: 0');
+                            http_response_code(304);
+                            exit();
+                        }
+                    }
+                }
+
                 // فحص كاش السيرفر المصغر أولاً لخفض استهلاك Supabase Egress
                 $cached = MicroCache::get('settings_' . $key);
                 if ($cached !== null) {
+                    if (!empty($verRow)) {
+                        header('ETag: "' . 'v' . (int)$verRow['version'] . '_' . md5((string)$verRow['updated_at']) . '"');
+                    }
                     jsonResponse($cached);
                 }
 
@@ -244,7 +269,7 @@ try {
                         'updated_at' => $row['updated_at']
                     ];
 
-                    // حفظ في كاش السيرفر لمدة 8 ثوانٍ
+                    // حفظ في كاش السيرفر
                     MicroCache::set('settings_' . $key, $response, MICRO_CACHE_TTL);
                     MicroCache::set('version_' . $key, [
                         'success' => true,
@@ -253,6 +278,8 @@ try {
                         'updated_at' => $row['updated_at']
                     ], MICRO_CACHE_TTL);
 
+                    $etag = '"v' . (int)$row['version'] . '_' . md5((string)$row['updated_at']) . '"';
+                    header('ETag: ' . $etag);
                     jsonResponse($response);
                 } else {
                     $response = [
@@ -462,6 +489,16 @@ try {
                     }
                 }
 
+                // 5.5 فصل المرفقات والصور تلقائياً إلى app_attachments وحماية السجل من التضخم
+                if (is_array($finalValueData)) {
+                    autoExtractStateAttachments($finalValueData);
+
+                    // تقليم شواهد القبور المتراكمة لحماية الذاكرة وسرعة المعالجة
+                    if (isset($finalValueData['_deletedIds']) && is_array($finalValueData['_deletedIds']) && count($finalValueData['_deletedIds']) > 150) {
+                        $finalValueData['_deletedIds'] = array_slice($finalValueData['_deletedIds'], -150);
+                    }
+                }
+
                 $jsonString = is_string($finalValueData)
                     ? $finalValueData
                     : json_encode($finalValueData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
@@ -489,20 +526,32 @@ try {
                     );
                 } catch (Throwable) {}
 
-                // تحديث كاش السيرفر بالحالة الجديدة مباشرة
+                // تحديث كاش السيرفر بالحالة الجديدة مباشرة مع تجنب إرجاع 5.4MB غير ضرورية في رد الحفظ
+                $returnFull = !empty($payload['includeFullValue']) || !empty($_GET['includeFullValue']);
                 $savedResponse = [
                     'success' => true,
                     'message' => 'State saved and merged successfully',
                     'key' => $targetKey,
                     'version' => $currentVersion,
                     'updated_at' => $updatedAt,
-                    'value' => is_array($finalValueData) ? $finalValueData : null
+                    'value' => $returnFull ? (is_array($finalValueData) ? $finalValueData : null) : null
                 ];
 
-                // إبطال أي كاش سابق فورياً وتحديثه بالبيانات المدمجة الجديدة
+                $etag = '"v' . $currentVersion . '_' . md5((string)$updatedAt) . '"';
+                header('ETag: ' . $etag);
+
+                $fullCacheResponse = [
+                    'success' => true,
+                    'key' => $targetKey,
+                    'value' => is_array($finalValueData) ? $finalValueData : null,
+                    'version' => $currentVersion,
+                    'updated_at' => $updatedAt
+                ];
+
+                // إبطال أي كاش سابق وتحديثه بالبيانات المدمجة الجديدة
                 MicroCache::invalidate('settings_' . $targetKey);
                 MicroCache::invalidate('version_' . $targetKey);
-                MicroCache::set('settings_' . $targetKey, $savedResponse, MICRO_CACHE_TTL);
+                MicroCache::set('settings_' . $targetKey, $fullCacheResponse, MICRO_CACHE_TTL);
                 MicroCache::set('version_' . $targetKey, [
                     'success' => true,
                     'key' => $targetKey,
@@ -671,6 +720,91 @@ try {
             break;
 
         // ==================================================================
+        // 6.0 إدارة المرفقات والصور المنفصلة (Decoupled Blob Storage Engine)
+        // ==================================================================
+        case 'attachments':
+        case 'attachment':
+            $attId = $_GET['id'] ?? null;
+
+            if ($method === 'GET') {
+                if (empty($attId)) {
+                    $entityType = $_GET['entity_type'] ?? '';
+                    $entityId = $_GET['entity_id'] ?? '';
+                    if (!empty($entityType) && !empty($entityId)) {
+                        $rows = Database::query("SELECT id, entity_type, entity_id, field_name, mime_type, file_size, created_at FROM app_attachments WHERE entity_type = ? AND entity_id = ?", [$entityType, $entityId]);
+                        jsonResponse(['success' => true, 'attachments' => $rows]);
+                    }
+                    jsonResponse(['success' => false, 'error' => 'Missing attachment id'], 400);
+                }
+
+                $row = Database::queryOne("SELECT id, file_data, mime_type FROM app_attachments WHERE id = ? LIMIT 1", [(string)$attId]);
+                if (!$row) {
+                    jsonResponse(['success' => false, 'error' => 'Attachment not found'], 404);
+                }
+
+                $raw = $row['file_data'];
+                $mime = $row['mime_type'] ?: 'image/jpeg';
+
+                // إذا كان الطلب من خلال وسيط صورة مباشر (Direct Image Rendering)
+                if (isset($_GET['raw']) || str_contains($_SERVER['HTTP_ACCEPT'] ?? '', 'image/')) {
+                    header('Content-Type: ' . $mime);
+                    header('Cache-Control: public, max-age=31536000, immutable');
+                    if (str_starts_with($raw, 'data:')) {
+                        $parts = explode(',', $raw, 2);
+                        echo base64_decode($parts[1] ?? '');
+                    } else {
+                        echo base64_decode($raw);
+                    }
+                    exit();
+                }
+
+                jsonResponse([
+                    'success' => true,
+                    'id' => $row['id'],
+                    'mime_type' => $mime,
+                    'data' => $raw
+                ]);
+            } elseif ($method === 'POST') {
+                $payload = getRequestData();
+                $id = trim((string)($payload['id'] ?? ('att_' . round(microtime(true) * 1000) . '_' . substr(bin2hex(random_bytes(3)), 0, 6))));
+                $entityType = trim((string)($payload['entity_type'] ?? 'general'));
+                $entityId = trim((string)($payload['entity_id'] ?? 'none'));
+                $fieldName = trim((string)($payload['field_name'] ?? 'document'));
+                $fileData = (string)($payload['file_data'] ?? $payload['data'] ?? '');
+                $mimeType = trim((string)($payload['mime_type'] ?? 'image/jpeg'));
+                $size = strlen($fileData);
+
+                if (empty($fileData)) {
+                    jsonResponse(['success' => false, 'error' => 'Empty attachment payload'], 400);
+                }
+
+                Database::execute("
+                    INSERT INTO app_attachments (id, entity_type, entity_id, field_name, file_data, mime_type, file_size, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+                    ON CONFLICT (id) DO UPDATE
+                    SET file_data = EXCLUDED.file_data, mime_type = EXCLUDED.mime_type, file_size = EXCLUDED.file_size, updated_at = NOW()
+                ", [$id, $entityType, $entityId, $fieldName, $fileData, $mimeType, $size]);
+
+                jsonResponse([
+                    'success' => true,
+                    'id' => $id,
+                    'url' => 'api/attachments?id=' . $id,
+                    'file_size' => $size
+                ]);
+            } elseif ($method === 'DELETE') {
+                if (empty($attId)) {
+                    $payload = getRequestData();
+                    $attId = $payload['id'] ?? null;
+                }
+                if ($attId) {
+                    Database::execute("DELETE FROM app_attachments WHERE id = ?", [(string)$attId]);
+                    jsonResponse(['success' => true, 'message' => 'Attachment deleted']);
+                }
+                jsonResponse(['success' => false, 'error' => 'Missing attachment id'], 400);
+            }
+            break;
+
+        // ==================================================================
         // 6.1 الإرسال الذري الخفيف للطلبات (Ultra-Lightweight Request Submit < 2KB)
         // ==================================================================
         case 'requests/submit':
@@ -803,7 +937,7 @@ try {
                             ON CONFLICT (id) DO UPDATE
                             SET updated_at = NOW(), payload = EXCLUDED.payload, status = EXCLUDED.status
                         ", [$reqIdStr, $idempKey, $reqType, $empId, $empName, $empCode, $bId, $targetRole, $priority, $status, $reqJson]);
-
+                    } else {
                         Database::execute("
                             INSERT INTO change_log (entity_type, entity_id, branch_id, operation, delta_payload)
                             VALUES ('request', ?, ?, 'INSERT', ?)

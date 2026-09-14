@@ -286,7 +286,7 @@ export function useRealtimeSync(props = {}) {
       if (isPolling || !isMountedRef.current) return;
       isPolling = true;
       try {
-        const versionRes = await apiFetchVersion(STORAGE_KEY, { timeout: 3500, isBackground: true });
+        const versionRes = await apiFetchVersion(STORAGE_KEY, { timeout: 10000, isBackground: true });
         const currentVer = typeof versionRes?.version === 'number' ? versionRes.version : 0;
         const currentUpdated = versionRes?.updated_at || '';
 
@@ -305,7 +305,7 @@ export function useRealtimeSync(props = {}) {
           // جلب التغييرات التزايدية الخفيفة أولاً
           pullDeltaSync(currentBranch?.id).catch(() => {});
 
-          const remoteData = await apiFetchSettings(STORAGE_KEY, { timeout: 6000, useETag: true, isBackground: true });
+          const remoteData = await apiFetchSettings(STORAGE_KEY, { timeout: 30000, useETag: true, isBackground: true });
           if (remoteData && !remoteData.notModified) {
             applyRemoteData(remoteData);
           }

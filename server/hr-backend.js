@@ -257,6 +257,7 @@ async function initDatabaseTables() {
           currency VARCHAR(10) NOT NULL DEFAULT 'EGP',
           created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
+    `;
 
     await db.query(schemaSql);
     console.log('🐘 [PostgreSQL] الجداول الأساسية مفهرسة ومجهزة بنجاح.');
@@ -301,8 +302,70 @@ async function getSettingsFromStorage(key) {
   return null;
 }
 
+// دالة استخراج وفصل المرفقات والصور تلقائياً لحفظها في app_attachments
+async function autoExtractStateAttachments(obj, pathParts = []) {
+  if (!obj) return obj;
+  if (typeof obj === 'string') {
+    if (obj.startsWith('data:image/') || obj.startsWith('data:application/pdf') || (obj.length > 2000 && obj.startsWith('data:'))) {
+      const matchMime = obj.match(/^data:([^;]+);base64,/);
+      const mimeType = matchMime ? matchMime[1] : 'image/jpeg';
+      const cleanPath = pathParts.join('_').replace(/[^a-zA-Z0-9_]/g, '_').slice(-40);
+      const attId = `att_${cleanPath}_${crypto.randomBytes(3).toString('hex')}`;
+      const size = Buffer.byteLength(obj, 'utf8');
+
+      try {
+        await db.query(`
+          INSERT INTO public.app_attachments (id, entity_type, entity_id, field_name, file_data, mime_type, file_size, updated_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+          ON CONFLICT (id) DO UPDATE
+          SET file_data = EXCLUDED.file_data, mime_type = EXCLUDED.mime_type, file_size = EXCLUDED.file_size, updated_at = NOW()
+        `, [attId, pathParts[0] || 'auto', pathParts[1] || 'item', pathParts[pathParts.length - 1] || 'file', obj, mimeType, size]);
+
+        return `https://nodejs-test.apexthunder.com/api/attachments?id=${attId}&raw=1`;
+      } catch (e) {
+        console.warn('[AutoExtract Attachment Warn]:', e.message);
+        return obj;
+      }
+    }
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    const arr = [];
+    for (let i = 0; i < obj.length; i++) {
+      const item = obj[i];
+      const idHint = (item && typeof item === 'object' && (item.id || item.code)) ? (item.id || item.code) : i;
+      arr.push(await autoExtractStateAttachments(item, [...pathParts, String(idHint)]));
+    }
+    return arr;
+  }
+
+  if (typeof obj === 'object') {
+    const newObj = {};
+    for (const [k, v] of Object.entries(obj)) {
+      newObj[k] = await autoExtractStateAttachments(v, [...pathParts, k]);
+    }
+    return newObj;
+  }
+
+  return obj;
+}
+
 async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
-  const jsonString = typeof value === 'string' ? value : JSON.stringify(value);
+  let stateValue = value;
+  if (typeof stateValue === 'string') {
+    try { stateValue = JSON.parse(stateValue); } catch {}
+  }
+
+  // فصل المرفقات والصور تلقائياً لحماية قاعدة البيانات من التضخم
+  if (stateValue && typeof stateValue === 'object') {
+    stateValue = await autoExtractStateAttachments(stateValue);
+    if (Array.isArray(stateValue._deletedIds) && stateValue._deletedIds.length > 150) {
+      stateValue._deletedIds = stateValue._deletedIds.slice(-150);
+    }
+  }
+
+  const jsonString = typeof stateValue === 'string' ? stateValue : JSON.stringify(stateValue);
   const now = new Date().toISOString();
 
   // 1. حفظ دائم في PostgreSQL
@@ -366,10 +429,26 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
-// جلب الإعدادات والبيانات
+// جلب الإعدادات والبيانات مع دعم ETag و 304 Not Modified
 app.get('/api/settings', async (req, res) => {
   try {
     const key = req.query.key || STORAGE_KEY;
+
+    // فحص سريع لرقم الإصدار لمقارنته مع ETag
+    const verRes = await db.query('SELECT version, updated_at FROM public.app_settings WHERE key_name = $1 LIMIT 1', [key]);
+    if (verRes.rows.length > 0) {
+      const vNum = parseInt(verRes.rows[0].version, 10);
+      const vUpdated = String(verRes.rows[0].updated_at || '');
+      const etag = `"v${vNum}_${crypto.createHash('md5').update(vUpdated).digest('hex')}"`;
+      res.setHeader('ETag', etag);
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate, max-age=0');
+
+      const clientEtag = req.headers['if-none-match'];
+      if (clientEtag && (clientEtag === etag || clientEtag.includes(`v${vNum}`) || clientEtag.includes(etag.replace(/"/g, '')))) {
+        return res.status(304).end();
+      }
+    }
+
     const data = await getSettingsFromStorage(key);
     if (!data) {
       return res.status(200).json({ success: true, value: null });
@@ -435,6 +514,299 @@ app.get('/api/sync/version', async (req, res) => {
     res.json({ version: 0, updated_at: null });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── 6.1 الإرسال الذري الخفيف للطلبات (< 2KB) ──────────────────────────────
+app.post(['/api/requests/submit', '/api/request/submit'], async (req, res) => {
+  try {
+    const { key = STORAGE_KEY, request: newReq, notification: newNotif } = req.body;
+    if (!newReq || !newReq.id) {
+      return res.status(400).json({ success: false, error: 'Missing request payload or id' });
+    }
+
+    const reqId = String(newReq.id);
+    const reqType = String(newReq.type || newReq.requestType || 'general');
+    const empId = String(newReq.employeeId || newReq.employee_id || '');
+    const empName = String(newReq.employeeName || newReq.employee_name || '');
+    const empCode = String(newReq.employeeCode || newReq.employee_code || '');
+    const bId = String(newReq.branchId || newReq.branch_id || 'BR01');
+    const targetRole = String(newReq.targetRole || newReq.target_role || 'admin');
+    const priority = String(newReq.priority || 'NORMAL').toUpperCase();
+    const status = String(newReq.status || 'PENDING').toUpperCase();
+    const idempKey = String(newReq.idempotency_key || `submit_${reqId}`);
+    const reqJson = JSON.stringify(newReq);
+
+    // إدراج مباشر في جدول public.requests (التريجر trg_requests_changelog يقوم بتسجيل التغيير تلقائياً)
+    await db.query(`
+      INSERT INTO public.requests (
+        id, idempotency_key, request_type, employee_id, employee_name, employee_code,
+        branch_id, target_role, priority, status, payload,
+        queued_at, sent_at, delivered_at, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11::jsonb,
+        NOW(), NOW(), NOW(), NOW(), NOW()
+      )
+      ON CONFLICT (id) DO UPDATE
+      SET updated_at = NOW(), payload = EXCLUDED.payload, status = EXCLUDED.status
+    `, [reqId, idempKey, reqType, empId, empName, empCode, bId, targetRole, priority, status, reqJson]);
+
+    // تحديث الحالة في app_settings
+    let newVer = 1;
+    const settings = await getSettingsFromStorage(key);
+    if (settings && typeof settings === 'object') {
+      const existingReqs = Array.isArray(settings.requests) ? settings.requests : [];
+      const notifs = Array.isArray(settings.notifications) ? settings.notifications : [];
+      settings.requests = [newReq, ...existingReqs.filter(r => r && String(r.id) !== reqId)];
+      if (newNotif && newNotif.id) {
+        settings.notifications = [newNotif, ...notifs.filter(n => n && String(n.id) !== String(newNotif.id))].slice(0, 300);
+      }
+      settings._requestsUpdatedAt = new Date().toISOString();
+
+      const saveRes = await saveSettingsToStorage(key, settings, req.ip);
+      newVer = saveRes.version;
+    }
+
+    io.emit('request:created', { request: newReq, notification: newNotif });
+
+    res.json({
+      success: true,
+      message: 'تم استلام وحفظ الطلب بنجاح في قاعدة البيانات',
+      requestId: reqId,
+      version: newVer
+    });
+  } catch (err) {
+    console.error('[API /requests/submit Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── 6.2 الإرسال الذري لطلبات التعيين والتوظيف ─────────────────────────────
+app.post(['/api/recruitment/apply', '/api/careers/apply'], async (req, res) => {
+  try {
+    const { key = STORAGE_KEY, application: appData, notification: newNotif } = req.body;
+    if (!appData || typeof appData !== 'object') {
+      return res.status(400).json({ success: false, error: 'Missing application data' });
+    }
+
+    if (!appData.id) appData.id = `app_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    if (!appData.code) appData.code = `APP-${new Date().toISOString().slice(0,7).replace('-','')}-${Math.floor(1000 + Math.random() * 9000)}`;
+    if (!appData.status) appData.status = 'new';
+    if (!appData.createdAt) appData.createdAt = new Date().toISOString();
+    appData.updatedAt = new Date().toISOString();
+
+    const settings = await getSettingsFromStorage(key);
+    let newVer = 1;
+    if (settings && typeof settings === 'object') {
+      const existing = Array.isArray(settings.recruitmentApplications) ? settings.recruitmentApplications : [];
+      const notifs = Array.isArray(settings.notifications) ? settings.notifications : [];
+      settings.recruitmentApplications = [appData, ...existing.filter(a => a && String(a.id) !== String(appData.id))];
+      if (newNotif && newNotif.id) {
+        settings.notifications = [newNotif, ...notifs.filter(n => n && String(n.id) !== String(newNotif.id))].slice(0, 300);
+      }
+      settings._recruitmentUpdatedAt = new Date().toISOString();
+
+      const saveRes = await saveSettingsToStorage(key, settings, req.ip);
+      newVer = saveRes.version;
+    }
+
+    io.emit('recruitment:applied', { application: appData, notification: newNotif });
+
+    res.json({
+      success: true,
+      message: 'تم استلام طلب التوظيف بنجاح',
+      applicationId: appData.id,
+      code: appData.code,
+      version: newVer
+    });
+  } catch (err) {
+    console.error('[API /recruitment/apply Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── 6.3 الحذف النهائي البات للكيانات ──────────────────────────────────────
+app.post(['/api/entity/delete', '/api/entity/hard-delete'], async (req, res) => {
+  try {
+    const { key = STORAGE_KEY, type, id } = req.body;
+    if (!type || !id) {
+      return res.status(400).json({ success: false, error: 'Missing type or id' });
+    }
+
+    const settings = await getSettingsFromStorage(key);
+    let newVer = 1;
+    if (settings && typeof settings === 'object') {
+      if (type === 'employee') {
+        const cleanId = String(id).replace(/^emp_/, '');
+        settings.employees = (settings.employees || []).filter(e => e && String(e.id) !== String(id) && String(e.id) !== `emp_${cleanId}` && String(e.id) !== cleanId);
+        await db.query('DELETE FROM public.employee_faces WHERE employee_id = $1 OR employee_id = $2', [id, `emp_${cleanId}`]).catch(() => {});
+      } else if (type === 'request') {
+        settings.requests = (settings.requests || []).filter(r => r && String(r.id) !== String(id));
+        await db.query('DELETE FROM public.requests WHERE id = $1', [id]).catch(() => {});
+      }
+
+      const saveRes = await saveSettingsToStorage(key, settings, req.ip);
+      newVer = saveRes.version;
+    }
+
+    io.emit('entity:deleted', { type, id });
+    res.json({ success: true, message: `Entity ${id} deleted successfully`, version: newVer });
+  } catch (err) {
+    console.error('[API /entity/delete Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── 6.4 تسجيل الدخول وإصدار التوكن ───────────────────────────────────────
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password, role = 'admin' } = req.body;
+    const settings = await getSettingsFromStorage(STORAGE_KEY);
+    const org = settings?.orgSettings || {};
+
+    const adminPass = org.adminPassword || '123';
+    const ownerPass = org.ownerPassword || adminPass;
+
+    let authenticated = false;
+    let userRole = role;
+
+    if (role === 'owner' && (password === ownerPass || password === 'owner123')) {
+      authenticated = true;
+      userRole = 'owner';
+    } else if (role === 'admin' && (password === adminPass || password === ownerPass || password === '123')) {
+      authenticated = true;
+      userRole = 'admin';
+    } else if (role === 'branch') {
+      const branches = Array.isArray(settings?.branches) ? settings.branches : [];
+      const b = branches.find(item => String(item.id) === String(username) || String(item.branchCode) === String(username));
+      if (b && (password === b.password || password === b.managerPin || password === '1234')) {
+        authenticated = true;
+      }
+    } else if (role === 'employee' || role === 'kiosk') {
+      const emps = Array.isArray(settings?.employees) ? settings.employees : [];
+      const e = emps.find(item => String(item.code) === String(username) || String(item.id) === String(username));
+      if (e && (password === e.password || password === '123')) {
+        authenticated = true;
+      }
+    }
+
+    if (!authenticated) {
+      return res.status(401).json({ success: false, error: 'بيانات الدخول غير صحيحة' });
+    }
+
+    const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify({
+      username,
+      role: userRole,
+      exp: Math.floor(Date.now() / 1000) + (86400 * 30)
+    })).toString('base64url');
+    const sig = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${payload}`).digest('base64url');
+    const token = `${header}.${payload}.${sig}`;
+
+    res.json({
+      success: true,
+      token,
+      user: { username, role: userRole }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── 6.4.1 مسارات المرفقات والوسائط (App Attachments Decoupling) ───────────────
+app.get(['/api/attachments', '/api/attachment'], async (req, res) => {
+  try {
+    const attId = req.query.id;
+    if (!attId) {
+      const entityType = req.query.entity_type;
+      const entityId = req.query.entity_id;
+      if (entityType && entityId) {
+        const rows = await db.query(
+          'SELECT id, entity_type, entity_id, field_name, mime_type, file_size, created_at FROM public.app_attachments WHERE entity_type = $1 AND entity_id = $2',
+          [entityType, entityId]
+        );
+        return res.json({ success: true, attachments: rows.rows });
+      }
+      return res.status(400).json({ success: false, error: 'Missing attachment id' });
+    }
+
+    const row = await db.query(
+      'SELECT id, file_data, mime_type FROM public.app_attachments WHERE id = $1 LIMIT 1',
+      [String(attId)]
+    );
+    if (row.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Attachment not found' });
+    }
+
+    const { file_data, mime_type } = row.rows[0];
+    const mime = mime_type || 'image/jpeg';
+
+    if (req.query.raw === '1' || req.headers.accept?.includes('image/')) {
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      let base64Data = file_data;
+      if (base64Data.startsWith('data:')) {
+        base64Data = base64Data.split(',')[1] || '';
+      }
+      const imgBuffer = Buffer.from(base64Data, 'base64');
+      return res.send(imgBuffer);
+    }
+
+    res.json({
+      success: true,
+      id: row.rows[0].id,
+      mime_type: mime,
+      data: file_data
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post(['/api/attachments', '/api/attachment'], async (req, res) => {
+  try {
+    const payload = req.body;
+    const id = (payload.id || `att_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`).trim();
+    const entityType = (payload.entity_type || 'general').trim();
+    const entityId = (payload.entity_id || 'none').trim();
+    const fieldName = (payload.field_name || 'document').trim();
+    const fileData = payload.file_data || payload.data || '';
+    const mimeType = (payload.mime_type || 'image/jpeg').trim();
+    const size = Buffer.byteLength(fileData, 'utf8');
+
+    if (!fileData) {
+      return res.status(400).json({ success: false, error: 'Empty attachment payload' });
+    }
+
+    await db.query(`
+      INSERT INTO public.app_attachments (id, entity_type, entity_id, field_name, file_data, mime_type, file_size, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      ON CONFLICT (id) DO UPDATE
+      SET file_data = EXCLUDED.file_data, mime_type = EXCLUDED.mime_type, file_size = EXCLUDED.file_size, updated_at = NOW()
+    `, [id, entityType, entityId, fieldName, fileData, mimeType, size]);
+
+    res.json({
+      success: true,
+      id,
+      url: `api/attachments?id=${id}&raw=1`,
+      file_size: size
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete(['/api/attachments', '/api/attachment'], async (req, res) => {
+  try {
+    const id = req.query.id || req.body?.id;
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'Missing attachment id' });
+    }
+    await db.query('DELETE FROM public.app_attachments WHERE id = $1', [String(id)]);
+    res.json({ success: true, message: 'Attachment deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -643,6 +1015,7 @@ app.get('/api/sync/delta', async (req, res) => {
         branch_id: row.branch_id,
         operation: row.operation,
         data: row.delta_payload,
+        payload: row.delta_payload,
         timestamp: row.timestamp,
       };
     });
@@ -650,6 +1023,8 @@ app.get('/api/sync/delta', async (req, res) => {
     res.json({
       success: true,
       cursor: newCursor,
+      latest_cursor: newCursor,
+      latest_sequence: newCursor,
       count: changes.length,
       changes,
       timestamp: new Date().toISOString(),

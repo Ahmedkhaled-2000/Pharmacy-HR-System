@@ -11,7 +11,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
 
 // مفتاح التوقيع لتوليد رموز المصادقة المستقلة للأرشيف
-define('ARCHIVE_SECRET_KEY', 'pharmacy-archive-secret-key-2026-secure');
+define('ARCHIVE_SECRET_KEY', getenv('ARCHIVE_SECRET_KEY') ?: 'pharmacy-archive-secret-key-2026-secure');
 
 /**
  * دالة توليد معرف فريد UUID v4
@@ -61,6 +61,52 @@ function verifyArchiveToken(?string $token): ?array
 
     return $data;
 }
+
+/**
+ * استخراج بيانات مستخدم الأرشيف الموثق
+ */
+function getAuthenticatedArchiveUser(): ?array
+{
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
+    if (empty($authHeader) && function_exists('apache_request_headers')) {
+        $headers = apache_request_headers();
+        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    }
+    $token = '';
+    if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
+        $token = trim($matches[1]);
+    }
+
+    $archiveTokenData = verifyArchiveToken($token);
+    if ($archiveTokenData) return $archiveTokenData;
+
+    // دعم مصادقة توكن المنظومة الرئيسي للأدمن والمالك
+    $mainTokenData = verifyApiToken($token);
+    if ($mainTokenData && in_array($mainTokenData['role'] ?? '', ['owner', 'admin'], true)) {
+        return [
+            'username' => $mainTokenData['username'] ?? 'admin',
+            'role' => 'archive_admin'
+        ];
+    }
+
+    return null;
+}
+
+/**
+ * فرض المصادقة على عمليات الأرشيف الحساسة
+ */
+function requireArchiveAuth(): array
+{
+    $u = getAuthenticatedArchiveUser();
+    if (!$u) {
+        jsonResponse([
+            'success' => false,
+            'error' => 'غير مصرح: يلزم تسجيل الدخول في نظام الأرشيف وتوفير توكن جلسة نشط (Unauthorized)'
+        ], 401);
+    }
+    return $u;
+}
+
 
 /**
  * التأكد التلقائي والترقية الذاتية لجداول الأرشيف في قاعدة بيانات Supabase PostgreSQL
@@ -225,13 +271,27 @@ function handleArchiveApi(string $subPath, string $method): void
             // =================================================================
             case 'auth':
                 if ($action === 'login' && $method === 'POST') {
+                    $retryAfter = null;
+                    if (!checkRateLimit('arch_login_' . getClientIp(), 10, 300, $retryAfter)) {
+                        http_response_code(429);
+                        header("Retry-After: {$retryAfter}");
+                        jsonResponse([
+                            'success' => false,
+                            'error' => "تم تجاوز الحد الأقصى لمحاولات تسجيل الدخول للأرشيف. يرجى الانتظار {$retryAfter} ثانية."
+                        ], 429);
+                    }
+
                     $username = trim((string)($requestData['username'] ?? ''));
                     $password = (string)($requestData['password'] ?? '');
+
+                    if (empty($username) || empty($password)) {
+                        jsonResponse(['success' => false, 'error' => 'يرجى إدخال اسم المستخدم وكلمة المرور'], 400);
+                    }
 
                     $savedUser = getArchiveSetting('ADMIN_USERNAME', 'admin');
                     $savedPass = getArchiveSetting('ADMIN_PASSWORD', '123456');
 
-                    if ($username === $savedUser && $password === $savedPass) {
+                    if (hash_equals($savedUser, $username) && hash_equals($savedPass, $password)) {
                         $token = createArchiveToken($username);
                         jsonResponse([
                             'success' => true,
@@ -248,13 +308,7 @@ function handleArchiveApi(string $subPath, string $method): void
                         jsonResponse(['success' => false, 'error' => 'اسم المستخدم أو كلمة المرور غير صحيحة'], 401);
                     }
                 } elseif ($action === 'session' && $method === 'GET') {
-                    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-                    $token = '';
-                    if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
-                        $token = trim($matches[1]);
-                    }
-
-                    $userData = verifyArchiveToken($token);
+                    $userData = getAuthenticatedArchiveUser();
                     if ($userData) {
                         jsonResponse([
                             'success' => true,
@@ -270,13 +324,14 @@ function handleArchiveApi(string $subPath, string $method): void
                         jsonResponse(['success' => false, 'authenticated' => false], 401);
                     }
                 } elseif ($action === 'change-credentials' && $method === 'POST') {
+                    requireArchiveAuth();
                     $currPass = (string)($requestData['currentPassword'] ?? '');
                     $newPass = (string)($requestData['newPassword'] ?? '');
                     $newUser = trim((string)($requestData['newUsername'] ?? ''));
 
                     $savedPass = getArchiveSetting('ADMIN_PASSWORD', '123456');
 
-                    if ($currPass !== $savedPass) {
+                    if (!hash_equals($savedPass, $currPass)) {
                         jsonResponse(['success' => false, 'error' => 'كلمة المرور الحالية غير صحيحة'], 400);
                     }
 
@@ -1043,6 +1098,7 @@ function handleArchiveApi(string $subPath, string $method): void
                     jsonResponse(['success' => true, 'settings' => $settings]);
 
                 } elseif ($method === 'POST') {
+                    requireArchiveAuth();
                     foreach ($requestData as $key => $val) {
                         if ($key === 'ADMIN_PASSWORD' && empty($val)) continue;
                         setArchiveSetting((string)$key, (string)$val);
@@ -1058,18 +1114,21 @@ function handleArchiveApi(string $subPath, string $method): void
             case 'upload':
                 if ($method !== 'POST') jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
 
+                // التحقق من صلاحية وجلسة المستخدم
+                requireArchiveAuth();
+
                 $uploadDir = __DIR__ . '/../uploads/archive/';
                 if (!is_dir($uploadDir)) {
                     @mkdir($uploadDir, 0755, true);
                 }
 
-                // إنشاء ملف .htaccess لحماية مجلد الرفع من تنفيذ أي نصوص برمجية
+                // إنشاء ملف .htaccess لحماية مجلد الرفع من تنفيذ أي نصوص برمجية نهائياً
                 $htaccessPath = $uploadDir . '.htaccess';
                 if (!file_exists($htaccessPath)) {
                     @file_put_contents($htaccessPath, "<FilesMatch \"(?i)\\.(php|phtml|php3|php4|php5|php7|php8|phar|inc|pl|py|cgi|sh|bash|exe|bat|cmd|dll|htc|shtml)$\">\n    Order Allow,Deny\n    Deny from all\n</FilesMatch>\n<IfModule mod_php.c>\n    php_flag engine off\n</IfModule>\n<IfModule mod_php7.c>\n    php_flag engine off\n</IfModule>\n<IfModule mod_php8.c>\n    php_flag engine off\n</IfModule>\nOptions -ExecCGI\n");
                 }
 
-                $allowedExtensions = ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'xlsx', 'xls', 'csv', 'txt'];
+                $allowedExtensions = ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'xlsx', 'xls', 'csv'];
                 $maxSizeBytes = 25 * 1024 * 1024; // 25 MB
 
                 if (!empty($_FILES['file'])) {
@@ -1087,6 +1146,28 @@ function handleArchiveApi(string $subPath, string $method): void
                         jsonResponse(['success' => false, 'error' => 'نوع الملف غير مدعوم أو غير آمن. يسمح فقط بالصور والمستندات (PDF, Excel, Images)'], 400);
                     }
 
+                    // التحقق المزدوج من نوع المحتوى الفعلي (Magic Bytes Verification)
+                    $detectedMime = 'application/octet-stream';
+                    if (function_exists('finfo_open')) {
+                        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                        $detectedMime = (string)finfo_file($finfo, $file['tmp_name']);
+                        finfo_close($finfo);
+                    } elseif (function_exists('mime_content_type')) {
+                        $detectedMime = (string)mime_content_type($file['tmp_name']);
+                    }
+
+                    $validMimes = [
+                        'image/jpeg', 'image/pjpeg', 'image/png', 'image/webp',
+                        'application/pdf',
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        'application/vnd.ms-excel',
+                        'text/csv', 'text/plain'
+                    ];
+
+                    if (!in_array($detectedMime, $validMimes, true)) {
+                        jsonResponse(['success' => false, 'error' => 'تم رفض الملف: المحتوى الفعلي للملف لا يتطابق مع الأنواع المسموحة'], 400);
+                    }
+
                     $safeName = 'inv_' . date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
                     $target = $uploadDir . $safeName;
 
@@ -1096,7 +1177,7 @@ function handleArchiveApi(string $subPath, string $method): void
                             'success' => true,
                             'fileUrl' => $fileUrl,
                             'fileName' => htmlspecialchars($file['name'], ENT_QUOTES, 'UTF-8'),
-                            'fileType' => $file['type']
+                            'fileType' => $detectedMime
                         ]);
                     } else {
                         jsonResponse(['success' => false, 'error' => 'فشل حفظ الملف على الخادم'], 500);
@@ -1112,9 +1193,6 @@ function handleArchiveApi(string $subPath, string $method): void
                         jsonResponse(['success' => false, 'error' => 'نوع الملف المرفوع عبر Base64 غير مسموح'], 400);
                     }
 
-                    $safeName = 'inv_' . date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
-                    $target = $uploadDir . $safeName;
-
                     $data = preg_replace('#^data:[^;]+;base64,#i', '', $base64);
                     $data = base64_decode($data, true);
 
@@ -1126,6 +1204,22 @@ function handleArchiveApi(string $subPath, string $method): void
                         jsonResponse(['success' => false, 'error' => 'حجم الملف يتجاوز الحد المسموح (25 ميجابايت)'], 400);
                     }
 
+                    // التحقق من البصمة الثنائية لملفات Base64
+                    $isAllowedMagic = false;
+                    if (str_starts_with($data, "%PDF-")) $isAllowedMagic = true;
+                    elseif (str_starts_with($data, "\x89PNG\x0d\x0a\x1a\x0a")) $isAllowedMagic = true;
+                    elseif (str_starts_with($data, "\xFF\xD8\xFF")) $isAllowedMagic = true;
+                    elseif (str_contains(substr($data, 0, 32), 'WEBP')) $isAllowedMagic = true;
+                    elseif (str_starts_with($data, "PK\x03\x04")) $isAllowedMagic = true;
+                    elseif (preg_match('/^[\x20-\x7E\r\n\t,;"\']+$/', substr($data, 0, 256))) $isAllowedMagic = true;
+
+                    if (!$isAllowedMagic) {
+                        jsonResponse(['success' => false, 'error' => 'تم رفض الملف: البصمة الثنائية للملف غير موثوقة'], 400);
+                    }
+
+                    $safeName = 'inv_' . date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
+                    $target = $uploadDir . $safeName;
+
                     if (file_put_contents($target, $data)) {
                         $fileUrl = '/uploads/archive/' . $safeName;
                         jsonResponse([
@@ -1133,10 +1227,12 @@ function handleArchiveApi(string $subPath, string $method): void
                             'fileUrl' => $fileUrl,
                             'fileName' => htmlspecialchars($fileName, ENT_QUOTES, 'UTF-8')
                         ]);
+                    } else {
+                        jsonResponse(['success' => false, 'error' => 'فشل حفظ الملف على الخادم'], 500);
                     }
                 }
 
-                jsonResponse(['success' => false, 'error' => 'لا يوجد ملف مرفوع'], 400);
+                jsonResponse(['success' => false, 'error' => 'لم يتم إرسال أي ملف صالح للرفع'], 400);
                 break;
 
             default:

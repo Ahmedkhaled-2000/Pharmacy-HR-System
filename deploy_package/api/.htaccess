@@ -1,11 +1,58 @@
+# ==============================================================================
+# 🛡️ PHARMACY HR API - HARDENED APACHE / LITESPEED SECURITY CONFIGURATION
+# ==============================================================================
+
+Options -Indexes -MultiViews
+
+# 1. منع استعراض أو تحميل أي ملفات قواعد بيانات أو كاش أو إعدادات أو نسخ احتياطية نهائياً
+<FilesMatch "(?i)\.(sqlite|sqlite3|db|cache|json|sql|log|env|bak|backup|gs|sh|bash|tmp|lock|git|yml|yaml|ini|conf)$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order Allow,Deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+# 2. حماية وتأمين سكريبتات الطوارئ والتصفير من الاستدعاء المباشر
+<FilesMatch "(?i)^(reset_db|restore|diagnose)\.php$">
+  <IfModule mod_authz_core.c>
+    Require local
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order Deny,Allow
+    Deny from all
+    Allow from 127.0.0.1
+    Allow from ::1
+  </IfModule>
+</FilesMatch>
+
+# 3. ترويسات الأمان الصارمة (HTTP Defense Headers)
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "SAMEORIGIN"
+  Header set X-XSS-Protection "1; mode=block"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+  Header unset Server
+  Header unset X-Powered-By
+</IfModule>
+
+# 4. محرك إعادة التوجيه الآمن للـ API
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /api/
 
-  # إذا كان الملف موجوداً كملف php أو غيره، اتركه يعمل
+  # حظر الوصول المباشر لأي مجلد كاش أو ملفات مخفية
+  RewriteRule ^cache/ - [F,L]
+  RewriteRule ^\. - [F,L]
+
+  # إذا كان الطلب يستهدف ملف PHP مسموحاً به (مثل index.php أو archive.php أو ping.php)
   RewriteCond %{REQUEST_FILENAME} -f
+  RewriteCond %{REQUEST_FILENAME} \.php$
   RewriteRule ^ - [L]
 
-  # توجيه أي endpoint غير موجود إلى index.php
+  # توجيه كافة طلبات الـ API إلى index.php
   RewriteRule ^(.*)$ index.php?endpoint=$1 [QSA,L]
 </IfModule>
+

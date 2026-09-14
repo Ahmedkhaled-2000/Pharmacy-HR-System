@@ -10,11 +10,18 @@ declare(strict_types=1);
 
 // ضبط تقرير الأخطاء والذاكرة والمهل الزمنية للبيئة الإنتاجية
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED & ~E_NOTICE);
-@ini_set('memory_limit', '256M');
-@ini_set('max_execution_time', '15');
-@ini_set('default_socket_timeout', '10');
+@ini_set('memory_limit', '512M');
+@ini_set('max_execution_time', '90');
+@ini_set('default_socket_timeout', '30');
 @ini_set('display_errors', '0');
 ini_set('log_errors', '1');
+
+// تفعيل ضغط الاستجابات لتقليص استهلاك الباندويث وتسريع النقل بنسبة تصل إلى 90%
+if (!ob_get_level() && !headers_sent()) {
+    if (extension_loaded('zlib') && !ini_get('zlib.output_compression')) {
+        @ob_start('ob_gzhandler');
+    }
+}
 
 // ضبط التوقيت الافتراضي
 date_default_timezone_set('Africa/Cairo');
@@ -22,15 +29,13 @@ date_default_timezone_set('Africa/Cairo');
 // إعدادات ترويسات CORS المفتوحة للاتصال الآمن من الويب والهاتف
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-App-Version, If-None-Match, Cache-Control, Pragma');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-App-Version, If-None-Match, Cache-Control, Pragma, X-App-Role, X-App-Password, X-App-Emp-Code, X-App-Branch-Id');
+header('Access-Control-Expose-Headers: ETag, Content-Length, X-App-Version');
 header('Access-Control-Max-Age: 86400'); // 24 hours cache for preflight OPTIONS
 
-// ترويسات صارمة لمنع التخزين المؤقت في المتصفحات نهائياً (Anti-Browser-Cache)
-// لضمان ظهور أي تعديل أو حفظ فوراً لدى كافة الأجهزة بدون الحاجة لمسح كاش المتصفح
-header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0');
+// ترويسات ذكية للمتصفحات تضمن عدم كاش البيانات القديمة وتدعم التحقق السريع عبر ETag (304 Not Modified)
+header('Cache-Control: no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
-header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
-header('X-LiteSpeed-Cache-Control: no-cache, no-store');
 header('X-Accel-Buffering: no');
 
 // التعامل مع طلبات Preflight (OPTIONS)
@@ -227,11 +232,9 @@ function jsonResponse(mixed $data, int $statusCode = 200): void
     http_response_code($statusCode);
     header('Content-Type: application/json; charset=utf-8');
     
-    // تأكيد صارم لعدم حفظ الكاش في المتصفح
-    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0');
+    // تأكيد صارم لعدم اعتماد كاش متصفح قديم مع دعم التحقق الفوري والذكي عبر ETag (304 Not Modified)
+    header('Cache-Control: no-cache, must-revalidate, max-age=0');
     header('Pragma: no-cache');
-    header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
-    header('X-LiteSpeed-Cache-Control: no-cache, no-store');
 
     $output = is_string($data) ? $data : json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
     if ($output === false) {
@@ -760,3 +763,37 @@ function mergeServerState(array $existing, array $incoming): array
     $merged['_deletedIds'] = array_slice(array_keys($deletedSet), -3000);
     return $merged;
 }
+
+/**
+ * استخراج وفصل المرفقات والصور تلقائياً وحفظها في جدول app_attachments
+ * يحمي قاعدة البيانات من التضخم ويضمن بقاء السجل الرئيسي خفيفاً (< 800KB)
+ */
+function autoExtractStateAttachments(array &$data, string $entityPath = 'state'): void
+{
+    foreach ($data as $k => &$v) {
+        $curPath = $entityPath . '_' . $k;
+        if (is_array($v)) {
+            autoExtractStateAttachments($v, $curPath);
+        } elseif (is_string($v) && (str_starts_with($v, 'data:image/') || str_starts_with($v, 'data:application/pdf') || (strlen($v) > 2000 && str_starts_with($v, 'data:')))) {
+            preg_match('/^data:([^;]+);base64,/', $v, $m);
+            $mime = $m[1] ?? 'image/jpeg';
+            $size = strlen($v);
+            $cleanPath = preg_replace('/[^a-zA-Z0-9_]/', '_', substr($curPath, -40));
+            $attId = 'att_' . $cleanPath . '_' . substr(bin2hex(random_bytes(3)), 0, 6);
+
+            try {
+                Database::execute("
+                    INSERT INTO app_attachments (id, entity_type, entity_id, field_name, file_data, mime_type, file_size, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+                    ON CONFLICT (id) DO UPDATE
+                    SET file_data = EXCLUDED.file_data, mime_type = EXCLUDED.mime_type, file_size = EXCLUDED.file_size, updated_at = NOW()
+                ", [$attId, 'auto', (string)$k, (string)$k, $v, $mime, $size]);
+
+                $v = "https://nodejs-test.apexthunder.com/api/attachments?id=" . $attId . "&raw=1";
+            } catch (Throwable) {
+                // Keep original if DB insertion fails
+            }
+        }
+    }
+}
+

@@ -45,6 +45,7 @@ scratch/
 *.sqlite-wal
 supabase_extracted_data.json
 supabase_backup_safe_*.json
+pharmacy_data_backup_*.json
 implementation_plan.md
 uploads/
 release/

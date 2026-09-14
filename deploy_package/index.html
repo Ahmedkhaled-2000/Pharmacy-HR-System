@@ -37,6 +37,8 @@
     <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512x512.svg" />
 
     <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 
     <!-- Fonts: High-Legibility Modern Typography -->
@@ -95,11 +97,12 @@
         window.playFingerprintChime = function(t) { createChime(t || 'success'); };
       })();
     </script>
-    <script type="module" crossorigin src="/assets/index-DYSZCYtR.js"></script>
+    <script type="module" crossorigin src="/assets/index-ChXE20xi.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-Dd_uD5pT.js">
-    <link rel="modulepreload" crossorigin href="/assets/vendor-icons-Deaohx3B.js">
-    <link rel="modulepreload" crossorigin href="/assets/vendor-react-DJ3HkTQ4.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-C2oE1nZw.css">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-icons-wEnEOOGI.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-react-DTupvIDo.js">
+    <link rel="modulepreload" crossorigin href="/assets/periodEngine-DCsblwdh.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-BW_Btlxc.css">
   <link rel="manifest" href="/manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="/registerSW.js"></script></head>
   <body>
     <div id="root"></div>
@@ -119,7 +122,7 @@
           }).catch(function() {});
         }
 
-        if ('serviceWorker' in navigator) {
+        if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
           let refreshing = false;
           navigator.serviceWorker.addEventListener('controllerchange', () => {
             if (refreshing) return;

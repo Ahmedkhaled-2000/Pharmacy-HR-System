@@ -10,12 +10,13 @@ header('Content-Type: application/json; charset=utf-8');
 $diagnoseSecret = getenv('DIAGNOSE_SECRET') ?: 'diag_pharmacy_2026';
 $providedSecret = $_GET['secret'] ?? $_SERVER['HTTP_X_DIAGNOSE_SECRET'] ?? '';
 $isDev = (getenv('APP_DEBUG') === 'true' || getenv('APP_ENV') === 'development' || in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1'], true));
+$isAuthorized = $isDev || (is_string($providedSecret) && hash_equals($diagnoseSecret, $providedSecret));
 
-if (!$isDev && $providedSecret !== $diagnoseSecret) {
+if (!$isAuthorized) {
     http_response_code(403);
     echo json_encode([
         'success' => false,
-        'error' => 'Access denied. Provide valid secret parameter ?secret=...'
+        'error' => 'Access denied: Unauthorized diagnostic request.'
     ], JSON_UNESCAPED_UNICODE);
     exit();
 }
@@ -25,10 +26,10 @@ $results = [
     'service' => 'Pharmacy HR System API (Supabase Dedicated Diagnostic)',
     'php_version' => PHP_VERSION,
     'pdo_drivers' => PDO::getAvailableDrivers(),
-    'supabase_host' => DB_HOST,
+    'supabase_host' => !empty(DB_HOST) ? substr(DB_HOST, 0, 4) . '***' : null,
     'supabase_port' => DB_PORT,
-    'supabase_user' => DB_USER,
-    'supabase_db' => DB_NAME,
+    'supabase_user' => !empty(DB_USER) ? substr(DB_USER, 0, 3) . '***' : null,
+    'supabase_db' => !empty(DB_NAME) ? substr(DB_NAME, 0, 3) . '***' : null,
     'micro_cache_enabled' => defined('MICRO_CACHE_ENABLED') ? MICRO_CACHE_ENABLED : false,
     'micro_cache_ttl' => defined('MICRO_CACHE_TTL') ? MICRO_CACHE_TTL : 0,
     'supabase_connection' => null,
@@ -49,9 +50,10 @@ try {
         'postgres_version' => $verRow['ver'] ?? 'Unknown'
     ];
 } catch (Throwable $e) {
+    error_log('[Diagnose DB Connection Error] ' . $e->getMessage());
     $results['supabase_connection'] = [
         'status' => 'CONNECTION_FAILED',
-        'error' => $e->getMessage()
+        'error' => 'Unable to connect to database. Check server logs.'
     ];
 }
 
@@ -70,7 +72,8 @@ try {
         'tables' => $tableNames
     ];
 } catch (Throwable $e) {
-    $results['tables_audit'] = ['error' => $e->getMessage()];
+    error_log('[Diagnose Tables Audit Error] ' . $e->getMessage());
+    $results['tables_audit'] = ['error' => 'Unable to query tables audit. Check server logs.'];
 }
 
 // 3. فحص حالة بيانات التطبيق واللوائح المحفوظة
@@ -92,7 +95,8 @@ try {
         'employee_faces_count' => (int)($facesCount['c'] ?? 0)
     ];
 } catch (Throwable $e) {
-    $results['app_settings_check'] = ['error' => $e->getMessage()];
+    error_log('[Diagnose App Settings Error] ' . $e->getMessage());
+    $results['app_settings_check'] = ['error' => 'Unable to query app settings. Check server logs.'];
 }
 
 echo json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);

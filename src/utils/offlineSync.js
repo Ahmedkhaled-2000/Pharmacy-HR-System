@@ -124,7 +124,7 @@ export async function smartSaveState(updatedState, options = {}) {
 
   // نحاول الحفظ مباشرة حتى لو كان navigator.onLine يزعم الأوفلاين
   try {
-    const res = await apiSaveSettings(STORAGE_KEY, cleanUpdated, { timeout: 15000 });
+    const res = await apiSaveSettings(STORAGE_KEY, cleanUpdated, { timeout: 60000 });
 
     if (!res?.success) {
       throw new Error(res?.error || 'Failed to save to Database');
@@ -398,7 +398,7 @@ export async function smartLoadState(options = {}) {
     onProgress?.('جاري الاتصال بالسحابة ومزامنة البيانات...');
     try {
       // محاولة مباشرة لجلب أحدث وأدق نسخة حية من السحابة بدون كاش
-      const remoteData = await fetchRemoteState({ timeout: 12000, useETag: false, isBackground: true });
+      const remoteData = await fetchRemoteState({ timeout: 35000, useETag: false, isBackground: true });
       
       if (remoteData && !remoteData.notModified) {
         const normalized = normalizeState(remoteData);
@@ -431,13 +431,13 @@ export function startSmartPolling({ onRemoteUpdate, intervalActive = 3500, inter
     
     try {
       isFetching = true;
-      const vRes = await apiFetchVersion(STORAGE_KEY, { timeout: 3500, isBackground: true });
+      const vRes = await apiFetchVersion(STORAGE_KEY, { timeout: 8000, isBackground: true });
       const currentVer = typeof vRes?.version === 'number' ? vRes.version : (vRes?.updated_at || vRes?.timestamp);
 
       if (currentVer) {
         pollFailures = 0;
         if (lastKnownVersion !== null && currentVer !== lastKnownVersion) {
-          const freshData = await fetchRemoteState({ timeout: 8000, useETag: false, isBackground: true });
+          const freshData = await fetchRemoteState({ timeout: 30000, useETag: false, isBackground: true });
           if (freshData && !freshData.notModified) {
             const localCurrent = await loadLocalStateFast();
             const merged = localCurrent ? smartMergeStates(localCurrent, freshData) : freshData;

@@ -152,14 +152,16 @@ function handleSyncPush(): void
                     ", [$reqId, $status, $userId, $empName]);
                 } catch (Throwable) {}
 
-                // تسجيل في change_log إذا لم يكن التريجر مفعلاً
-                try {
-                    $clRes = Database::execute("
-                        INSERT INTO change_log (entity_type, entity_id, branch_id, operation, delta_payload)
-                        VALUES ('request', ?, ?, 'INSERT', ?)
-                    ", [$reqId, $bId, $reqJson]);
-                    if ($clRes['insert_id'] > 0) $serverSeq = $clRes['insert_id'];
-                } catch (Throwable) {}
+                // تسجيل في change_log فقط للمشغلات البديلة (في PostgreSQL يوجد Trigger تلقائي trg_requests_changelog)
+                if ($driver !== 'pgsql') {
+                    try {
+                        $clRes = Database::execute("
+                            INSERT INTO change_log (entity_type, entity_id, branch_id, operation, delta_payload)
+                            VALUES ('request', ?, ?, 'INSERT', ?)
+                        ", [$reqId, $bId, $reqJson]);
+                        if ($clRes['insert_id'] > 0) $serverSeq = $clRes['insert_id'];
+                    } catch (Throwable) {}
+                }
 
                 $opSuccess = true;
 
@@ -348,6 +350,7 @@ function handleSyncDelta(): void
                 'branch_id' => $r['branch_id'],
                 'operation' => $r['operation'],
                 'data' => $payload,
+                'payload' => $payload,
                 'timestamp' => $r['timestamp']
             ];
         }
@@ -366,25 +369,28 @@ function handleSyncDelta(): void
                 $payload = $rr['payload'] ?? null;
                 if (is_string($payload)) $payload = json_decode($payload, true) ?: $payload;
 
+                $reqItem = [
+                    'id' => $rr['id'],
+                    'request_type' => $rr['request_type'],
+                    'employee_id' => $rr['employee_id'],
+                    'employee_name' => $rr['employee_name'],
+                    'employee_code' => $rr['employee_code'],
+                    'branch_id' => $rr['branch_id'],
+                    'priority' => $rr['priority'],
+                    'status' => $rr['status'],
+                    'payload' => $payload,
+                    'created_at' => $rr['created_at'],
+                    'updated_at' => $rr['updated_at']
+                ];
+
                 $changes[] = [
                     'sequence' => $seq,
                     'entity_type' => 'request',
                     'entity_id' => $rr['id'],
                     'branch_id' => $rr['branch_id'],
                     'operation' => 'INSERT',
-                    'data' => [
-                        'id' => $rr['id'],
-                        'request_type' => $rr['request_type'],
-                        'employee_id' => $rr['employee_id'],
-                        'employee_name' => $rr['employee_name'],
-                        'employee_code' => $rr['employee_code'],
-                        'branch_id' => $rr['branch_id'],
-                        'priority' => $rr['priority'],
-                        'status' => $rr['status'],
-                        'payload' => $payload,
-                        'created_at' => $rr['created_at'],
-                        'updated_at' => $rr['updated_at']
-                    ],
+                    'data' => $reqItem,
+                    'payload' => $reqItem,
                     'timestamp' => $rr['updated_at'] ?? $rr['created_at']
                 ];
             }
@@ -401,6 +407,8 @@ function handleSyncDelta(): void
     jsonResponse([
         'success' => true,
         'cursor' => $newCursor,
+        'latest_cursor' => $newCursor,
+        'latest_sequence' => $newCursor,
         'count' => count($changes),
         'changes' => $changes,
         'timestamp' => date('Y-m-d H:i:s')
