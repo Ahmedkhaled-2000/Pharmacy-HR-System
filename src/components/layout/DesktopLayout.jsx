@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import { getCycleDateRange } from '../../utils/periodEngine';
-import { getNotificationTarget, getNotificationTargetTab } from '../../utils/notificationEngine';
+import { getNotificationTarget, getNotificationTargetTab, isRequestNotification } from '../../utils/notificationEngine';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🌟 ADAPTIVE DROPDOWN ITEM WITH SMART BIDIRECTIONAL FLYOUT (Anti-Clipping Engine)
@@ -617,6 +617,10 @@ export default function DesktopLayout({
   resignationCount = 0,
   bylawsCount = 0,
   notifications = [],
+  systemNotifications = null,
+  requestNotifications = null,
+  unreadSystemCount = null,
+  unreadRequestCount = null,
   onMarkNotificationRead,
   onMarkAllNotificationsRead,
   onDeleteNotification,
@@ -642,6 +646,7 @@ export default function DesktopLayout({
   const [openDropdown, setOpenDropdown] = useState(null);
   const [hoveredFlyoutId, setHoveredFlyoutId] = useState(null);
   const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
+  const [notifDropdownTab, setNotifDropdownTab] = useState('system'); // 'system' | 'requests'
   const menuContainerRef = useRef(null);
   const notifDropdownRef = useRef(null);
   const topMenuRefs = useRef([]);
@@ -683,7 +688,25 @@ export default function DesktopLayout({
     }
   };
 
-  const unreadNotificationsCount = (notifications || []).filter(n => !n.read).length + (bylawsCount || 0);
+  // ⚡ فك الارتباط الكامل بين إشعارات النظام وإشعارات الطلبات
+  const effectiveSystemNotifs = systemNotifications !== null
+    ? systemNotifications
+    : (notifications || []).filter(n => !isRequestNotification(n));
+
+  const effectiveRequestNotifs = requestNotifications !== null
+    ? requestNotifications
+    : (notifications || []).filter(n => isRequestNotification(n));
+
+  const effectiveUnreadSystemCount = unreadSystemCount !== null
+    ? unreadSystemCount
+    : effectiveSystemNotifs.filter(n => !n.read).length;
+
+  const effectiveUnreadRequestCount = unreadRequestCount !== null
+    ? unreadRequestCount
+    : effectiveRequestNotifs.filter(n => !n.read).length;
+
+  // شارة الجرس 🔔 تعكس حصرياً إشعارات وتنبيهات النظام والتوجيهات الإدارية
+  const unreadNotificationsCount = effectiveUnreadSystemCount;
 
   // Define Desktop Menu Structure for Super Admin
   const adminMenuItems = [
@@ -2258,8 +2281,8 @@ return (
                 position: 'absolute',
                 top: 'calc(100% + 8px)',
                 left: 0,
-                width: '360px',
-                maxWidth: '92vw',
+                width: '390px',
+                maxWidth: '94vw',
                 background: 'var(--surface, #ffffff)',
                 border: '1px solid var(--border, #e2e8f0)',
                 borderRadius: '12px',
@@ -2270,80 +2293,175 @@ return (
                 fontFamily: "'Cairo', 'Tajawal', sans-serif"
               }}
             >
+              {/* ⚡ تبويبات فصل إشعارات النظام عن إشعارات الطلبات */}
               <div
                 style={{
-                  padding: '10px 14px',
-                  background: 'var(--surface-muted, #f8fafc)',
-                  borderBottom: '1px solid var(--border, #e2e8f0)',
                   display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
+                  borderBottom: '1px solid var(--border, #e2e8f0)',
+                  background: 'var(--surface-muted, #f8fafc)'
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>🔔 أحدث الإشعارات</span>
-                  {unreadNotificationsCount > 0 && (
-                    <span style={{ background: '#fee2e2', color: '#dc2626', fontSize: '10px', fontWeight: 800, padding: '1px 6px', borderRadius: '8px' }}>
-                      {unreadNotificationsCount} غير مقروء
+                <button
+                  type="button"
+                  onClick={() => setNotifDropdownTab('system')}
+                  style={{
+                    flex: 1,
+                    padding: '10px 8px',
+                    border: 'none',
+                    borderBottom: notifDropdownTab === 'system' ? '3px solid var(--primary, #0f766e)' : '3px solid transparent',
+                    background: notifDropdownTab === 'system' ? 'var(--surface, #ffffff)' : 'transparent',
+                    color: notifDropdownTab === 'system' ? 'var(--primary, #0f766e)' : 'var(--muted, #64748b)',
+                    fontWeight: notifDropdownTab === 'system' ? 800 : 600,
+                    fontSize: '12.5px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <span>📢 إشعارات النظام</span>
+                  {effectiveUnreadSystemCount > 0 && (
+                    <span style={{
+                      background: '#fee2e2',
+                      color: '#dc2626',
+                      fontSize: '10px',
+                      fontWeight: 800,
+                      padding: '1px 6px',
+                      borderRadius: '10px'
+                    }}>
+                      {effectiveUnreadSystemCount}
                     </span>
                   )}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {unreadNotificationsCount > 0 && onMarkAllNotificationsRead && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onMarkAllNotificationsRead();
-                      }}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'var(--primary, #0f766e)',
-                        fontSize: '11px',
-                        fontWeight: 'bold',
-                        cursor: 'pointer',
-                        padding: '2px 5px'
-                      }}
-                    >
-                      ✓ تحديد الكل
-                    </button>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setNotifDropdownTab('requests')}
+                  style={{
+                    flex: 1,
+                    padding: '10px 8px',
+                    border: 'none',
+                    borderBottom: notifDropdownTab === 'requests' ? '3px solid #f59e0b' : '3px solid transparent',
+                    background: notifDropdownTab === 'requests' ? 'var(--surface, #ffffff)' : 'transparent',
+                    color: notifDropdownTab === 'requests' ? '#b45309' : 'var(--muted, #64748b)',
+                    fontWeight: notifDropdownTab === 'requests' ? 800 : 600,
+                    fontSize: '12.5px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <span>📋 إشعارات ومتابعة الطلبات</span>
+                  {effectiveUnreadRequestCount > 0 && (
+                    <span style={{
+                      background: '#fef3c7',
+                      color: '#d97706',
+                      fontSize: '10px',
+                      fontWeight: 800,
+                      padding: '1px 6px',
+                      borderRadius: '10px'
+                    }}>
+                      {effectiveUnreadRequestCount}
+                    </span>
                   )}
-                  {onClearReadNotifications && (notifications || []).some(n => n.read) && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onClearReadNotifications();
-                      }}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'var(--danger, #dc2626)',
-                        fontSize: '11px',
-                        fontWeight: 'bold',
-                        cursor: 'pointer',
-                        padding: '2px 5px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '2px'
-                      }}
-                      title="حذف جميع الإشعارات المقروءة"
-                    >
-                      <span>🗑️</span>
-                      <span>مسح المقروء</span>
-                    </button>
-                  )}
-                </div>
+                </button>
               </div>
 
-              <div style={{ maxHeight: '340px', overflowY: 'auto' }}>
-                {(notifications || []).length === 0 ? (
-                  <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: '12.5px' }}>
-                    🎉 لا توجد إشعارات حالياً
+              {/* شريط الإجراءات الفرعي الخاص بالتبويب المختار */}
+              {(() => {
+                const activeNotifs = notifDropdownTab === 'system' ? effectiveSystemNotifs : effectiveRequestNotifs;
+                const activeUnreadCount = notifDropdownTab === 'system' ? effectiveUnreadSystemCount : effectiveUnreadRequestCount;
+                const hasReadItems = activeNotifs.some(n => n.read);
+
+                return (
+                  <div
+                    style={{
+                      padding: '8px 14px',
+                      background: 'var(--surface-muted, #f8fafc)',
+                      borderBottom: '1px solid var(--border, #e2e8f0)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <div style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748b)', fontWeight: 600 }}>
+                      {notifDropdownTab === 'system' ? (
+                        <span>تنبيهات وتوجيهات النظام {activeUnreadCount > 0 ? `(${activeUnreadCount} غير مقروء)` : ''}</span>
+                      ) : (
+                        <span>إشعارات ومستجدات طلبات الموظفين {activeUnreadCount > 0 ? `(${activeUnreadCount} غير مقروء)` : ''}</span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {activeUnreadCount > 0 && onMarkAllNotificationsRead && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onMarkAllNotificationsRead(notifDropdownTab);
+                          }}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: notifDropdownTab === 'system' ? 'var(--primary, #0f766e)' : '#b45309',
+                            fontSize: '11px',
+                            fontWeight: 'bold',
+                            cursor: 'pointer',
+                            padding: '2px 5px'
+                          }}
+                        >
+                          ✓ تحديد كمقروء
+                        </button>
+                      )}
+                      {onClearReadNotifications && hasReadItems && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onClearReadNotifications(notifDropdownTab);
+                          }}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--danger, #dc2626)',
+                            fontSize: '11px',
+                            fontWeight: 'bold',
+                            cursor: 'pointer',
+                            padding: '2px 5px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '2px'
+                          }}
+                          title={`حذف الإشعارات المقروءة في ${notifDropdownTab === 'system' ? 'إشعارات النظام' : 'إشعارات الطلبات'}`}
+                        >
+                          <span>🗑️</span>
+                          <span>مسح المقروء</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
-                ) : (
-                  (notifications || []).slice(0, 20).map((n) => {
+                );
+              })()}
+
+              <div style={{ maxHeight: '340px', overflowY: 'auto' }}>
+                {(() => {
+                  const activeNotifs = notifDropdownTab === 'system' ? effectiveSystemNotifs : effectiveRequestNotifs;
+
+                  if (activeNotifs.length === 0) {
+                    return (
+                      <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: '12.5px' }}>
+                        {notifDropdownTab === 'system'
+                          ? '🎉 لا توجد تنبيهات أو إشعارات نظام حالياً'
+                          : '🎉 لا توجد إشعارات لطلبات الموظفين حالياً'}
+                      </div>
+                    );
+                  }
+
+                  return activeNotifs.slice(0, 25).map((n) => {
                     const isUnread = !n.read;
                     const handleDesktopItemClick = () => {
                       if (isUnread && onMarkNotificationRead) onMarkNotificationRead(n.id);
@@ -2380,7 +2498,9 @@ return (
                         style={{
                           padding: '10px 14px',
                           borderBottom: '1px solid var(--border, #f1f5f9)',
-                          background: isUnread ? 'rgba(13, 148, 136, 0.06)' : 'transparent',
+                          background: isUnread
+                            ? (notifDropdownTab === 'system' ? 'rgba(13, 148, 136, 0.06)' : 'rgba(245, 158, 11, 0.07)')
+                            : 'transparent',
                           display: 'flex',
                           gap: '10px',
                           alignItems: 'flex-start',
@@ -2409,7 +2529,7 @@ return (
                                   style={{
                                     background: 'none',
                                     border: 'none',
-                                    color: 'var(--primary, #0f766e)',
+                                    color: notifDropdownTab === 'system' ? 'var(--primary, #0f766e)' : '#b45309',
                                     fontSize: '11px',
                                     cursor: 'pointer',
                                     padding: '0 4px',
@@ -2454,8 +2574,8 @@ return (
                         </div>
                       </div>
                     );
-                  })
-                )}
+                  });
+                })()}
               </div>
 
               <div
@@ -2469,13 +2589,17 @@ return (
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveTab('notifications');
+                    if (notifDropdownTab === 'requests') {
+                      setActiveTab('requests');
+                    } else {
+                      setActiveTab('notifications');
+                    }
                     setIsNotifDropdownOpen(false);
                   }}
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: 'var(--primary, #0f766e)',
+                    color: notifDropdownTab === 'system' ? 'var(--primary, #0f766e)' : '#b45309',
                     fontSize: '12px',
                     fontWeight: 800,
                     cursor: 'pointer',
@@ -2484,8 +2608,17 @@ return (
                     gap: '4px'
                   }}
                 >
-                  <span>📂 الانتقال لمركز الإشعارات والرقابة الحية الكامل</span>
-                  <span>←</span>
+                  {notifDropdownTab === 'requests' ? (
+                    <>
+                      <span>📋 الانتقال لمركز الطلبات والاعتمادات</span>
+                      <span>←</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>📂 الانتقال لمركز الإشعارات والرقابة الحية الكامل</span>
+                      <span>←</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

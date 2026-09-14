@@ -9,7 +9,8 @@ import {
   getNotificationTargetTab,
   getNotificationTabLabel,
   isNotificationReadForAdmin,
-  isNotificationReadForBranch
+  isNotificationReadForBranch,
+  isRequestNotification
 } from '../../utils/notificationEngine';
 import { useUI } from '../../context/UIContext';
 import { hardDeleteEntityFast } from '../../utils/offlineSync';
@@ -419,6 +420,11 @@ export default function NotificationCenterModule({
     return true;
   });
 
+  // ⚡ إشعارات النظام وتنبيهات اللائحة والتوجيهات الإدارية مفصولة تماماً عن طلبات الموظفين
+  const systemNotifications = useMemo(() => {
+    return notifications.filter((n) => !isRequestNotification(n));
+  }, [notifications]);
+
   const handleMarkAsRead = async (id) => {
     if (!id) return;
     const notifIdStr = String(id);
@@ -794,10 +800,10 @@ export default function NotificationCenterModule({
       {/* Filter Navigation Tabs */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
         <button className={`btn ${filterType === 'all' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('all')}>
-          🌐 جميع الأنشطة والإشعارات ({presentCount + absentCount + pendingCount + penaltiesCount + notifications.length})
+          🌐 جميع الأنشطة والإشعارات ({presentCount + absentCount + pendingCount + penaltiesCount + systemNotifications.length})
         </button>
         <button className={`btn ${filterType === 'system_notifs' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('system_notifs')}>
-          📢 إشعارات وتنبيهات النظام ({notifications.length})
+          📢 إشعارات وتنبيهات النظام ({systemNotifications.length})
         </button>
         <button className={`btn ${filterType === 'today_punches' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('today_punches')}>
           ⏱️ البصمات والحضور اليومي ({presentCount})
@@ -1278,22 +1284,22 @@ export default function NotificationCenterModule({
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
             <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              📢 سجل إشعارات وتنبيهات النظام والرسائل ({notifications.length})
+              📢 سجل إشعارات وتنبيهات النظام والرسائل ({systemNotifications.length})
             </h4>
-            {notifications.some(n => !n.read) && (
+            {systemNotifications.some(n => !n.read) && (
               <button className="btn btn-ghost" style={{ fontSize: '12px', fontWeight: 'bold' }} onClick={handleMarkAllRead}>
                 ✓ تحديد الكل كمقروء
               </button>
             )}
           </div>
 
-          {notifications.length === 0 ? (
+          {systemNotifications.length === 0 ? (
             <div style={{ padding: '24px', textAlign: 'center', color: 'var(--muted)', background: 'var(--surface)', borderRadius: '10px', border: '1px solid var(--border)' }}>
               لا توجد إشعارات مسجلة في هذا السجل حالياً.
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {notifications.map((item) => {
+              {systemNotifications.map((item) => {
                 const isUnread = !item.read;
                 const target = getNotificationTarget(item, authRole);
                 const tabLabel = getNotificationTabLabel(target, authRole);

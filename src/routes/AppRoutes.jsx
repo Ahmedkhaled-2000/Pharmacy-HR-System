@@ -121,6 +121,10 @@ export default function AppRoutes() {
     bylawsCount,
     resignationCount,
     notifications,
+    systemNotifications,
+    requestNotifications,
+    unreadSystemCount,
+    unreadRequestCount,
     handleMarkNotificationRead,
     handleMarkAllNotificationsRead,
     handleDeleteNotification,
@@ -837,6 +841,10 @@ export default function AppRoutes() {
             pendingSyncCount={pendingSyncCount}
             onTriggerSync={triggerManualSync}
             notifications={notifications}
+            systemNotifications={systemNotifications}
+            requestNotifications={requestNotifications}
+            unreadSystemCount={unreadSystemCount}
+            unreadRequestCount={unreadRequestCount}
             onMarkNotificationRead={handleMarkNotificationRead}
             onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
             onDeleteNotification={handleDeleteNotification}

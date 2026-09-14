@@ -870,10 +870,18 @@ export function generateOfficialPayslipHTML({
   // Shifts
   (shifts || []).forEach((s) => {
     const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
-    const effHours = parseFloat(s.hours || s.regularHours) || 0;
+    const isRejectedPhoto = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
+    const effHours = isRejectedPhoto ? 0 : (parseFloat(s.hours || s.regularHours) || 0);
     const hasPerm = s.hasPermission || false;
     const daySched = getEmployeeDaySchedule(emp.id, s.date, state);
     const isSwapped = daySched && daySched.isSwapped;
+
+    let badge = '';
+    if (isRejectedPhoto) {
+      badge = '<span style="background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px; display: inline-block;">❌ تم رفض بصمة هذا اليوم بسبب رفض الصورة</span>';
+    } else if (isSwapped) {
+      badge = `<span style="background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🔄 وردية متبدلة ${daySched.swappedWithName ? `(بديل عن ${daySched.swappedWithName})` : ''}</span>`;
+    }
 
     unifiedTableRows.push({
       id: `shift_${s.id || s.date}`,
@@ -881,13 +889,14 @@ export function generateOfficialPayslipHTML({
       type: 'shift',
       dayName: s.dayName || arabicWeekday(s.date),
       hasPerm,
+      isRejectedPhoto,
       timeIn: s.timeIn || '—',
       timeOut: s.timeOut || '—',
       breakHours: parseFloat(s.breakHours) || 0,
       effHours: effHours,
       earnings: effHours * shiftRate,
       isSwapped,
-      badge: isSwapped ? `<span style="background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🔄 وردية متبدلة ${daySched.swappedWithName ? `(بديل عن ${daySched.swappedWithName})` : ''}</span>` : ''
+      badge
     });
   });
 
@@ -1257,17 +1266,21 @@ export function generateOfficialPayslipHTML({
                     </thead>
                     <tbody>
                       ${bShifts.map((s, idx) => {
-                        const effHours = parseFloat(s.hours || s.regularHours) || 0;
+                        const isRej = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
+                        const effHours = isRej ? 0 : (parseFloat(s.hours || s.regularHours) || 0);
                         const hasPerm = s.hasPermission || false;
                         return `
-                          <tr style="background: ${hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc')};">
+                          <tr style="background: ${isRej ? '#fef2f2' : (hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc'))};">
                             <td style="padding: 2px;">${idx + 1}</td>
-                            <td style="padding: 2px; font-weight: bold;">${s.dayName || ''} ${s.date}</td>
-                            <td style="padding: 2px; color: #16a34a;">${s.timeIn || '—'}</td>
-                            <td style="padding: 2px; color: #dc2626;">${s.timeOut || '—'}</td>
+                            <td style="padding: 2px; font-weight: bold;">
+                              ${s.dayName || ''} ${s.date}
+                              ${isRej ? '<span style="display: block; color: #dc2626; font-size: 8px; font-weight: 800; margin-top: 2px;">❌ تم رفض بصمة هذا اليوم بسبب رفض الصورة</span>' : ''}
+                            </td>
+                            <td style="padding: 2px; color: ${isRej ? '#94a3b8; text-decoration: line-through;' : '#16a34a;'}">${s.timeIn || '—'}</td>
+                            <td style="padding: 2px; color: ${isRej ? '#94a3b8; text-decoration: line-through;' : '#dc2626;'}">${s.timeOut || '—'}</td>
                             <td style="padding: 2px;">${fmt(s.breakHours)} س</td>
-                            <td style="padding: 2px; font-weight: bold;">${fmt(effHours)} س</td>
-                            <td style="padding: 2px; font-weight: bold; color: #0d9488;">${fmt(effHours * bRate)} ج.م</td>
+                            <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : 'inherit;'}">${isRej ? '0 س (غير محتسبة)' : `${fmt(effHours)} س`}</td>
+                            <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : '#0d9488;'}">${isRej ? '0.00 ج.م' : `${fmt(effHours * bRate)} ج.م`}</td>
                           </tr>
                         `;
                       }).join('')}
@@ -1314,19 +1327,20 @@ export function generateOfficialPayslipHTML({
             <tbody>
               ${(unifiedTableRows && unifiedTableRows.length > 0) ? unifiedTableRows.map((item, idx) => {
                 if (item.type === 'shift') {
+                  const isRej = item.isRejectedPhoto;
                   return `
-                    <tr style="background: ${item.hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc')};">
+                    <tr style="background: ${isRej ? '#fef2f2' : (item.hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc'))};">
                       <td style="padding: 2px;">${idx + 1}</td>
                       <td style="padding: 2px; font-weight: bold;">
                         ${item.dayName || ''} ${item.date}
                         ${item.hasPerm ? '<span style="display: block; color: #b45309; font-size: 8.5px;">⏰ إذن معتمد</span>' : ''}
                         ${item.badge ? `<span style="display: block; margin-top: 1px;">${item.badge}</span>` : ''}
                       </td>
-                      <td style="padding: 2px; color: #16a34a;">${item.timeIn || '—'}</td>
-                      <td style="padding: 2px; color: #dc2626;">${item.timeOut || '—'}</td>
+                      <td style="padding: 2px; color: ${isRej ? '#94a3b8; text-decoration: line-through;' : '#16a34a;'}">${item.timeIn || '—'}</td>
+                      <td style="padding: 2px; color: ${isRej ? '#94a3b8; text-decoration: line-through;' : '#dc2626;'}">${item.timeOut || '—'}</td>
                       <td style="padding: 2px;">${fmt(item.breakHours)} س</td>
-                      <td style="padding: 2px; font-weight: bold;">${fmt(item.effHours)} س</td>
-                      <td style="padding: 2px; font-weight: bold; color: #0d9488;">${fmt(item.earnings)} ج.م</td>
+                      <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : 'inherit;'}">${isRej ? '0 س (غير محتسبة)' : `${fmt(item.effHours)} س`}</td>
+                      <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : '#0d9488;'}">${isRej ? '0.00 ج.م' : `${fmt(item.earnings)} ج.م`}</td>
                     </tr>
                   `;
                 } else if (item.type === 'rest') {

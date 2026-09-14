@@ -7,7 +7,8 @@ import {
   isNotificationReadForBranch,
   filterAdminNotifications,
   filterBranchManagerNotifications,
-  filterEmployeeNotifications
+  filterEmployeeNotifications,
+  isRequestNotification
 } from '../utils/notificationEngine';
 import { isApprovedPermissionForDate } from '../utils/latePenaltyEngine';
 import { shouldRouteDirectToAdmin } from '../utils/jobsHelper';
@@ -305,6 +306,31 @@ export function NotificationProvider({ children }) {
     return filterAdminNotifications(state.notifications || [], state);
   }, [state, authRole, currentBranch, currentEmpUser]);
 
+  // ⚡ فصل إشعارات النظام عن إشعارات الطلبات تماماً
+  const systemNotifications = useMemo(() => {
+    return (roleNotifications || []).filter((n) => !isRequestNotification(n));
+  }, [roleNotifications]);
+
+  const requestNotifications = useMemo(() => {
+    return (roleNotifications || []).filter((n) => isRequestNotification(n));
+  }, [roleNotifications]);
+
+  const unreadSystemCount = useMemo(() => {
+    return (systemNotifications || []).filter((n) => {
+      if (authRole === 'admin' || authRole === 'owner') return !isNotificationReadForAdmin(n);
+      if (authRole === 'branch' && currentBranch) return !isNotificationReadForBranch(n, currentBranch);
+      return !n.read;
+    }).length;
+  }, [systemNotifications, authRole, currentBranch]);
+
+  const unreadRequestCount = useMemo(() => {
+    return (requestNotifications || []).filter((n) => {
+      if (authRole === 'admin' || authRole === 'owner') return !isNotificationReadForAdmin(n);
+      if (authRole === 'branch' && currentBranch) return !isNotificationReadForBranch(n, currentBranch);
+      return !n.read;
+    }).length;
+  }, [requestNotifications, authRole, currentBranch]);
+
   // 4. دوال التحكم في الإشعارات
   const handleMarkNotificationRead = async (notifId) => {
     if (!notifId) return;
@@ -359,10 +385,19 @@ export function NotificationProvider({ children }) {
     saveState(updatedState).catch(() => {});
   };
 
-  const handleMarkAllNotificationsRead = async () => {
-    const allIds = (state.notifications || []).map((n) => n && n.id).filter(Boolean);
+  const handleMarkAllNotificationsRead = async (channel = 'all') => {
+    const targetNotifs = channel === 'system'
+      ? systemNotifications
+      : channel === 'requests'
+      ? requestNotifications
+      : (roleNotifications || []);
+
+    const allIds = targetNotifs.map((n) => n && n.id).filter(Boolean);
     persistReadNotifIds(allIds);
+    const targetIdsSet = new Set(allIds.map(String));
+
     const updatedNotifs = (state.notifications || []).map((n) => {
+      if (!n || !targetIdsSet.has(String(n.id))) return n;
       const existingReadBy = Array.isArray(n.readBy) ? [...n.readBy] : [];
       const existingReadByBranches = Array.isArray(n.readByBranches) ? [...n.readByBranches] : [];
       const existingReadByEmployees = Array.isArray(n.readByEmployees) ? [...n.readByEmployees] : [];
@@ -386,12 +421,18 @@ export function NotificationProvider({ children }) {
       return { ...n, read: true };
     });
 
-    const updatedLate = (state.lateIncidents || []).map((inc) => ({ ...inc, read: true }));
-    const updatedRequests = (state.requests || []).map((r) => ({ ...r, read: true }));
-    const updatedState = { ...state, notifications: updatedNotifs, lateIncidents: updatedLate, requests: updatedRequests };
+    const updatedState = { ...state, notifications: updatedNotifs };
+    // لا تقم بتعديل الطلبات عند قراءة إشعارات النظام فقط
+    if (channel === 'all' || channel === 'requests') {
+      updatedState.requests = (state.requests || []).map((r) => ({ ...r, read: true }));
+    }
+    if (channel === 'all') {
+      updatedState.lateIncidents = (state.lateIncidents || []).map((inc) => ({ ...inc, read: true }));
+    }
+
     setState(updatedState);
     saveState(updatedState).catch(() => {});
-    showToast('✅ تم تحديد كافة الإشعارات كمقروءة');
+    showToast(channel === 'system' ? '✅ تم تحديد إشعارات النظام كمقروءة' : (channel === 'requests' ? '✅ تم تحديد إشعارات الطلبات كمقروءة' : '✅ تم تحديد كافة الإشعارات كمقروءة'));
   };
 
   const handleDeleteNotification = async (notifId) => {
@@ -428,12 +469,21 @@ export function NotificationProvider({ children }) {
     showToast('🗑️ تم حذف الإشعار');
   };
 
-  const handleClearReadNotifications = async () => {
+  const handleClearReadNotifications = async (channel = 'all') => {
     const nowIso = new Date().toISOString();
     const readIdsToRecord = [];
     const tombstoneIds = [];
 
+    const targetNotifs = channel === 'system'
+      ? systemNotifications
+      : channel === 'requests'
+      ? requestNotifications
+      : (roleNotifications || []);
+
+    const targetIdSet = new Set(targetNotifs.map((n) => n && String(n.id)).filter(Boolean));
+
     (state.notifications || []).forEach((n) => {
+      if (!n || !targetIdSet.has(String(n.id))) return;
       const isRead = (authRole === 'admin' || authRole === 'owner')
         ? isNotificationReadForAdmin(n)
         : (authRole === 'branch' && currentBranch)
@@ -476,6 +526,10 @@ export function NotificationProvider({ children }) {
     bylawsCount,
     resignationCount,
     notifications: roleNotifications,
+    systemNotifications,
+    requestNotifications,
+    unreadSystemCount,
+    unreadRequestCount,
     handleMarkNotificationRead,
     handleMarkAllNotificationsRead,
     handleDeleteNotification,

@@ -819,22 +819,40 @@ export default function ElectronicKioskView({
     };
 
     if (setState) {
-      setState(finalState);
+      try {
+        setState(finalState);
+      } catch (err) {
+        console.error('[Kiosk Photo Attendance] setState error:', err);
+      }
     }
     if (saveState) {
-      saveState(finalState).catch(err => console.error('[Kiosk Photo Attendance] Save error:', err));
-    }
-    if (submitRequest) {
-      submitRequest(requestData);
+      try {
+        saveState(finalState).catch(err => console.error('[Kiosk Photo Attendance] Save error:', err));
+      } catch (err) {
+        console.error('[Kiosk Photo Attendance] saveState error:', err);
+      }
     }
 
-    // ⚡ إرسال ذري فوري للسيرفر السحابي + إدراج في صندوق الإرسال التزايدي الموثوق
-    apiSubmitRequestAtomic(requestData, newNotif).catch(err => {
-      console.warn('[Kiosk Photo Attendance] Atomic request submission warning:', err);
-    });
-    enqueueNewRequest(requestData, effectiveBranchId).catch(err => {
-      console.warn('[Kiosk Photo Attendance] Outbox enqueue warning:', err);
-    });
+    // ⚡ بدء أو إنهاء الوردية فورياً بغض النظر عن إرسال الطلب أو حالة الشبكة
+    try {
+      if (submitRequest) {
+        submitRequest(requestData);
+      }
+    } catch (reqErr) {
+      console.warn('[Kiosk Photo Attendance] submitRequest warning:', reqErr);
+    }
+
+    try {
+      // ⚡ إرسال ذري فوري للسيرفر السحابي + إدراج في صندوق الإرسال التزايدي الموثوق
+      apiSubmitRequestAtomic(requestData, newNotif).catch(err => {
+        console.warn('[Kiosk Photo Attendance] Atomic request submission warning:', err);
+      });
+      enqueueNewRequest(requestData, effectiveBranchId).catch(err => {
+        console.warn('[Kiosk Photo Attendance] Outbox enqueue warning:', err);
+      });
+    } catch (netErr) {
+      console.warn('[Kiosk Photo Attendance] Network dispatch warning:', netErr);
+    }
 
     // ⚡ 4. المهام الخلفية المستقلة تماماً (رفع Drive وإشعارات Gmail)
     (async () => {

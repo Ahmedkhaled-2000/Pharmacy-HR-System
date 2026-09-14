@@ -130,14 +130,16 @@ export default function PayslipPrintModal({
 
   // Prepared mapped shifts for print helper
   const mappedShiftsForPrint = empShifts.map((s) => {
-    const effHours = getEffectiveShiftHours(s, state);
+    const isRejectedPhoto = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
+    const effHours = isRejectedPhoto ? 0 : getEffectiveShiftHours(s, state);
     const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
     return {
       ...s,
       dayName: arabicWeekday(s.date),
       hours: effHours,
       regularHours: effHours,
-      hasPermission: hasPerm
+      hasPermission: hasPerm,
+      isRejectedPhoto
     };
   });
 
@@ -509,7 +511,8 @@ export default function PayslipPrintModal({
   // Shifts
   (empShifts || []).forEach((s) => {
     const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
-    const effHours = getEffectiveShiftHours(s, state);
+    const isRejectedPhoto = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
+    const effHours = isRejectedPhoto ? 0 : getEffectiveShiftHours(s, state);
     const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
     const daySched = getEmployeeDaySchedule(emp.id, s.date, state);
     const isSwapped = daySched && daySched.isSwapped;
@@ -520,13 +523,18 @@ export default function PayslipPrintModal({
       type: 'shift',
       dayName: arabicWeekday(s.date),
       hasPerm,
+      isRejectedPhoto,
       timeIn: s.timeIn || '—',
       timeOut: s.timeOut || '—',
       breakHours: s.breakHours || 0,
       effHours: effHours,
       earnings: effHours * shiftRate,
       isSwapped,
-      badge: isSwapped ? (
+      badge: isRejectedPhoto ? (
+        <span style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '9px', display: 'inline-block' }}>
+          ❌ تم رفض بصمة هذا اليوم بسبب رفض الصورة
+        </span>
+      ) : isSwapped ? (
         <span style={{ background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '9px' }}>
           🔄 وردية متبدلة {daySched.swappedWithName ? `(بديل عن ${daySched.swappedWithName})` : ''}
         </span>
@@ -1130,20 +1138,26 @@ export default function PayslipPrintModal({
                           </thead>
                           <tbody>
                             {bShifts.map((s, sIdx) => {
-                              const effHours = getEffectiveShiftHours(s, state);
+                              const isRej = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
+                              const effHours = isRej ? 0 : getEffectiveShiftHours(s, state);
                               const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
                               return (
-                                <tr key={s.id || sIdx} style={{ background: hasPerm ? '#fefce8' : (sIdx % 2 === 0 ? '#fff' : '#f8fafc') }}>
+                                <tr key={s.id || sIdx} style={{ background: isRej ? '#fef2f2' : (hasPerm ? '#fefce8' : (sIdx % 2 === 0 ? '#fff' : '#f8fafc')) }}>
                                   <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{sIdx + 1}</td>
                                   <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>
                                     {arabicWeekday(s.date)} {s.date}
                                     {hasPerm && <span style={{ display: 'block', color: '#b45309', fontSize: '9px' }}>⏰ إذن معتمد</span>}
+                                    {isRej && (
+                                      <span style={{ display: 'block', color: '#dc2626', fontSize: '9px', fontWeight: 'bold' }}>
+                                        ❌ تم رفض بصمة هذا اليوم بسبب رفض الصورة
+                                      </span>
+                                    )}
                                   </td>
-                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#16a34a' }}>{s.timeIn || '—'}</td>
-                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#dc2626' }}>{s.timeOut || '—'}</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: isRej ? '#94a3b8' : '#16a34a', textDecoration: isRej ? 'line-through' : 'none' }}>{s.timeIn || '—'}</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: isRej ? '#94a3b8' : '#dc2626', textDecoration: isRej ? 'line-through' : 'none' }}>{s.timeOut || '—'}</td>
                                   <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{fmt(s.breakHours)} س</td>
-                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{fmt(effHours)} س</td>
-                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#0f766e' }}>{fmt(effHours * bRate)} ج.م</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: isRej ? '#dc2626' : 'inherit' }}>{isRej ? '0 س (غير محتسبة)' : `${fmt(effHours)} س`}</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: isRej ? '#dc2626' : '#0f766e' }}>{isRej ? '0.00 ج.م' : `${fmt(effHours * bRate)} ج.م`}</td>
                                 </tr>
                               );
                             })}
@@ -1203,19 +1217,20 @@ export default function PayslipPrintModal({
                     ) : (
                       unifiedTableRows.map((item, idx) => {
                         if (item.type === 'shift') {
+                          const isRej = item.isRejectedPhoto;
                           return (
-                            <tr key={item.id || idx} style={{ background: item.hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc') }}>
+                            <tr key={item.id || idx} style={{ background: isRej ? '#fef2f2' : (item.hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc')) }}>
                               <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{idx + 1}</td>
                               <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>
                                 {item.dayName} {item.date}
                                 {item.hasPerm && <span style={{ display: 'block', color: '#b45309', fontSize: '9px' }}>⏰ إذن معتمد</span>}
                                 {item.badge && <span style={{ display: 'block', marginTop: '2px' }}>{item.badge}</span>}
                               </td>
-                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#16a34a' }}>{item.timeIn}</td>
-                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#dc2626' }}>{item.timeOut}</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: isRej ? '#94a3b8' : '#16a34a', textDecoration: isRej ? 'line-through' : 'none' }}>{item.timeIn}</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: isRej ? '#94a3b8' : '#dc2626', textDecoration: isRej ? 'line-through' : 'none' }}>{item.timeOut}</td>
                               <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{fmt(item.breakHours)} س</td>
-                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{fmt(item.effHours)} س</td>
-                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#0f766e' }}>{fmt(item.earnings)} ج.م</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: isRej ? '#dc2626' : 'inherit' }}>{isRej ? '0 س (غير محتسبة)' : `${fmt(item.effHours)} س`}</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: isRej ? '#dc2626' : '#0f766e' }}>{isRej ? '0.00 ج.م' : `${fmt(item.earnings)} ج.م`}</td>
                             </tr>
                           );
                         } else if (item.type === 'rest') {

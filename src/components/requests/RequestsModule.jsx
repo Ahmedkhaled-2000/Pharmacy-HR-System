@@ -254,6 +254,16 @@ export default function RequestsModule({
       // Resignations are managed exclusively in their dedicated module
       if (r.type === 'resignation' || r.type === 'withdraw' || r.type === 'resignation_request' || idStr.startsWith('res_')) return;
 
+      // Exclude auto-approved system penalties from the requests page (they are managed in bylaws tab)
+      const isAutoSystemPenalty =
+        (r.type === 'penalty' || r.type === 'late_penalty' || r.subType === 'lateness' || idStr.startsWith('req_late_inc_') || idStr.startsWith('req_inc_')) &&
+        (r.source === 'system' || r.source === 'late_penalty_engine' || r.subType === 'lateness' || idStr.startsWith('req_late_inc_') || r.adminApproved || r.status === 'approved');
+
+      // Preserve employee penalty objections (e.g. penalty_objection or obj_inc_...)
+      if (isAutoSystemPenalty && r.type !== 'penalty_objection' && !idStr.startsWith('obj_')) {
+        return;
+      }
+
       // Semantic deduplication for double submissions / rapid multi-clicks
       const empKey = String(r.employeeId || r.employeeCode || '');
       const typeKey = String(r.type || defaultType || 'gen');

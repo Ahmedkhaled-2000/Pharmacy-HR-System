@@ -996,3 +996,47 @@ export function getNotificationTabLabel(targetTab, role = 'admin') {
   return labels[tabKey] || 'القسم المطلوب 🔗';
 }
 
+/**
+ * التحقق مما إذا كان الإشعار يخص طلباً للموظف (إجازات، أذونات، سلف، بصمات، استقالات، إلخ)
+ * لفك ارتباطه تماماً عن إشعارات وتوجيهات وتنبيهات النظام
+ */
+export function isRequestNotification(n) {
+  if (!n) return false;
+  if (n.category === 'request' || n.isRequestNotification === true) return true;
+  if (n.category === 'system' || n.isSystemNotification === true) return false;
+
+  // استبعاد تنبيهات التأخير أو الانصراف المبكر التلقائية للنظام
+  const type = String(n.type || '').toLowerCase();
+  if (type === 'lateness_alert' || type === 'early_departure_alert' || type === 'system_alert' || type === 'admin_directive') {
+    return false;
+  }
+
+  // وجود requestId صريح يخص طلباً للموظف (وليس واقعة تأخير تلقائية)
+  if (n.requestId) {
+    const reqId = String(n.requestId);
+    if (!reqId.startsWith('req_late_inc_') && !reqId.startsWith('late_inc_')) {
+      return true;
+    }
+  }
+
+  const title = String(n.title || '');
+  const REQUEST_TYPES = [
+    'leave', 'leave_request', 'permission', 'permission_request',
+    'loan', 'advance', 'meds', 'credit_medicine', 'swap', 'shift_swap',
+    'resignation', 'resignation_request', 'biometric_verification',
+    'biometric_registration', 'biometric_reset', 'تأكيد بصمة الوجه',
+    'تأكيد بصمة اليد', 'manual_punch', 'punch_correction', 'penalty_objection',
+    'bonus_request', 'overtime', 'recruitment'
+  ];
+
+  if (REQUEST_TYPES.some((t) => type === t || type.startsWith(`${t}_`) || type.endsWith(`_${t}`))) {
+    return true;
+  }
+
+  if (title.startsWith('طلب ') || title.includes('طلب اعتماد') || title.includes('طلب إجازة') || title.includes('طلب سلفة') || title.includes('تظلم')) {
+    return true;
+  }
+
+  return false;
+}
+

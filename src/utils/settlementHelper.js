@@ -129,7 +129,7 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
       approvedOtHours,
       baseEarnings: baseEarn,
       overtimeEarnings: otEarn,
-      shiftCount: bShifts.length
+      shiftCount: bShifts.filter((s) => getEffectiveShiftHours(s, state) > 0).length
     });
   });
 
