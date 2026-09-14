@@ -904,8 +904,9 @@ export function useRequestsManager() {
           if (isTarget) {
             return {
               ...s,
-              status: 'cancelled',
-              isCancelled: true,
+              status: 'rejected_photo',
+              isRejectedPhoto: true,
+              isCancelled: false,
               isRejected: true,
               rejected: true,
               hours: 0,
@@ -915,10 +916,11 @@ export function useRequestsManager() {
               regularHours: 0,
               overtimeHours: 0,
               overtimeStatus: 'rejected',
-              statusLabel: 'ملغي ومرفوض من الإدارة',
+              statusLabel: 'مرفوضة (رفض الصورة)',
+              photoRejectionReason: `تم رفض البصمة بسبب رفض الصورة من ${rejecterTitle}`,
               rejectedBy: rejecterTitle,
               rejectedAt: new Date().toISOString(),
-              note: (s.note ? s.note + ' | ' : '') + `🚫 تم رفض توثيق البصمة بالصورة (${actionTitle}) من ${rejecterTitle}، وتم إلغاء الوردية وشطبها نهائياً وتصفير ساعاتها وأجرها.`
+              note: (s.note ? s.note + ' | ' : '') + `⚠️ تم رفض البصمة بسبب رفض الصورة (${actionTitle}) من ${rejecterTitle} - غير محتسبة في الأجور لحين اعتمادها يدوياً.`
             };
           }
           return s;

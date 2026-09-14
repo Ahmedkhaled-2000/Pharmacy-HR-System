@@ -65,17 +65,16 @@ export default function AttendancePunchesModal({
     source: activeShift.source || 'kiosk'
   } : null;
 
-  const rawMonthPunches = (state.shifts || []).filter(
-    (p) =>
-      p &&
-      p.status !== 'cancelled' &&
-      p.status !== 'rejected' &&
-      !p.isCancelled &&
-      !p.rejected &&
-      !(typeof p.statusLabel === 'string' && (p.statusLabel.includes('ملغي') || p.statusLabel.includes('مرفوض'))) &&
-      (String(p.employeeId) === String(employee.id) || String(p.employeeCode) === String(employee.code)) &&
-      activePeriodFilter(p.date)
-  );
+  const rawMonthPunches = (state.shifts || []).filter((p) => {
+    if (!p) return false;
+    if (p.status === 'cancelled' || p.isCancelled) return false;
+    const isRejectedPhoto = p.isRejectedPhoto || p.status === 'rejected_photo' || (typeof p.statusLabel === 'string' && p.statusLabel.includes('رفض الصورة'));
+    if (!isRejectedPhoto && (p.status === 'rejected' || p.rejected || (typeof p.statusLabel === 'string' && (p.statusLabel.includes('ملغي') || p.statusLabel.includes('مرفوض'))))) {
+      return false;
+    }
+    const isMatch = (String(p.employeeId) === String(employee.id) || String(p.employeeCode) === String(employee.code));
+    return isMatch && activePeriodFilter(p.date);
+  });
 
   const monthPunches = livePunch ? [livePunch, ...rawMonthPunches] : rawMonthPunches;
 
@@ -113,7 +112,7 @@ export default function AttendancePunchesModal({
 
   const totalEarned = monthPunches
     .reduce((acc, p) => {
-      const netH = parseFloat(p.hours || p.workHours || p.netHours || 8) || 0;
+      const netH = getEffectiveShiftHours(p, state);
       const rate = getBranchRate(p.branchId || employee.branchId);
       return acc + (netH * rate);
     }, 0)
@@ -336,6 +335,120 @@ export default function AttendancePunchesModal({
     }
   };
 
+  const handleApproveAndCalculateShift = async (punch) => {
+    if (!punch) return;
+    const performApproveAndCalculate = async () => {
+      const punchIdStr = String(punch.id || '');
+      const punchDate = punch.date || new Date().toISOString().slice(0, 10);
+      const inTime = punch.timeIn || punch.checkIn || punch.inTime || '09:00';
+      const outTime = punch.timeOut && punch.timeOut !== '—' && punch.timeOut !== '' ? (punch.timeOut || punch.checkOut || punch.outTime) : '17:00';
+
+      const inParts = inTime.split(':').map(Number);
+      const outParts = outTime.split(':').map(Number);
+      let diffMinutes = ((outParts[0] || 0) * 60 + (outParts[1] || 0)) - ((inParts[0] || 0) * 60 + (inParts[1] || 0));
+      if (diffMinutes <= 0) diffMinutes += 24 * 60;
+      const totalElapsed = diffMinutes / 60;
+      const bH = Math.max(0, parseFloat(punch.breakHours) || 0);
+      const netHours = Math.max(0, Math.round((totalElapsed - bH) * 100) / 100);
+      const schedHours = parseFloat(punch.scheduledHours || employee.workHoursPerDay) || 8;
+      const regularHours = Math.min(netHours, schedHours);
+      const overtimeHours = Math.max(0, Math.round((netHours - schedHours) * 100) / 100);
+
+      const updatedShifts = (state.shifts || []).map((s) => {
+        const isMatch = (punchIdStr && String(s.id) === punchIdStr) ||
+                        (punch.requestId && s.requestId === punch.requestId) ||
+                        (String(s.employeeId) === String(employee.id) && s.date === punchDate && s.timeIn === inTime);
+
+        if (isMatch) {
+          return {
+            ...s,
+            status: 'approved',
+            isRejectedPhoto: false,
+            isCancelled: false,
+            isRejected: false,
+            rejected: false,
+            timeIn: inTime,
+            timeOut: outTime,
+            hours: netHours,
+            actualWorkedHours: netHours,
+            netHours: netHours,
+            workHours: netHours,
+            regularHours: regularHours,
+            overtimeHours: overtimeHours,
+            overtimeStatus: overtimeHours > 0 ? 'approved' : 'none',
+            statusLabel: 'حضور معتمد (تم احتساب البصمة يدوياً بواسطة الإدارة)',
+            adminApproved: true,
+            approvedBy: 'الإدارة العليا',
+            approvedAt: new Date().toISOString(),
+            note: (s.note ? s.note + ' | ' : '') + '✅ تم احتساب البصمة واعتماد الوردية في نظام الأجور بواسطة الإدارة العليا',
+            notes: (s.notes ? s.notes + ' | ' : '') + '✅ تم احتساب البصمة واعتماد الوردية في نظام الأجور بواسطة الإدارة العليا',
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return s;
+      });
+
+      // أيضاً تحديث الطلب المرتبط في state.requests إن وجد ليصبح معتمداً
+      const updatedRequests = (state.requests || []).map((r) => {
+        if ((punch.requestId && r.id === punch.requestId) || (r.shiftId && (String(r.shiftId) === punchIdStr || r.shiftId === punch.id))) {
+          return {
+            ...r,
+            status: 'approved',
+            adminApproved: true,
+            resolvedAt: new Date().toISOString(),
+            adminNote: 'تم احتساب البصمة واعتماد الوردية في نظام الأجور بواسطة الإدارة العليا'
+          };
+        }
+        return r;
+      });
+
+      let updatedState = {
+        ...state,
+        shifts: updatedShifts,
+        requests: updatedRequests
+      };
+
+      // إعادة احتساب الجزاءات والتأخيرات تلقائياً
+      const recRes = recalculateEmployeeCycleLateness({
+        employeeId: employee.id,
+        state: updatedState,
+        payrollCycleId: punchDate.slice(0, 7)
+      });
+      updatedState = {
+        ...updatedState,
+        lateIncidents: recRes.incidents,
+        requests: recRes.updatedRequests
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      showToast?.(`✅ تم احتساب البصمة وتفعيل الوردية (${netHours} س) في نظام الأجور والرواتب بنجاح!`);
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockApproveManualPunches',
+        actionTitle: `احتساب وتفعيل بصمة الوردية للموظف (${employee.name})`,
+        actionDetails: `تفعيل وردية يوم ${punch.date || ''} (${punch.timeIn || ''} - ${punch.timeOut || ''}) في نظام الأجور والرواتب.`,
+        onExecute: performApproveAndCalculate
+      });
+      return;
+    }
+
+    const isConfirmed = await showConfirm({
+      title: 'احتساب وتفعيل البصمة في نظام الأجور',
+      message: `هل تريد اعتماد واحتساب وردية يوم ${punch.date} للموظف (${employee.name}) وتفعيل ساعاتها وأجرها في نظام الرواتب تلقائياً؟`,
+      confirmText: 'تأكيد واحتساب الوردية',
+      cancelText: 'إلغاء',
+      type: 'success',
+      icon: '✅'
+    });
+    if (isConfirmed) {
+      await performApproveAndCalculate();
+    }
+  };
+
   return (
     <div className="modal-backdrop">
       <div className="modal-content card" style={{ maxWidth: '1200px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
@@ -381,9 +494,9 @@ export default function AttendancePunchesModal({
 
               const bShiftsCount = bPunches.length;
               const bTotalBreak = bPunches.reduce((acc, p) => acc + (parseFloat(p.breakHours) || 0), 0).toFixed(2);
-              const bTotalWork = bPunches.reduce((acc, p) => acc + (parseFloat(p.hours) || parseFloat(p.workHours) || parseFloat(p.netHours) || 8), 0).toFixed(2);
+              const bTotalWork = bPunches.reduce((acc, p) => acc + (getEffectiveShiftHours(p, state) || 0), 0).toFixed(2);
               const bRate = getBranchRate(bId);
-              const bTotalEarned = bPunches.reduce((acc, p) => acc + ((parseFloat(p.hours) || parseFloat(p.workHours) || parseFloat(p.netHours) || 8) || 0) * bRate, 0).toFixed(2);
+              const bTotalEarned = bPunches.reduce((acc, p) => acc + (getEffectiveShiftHours(p, state) || 0) * bRate, 0).toFixed(2);
 
               return (
                 <div key={bId} style={{ marginBottom: '24px', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
@@ -427,20 +540,26 @@ export default function AttendancePunchesModal({
                             const pDate = new Date(p.date || p.timestamp || Date.now());
                             const dayName = pDate.toLocaleDateString('ar-EG', { weekday: 'long' });
                             const dateStr = p.date || pDate.toISOString().slice(0, 10);
+                            const isRejectedPhoto = p.isRejectedPhoto || p.status === 'rejected_photo' || (typeof p.statusLabel === 'string' && p.statusLabel.includes('رفض الصورة'));
                             const netH = getEffectiveShiftHours(p, state).toFixed(2);
                             const breakH = p.breakHours ? parseFloat(p.breakHours).toFixed(2) : null;
-                            const shiftEarned = (parseFloat(netH) * bRate).toFixed(2);
+                            const shiftEarned = isRejectedPhoto ? '0.00' : (parseFloat(netH) * bRate).toFixed(2);
 
                             const perm = isApprovedPermissionForDate(employee?.id, dateStr, state);
                             const hasPerm = p.hasApprovedPermission || !!perm;
                             const permHours = p.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
 
                             return (
-                              <tr key={p.id || index} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
+                              <tr key={p.id || index} style={{ background: isRejectedPhoto ? '#fff1f2' : (hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent') }}>
                                 <td style={{ textAlign: 'center', fontWeight: '700' }}>{index + 1}</td>
                                 <td style={{ fontWeight: '700' }}>
                                   {dateStr}
-                                  {hasPerm && (
+                                  {isRejectedPhoto && (
+                                    <span style={{ display: 'block', marginTop: '3px', background: '#fee2e2', color: '#991b1b', border: '1px solid #f87171', padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                      ⚠️ تم رفض البصمة بسبب رفض الصورة
+                                    </span>
+                                  )}
+                                  {hasPerm && !isRejectedPhoto && (
                                     <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
                                       ⏰ معدلة بإذن (+{permHours} س)
                                     </span>
@@ -471,25 +590,46 @@ export default function AttendancePunchesModal({
                                 <td style={{ textAlign: 'center' }}>
                                   {breakH ? <span style={{ background: '#fef3c7', color: '#b45309', padding: '4px 8px', borderRadius: '10px', fontWeight: '700', fontSize: '12px' }}>{breakH} س</span> : <span style={{ color: 'var(--muted)' }}>—</span>}
                                 </td>
-                                 <td style={{ textAlign: 'center', color: '#0d9488', fontWeight: '800' }}>
-                                   {netH} ساعة
-                                   {hasPerm && permHours > 0 && (
-                                     <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
-                                       (فعلي: {(Math.max(0, parseFloat(netH) - permHours)).toFixed(2)} س + إذن: {permHours} س)
-                                     </div>
-                                   )}
-                                 </td>
-                                <td style={{ textAlign: 'center', color: '#16a34a', fontWeight: '700' }}>
-                                  {shiftEarned} ج.م
+                                <td style={{ textAlign: 'center', color: isRejectedPhoto ? '#dc2626' : '#0d9488', fontWeight: '800' }}>
+                                  {isRejectedPhoto ? (
+                                    <div>
+                                      <span style={{ textDecoration: 'line-through', opacity: 0.65 }}>0.00 ساعة</span>
+                                      <div style={{ fontSize: '10.5px', color: '#b91c1c', fontWeight: 800 }}>مستبعدة من الأجور</div>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      {netH} ساعة
+                                      {hasPerm && permHours > 0 && (
+                                        <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
+                                          (فعلي: {(Math.max(0, parseFloat(netH) - permHours)).toFixed(2)} س + إذن: {permHours} س)
+                                        </div>
+                                      )}
+                                    </>
+                                  )}
                                 </td>
-                                <td style={{ fontSize: '12px', color: hasPerm ? '#047857' : 'var(--muted)' }}>
-                                  {hasPerm ? (
+                                <td style={{ textAlign: 'center', color: isRejectedPhoto ? '#dc2626' : '#16a34a', fontWeight: '700' }}>
+                                  {isRejectedPhoto ? (
+                                    <div>
+                                      <span style={{ fontWeight: 800 }}>0.00 ج.م</span>
+                                      <div style={{ fontSize: '10px', color: '#dc2626' }}>ملغاة من الراتب</div>
+                                    </div>
+                                  ) : (
+                                    `${shiftEarned} ج.م`
+                                  )}
+                                </td>
+                                <td style={{ fontSize: '12px', color: isRejectedPhoto ? '#b91c1c' : (hasPerm ? '#047857' : 'var(--muted)') }}>
+                                  {isRejectedPhoto ? (
+                                    <div>
+                                      <strong style={{ color: '#dc2626', display: 'block' }}>⚠️ تم رفض البصمة بسبب رفض الصورة</strong>
+                                      <span style={{ fontSize: '11px', color: '#7f1d1d' }}>{p.notes || p.note || 'مستبعدة تماماً من احتساب الأجور'}</span>
+                                    </div>
+                                  ) : hasPerm ? (
                                     <div>
                                       <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
                                       {p.notes && !p.notes.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{p.notes}</div>}
                                     </div>
                                   ) : (
-                                    p.notes || p.statusLabel || 'تسجيل بصمة عادية'
+                                    p.notes || p.note || p.statusLabel || 'تسجيل بصمة عادية'
                                   )}
                                 </td>
                                 <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
@@ -498,7 +638,17 @@ export default function AttendancePunchesModal({
                                       🟢 جاري الآن
                                     </span>
                                   ) : (
-                                    <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                                    <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
+                                      {isRejectedPhoto && (
+                                        <button
+                                          className="btn btn-success"
+                                          style={{ padding: '3px 8px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                          title="احتساب وتفعيل البصمة في نظام الأجور"
+                                          onClick={() => handleApproveAndCalculateShift(p)}
+                                        >
+                                          ✅ احتساب البصمة
+                                        </button>
+                                      )}
                                       <button
                                         className="btn btn-ghost"
                                         style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
@@ -575,21 +725,27 @@ export default function AttendancePunchesModal({
                     const pDate = new Date(p.date || p.timestamp || Date.now());
                     const dayName = pDate.toLocaleDateString('ar-EG', { weekday: 'long' });
                     const dateStr = p.date || pDate.toISOString().slice(0, 10);
+                    const isRejectedPhoto = p.isRejectedPhoto || p.status === 'rejected_photo' || (typeof p.statusLabel === 'string' && p.statusLabel.includes('رفض الصورة'));
                     const netH = getEffectiveShiftHours(p, state).toFixed(2);
                     const breakH = p.breakHours ? parseFloat(p.breakHours).toFixed(2) : null;
                     const shiftRate = getBranchRate(p.branchId || employee.branchId);
-                    const shiftEarned = (parseFloat(netH) * shiftRate).toFixed(2);
+                    const shiftEarned = isRejectedPhoto ? '0.00' : (parseFloat(netH) * shiftRate).toFixed(2);
 
                     const perm = isApprovedPermissionForDate(employee?.id, dateStr, state);
                     const hasPerm = p.hasApprovedPermission || !!perm;
                     const permHours = p.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
 
                     return (
-                      <tr key={p.id || index} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
+                      <tr key={p.id || index} style={{ background: isRejectedPhoto ? '#fff1f2' : (hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent') }}>
                         <td style={{ textAlign: 'center', fontWeight: '700' }}>{index + 1}</td>
                         <td style={{ fontWeight: '700' }}>
                           {dateStr}
-                          {hasPerm && (
+                          {isRejectedPhoto && (
+                            <span style={{ display: 'block', marginTop: '3px', background: '#fee2e2', color: '#991b1b', border: '1px solid #f87171', padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                              ⚠️ تم رفض البصمة بسبب رفض الصورة
+                            </span>
+                          )}
+                          {hasPerm && !isRejectedPhoto && (
                             <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
                               ⏰ معدلة بإذن (+{permHours} س)
                             </span>
@@ -657,29 +813,50 @@ export default function AttendancePunchesModal({
                         </td>
 
                         {/* Net Hours */}
-                        <td style={{ textAlign: 'center', color: '#0d9488', fontWeight: '800' }}>
-                          {netH} ساعة
-                          {hasPerm && permHours > 0 && (
-                            <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
-                              (فعلي: {(Math.max(0, parseFloat(netH) - permHours)).toFixed(2)} س + إذن: {permHours} س)
+                        <td style={{ textAlign: 'center', color: isRejectedPhoto ? '#dc2626' : '#0d9488', fontWeight: '800' }}>
+                          {isRejectedPhoto ? (
+                            <div>
+                              <span style={{ textDecoration: 'line-through', opacity: 0.65 }}>0.00 ساعة</span>
+                              <div style={{ fontSize: '10.5px', color: '#b91c1c', fontWeight: 800 }}>مستبعدة من الأجور</div>
                             </div>
+                          ) : (
+                            <>
+                              {netH} ساعة
+                              {hasPerm && permHours > 0 && (
+                                <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
+                                  (فعلي: {(Math.max(0, parseFloat(netH) - permHours)).toFixed(2)} س + إذن: {permHours} س)
+                                </div>
+                              )}
+                            </>
                           )}
                         </td>
 
                         {/* Amount Due */}
-                        <td style={{ textAlign: 'center', color: '#16a34a', fontWeight: '700' }}>
-                          {shiftEarned} ج.م
+                        <td style={{ textAlign: 'center', color: isRejectedPhoto ? '#dc2626' : '#16a34a', fontWeight: '700' }}>
+                          {isRejectedPhoto ? (
+                            <div>
+                              <span style={{ fontWeight: 800 }}>0.00 ج.م</span>
+                              <div style={{ fontSize: '10px', color: '#dc2626' }}>ملغاة من الراتب</div>
+                            </div>
+                          ) : (
+                            `${shiftEarned} ج.م`
+                          )}
                         </td>
 
                         {/* Notes */}
-                        <td style={{ fontSize: '12px', color: hasPerm ? '#047857' : 'var(--muted)' }}>
-                          {hasPerm ? (
+                        <td style={{ fontSize: '12px', color: isRejectedPhoto ? '#b91c1c' : (hasPerm ? '#047857' : 'var(--muted)') }}>
+                          {isRejectedPhoto ? (
+                            <div>
+                              <strong style={{ color: '#dc2626', display: 'block' }}>⚠️ تم رفض البصمة بسبب رفض الصورة</strong>
+                              <span style={{ fontSize: '11px', color: '#7f1d1d' }}>{p.notes || p.note || 'مستبعدة تماماً من احتساب الأجور'}</span>
+                            </div>
+                          ) : hasPerm ? (
                             <div>
                               <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
                               {p.notes && !p.notes.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{p.notes}</div>}
                             </div>
                           ) : (
-                            p.notes || p.statusLabel || 'تسجيل بصمة عادية'
+                            p.notes || p.note || p.statusLabel || 'تسجيل بصمة عادية'
                           )}
                         </td>
 
@@ -690,7 +867,17 @@ export default function AttendancePunchesModal({
                               🟢 جاري الآن
                             </span>
                           ) : (
-                            <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                            <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
+                              {isRejectedPhoto && (
+                                <button
+                                  className="btn btn-success"
+                                  style={{ padding: '3px 8px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                  title="احتساب وتفعيل البصمة في نظام الأجور"
+                                  onClick={() => handleApproveAndCalculateShift(p)}
+                                >
+                                  ✅ احتساب البصمة
+                                </button>
+                              )}
                               <button
                                 className="btn btn-ghost"
                                 style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}

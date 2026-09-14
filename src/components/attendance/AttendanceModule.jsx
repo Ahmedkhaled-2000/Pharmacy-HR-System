@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
-import { recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
+import { recalculateEmployeeCycleLateness, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount } from '../../utils/formatters';
 
 export default function AttendanceModule({
@@ -412,6 +412,7 @@ export default function AttendanceModule({
               filteredEmployees.map((emp) => {
                 const b = branches.find((br) => br.id === emp.branchId);
                 const empPunches = (state.shifts || []).filter((p) => {
+                  if (p.status === 'cancelled' || p.isCancelled) return false;
                   const isMatch = String(p.employeeId) === String(emp.id) || String(p.employeeCode) === String(emp.code);
                   return isMatch && activePeriodFilter(p.date);
                 });
@@ -423,9 +424,10 @@ export default function AttendanceModule({
                   ? Math.max(0, Math.round(((Date.now() - (activeShift.startEpoch || Date.now())) / 3600000) * 10) / 10)
                   : 0;
 
-                const totalCompletedHours = empPunches.reduce((acc, p) => acc + (parseFloat(p.hours) || parseFloat(p.workHours) || 8), 0);
+                const validPunches = empPunches.filter((p) => !p.isRejectedPhoto && p.status !== 'rejected_photo');
+                const totalCompletedHours = validPunches.reduce((acc, p) => acc + (getEffectiveShiftHours(p, state) || 0), 0);
                 const totalHours = (totalCompletedHours + liveElapsedHours).toFixed(1);
-                const totalShiftsCount = empPunches.length + (hasLiveShift ? 1 : 0);
+                const totalShiftsCount = validPunches.length + (hasLiveShift ? 1 : 0);
                 const manualCount = getEmployeeManualPunchesCount(emp.id, state, activePeriodFilter);
 
                 return (

@@ -745,6 +745,8 @@ export function getEffectiveShiftHours(shift, state) {
   if (
     shift.status === 'cancelled' ||
     shift.status === 'rejected' ||
+    shift.status === 'rejected_photo' ||
+    shift.isRejectedPhoto ||
     shift.isCancelled ||
     shift.rejected ||
     (typeof shift.statusLabel === 'string' && (shift.statusLabel.includes('ملغي') || shift.statusLabel.includes('مرفوض')))

@@ -860,6 +860,8 @@ export function DataProvider({ children, showToast = () => {} }) {
       if (!daySchedule || daySchedule.type === 'off' || daySchedule.isOff) continue;
       const hasShift = (state.shifts || []).some(s => {
         if (!s || s.date !== dateStr) return false;
+        if (s.isCancelled || s.status === 'cancelled' || s.isRejectedPhoto || s.status === 'rejected_photo') return false;
+        if (typeof s.statusLabel === 'string' && (s.statusLabel.includes('ملغي') || s.statusLabel.includes('مرفوض'))) return false;
         const matchEmp = String(s.employeeId) === empIdStr || (empCodeStr && String(s.employeeCode || s.employeeId) === empCodeStr);
         if (!matchEmp) return false;
         const effHours = getEffectiveShiftHours(s, state);
@@ -977,7 +979,7 @@ export function DataProvider({ children, showToast = () => {} }) {
       // حصر ورديات هذا الفرع بدقة بالغة وبدون تسريب ورديات الفروع الأخرى (واستبعاد أي ورديات ملغاة أو مرفوضة نهائياً)
       const bShifts = (state.shifts || []).filter(s => {
         if (!s) return false;
-        if (s.status === 'cancelled' || s.status === 'rejected' || s.isCancelled || s.rejected) return false;
+        if (s.status === 'cancelled' || s.status === 'rejected' || s.status === 'rejected_photo' || s.isRejectedPhoto || s.isCancelled || s.rejected) return false;
         if (typeof s.statusLabel === 'string' && (s.statusLabel.includes('ملغي') || s.statusLabel.includes('مرفوض'))) return false;
         if (String(s.employeeId) !== String(empId)) return false;
         if (!effectiveFilterFn(s.date)) return false;
@@ -1132,6 +1134,8 @@ export function DataProvider({ children, showToast = () => {} }) {
       s &&
       s.status !== 'cancelled' &&
       s.status !== 'rejected' &&
+      s.status !== 'rejected_photo' &&
+      !s.isRejectedPhoto &&
       !s.isCancelled &&
       !s.rejected &&
       !(typeof s.statusLabel === 'string' && (s.statusLabel.includes('ملغي') || s.statusLabel.includes('مرفوض'))) &&

@@ -1601,8 +1601,9 @@ export default function RequestsModule({
         if (isTarget) {
           return {
             ...s,
-            status: 'cancelled',
-            isCancelled: true,
+            status: 'rejected_photo',
+            isRejectedPhoto: true,
+            isCancelled: false,
             isRejected: true,
             rejected: true,
             hours: 0,
@@ -1612,10 +1613,11 @@ export default function RequestsModule({
             regularHours: 0,
             overtimeHours: 0,
             overtimeStatus: 'rejected',
-            statusLabel: 'ملغي ومرفوض من الإدارة',
+            statusLabel: 'مرفوضة (رفض الصورة)',
+            photoRejectionReason: 'تم رفض البصمة بسبب رفض الصورة من قِبل الإدارة العليا',
             rejectedBy: 'الإدارة العليا',
             rejectedAt: new Date().toISOString(),
-            note: (s.note ? s.note + ' | ' : '') + `🚫 تم رفض توثيق البصمة بالصورة (${actionTitle}) من قِبل الإدارة العليا، وتم إلغاء الوردية وشطبها نهائياً وتصفير ساعاتها وأجرها.`
+            note: (s.note ? s.note + ' | ' : '') + `⚠️ تم رفض البصمة بسبب رفض الصورة (${actionTitle}) من قِبل الإدارة العليا - غير محتسبة في الأجور لحين اعتمادها يدوياً.`
           };
         }
         return s;
