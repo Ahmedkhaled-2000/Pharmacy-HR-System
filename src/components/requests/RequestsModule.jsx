@@ -1573,6 +1573,55 @@ export default function RequestsModule({
     }
 
     let updatedShifts = [...(state.shifts || [])];
+    let updatedActiveShifts = { ...(state.activeShifts || {}) };
+
+    if (
+      rejectedTargetReq &&
+      (rejectedTargetReq.type === 'biometric_verification' ||
+       rejectedTargetReq.type === 'تأكيد بصمة الوجه' ||
+       rejectedTargetReq.type === 'تأكيد بصمة اليد' ||
+       rejectedTargetReq.requestType === 'biometric_verification')
+    ) {
+      const empId = rejectedTargetReq.employeeId;
+      const reqDate = rejectedTargetReq.date || (rejectedTargetReq.createdAt ? rejectedTargetReq.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
+      const targetAction = rejectedTargetReq.targetAction || rejectedTargetReq.actionType || 'shift_start';
+      const actionTitle = targetAction === 'shift_end' ? 'انصراف' : 'حضور';
+
+      // 1. حذف الوردية النشطة نهائياً بكلا المعرفين
+      delete updatedActiveShifts[empId];
+      delete updatedActiveShifts[String(empId)];
+
+      // 2. إلغاء وتصفير الوردية بالكامل من سجل الورديات وشطبها نهائياً
+      updatedShifts = updatedShifts.map((s) => {
+        const isTarget =
+          (rejectedTargetReq.shiftId && s.id === rejectedTargetReq.shiftId) ||
+          (s.requestId && (s.requestId === rejectedTargetReq.id || s.requestId === reqId)) ||
+          (String(s.employeeId) === String(empId) && s.date === reqDate && (s.punchType === 'photo_attendance' || s.requestId === rejectedTargetReq.id));
+
+        if (isTarget) {
+          return {
+            ...s,
+            status: 'cancelled',
+            isCancelled: true,
+            isRejected: true,
+            rejected: true,
+            hours: 0,
+            actualWorkedHours: 0,
+            netHours: 0,
+            workHours: 0,
+            regularHours: 0,
+            overtimeHours: 0,
+            overtimeStatus: 'rejected',
+            statusLabel: 'ملغي ومرفوض من الإدارة',
+            rejectedBy: 'الإدارة العليا',
+            rejectedAt: new Date().toISOString(),
+            note: (s.note ? s.note + ' | ' : '') + `🚫 تم رفض توثيق البصمة بالصورة (${actionTitle}) من قِبل الإدارة العليا، وتم إلغاء الوردية وشطبها نهائياً وتصفير ساعاتها وأجرها.`
+          };
+        }
+        return s;
+      });
+    }
+
     if (rejectedTargetReq && rejectedTargetReq.type === 'overtime') {
       updatedShifts = updatedShifts.map((s) => {
         if (s.id === rejectedTargetReq.shiftId || (String(s.employeeId) === String(rejectedTargetReq.employeeId) && s.date === rejectedTargetReq.date)) {
@@ -1630,9 +1679,11 @@ export default function RequestsModule({
       action: 'rejected',
       approverRole: 'admin',
       title: rejectedTargetReq?.type === 'penalty_objection' ? '❌ تم رفض التظلم وتثبيت الجزاء' :
+             (rejectedTargetReq?.type === 'biometric_verification' || rejectedTargetReq?.type === 'تأكيد بصمة الوجه' || rejectedTargetReq?.type === 'تأكيد بصمة اليد' || rejectedTargetReq?.requestType === 'biometric_verification') ? '❌ تم رفض توثيق البصمة بالصورة وإلغاء الوردية' :
              (rejectedTargetReq?.type === 'biometric_registration' ? '❌ تم رفض طلب اعتماد البصمة' :
              (rejectedTargetReq?.type === 'biometric_reset' ? '❌ تم رفض طلب إعادة تسجيل البصمة' : undefined)),
       message: rejectedTargetReq?.type === 'penalty_objection' ? 'تمت دراسة التظلم ورؤي عدم كفاية المبررات وتثبيت القرار التأديبي' :
+               (rejectedTargetReq?.type === 'biometric_verification' || rejectedTargetReq?.type === 'تأكيد بصمة الوجه' || rejectedTargetReq?.type === 'تأكيد بصمة اليد' || rejectedTargetReq?.requestType === 'biometric_verification') ? 'تم رفض طلب اعتماد البصمة بالصورة من قِبل الإدارة، وبناءً عليه تم إلغاء الوردية وشطبها نهائياً من سجل البصمات ونظام الأجور.' :
                (rejectedTargetReq?.type === 'biometric_registration' ? 'تم رفض اعتماد البصمة الملتقطة، يرجى إعادة تسجيل بصمة أوضح وفق الإرشادات' :
                (rejectedTargetReq?.type === 'biometric_reset' ? 'تم رفض طلب مسح البصمة من قِبل الإدارة العليا' : undefined)),
       details: rejectedTargetReq?.reason || rejectedTargetReq?.details || ''
@@ -1651,6 +1702,7 @@ export default function RequestsModule({
       lateIncidents: updatedLateIncidents,
       adjustments: updatedAdjustments,
       shifts: updatedShifts,
+      activeShifts: updatedActiveShifts,
       leaveRequests: updatedLeaveRequests,
       permissionRequests: updatedPermRequests,
       loans: updatedLoans,
@@ -1658,6 +1710,7 @@ export default function RequestsModule({
       resignationRequests: updatedResignations,
       notifications: updatedNotifications
     };
+
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
       enqueueRequestDecision({

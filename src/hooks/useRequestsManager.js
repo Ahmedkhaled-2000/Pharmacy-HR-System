@@ -883,41 +883,46 @@ export function useRequestsManager() {
       let updatedShifts = [...(state.shifts || [])];
       let updatedActiveShifts = { ...(state.activeShifts || {}) };
 
-      if (targetReq && (targetReq.type === 'biometric_verification' || targetReq.type === 'تأكيد بصمة الوجه' || targetReq.type === 'تأكيد بصمة اليد')) {
+      if (targetReq && (targetReq.type === 'biometric_verification' || targetReq.type === 'تأكيد بصمة الوجه' || targetReq.type === 'تأكيد بصمة اليد' || targetReq.requestType === 'biometric_verification')) {
         const empId = targetReq.employeeId;
         const reqDate = targetReq.date || (targetReq.createdAt ? targetReq.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
         const rejecterTitle = role === 'admin' ? 'الإدارة العليا' : 'مدير الفرع';
+        const targetAction = targetReq.targetAction || targetReq.actionType || 'shift_start';
+        const actionTitle = targetAction === 'shift_end' ? 'انصراف' : 'حضور';
 
-        if (targetReq.targetAction === 'shift_start' || targetReq.actionType === 'shift_start') {
-          if (updatedActiveShifts[empId]) {
-            delete updatedActiveShifts[empId];
+        // 1. حذف الوردية النشطة نهائياً بكلا المعرفين (سواء كان الرفض لحضور أو انصراف)
+        delete updatedActiveShifts[empId];
+        delete updatedActiveShifts[String(empId)];
+
+        // 2. إلغاء وتصفير الوردية بالكامل من سجل الورديات وشطبها نهائياً
+        updatedShifts = updatedShifts.map((s) => {
+          const isTarget =
+            (targetReq.shiftId && s.id === targetReq.shiftId) ||
+            (s.requestId && (s.requestId === targetReq.id || s.requestId === requestId)) ||
+            (String(s.employeeId) === String(empId) && s.date === reqDate && (s.punchType === 'photo_attendance' || s.requestId === targetReq.id));
+
+          if (isTarget) {
+            return {
+              ...s,
+              status: 'cancelled',
+              isCancelled: true,
+              isRejected: true,
+              rejected: true,
+              hours: 0,
+              actualWorkedHours: 0,
+              netHours: 0,
+              workHours: 0,
+              regularHours: 0,
+              overtimeHours: 0,
+              overtimeStatus: 'rejected',
+              statusLabel: 'ملغي ومرفوض من الإدارة',
+              rejectedBy: rejecterTitle,
+              rejectedAt: new Date().toISOString(),
+              note: (s.note ? s.note + ' | ' : '') + `🚫 تم رفض توثيق البصمة بالصورة (${actionTitle}) من ${rejecterTitle}، وتم إلغاء الوردية وشطبها نهائياً وتصفير ساعاتها وأجرها.`
+            };
           }
-          updatedShifts = updatedShifts.map(s => {
-            if (String(s.employeeId) === String(empId) && (s.date === reqDate || s.id === targetReq.shiftId)) {
-              return {
-                ...s,
-                statusLabel: 'حضور بالصورة (مرفوض)',
-                rejectedBy: rejecterTitle,
-                rejectedAt: new Date().toISOString(),
-                note: (s.note ? s.note + ' | ' : '') + `❌ تم رفض توثيق الحضور بالصورة من ${rejecterTitle}`
-              };
-            }
-            return s;
-          });
-        } else if (targetReq.targetAction === 'shift_end' || targetReq.actionType === 'shift_end') {
-          updatedShifts = updatedShifts.map(s => {
-            if (String(s.employeeId) === String(empId) && (s.date === reqDate || s.id === targetReq.shiftId)) {
-              return {
-                ...s,
-                statusLabel: 'انصراف بالصورة (مرفوض)',
-                rejectedBy: rejecterTitle,
-                rejectedAt: new Date().toISOString(),
-                note: (s.note ? s.note + ' | ' : '') + `❌ تم رفض توثيق الانصراف بالصورة من ${rejecterTitle}`
-              };
-            }
-            return s;
-          });
-        }
+          return s;
+        });
       }
 
       if (targetReq && targetReq.type === 'overtime') {
@@ -952,11 +957,22 @@ export function useRequestsManager() {
       );
 
       const updatedLoans = (state.loans || []).map((l) =>
-        l.id === requestId || l.requestId === requestId ? { ...l, status: 'rejected', adminApproved: false } : l
+        l.id === requestId || l.requestId === requestId || (targetReq && String(l.employeeId) === String(targetReq.employeeId) && (l.amount === targetReq.amount || l.totalAmount === targetReq.totalAmount))
+          ? { ...l, status: 'rejected', adminApproved: false, rejectedAt: new Date().toISOString() }
+          : l
       );
 
       const updatedResignations = (state.resignationRequests || []).map((r) =>
-        r.id === requestId ? { ...r, status: 'rejected', adminStatus: 'rejected', adminApproved: false } : r
+        String(r.id) === String(requestId)
+          ? {
+              ...r,
+              status: 'rejected',
+              adminStatus: 'rejected',
+              adminApproved: false,
+              rejectedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            }
+          : r
       );
 
       // إذا تم رفض مقترح جزاء تأديبي كان قد تسبب في تعليق الموظف أو بصمته، يتم إعادة تنشيطه فورياً
@@ -991,12 +1007,15 @@ export function useRequestsManager() {
         }
       }
 
+      const isBio = targetReq && (targetReq.type === 'biometric_verification' || targetReq.type === 'تأكيد بصمة الوجه' || targetReq.type === 'تأكيد بصمة اليد' || targetReq.requestType === 'biometric_verification');
       const decisionNotif = createRequestDecisionNotification({
         requestId: targetReq?.id || requestId,
         employeeId: targetReq?.employeeId,
         type: targetReq?.type,
         action: 'rejected',
         approverRole: role,
+        title: isBio ? '❌ تم رفض توثيق البصمة بالصورة وإلغاء الوردية' : undefined,
+        message: isBio ? 'تم رفض طلب اعتماد البصمة بالصورة من قِبل الإدارة، وبناءً عليه تم إلغاء الوردية وشطبها نهائياً من سجل البصمات ونظام الأجور.' : undefined,
         details: targetReq?.reason || targetReq?.details || ''
       });
 

@@ -20,7 +20,7 @@ export default function RecruitmentHubModule({
   const branches = state?.branches || [];
 
   const [activeTab, setActiveTab] = useState('pipeline'); // 'pipeline' | 'vacancies' | 'waiting_list'
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('new'); // الافتراضي: الطلبات الجديدة
   const [searchQuery, setSearchQuery] = useState('');
   const [jobFilter, setJobFilter] = useState('all');
 
@@ -463,27 +463,39 @@ export default function RecruitmentHubModule({
         marginBottom: '20px'
       }}>
         {/* Total Applications */}
-        <div style={{
-          background: '#ffffff',
-          borderRadius: '16px',
-          border: '1px solid #e2e8f0',
-          padding: '16px 18px',
-          boxShadow: '0 2px 10px rgba(0, 0, 0, 0.02)'
-        }}>
+        <div 
+          onClick={() => { setActiveTab('pipeline'); setStatusFilter('all'); }}
+          title="عرض كافة الطلبات"
+          style={{
+            cursor: 'pointer',
+            background: '#ffffff',
+            borderRadius: '16px',
+            border: activeTab === 'pipeline' && statusFilter === 'all' ? '2px solid #0f172a' : '1px solid #e2e8f0',
+            padding: '16px 18px',
+            boxShadow: activeTab === 'pipeline' && statusFilter === 'all' ? '0 4px 14px rgba(15, 23, 42, 0.12)' : '0 2px 10px rgba(0, 0, 0, 0.02)',
+            transition: 'all 0.2s ease'
+          }}
+        >
           <div style={{ color: '#64748b', fontSize: '12.5px', fontWeight: 800 }}>📥 إجمالي الطلبات</div>
           <div style={{ fontSize: '26px', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
             {stats.total}
           </div>
         </div>
 
-        {/* New Applications */}
-        <div style={{
-          background: '#ffffff',
-          borderRadius: '16px',
-          border: '1.5px solid #bfdbfe',
-          padding: '16px 18px',
-          boxShadow: '0 2px 10px rgba(37, 99, 235, 0.04)'
-        }}>
+        {/* New Applications (الافتراضي) */}
+        <div 
+          onClick={() => { setActiveTab('pipeline'); setStatusFilter('new'); }}
+          title="تصفية: الطلبات الجديدة فقط"
+          style={{
+            cursor: 'pointer',
+            background: activeTab === 'pipeline' && statusFilter === 'new' ? '#eff6ff' : '#ffffff',
+            borderRadius: '16px',
+            border: activeTab === 'pipeline' && statusFilter === 'new' ? '2.5px solid #2563eb' : '1.5px solid #bfdbfe',
+            padding: '16px 18px',
+            boxShadow: activeTab === 'pipeline' && statusFilter === 'new' ? '0 4px 14px rgba(37, 99, 235, 0.2)' : '0 2px 10px rgba(37, 99, 235, 0.04)',
+            transition: 'all 0.2s ease'
+          }}
+        >
           <div style={{ color: '#1d4ed8', fontSize: '12.5px', fontWeight: 800 }}>🆕 طلبات جديدة</div>
           <div style={{ fontSize: '26px', fontWeight: 900, color: '#2563eb', marginTop: '4px' }}>
             {stats.newCount}
@@ -491,13 +503,19 @@ export default function RecruitmentHubModule({
         </div>
 
         {/* Scheduled Interviews */}
-        <div style={{
-          background: '#ffffff',
-          borderRadius: '16px',
-          border: '1.5px solid #ddd6fe',
-          padding: '16px 18px',
-          boxShadow: '0 2px 10px rgba(124, 58, 237, 0.04)'
-        }}>
+        <div 
+          onClick={() => { setActiveTab('pipeline'); setStatusFilter('interview_scheduled'); }}
+          title="تصفية: مقابلات مجدولة"
+          style={{
+            cursor: 'pointer',
+            background: activeTab === 'pipeline' && statusFilter === 'interview_scheduled' ? '#f5f3ff' : '#ffffff',
+            borderRadius: '16px',
+            border: activeTab === 'pipeline' && statusFilter === 'interview_scheduled' ? '2.5px solid #7c3aed' : '1.5px solid #ddd6fe',
+            padding: '16px 18px',
+            boxShadow: activeTab === 'pipeline' && statusFilter === 'interview_scheduled' ? '0 4px 14px rgba(124, 58, 237, 0.2)' : '0 2px 10px rgba(124, 58, 237, 0.04)',
+            transition: 'all 0.2s ease'
+          }}
+        >
           <div style={{ color: '#6d28d9', fontSize: '12.5px', fontWeight: 800 }}>📅 مقابلات مجدولة</div>
           <div style={{ fontSize: '26px', fontWeight: 900, color: '#7c3aed', marginTop: '4px' }}>
             {stats.scheduledCount}
@@ -505,13 +523,19 @@ export default function RecruitmentHubModule({
         </div>
 
         {/* Interviewed */}
-        <div style={{
-          background: '#ffffff',
-          borderRadius: '16px',
-          border: '1.5px solid #fde68a',
-          padding: '16px 18px',
-          boxShadow: '0 2px 10px rgba(217, 119, 6, 0.04)'
-        }}>
+        <div 
+          onClick={() => { setActiveTab('pipeline'); setStatusFilter('interviewed'); }}
+          title="تصفية: تمت المقابلة وبانتظار القرار"
+          style={{
+            cursor: 'pointer',
+            background: activeTab === 'pipeline' && statusFilter === 'interviewed' ? '#fffbeb' : '#ffffff',
+            borderRadius: '16px',
+            border: activeTab === 'pipeline' && statusFilter === 'interviewed' ? '2.5px solid #d97706' : '1.5px solid #fde68a',
+            padding: '16px 18px',
+            boxShadow: activeTab === 'pipeline' && statusFilter === 'interviewed' ? '0 4px 14px rgba(217, 119, 6, 0.2)' : '0 2px 10px rgba(217, 119, 6, 0.04)',
+            transition: 'all 0.2s ease'
+          }}
+        >
           <div style={{ color: '#b45309', fontSize: '12.5px', fontWeight: 800 }}>📋 تمت المقابلة وبانتظار القرار</div>
           <div style={{ fontSize: '26px', fontWeight: 900, color: '#d97706', marginTop: '4px' }}>
             {stats.interviewedCount}
@@ -519,13 +543,19 @@ export default function RecruitmentHubModule({
         </div>
 
         {/* Hired */}
-        <div style={{
-          background: '#ffffff',
-          borderRadius: '16px',
-          border: '1.5px solid #a7f3d0',
-          padding: '16px 18px',
-          boxShadow: '0 2px 10px rgba(5, 150, 105, 0.04)'
-        }}>
+        <div 
+          onClick={() => { setActiveTab('pipeline'); setStatusFilter('hired'); }}
+          title="تصفية: تم القبول والتعيين"
+          style={{
+            cursor: 'pointer',
+            background: activeTab === 'pipeline' && statusFilter === 'hired' ? '#ecfdf5' : '#ffffff',
+            borderRadius: '16px',
+            border: activeTab === 'pipeline' && statusFilter === 'hired' ? '2.5px solid #059669' : '1.5px solid #a7f3d0',
+            padding: '16px 18px',
+            boxShadow: activeTab === 'pipeline' && statusFilter === 'hired' ? '0 4px 14px rgba(5, 150, 105, 0.2)' : '0 2px 10px rgba(5, 150, 105, 0.04)',
+            transition: 'all 0.2s ease'
+          }}
+        >
           <div style={{ color: '#047857', fontSize: '12.5px', fontWeight: 800 }}>✅ تم القبول والتعيين</div>
           <div style={{ fontSize: '26px', fontWeight: 900, color: '#059669', marginTop: '4px' }}>
             {stats.hiredCount}
@@ -533,13 +563,19 @@ export default function RecruitmentHubModule({
         </div>
 
         {/* Waiting List */}
-        <div style={{
-          background: '#ffffff',
-          borderRadius: '16px',
-          border: '1.5px solid #fed7aa',
-          padding: '16px 18px',
-          boxShadow: '0 2px 10px rgba(234, 88, 12, 0.04)'
-        }}>
+        <div 
+          onClick={() => { setActiveTab('waiting_list'); setStatusFilter('waiting_list'); }}
+          title="تصفية: قائمة الانتظار"
+          style={{
+            cursor: 'pointer',
+            background: activeTab === 'waiting_list' ? '#fff7ed' : '#ffffff',
+            borderRadius: '16px',
+            border: activeTab === 'waiting_list' ? '2.5px solid #ea580c' : '1.5px solid #fed7aa',
+            padding: '16px 18px',
+            boxShadow: activeTab === 'waiting_list' ? '0 4px 14px rgba(234, 88, 12, 0.2)' : '0 2px 10px rgba(234, 88, 12, 0.04)',
+            transition: 'all 0.2s ease'
+          }}
+        >
           <div style={{ color: '#c2410c', fontSize: '12.5px', fontWeight: 800 }}>⏳ قائمة الانتظار</div>
           <div style={{ fontSize: '26px', fontWeight: 900, color: '#ea580c', marginTop: '4px' }}>
             {stats.waitingCount}

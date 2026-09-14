@@ -66,7 +66,15 @@ export default function AttendancePunchesModal({
   } : null;
 
   const rawMonthPunches = (state.shifts || []).filter(
-    (p) => (String(p.employeeId) === String(employee.id) || String(p.employeeCode) === String(employee.code)) && activePeriodFilter(p.date)
+    (p) =>
+      p &&
+      p.status !== 'cancelled' &&
+      p.status !== 'rejected' &&
+      !p.isCancelled &&
+      !p.rejected &&
+      !(typeof p.statusLabel === 'string' && (p.statusLabel.includes('ملغي') || p.statusLabel.includes('مرفوض'))) &&
+      (String(p.employeeId) === String(employee.id) || String(p.employeeCode) === String(employee.code)) &&
+      activePeriodFilter(p.date)
   );
 
   const monthPunches = livePunch ? [livePunch, ...rawMonthPunches] : rawMonthPunches;

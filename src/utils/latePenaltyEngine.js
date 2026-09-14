@@ -742,6 +742,15 @@ export const DEFAULT_PERMISSION_POLICY = {
  */
 export function getEffectiveShiftHours(shift, state) {
   if (!shift) return 0;
+  if (
+    shift.status === 'cancelled' ||
+    shift.status === 'rejected' ||
+    shift.isCancelled ||
+    shift.rejected ||
+    (typeof shift.statusLabel === 'string' && (shift.statusLabel.includes('ملغي') || shift.statusLabel.includes('مرفوض')))
+  ) {
+    return 0;
+  }
   
   // Find employee to check default break hours if shift.breakHours is not explicitly set
   const emp = (state?.employees || []).find(

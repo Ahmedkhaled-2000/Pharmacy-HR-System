@@ -974,8 +974,11 @@ export function DataProvider({ children, showToast = () => {} }) {
 
       const { dailyRate, hourlyRate: rate, monthlySalary } = rates;
 
-      // حصر ورديات هذا الفرع بدقة بالغة وبدون تسريب ورديات الفروع الأخرى
+      // حصر ورديات هذا الفرع بدقة بالغة وبدون تسريب ورديات الفروع الأخرى (واستبعاد أي ورديات ملغاة أو مرفوضة نهائياً)
       const bShifts = (state.shifts || []).filter(s => {
+        if (!s) return false;
+        if (s.status === 'cancelled' || s.status === 'rejected' || s.isCancelled || s.rejected) return false;
+        if (typeof s.statusLabel === 'string' && (s.statusLabel.includes('ملغي') || s.statusLabel.includes('مرفوض'))) return false;
         if (String(s.employeeId) !== String(empId)) return false;
         if (!effectiveFilterFn(s.date)) return false;
         if (s.branchId) {
@@ -1124,9 +1127,14 @@ export function DataProvider({ children, showToast = () => {} }) {
       extraAllowance = 0;
     }
 
-    // بدل الحضور اليومي
+    // بدل الحضور اليومي (مع استبعاد أي ورديات ملغاة أو مرفوضة من احتساب الحضور)
     const allEmployeeShifts = (state.shifts || []).filter(s =>
       s &&
+      s.status !== 'cancelled' &&
+      s.status !== 'rejected' &&
+      !s.isCancelled &&
+      !s.rejected &&
+      !(typeof s.statusLabel === 'string' && (s.statusLabel.includes('ملغي') || s.statusLabel.includes('مرفوض'))) &&
       (String(s.employeeId) === String(empId) || (emp.code && String(s.employeeCode || s.employeeId) === String(emp.code))) &&
       effectiveFilterFn(s.date) &&
       (s.timeIn || s.checkIn || getEffectiveShiftHours(s, state) > 0)
