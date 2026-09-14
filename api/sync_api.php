@@ -307,7 +307,7 @@ function handleSyncPush(): void
 
 function handleSyncDelta(): void
 {
-    $sinceSeq = (int)($_GET['since_sequence'] ?? $_GET['cursor'] ?? 0);
+    $sinceSeq = (int)($_GET['since_sequence'] ?? $_GET['cursor'] ?? $_GET['sequence'] ?? 0);
     $branchId = trim((string)($_GET['branch_id'] ?? ''));
     $limit = min(200, max(1, (int)($_GET['limit'] ?? 100)));
 
