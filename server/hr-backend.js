@@ -257,10 +257,58 @@ async function initDatabaseTables() {
           currency VARCHAR(10) NOT NULL DEFAULT 'EGP',
           created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
+
+      -- 5. جدول الأجهزة المتصلة وإدارتها وإلغاء تنشيطها
+      CREATE TABLE IF NOT EXISTS public.devices (
+          device_id VARCHAR(100) PRIMARY KEY,
+          user_id VARCHAR(100) NOT NULL,
+          device_name VARCHAR(255) NULL,
+          platform VARCHAR(50) NOT NULL DEFAULT 'android',
+          app_version VARCHAR(50) NULL,
+          push_token TEXT NULL,
+          status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
+          last_seen TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_devices_user ON public.devices(user_id);
+      CREATE INDEX IF NOT EXISTS idx_devices_status ON public.devices(status);
+
+      -- 6. جدول إصدارات وتحديثات التطبيق والمانيفست
+      CREATE TABLE IF NOT EXISTS public.app_versions (
+          id BIGSERIAL PRIMARY KEY,
+          version_name VARCHAR(50) NOT NULL,
+          version_code INTEGER NOT NULL UNIQUE,
+          min_supported_code INTEGER NOT NULL DEFAULT 1,
+          platform VARCHAR(50) NOT NULL DEFAULT 'android',
+          download_url TEXT NOT NULL,
+          sha256_checksum VARCHAR(64) NULL,
+          file_size BIGINT NULL,
+          mandatory_update BOOLEAN NOT NULL DEFAULT false,
+          release_notes TEXT NULL,
+          is_active BOOLEAN NOT NULL DEFAULT true,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_app_ver_code ON public.app_versions(version_code DESC);
+
+      -- 7. جدول سجل التدقيق الأمني للعمليات
+      CREATE TABLE IF NOT EXISTS public.audit_logs (
+          id BIGSERIAL PRIMARY KEY,
+          user_id VARCHAR(100) NULL,
+          device_id VARCHAR(100) NULL,
+          action VARCHAR(100) NOT NULL,
+          entity VARCHAR(100) NOT NULL,
+          entity_id VARCHAR(100) NULL,
+          metadata JSONB NULL,
+          client_ip VARCHAR(50) NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON public.audit_logs(action);
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_date ON public.audit_logs(created_at DESC);
     `;
 
     await db.query(schemaSql);
-    console.log('🐘 [PostgreSQL] الجداول الأساسية مفهرسة ومجهزة بنجاح.');
+    console.log('🐘 [PostgreSQL] الجداول الأساسية وجداول الأجهزة والتحديثات مفهرسة ومجهزة بنجاح.');
   } catch (err) {
     console.error('❌ [PostgreSQL Init Error]:', err.message);
   }
@@ -818,6 +866,23 @@ app.post('/api/sync/push', async (req, res) => {
       return res.status(400).json({ success: false, error: 'operations must be an array' });
     }
 
+    // 0. التحقق من حالة الجهاز (Device Status & Revocation Check)
+    if (device_id && device_id !== 'device_unknown') {
+      try {
+        const devCheck = await db.query('SELECT status FROM public.devices WHERE device_id = $1 LIMIT 1', [device_id]);
+        if (devCheck.rows.length > 0 && devCheck.rows[0].status === 'REVOKED') {
+          return res.status(401).json({
+            success: false,
+            error: 'DEVICE_REVOKED',
+            message: 'تم إلغاء تنشيط هذا الجهاز من قبل الإدارة. يرجى تسجيل الدخول مجدداً.'
+          });
+        }
+        await db.query('UPDATE public.devices SET last_seen = NOW(), updated_at = NOW() WHERE device_id = $1', [device_id]).catch(() => {});
+      } catch (devErr) {
+        // إذا كان الجدول جديداً أو حدث تحذير
+      }
+    }
+
     const acks = [];
     const conflicts = [];
     let maxSequence = 0;
@@ -1070,6 +1135,195 @@ app.get('/api/sync/delta', async (req, res) => {
   } catch (err) {
     console.error('[API /sync/delta Error]:', err);
     res.status(500).json({ success: false, error: 'Sync delta failed' });
+  }
+});
+
+// ── 6.6 مسارات إدارة الأجهزة وتتبع النشاط (Device Management & Security) ─────────
+app.post('/api/devices/register', async (req, res) => {
+  try {
+    const { device_id, user_id, device_name, platform = 'android', app_version, push_token } = req.body;
+    if (!device_id || !user_id) {
+      return res.status(400).json({ success: false, error: 'Missing device_id or user_id' });
+    }
+
+    const q = `
+      INSERT INTO public.devices (
+        device_id, user_id, device_name, platform, app_version, push_token, status, last_seen, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, 'ACTIVE', NOW(), NOW())
+      ON CONFLICT (device_id) DO UPDATE SET
+        user_id = EXCLUDED.user_id,
+        device_name = COALESCE(EXCLUDED.device_name, public.devices.device_name),
+        platform = EXCLUDED.platform,
+        app_version = EXCLUDED.app_version,
+        push_token = COALESCE(EXCLUDED.push_token, public.devices.push_token),
+        status = 'ACTIVE',
+        last_seen = NOW(),
+        updated_at = NOW()
+      RETURNING *;
+    `;
+    const r = await db.query(q, [device_id, user_id, device_name || null, platform, app_version || null, push_token || null]);
+
+    // تسجيل في سجل التدقيق الأمني
+    db.query(
+      'INSERT INTO public.audit_logs (user_id, device_id, action, entity, entity_id, client_ip) VALUES ($1, $2, $3, $4, $5, $6)',
+      [user_id, device_id, 'DEVICE_REGISTERED', 'device', device_id, req.ip]
+    ).catch(() => {});
+
+    res.json({ success: true, device: r.rows[0] });
+  } catch (err) {
+    console.error('[API /devices/register Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/devices/revoke', async (req, res) => {
+  try {
+    const authUser = getAuthFromReq(req);
+    if (!authUser || !['admin', 'owner'].includes(authUser.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized: Admin or owner role required' });
+    }
+
+    const { device_id } = req.body;
+    if (!device_id) {
+      return res.status(400).json({ success: false, error: 'Missing device_id' });
+    }
+
+    await db.query('UPDATE public.devices SET status = $1, updated_at = NOW() WHERE device_id = $2', ['REVOKED', device_id]);
+
+    // بث إشعار فوري لفصل الجهاز وإجباره على تسجيل الخروج
+    io.emit('device:revoked', { device_id });
+
+    // تسجيل التدقيق
+    db.query(
+      'INSERT INTO public.audit_logs (user_id, device_id, action, entity, entity_id, client_ip) VALUES ($1, $2, $3, $4, $5, $6)',
+      [authUser.username, device_id, 'DEVICE_REVOKED', 'device', device_id, req.ip]
+    ).catch(() => {});
+
+    res.json({ success: true, message: `Device ${device_id} revoked successfully` });
+  } catch (err) {
+    console.error('[API /devices/revoke Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/devices', async (req, res) => {
+  try {
+    const authUser = getAuthFromReq(req);
+    const { user_id } = req.query;
+
+    let q = 'SELECT * FROM public.devices';
+    const params = [];
+
+    if (user_id) {
+      q += ' WHERE user_id = $1';
+      params.push(user_id);
+    } else if (!authUser || !['admin', 'owner'].includes(authUser.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    q += ' ORDER BY last_seen DESC LIMIT 100';
+    const r = await db.query(q, params);
+    res.json({ success: true, devices: r.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── 6.7 مسارات تحديثات التطبيق والمانيفست (In-App Releases & Auto-Update Manifest) ─
+app.get('/api/app/update-manifest', async (req, res) => {
+  try {
+    const platform = req.query.platform || 'android';
+    const currentCode = parseInt(req.query.current_version_code || '0', 10);
+
+    const q = 'SELECT * FROM public.app_versions WHERE platform = $1 AND is_active = true ORDER BY version_code DESC LIMIT 1';
+    const r = await db.query(q, [platform]);
+
+    if (r.rows.length > 0) {
+      const rel = r.rows[0];
+      return res.json({
+        success: true,
+        latest_version: rel.version_name,
+        latest_version_code: rel.version_code,
+        min_supported_code: rel.min_supported_code,
+        download_url: rel.download_url,
+        sha256_checksum: rel.sha256_checksum,
+        file_size: parseInt(rel.file_size || '0', 10),
+        mandatory_update: rel.mandatory_update || (currentCode < rel.min_supported_code),
+        release_notes: rel.release_notes,
+        release_date: rel.created_at
+      });
+    }
+
+    // مانيفست افتراضي آمن للإصدار 1.2.39
+    res.json({
+      success: true,
+      latest_version: '1.2.39',
+      latest_version_code: 2,
+      min_supported_code: 1,
+      download_url: 'https://nodejs-test.apexthunder.com/api/app/download-latest',
+      sha256_checksum: '',
+      file_size: 77659055,
+      mandatory_update: false,
+      release_notes: 'تحسينات شاملة على الأداء والمزامنة Offline-First وتسجيل الدخول بالبصمة',
+      release_date: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('[API /app/update-manifest Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/app/releases', async (req, res) => {
+  try {
+    const authUser = getAuthFromReq(req);
+    if (!authUser || !['admin', 'owner'].includes(authUser.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized: Admin or owner role required' });
+    }
+
+    const {
+      version_name,
+      version_code,
+      min_supported_code = 1,
+      platform = 'android',
+      download_url,
+      sha256_checksum = '',
+      file_size = 0,
+      mandatory_update = false,
+      release_notes = ''
+    } = req.body;
+
+    if (!version_name || !version_code || !download_url) {
+      return res.status(400).json({ success: false, error: 'Missing required release fields' });
+    }
+
+    const q = `
+      INSERT INTO public.app_versions (
+        version_name, version_code, min_supported_code, platform, download_url,
+        sha256_checksum, file_size, mandatory_update, release_notes, is_active, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, NOW())
+      ON CONFLICT (version_code) DO UPDATE SET
+        version_name = EXCLUDED.version_name,
+        min_supported_code = EXCLUDED.min_supported_code,
+        download_url = EXCLUDED.download_url,
+        sha256_checksum = EXCLUDED.sha256_checksum,
+        file_size = EXCLUDED.file_size,
+        mandatory_update = EXCLUDED.mandatory_update,
+        release_notes = EXCLUDED.release_notes,
+        is_active = true
+      RETURNING *;
+    `;
+    const r = await db.query(q, [
+      version_name, version_code, min_supported_code, platform, download_url,
+      sha256_checksum, file_size, mandatory_update, release_notes
+    ]);
+
+    // بث إشعار التحديث للأجهزة المتصلة
+    io.emit('app:update_available', r.rows[0]);
+
+    res.json({ success: true, release: r.rows[0] });
+  } catch (err) {
+    console.error('[API /app/releases Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

@@ -103,6 +103,14 @@ export function canTransition(fromState, toState) {
 }
 
 /**
+ * فحص ما إذا كانت الحالة نهائية محصنة لا يمكن الرجوع عنها
+ */
+export function isTerminalState(status) {
+  const norm = normalizeLifecycleState(status);
+  return norm === REQUEST_STATES.COMPLETED || norm === REQUEST_STATES.REJECTED || norm === REQUEST_STATES.CANCELLED;
+}
+
+/**
  * توليد مفتاح فريد لضمان عدم التكرار (UUID v4 Idempotency Key)
  */
 export function generateIdempotencyKey() {

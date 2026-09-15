@@ -29,7 +29,17 @@
         </provider>
     </application>
 
-    <!-- Permissions -->
-
+    <!-- Core and Network Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Modern Android Notification Permissions (Android 13+ Tiramisu) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Biometric Authentication (Android Keystore / BiometricPrompt) -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
+    <!-- Secure In-App Automatic APK Update Installation -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 </manifest>

@@ -140,6 +140,58 @@ CREATE TABLE IF NOT EXISTS public.dead_letter_operations (
 
 CREATE INDEX IF NOT EXISTS idx_dlq_resolved ON public.dead_letter_operations(resolved);
 
+-- 7.1 جدول الأجهزة المتصلة وإدارتها (Devices Management & Revocation)
+CREATE TABLE IF NOT EXISTS public.devices (
+    device_id VARCHAR(100) PRIMARY KEY,
+    user_id VARCHAR(100) NOT NULL,
+    device_name VARCHAR(255) NULL,
+    platform VARCHAR(50) NOT NULL DEFAULT 'android',
+    app_version VARCHAR(50) NULL,
+    push_token TEXT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_devices_user ON public.devices(user_id);
+CREATE INDEX IF NOT EXISTS idx_devices_status ON public.devices(status);
+
+-- 7.2 جدول إصدارات وتحديثات التطبيق (In-App Releases & Update Manifest)
+CREATE TABLE IF NOT EXISTS public.app_versions (
+    id BIGSERIAL PRIMARY KEY,
+    version_name VARCHAR(50) NOT NULL,
+    version_code INTEGER NOT NULL UNIQUE,
+    min_supported_code INTEGER NOT NULL DEFAULT 1,
+    platform VARCHAR(50) NOT NULL DEFAULT 'android',
+    download_url TEXT NOT NULL,
+    sha256_checksum VARCHAR(64) NULL,
+    file_size BIGINT NULL,
+    mandatory_update BOOLEAN NOT NULL DEFAULT false,
+    release_notes TEXT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_ver_code ON public.app_versions(version_code DESC);
+
+-- 7.3 جدول سجل التدقيق الأمني للعمليات الحساسة (Security Audit Trail)
+CREATE TABLE IF NOT EXISTS public.audit_logs (
+    id BIGSERIAL PRIMARY KEY,
+    user_id VARCHAR(100) NULL,
+    device_id VARCHAR(100) NULL,
+    action VARCHAR(100) NOT NULL,
+    entity VARCHAR(100) NOT NULL,
+    entity_id VARCHAR(100) NULL,
+    metadata JSONB NULL,
+    client_ip VARCHAR(50) NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON public.audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON public.audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_date ON public.audit_logs(created_at DESC);
+
 -- ضمان توافق حجم الأعمدة مع المعرفات التاريخية الطويلة في حال وجود الجداول مسبقاً
 DO $$
 BEGIN

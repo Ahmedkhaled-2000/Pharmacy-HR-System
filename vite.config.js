@@ -96,7 +96,7 @@ export default defineConfig({
     })
   ].filter(Boolean),
   build: {
-    emptyOutDir: false,
+    emptyOutDir: true,
     cssMinify: false,
     chunkSizeWarningLimit: 3000,
     rollupOptions: {
