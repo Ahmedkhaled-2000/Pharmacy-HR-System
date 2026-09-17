@@ -97,11 +97,33 @@ public class ApkUpdatePlugin extends Plugin {
             OutputStream output = null;
             HttpURLConnection connection = null;
             try {
-                URL url = new URL(downloadUrl);
-                connection = (HttpURLConnection) url.openConnection();
-                connection.setConnectTimeout(20000);
-                connection.setReadTimeout(60000);
-                connection.connect();
+                URL currentUrl = new URL(downloadUrl);
+                boolean redirect = false;
+                int redirectCount = 0;
+
+                do {
+                    connection = (HttpURLConnection) currentUrl.openConnection();
+                    connection.setInstanceFollowRedirects(true);
+                    connection.setRequestProperty("User-Agent", "Pharmacy-HR-AutoUpdater");
+                    connection.setConnectTimeout(30000);
+                    connection.setReadTimeout(90000);
+                    connection.connect();
+
+                    int status = connection.getResponseCode();
+                    if (status == HttpURLConnection.HTTP_MOVED_TEMP || status == HttpURLConnection.HTTP_MOVED_PERM || status == HttpURLConnection.HTTP_SEE_OTHER || status == 307 || status == 308) {
+                        String newUrl = connection.getHeaderField("Location");
+                        if (newUrl != null && !newUrl.isEmpty()) {
+                            currentUrl = new URL(newUrl);
+                            redirect = true;
+                            redirectCount++;
+                            connection.disconnect();
+                        } else {
+                            redirect = false;
+                        }
+                    } else {
+                        redirect = false;
+                    }
+                } while (redirect && redirectCount < 8);
 
                 if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
                     notifyDownloadError("Server returned HTTP " + connection.getResponseCode() + " " + connection.getResponseMessage());

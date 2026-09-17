@@ -185,10 +185,8 @@ async function request(endpoint, options = {}) {
     const headers = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      'Accept-Encoding': 'gzip, deflate, br',
       'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
       'Pragma': 'no-cache',
-      'Expires': '0',
       ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
       'X-App-Role': appRole,
       'X-App-Password': appPass,
@@ -285,36 +283,75 @@ async function request(endpoint, options = {}) {
 }
 
 // ── 0. مصادقة وتسجيل الدخول السحابي ─────────────────────────────────────────
-export async function apiLogin(usernameOrCreds, password = '', role = 'admin') {
-  let payload;
+export async function apiLogin(usernameOrCreds, password = '', role = 'auto') {
+  let targetUser = '';
+  let targetPass = '';
+  let targetRole = role || 'auto';
+
   if (typeof usernameOrCreds === 'object' && usernameOrCreds !== null) {
-    payload = {
-      username: usernameOrCreds.username || '',
-      password: usernameOrCreds.password || '',
-      role: usernameOrCreds.role || role
-    };
+    targetUser = String(usernameOrCreds.username || '').trim();
+    targetPass = String(usernameOrCreds.password || '').trim();
+    targetRole = usernameOrCreds.role || role || 'auto';
   } else {
-    payload = {
-      username: usernameOrCreds,
-      password,
-      role
-    };
+    targetUser = String(usernameOrCreds || '').trim();
+    targetPass = String(password || '').trim();
+    targetRole = role || 'auto';
+  }
+
+  let rolesToTry = [targetRole];
+  if (targetRole === 'auto') {
+    const lower = targetUser.toLowerCase();
+    if (lower === 'admin') {
+      rolesToTry = ['admin', 'owner'];
+    } else if (lower === 'owner') {
+      rolesToTry = ['owner', 'admin'];
+    } else {
+      // بالنسبة لتطبيق بوابة الموظف، الموظفون هم الأغلبية الساحقة
+      rolesToTry = ['employee', 'branch', 'admin', 'owner'];
+    }
   }
 
   const cleanUrl = `${API_BASE_URL}/auth/login`;
-  const res = await fetch(cleanUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    cache: 'no-store'
-  });
-  const data = await res.json();
-  if (data?.token) {
+  let lastResponse = null;
+
+  for (const currentRole of rolesToTry) {
     try {
-      localStorage.setItem('app_auth_token', data.token);
-    } catch {}
+      const res = await fetch(cleanUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({
+          username: targetUser,
+          password: targetPass,
+          role: currentRole
+        }),
+        cache: 'no-store'
+      });
+
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        if (!data.role) data.role = currentRole;
+        if (data.token) {
+          try {
+            localStorage.setItem('app_auth_token', data.token);
+          } catch {}
+        }
+        return data;
+      }
+      lastResponse = data;
+    } catch (err) {
+      console.warn('[ApiClient] apiLogin network error:', err);
+      return {
+        success: false,
+        networkError: true,
+        error: 'تعذر الاتصال بخادم السحابة، يرجى التأكد من اتصال الهاتف بالإنترنت.'
+      };
+    }
   }
-  return data;
+
+  return lastResponse || {
+    success: false,
+    error: 'اسم المستخدم أو كلمة المرور غير صحيحة'
+  };
 }
 
 // ── 1. دوال إعدادات وبيانات التطبيق الرئيسية (Settings / State) ────────────────

@@ -127,15 +127,28 @@ try {
             $userRole = 'guest';
             $userData = ['username' => $username];
 
-            if ($role === 'owner' && (hash_equals($ownerPass, $password) || ($password === 'owner123' && $ownerPass === 'owner123'))) {
-                $authenticated = true;
-                $userRole = 'owner';
-                $userData['name'] = 'المالك / الإدارة العليا';
-            } elseif (($role === 'admin' || $username === 'admin') && (hash_equals($adminPass, $password) || hash_equals($ownerPass, $password))) {
-                $authenticated = true;
-                $userRole = 'admin';
-                $userData['name'] = 'مدير النظام';
-            } elseif ($role === 'branch') {
+            $isAuto = empty($role) || $role === 'auto' || $role === 'any';
+
+            // 1. فحص المالك
+            if (($role === 'owner' || $isAuto) && (hash_equals($ownerPass, $password) || ($password === 'owner123' && $ownerPass === 'owner123'))) {
+                if ($role === 'owner' || $username === 'owner' || (string)($orgSettings['ownerUsername'] ?? '') === $username) {
+                    $authenticated = true;
+                    $userRole = 'owner';
+                    $userData = ['username' => $username, 'name' => 'المالك / الإدارة العليا'];
+                }
+            }
+
+            // 2. فحص مدير النظام (Admin)
+            if (!$authenticated && ($role === 'admin' || $isAuto) && (hash_equals($adminPass, $password) || hash_equals($ownerPass, $password))) {
+                if ($role === 'admin' || $username === 'admin' || (string)($orgSettings['adminUsername'] ?? '') === $username) {
+                    $authenticated = true;
+                    $userRole = 'admin';
+                    $userData = ['username' => $username, 'name' => 'مدير النظام'];
+                }
+            }
+
+            // 3. فحص مديري الفروع
+            if (!$authenticated && ($role === 'branch' || $isAuto)) {
                 $branches = is_array($appState['branches'] ?? null) ? $appState['branches'] : [];
                 foreach ($branches as $b) {
                     if (is_array($b) && ((string)($b['id'] ?? '') === $username || (string)($b['name'] ?? '') === $username || (string)($b['code'] ?? '') === $username)) {
@@ -143,13 +156,17 @@ try {
                         if (hash_equals($bPass, $password) || hash_equals($adminPass, $password)) {
                             $authenticated = true;
                             $userRole = 'branch';
+                            $userData = $b;
                             $userData['branchId'] = $b['id'] ?? '';
                             $userData['name'] = $b['name'] ?? 'مدير فرع';
+                            break;
                         }
-                        break;
                     }
                 }
-            } elseif ($role === 'employee' || $role === 'kiosk') {
+            }
+
+            // 4. فحص الموظفين وبوابة الموظف
+            if (!$authenticated && ($role === 'employee' || $role === 'kiosk' || $isAuto)) {
                 $employees = is_array($appState['employees'] ?? null) ? $appState['employees'] : [];
                 foreach ($employees as $e) {
                     if (is_array($e) && ((string)($e['code'] ?? '') === $username || (string)($e['id'] ?? '') === $username || (string)($e['phone'] ?? '') === $username)) {
@@ -157,11 +174,9 @@ try {
                         if (hash_equals($ePass, $password) || hash_equals($adminPass, $password)) {
                             $authenticated = true;
                             $userRole = 'employee';
-                            $userData['id'] = $e['id'] ?? '';
-                            $userData['code'] = $e['code'] ?? '';
-                            $userData['name'] = $e['name'] ?? 'موظف';
+                            $userData = $e; // كامل بيانات الموظف
+                            break;
                         }
-                        break;
                     }
                 }
             }
@@ -1483,6 +1498,70 @@ try {
                 'message' => 'تم تصفير ومسح قاعدة البيانات بالكامل وتحديث كافة الجلسات بنجاح',
                 'session_epoch' => time()
             ]);
+            break;
+
+        // ==================================================================
+        // 20. مسار فحص وتوزيع التحديثات التلقائية (In-App Auto-Update)
+        // ==================================================================
+        case 'app/update-manifest':
+            $currentCode = (int)($_GET['current_version_code'] ?? 0);
+            $platform = (string)($_GET['platform'] ?? 'android');
+
+            $cached = MicroCache::get('app_update_manifest_' . $platform);
+            if ($cached) {
+                jsonResponse($cached);
+            }
+
+            $githubRepo = 'Ahmedkhaled-2000/Pharmacy-HR-System';
+            $manifest = [
+                'success' => true,
+                'latest_version' => '1.2.39',
+                'latest_version_code' => 2,
+                'min_supported_code' => 1,
+                'download_url' => "https://github.com/{$githubRepo}/releases/latest/download/بوابة_الموظف.apk",
+                'sha256_checksum' => '',
+                'file_size' => 99586449,
+                'mandatory_update' => false,
+                'release_notes' => 'تحديث شامل: دعم الاتصال المباشر بالسحابة، تسريع تسجيل الدخول، والمزامنة التلقائية',
+                'release_date' => date('Y-m-d H:i:s')
+            ];
+
+            // محاولة جلب أحدث بيانات Release من GitHub API
+            try {
+                $opts = [
+                    'http' => [
+                        'method' => 'GET',
+                        'header' => "User-Agent: Pharmacy-HR-System\r\nAccept: application/vnd.github.v3+json\r\n",
+                        'timeout' => 4
+                    ]
+                ];
+                $ctx = stream_context_create($opts);
+                $ghRaw = @file_get_contents("https://api.github.com/repos/{$githubRepo}/releases/latest", false, $ctx);
+                if ($ghRaw) {
+                    $ghData = json_decode($ghRaw, true);
+                    if (!empty($ghData['tag_name'])) {
+                        $manifest['latest_version'] = ltrim($ghData['tag_name'], 'v');
+                        if (!empty($ghData['body'])) {
+                            $manifest['release_notes'] = $ghData['body'];
+                        }
+                        if (!empty($ghData['published_at'])) {
+                            $manifest['release_date'] = $ghData['published_at'];
+                        }
+                        if (!empty($ghData['assets']) && is_array($ghData['assets'])) {
+                            foreach ($ghData['assets'] as $asset) {
+                                if (!empty($asset['name']) && str_ends_with(strtolower($asset['name']), '.apk')) {
+                                    $manifest['download_url'] = $asset['browser_download_url'] ?? $manifest['download_url'];
+                                    $manifest['file_size'] = (int)($asset['size'] ?? $manifest['file_size']);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable $e) {}
+
+            MicroCache::set('app_update_manifest_' . $platform, $manifest, 300);
+            jsonResponse($manifest);
             break;
 
         default:

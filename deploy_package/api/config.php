@@ -29,7 +29,10 @@ date_default_timezone_set('Africa/Cairo');
 // إعدادات ترويسات CORS المفتوحة للاتصال الآمن من الويب والهاتف
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-App-Version, If-None-Match, Cache-Control, Pragma, X-App-Role, X-App-Password, X-App-Emp-Code, X-App-Branch-Id');
+$reqHeaders = !empty($_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'])
+    ? $_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS']
+    : 'Content-Type, Authorization, X-Requested-With, X-App-Version, If-None-Match, Cache-Control, Pragma, Expires, Accept-Encoding, X-App-Role, X-App-Password, X-App-Emp-Code, X-App-Branch-Id';
+header('Access-Control-Allow-Headers: ' . $reqHeaders);
 header('Access-Control-Expose-Headers: ETag, Content-Length, X-App-Version');
 header('Access-Control-Max-Age: 86400'); // 24 hours cache for preflight OPTIONS
 

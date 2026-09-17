@@ -532,21 +532,102 @@ export default function AppRoutes() {
 
     let authResult = checkMatch(state);
 
-    // إذا فشل الفحص، نجلب أحدث وأدق نسخة من السحابة للتحقق من أي تغيير لكلمات المرور أو الموظفين
+    // إذا لم يتطابق محلياً (مثل أول تثبيت للتطبيق على الهاتف أو عدم مزامنة البيانات بعد):
+    // نقوم بالمصادقة المباشرة أولاً عبر API الخادم السحابي
     if (!authResult.matched) {
       try {
-        const freshCloud = await fetchRemoteState({ timeout: 10000, useETag: false, isBackground: false });
-        if (freshCloud && typeof freshCloud === 'object' && !freshCloud.notModified) {
-          const freshNormalized = normalizeState(freshCloud);
-          const cloudAuthResult = checkMatch(freshNormalized);
-          if (cloudAuthResult.matched) {
-            authResult = cloudAuthResult;
-            setState((prev) => normalizeState(smartMergeStates(prev, freshNormalized)));
-            saveStateLocally(freshNormalized).catch(() => {});
+        const loginRes = await apiLogin({ username: cleanUser, password: cleanPass, role: 'auto' });
+        if (loginRes && loginRes.success && loginRes.user) {
+          if (loginRes.token) {
+            try { localStorage.setItem('app_auth_token', loginRes.token); } catch {}
           }
+          const sRole = loginRes.role || 'employee';
+          const sUser = loginRes.user;
+
+          if (sRole === 'employee') {
+            if (sUser.accountSuspended || sUser.biometricSuspended || sUser.punchDisabled || sUser.status === 'معلق') {
+              return {
+                success: false,
+                error: `⛔ تم إيقاف بصمة وحساب الموظف مؤقتاً (${sUser.suspensionReason || 'إيقاف مؤقت لحين المراجعة'}). يرجى مراجعة إدارة الموارد البشرية.`
+              };
+            }
+            if (sUser.isTerminated || sUser.status === 'تم الاستقالة' || sUser.is_active === false) {
+              return {
+                success: false,
+                error: `🚫 تم إنهاء خدمة هذا الموظف (${sUser.terminationReason || 'إنهاء تعاقد أو استقالة'}) ولا يمكن تسجيل الدخول.`
+              };
+            }
+            authResult = { role: 'employee', matched: true, user: sUser };
+            setState((prev) => {
+              const emps = Array.isArray(prev?.employees) ? [...prev.employees] : [];
+              const idx = emps.findIndex((e) => String(e.id) === String(sUser.id) || String(e.code) === String(sUser.code));
+              if (idx >= 0) emps[idx] = { ...emps[idx], ...sUser };
+              else emps.push(sUser);
+              return { ...prev, employees: emps };
+            });
+          } else if (sRole === 'branch') {
+            authResult = { role: 'branch', matched: true, branch: sUser };
+          } else if (sRole === 'admin') {
+            authResult = { role: 'admin', matched: true, org: state?.orgSettings || {} };
+          } else if (sRole === 'owner') {
+            authResult = { role: 'owner', matched: true, org: state?.orgSettings || {} };
+          }
+
+          // مزامنة حالة التطبيق بالكامل في الخلفية دون تعطيل أو تأخير الدخول
+          fetchRemoteState({ timeout: 15000, isBackground: true })
+            .then((freshCloud) => {
+              if (freshCloud && typeof freshCloud === 'object' && !freshCloud.notModified) {
+                const freshNormalized = normalizeState(freshCloud);
+                setState((prev) => normalizeState(smartMergeStates(prev, freshNormalized)));
+                saveStateLocally(freshNormalized).catch(() => {});
+              }
+            })
+            .catch(() => {});
+        } else if (loginRes && loginRes.networkError) {
+          // تعذر الاتصال بالخادم، نحاول جلب ملف الحالة كحل أخير
+          try {
+            const freshCloud = await fetchRemoteState({ timeout: 6000, useETag: false, isBackground: false });
+            if (freshCloud && typeof freshCloud === 'object' && !freshCloud.notModified) {
+              const freshNormalized = normalizeState(freshCloud);
+              const cloudAuthResult = checkMatch(freshNormalized);
+              if (cloudAuthResult.matched) {
+                authResult = cloudAuthResult;
+                setState((prev) => normalizeState(smartMergeStates(prev, freshNormalized)));
+                saveStateLocally(freshNormalized).catch(() => {});
+              }
+            }
+          } catch (e) {
+            console.warn('[Login Cloud Fetch Warning]:', e);
+          }
+          if (!authResult.matched) {
+            return {
+              success: false,
+              error: 'تعذر الاتصال بالخادم، يرجى التأكد من اتصال الإنترنت على الهاتف والمحاولة مرة أخرى.'
+            };
+          }
+        } else if (loginRes && loginRes.error) {
+          return {
+            success: false,
+            error: loginRes.error || 'اسم المستخدم أو كلمة المرور غير صحيحة'
+          };
         }
-      } catch (e) {
-        console.warn('[Login Cloud Fetch Warning]:', e);
+      } catch (err) {
+        console.warn('[apiLogin direct call error]:', err);
+        // Fallback: try fetching remote state
+        try {
+          const freshCloud = await fetchRemoteState({ timeout: 8000, useETag: false, isBackground: false });
+          if (freshCloud && typeof freshCloud === 'object' && !freshCloud.notModified) {
+            const freshNormalized = normalizeState(freshCloud);
+            const cloudAuthResult = checkMatch(freshNormalized);
+            if (cloudAuthResult.matched) {
+              authResult = cloudAuthResult;
+              setState((prev) => normalizeState(smartMergeStates(prev, freshNormalized)));
+              saveStateLocally(freshNormalized).catch(() => {});
+            }
+          }
+        } catch (e) {
+          console.warn('[Login Cloud Fetch Warning]:', e);
+        }
       }
     }
 
@@ -568,7 +649,7 @@ export default function AppRoutes() {
 
       // إصدار وحفظ توكن JWT رسمي من السيرفر للمصادقة وتفويض العمليات الحساسة
       try {
-        apiLogin({ username: cleanUser, password: cleanPass })
+        apiLogin({ username: cleanUser, password: cleanPass, role: role || 'auto' })
           .then((res) => {
             if (res && res.token) {
               localStorage.setItem('app_auth_token', res.token);

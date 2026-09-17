@@ -16,4 +16,12 @@ fs.mkdirSync(destDir, { recursive: true });
 
 console.log(`📦 Copying web assets from ${srcDir} to ${destDir}...`);
 fs.cpSync(srcDir, destDir, { recursive: true, force: true });
+
+const capSrc = path.resolve('capacitor.config.json');
+const capDest = path.resolve('android/app/src/main/assets/capacitor.config.json');
+if (fs.existsSync(capSrc)) {
+  fs.copyFileSync(capSrc, capDest);
+  console.log('✅ capacitor.config.json synced to Android assets!');
+}
+
 console.log('✅ Web assets copied successfully into Android app assets!');

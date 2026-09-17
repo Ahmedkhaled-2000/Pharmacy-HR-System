@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 echo ===================================================
@@ -6,11 +7,51 @@ echo   Building Employee Portal Android APK
 echo   بوابة الموظف - استخراج تطبيق أندرويد
 echo ===================================================
 
-:: Set JAVA_HOME if needed
-if exist "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.8-hotspot" (
-    set "JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.20.8-hotspot"
-) else if exist "C:\Program Files\Microsoft\jdk-17.0.20.8-hotspot" (
-    set "JAVA_HOME=C:\Program Files\Microsoft\jdk-17.0.20.8-hotspot"
+:: Setup Java JDK 17
+if defined JAVA_HOME (
+    if exist "%JAVA_HOME%\bin\javac.exe" goto :found_java
+)
+if exist "%LOCALAPPDATA%\Programs\Eclipse Adoptium" (
+    for /d %%D in ("%LOCALAPPDATA%\Programs\Eclipse Adoptium\jdk-17*") do (
+        if exist "%%D\bin\javac.exe" (
+            set "JAVA_HOME=%%D"
+            goto :found_java
+        )
+    )
+)
+if exist "C:\Program Files\Eclipse Adoptium" (
+    for /d %%D in ("C:\Program Files\Eclipse Adoptium\jdk-17*") do (
+        if exist "%%D\bin\javac.exe" (
+            set "JAVA_HOME=%%D"
+            goto :found_java
+        )
+    )
+)
+if exist "C:\Program Files\Microsoft" (
+    for /d %%D in ("C:\Program Files\Microsoft\jdk-17*") do (
+        if exist "%%D\bin\javac.exe" (
+            set "JAVA_HOME=%%D"
+            goto :found_java
+        )
+    )
+)
+:found_java
+
+:: Setup Android SDK
+if not defined ANDROID_HOME (
+    if exist "%LOCALAPPDATA%\Android\Sdk" (
+        set "ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk"
+    )
+)
+if not defined ANDROID_SDK_ROOT (
+    if defined ANDROID_HOME set "ANDROID_SDK_ROOT=%ANDROID_HOME%"
+)
+
+if defined JAVA_HOME (
+    set "PATH=%JAVA_HOME%\bin;%PATH%"
+)
+if exist "C:\Program Files\nodejs" (
+    set "PATH=%ProgramFiles%\nodejs;%APPDATA%\npm;%PATH%"
 )
 
 set "BASE_DIR=%~dp0"
@@ -29,7 +70,12 @@ if exist "%SRC_ICON%" (
 )
 
 echo [2/4] Building web assets (npm run build)...
-call npm run build
+call npm.cmd run build
+if not exist "%BASE_DIR%dist\index.html" (
+    echo [ERROR] Web build failed: dist/index.html was not generated.
+    pause
+    exit /b 1
+)
 
 echo [3/4] Syncing web assets to Capacitor Android assets...
 call node scripts/sync_assets.js
@@ -54,3 +100,4 @@ if exist "app\build\outputs\apk\debug\app-debug.apk" (
 
 cd "%BASE_DIR%"
 pause
+

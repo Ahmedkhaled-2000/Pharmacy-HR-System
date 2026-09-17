@@ -5,7 +5,7 @@
  */
 
 import { registerPlugin } from '@capacitor/core';
-import { API_BASE_URL } from './apiClient';
+import { API_BASE_URL } from './apiClient.js';
 
 // تسجيل الإضافة الأصلية في بيئة Capacitor
 export const ApkUpdate = registerPlugin('ApkUpdate');
@@ -47,8 +47,30 @@ export async function getNativeAppVersion() {
   }
 }
 
+export const GITHUB_REPO = 'Ahmedkhaled-2000/Pharmacy-HR-System';
+export const GITHUB_RELEASES_API = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
+
+function parseVersion(v) {
+  if (!v) return [0, 0, 0];
+  const clean = String(v).replace(/^[^\d]*/, '').trim();
+  return clean.split('.').map((part) => parseInt(part, 10) || 0);
+}
+
+function isNewerVersion(remoteVer, currentVer) {
+  const r = parseVersion(remoteVer);
+  const c = parseVersion(currentVer);
+  const len = Math.max(r.length, c.length);
+  for (let i = 0; i < len; i++) {
+    const rPart = r[i] || 0;
+    const cPart = c[i] || 0;
+    if (rPart > cPart) return true;
+    if (rPart < cPart) return false;
+  }
+  return false;
+}
+
 /**
- * فحص توفر تحديث جديد من السيرفر
+ * فحص توفر تحديث جديد لتطبيق أندرويد عبر GitHub Releases وخادم المنظومة
  */
 export async function checkNativeAppUpdate() {
   if (!isAndroidNative()) {
@@ -57,8 +79,49 @@ export async function checkNativeAppUpdate() {
 
   try {
     const currentInfo = await getNativeAppVersion();
-    const manifestUrl = `${API_BASE_URL}/app/update-manifest?platform=android&current_version_code=${currentInfo.versionCode}`;
 
+    // 1. المحاولة الأولى: الفحص المباشر عبر GitHub Releases السريعة والمجانية
+    try {
+      const ghRes = await fetch(GITHUB_RELEASES_API, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'Pharmacy-HR-Mobile-Updater'
+        },
+        cache: 'no-store'
+      });
+
+      if (ghRes.ok) {
+        const ghRelease = await ghRes.json();
+        const tagVer = (ghRelease.tag_name || '').replace(/^v/i, '');
+        const assets = ghRelease.assets || [];
+        const apkAsset = assets.find((a) => a && a.name && a.name.toLowerCase().endsWith('.apk'));
+
+        if (apkAsset && tagVer && isNewerVersion(tagVer, currentInfo.versionName)) {
+          console.log(`[NativeAppUpdater] New update found on GitHub: ${tagVer} (current: ${currentInfo.versionName})`);
+          return {
+            hasUpdate: true,
+            isNative: true,
+            currentVersionName: currentInfo.versionName,
+            currentVersionCode: currentInfo.versionCode,
+            latestVersionName: tagVer,
+            latestVersionCode: currentInfo.versionCode + 1,
+            minSupportedCode: 1,
+            isMandatory: (ghRelease.body || '').includes('[MANDATORY]'),
+            downloadUrl: apkAsset.browser_download_url,
+            sha256Checksum: '',
+            fileSize: apkAsset.size || 0,
+            releaseNotes: ghRelease.body || 'تحديث تلقائي جديد لمنظومة الموارد البشرية وبوابة الموظف.',
+            releaseDate: ghRelease.published_at || ghRelease.created_at
+          };
+        }
+      }
+    } catch (ghErr) {
+      console.warn('[NativeAppUpdater] Direct GitHub check failed, falling back to server API:', ghErr);
+    }
+
+    // 2. المحاولة الثانية: الفحص عبر خادم السحابة الاحتياطي (Server Update Manifest)
+    const manifestUrl = `${API_BASE_URL}/app/update-manifest?platform=android&current_version_code=${currentInfo.versionCode}`;
     const res = await fetch(manifestUrl, {
       method: 'GET',
       headers: { 'Accept': 'application/json' },
@@ -71,13 +134,14 @@ export async function checkNativeAppUpdate() {
     }
 
     const manifest = await res.json();
-    if (!manifest || !manifest.success || !manifest.latest_version_code) {
+    if (!manifest || !manifest.success || !manifest.latest_version) {
       return { hasUpdate: false, isNative: true };
     }
 
-    const latestCode = Number(manifest.latest_version_code);
+    const hasUpdate = isNewerVersion(manifest.latest_version, currentInfo.versionName) ||
+      (manifest.latest_version_code && Number(manifest.latest_version_code) > currentInfo.versionCode);
+
     const minSupported = Number(manifest.min_supported_code || 1);
-    const hasUpdate = latestCode > currentInfo.versionCode;
     const isMandatory = manifest.mandatory_update || (currentInfo.versionCode < minSupported);
 
     return {
@@ -86,7 +150,7 @@ export async function checkNativeAppUpdate() {
       currentVersionName: currentInfo.versionName,
       currentVersionCode: currentInfo.versionCode,
       latestVersionName: manifest.latest_version,
-      latestVersionCode: latestCode,
+      latestVersionCode: Number(manifest.latest_version_code || currentInfo.versionCode + 1),
       minSupportedCode: minSupported,
       isMandatory,
       downloadUrl: manifest.download_url,
