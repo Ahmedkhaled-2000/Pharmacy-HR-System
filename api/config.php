@@ -818,7 +818,7 @@ function autoExtractStateAttachments(array &$data, string $entityPath = 'state')
                     SET file_data = EXCLUDED.file_data, mime_type = EXCLUDED.mime_type, file_size = EXCLUDED.file_size, updated_at = NOW()
                 ", [$attId, 'auto', (string)$k, (string)$k, $v, $mime, $size]);
 
-                $v = "https://nodejs-test.apexthunder.com/api/attachments?id=" . $attId . "&raw=1";
+                $v = "http://63.183.147.199/api/attachments?id=" . $attId . "&raw=1";
             } catch (Throwable) {
                 // Keep original if DB insertion fails
             }

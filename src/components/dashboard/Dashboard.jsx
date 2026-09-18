@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { arabicWeekday, getRealTodayStr, fmt } from '../../utils/formatters';
+import { arabicWeekday, getRealTodayStr, fmt, isEmployeeActive } from '../../utils/formatters';
 import { createDatePredicate, getCycleDateRange } from '../../utils/periodEngine';
 import {
   DEFAULT_LATE_PENALTY_POLICY,
@@ -44,8 +44,17 @@ export default function Dashboard({
   const [lateEditDeductionMins, setLateEditDeductionMins] = useState(0);
   const [lateEditReason, setLateEditReason] = useState('');
 
-  // ── Cards Collapse State (Default: all collapsed, resets to collapsed on page reload) ──
-  const [expandedCards, setExpandedCards] = useState({});
+  // Search query for absent employees
+  const [absentSearchQuery, setAbsentSearchQuery] = useState('');
+
+  // Expand / Collapse state for cards (Accordion/Collapsible)
+  const [expandedCards, setExpandedCards] = useState({
+    absent: true,
+    late: true,
+    branchLive: true,
+    extraHours: true,
+    branchSales: false
+  });
 
   const isCardExpanded = (cardKey) => Boolean(expandedCards[cardKey]);
 
@@ -57,19 +66,13 @@ export default function Dashboard({
   };
 
   const expandAllCards = () => {
-    const all = {
-      empStats: true,
+    setExpandedCards({
+      absent: true,
+      late: true,
       branchLive: true,
-      absentToday: true,
-      lateToday: true,
-      earlyExit: true,
-      overtime: true,
-      finances: true
-    };
-    (state?.branches || []).forEach((b) => {
-      if (b && b.id) all[`branch_${b.id}`] = true;
+      extraHours: true,
+      branchSales: true
     });
-    setExpandedCards(all);
   };
 
   const collapseAllCards = () => {
@@ -77,7 +80,7 @@ export default function Dashboard({
   };
 
   const orgSettings = state?.orgSettings || {};
-  const employees = (state?.employees || []).filter((e) => e && e.id);
+  const employees = (state?.employees || []).filter((e) => e && e.id && isEmployeeActive(e));
   const branches = (state?.branches || []).filter((b) => b && b.id);
   const punches = (state?.shifts || []).filter((p) => p && (p.id || p.date || p.timestamp));
   const transactions = (state?.finances || state?.transactions || []).filter(Boolean);
@@ -485,19 +488,21 @@ export default function Dashboard({
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '18px', marginBottom: '28px' }}>
           {branches.map((b) => {
             if (!b || !b.id) return null;
-            const branchEmps = employees.filter((e) => e && empBelongsToBranch(e, b.id));
+            const branchEmps = employees.filter((e) => e && isEmployeeActive(e) && empBelongsToBranch(e, b.id));
             const branchTodayPunches = todayPunches.filter((p) => {
               if (!p) return false;
               if (p.branchId) return String(p.branchId) === String(b.id);
               return String(branchEmps.find((e) => e && String(e.id) === String(p.employeeId))?.branchId || '') === String(b.id);
             });
             const branchActiveCount = branchEmps.filter((e) => {
-              if (!e || !e.id) return false;
+              if (!e || !e.id || !isEmployeeActive(e)) return false;
               const act = state?.activeShifts?.[e.id];
-              return act && String(act.branchId || e.branchId) === String(b.id);
+              if (!act) return false;
+              const isToday = act.date ? String(act.date) === String(todayDate) : true;
+              return isToday && String(act.branchId || e.branchId) === String(b.id);
             }).length;
             const allLeaves = [...(state?.leaveRequests || []), ...(state?.requests || [])];
-            const totalLiveCount = branchTodayPunches.length + branchActiveCount;
+            const totalLiveCount = branchActiveCount;
             const isBranchExpanded = isCardExpanded(`branch_${b.id}`);
 
             return (
@@ -574,8 +579,9 @@ export default function Dashboard({
                       branchEmps.map((emp) => {
                         if (!emp || !emp.id) return null;
                         const activeShift = state?.activeShifts?.[emp.id];
-                        const isActiveInThisBranch = activeShift && (String(activeShift.branchId || emp.branchId) === String(b.id));
-                        const isActiveInOtherBranch = activeShift && !isActiveInThisBranch;
+                        const isShiftToday = activeShift && (activeShift.date ? String(activeShift.date) === String(todayDate) : true);
+                        const isActiveInThisBranch = activeShift && isShiftToday && isEmployeeActive(emp) && (String(activeShift.branchId || emp.branchId) === String(b.id));
+                        const isActiveInOtherBranch = activeShift && isShiftToday && isEmployeeActive(emp) && !isActiveInThisBranch;
 
                         const empTodayPunchesInThisBranch = todayPunches.filter((p) => {
                           if (!p) return false;

@@ -51458,7 +51458,7 @@
     "orgName": "منظومة إدارة الموارد البشرية والرواتب",
     "adminPass": "123",
     "adminUser": "admin",
-    "systemUrl": "https://nodejs-test.apexthunder.com",
+    "systemUrl": "http://63.183.147.199",
     "taxNumber": "102-284-948",
     "updatedAt": 1789278629569,
     "approvedIPs": [
@@ -51473,7 +51473,7 @@
     },
     "gmailConfig": {
       "enabled": true,
-      "systemUrl": "https://nodejs-test.apexthunder.com",
+      "systemUrl": "http://63.183.147.199",
       "updatedAt": "2026-09-10T14:59:12.508Z",
       "userEmail": "ahmed.kahled.15.11.2000@gmail.com",
       "serviceUrl": "https://script.google.com/macros/s/AKfycbxY4tYcnznk9YO6je1--MMy55r4wJqFxDsmXxcPMwOaXxUwj7kFpu3XyM-qvf30dXh1/exec",

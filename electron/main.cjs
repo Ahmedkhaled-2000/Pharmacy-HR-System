@@ -8,9 +8,11 @@ const { app, BrowserWindow, ipcMain, Menu, dialog, powerMonitor, net, protocol, 
 const path = require('path');
 const fs = require('fs');
 const url = require('url');
+const http = require('http');
 
-// ── تهيئة سويتشات الكروميوم للصلاحيات الكاملة والـ WASM ومعالجة الذاكرة ──────
-app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
+// ── تهيئة سويتشات الكروميوم للصلاحيات الكاملة وبصمة الويندوز WebAuthn و Windows Hello ──────
+app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer,WebAuthentication');
+app.commandLine.appendSwitch('enable-web-authentication-testing-api');
 app.commandLine.appendSwitch('allow-file-access-from-files');
 app.commandLine.appendSwitch('disable-site-isolation-trials');
 app.commandLine.appendSwitch('ignore-certificate-errors');
@@ -62,6 +64,136 @@ const LOCAL_STATE_FILE = path.join(userDataPath, 'local_state.json');
 const LOCAL_BACKUP_FILE = path.join(userDataPath, 'local_state.bak.json');
 const LOCAL_PENDING_FILE = path.join(userDataPath, 'pending_queue.json');
 
+// ── 1.5. خادم الويب المحلي فائق السرعة لدعم بصمة الويندوز WebAuthn / Windows Hello ──
+let localStaticServer = null;
+let localStaticPort = 5858;
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.wasm': 'application/wasm',
+  '.bin': 'application/octet-stream',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.mp3': 'audio/mpeg',
+  '.webm': 'video/webm'
+};
+
+function startLocalStaticServer(distDir) {
+  return new Promise((resolve) => {
+    if (localStaticServer) return resolve(localStaticPort);
+
+    localStaticServer = http.createServer((req, res) => {
+      try {
+        let reqPath = decodeURIComponent(url.parse(req.url).pathname || '/');
+        if (reqPath === '/' || !reqPath) reqPath = '/index.html';
+
+        let filePath = path.normalize(path.join(distDir, reqPath));
+        if (!filePath.startsWith(distDir)) {
+          res.writeHead(403);
+          return res.end('Forbidden');
+        }
+
+        if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+          filePath = path.join(distDir, 'index.html');
+        }
+
+        const ext = path.extname(filePath).toLowerCase();
+        const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+        res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+
+        const stream = fs.createReadStream(filePath);
+        stream.pipe(res);
+        stream.on('error', () => {
+          res.writeHead(500);
+          res.end('Server error');
+        });
+      } catch (err) {
+        res.writeHead(500);
+        res.end('Internal error');
+      }
+    });
+
+    localStaticServer.on('error', (err) => {
+      console.warn('[LocalStaticServer] Port 5858 busy, selecting random available port:', err.message);
+      localStaticServer.listen(0, '127.0.0.1', () => {
+        localStaticPort = localStaticServer.address().port;
+        console.log(`[LocalStaticServer] Serving dist on http://127.0.0.1:${localStaticPort}`);
+        resolve(localStaticPort);
+      });
+    });
+
+    localStaticServer.listen(5858, '127.0.0.1', () => {
+      localStaticPort = 5858;
+      console.log(`[LocalStaticServer] Serving dist on http://127.0.0.1:5858`);
+      resolve(5858);
+    });
+  });
+}
+
+// دالة جلب البيانات المركزية المباشرة من خادم VPS السحابي
+function fetchCloudDataDirect() {
+  return new Promise((resolve, reject) => {
+    const req = http.get('http://63.183.147.199/api/settings?key=pharmacy-tracker-data', { timeout: 8000 }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          let val = json?.value;
+          if (typeof val === 'string') val = JSON.parse(val);
+          resolve(val);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+  });
+}
+
+// التأكد من ملء قاعدة البيانات المحلية عند بدء التشغيل لمنع فتح برنامج فارغ (0 موظف)
+async function ensureLocalStatePopulated() {
+  try {
+    let needsFetch = true;
+    if (fs.existsSync(LOCAL_STATE_FILE)) {
+      try {
+        const raw = fs.readFileSync(LOCAL_STATE_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.employees) && parsed.employees.length > 0) {
+          needsFetch = false;
+        }
+      } catch {}
+    }
+
+    if (needsFetch) {
+      console.log('[Desktop State] Local state empty or missing. Fetching from VPS (63.183.147.199)...');
+      const cloudData = await fetchCloudDataDirect();
+      if (cloudData && Array.isArray(cloudData.employees) && cloudData.employees.length > 0) {
+        fs.writeFileSync(LOCAL_STATE_FILE, JSON.stringify(cloudData), 'utf8');
+        console.log(`[Desktop State] Successfully seeded local state with ${cloudData.employees.length} employees from VPS.`);
+      }
+    }
+  } catch (err) {
+    console.warn('[Desktop State] Could not seed from VPS at startup:', err.message);
+  }
+}
+
 // ── 2. قفل النسخة الفردية (Single Instance Lock) ─────────────────────────
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -96,7 +228,7 @@ function createMainWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false, // للسماح بتحميل نماذج الذكاء الاصطناعي وبصمة الوجه وملفات WASM المحلية
-      allowRunningInsecureContent: false,
+      allowRunningInsecureContent: true,
       spellcheck: false,
       backgroundThrottling: false, // يمنع تجميد أو إبطاء المؤقتات واستطلاع المزامنة عند تشغيل التطبيق في الخلفية
     },
@@ -190,12 +322,12 @@ function createMainWindow() {
     return true;
   });
 
-  // تحميل مسار الواجهة عبر البروتوكول الآمن أو خادم التطوير
+  // تحميل مسار الواجهة عبر خادم الـ Localhost لدعم WebAuthn وبصمة Windows Hello قانونياً
   if (isDev) {
     const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
     mainWindow.loadURL(devUrl);
   } else {
-    mainWindow.loadURL('app://localhost/index.html');
+    mainWindow.loadURL(`http://localhost:${localStaticPort}/index.html`);
   }
 
   mainWindow.on('closed', () => {
@@ -421,6 +553,20 @@ ipcMain.handle('local-db:clear', async () => {
   }
 });
 
+// المزامنة المركزية المباشرة مع خادم VPS
+ipcMain.handle('cloud:sync-state', async () => {
+  try {
+    const cloudData = await fetchCloudDataDirect();
+    if (cloudData && Array.isArray(cloudData.employees) && cloudData.employees.length > 0) {
+      fs.writeFileSync(LOCAL_STATE_FILE, JSON.stringify(cloudData), 'utf8');
+      return { success: true, data: cloudData };
+    }
+    return { success: false, error: 'Empty cloud data' };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // محرك التحديثات عبر الواجهة (الفحص اليدوي)
 ipcMain.handle('app-update:check', async () => {
   return await checkForAppUpdates(true);
@@ -485,7 +631,6 @@ ipcMain.handle('app:is-admin', async () => {
 });
 
 // ── 5.5. إدارة خادم الواتساب التلقائي على مدار 24 ساعة (Auto 24/7 WhatsApp Gateway) ──
-const http = require('http');
 const os = require('os');
 const { spawn, exec } = require('child_process');
 
@@ -932,11 +1077,30 @@ ipcMain.handle('print:generate-pdf-base64', async (_event, htmlContent, printOpt
 });
 
 // ── 6. دورة حياة التطبيق (App Lifecycle) ──────────────────────────────────
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // فحص وإتاحة المنفذ 3100 في جدار حماية ويندوز لربط باقي الأجهزة بالصيدلية
   ensureFirewallPortAllowed();
   // تشغيل خادم الواتساب تلقائياً في الخلفية فور إقلاع التطبيق
   ensureWhatsAppServerRunning();
+
+  const distDir = path.normalize(path.join(__dirname, '../dist'));
+
+  // تشغيل خادم الويب المحلي لخدمة الواجهة وتفعيل بصمة Windows Hello و WebAuthn
+  if (!isDev) {
+    try {
+      await startLocalStaticServer(distDir);
+    } catch (e) {
+      console.warn('[LocalStaticServer Error]:', e.message);
+    }
+  }
+
+  // التأكد من ملء قاعدة البيانات المحلية من سيرفر VPS لحماية التطبيق من الظهور بدون موظفين
+  try {
+    await ensureLocalStatePopulated();
+  } catch (e) {
+    console.warn('[LocalState Init Error]:', e.message);
+  }
+
   // ── تفعيل معالج بروتوكول app المحلي لخدمة ملفات المنظومة ونماذج AI محلياً ──
   try {
     protocol.handle('app', (request) => {

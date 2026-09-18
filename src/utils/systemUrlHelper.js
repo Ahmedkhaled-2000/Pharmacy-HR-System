@@ -2,15 +2,14 @@
  * src/utils/systemUrlHelper.js
  * مزود وموحد الروابط العامة للمنظومة (Public System URL Resolver & Clipboard Formatter)
  * 
- * يضمن دائماً أنه عند نسخ أي رابط داخل تطبيق سطح المكتب (Windows Electron) أو بيئة التطوير
- * يتم نسخ الرابط العام الحي الرسمي للمنظومة (الذي يمكن للأجهزة الخارجية، هواتف الموظفين،
- * والشاشات، والفروع فتحه والاتصال به) بدلاً من نسخ رابط محلي مغلق مثل app://localhost أو localhost.
+ * يضمن دائماً أنه عند نسخ أي رابط داخل تطبيق سطح المكتب (Windows Electron) أو بيئة المتصفح (HTTP/HTTPS)
+ * يتم نسخ الرابط العام الحي الرسمي لسيرفر الـ VPS المعتمد (http://63.183.147.199) بدلاً من روابط محليه أو روابط قديمة.
  */
 
-export const DEFAULT_PRODUCTION_URL = 'https://nodejs-test.apexthunder.com';
+export const DEFAULT_PRODUCTION_URL = 'http://63.183.147.199';
 
 /**
- * فحص ما إذا كان الرابط أو النطاق محلياً أو مخصصاً لسطح المكتب فقط
+ * فحص ما إذا كان الرابط أو النطاق محلياً أو قديماً
  */
 export function isLocalOrDesktopUrl(url) {
   if (!url || typeof url !== 'string') return false;
@@ -22,7 +21,9 @@ export function isLocalOrDesktopUrl(url) {
     trimmed.includes('localhost') ||
     trimmed.includes('127.0.0.1') ||
     trimmed.includes('0.0.0.0') ||
-    trimmed.includes('pharmacy-hr-system.vercel.app') // الرابط القديم المستبدل
+    trimmed.includes('apexthunder.com') ||
+    trimmed.includes('172.20.10.3') ||
+    trimmed.includes('pharmacy-hr-system.vercel.app')
   );
 }
 
@@ -40,7 +41,7 @@ export function isElectronDesktop() {
 }
 
 /**
- * جلب النطاق العام الرسمي المعتمد للمنظومة بدون أي مسارات زائدة أو شرطة مائلة في النهاية
+ * جلب النطاق العام الرسمي المعتمد للمنظومة (VPS)
  */
 export function getPublicSystemOrigin(stateOrConfig = null) {
   // 1. فحص الإعدادات المباشرة في كائن الحالة (state)
@@ -77,7 +78,7 @@ export function getPublicSystemOrigin(stateOrConfig = null) {
     }
   } catch {}
 
-  // 3. فحص نطاق المتصفح المباشر (فقط إذا كان متصفح ويب عام وحي، وليس تطبيق ويندوز ولا لوكال)
+  // 3. فحص نطاق المتصفح المباشر
   if (typeof window !== 'undefined' && window.location?.origin) {
     const origin = window.location.origin;
     if (
@@ -93,18 +94,17 @@ export function getPublicSystemOrigin(stateOrConfig = null) {
     }
   }
 
-  // 4. الدومين الرسمي المعتمد للمنظومة
+  // 4. خادم الـ VPS المركزي المعتمد
   return DEFAULT_PRODUCTION_URL;
 }
 
 /**
- * بناء رابط عام صالح وكامل لمسار معين (مثل /kiosk أو /careers أو /interview)
+ * بناء رابط عام صالح ومباشر لمسار معين
  */
 export function getPublicSystemUrl(path = '', stateOrConfig = null) {
   const origin = getPublicSystemOrigin(stateOrConfig);
   if (!path) return origin;
   
-  // إذا كان المسار رابطاً كاملاً بالفعل
   if (
     path.startsWith('http://') ||
     path.startsWith('https://') ||
@@ -112,9 +112,8 @@ export function getPublicSystemUrl(path = '', stateOrConfig = null) {
     path.startsWith('file://')
   ) {
     if (isLocalOrDesktopUrl(path)) {
-      // استبدال النطاق المحلي بالنطاق العام الرسمي
       try {
-        const normalized = path.replace(/^app:\/\/localhost/, 'http://localhost');
+        const normalized = path.replace(/^(app:\/\/localhost|http:\/\/localhost:\d+)/, 'http://localhost');
         const parsed = new URL(normalized);
         return `${origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
       } catch {
@@ -129,47 +128,99 @@ export function getPublicSystemUrl(path = '', stateOrConfig = null) {
 }
 
 /**
+ * محرك النسخ الشامل للحافظة (يعمل عبر HTTPS و HTTP وجميع البيئات بلا استثناء)
+ */
+export async function safeCopyToClipboard(text) {
+  if (typeof text !== 'string') text = String(text || '');
+
+  // 1. تجربة الـ Modern Clipboard API إذا كانت البيئة Secure Context
+  try {
+    if (navigator?.clipboard?.writeText && (window.isSecureContext || window.location?.hostname === 'localhost')) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {}
+
+  // 2. البديل العالمي الفوري المتوافق مع HTTP والمتصفحات المقيدة (execCommand Fallback)
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.contain = 'strict';
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '-9999px';
+    textarea.style.opacity = '0';
+    textarea.style.fontSize = '12pt';
+
+    const selection = document.getSelection();
+    let originalRange = null;
+    if (selection && selection.rangeCount > 0) {
+      originalRange = selection.getRangeAt(0);
+    }
+
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textarea);
+
+    if (originalRange && selection) {
+      selection.removeAllRanges();
+      selection.addRange(originalRange);
+    }
+    return successful;
+  } catch (err) {
+    console.warn('[Clipboard] Copy fallback error:', err);
+    return false;
+  }
+}
+
+/**
  * نسخ الرابط العام للحافظة مع إشعار للمستخدم
  */
 export async function copyPublicSystemUrl(urlOrPath, stateOrConfig = null, onSuccess = null) {
   const publicUrl = getPublicSystemUrl(urlOrPath, stateOrConfig);
-  try {
-    if (navigator?.clipboard?.writeText) {
-      await navigator.clipboard.writeText(publicUrl);
-    } else {
-      // Fallback
-      const textarea = document.createElement('textarea');
-      textarea.value = publicUrl;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-    }
-  } catch (err) {
-    console.warn('Failed to copy using standard clipboard:', err);
-  }
-
-  if (typeof onSuccess === 'function') {
+  const success = await safeCopyToClipboard(publicUrl);
+  if (success && typeof onSuccess === 'function') {
     onSuccess(publicUrl);
   }
   return publicUrl;
 }
 
 /**
- * تثبيت اعتراض عام وذكي لـ navigator.clipboard.writeText في بيئة سطح المكتب
- * بحيث لو حاول أي مكون برمجياً نسخ رابط يبدأ بـ app://localhost أو localhost:5173
- * يتم تحويله تلقائياً وبشكل صامت إلى الرابط العام الرسمي المعتمد!
+ * تثبيت Polyfill واعتراض عام لـ navigator.clipboard لدعم HTTP وتطهير الروابط القديمة
  */
 export function installClipboardUrlSanitizer() {
-  if (typeof window === 'undefined' || !navigator?.clipboard) return;
-  
-  // نتأكد من عدم التثبيت أكثر من مرة
+  if (typeof window === 'undefined') return;
+
+  // 1. حقن Polyfill لـ navigator.clipboard إن لم يكن موجوداً على HTTP
+  if (!navigator.clipboard) {
+    navigator.clipboard = {
+      writeText: async (text) => {
+        const publicOrigin = getPublicSystemOrigin();
+        let sanitized = String(text || '')
+          .replace(/app:\/\/localhost/gi, publicOrigin)
+          .replace(/https?:\/\/localhost:\d+/gi, publicOrigin)
+          .replace(/https?:\/\/127\.0\.0\.1:\d+/gi, publicOrigin)
+          .replace(/https?:\/\/[^/]*apexthunder\.com/gi, publicOrigin)
+          .replace(/https?:\/\/172\.20\.10\.3(:\d+)?/gi, publicOrigin);
+        return safeCopyToClipboard(sanitized);
+      }
+    };
+    return;
+  }
+
   if (navigator.clipboard._hasUrlSanitizer) return;
 
   const originalWriteText = navigator.clipboard.writeText?.bind(navigator.clipboard);
-  if (!originalWriteText) return;
+  if (!originalWriteText) {
+    navigator.clipboard.writeText = async (text) => safeCopyToClipboard(text);
+    navigator.clipboard._hasUrlSanitizer = true;
+    return;
+  }
 
   navigator.clipboard.writeText = async function (text) {
     let sanitizedText = text;
@@ -177,11 +228,18 @@ export function installClipboardUrlSanitizer() {
       const publicOrigin = getPublicSystemOrigin();
       sanitizedText = sanitizedText
         .replace(/app:\/\/localhost/gi, publicOrigin)
-        .replace(/https?:\/\/localhost:5173/gi, publicOrigin)
-        .replace(/https?:\/\/127\.0\.0\.1:5173/gi, publicOrigin)
+        .replace(/https?:\/\/localhost:\d+/gi, publicOrigin)
+        .replace(/https?:\/\/127\.0\.0\.1:\d+/gi, publicOrigin)
+        .replace(/https?:\/\/[^/]*apexthunder\.com/gi, publicOrigin)
+        .replace(/https?:\/\/172\.20\.10\.3(:\d+)?/gi, publicOrigin)
         .replace(/https?:\/\/pharmacy-hr-system\.vercel\.app/gi, publicOrigin);
     }
-    return originalWriteText(sanitizedText);
+    try {
+      if (window.isSecureContext) {
+        return await originalWriteText(sanitizedText);
+      }
+    } catch {}
+    return safeCopyToClipboard(sanitizedText);
   };
   navigator.clipboard._hasUrlSanitizer = true;
 }

@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   savePendingQueue: (queue) => ipcRenderer.invoke('local-db:save-pending', queue),
   loadPendingQueue: () => ipcRenderer.invoke('local-db:load-pending'),
   clearLocalCache: () => ipcRenderer.invoke('local-db:clear'),
+  syncCloudState: () => ipcRenderer.invoke('cloud:sync-state'),
 
   // 4. محرك التحديثات التلقائية داخل البرنامج (In-App Auto-Updater)
   checkForUpdates: () => ipcRenderer.invoke('app-update:check'),

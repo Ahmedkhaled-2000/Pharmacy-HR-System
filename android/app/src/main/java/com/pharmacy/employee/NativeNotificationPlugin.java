@@ -126,4 +126,38 @@ public class NativeNotificationPlugin extends Plugin {
             call.reject("Failed to show system notification: " + e.getMessage(), e);
         }
     }
+
+    @PluginMethod
+    public void startBackgroundService(PluginCall call) {
+        try {
+            Context context = getContext();
+            Intent serviceIntent = new Intent(context, BackgroundNotificationService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent);
+            } else {
+                context.startService(serviceIntent);
+            }
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            ret.put("message", "Background service started");
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Failed to start background service: " + e.getMessage(), e);
+        }
+    }
+
+    @PluginMethod
+    public void stopBackgroundService(PluginCall call) {
+        try {
+            Context context = getContext();
+            Intent serviceIntent = new Intent(context, BackgroundNotificationService.class);
+            context.stopService(serviceIntent);
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            ret.put("message", "Background service stopped");
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Failed to stop background service: " + e.getMessage(), e);
+        }
+    }
 }

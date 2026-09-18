@@ -658,7 +658,7 @@ function doGet(e) {
             type="text"
             value={systemUrl}
             onChange={(e) => setSystemUrl(e.target.value)}
-            placeholder="https://nodejs-test.apexthunder.com"
+            placeholder="http://63.183.147.199"
             style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--surface)' }}
           />
           <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>

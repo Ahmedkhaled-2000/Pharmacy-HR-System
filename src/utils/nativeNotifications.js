@@ -21,7 +21,11 @@ export async function requestSystemNotificationPermission() {
   if (isAndroidNative()) {
     try {
       const res = await NativeNotification.requestPermission();
-      return Boolean(res?.granted);
+      if (res?.granted) {
+        NativeNotification.startBackgroundService().catch(() => {});
+        return true;
+      }
+      return false;
     } catch (e) {
       console.warn('[NativeNotifications] Failed to request Android permission:', e);
       return false;
@@ -113,4 +117,30 @@ export async function showSystemNotification({ title, body, id = null, icon = nu
   }
 
   return false;
+}
+
+/**
+ * تشغيل خدمة الإشعارات في الخلفية على أندرويد لتعمل 24/7 حتى لو أُغلق التطبيق
+ */
+export async function startBackgroundNotificationService() {
+  if (isAndroidNative()) {
+    try {
+      await NativeNotification.startBackgroundService();
+    } catch (e) {
+      console.warn('[NativeNotifications] Could not start background service:', e);
+    }
+  }
+}
+
+/**
+ * إيقاف خدمة الخلفية عند الحاجة
+ */
+export async function stopBackgroundNotificationService() {
+  if (isAndroidNative()) {
+    try {
+      await NativeNotification.stopBackgroundService();
+    } catch (e) {
+      console.warn('[NativeNotifications] Could not stop background service:', e);
+    }
+  }
 }

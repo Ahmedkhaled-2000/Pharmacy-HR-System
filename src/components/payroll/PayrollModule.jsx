@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PayslipPrintModal from './PayslipPrintModal';
-import { fmt, getEmpDisplayName } from '../../utils/formatters';
+import { fmt, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import { getCycleDateRange } from '../../utils/periodEngine';
@@ -97,6 +97,7 @@ export default function PayrollModule({
   const branches = state.branches || [];
 
   const filteredEmployees = employees.filter((emp) => {
+    if (!isEmployeeActive(emp)) return false;
     if (filterBranch && emp.branchId !== filterBranch && (!emp.branchesDetails || !emp.branchesDetails.some((bd) => bd.branchId === filterBranch))) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();

@@ -397,7 +397,7 @@ async function autoExtractStateAttachments(obj, pathParts = []) {
           SET file_data = EXCLUDED.file_data, mime_type = EXCLUDED.mime_type, file_size = EXCLUDED.file_size, updated_at = NOW()
         `, [attId, pathParts[0] || 'auto', pathParts[1] || 'item', pathParts[pathParts.length - 1] || 'file', obj, mimeType, size]);
 
-        return `https://nodejs-test.apexthunder.com/api/attachments?id=${attId}&raw=1`;
+        return `http://63.183.147.199/api/attachments?id=${attId}&raw=1`;
       } catch (e) {
         console.warn('[AutoExtract Attachment Warn]:', e.message);
         return obj;
@@ -438,6 +438,20 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
     stateValue = await autoExtractStateAttachments(stateValue);
     if (Array.isArray(stateValue._deletedIds) && stateValue._deletedIds.length > 150) {
       stateValue._deletedIds = stateValue._deletedIds.slice(-150);
+    }
+
+    // حماية ضد المسح العرضي للكوادر والموظفين (Accidental Wipe Protection)
+    const incomingEmpCount = Array.isArray(stateValue?.employees) ? stateValue.employees.length : 0;
+    const isExplicitReset = Boolean(stateValue?._systemResetToken);
+    if (!isExplicitReset && incomingEmpCount === 0) {
+      const existing = await getSettingsFromStorage(key);
+      if (existing && Array.isArray(existing.employees) && existing.employees.length > 0) {
+        console.warn(`[Backend Guard] 🛡️ Incoming save has 0 employees. Preserving ${existing.employees.length} existing employees.`);
+        stateValue.employees = existing.employees;
+        if (!Array.isArray(stateValue.branches) || stateValue.branches.length === 0) {
+          stateValue.branches = existing.branches || [];
+        }
+      }
     }
   }
 

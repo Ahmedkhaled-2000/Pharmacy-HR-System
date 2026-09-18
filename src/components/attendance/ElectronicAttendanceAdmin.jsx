@@ -4,7 +4,7 @@ import FaceTestModal from './FaceTestModal';
 import { saveFaceDescriptor, deleteFaceDescriptor, saveHandDescriptor, deleteHandDescriptor } from '../../utils/faceStorage';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
-import { getPublicSystemUrl } from '../../utils/systemUrlHelper';
+import { getPublicSystemUrl, safeCopyToClipboard } from '../../utils/systemUrlHelper';
 
 export default function ElectronicAttendanceAdmin({ state, setState, saveState, showToast, executeWithOwnerGuard }) {
   const { showConfirm } = useUI();
@@ -31,10 +31,10 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
   const employees = state.employees || [];
   const globalBiometricType = state.orgSettings?.biometricType || 'face';
 
-  const copyAttendanceLink = (branchId) => {
+  const copyAttendanceLink = async (branchId) => {
     const path = branchId ? `/kiosk/${branchId}` : '/kiosk';
     const link = getPublicSystemUrl(path, state);
-    navigator.clipboard.writeText(link);
+    await safeCopyToClipboard(link);
     if (showToast) {
       showToast('✅ تم نسخ رابط البصمة العام بنجاح: ' + link);
     } else {

@@ -5,7 +5,7 @@ const supabaseUrl = 'https://jjosopujlxgkhrragumj.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impqb3NvcHVqbHhna2hycmFndW1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MzA2NjQsImV4cCI6MjEwMDIwNjY2NH0.m91fh2xgaU72oEfNacFF2BICNuGuvEg3t_sHc2U8n9M';
 
 const supabase = createClient(supabaseUrl, supabaseKey);
-const LIVE_API_URL = 'https://nodejs-test.apexthunder.com/api';
+const LIVE_API_URL = 'http://63.183.147.199:5000/api';
 
 async function migrateData() {
   console.log('🚀 1. Fetching data from Supabase...');

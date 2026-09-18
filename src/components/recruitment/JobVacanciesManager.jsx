@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 import { DEFAULT_VACANCIES } from '../../utils/recruitmentHelper';
 import { useUI } from '../../context/UIContext';
-import { getPublicSystemUrl } from '../../utils/systemUrlHelper';
+import { getPublicSystemUrl, safeCopyToClipboard } from '../../utils/systemUrlHelper';
 
 export default function JobVacanciesManager({
   state,
@@ -222,8 +222,8 @@ export default function JobVacanciesManager({
             <div style={{ display: 'flex', gap: '6px' }}>
               <button
                 type="button"
-                onClick={() => {
-                  navigator.clipboard?.writeText(publicApplyUrl);
+                onClick={async () => {
+                  await safeCopyToClipboard(publicApplyUrl);
                   showToast?.('📋 تم نسخ رابط تقديم المرشحين العام (/careers)');
                 }}
                 style={{
@@ -266,8 +266,8 @@ export default function JobVacanciesManager({
             <div style={{ display: 'flex', gap: '6px' }}>
               <button
                 type="button"
-                onClick={() => {
-                  navigator.clipboard?.writeText(interviewerPortalUrl);
+                onClick={async () => {
+                  await safeCopyToClipboard(interviewerPortalUrl);
                   showToast?.('📋 تم نسخ رابط القائم بالمقابلة (/interview)');
                 }}
                 style={{
@@ -719,8 +719,8 @@ export default function JobVacanciesManager({
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
               <button
                 type="button"
-                onClick={() => {
-                  navigator.clipboard?.writeText(qrModal.url);
+                onClick={async () => {
+                  await safeCopyToClipboard(qrModal.url);
                   showToast?.('📋 تم نسخ الرابط بنجاح');
                 }}
                 style={{ padding: '8px 16px', borderRadius: '8px', fontSize: '13px', background: '#0d9488', color: '#fff', border: 'none', fontWeight: 800, cursor: 'pointer' }}

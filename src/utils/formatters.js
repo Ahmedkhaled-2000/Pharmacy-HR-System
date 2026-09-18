@@ -1189,10 +1189,21 @@ export function calculateEmployeeLeaveStats(emp, state, targetYear = '') {
 export function isEmployeeActive(emp) {
   if (!emp) return false;
   if (emp.is_active === false) return false;
+  if (emp.isTerminated === true || emp.isResigned === true || emp.isArchived === true) return false;
+  if (emp.resignationStatus === 'approved') return false;
+
   const s = String(emp.status || '').trim().toLowerCase();
   if (s === 'تم الاستقالة' || s === 'resigned' || s === 'terminated' || s === 'منتهية خدمته' || s === 'مستقيل' || s === 'inactive') return false;
-  if (emp.isTerminated === true || emp.isResigned === true) return false;
-  if (emp.resignationStatus === 'approved') return false;
+  if (s.includes('استقال') || s.includes('إنهاء') || s.includes('انهاء') || s.includes('منتهي')) return false;
+
+  const es = String(emp.employmentStatus || '').trim().toLowerCase();
+  if (es === 'resigned' || es === 'terminated' || es === 'inactive') return false;
+
+  // فحص تواريخ إنهاء الخدمة أو الاستقالة الصريحة
+  if (emp.terminationDate && String(emp.terminationDate).trim().length >= 4) return false;
+  if (emp.resignationDate && String(emp.resignationDate).trim().length >= 4) return false;
+  if (emp.terminatedAt || emp.resignedAt) return false;
+
   return true;
 }
 

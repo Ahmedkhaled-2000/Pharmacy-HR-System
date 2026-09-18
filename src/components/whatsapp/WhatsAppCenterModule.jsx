@@ -1269,7 +1269,7 @@ export default function WhatsAppCenterModule({
                 💡 <strong>ملاحظة أمنية للمتصفح:</strong> قد تمنع متصفحات Chrome/Edge الاتصال المباشر بخادم الواتساب المحلي من موقع HTTPS. يمكنك فتح المنظومة عبر رابط HTTP المباشر للاتصال بدون حظر أمني:
               </span>
               <a
-                href="http://nodejs-test.apexthunder.com"
+                href="http://63.183.147.199"
                 target="_blank"
                 rel="noreferrer"
                 className="btn"
@@ -1542,7 +1542,7 @@ export default function WhatsAppCenterModule({
             <div style={{ marginTop: '8px', padding: '6px 12px', background: 'rgba(0,0,0,0.25)', borderRadius: '6px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span>⚠️ إذا حظر المتصفح الاتصال بالخادم المحلي (Mixed Content):</span>
               <a
-                href="http://nodejs-test.apexthunder.com"
+                href="http://63.183.147.199"
                 target="_blank"
                 rel="noreferrer"
                 style={{ color: '#fef08a', fontWeight: 800, textDecoration: 'underline' }}

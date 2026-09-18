@@ -71,7 +71,7 @@ async function runOptimization(isDryRun = false) {
         });
 
         // Use standard universal attachment endpoint with raw=1 for <img> compatibility
-        return `https://nodejs-test.apexthunder.com/api/attachments?id=${attId}&raw=1`;
+        return `http://63.183.147.199:5000/api/attachments?id=${attId}&raw=1`;
       }
       return obj;
     }

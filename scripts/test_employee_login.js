@@ -1,6 +1,6 @@
 // Test employee login against cloud API using standard fetch
 async function testLogin(username, password) {
-  const res = await fetch('https://nodejs-test.apexthunder.com/api/auth/login', {
+  const res = await fetch('http://63.183.147.199:5000/api/auth/login', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

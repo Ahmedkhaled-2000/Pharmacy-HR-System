@@ -322,6 +322,16 @@ export default function FaceTestModal({ employee, onClose, biometricType = 'face
                     📌 <strong>كيفية السماح:</strong> اضغط على أيقونة القفل بجانب رابط الموقع في شريط العناوين ➔ فعّل الكاميرا ➔ ثم انقر على زر إعادة المحاولة.
                   </div>
                 )}
+                {typeof window !== 'undefined' && window.location.protocol === 'http:' && !window.location.hostname.includes('localhost') && (
+                  <button
+                    type="button"
+                    onClick={() => { window.location.href = window.location.href.replace(/^http:/, 'https:'); }}
+                    style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: '9px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}
+                  >
+                    <span>🔒</span>
+                    <span>التحويل إلى رابط HTTPS المشفر لتفعيل الكاميرا</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleRetryAll}

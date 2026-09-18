@@ -119,7 +119,17 @@ export async function loadStateLocally() {
   // 1. الأولوية لتطبيق سطح المكتب Windows لقراءة أحدث نسخة من القرص الصلب
   try {
     if (typeof window !== 'undefined' && window.desktopAPI?.loadStateLocally) {
-      const desktopState = await window.desktopAPI.loadStateLocally();
+      let desktopState = await window.desktopAPI.loadStateLocally();
+      if (desktopState && typeof desktopState === 'object' && Array.isArray(desktopState.employees) && desktopState.employees.length > 0) {
+        return desktopState;
+      }
+      // إذا كان التخزين المحلي فارغاً، نحاول المزامنة الفورية من خادم VPS
+      if (window.desktopAPI?.syncCloudState) {
+        const syncRes = await window.desktopAPI.syncCloudState();
+        if (syncRes?.success && syncRes.data) {
+          return syncRes.data;
+        }
+      }
       if (desktopState && typeof desktopState === 'object') {
         return desktopState;
       }

@@ -426,7 +426,7 @@ export default function AttendanceModule({
                   s.status !== 'cancelled' && !s.isCancelled
                 );
                 const activeShift = state.activeShifts?.[emp.id] || state.activeShifts?.[String(emp.id)] || openShiftInShifts;
-                const hasLiveShift = Boolean(activeShift && activePeriodFilter(activeShift.date));
+                const hasLiveShift = Boolean(activeShift && isEmployeeActive(emp) && activeShift.date === todayStrNow);
                 const liveElapsedHours = hasLiveShift
                   ? Math.max(0, Math.round(((Date.now() - (activeShift.startEpoch || (activeShift.createdAt ? new Date(activeShift.createdAt).getTime() : Date.now()))) / 3600000) * 10) / 10)
                   : 0;

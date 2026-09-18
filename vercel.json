@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://nodejs-test.apexthunder.com/api/:path*"
+      "destination": "http://63.183.147.199/api/:path*"
     },
     {
       "source": "/(.*)",

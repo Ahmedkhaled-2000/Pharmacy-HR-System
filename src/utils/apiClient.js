@@ -26,7 +26,7 @@ const getApiBaseUrl = () => {
   // 3. في بيئة المتصفح المباشرة على نطاق السيرفر أو pharmacore.site
   if (typeof window !== 'undefined' && window.location) {
     const { origin, hostname } = window.location;
-    if (hostname && (hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site') || hostname === '63.183.147.199' || hostname === 'nodejs-test.apexthunder.com' || hostname.endsWith('.apexthunder.com'))) {
+    if (hostname && (hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site') || hostname === '63.183.147.199')) {
       return `${origin}/api`;
     }
   }
