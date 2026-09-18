@@ -1,5 +1,5 @@
 import React from 'react';
-import { getPublicSystemUrl } from '../../utils/systemUrlHelper';
+import { getPublicSystemUrl, safeCopyToClipboard } from '../../utils/systemUrlHelper';
 
 export default function OrgSettingsCard({
   orgNameInput,
@@ -99,9 +99,9 @@ export default function OrgSettingsCard({
           <button
             type="button"
             className="btn btn-start"
-            onClick={() => {
+            onClick={async () => {
               const link = getPublicSystemUrl('/kiosk', state);
-              navigator.clipboard.writeText(link);
+              await safeCopyToClipboard(link);
               alert('✅ تم نسخ رابط البصمة الإلكترونية العام إلى الحافظة بنجاح!\n' + link);
             }}
           >

@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useState, useMemo, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
+import { getPublicSystemUrl } from '../utils/systemUrlHelper';
 
 import ErrorBoundary from '../components/common/ErrorBoundary';
 import LoginPage from '../components/auth/LoginPage';
@@ -1447,7 +1448,7 @@ export default function AppRoutes() {
                         type="button"
                         className="btn btn-primary"
                         onClick={() => {
-                          window.open(window.location.origin + '/accounts', '_blank');
+                          window.open(getPublicSystemUrl('/accounts'), '_blank');
                           setActiveNavTab('dashboard');
                         }}
                         style={{
@@ -1519,7 +1520,7 @@ export default function AppRoutes() {
                         className="btn btn-primary"
                         onClick={() => {
                           const link = document.createElement('a');
-                          link.href = window.location.origin + '/kiosk';
+                          link.href = getPublicSystemUrl('/kiosk');
                           link.target = '_blank';
                           link.rel = 'noopener noreferrer';
                           document.body.appendChild(link);

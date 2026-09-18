@@ -8,6 +8,7 @@ import {
   normalizeKeyFromEvent
 } from '../../utils/shortcutsConfig';
 import { forceClearCacheAndReload } from '../../utils/cacheManager';
+import { getPublicSystemUrl } from '../../utils/systemUrlHelper';
 
 /**
  * المتحكم المركزي الشامل باختصارات لوحة المفاتيح وإغلاق النوافذ في كامل النظام
@@ -546,7 +547,7 @@ export default function UniversalShortcutsController() {
           consumeEvent();
           uiRef.current?.showToast?.('⚡ جاري فتح كشك البصمة في صفحة جديدة...');
 
-          const kioskUrl = window.location.origin + '/kiosk';
+          const kioskUrl = getPublicSystemUrl('/kiosk', state);
           let win = null;
           try {
             win = window.open(kioskUrl, '_blank');

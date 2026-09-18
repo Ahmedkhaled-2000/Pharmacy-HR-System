@@ -3,6 +3,7 @@ import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import { getCycleDateRange } from '../../utils/periodEngine';
 import { getNotificationTarget, getNotificationTargetTab, isRequestNotification } from '../../utils/notificationEngine';
 import { triggerAndroidApkDownload } from '../../utils/nativeAppUpdater';
+import { getPublicSystemUrl } from '../../utils/systemUrlHelper';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🌟 ADAPTIVE DROPDOWN ITEM WITH SMART BIDIRECTIONAL FLYOUT (Anti-Clipping Engine)
@@ -1423,7 +1424,7 @@ export default function DesktopLayout({
 
   // Listen to system-wide navigation shortcuts (Alt+1 .. Alt+9, Alt+0) & dropdown close requests
   const openKioskInNewTab = () => {
-    const kioskUrl = window.location.origin + '/kiosk';
+    const kioskUrl = getPublicSystemUrl('/kiosk');
     let win = null;
     try {
       win = window.open(kioskUrl, '_blank');
@@ -1453,9 +1454,9 @@ export default function DesktopLayout({
       const targetSubTab = e.detail?.targetSubTab;
       if (targetTab || e.detail?.id === 'kiosk') {
         if (targetTab === 'accounts') {
-          window.open(window.location.origin + '/accounts', '_blank');
+          window.open(getPublicSystemUrl('/accounts'), '_blank');
         } else if (targetTab === 'pharmacy-archive') {
-          window.open(window.location.origin + '/archive', '_blank');
+          window.open(getPublicSystemUrl('/archive'), '_blank');
         } else if (targetTab === 'kiosk' || targetTab === 'kioskMode' || e.detail?.id === 'kiosk') {
           openKioskInNewTab();
           return;
@@ -1538,9 +1539,9 @@ const handleMenuClick = (menu) => {
   }
 if (menu.isSingle) {
   if (menu.targetTab === 'accounts' || menu.navigateToAccounts || menu.id === 'accounts') {
-    window.open(window.location.origin + '/accounts', '_blank');
+    window.open(getPublicSystemUrl('/accounts'), '_blank');
   } else if (menu.openInNewTab || menu.targetTab === 'pharmacy-archive') {
-    window.open(window.location.origin + '/archive', '_blank');
+    window.open(getPublicSystemUrl('/archive'), '_blank');
   } else if (menu.targetTab === 'kiosk' || menu.id === 'kiosk') {
     openKioskInNewTab();
   } else {
@@ -1568,7 +1569,7 @@ const handleSubItemClick = (subItem) => {
     return;
   }
 if (subItem.targetTab === 'accounts' || subItem.navigateToAccounts || subItem.id === 'accounts') {
-  window.open(window.location.origin + '/accounts', '_blank');
+  window.open(getPublicSystemUrl('/accounts'), '_blank');
   setOpenDropdown(null);
   setHoveredFlyoutId(null);
   return;
@@ -1580,7 +1581,7 @@ if (subItem.targetTab === 'kiosk' || subItem.id === 'kiosk') {
   return;
 }
 if (subItem.openInNewTab || subItem.targetTab === 'pharmacy-archive') {
-  window.open(window.location.origin + '/archive', '_blank');
+  window.open(getPublicSystemUrl('/archive'), '_blank');
   setOpenDropdown(null);
   setHoveredFlyoutId(null);
   return;

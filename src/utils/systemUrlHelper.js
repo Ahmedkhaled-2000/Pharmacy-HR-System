@@ -8,6 +8,20 @@
 
 export const DEFAULT_PRODUCTION_URL = 'http://63.183.147.199';
 
+// تنظيف فوري واستباقي لأي قيم قديمة مخزنة في المتصفح للحسابات السابقة
+try {
+  if (typeof localStorage !== 'undefined') {
+    const saved = localStorage.getItem('pharmacy_system_url');
+    if (saved && (saved.includes('apexthunder.com') || saved.includes('172.20.10.3') || saved.includes('vercel.app'))) {
+      localStorage.setItem('pharmacy_system_url', DEFAULT_PRODUCTION_URL);
+    }
+    const localGmail = localStorage.getItem('pharmacy_gmail_config');
+    if (localGmail && localGmail.includes('apexthunder.com')) {
+      localStorage.setItem('pharmacy_gmail_config', localGmail.replace(/https?:\/\/[^"'\s]*apexthunder\.com/gi, DEFAULT_PRODUCTION_URL));
+    }
+  }
+} catch {}
+
 /**
  * فحص ما إذا كان الرابط أو النطاق محلياً أو قديماً
  */
@@ -52,7 +66,7 @@ export function getPublicSystemOrigin(stateOrConfig = null) {
 
   if (stateSystemUrl && typeof stateSystemUrl === 'string') {
     const trimmed = stateSystemUrl.trim().replace(/\/+$/, '');
-    if (trimmed.startsWith('http') && !isLocalOrDesktopUrl(trimmed)) {
+    if (trimmed.startsWith('http') && !isLocalOrDesktopUrl(trimmed) && !trimmed.includes('apexthunder.com')) {
       return trimmed;
     }
   }
@@ -63,7 +77,7 @@ export function getPublicSystemOrigin(stateOrConfig = null) {
       const savedSystemUrl = localStorage.getItem('pharmacy_system_url');
       if (savedSystemUrl && typeof savedSystemUrl === 'string') {
         const trimmed = savedSystemUrl.trim().replace(/\/+$/, '');
-        if (trimmed.startsWith('http') && !isLocalOrDesktopUrl(trimmed)) {
+        if (trimmed.startsWith('http') && !isLocalOrDesktopUrl(trimmed) && !trimmed.includes('apexthunder.com')) {
           return trimmed;
         }
       }
@@ -71,21 +85,22 @@ export function getPublicSystemOrigin(stateOrConfig = null) {
       const localGmail = JSON.parse(localStorage.getItem('pharmacy_gmail_config') || '{}');
       if (localGmail?.systemUrl && typeof localGmail.systemUrl === 'string') {
         const trimmed = localGmail.systemUrl.trim().replace(/\/+$/, '');
-        if (trimmed.startsWith('http') && !isLocalOrDesktopUrl(trimmed)) {
+        if (trimmed.startsWith('http') && !isLocalOrDesktopUrl(trimmed) && !trimmed.includes('apexthunder.com')) {
           return trimmed;
         }
       }
     }
   } catch {}
 
-  // 3. فحص نطاق المتصفح المباشر
+  // 3. فحص نطاق المتصفح المباشر (مع استبعاد apexthunder و Electron)
   if (typeof window !== 'undefined' && window.location?.origin) {
     const origin = window.location.origin;
     if (
       !isElectronDesktop() &&
       origin &&
       origin !== 'null' &&
-      !isLocalOrDesktopUrl(origin)
+      !isLocalOrDesktopUrl(origin) &&
+      !origin.includes('apexthunder.com')
     ) {
       try {
         localStorage.setItem('pharmacy_system_url', origin);
@@ -96,6 +111,21 @@ export function getPublicSystemOrigin(stateOrConfig = null) {
 
   // 4. خادم الـ VPS المركزي المعتمد
   return DEFAULT_PRODUCTION_URL;
+}
+
+/**
+ * تطهير واستبدال أي نطاقات قديمة فورياً بالنطاق الرسمي للـ VPS
+ */
+export function sanitizeSystemUrl(text) {
+  if (!text || typeof text !== 'string') return text;
+  const publicOrigin = getPublicSystemOrigin();
+  return text
+    .replace(/https?:\/\/[^/]*apexthunder\.com/gi, publicOrigin)
+    .replace(/https?:\/\/172\.20\.10\.3(:\d+)?/gi, publicOrigin)
+    .replace(/https?:\/\/pharmacy-hr-system\.vercel\.app/gi, publicOrigin)
+    .replace(/app:\/\/localhost/gi, publicOrigin)
+    .replace(/https?:\/\/localhost:\d+/gi, publicOrigin)
+    .replace(/https?:\/\/127\.0\.0\.1:\d+/gi, publicOrigin);
 }
 
 /**
@@ -111,16 +141,16 @@ export function getPublicSystemUrl(path = '', stateOrConfig = null) {
     path.startsWith('app://') ||
     path.startsWith('file://')
   ) {
-    if (isLocalOrDesktopUrl(path)) {
+    if (isLocalOrDesktopUrl(path) || path.includes('apexthunder.com')) {
       try {
-        const normalized = path.replace(/^(app:\/\/localhost|http:\/\/localhost:\d+)/, 'http://localhost');
+        const normalized = path.replace(/^(app:\/\/localhost|http:\/\/localhost:\d+|https?:\/\/[^/]*apexthunder\.com)/, 'http://localhost');
         const parsed = new URL(normalized);
         return `${origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
       } catch {
         return `${origin}/${path.replace(/^(https?:\/\/[^/]+|app:\/\/localhost|file:\/\/[^/]+)\/?/, '')}`;
       }
     }
-    return path;
+    return sanitizeSystemUrl(path);
   }
 
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
@@ -132,11 +162,12 @@ export function getPublicSystemUrl(path = '', stateOrConfig = null) {
  */
 export async function safeCopyToClipboard(text) {
   if (typeof text !== 'string') text = String(text || '');
+  const sanitizedText = sanitizeSystemUrl(text);
 
   // 1. تجربة الـ Modern Clipboard API إذا كانت البيئة Secure Context
   try {
     if (navigator?.clipboard?.writeText && (window.isSecureContext || window.location?.hostname === 'localhost')) {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(sanitizedText);
       return true;
     }
   } catch {}
@@ -144,7 +175,7 @@ export async function safeCopyToClipboard(text) {
   // 2. البديل العالمي الفوري المتوافق مع HTTP والمتصفحات المقيدة (execCommand Fallback)
   try {
     const textarea = document.createElement('textarea');
-    textarea.value = text;
+    textarea.value = sanitizedText;
     textarea.setAttribute('readonly', '');
     textarea.style.contain = 'strict';
     textarea.style.position = 'fixed';

@@ -42,8 +42,13 @@ export default function GmailConfigCard({
       userEmail: stateCfg.userEmail || localSaved?.userEmail || '',
       appPassword: stateCfg.appPassword || localSaved?.appPassword || '',
       adminEmails: parsedAdminEmails,
-      dailyDigestTime: localSaved?.dailyDigestTime !== undefined ? localSaved.dailyDigestTime : (stateCfg.dailyDigestTime || ''),
-      systemUrl: stateCfg.systemUrl || localSaved?.systemUrl || getPublicSystemOrigin(stateCfg),
+      systemUrl: (() => {
+        const val = stateCfg.systemUrl || localSaved?.systemUrl || '';
+        if (!val || val.includes('apexthunder.com') || val.includes('172.20.10.3') || val.includes('localhost')) {
+          return getPublicSystemOrigin();
+        }
+        return val;
+      })(),
       serviceUrl: stateCfg.serviceUrl || localSaved?.serviceUrl || '',
       sendOnRequest: stateCfg.sendOnRequest !== undefined ? Boolean(stateCfg.sendOnRequest) : (localSaved?.sendOnRequest ?? true),
       sendOnDecision: stateCfg.sendOnDecision !== undefined ? Boolean(stateCfg.sendOnDecision) : (localSaved?.sendOnDecision ?? true),
@@ -93,8 +98,10 @@ export default function GmailConfigCard({
     if (effective.userEmail) setUserEmail(effective.userEmail);
     if (effective.appPassword) setAppPassword(effective.appPassword);
     if (effective.adminEmails && effective.adminEmails.length > 0) setAdminEmails(effective.adminEmails);
-    if (effective.dailyDigestTime) setDailyDigestTime(effective.dailyDigestTime);
-    if (effective.systemUrl) setSystemUrl(effective.systemUrl);
+    if (effective.systemUrl) {
+      const clean = (effective.systemUrl.includes('apexthunder.com') || effective.systemUrl.includes('172.20.10.3')) ? getPublicSystemOrigin() : effective.systemUrl;
+      setSystemUrl(clean);
+    }
     if (effective.serviceUrl) setServiceUrl(effective.serviceUrl);
     if (effective.sendOnRequest !== undefined) setSendOnRequest(effective.sendOnRequest);
     if (effective.sendOnDecision !== undefined) setSendOnDecision(effective.sendOnDecision);

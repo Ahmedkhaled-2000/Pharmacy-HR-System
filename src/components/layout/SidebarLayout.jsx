@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import { getCycleDateRange } from '../../utils/periodEngine';
+import { getPublicSystemUrl } from '../../utils/systemUrlHelper';
 
 export default function SidebarLayout({
   currentRole,
@@ -140,11 +141,11 @@ export default function SidebarLayout({
                   key={item.id}
                   onClick={() => {
                     if (item.id === 'accounts') {
-                      window.open(window.location.origin + '/accounts', '_blank');
+                      window.open(getPublicSystemUrl('/accounts'), '_blank');
                     } else if (item.openInNewTab || item.id === 'pharmacy-archive') {
-                      window.open(window.location.origin + '/archive', '_blank');
+                      window.open(getPublicSystemUrl('/archive'), '_blank');
                     } else if (item.id === 'kiosk') {
-                      window.open(window.location.origin + '/kiosk', '_blank');
+                      window.open(getPublicSystemUrl('/kiosk'), '_blank');
                     } else {
                       setActiveTab(item.id);
                     }

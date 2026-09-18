@@ -4,6 +4,7 @@ import {
   formatShortcutDisplay,
   formatShortcutFallback
 } from '../../utils/shortcutsConfig';
+import { getPublicSystemUrl } from '../../utils/systemUrlHelper';
 
 /**
  * دليل اختصارات لوحة المفاتيح الفاخر لنظام Pharmacy ERP
@@ -35,7 +36,7 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
   const handleLaunchShortcut = (item) => {
     if (item.id === 'kioskMode') {
       onClose?.();
-      const targetUrl = window.location.origin + '/kiosk';
+      const targetUrl = getPublicSystemUrl('/kiosk');
       try {
         const link = document.createElement('a');
         link.href = targetUrl;
