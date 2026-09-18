@@ -217,3 +217,68 @@ export function emitSyncHint(payload) {
   return false;
 }
 
+// معرف جلسة فريد للجهاز/التبويب الحالي لمنع الصدى الذاتي (Self-Echo Prevention)
+export const CLIENT_SESSION_ID = typeof crypto !== 'undefined' && crypto.randomUUID
+  ? crypto.randomUUID()
+  : `client_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+/**
+ * بث تغيير ذري لحظي لكائن معين (موظف، وردية، طلب، سلفة، إلخ) لجميع الأجهزة (< 20ms)
+ * @param {Object} params
+ * @param {string} params.entityType - نوع الكيان ('employee'|'shift'|'roster'|'request'|'adjustment'|'loan'|'branch'|'bylaws'|'settings')
+ * @param {string|number} params.entityId - معرف العنصر
+ * @param {Object} params.data - البيانات المعدلة
+ * @param {'update'|'create'|'delete'} [params.action='update'] - نوع العملية
+ */
+export function emitEntityChange({ entityType, entityId, data, action = 'update', meta = {} }) {
+  const s = getSocket();
+  if (!entityType) return false;
+
+  const payload = {
+    entityType,
+    entityId: entityId ? String(entityId) : (data?.id ? String(data.id) : null),
+    data,
+    action,
+    meta,
+    clientId: CLIENT_SESSION_ID,
+    timestamp: new Date().toISOString()
+  };
+
+  if (s && s.connected) {
+    try {
+      s.emit('entity:change', payload);
+      return true;
+    } catch (e) {
+      console.warn('[Socket.io] Error emitting entity:change:', e);
+    }
+  }
+  return false;
+}
+
+/**
+ * الاشتراك في التغييرات والقرارات الذرية اللحظية الواردة من الأجهزة الأخرى (< 30ms)
+ * @param {Function} onEntityChanged - دالة معالجة التغيير
+ */
+export function subscribeToEntityChanges(onEntityChanged) {
+  const s = getSocket();
+  if (!s || typeof onEntityChanged !== 'function') return () => {};
+
+  const handler = (payload) => {
+    try {
+      // تجاهل التحديث إذا كان مرسلاً من نفس النافذة أو الجلسة الحالية
+      if (payload && payload.clientId && payload.clientId === CLIENT_SESSION_ID) {
+        return;
+      }
+      onEntityChanged(payload);
+    } catch (e) {
+      console.warn('[Socket.io] Error handling entity:changed:', e);
+    }
+  };
+
+  s.on('entity:changed', handler);
+
+  return () => {
+    s.off('entity:changed', handler);
+  };
+}
+

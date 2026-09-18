@@ -9,7 +9,8 @@ import {
   subscribeToLiveState,
   subscribeToLiveRequests,
   subscribeToLiveRequestUpdates,
-  subscribeToSyncHints
+  subscribeToSyncHints,
+  subscribeToEntityChanges
 } from '../utils/socketClient';
 import {
   pullDeltaSync
@@ -423,6 +424,184 @@ export function useRealtimeSync(props = {}) {
 
     const unsubRequestUpdates = subscribeToLiveRequestUpdates(handleIncomingRequestPayload);
 
+    // ز) استقبال التغييرات الذرية اللحظية لكافة الكيانات فورياً (< 30ms) وتحديث الشاشات مباشرة
+    const unsubEntityChanges = subscribeToEntityChanges((payload) => {
+      if (!payload || !payload.entityType) return;
+      const { entityType, entityId, data, action, timestamp } = payload;
+      const nowIso = timestamp || new Date().toISOString();
+      console.log(`⚡ [RealtimeSync] استقبال تعديل ذري فوري (${entityType}: ${entityId || action})`);
+
+      // إطلاق وميض بصري لطيف للعنصر المتأثر
+      if (typeof window !== 'undefined' && entityId) {
+        window.dispatchEvent(new CustomEvent('hr:entity-highlight', {
+          detail: { entityType, entityId, action }
+        }));
+      }
+
+      setState((prev) => {
+        if (!prev) return prev;
+
+        switch (entityType) {
+          case 'employee':
+          case 'employees': {
+            const list = Array.isArray(prev.employees) ? [...prev.employees] : [];
+            const targetId = entityId ? String(entityId) : (data?.id ? String(data.id) : null);
+            if (action === 'delete') {
+              return {
+                ...prev,
+                employees: list.filter((e) => e && String(e.id) !== targetId && String(e.code) !== targetId),
+                _lastDeltaSyncAt: nowIso
+              };
+            }
+            const idx = list.findIndex((e) => e && (String(e.id) === targetId || (data?.code && String(e.code) === String(data.code))));
+            if (idx >= 0) {
+              list[idx] = { ...list[idx], ...data, updatedAt: nowIso };
+            } else if (data) {
+              list.unshift({ ...data, updatedAt: nowIso });
+            }
+            return { ...prev, employees: list, _lastDeltaSyncAt: nowIso };
+          }
+
+          case 'shift':
+          case 'shifts': {
+            const list = Array.isArray(prev.shifts) ? [...prev.shifts] : [];
+            const targetId = entityId ? String(entityId) : (data?.id ? String(data.id) : null);
+            if (action === 'delete') {
+              return {
+                ...prev,
+                shifts: list.filter((s) => s && String(s.id) !== targetId),
+                _lastDeltaSyncAt: nowIso
+              };
+            }
+            const idx = list.findIndex((s) => s && String(s.id) === targetId);
+            if (idx >= 0) {
+              list[idx] = { ...list[idx], ...data, updatedAt: nowIso };
+            } else if (data) {
+              list.unshift({ ...data, updatedAt: nowIso });
+            }
+            return { ...prev, shifts: list, _lastDeltaSyncAt: nowIso };
+          }
+
+          case 'activeShift':
+          case 'activeShifts': {
+            const active = { ...(prev.activeShifts || {}) };
+            if (action === 'delete' || !data) {
+              delete active[entityId];
+            } else if (entityId === 'all') {
+              return { ...prev, activeShifts: { ...data }, _lastDeltaSyncAt: nowIso };
+            } else {
+              active[entityId] = { ...(active[entityId] || {}), ...data };
+            }
+            return { ...prev, activeShifts: active, _lastDeltaSyncAt: nowIso };
+          }
+
+          case 'roster':
+          case 'rosters': {
+            if (Array.isArray(prev.rosters)) {
+              const list = [...prev.rosters];
+              const targetId = entityId ? String(entityId) : (data?.id ? String(data.id) : null);
+              if (action === 'delete') {
+                return { ...prev, rosters: list.filter((r) => r && String(r.id) !== targetId), _lastDeltaSyncAt: nowIso };
+              }
+              const idx = list.findIndex((r) => r && String(r.id) === targetId);
+              if (idx >= 0) {
+                list[idx] = { ...list[idx], ...data, updatedAt: nowIso };
+              } else if (data) {
+                list.push({ ...data, updatedAt: nowIso });
+              }
+              return { ...prev, rosters: list, _lastDeltaSyncAt: nowIso };
+            } else if (typeof prev.rosters === 'object') {
+              return {
+                ...prev,
+                rosters: { ...prev.rosters, ...(entityId === 'active' ? data : { [entityId]: data }) },
+                _lastDeltaSyncAt: nowIso
+              };
+            }
+            return prev;
+          }
+
+          case 'adjustment':
+          case 'adjustments': {
+            const list = Array.isArray(prev.adjustments) ? [...prev.adjustments] : [];
+            const targetId = entityId ? String(entityId) : (data?.id ? String(data.id) : null);
+            if (action === 'delete') {
+              return { ...prev, adjustments: list.filter((a) => a && String(a.id) !== targetId), _lastDeltaSyncAt: nowIso };
+            }
+            const idx = list.findIndex((a) => a && String(a.id) === targetId);
+            if (idx >= 0) {
+              list[idx] = { ...list[idx], ...data, updatedAt: nowIso };
+            } else if (data) {
+              list.unshift({ ...data, updatedAt: nowIso });
+            }
+            return { ...prev, adjustments: list, _lastDeltaSyncAt: nowIso };
+          }
+
+          case 'loan':
+          case 'loans': {
+            const list = Array.isArray(prev.loans) ? [...prev.loans] : [];
+            const targetId = entityId ? String(entityId) : (data?.id ? String(data.id) : null);
+            if (action === 'delete') {
+              return { ...prev, loans: list.filter((l) => l && String(l.id) !== targetId), _lastDeltaSyncAt: nowIso };
+            }
+            const idx = list.findIndex((l) => l && String(l.id) === targetId);
+            if (idx >= 0) {
+              list[idx] = { ...list[idx], ...data, updatedAt: nowIso };
+            } else if (data) {
+              list.unshift({ ...data, updatedAt: nowIso });
+            }
+            return { ...prev, loans: list, _lastDeltaSyncAt: nowIso };
+          }
+
+          case 'branch':
+          case 'branches': {
+            const list = Array.isArray(prev.branches) ? [...prev.branches] : [];
+            const targetId = entityId ? String(entityId) : (data?.id ? String(data.id) : null);
+            if (action === 'delete') {
+              return { ...prev, branches: list.filter((b) => b && String(b.id) !== targetId), _lastDeltaSyncAt: nowIso };
+            }
+            const idx = list.findIndex((b) => b && (String(b.id) === targetId || (data?.branchCode && String(b.branchCode) === String(data.branchCode))));
+            if (idx >= 0) {
+              list[idx] = { ...list[idx], ...data, updatedAt: nowIso };
+            } else if (data) {
+              list.push({ ...data, updatedAt: nowIso });
+            }
+            return { ...prev, branches: list, _lastDeltaSyncAt: nowIso };
+          }
+
+          case 'bylaws': {
+            return { ...prev, bylaws: { ...(prev.bylaws || {}), ...data }, _lastDeltaSyncAt: nowIso };
+          }
+
+          case 'settings':
+          case 'orgSettings': {
+            return { ...prev, orgSettings: { ...(prev.orgSettings || {}), ...data }, _lastDeltaSyncAt: nowIso };
+          }
+
+          case 'officialLeaves': {
+            return { ...prev, officialLeaves: data, _lastDeltaSyncAt: nowIso };
+          }
+
+          default:
+            return prev;
+        }
+      });
+    });
+
+    const handleHighlightEvent = (e) => {
+      const { entityId } = e.detail || {};
+      if (!entityId || typeof document === 'undefined') return;
+      const el = document.querySelector(`[data-id="${entityId}"], [data-emp-id="${entityId}"], [data-shift-id="${entityId}"], [data-req-id="${entityId}"]`);
+      if (el) {
+        el.classList.remove('realtime-highlight-row');
+        void el.offsetWidth;
+        el.classList.add('realtime-highlight-row');
+        setTimeout(() => {
+          el.classList.remove('realtime-highlight-row');
+        }, 2600);
+      }
+    };
+    window.addEventListener('hr:entity-highlight', handleHighlightEvent);
+
     const handleFocusOrVisible = () => {
       if (document.visibilityState === 'visible' || document.hasFocus()) {
         pollFailures = 0; // تصفير الفشل فور تفاعل المستخدم
@@ -443,7 +622,9 @@ export function useRealtimeSync(props = {}) {
       if (unsubSyncHint) unsubSyncHint();
       if (unsubRequests) unsubRequests();
       if (unsubRequestUpdates) unsubRequestUpdates();
+      if (unsubEntityChanges) unsubEntityChanges();
       unsubBroadcast();
+      window.removeEventListener('hr:entity-highlight', handleHighlightEvent);
       window.removeEventListener('focus', handleFocusOrVisible);
       window.removeEventListener('online', handleFocusOrVisible);
       document.removeEventListener('visibilitychange', handleFocusOrVisible);

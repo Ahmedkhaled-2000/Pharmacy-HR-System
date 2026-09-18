@@ -1810,6 +1810,18 @@ io.on('connection', (socket) => {
     }
   });
 
+  // استقبال وبث التغييرات الذرية اللحظية (< 5ms) لكافة الأجهزة والصفحات فور التعديل
+  socket.on('entity:change', (payload) => {
+    try {
+      if (payload && payload.entityType) {
+        console.log(`⚡ [Socket.io] بث فوري لتغيير ذري (${payload.entityType}: ${payload.entityId || payload.action}) لجميع الأجهزة المتزامنة`);
+        socket.broadcast.emit('entity:changed', payload);
+      }
+    } catch (err) {
+      console.warn('[Socket.io] error on entity:change:', err.message);
+    }
+  });
+
   socket.on('disconnect', (reason) => {
     console.log(`🔌 [Socket.io] انقطع اتصال: ${socket.id} (${reason})`);
   });

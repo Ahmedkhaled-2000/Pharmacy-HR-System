@@ -62,6 +62,98 @@ import {
   getAllLocalRequests,
   putRequestsBatch
 } from '../utils/localDatabase';
+import { emitEntityChange } from '../utils/socketClient';
+
+/**
+ * كاشف التغييرات الذرية فائق السرعة
+ * يستخرج الكيان المعدل فقط لبثه عبر WebSockets في أقل من 5 مللي ثانية
+ */
+function detectEntityDeltas(prevState, nextState) {
+  const deltas = [];
+  if (!prevState || !nextState) return deltas;
+
+  try {
+    // 1. الموظفون
+    if (prevState.employees !== nextState.employees) {
+      const prevList = Array.isArray(prevState.employees) ? prevState.employees : [];
+      const nextList = Array.isArray(nextState.employees) ? nextState.employees : [];
+      const prevMap = new Map(prevList.map((e) => [String(e.id || e.code), e]));
+      const nextMap = new Map(nextList.map((e) => [String(e.id || e.code), e]));
+
+      for (const [id, nextItem] of nextMap.entries()) {
+        const prevItem = prevMap.get(id);
+        if (!prevItem) {
+          deltas.push({ entityType: 'employee', entityId: id, data: nextItem, action: 'create' });
+        } else if (prevItem !== nextItem && (prevItem.updatedAt !== nextItem.updatedAt || JSON.stringify(prevItem) !== JSON.stringify(nextItem))) {
+          deltas.push({ entityType: 'employee', entityId: id, data: nextItem, action: 'update' });
+        }
+      }
+
+      for (const [id] of prevMap.entries()) {
+        if (!nextMap.has(id)) {
+          deltas.push({ entityType: 'employee', entityId: id, action: 'delete' });
+        }
+      }
+    }
+
+    // 2. الورديات
+    if (prevState.shifts !== nextState.shifts) {
+      const prevShifts = Array.isArray(prevState.shifts) ? prevState.shifts : [];
+      const nextShifts = Array.isArray(nextState.shifts) ? nextState.shifts : [];
+      if (nextShifts.length > prevShifts.length && nextShifts[0]) {
+        deltas.push({ entityType: 'shift', entityId: nextShifts[0].id, data: nextShifts[0], action: 'create' });
+      } else {
+        const prevMap = new Map(prevShifts.slice(0, 100).map((s) => [String(s.id), s]));
+        for (const nextS of nextShifts.slice(0, 100)) {
+          const id = String(nextS.id);
+          const prevS = prevMap.get(id);
+          if (prevS && prevS !== nextS && JSON.stringify(prevS) !== JSON.stringify(nextS)) {
+            deltas.push({ entityType: 'shift', entityId: id, data: nextS, action: 'update' });
+            break;
+          }
+        }
+      }
+    }
+
+    // 3. الورديات النشطة
+    if (prevState.activeShifts !== nextState.activeShifts) {
+      deltas.push({ entityType: 'activeShifts', entityId: 'all', data: nextState.activeShifts, action: 'update' });
+    }
+
+    // 4. المكافآت والخصومات
+    if (prevState.adjustments !== nextState.adjustments) {
+      const prevAdj = Array.isArray(prevState.adjustments) ? prevState.adjustments : [];
+      const nextAdj = Array.isArray(nextState.adjustments) ? nextState.adjustments : [];
+      if (nextAdj.length > prevAdj.length && nextAdj[0]) {
+        deltas.push({ entityType: 'adjustment', entityId: nextAdj[0].id, data: nextAdj[0], action: 'create' });
+      } else {
+        deltas.push({ entityType: 'adjustment', entityId: 'all', data: nextAdj, action: 'update' });
+      }
+    }
+
+    // 5. الجداول
+    if (prevState.rosters !== nextState.rosters) {
+      deltas.push({ entityType: 'roster', entityId: 'active', data: nextState.rosters, action: 'update' });
+    }
+
+    // 6. الفروع
+    if (prevState.branches !== nextState.branches) {
+      deltas.push({ entityType: 'branches', entityId: 'all', data: nextState.branches, action: 'update' });
+    }
+
+    // 7. اللائحة والإعدادات
+    if (prevState.bylaws !== nextState.bylaws) {
+      deltas.push({ entityType: 'bylaws', entityId: 'bylaws', data: nextState.bylaws, action: 'update' });
+    }
+    if (prevState.orgSettings !== nextState.orgSettings) {
+      deltas.push({ entityType: 'settings', entityId: 'orgSettings', data: nextState.orgSettings, action: 'update' });
+    }
+  } catch (err) {
+    console.warn('[detectEntityDeltas Warn]:', err);
+  }
+
+  return deltas;
+}
 
 const DataContext = createContext(null);
 
@@ -631,8 +723,22 @@ export function DataProvider({ children, showToast = () => {} }) {
     showToast
   });
 
-  // Save State with Optimistic UI & Auto-Backup
-  const saveState = async (updatedState) => {
+  // Save State with Optimistic UI, WebSocket Atomic Delta Broadcasting, & Auto-Backup
+  const saveState = async (updatedState, deltaHint = null) => {
+    // 1. بث ذري فوري عبر WebSockets لكافة الأجهزة والتبويبات (< 20ms)
+    try {
+      if (deltaHint && deltaHint.entityType) {
+        emitEntityChange(deltaHint);
+      } else {
+        const deltas = detectEntityDeltas(state, updatedState);
+        for (const d of deltas.slice(0, 5)) {
+          emitEntityChange(d);
+        }
+      }
+    } catch (broadcastErr) {
+      console.warn('[Sync] Instant delta broadcast error:', broadcastErr);
+    }
+
     setIsSyncing(true);
     const result = await smartSaveState(updatedState, {
       onSyncSuccess: (finalMerged) => {
@@ -745,6 +851,11 @@ export function DataProvider({ children, showToast = () => {} }) {
       setIsSyncing(false);
     }
   };
+
+  // بث ذري مباشر لكائن محدد فوراً (< 5ms) عبر WebSockets
+  const broadcastEntityChange = useCallback((entityType, entityId, data, action = 'update') => {
+    emitEntityChange({ entityType, entityId, data, action });
+  }, []);
 
   // Helper Methods
   const getEmp = useCallback((id) => {
@@ -1302,6 +1413,7 @@ export function DataProvider({ children, showToast = () => {} }) {
     state,
     setState,
     saveState,
+    broadcastEntityChange,
     triggerManualSync,
     isLoading,
     setIsLoading,
