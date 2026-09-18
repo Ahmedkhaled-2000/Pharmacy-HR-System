@@ -1375,23 +1375,28 @@ app.get('/api/app/update-manifest', async (req, res) => {
       });
     }
 
-    // مانيفست افتراضي آمن للإصدار 1.2.39
+    // مانيفست افتراضي آمن للإصدار v1.2.41 على خادم الـ VPS
     res.json({
       success: true,
-      latest_version: '1.2.39',
-      latest_version_code: 2,
+      latest_version: '1.2.41',
+      latest_version_code: 5,
       min_supported_code: 1,
-      download_url: 'https://nodejs-test.apexthunder.com/api/app/download-latest',
+      download_url: 'http://63.183.147.199/downloads/pharmacy-hr-employee-1.2.41.apk',
       sha256_checksum: '',
-      file_size: 77659055,
+      file_size: 99099961,
       mandatory_update: false,
-      release_notes: 'تحسينات شاملة على الأداء والمزامنة Offline-First وتسجيل الدخول بالبصمة',
+      release_notes: 'تحديث شامل لمنظومة الموارد البشرية وبوابة الموظف وربطها بسيرفر VPS السحابي',
       release_date: new Date().toISOString()
     });
   } catch (err) {
     console.error('[API /app/update-manifest Error]:', err);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// مسار التحميل المباشر للإصدار الأخير
+app.get(['/api/app/download-latest', '/downloads/latest.apk'], (req, res) => {
+  res.redirect(302, '/downloads/pharmacy-hr-employee-1.2.41.apk');
 });
 
 app.post('/api/app/releases', async (req, res) => {
