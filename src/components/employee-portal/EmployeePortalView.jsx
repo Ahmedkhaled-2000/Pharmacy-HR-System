@@ -29,6 +29,7 @@ import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import { apiSubmitRequestAtomic } from '../../utils/apiClient';
 import { broadcastStateChange } from '../../utils/offlineSync';
 import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
+import { triggerAndroidApkDownload } from '../../utils/nativeAppUpdater';
 import '../../portal.css';
 
 // ─────────────────────────────────────────
@@ -2028,6 +2029,14 @@ export default function EmployeePortalView({
             visible: canViewBylaws !== false
           }
         ].filter(item => item.visible !== false)
+      },
+      {
+        id: 'download-android-app',
+        label: '📱 تحميل تطبيق الأندرويد (APK)',
+        icon: '🤖',
+        isSingle: true,
+        badge: 'v1.2.41',
+        action: 'download_android'
       }
     ];
 
@@ -2058,6 +2067,12 @@ export default function EmployeePortalView({
   ]);
 
   const handleMenuClick = (menu) => {
+    if (menu.action === 'download_android' || menu.id === 'download-android-app') {
+      triggerAndroidApkDownload();
+      setOpenDropdown(null);
+      setIsMobileDrawerOpen(false);
+      return;
+    }
     if (menu.isSingle) {
       setActiveTab(menu.targetTab);
       setOpenDropdown(null);
@@ -2067,6 +2082,12 @@ export default function EmployeePortalView({
   };
 
   const handleSubItemClick = (subItem) => {
+    if (subItem.action === 'download_android' || subItem.id === 'download-android-app') {
+      triggerAndroidApkDownload();
+      setOpenDropdown(null);
+      setIsMobileDrawerOpen(false);
+      return;
+    }
     if (subItem.action === 'print_payslip') {
       setShowPrintModal(true);
       setOpenDropdown(null);
@@ -3047,6 +3068,38 @@ export default function EmployeePortalView({
             </div>
 
             {/* Theme Toggle Button */}
+            {/* Android APK Download Button */}
+            <button
+              type="button"
+              onClick={triggerAndroidApkDownload}
+              title="تنزيل تطبيق الأندرويد لهواتف الموظفين بصيغة APK (الإصدار v1.2.41)"
+              style={{
+                border: '1px solid #10b981',
+                background: 'linear-gradient(135deg, #059669, #10b981)',
+                color: '#ffffff',
+                padding: '5px 11px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span style={{ fontSize: '14px' }}>📱</span>
+              <span className="ep-btn-label">تطبيق الأندرويد</span>
+              <span style={{
+                background: 'rgba(255,255,255,0.25)',
+                fontSize: '10px',
+                padding: '1px 5px',
+                borderRadius: '4px',
+                fontWeight: 800
+              }}>v1.2.41</span>
+            </button>
+
             {toggleTheme && (
               <button
                 type="button"
@@ -3402,6 +3455,11 @@ export default function EmployeePortalView({
                       key={menu.id}
                       type="button"
                       onClick={() => {
+                        if (menu.action === 'download_android' || menu.id === 'download-android-app') {
+                          triggerAndroidApkDownload();
+                          setIsMobileDrawerOpen(false);
+                          return;
+                        }
                         setActiveTab(menu.targetTab);
                         setIsMobileDrawerOpen(false);
                       }}
@@ -3510,8 +3568,34 @@ export default function EmployeePortalView({
               })}
             </div>
 
-            {/* Drawer Footer (Logout) */}
+            {/* Drawer Footer (Android App Download & Logout) */}
             <div style={{ padding: '14px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  triggerAndroidApkDownload();
+                  setIsMobileDrawerOpen(false);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  background: 'linear-gradient(135deg, #059669, #10b981)',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontSize: '13.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)'
+                }}
+              >
+                <span>📱</span>
+                <span>تنزيل تطبيق الأندرويد (v1.2.41)</span>
+              </button>
               <button
                 type="button"
                 onClick={() => {

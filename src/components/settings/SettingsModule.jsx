@@ -25,6 +25,7 @@ import DatesPeriodsSettingsCard from './DatesPeriodsSettingsCard';
 import AccountingSystemGuideCard from './AccountingSystemGuideCard';
 import KeyboardShortcutsSettingsCard from './KeyboardShortcutsSettingsCard';
 import EnterpriseHeaderSettingsCard from './EnterpriseHeaderSettingsCard';
+import AndroidAppDownloadCard from './AndroidAppDownloadCard';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 import { DEFAULT_PHARMACY_BYLAWS_SECTIONS } from '../../utils/bylawsDefaults';
 import {
@@ -1607,6 +1608,7 @@ export default function SettingsModule({
             gap: '6px'
           }}>
             {activeTab === 'general' && '🏥 بيانات الصيدلية والمدير العام'}
+            {activeTab === 'mobile_app' && '📱 تطبيق الأندرويد والهاتف (APK)'}
             {(activeTab === 'dates' || activeTab === 'cutoff') && '📅 التواريخ والفترات ودورات الرواتب'}
             {activeTab === 'permissions' && '🔒 إدارة الصلاحيات'}
             {activeTab === 'rules' && '🔐 قواعد الموافقة المزدوجة'}
@@ -1633,6 +1635,7 @@ export default function SettingsModule({
         }}
       >
         {[
+          { id: 'mobile_app', label: '📱 تطبيق الأندرويد (APK)' },
           { id: 'general', label: '🏥 بيانات المؤسسة' },
           { id: 'dates', label: '📅 التواريخ وفترات الرواتب' },
           { id: 'permissions', label: '🔒 إدارة الصلاحيات' },
@@ -1681,6 +1684,11 @@ export default function SettingsModule({
           );
         })}
       </div>
+
+      {/* Tab: Android Mobile App APK */}
+      {activeTab === 'mobile_app' && (
+        <AndroidAppDownloadCard showToast={showToast} isCompact={false} />
+      )}
 
       {/* Tab: Keyboard Shortcuts Management */}
       {(activeTab === 'shortcuts' || activeTab === 'keyboard_shortcuts') && (
@@ -1740,6 +1748,8 @@ export default function SettingsModule({
       {/* Tab 1: General Org & Admin Settings */}
       {activeTab === 'general' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <AndroidAppDownloadCard showToast={showToast} isCompact={true} />
+
           <EnterpriseHeaderSettingsCard
             state={state}
             setState={setState}

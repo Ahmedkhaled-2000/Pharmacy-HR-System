@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import { getCycleDateRange } from '../../utils/periodEngine';
 import { getNotificationTarget, getNotificationTargetTab, isRequestNotification } from '../../utils/notificationEngine';
+import { triggerAndroidApkDownload } from '../../utils/nativeAppUpdater';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🌟 ADAPTIVE DROPDOWN ITEM WITH SMART BIDIRECTIONAL FLYOUT (Anti-Clipping Engine)
@@ -1037,6 +1038,14 @@ export default function DesktopLayout({
           desc: 'تخصيص القواعد، الصلاحيات، وربط النظام',
           subChildren: [
             {
+              id: 'settings:mobile_app',
+              targetTab: 'settings',
+              targetSubTab: 'mobile_app',
+              label: '📱 تطبيق الأندرويد والهاتف (APK)',
+              icon: '📱',
+              desc: 'تحميل ملف APK، رمز الـ QR، وتعليمات التثبيت'
+            },
+            {
               id: 'settings:general',
               targetTab: 'settings',
               targetSubTab: 'general',
@@ -1133,6 +1142,14 @@ export default function DesktopLayout({
           label: '👑 صلاحيات وتحكم المالك',
           icon: '👑',
           desc: 'إدارة أقفال تعديلات الإدارة العليا وبيانات المالك'
+        },
+        {
+          id: 'download-android-app',
+          downloadAction: 'android-app',
+          label: '📱 تنزيل تطبيق الأندرويد (APK)',
+          icon: '🤖',
+          badge: 'v1.2.41',
+          desc: 'تحميل تطبيق الهاتف المحمول للموظفين ومديري الفروع مع التحديث المباشر'
         },
         {
           id: 'download-windows-app',
@@ -1289,6 +1306,14 @@ export default function DesktopLayout({
       icon: '📜',
       isSingle: true,
       targetTab: 'bylaws'
+    },
+    {
+      id: 'download-android-app-branch',
+      label: '📱 تحميل تطبيق الأندرويد (APK)',
+      icon: '🤖',
+      badge: 'v1.2.41',
+      isSingle: true,
+      downloadAction: 'android-app'
     },
     {
       id: 'download-windows-app-branch',
@@ -1499,6 +1524,12 @@ export default function DesktopLayout({
   }, []);
 
 const handleMenuClick = (menu) => {
+  if (menu.downloadAction === 'android-app' || menu.id === 'download-android-app-branch') {
+    triggerAndroidApkDownload();
+    setOpenDropdown(null);
+    setHoveredFlyoutId(null);
+    return;
+  }
   if (menu.downloadAction === 'windows-app' || menu.id === 'download-windows-app-branch') {
     handleDownloadWindowsApp();
     setOpenDropdown(null);
@@ -1524,6 +1555,12 @@ if (menu.isSingle) {
 };
 
 const handleSubItemClick = (subItem) => {
+  if (subItem.downloadAction === 'android-app' || subItem.id === 'download-android-app') {
+    triggerAndroidApkDownload();
+    setOpenDropdown(null);
+    setHoveredFlyoutId(null);
+    return;
+  }
   if (subItem.downloadAction === 'windows-app' || subItem.id === 'download-windows-app') {
     handleDownloadWindowsApp();
     setOpenDropdown(null);

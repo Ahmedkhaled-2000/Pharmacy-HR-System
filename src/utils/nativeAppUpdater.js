@@ -214,3 +214,28 @@ export async function downloadAndInstallNativeUpdate({ downloadUrl, sha256Checks
     throw err;
   }
 }
+
+export const LATEST_ANDROID_APK_FILENAME = 'pharmacy-hr-employee-1.2.41.apk';
+export const LATEST_ANDROID_VERSION = '1.2.41';
+
+/**
+ * إرجاع رابط التنزيل المباشر لأحدث تطبيق أندرويد APK
+ */
+export function getAndroidApkDownloadUrl() {
+  const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'http://63.183.147.199';
+  return `${origin}/downloads/${LATEST_ANDROID_APK_FILENAME}`;
+}
+
+/**
+ * بدء تنزيل ملف أندرويد APK مباشرة للمستخدم في المتصفح أو التطبيق
+ */
+export function triggerAndroidApkDownload() {
+  const url = getAndroidApkDownloadUrl();
+  const a = document.createElement('a');
+  a.href = url;
+  a.setAttribute('download', LATEST_ANDROID_APK_FILENAME);
+  a.target = '_blank';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}

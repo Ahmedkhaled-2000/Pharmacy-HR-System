@@ -22,6 +22,7 @@ import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '.
 import { getRealDate, getRealTodayStr } from '../../utils/timeEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { getBranchIdentifiers, isEmployeeInBranch } from '../../utils/disciplinaryPenaltyEngine';
+import { triggerAndroidApkDownload } from '../../utils/nativeAppUpdater';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -1740,6 +1741,36 @@ export default function BranchManagerView({
         </div>
 
         <div style={{ display: 'flex', gap: isMobileScreen ? '8px' : '12px', flexWrap: 'wrap', alignItems: 'center', width: isMobileScreen ? '100%' : 'auto' }}>
+          <button
+            type="button"
+            onClick={triggerAndroidApkDownload}
+            style={{
+              background: 'linear-gradient(135deg, #10b981, #059669)',
+              color: '#ffffff',
+              border: '1px solid rgba(255,255,255,0.3)',
+              borderRadius: '10px',
+              padding: isMobileScreen ? '7px 12px' : '8px 16px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              fontWeight: 800,
+              fontSize: isMobileScreen ? '12px' : '13px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+              transition: 'all 0.15s ease'
+            }}
+            title="تحميل تطبيق الأندرويد لمدير الفرع والموظفين بصيغة APK (الإصدار v1.2.41)"
+          >
+            <span style={{ fontSize: '15px' }}>📱</span>
+            <span>تنزيل تطبيق الأندرويد</span>
+            <span style={{
+              background: 'rgba(255,255,255,0.25)',
+              padding: '1px 6px',
+              borderRadius: '6px',
+              fontSize: '10px'
+            }}>v1.2.41</span>
+          </button>
           <div style={{ flex: isMobileScreen ? 1 : 'none', background: 'rgba(255,255,255,0.15)', padding: isMobileScreen ? '6px 10px' : '8px 16px', borderRadius: '10px', textAlign: 'center' }}>
             <span style={{ fontSize: '11px', display: 'block', opacity: 0.85 }}>عدد موظفي الفرع</span>
             <span style={{ fontSize: isMobileScreen ? '15px' : '18px', fontWeight: '800' }}>{branchEmployees.length} موظف</span>
@@ -1777,7 +1808,14 @@ export default function BranchManagerView({
                 رفع طلبات البصمات اليدوية، المكافآت، والإجازات مباشرة للاعتماد من الإدارة العليا
               </p>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: isMobileScreen ? 'repeat(auto-fit, minmax(130px, 1fr))' : 'auto auto auto', gap: '8px', width: isMobileScreen ? '100%' : 'auto' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobileScreen ? 'repeat(auto-fit, minmax(130px, 1fr))' : 'repeat(auto-fit, minmax(140px, auto))', gap: '8px', width: isMobileScreen ? '100%' : 'auto' }}>
+              <button
+                className="btn btn-start"
+                style={{ padding: isMobileScreen ? '8px 10px' : '8px 16px', fontSize: isMobileScreen ? '12px' : '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', background: 'linear-gradient(135deg, #059669, #10b981)', fontWeight: 800 }}
+                onClick={triggerAndroidApkDownload}
+              >
+                📱 تطبيق الأندرويد (APK)
+              </button>
               <button
                 className="btn btn-start"
                 style={{ padding: isMobileScreen ? '8px 10px' : '8px 16px', fontSize: isMobileScreen ? '12px' : '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', background: '#0d9488' }}
