@@ -23,20 +23,27 @@ export default function WhatsAppStatusCard({
   const getResolvedServerUrl = () => {
     try {
       const localDevice = (localStorage.getItem('PHARMACY_DEVICE_WA_URL') || '').trim();
-      if (localDevice && !localDevice.includes('apexthunder.com')) return localDevice.replace(/\/+$/, '');
+      if (localDevice && !localDevice.includes('apexthunder.com') && !localDevice.includes('172.20.10.3')) {
+        return localDevice.replace(/\/+$/, '');
+      }
     } catch {}
+    if (typeof window !== 'undefined' && window.location) {
+      const { hostname, origin } = window.location;
+      if (hostname === '63.183.147.199' || hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site')) {
+        return `${origin}/whatsapp`;
+      }
+      if (isPrivateLanIp(hostname) && hostname !== 'localhost' && hostname !== '127.0.0.1' && !hostname.includes('172.20.10.3')) {
+        return `http://${hostname}:3100`;
+      }
+    }
     if (typeof window !== 'undefined' && window.desktopAPI?.isDesktop) {
       return 'http://127.0.0.1:3100';
     }
     const custom = (waServerUrlInput || '').trim();
-    if (custom && !custom.includes('apexthunder.com') && !custom.includes('localhost:3001')) return custom.replace(/\/+$/, '');
-    if (typeof window !== 'undefined' && window.location?.hostname) {
-      const host = window.location.hostname;
-      if (isPrivateLanIp(host) && host !== 'localhost' && host !== '127.0.0.1') {
-        return `http://${host}:3100`;
-      }
+    if (custom && !custom.includes('apexthunder.com') && !custom.includes('localhost:3001') && !custom.includes('172.20.10.3')) {
+      return custom.replace(/\/+$/, '');
     }
-    return 'http://127.0.0.1:3100';
+    return 'http://63.183.147.199/whatsapp';
   };
 
   const triggerServerWakeup = () => {

@@ -35,6 +35,7 @@ deploy_package
 .env
 .env.*
 !.env.example
+*.pem
 *.sqlite
 *.sqlite3
 *.sqlite-journal

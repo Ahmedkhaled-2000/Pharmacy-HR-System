@@ -87,23 +87,27 @@ const io = new SocketIOServer(server, {
 // ── 2. إعداد الاتصال بقاعدة بيانات Supabase PostgreSQL ──────────────────────
 const { Pool } = pg;
 
+const resolvedHost = process.env.DB_HOST || process.env.POSTGRES_HOST || 'aws-0-eu-west-2.pooler.supabase.com';
+const isLocalHost = ['localhost', '127.0.0.1', 'postgres'].includes(resolvedHost);
+const useSsl = process.env.DB_SSL === 'true' || (process.env.DB_SSL !== 'false' && !isLocalHost);
+
 const connectionString = process.env.SUPABASE_POOLER_URL ||
-  (process.env.DB_HOST ? `postgresql://${process.env.DB_USER}:${encodeURIComponent(process.env.DB_PASS || '')}@${process.env.DB_HOST}:${process.env.DB_PORT || 6543}/${process.env.DB_NAME || 'postgres'}?sslmode=${process.env.DB_SSLMODE || 'require'}` : null);
+  (process.env.DB_HOST ? `postgresql://${process.env.DB_USER}:${encodeURIComponent(process.env.DB_PASS || '')}@${process.env.DB_HOST}:${process.env.DB_PORT || 6543}/${process.env.DB_NAME || 'postgres'}?sslmode=${process.env.DB_SSLMODE || (useSsl ? 'require' : 'disable')}` : null);
 
 const pgConfig = connectionString ? {
   connectionString,
-  ssl: { rejectUnauthorized: false },
-  max: 20,
+  ssl: useSsl ? { rejectUnauthorized: false } : false,
+  max: 30,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 8000,
 } : {
-  host: process.env.DB_HOST || process.env.POSTGRES_HOST || 'aws-0-eu-west-2.pooler.supabase.com',
-  port: parseInt(process.env.DB_PORT || process.env.POSTGRES_PORT || '6543', 10),
+  host: resolvedHost,
+  port: parseInt(process.env.DB_PORT || process.env.POSTGRES_PORT || (isLocalHost ? '5432' : '6543'), 10),
   database: process.env.DB_NAME || process.env.POSTGRES_DB || 'postgres',
-  user: process.env.DB_USER || process.env.POSTGRES_USER || '',
+  user: process.env.DB_USER || process.env.POSTGRES_USER || 'postgres',
   password: process.env.DB_PASS || process.env.POSTGRES_PASSWORD || '',
-  ssl: { rejectUnauthorized: false },
-  max: 20,
+  ssl: useSsl ? { rejectUnauthorized: false } : false,
+  max: 30,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 8000,
 };
@@ -178,6 +182,30 @@ async function initDatabaseTables() {
           created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_sync_logs_key_date ON public.sync_logs (entity_key, created_at DESC);
+
+      -- 3.1 جدول الطلبات المباشرة السريعة (Fast Ingestion Requests Table)
+      CREATE TABLE IF NOT EXISTS public.requests (
+          id VARCHAR(100) PRIMARY KEY,
+          idempotency_key VARCHAR(255) NULL,
+          request_type VARCHAR(100) NOT NULL DEFAULT 'general',
+          employee_id VARCHAR(100) NULL,
+          employee_name VARCHAR(255) NULL,
+          employee_code VARCHAR(100) NULL,
+          branch_id VARCHAR(50) NULL,
+          target_role VARCHAR(50) NULL DEFAULT 'admin',
+          priority VARCHAR(50) NOT NULL DEFAULT 'NORMAL',
+          status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+          payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+          queued_at TIMESTAMPTZ NULL DEFAULT CURRENT_TIMESTAMP,
+          sent_at TIMESTAMPTZ NULL DEFAULT CURRENT_TIMESTAMP,
+          delivered_at TIMESTAMPTZ NULL DEFAULT CURRENT_TIMESTAMP,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_requests_status ON public.requests (status);
+      CREATE INDEX IF NOT EXISTS idx_requests_emp ON public.requests (employee_id);
+      CREATE INDEX IF NOT EXISTS idx_requests_branch ON public.requests (branch_id);
+      CREATE INDEX IF NOT EXISTS idx_requests_created ON public.requests (created_at DESC);
 
       -- 4. جداول منظومة الحسابات العامة (Accounting & General Ledger)
       CREATE TABLE IF NOT EXISTS public.acc_accounts (
@@ -446,14 +474,18 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
     ['SAVE_STATE', key, newVersion, clientIp, now]
   ).catch(() => {});
 
-  // 4. بث التحديث اللحظي لجميع الأجهزة والتبويبات المتصلة عبر WebSockets (< 5ms)
   const payload = typeof value === 'string' ? JSON.parse(value) : value;
-  io.emit('state:updated', {
-    key,
-    value: payload,
-    version: newVersion,
-    updated_at: updatedAt,
-  });
+
+  // 4. بث التحديث اللحظي لجميع الأجهزة والتبويبات المتصلة عبر WebSockets (< 5ms)
+  // لا يتم بث كائن الـ 2.2MB الضخم أثناء تفريغ الطابور الدفعي (batch-worker) لمنع اختناق الشبكة والمعالج
+  if (clientIp !== 'batch-worker') {
+    io.emit('state:updated', {
+      key,
+      value: payload,
+      version: newVersion,
+      updated_at: updatedAt,
+    });
+  }
 
   return { success: true, version: newVersion, updated_at: updatedAt, value: payload };
 }
@@ -565,7 +597,106 @@ app.get('/api/sync/version', async (req, res) => {
   }
 });
 
-// ── 6.1 الإرسال الذري الخفيف للطلبات (< 2KB) ──────────────────────────────
+// ── 5.1 طابور التجميع والمعالجة الدفعية الذكية للطلبات (Zero CPU Choke Coalesced Buffer) ──
+// يجمع الطلبات الواردة خلال نافذة (6 ثوانٍ) ويدمجها في دفعة واحدة داخل app_settings
+// لمنع استهلاك المعالج (1 vCPU) وتفادي كتابة 2.2MB على القرص في كل طلب منفرد
+const requestBatchQueue = [];
+let requestFlushTimer = null;
+let isFlushingBatch = false;
+const REQUEST_BATCH_FLUSH_INTERVAL_MS = 6000; // نافذة 6 ثوانٍ (بين 5 و 10 ثوانٍ كما طُلب)
+
+function enqueueRequestForBatch(item) {
+  requestBatchQueue.push(item);
+
+  // إذا لم يكن هناك مؤقت مجدول ولسنا في منتصف عملية تفريغ حالياً، نجدول التفريغ بعد 6 ثوانٍ
+  if (!requestFlushTimer && !isFlushingBatch) {
+    requestFlushTimer = setTimeout(() => {
+      requestFlushTimer = null;
+      flushRequestBatch().catch((err) => console.error('❌ [Batch Flush Timer Error]:', err.message));
+    }, REQUEST_BATCH_FLUSH_INTERVAL_MS);
+  }
+}
+
+async function flushRequestBatch() {
+  if (requestBatchQueue.length === 0 || isFlushingBatch) return;
+
+  isFlushingBatch = true;
+  const batch = requestBatchQueue.splice(0, requestBatchQueue.length);
+  const targetKey = batch[0]?.key || STORAGE_KEY;
+
+  console.log(`📦 [Request Batch Worker] بدء دمج وحفظ دفعة تضم (${batch.length}) طلب في app_settings لمنع اختناق المعالج...`);
+
+  try {
+    const settings = await getSettingsFromStorage(targetKey);
+    if (!settings || typeof settings !== 'object') {
+      console.warn('⚠️ [Batch Worker] تعذر جلب app_settings للدمج');
+      return;
+    }
+
+    const existingReqs = Array.isArray(settings.requests) ? settings.requests : [];
+    const existingNotifs = Array.isArray(settings.notifications) ? settings.notifications : [];
+
+    const reqMap = new Map();
+    for (const r of existingReqs) {
+      if (r && r.id) reqMap.set(String(r.id), r);
+    }
+
+    const newNotifs = [];
+    for (const item of batch) {
+      if (item.request && item.request.id) {
+        reqMap.set(String(item.request.id), item.request);
+      }
+      if (item.notification && item.notification.id) {
+        newNotifs.push(item.notification);
+      }
+    }
+
+    settings.requests = Array.from(reqMap.values()).sort((a, b) => {
+      const tA = new Date(a.createdAt || a.created_at || a.date || 0).getTime();
+      const tB = new Date(b.createdAt || b.created_at || b.date || 0).getTime();
+      return tB - tA;
+    });
+
+    if (newNotifs.length > 0) {
+      const notifMap = new Map();
+      for (const n of newNotifs) {
+        if (n && n.id) notifMap.set(String(n.id), n);
+      }
+      for (const n of existingNotifs) {
+        if (n && n.id && !notifMap.has(String(n.id))) {
+          notifMap.set(String(n.id), n);
+        }
+      }
+      settings.notifications = Array.from(notifMap.values()).slice(0, 300);
+    }
+
+    settings._requestsUpdatedAt = new Date().toISOString();
+
+    const saveRes = await saveSettingsToStorage(targetKey, settings, 'batch-worker');
+    console.log(`✅ [Request Batch Worker] تم بنجاح دمج وحفظ (${batch.length}) طلب في app_settings (إصدار: v${saveRes.version})`);
+
+    // إشعار جميع الشاشات بانتهاء الدمج الدفعي
+    io.emit('requests:batch_saved', {
+      count: batch.length,
+      version: saveRes.version,
+      updated_at: saveRes.updated_at
+    });
+  } catch (err) {
+    console.error('❌ [Batch Worker Error]:', err.message);
+    requestBatchQueue.unshift(...batch);
+  } finally {
+    isFlushingBatch = false;
+    // إذا وصلت طلبات جديدة أثناء الحفظ، نجدول تفريغها بعد 6 ثوانٍ
+    if (requestBatchQueue.length > 0 && !requestFlushTimer) {
+      requestFlushTimer = setTimeout(() => {
+        requestFlushTimer = null;
+        flushRequestBatch().catch((err) => console.error('❌ [Batch Flush Follow-up Error]:', err.message));
+      }, REQUEST_BATCH_FLUSH_INTERVAL_MS);
+    }
+  }
+}
+
+// ── 6.1 الإرسال الذري الخفيف للطلبات (< 2KB) مع الاستجابة اللحظية (< 5ms) ──────
 app.post(['/api/requests/submit', '/api/request/submit'], async (req, res) => {
   try {
     const { key = STORAGE_KEY, request: newReq, notification: newNotif } = req.body;
@@ -585,7 +716,7 @@ app.post(['/api/requests/submit', '/api/request/submit'], async (req, res) => {
     const idempKey = String(newReq.idempotency_key || `submit_${reqId}`);
     const reqJson = JSON.stringify(newReq);
 
-    // إدراج مباشر في جدول public.requests (التريجر trg_requests_changelog يقوم بتسجيل التغيير تلقائياً)
+    // 1. حفظ ذري مباشر وفوري في جدول public.requests (< 2ms)
     await db.query(`
       INSERT INTO public.requests (
         id, idempotency_key, request_type, employee_id, employee_name, employee_code,
@@ -600,29 +731,19 @@ app.post(['/api/requests/submit', '/api/request/submit'], async (req, res) => {
       SET updated_at = NOW(), payload = EXCLUDED.payload, status = EXCLUDED.status
     `, [reqId, idempKey, reqType, empId, empName, empCode, bId, targetRole, priority, status, reqJson]);
 
-    // تحديث الحالة في app_settings
-    let newVer = 1;
-    const settings = await getSettingsFromStorage(key);
-    if (settings && typeof settings === 'object') {
-      const existingReqs = Array.isArray(settings.requests) ? settings.requests : [];
-      const notifs = Array.isArray(settings.notifications) ? settings.notifications : [];
-      settings.requests = [newReq, ...existingReqs.filter(r => r && String(r.id) !== reqId)];
-      if (newNotif && newNotif.id) {
-        settings.notifications = [newNotif, ...notifs.filter(n => n && String(n.id) !== String(newNotif.id))].slice(0, 300);
-      }
-      settings._requestsUpdatedAt = new Date().toISOString();
+    // 2. بث لحظي عبر WebSockets لجميع الأجهزة النشطة (< 1ms)
+    io.emit('request:created', { request: newReq, notification: newNotif, queued: true });
 
-      const saveRes = await saveSettingsToStorage(key, settings, req.ip);
-      newVer = saveRes.version;
-    }
+    // 3. إدراج الطلب في طابور المعالجة الدفعية لحفظه في app_settings كل 6 ثوانٍ
+    enqueueRequestForBatch({ key, request: newReq, notification: newNotif, clientIp: req.ip });
 
-    io.emit('request:created', { request: newReq, notification: newNotif });
-
+    // 4. استجابة فائقة السرعة للعميل (< 5ms) بدون انتظار كتابة الـ 2.2MB في القرص
     res.json({
       success: true,
-      message: 'تم استلام وحفظ الطلب بنجاح في قاعدة البيانات',
+      message: 'تم استلام وبث الطلب فورياً وجدولته للحفظ الدفعي السريع',
       requestId: reqId,
-      version: newVer
+      queued: true,
+      immediate: true
     });
   } catch (err) {
     console.error('[API /requests/submit Error]:', err);
@@ -1663,7 +1784,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// ── 10. بدء تشغيل الخادم ────────────────────────────────────────────────────
+// ── 10. بدء تشغيل الخادم والإغلاق الآمن ───────────────────────────────────────
 server.listen(PORT, '0.0.0.0', () => {
   console.log('========================================================');
   console.log(`🚀 [HR Backend Server] يعمل بنجاح على المنفذ: ${PORT}`);
@@ -1671,3 +1792,23 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`⚡ WebSockets: ws://localhost:${PORT}`);
   console.log('========================================================');
 });
+
+// تفريغ الطوابير المعلقة بأمان عند إيقاف الخادم أو إعادة تشغيل Docker
+async function gracefulShutdown(signal) {
+  console.log(`🛑 [Shutdown ${signal}] جاري تفريغ الطوابير المعلقة وحفظها بأمان...`);
+  if (requestFlushTimer) {
+    clearTimeout(requestFlushTimer);
+    requestFlushTimer = null;
+  }
+  try {
+    await flushRequestBatch();
+    console.log('✅ [Shutdown] تم حفظ كافة الطلبات المعلقة بنجاح.');
+  } catch (err) {
+    console.error('❌ [Shutdown Flush Error]:', err.message);
+  }
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+

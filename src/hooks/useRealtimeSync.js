@@ -7,6 +7,7 @@ import {
 } from '../utils/apiClient';
 import {
   subscribeToLiveState,
+  subscribeToLiveRequests,
   subscribeToSyncHints
 } from '../utils/socketClient';
 import {
@@ -366,6 +367,39 @@ export function useRealtimeSync(props = {}) {
       }
     });
 
+    // و) استقبال الطلبات اللحظية فوراً (< 5ms) والتحديث اللحظي للشاشات دون انتظار الـ 6 ثوانٍ
+    const unsubRequests = subscribeToLiveRequests(
+      (payload) => {
+        if (payload && payload.request) {
+          const incomingReq = payload.request;
+          const incomingNotif = payload.notification;
+          console.log('⚡ [RealtimeSync] استلام طلب فوري عبر الـ WebSockets:', incomingReq.id);
+
+          setState((prev) => {
+            if (!prev) return prev;
+            const existingReqs = Array.isArray(prev.requests) ? prev.requests : [];
+            if (existingReqs.some((r) => r && String(r.id) === String(incomingReq.id))) {
+              return prev;
+            }
+            const updatedReqs = [incomingReq, ...existingReqs];
+            let updatedNotifs = Array.isArray(prev.notifications) ? prev.notifications : [];
+            if (incomingNotif && incomingNotif.id) {
+              updatedNotifs = [incomingNotif, ...updatedNotifs.filter((n) => n && String(n.id) !== String(incomingNotif.id))].slice(0, 300);
+            }
+            return {
+              ...prev,
+              requests: updatedReqs,
+              notifications: updatedNotifs,
+              _requestsUpdatedAt: new Date().toISOString()
+            };
+          });
+        }
+      },
+      (batchPayload) => {
+        console.log(`📦 [RealtimeSync] تم اكتمال الحفظ الدفعي لـ (${batchPayload?.count || 0}) طلب على السيرفر (v${batchPayload?.version})`);
+      }
+    );
+
     const handleFocusOrVisible = () => {
       if (document.visibilityState === 'visible' || document.hasFocus()) {
         pollFailures = 0; // تصفير الفشل فور تفاعل المستخدم
@@ -384,6 +418,7 @@ export function useRealtimeSync(props = {}) {
       if (eventSource) eventSource.close();
       if (unsubSocket) unsubSocket();
       if (unsubSyncHint) unsubSyncHint();
+      if (unsubRequests) unsubRequests();
       unsubBroadcast();
       window.removeEventListener('focus', handleFocusOrVisible);
       window.removeEventListener('online', handleFocusOrVisible);

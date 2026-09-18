@@ -23,16 +23,16 @@ const getApiBaseUrl = () => {
     return import.meta.env.VITE_API_URL.replace(/\/+$/, '');
   }
 
-  // 3. في بيئة المتصفح المباشرة على نطاق Apex Thunder
+  // 3. في بيئة المتصفح المباشرة على نطاق السيرفر أو pharmacore.site
   if (typeof window !== 'undefined' && window.location) {
     const { origin, hostname } = window.location;
-    if (hostname && (hostname === 'nodejs-test.apexthunder.com' || hostname.endsWith('.apexthunder.com'))) {
+    if (hostname && (hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site') || hostname === '63.183.147.199' || hostname === 'nodejs-test.apexthunder.com' || hostname.endsWith('.apexthunder.com'))) {
       return `${origin}/api`;
     }
   }
 
   // 4. الرابط السحابي المركزي الموحد لكافة المنصات (تطبيق الويندوز المكتبي، المتصفح على Vercel، التطوير المحلي)
-  return 'https://nodejs-test.apexthunder.com/api';
+  return 'http://63.183.147.199/api';
 };
 
 export const API_BASE_URL = getApiBaseUrl();

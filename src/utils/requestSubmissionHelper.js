@@ -101,10 +101,10 @@ export async function dispatchEmployeeRequest({
     console.warn('⚠️ [Dispatch] تعثر إدراج الطلب في Outbox:', err.message);
   }
 
-  // 4. مزامنة الحالة الكاملة الاحتياطية في الخلفية
-  if (typeof saveState === 'function') {
+  // 4. مزامنة الحالة الكاملة الاحتياطية (فقط إذا فشل الإرسال الذري السريع لحماية السيرفر من الازدحام)
+  if (!atomicSuccess && typeof saveState === 'function') {
     saveState(updatedState).catch((err) => {
-      console.warn('⚠️ [Dispatch] Background full save notice:', err.message);
+      console.warn('⚠️ [Dispatch] Fallback full save notice:', err.message);
     });
   }
 

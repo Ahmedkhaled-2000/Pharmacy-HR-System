@@ -45,7 +45,12 @@ export default function WhatsAppCenterModule({
   const [customServerUrl, setCustomServerUrl] = useState(state?.orgSettings?.waServerUrl || '');
   const [deviceServerUrl, setDeviceServerUrl] = useState(() => {
     try {
-      return localStorage.getItem('PHARMACY_DEVICE_WA_URL') || '';
+      const v = (localStorage.getItem('PHARMACY_DEVICE_WA_URL') || '').trim();
+      if (v.includes('172.20.10.3') || v.includes('apexthunder.com')) {
+        localStorage.removeItem('PHARMACY_DEVICE_WA_URL');
+        return '';
+      }
+      return v;
     } catch {
       return '';
     }
@@ -64,49 +69,73 @@ export default function WhatsAppCenterModule({
   const isDesktop = typeof window !== 'undefined' && Boolean(window.desktopAPI?.isDesktop);
 
   // احتساب رابط السيرفر ديناميكياً:
-  // - في تطبيق الويندوز: يرتبط دائماً ومباشرة بالخادم الداخلي 127.0.0.1:3100 بصورة مستقلة ومحمية دون التأثر بتغير الـ IP أو انقطاع الشبكة
-  // - في متصفح الويب والموبايل: يرتبط بخادم الصيدلية عبر الـ IP المكتشف على الشبكة المحلية (مثل http://192.168.1.2:3100)
+  // - في متصفح الويب والـ VPS: الاتصال التلقائي بسيرفر الـ VPS السحابي عبر /whatsapp ليعمل 24 ساعة لجميع الموبايلات والأجهزة
+  // - في تطبيق الويندوز: تشغيل مباشر ومحمي على 127.0.0.1:3100
   const serverUrl = useMemo(() => {
-    // 1. رابط مخصص مثبت لهذا الجهاز/المتصفح فقط (يدعم رغبة: كل جهاز بربط واتساب مستقل إذا حدده يدوياً)
+    // 1. رابط مخصص مثبت لهذا الجهاز/المتصفح فقط (تم استبعاد أي عناوين قديمة)
     const localOverride = (deviceServerUrl || '').trim();
-    if (localOverride && !localOverride.includes('apexthunder.com')) {
+    if (localOverride && !localOverride.includes('apexthunder.com') && !localOverride.includes('172.20.10.3')) {
       return localOverride.replace(/\/+$/, '');
     }
 
-    // 2. في حالة تطبيق الويندوز: تشغيل مباشر ومحمي على 127.0.0.1:3100 بمعزل تام عن كروت الشبكة والـ IP
+    // 2. إذا كان المتصفح يعمل عبر خادم الـ VPS أو السحابة أو النطاق العام (63.183.147.199 أو pharmacore.site)
+    if (typeof window !== 'undefined' && window.location) {
+      const { hostname, origin } = window.location;
+      if (hostname === '63.183.147.199' || hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site')) {
+        return `${origin}/whatsapp`;
+      }
+      if (isPrivateLanIp(hostname) && hostname !== 'localhost' && hostname !== '127.0.0.1' && !hostname.includes('172.20.10.3')) {
+        return `http://${hostname}:3100`;
+      }
+    }
+
+    // 3. في حالة تطبيق الويندوز (سطح المكتب): تشغيل مباشر ومحمي على 127.0.0.1:3100
     if (isDesktop) {
       return 'http://127.0.0.1:3100';
     }
 
-    // 3. في حالة متصفح الويب / الموبايل: الأولوية لعنوان LAN المكتشف والمعلن من خادم الصيدلية (مثل http://192.168.1.2:3100)
+    // 4. الرابط المعمم في إعدادات المنظومة
     const lanUrl = (state?.orgSettings?.waServerLanUrl || '').trim();
-    if (lanUrl && !lanUrl.includes('apexthunder.com')) {
+    if (lanUrl && !lanUrl.includes('apexthunder.com') && !lanUrl.includes('172.20.10.3')) {
       return lanUrl.replace(/\/+$/, '');
     }
 
-    // 4. الرابط المعمم في إعدادات المنظومة
     const configured = (state?.orgSettings?.waServerUrl || '').trim();
-    if (configured && !configured.includes('apexthunder.com') && !configured.includes('localhost:3001')) {
+    if (configured && !configured.includes('apexthunder.com') && !configured.includes('localhost:3001') && !configured.includes('172.20.10.3')) {
       return configured.replace(/\/+$/, '');
     }
 
-    // 5. إذا كان المتصفح يعمل مباشرة عبر IP محلي بالصيدلية (LAN)
-    if (typeof window !== 'undefined' && window.location?.hostname) {
-      const host = window.location.hostname;
-      if (isPrivateLanIp(host) && host !== 'localhost' && host !== '127.0.0.1') {
-        return `http://${host}:3100`;
-      }
-    }
-    return 'http://127.0.0.1:3100';
+    // 5. الافتراضي الدائم: سيرفر الـ VPS السحابي ليعمل 24 ساعة
+    return 'http://63.183.147.199/whatsapp';
   }, [deviceServerUrl, isDesktop, state?.orgSettings?.waServerUrl, state?.orgSettings?.waServerLanUrl, isPrivateLanIp]);
 
-  // احتساب عنوان IP الخاص بالشبكة المحلية والمقترح لربط الهواتف والموبايلات
+  // احتساب عنوان خادم الواتساب المقترح لربط الهواتف والموبايلات والأجهزة
   const primaryLanUrl = useMemo(() => {
-    if (networkInfo?.suggestedLanUrl) return networkInfo.suggestedLanUrl;
-    if (networkInfo?.localIps?.[0]?.address) return `http://${networkInfo.localIps[0].address}:${networkInfo?.port || 3100}`;
-    if (state?.orgSettings?.waServerLanUrl) return state.orgSettings.waServerLanUrl;
-    return 'http://192.168.1.2:3100';
-  }, [networkInfo, state?.orgSettings?.waServerLanUrl]);
+    if (typeof window !== 'undefined' && window.location) {
+      const { hostname, origin } = window.location;
+      if (hostname === '63.183.147.199' || hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site')) {
+        return `${origin}/whatsapp`;
+      }
+    }
+    const savedLan = (state?.orgSettings?.waServerLanUrl || '').trim();
+    if (savedLan && !savedLan.includes('172.20.10.3') && !savedLan.includes('apexthunder.com')) {
+      return savedLan.replace(/\/+$/, '');
+    }
+    const configured = (state?.orgSettings?.waServerUrl || '').trim();
+    if (configured && !configured.includes('172.20.10.3') && !configured.includes('apexthunder.com') && !configured.includes('localhost:3001')) {
+      return configured.replace(/\/+$/, '');
+    }
+    if (networkInfo?.suggestedLanUrl && !networkInfo.suggestedLanUrl.includes('172.20.10.3')) {
+      return networkInfo.suggestedLanUrl.replace(/\/+$/, '');
+    }
+    return 'http://63.183.147.199/whatsapp';
+  }, [networkInfo, state?.orgSettings?.waServerLanUrl, state?.orgSettings?.waServerUrl]);
+
+  // هل الخادم الحالي هو سيرفر الـ VPS السحابي؟
+  const isVpsServer = useMemo(() => {
+    const url = primaryLanUrl || serverUrl || '';
+    return Boolean(url.includes('63.183.147.199') || url.includes('pharmacore.site') || url.includes('/whatsapp'));
+  }, [primaryLanUrl, serverUrl]);
 
   // هل خدمة الـ IP معلنة ومفعلة حالياً للهواتف والأجهزة الأخرى؟
   const isLanActive = useMemo(() => {
@@ -115,7 +144,7 @@ export default function WhatsAppCenterModule({
     return Boolean(current && cleanPrimary && (current === cleanPrimary || current.includes(cleanPrimary.split('://')[1] || '')));
   }, [state?.orgSettings?.waServerLanUrl, state?.orgSettings?.waServerUrl, primaryLanUrl]);
 
-  // تفعيل وتعميم الـ IP لجميع الهواتف بنقرة واحدة
+  // تفعيل وتعميم سيرفر الـ VPS لجميع الهواتف بنقرة واحدة
   const handleActivateMobileIp = async () => {
     if (!primaryLanUrl) return;
     try {
@@ -124,13 +153,26 @@ export default function WhatsAppCenterModule({
       }
     } catch {}
     await handleSaveServerUrl(primaryLanUrl);
-    showToast?.(`📱 تم تفعيل وتعميم IP السيرفر (${primaryLanUrl}) لجميع الهواتف والموبايلات بنجاح!`);
+    showToast?.(`📱 تم تفعيل وتعميم سيرفر الواتساب (${primaryLanUrl}) لجميع الهواتف والموبايلات بنجاح ليعمل 24 ساعة!`);
+  };
+
+  // زر التبديل الفوري لسيرفر الـ VPS السحابي
+  const handleSwitchToVpsServer = async () => {
+    const vpsUrl = typeof window !== 'undefined' && window.location?.origin && (window.location.hostname === '63.183.147.199' || window.location.hostname.includes('pharmacore.site'))
+      ? `${window.location.origin}/whatsapp`
+      : 'http://63.183.147.199/whatsapp';
+    try {
+      localStorage.setItem('PHARMACY_DEVICE_WA_URL', vpsUrl);
+      setDeviceServerUrl(vpsUrl);
+    } catch {}
+    await handleSaveServerUrl(vpsUrl);
+    showToast?.('⚡ تم تحويل خادم الواتساب إلى سيرفر الـ VPS (63.183.147.199) ليعمل على مدار 24 ساعة!');
   };
 
   // إظهار باركود QR للهواتف لربط الموبايل بنقرة واحدة
   const handleOpenMobileQr = async () => {
     try {
-      const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'http://nodejs-test.apexthunder.com';
+      const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'http://63.183.147.199';
       const connectUrl = `${origin}?wa_url=${encodeURIComponent(primaryLanUrl)}`;
       const qr = await QRCode.toDataURL(connectUrl, { width: 280, margin: 2 });
       setMobileQrDataUrl(qr);
@@ -432,6 +474,17 @@ export default function WhatsAppCenterModule({
     if (isDesktop) {
       addCandidate('http://127.0.0.1:3100');
       addCandidate('http://localhost:3100');
+    }
+
+    // في بيئة الويب وسيرفر الـ VPS: أولوية مباشرة لبوابة الواتساب السحابية
+    if (typeof window !== 'undefined' && window.location) {
+      const { hostname, origin } = window.location;
+      addCandidate(`${origin}/whatsapp`);
+      addCandidate(`http://${hostname}:3100`);
+      if (hostname === '63.183.147.199' || hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site')) {
+        addCandidate('http://63.183.147.199/whatsapp');
+        addCandidate('http://63.183.147.199:3100');
+      }
     }
 
     // 1. رابط LAN المعلن من تطبيق الويندوز في إعدادات المنظومة (المفضل فوراً لمتصفح الويب والموبايل)
@@ -1015,9 +1068,13 @@ export default function WhatsAppCenterModule({
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <h4 style={{ margin: 0, fontSize: '15.5px', fontWeight: 800, color: 'var(--text)' }}>
-                بوابة تشغيل الواتساب على الهواتف والموبايلات (IP الشبكة)
+                {isVpsServer ? 'بوابة تشغيل الواتساب السحابية (VPS 24/7)' : 'بوابة تشغيل الواتساب على الهواتف والموبايلات (IP الشبكة)'}
               </h4>
-              {isLanActive ? (
+              {isVpsServer ? (
+                <span style={{ fontSize: '11.5px', background: '#d1fae5', color: '#065f46', padding: '3px 9px', borderRadius: '6px', fontWeight: 800 }}>
+                  🟢 خادم سحابي VPS يعمل 24/7 لجميع الأجهزة
+                </span>
+              ) : isLanActive ? (
                 <span style={{ fontSize: '11.5px', background: '#d1fae5', color: '#065f46', padding: '3px 9px', borderRadius: '6px', fontWeight: 800 }}>
                   🟢 مفعل ومعمم للهواتف بالصيدلية
                 </span>
@@ -1028,11 +1085,13 @@ export default function WhatsAppCenterModule({
               )}
             </div>
             <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '5px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <span>عنوان الخادم المخصص للهواتف:</span>
+              <span>{isVpsServer ? 'عنوان خادم الـ VPS المخصص للهواتف والأجهزة:' : 'عنوان الخادم المخصص للهواتف:'}</span>
               <code style={{ background: 'rgba(37, 99, 235, 0.08)', color: '#1d4ed8', padding: '2px 8px', borderRadius: '6px', fontWeight: 800, direction: 'ltr', fontSize: '13px' }}>
                 {primaryLanUrl}
               </code>
-              <span style={{ opacity: 0.8 }}>(يتصل به أي موبايل أو جهاز على نفس راوتر الصيدلية)</span>
+              <span style={{ opacity: 0.8 }}>
+                {isVpsServer ? '(يعمل على مدار الساعة لجميع الموبايلات والأجهزة دون الحاجة لتشغيل أي كمبيوتر بالصيدلية)' : '(يتصل به أي موبايل أو جهاز على نفس راوتر الصيدلية)'}
+              </span>
             </div>
           </div>
         </div>
@@ -1042,7 +1101,7 @@ export default function WhatsAppCenterModule({
             type="button"
             className="btn"
             style={{
-              background: isLanActive ? '#059669' : '#2563eb',
+              background: isLanActive || isVpsServer ? '#059669' : '#2563eb',
               color: '#ffffff',
               fontWeight: '800',
               fontSize: '13px',
@@ -1055,11 +1114,36 @@ export default function WhatsAppCenterModule({
               cursor: 'pointer'
             }}
             onClick={handleActivateMobileIp}
-            title="تثبيت وتعميم هذا الـ IP لكي تتعرف عليه جميع الهواتف تلقائياً بدون كتابة"
+            title="تثبيت وتعميم هذا الخادم لكي تتعرف عليه جميع الهواتف تلقائياً"
           >
             <Wifi style={{ width: '15px', height: '15px' }} />
-            <span>{isLanActive ? '⚡ تحديث وتعميم IP الهواتف' : '⚡ تفعيل وتعميم هذا الـ IP للهواتف الآن'}</span>
+            <span>{isVpsServer ? '⚡ تعميم سيرفر الـ VPS للهواتف' : isLanActive ? '⚡ تحديث وتعميم IP الهواتف' : '⚡ تفعيل وتعميم هذا الـ IP للهواتف الآن'}</span>
           </button>
+
+          {!isVpsServer && (
+            <button
+              type="button"
+              className="btn"
+              style={{
+                background: '#7c3aed',
+                color: '#ffffff',
+                fontWeight: '800',
+                fontSize: '13px',
+                padding: '8px 14px',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 2px 8px rgba(124, 58, 237, 0.25)',
+                cursor: 'pointer'
+              }}
+              onClick={handleSwitchToVpsServer}
+              title="التبديل فوراً إلى سيرفر الـ VPS السحابي ليعمل 24 ساعة دون توقف"
+            >
+              <Smartphone style={{ width: '15px', height: '15px' }} />
+              <span>⚡ التبديل لسيرفر VPS (24 ساعة)</span>
+            </button>
+          )}
 
 
           <button

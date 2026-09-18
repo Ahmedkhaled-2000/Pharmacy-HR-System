@@ -25,16 +25,23 @@ process.on('exit', (code) => {
   console.error('[WhatsApp Gateway Process Exited]: Code =', code);
 });
 
-// محرك تحويل HTML إلى ملفات PDF احترافية باستخدام متصفح Chromium المتاح على النظام
+// محرك تحويل HTML إلى ملفات PDF احترافية باستخدام متصفح Chromium المتاح على النظام (ويندوز أو لينكس)
 function findBrowserBinary() {
   const candidates = [
+    process.env.CHROME_BIN,
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
     path.join(process.env.LOCALAPPDATA || '', 'Microsoft\\Edge\\Application\\msedge.exe'),
     path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
-  ];
+  ].filter(Boolean);
+
   for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }
@@ -44,7 +51,7 @@ function findBrowserBinary() {
 export async function renderHtmlToPdfBuffer(htmlContent) {
   const binary = findBrowserBinary();
   if (!binary) {
-    throw new Error('لم يتم العثور على متصفح Chromium (Edge أو Chrome) على النظام لتوليد الـ PDF.');
+    throw new Error('لم يتم العثور على متصفح Chromium على النظام لتوليد الـ PDF.');
   }
 
   const tmpDir = os.tmpdir();
@@ -57,6 +64,8 @@ export async function renderHtmlToPdfBuffer(htmlContent) {
   return new Promise((resolve, reject) => {
     execFile(binary, [
       '--headless',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
       '--disable-gpu',
       '--no-first-run',
       '--no-pdf-header-footer',
@@ -335,7 +344,7 @@ connectToWhatsApp();
 // ── مسارات الـ REST API ───────────────────────────────────────────────────
 
 // فحص الصحة (Health Check)
-app.get('/health', (req, res) => {
+app.get(['/health', '/api/health'], (req, res) => {
   res.json({
     status: 'ok',
     waStatus: serverState.status,
@@ -345,7 +354,7 @@ app.get('/health', (req, res) => {
 });
 
 // استعلام حالة السيرفر ورمز الـ QR المباشر
-app.get('/api/status', (req, res) => {
+app.get(['/status', '/api/status'], (req, res) => {
   res.json({
     status: serverState.status,
     phone: serverState.phone,
@@ -359,7 +368,7 @@ app.get('/api/status', (req, res) => {
 });
 
 // نقطة فحص عناوين الشبكة المحلية لربط الأجهزة الأخرى (الموبايلات وأجهزة الصيدلية)
-app.get('/api/network-info', (req, res) => {
+app.get(['/network-info', '/api/network-info'], (req, res) => {
   const ips = getLocalNetworkIps();
   const primaryIp = ips[0]?.address || '127.0.0.1';
   res.json({
@@ -374,7 +383,7 @@ app.get('/api/network-info', (req, res) => {
 });
 
 // تحويل HTML إلى PDF Base64
-app.post('/api/render-pdf', async (req, res) => {
+app.post(['/render-pdf', '/api/render-pdf'], async (req, res) => {
   const { html } = req.body;
   if (!html) {
     return res.status(400).json({ success: false, error: 'كود HTML مطلوب للتحويل.' });
@@ -393,7 +402,7 @@ app.post('/api/render-pdf', async (req, res) => {
 });
 
 // إرسال رسالة فردية مع محاكاة بشرية لمكافحة الحظر ودعم PDF مباشر
-app.post('/api/send-message', async (req, res) => {
+app.post(['/send-message', '/api/send-message'], async (req, res) => {
   const { phone, message, pdfBase64, pdfHtml, fileName } = req.body;
 
   if (!phone || (!message && !pdfBase64 && !pdfHtml)) {
@@ -471,7 +480,7 @@ app.post('/api/send-message', async (req, res) => {
 });
 
 // إرسال جماعي ذكي مع طابور زمني آمن وتوليد وتضمين ملفات الـ PDF تلقائياً
-app.post('/api/send-bulk', async (req, res) => {
+app.post(['/send-bulk', '/api/send-bulk'], async (req, res) => {
   const { messages } = req.body;
 
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -550,7 +559,7 @@ app.post('/api/send-bulk', async (req, res) => {
 });
 
 // إعادة تشغيل الاتصال يدوياً بضغطة زر
-app.post('/api/restart', async (req, res) => {
+app.post(['/restart', '/api/restart'], async (req, res) => {
   console.log('[WhatsApp Gateway] 🔄 Manual restart requested...');
   try {
     if (sock) {
@@ -569,7 +578,7 @@ app.post('/api/restart', async (req, res) => {
 });
 
 // تسجيل الخروج وإعادة توليد رمز الاقتران لتبديل الرقم
-app.post('/api/logout', async (req, res) => {
+app.post(['/logout', '/api/logout'], async (req, res) => {
   console.log('[WhatsApp Gateway] 🚪 Logout requested to change connected phone number...');
   try {
     if (sock) {
@@ -607,7 +616,7 @@ app.post('/api/logout', async (req, res) => {
 });
 
 // تصفير الجلسة تماماً وتوليد رمز QR جديد فوري بنقرة زر
-app.post('/api/force-reset', async (req, res) => {
+app.post(['/force-reset', '/api/force-reset'], async (req, res) => {
   console.log('[WhatsApp Gateway] ⚡ Force reset requested from client...');
   try {
     if (sock) {

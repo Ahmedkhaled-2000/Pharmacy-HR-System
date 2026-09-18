@@ -8,25 +8,26 @@ import { io } from 'socket.io-client';
 
 const getSocketUrl = () => {
   if (typeof window !== 'undefined' && window.location) {
-    const { hostname } = window.location;
+    const { hostname, origin } = window.location;
     const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
 
-    // في الإنتاج على الاستضافة، لا نحاول الاتصال بـ localhost إطلاقاً
     if (!isLocalhost) {
       const remoteSocketUrl = import.meta.env?.VITE_SOCKET_URL;
       if (remoteSocketUrl && !remoteSocketUrl.includes('localhost') && !remoteSocketUrl.includes('127.0.0.1')) {
         return remoteSocketUrl;
       }
-      // على استضافات PHP/Apache نعتمد على SSE والـ Smart Polling
-      return null;
+      if (hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site') || hostname === '63.183.147.199') {
+        return origin;
+      }
+      return 'http://63.183.147.199';
     }
   }
 
-  // في بيئة التطوير المحلي فقط
+  // في بيئة التطوير المحلي أو الافتراضي
   if (import.meta.env?.VITE_SOCKET_URL) {
     return import.meta.env.VITE_SOCKET_URL;
   }
-  return null;
+  return 'http://63.183.147.199';
 };
 
 export const SOCKET_SERVER_URL = getSocketUrl();
@@ -100,6 +101,38 @@ export function subscribeToLiveFaces(onUpdated, onDeleted) {
   return () => {
     s.off('face:updated', updateHandler);
     s.off('face:deleted', deleteHandler);
+  };
+}
+
+/**
+ * الاشتراك الفوري في أحداث إرسال وحفظ الطلبات اللحظية والدفعية (< 5ms)
+ */
+export function subscribeToLiveRequests(onRequestCreated, onBatchSaved) {
+  const s = getSocket();
+  if (!s) return () => {};
+
+  const createHandler = (payload) => {
+    try {
+      onRequestCreated?.(payload);
+    } catch (e) {
+      console.warn('[Socket.io] Error handling request:created:', e);
+    }
+  };
+
+  const batchHandler = (payload) => {
+    try {
+      onBatchSaved?.(payload);
+    } catch (e) {
+      console.warn('[Socket.io] Error handling requests:batch_saved:', e);
+    }
+  };
+
+  s.on('request:created', createHandler);
+  s.on('requests:batch_saved', batchHandler);
+
+  return () => {
+    s.off('request:created', createHandler);
+    s.off('requests:batch_saved', batchHandler);
   };
 }
 
