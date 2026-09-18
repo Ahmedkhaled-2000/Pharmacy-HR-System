@@ -22,8 +22,8 @@ export async function getNativeAppVersion() {
   if (!isAndroidNative()) {
     return {
       packageName: 'com.pharmacy.employee',
-      versionName: '1.2.41',
-      versionCode: 5,
+      versionName: '1.2.42',
+      versionCode: 6,
       isNative: false
     };
   }
@@ -33,15 +33,15 @@ export async function getNativeAppVersion() {
     return {
       packageName: info.packageName,
       versionName: info.versionName,
-      versionCode: Number(info.versionCode || 5),
+      versionCode: Number(info.versionCode || 6),
       isNative: true
     };
   } catch (err) {
     console.warn('[NativeAppUpdater] Failed to get app info:', err);
     return {
       packageName: 'com.pharmacy.employee',
-      versionName: '1.2.41',
-      versionCode: 5,
+      versionName: '1.2.42',
+      versionCode: 6,
       isNative: true
     };
   }
@@ -215,8 +215,8 @@ export async function downloadAndInstallNativeUpdate({ downloadUrl, sha256Checks
   }
 }
 
-export const LATEST_ANDROID_APK_FILENAME = 'pharmacy-hr-employee-1.2.41.apk';
-export const LATEST_ANDROID_VERSION = '1.2.41';
+export const LATEST_ANDROID_APK_FILENAME = 'pharmacy-hr-employee-1.2.42.apk';
+export const LATEST_ANDROID_VERSION = '1.2.42';
 
 /**
  * إرجاع رابط التنزيل المباشر لأحدث تطبيق أندرويد APK
