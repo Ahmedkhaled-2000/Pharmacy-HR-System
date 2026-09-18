@@ -22,8 +22,8 @@ export async function getNativeAppVersion() {
   if (!isAndroidNative()) {
     return {
       packageName: 'com.pharmacy.employee',
-      versionName: '1.2.42',
-      versionCode: 6,
+      versionName: '1.2.43',
+      versionCode: 7,
       isNative: false
     };
   }
@@ -33,15 +33,15 @@ export async function getNativeAppVersion() {
     return {
       packageName: info.packageName,
       versionName: info.versionName,
-      versionCode: Number(info.versionCode || 6),
+      versionCode: Number(info.versionCode || 7),
       isNative: true
     };
   } catch (err) {
     console.warn('[NativeAppUpdater] Failed to get app info:', err);
     return {
       packageName: 'com.pharmacy.employee',
-      versionName: '1.2.42',
-      versionCode: 6,
+      versionName: '1.2.43',
+      versionCode: 7,
       isNative: true
     };
   }
@@ -215,15 +215,22 @@ export async function downloadAndInstallNativeUpdate({ downloadUrl, sha256Checks
   }
 }
 
-export const LATEST_ANDROID_APK_FILENAME = 'pharmacy-hr-employee-1.2.42.apk';
-export const LATEST_ANDROID_VERSION = '1.2.42';
+export const LATEST_ANDROID_APK_FILENAME = 'pharmacy-employee-portal.apk';
+export const LATEST_ANDROID_VERSION = '1.2.43';
+export const GITHUB_LATEST_APK_URL = 'https://github.com/Ahmedkhaled-2000/Pharmacy-HR-System/releases/latest/download/pharmacy-employee-portal.apk';
 
 /**
  * إرجاع رابط التنزيل المباشر لأحدث تطبيق أندرويد APK
  */
 export function getAndroidApkDownloadUrl() {
-  const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'http://63.183.147.199';
-  return `${origin}/downloads/${LATEST_ANDROID_APK_FILENAME}`;
+  if (typeof window !== 'undefined' && window.location) {
+    const { hostname, origin } = window.location;
+    if (hostname === '63.183.147.199' || hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site')) {
+      return `${origin}/downloads/${LATEST_ANDROID_APK_FILENAME}`;
+    }
+  }
+  // التنزيل المباشر من GitHub Releases لأحدث إصدار رسمي متوفر عالمياً
+  return GITHUB_LATEST_APK_URL;
 }
 
 /**

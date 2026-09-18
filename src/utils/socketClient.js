@@ -41,10 +41,11 @@ export function getSocket() {
     socket = io(SOCKET_SERVER_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 3,
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 8000,
-      timeout: 5000,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1500,
+      reconnectionDelayMax: 10000,
+      randomizationFactor: 0.5,
+      timeout: 6000,
       autoConnect: true,
     });
 
@@ -52,13 +53,12 @@ export function getSocket() {
       console.log(`⚡ [Socket.io] متصل بخادم المزامنة اللحظية: ${SOCKET_SERVER_URL} (ID: ${socket.id})`);
     });
 
-    socket.on('disconnect', () => {
-      // انقطاع الاتصال
+    socket.on('disconnect', (reason) => {
+      // انقطاع الاتصال المؤقت - إعادة الاتصال ستتم تلقائياً
     });
 
-    socket.on('connect_error', () => {
-      // إيقاف المحاولات عند عدم توفر خادم WebSockets
-      try { socket.disconnect(); } catch {}
+    socket.on('connect_error', (err) => {
+      // إبقاء المحاولة النشطة لإعادة الاتصال التلقائي بدون تعطيل السوكت
     });
   }
   return socket;
@@ -133,6 +133,44 @@ export function subscribeToLiveRequests(onRequestCreated, onBatchSaved) {
   return () => {
     s.off('request:created', createHandler);
     s.off('requests:batch_saved', batchHandler);
+  };
+}
+
+/**
+ * بث تحديث قرار أو رد على طلب للموظفين فورياً (< 5ms) عبر الـ WebSocket
+ */
+export function emitLiveRequestUpdated(payload) {
+  const s = getSocket();
+  if (s && s.connected) {
+    try {
+      s.emit('request:update', payload);
+      return true;
+    } catch (e) {
+      console.warn('[Socket.io] Error emitting request:update:', e);
+    }
+  }
+  return false;
+}
+
+/**
+ * الاشتراك الفوري في أحداث قرارات وردود الإدارة ومدير الفرع على الطلبات (< 5ms)
+ */
+export function subscribeToLiveRequestUpdates(onUpdated) {
+  const s = getSocket();
+  if (!s || typeof onUpdated !== 'function') return () => {};
+
+  const updateHandler = (payload) => {
+    try {
+      onUpdated?.(payload);
+    } catch (e) {
+      console.warn('[Socket.io] Error handling request:updated:', e);
+    }
+  };
+
+  s.on('request:updated', updateHandler);
+
+  return () => {
+    s.off('request:updated', updateHandler);
   };
 }
 

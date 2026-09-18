@@ -1798,6 +1798,18 @@ io.on('connection', (socket) => {
     }
   });
 
+  // استقبال وبث قرارات وتحديثات الطلبات الفورية (< 5ms) لجميع الأجهزة وصفحات الموظفين
+  socket.on('request:update', (payload) => {
+    try {
+      if (payload && (payload.request || payload.requestId)) {
+        console.log(`⚡ [Socket.io] بث فوري لقرار/تحديث الطلب (${payload.request?.id || payload.requestId}) لكافة الموظفين والأجهزة`);
+        io.emit('request:updated', payload);
+      }
+    } catch (err) {
+      console.warn('[Socket.io] error on request:update:', err.message);
+    }
+  });
+
   socket.on('disconnect', (reason) => {
     console.log(`🔌 [Socket.io] انقطع اتصال: ${socket.id} (${reason})`);
   });

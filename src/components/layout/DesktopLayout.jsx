@@ -2908,6 +2908,58 @@ return (
           </div>
         );
       })}
+
+      {/* ── زر تنزيل تطبيق الأندرويد في القائمة العليا بعد أزرار الصفحات مباشرة ── */}
+      <div style={{ display: 'flex', alignItems: 'center', marginInlineStart: 'auto', paddingInlineStart: '8px' }}>
+        <button
+          type="button"
+          onClick={triggerAndroidApkDownload}
+          title="تحميل وتحديث تطبيق الأندرويد لهواتف الموظفين ومديري الفروع (بصيغة APK)"
+          className="desktop-menubar-btn topbar-apk-btn"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '7px',
+            padding: '7px 15px',
+            borderRadius: '10px',
+            border: '1px solid #10b981',
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(5, 150, 105, 0.22) 100%)',
+            color: '#059669',
+            fontSize: '13px',
+            fontWeight: 800,
+            cursor: 'pointer',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            boxShadow: '0 2px 6px rgba(16, 185, 129, 0.15)',
+            outline: 'none',
+            whiteSpace: 'nowrap'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, #059669 0%, #10b981 100%)';
+            e.currentTarget.style.color = '#ffffff';
+            e.currentTarget.style.boxShadow = '0 4px 14px rgba(16, 185, 129, 0.35)';
+            e.currentTarget.style.transform = 'translateY(-1px)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(5, 150, 105, 0.22) 100%)';
+            e.currentTarget.style.color = '#059669';
+            e.currentTarget.style.boxShadow = '0 2px 6px rgba(16, 185, 129, 0.15)';
+            e.currentTarget.style.transform = 'translateY(0)';
+          }}
+        >
+          <span style={{ fontSize: '15px' }}>🤖</span>
+          <span>تنزيل تطبيق الأندرويد</span>
+          <span style={{
+            background: '#10b981',
+            color: '#ffffff',
+            fontSize: '10px',
+            fontWeight: 900,
+            padding: '1px 6px',
+            borderRadius: '5px'
+          }}>
+            APK
+          </span>
+        </button>
+      </div>
     </nav>
   )}
 

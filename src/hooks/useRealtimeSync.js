@@ -8,6 +8,7 @@ import {
 import {
   subscribeToLiveState,
   subscribeToLiveRequests,
+  subscribeToLiveRequestUpdates,
   subscribeToSyncHints
 } from '../utils/socketClient';
 import {
@@ -325,10 +326,11 @@ export function useRealtimeSync(props = {}) {
       if (timerId) clearTimeout(timerId);
 
       const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
-      let delay = customDelay !== null ? customDelay : (isVisible ? 30000 : 60000);
+      // استطلاع متكيف فائق السرعة (3.5 ثوانٍ عند فتح الصفحة لضمان المزامنة في أقل من 5 ثوانٍ دائماً، و 25 ثانية في الخلفية)
+      let delay = customDelay !== null ? customDelay : (isVisible ? 3500 : 25000);
 
       if (customDelay === null && pollFailures > 0) {
-        delay = Math.min(60000, 20000 * Math.pow(1.5, Math.min(pollFailures, 3)));
+        delay = Math.min(30000, 4000 * Math.pow(1.3, Math.min(pollFailures, 4)));
       }
 
       timerId = setTimeout(async () => {
@@ -367,38 +369,59 @@ export function useRealtimeSync(props = {}) {
       }
     });
 
-    // و) استقبال الطلبات اللحظية فوراً (< 5ms) والتحديث اللحظي للشاشات دون انتظار الـ 6 ثوانٍ
-    const unsubRequests = subscribeToLiveRequests(
-      (payload) => {
-        if (payload && payload.request) {
-          const incomingReq = payload.request;
-          const incomingNotif = payload.notification;
-          console.log('⚡ [RealtimeSync] استلام طلب فوري عبر الـ WebSockets:', incomingReq.id);
+    // و) استقبال الطلبات وتحديثات وقرارات الردود اللحظية فوراً (< 5ms) والتحديث المباشر للشاشات
+    const handleIncomingRequestPayload = (payload) => {
+      if (!payload) return;
+      const incomingReq = payload.request;
+      const incomingNotif = payload.notification;
+      if (!incomingReq || !incomingReq.id) return;
 
-          setState((prev) => {
-            if (!prev) return prev;
-            const existingReqs = Array.isArray(prev.requests) ? prev.requests : [];
-            if (existingReqs.some((r) => r && String(r.id) === String(incomingReq.id))) {
-              return prev;
-            }
-            const updatedReqs = [incomingReq, ...existingReqs];
-            let updatedNotifs = Array.isArray(prev.notifications) ? prev.notifications : [];
-            if (incomingNotif && incomingNotif.id) {
-              updatedNotifs = [incomingNotif, ...updatedNotifs.filter((n) => n && String(n.id) !== String(incomingNotif.id))].slice(0, 300);
-            }
-            return {
-              ...prev,
-              requests: updatedReqs,
-              notifications: updatedNotifs,
-              _requestsUpdatedAt: new Date().toISOString()
-            };
-          });
+      const reqIdStr = String(incomingReq.id);
+      console.log('⚡ [RealtimeSync] معالجة طلب/رد فوري عبر الـ WebSockets:', reqIdStr, incomingReq.status || '');
+
+      setState((prev) => {
+        if (!prev) return prev;
+        const existingReqs = Array.isArray(prev.requests) ? prev.requests : [];
+        const exists = existingReqs.some((r) => r && String(r.id) === reqIdStr);
+        
+        // تحديث الطلب القائم بحالته الجديدة فورياً أو إدراجه كطلب جديد
+        const updatedReqs = exists
+          ? existingReqs.map((r) => String(r.id) === reqIdStr ? { ...r, ...incomingReq } : r)
+          : [incomingReq, ...existingReqs];
+
+        // تحديث مصفوفات الطلبات التخصصية (الإجازات، السلف، الأذونات، التبديلات) إن وُجدت
+        const updateSpecialtyList = (list) => {
+          if (!Array.isArray(list)) return list;
+          return list.map((item) => (item && String(item.id) === reqIdStr ? { ...item, ...incomingReq } : item));
+        };
+
+        let updatedNotifs = Array.isArray(prev.notifications) ? prev.notifications : [];
+        if (incomingNotif && incomingNotif.id) {
+          updatedNotifs = [incomingNotif, ...updatedNotifs.filter((n) => n && String(n.id) !== String(incomingNotif.id))].slice(0, 300);
         }
-      },
+
+        return {
+          ...prev,
+          requests: updatedReqs,
+          leaveRequests: updateSpecialtyList(prev.leaveRequests),
+          loans: updateSpecialtyList(prev.loans),
+          shiftSwaps: updateSpecialtyList(prev.shiftSwaps),
+          permissionRequests: updateSpecialtyList(prev.permissionRequests),
+          resignationRequests: updateSpecialtyList(prev.resignationRequests),
+          notifications: updatedNotifs,
+          _requestsUpdatedAt: new Date().toISOString()
+        };
+      });
+    };
+
+    const unsubRequests = subscribeToLiveRequests(
+      handleIncomingRequestPayload,
       (batchPayload) => {
         console.log(`📦 [RealtimeSync] تم اكتمال الحفظ الدفعي لـ (${batchPayload?.count || 0}) طلب على السيرفر (v${batchPayload?.version})`);
       }
     );
+
+    const unsubRequestUpdates = subscribeToLiveRequestUpdates(handleIncomingRequestPayload);
 
     const handleFocusOrVisible = () => {
       if (document.visibilityState === 'visible' || document.hasFocus()) {
@@ -419,6 +442,7 @@ export function useRealtimeSync(props = {}) {
       if (unsubSocket) unsubSocket();
       if (unsubSyncHint) unsubSyncHint();
       if (unsubRequests) unsubRequests();
+      if (unsubRequestUpdates) unsubRequestUpdates();
       unsubBroadcast();
       window.removeEventListener('focus', handleFocusOrVisible);
       window.removeEventListener('online', handleFocusOrVisible);

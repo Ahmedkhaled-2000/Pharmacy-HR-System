@@ -18,8 +18,8 @@ if not exist "%APK_FILE%" (
 )
 
 echo.
-set /p TAG_NAME="أدخل رقم الإصدار الجديد (مثال: v1.2.40): "
-if "%TAG_NAME%"=="" set "TAG_NAME=v1.2.40"
+set /p TAG_NAME="أدخل رقم الإصدار الجديد (مثال: v1.2.43): "
+if "%TAG_NAME%"=="" set "TAG_NAME=v1.2.43"
 
 echo.
 set /p NOTES="أدخل ملاحظات التحديث للموظفين (أو اضغط Enter للافتراضي): "

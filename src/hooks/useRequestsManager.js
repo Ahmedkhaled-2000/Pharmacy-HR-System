@@ -8,6 +8,8 @@ import { applyShiftSwapToRosters } from '../utils/rosterEngine';
 import { normalizeSchedule } from '../components/roster/RosterModule';
 import { saveFaceDescriptor, saveHandDescriptor, deleteFaceDescriptor, deleteHandDescriptor } from '../utils/faceStorage';
 import { enqueueRequestDecision } from '../utils/syncEngine';
+import { emitLiveRequestUpdated } from '../utils/socketClient';
+import { broadcastStateChange } from '../utils/offlineSync';
 import { useData } from '../context/DataContext';
 import { useUI } from '../context/UIContext';
 
@@ -698,6 +700,21 @@ export function useRequestsManager() {
         branchId: target.branchId || target.branch_id
       }).catch(err => console.warn('Outbox enqueue decision error:', err));
 
+      // بث لحظي فوري (< 5ms) لجميع الأجهزة وصفحة الموظف عبر الـ WebSocket والبث المحلي
+      try {
+        const finalApprovedReq = updatedRequests.find(r => r && String(r.id) === String(requestId)) || target;
+        emitLiveRequestUpdated({
+          request: finalApprovedReq,
+          notification: decisionNotif,
+          decision: 'approve',
+          requestId,
+          newStatus: isFullyApproved ? 'approved' : 'pending_admin'
+        });
+        broadcastStateChange(updatedState);
+      } catch (broadcastErr) {
+        console.warn('Realtime request broadcast error:', broadcastErr);
+      }
+
       // إشعار فوري عبر Gmail بتطبيق الجزاء / الخصم المعتمد
       if (target.type === 'penalty' || target.type === 'early_exit' || target.type === 'disciplinary_penalty' || target.type === 'violation' || String(target.id || '').startsWith('disc_')) {
         const targetEmp = (state.employees || []).find((e) => e && String(e.id) === String(target.employeeId));
@@ -1056,6 +1073,20 @@ export function useRequestsManager() {
         reviewer: { role },
         branchId: targetReq?.branchId || targetReq?.branch_id
       }).catch(err => console.warn('Outbox enqueue decision error:', err));
+
+      // بث لحظي فوري (< 5ms) لجميع الأجهزة وصفحة الموظف عبر الـ WebSocket والبث المحلي
+      try {
+        emitLiveRequestUpdated({
+          request: targetReq,
+          notification: decisionNotif,
+          decision: 'reject',
+          requestId,
+          newStatus: 'rejected'
+        });
+        broadcastStateChange(updatedState);
+      } catch (broadcastErr) {
+        console.warn('Realtime reject broadcast error:', broadcastErr);
+      }
     };
 
     if ((role === 'admin' || role === 'owner') && state.orgSettings?.ownerModificationLocks?.lockRejectRequests) {
