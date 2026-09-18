@@ -22,8 +22,8 @@ export async function getNativeAppVersion() {
   if (!isAndroidNative()) {
     return {
       packageName: 'com.pharmacy.employee',
-      versionName: '1.2.38',
-      versionCode: 1,
+      versionName: '1.2.40',
+      versionCode: 4,
       isNative: false
     };
   }
@@ -33,15 +33,15 @@ export async function getNativeAppVersion() {
     return {
       packageName: info.packageName,
       versionName: info.versionName,
-      versionCode: Number(info.versionCode || 1),
+      versionCode: Number(info.versionCode || 4),
       isNative: true
     };
   } catch (err) {
     console.warn('[NativeAppUpdater] Failed to get app info:', err);
     return {
       packageName: 'com.pharmacy.employee',
-      versionName: '1.2.38',
-      versionCode: 1,
+      versionName: '1.2.40',
+      versionCode: 4,
       isNative: true
     };
   }

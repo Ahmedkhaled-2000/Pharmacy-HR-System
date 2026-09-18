@@ -29,7 +29,8 @@ export default function PendingRosterModal({
 
   // Normalize submitted schedule
   const submittedSchedule = useMemo(() => {
-    return normalizeSchedule(pendingReq?.schedule);
+    const norm = normalizeSchedule(pendingReq?.schedule);
+    return (norm && typeof norm === 'object') ? norm : {};
   }, [pendingReq?.schedule]);
 
   // Check if there was an existing approved roster to offer comparison
@@ -47,8 +48,9 @@ export default function PendingRosterModal({
     let workDays = 0;
     let offDays = 0;
 
+    const safeSchedule = submittedSchedule || {};
     STANDARD_DAYS.forEach(d => {
-      const dayConf = submittedSchedule[d.key];
+      const dayConf = safeSchedule[d.key];
       const isOff = !dayConf || dayConf.type === 'off' || dayConf.isOff === true;
       if (isOff) {
         offDays += 1;
@@ -85,10 +87,9 @@ export default function PendingRosterModal({
   // Handler for printing submitted schedule
   const handlePrintSchedule = () => {
     const companyName = state?.orgSettings?.companyName || 'مجموعة صيدليات د. منار الكومي';
-    const empName = emp ? getEmpDisplayName(emp) : (pendingReq.employeeName || 'الموظف');
-
+    const safeSchedule = submittedSchedule || {};
     const rowsHTML = STANDARD_DAYS.map(d => {
-      const conf = submittedSchedule[d.key];
+      const conf = safeSchedule[d.key];
       const isOff = !conf || conf.type === 'off' || conf.isOff === true;
       const start12 = conf?.start ? formatTime12H(conf.start) : '';
       const end12 = conf?.end ? formatTime12H(conf.end) : '';

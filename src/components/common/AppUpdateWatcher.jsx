@@ -406,24 +406,6 @@ export default function AppUpdateWatcher() {
               </div>
             </div>
 
-            {androidUpdate.releaseNotes && (
-              <div
-                style={{
-                  background: '#f8fafc',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '14px',
-                  padding: '12px 14px',
-                  marginBottom: '18px',
-                  fontSize: '13px',
-                  color: '#334155',
-                  lineHeight: '1.6'
-                }}
-              >
-                <strong style={{ display: 'block', marginBottom: '4px', color: '#0f172a' }}>أبرز ما في التحديث:</strong>
-                <div>{androidUpdate.releaseNotes}</div>
-              </div>
-            )}
-
             {/* حالة التنزيل والتقدم */}
             {androidDownloadState === 'downloading' && (
               <div style={{ marginBottom: '18px' }}>

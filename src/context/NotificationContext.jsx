@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo } from 'react';
+import React, { createContext, useContext, useMemo, useEffect } from 'react';
 import {
   shouldShowRequestToBranch
 } from '../utils/formatters';
@@ -13,6 +13,7 @@ import {
 import { isApprovedPermissionForDate } from '../utils/latePenaltyEngine';
 import { shouldRouteDirectToAdmin } from '../utils/jobsHelper';
 import { hardDeleteEntityFast } from '../utils/offlineSync';
+import { requestSystemNotificationPermission, showSystemNotification } from '../utils/nativeNotifications';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 import { useUI } from './UIContext';
@@ -392,6 +393,32 @@ export function NotificationProvider({ children }) {
       return !n.read;
     }).length;
   }, [requestNotifications, authRole, currentBranch]);
+
+  // ── Dispatch Native System Notifications to Android Phone Status Bar / Notification Center ──
+  useEffect(() => {
+    if (!authRole || authRole === 'none') return;
+
+    // 1. طلب الصلاحية بهدوء في الخلفية
+    requestSystemNotificationPermission().catch(() => {});
+
+    // 2. فحص الإشعارات غير المقروءة لهذا المستخدم وإرسالها لشريط إشعارات الهاتف
+    if (Array.isArray(roleNotifications) && roleNotifications.length > 0) {
+      roleNotifications.forEach((n) => {
+        if (!n || !n.id) return;
+        const isRead = (authRole === 'admin' || authRole === 'owner')
+          ? isNotificationReadForAdmin(n)
+          : (authRole === 'branch' && currentBranch)
+          ? isNotificationReadForBranch(n, currentBranch)
+          : Boolean(n.read);
+
+        if (!isRead) {
+          const title = n.title || 'إشعار من الإدارة';
+          const body = n.message || n.text || n.body || n.title || 'لديك إشعار جديد في منظومة الموارد البشرية.';
+          showSystemNotification({ id: n.id, title, body }).catch(() => {});
+        }
+      });
+    }
+  }, [roleNotifications, authRole, currentBranch]);
 
   // 4. دوال التحكم في الإشعارات
   const handleMarkNotificationRead = async (notifId) => {

@@ -1515,14 +1515,14 @@ try {
             $githubRepo = 'Ahmedkhaled-2000/Pharmacy-HR-System';
             $manifest = [
                 'success' => true,
-                'latest_version' => '1.2.39',
-                'latest_version_code' => 2,
+                'latest_version' => '1.2.40',
+                'latest_version_code' => 4,
                 'min_supported_code' => 1,
-                'download_url' => "https://github.com/{$githubRepo}/releases/latest/download/بوابة_الموظف.apk",
+                'download_url' => "https://github.com/{$githubRepo}/releases/latest/download/pharmacy-employee-portal.apk",
                 'sha256_checksum' => '',
-                'file_size' => 99586449,
+                'file_size' => 101000000,
                 'mandatory_update' => false,
-                'release_notes' => 'تحديث شامل: دعم الاتصال المباشر بالسحابة، تسريع تسجيل الدخول، والمزامنة التلقائية',
+                'release_notes' => 'تحديث شامل: دعم البصمة الحيوية، إشعارات الهاتف الأصلية، وطباعة كشف المرتبات كـ PDF',
                 'release_date' => date('Y-m-d H:i:s')
             ];
 

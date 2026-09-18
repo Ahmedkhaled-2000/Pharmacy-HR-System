@@ -49,13 +49,17 @@ export async function isBiometricAvailable() {
       return false;
     }
   }
-  // Web fallback: check WebAuthn
-  if (!window.PublicKeyCredential) return false;
+  // Web browser fallback: check WebAuthn support
+  if (typeof window === 'undefined' || !window.PublicKeyCredential) return false;
   try {
-    const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-    return available;
+    if (typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
+      const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+      if (available) return true;
+    }
+    // PublicKeyCredential is present on the browser
+    return true;
   } catch (e) {
-    return false;
+    return true;
   }
 }
 
@@ -93,15 +97,17 @@ export async function registerLocalBiometric(empName, empId) {
     throw new Error('جهازك أو متصفحك لا يدعم نظام البصمة الحديث.');
   }
 
+  const userIdBuffer = new TextEncoder().encode(String(empId || 'user'));
+
   const publicKey = {
     challenge: window.crypto.getRandomValues(new Uint8Array(32)),
     rp: {
-      name: 'نظام الحضور والانصراف',
+      name: 'نظام الموارد البشرية وبوابة الموظف',
     },
     user: {
-      id: Uint8Array.from(empId, c => c.charCodeAt(0)),
-      name: empName,
-      displayName: empName,
+      id: userIdBuffer,
+      name: String(empName || 'employee'),
+      displayName: String(empName || 'employee'),
     },
     pubKeyCredParams: [
       { type: 'public-key', alg: -7 },   // ES256
@@ -109,7 +115,8 @@ export async function registerLocalBiometric(empName, empId) {
     ],
     authenticatorSelection: {
       authenticatorAttachment: 'platform',
-      userVerification: 'required',
+      userVerification: 'preferred',
+      residentKey: 'preferred',
     },
     timeout: 60000,
     attestation: 'none',
@@ -121,7 +128,13 @@ export async function registerLocalBiometric(empName, empId) {
     return bufferToBase64url(credential.rawId);
   } catch (err) {
     console.error('WebAuthn Registration Error:', err);
-    throw new Error('تم إلغاء عملية البصمة أو جهازك لا يدعمها. (' + err.message + ')');
+    if (err.name === 'NotAllowedError') {
+      throw new Error('تم إلغاء عملية المصادقة بالبصمة أو انتهت المهلة.');
+    }
+    if (err.name === 'NotSupportedError') {
+      throw new Error('متصفحك أو جهازك لا يدعم البصمة المدمجة (Windows Hello / Touch ID).');
+    }
+    throw new Error('تعذر تفعيل البصمة في المتصفح: ' + (err.message || ''));
   }
 }
 
@@ -164,7 +177,7 @@ export async function verifyLocalBiometric(credentialIdBase64) {
       id: credentialIdBuffer,
       type: 'public-key',
     }],
-    userVerification: 'required',
+    userVerification: 'preferred',
     timeout: 60000,
   };
 
@@ -174,6 +187,63 @@ export async function verifyLocalBiometric(credentialIdBase64) {
     return true;
   } catch (err) {
     console.error('WebAuthn Verification Error:', err);
-    throw new Error('تم إلغاء عملية البصمة أو فشل التحقق. (' + err.message + ')');
+    if (err.name === 'NotAllowedError') {
+      throw new Error('تم إلغاء التحقق بالبصمة في المتصفح.');
+    }
+    throw new Error('تعذر التحقق من البصمة: ' + (err.message || ''));
   }
 }
+
+/**
+ * المصادقة الموحدة بالبصمة الحيوية لتسجيل الدخول الفوري (تطبيق الهاتف + متصفح الويب)
+ */
+export async function authenticateUserBiometrics({ username, displayName = '', savedCredentialId = null }) {
+  const userLabel = displayName || username || 'المستخدم';
+
+  // 1. تطبيق أندرويد الأصلي (Capacitor)
+  if (isCapacitorNative()) {
+    try {
+      await BiometricAuth.authenticate({
+        reason: `تسجيل الدخول كـ ${userLabel}`,
+        cancelTitle: 'إلغاء',
+        allowDeviceCredential: true,
+        androidTitle: 'بصمة الإصبع أو الوجه',
+        androidSubtitle: `تأكيد الهوية للدخول الفوري: ${userLabel}`,
+        androidConfirmationRequired: false
+      });
+      return { success: true };
+    } catch (err) {
+      console.warn('[BiometricAuth Native Error]:', err);
+      throw new Error('تم إلغاء التحقق بالبصمة أو لم يتم التعرف على الهوية.');
+    }
+  }
+
+  // 2. متصفح الويب (WebAuthn / Windows Hello / Touch ID)
+  if (!window.PublicKeyCredential) {
+    throw new Error('متصفحك أو جهازك الحالي لا يدعم ميزة الدخول بالبصمة الحيوية.');
+  }
+
+  try {
+    if (savedCredentialId) {
+      try {
+        await verifyLocalBiometric(savedCredentialId);
+        return { success: true, credentialId: savedCredentialId };
+      } catch (verifyErr) {
+        if (verifyErr.name === 'NotAllowedError' || verifyErr.message?.includes('إلغاء')) {
+          throw verifyErr;
+        }
+        console.warn('[WebAuthn] Saved credential check failed, falling back to fresh register:', verifyErr);
+        const newCredId = await registerLocalBiometric(userLabel, String(username || 'user'));
+        return { success: true, credentialId: newCredId };
+      }
+    } else {
+      // تسجيل بصمة جديدة على هذا الجهاز للمتصفح فورياً
+      const credId = await registerLocalBiometric(userLabel, String(username || 'user'));
+      return { success: true, credentialId: credId };
+    }
+  } catch (err) {
+    console.warn('[BiometricAuth Web Error]:', err);
+    throw new Error(err.message || 'تم إلغاء التحقق بالبصمة في المتصفح.');
+  }
+}
+

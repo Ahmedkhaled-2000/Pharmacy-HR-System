@@ -322,15 +322,16 @@ export default function EmployeeRosterModule({
   // Handle Roster Schedule Field Change
   const handleScheduleChange = (day, field, value) => {
     setScheduleInputs((prev) => {
-      const cur = prev[day] || { type: 'shift', start: '', end: '' };
+      const safePrev = (prev && typeof prev === 'object') ? prev : { ...BLANK_SCHEDULE };
+      const cur = safePrev[day] || { type: 'shift', start: '', end: '' };
       if (field === 'type' && value === 'off') {
         return {
-          ...prev,
+          ...safePrev,
           [day]: { ...cur, type: 'off', start: '', end: '' }
         };
       }
       return {
-        ...prev,
+        ...safePrev,
         [day]: { ...cur, [field]: value }
       };
     });
@@ -340,8 +341,9 @@ export default function EmployeeRosterModule({
   const handleSubmitRoster = async (e) => {
     e.preventDefault();
 
+    const safeInputs = (scheduleInputs && typeof scheduleInputs === 'object') ? scheduleInputs : {};
     // Validation: check for incomplete shifts
-    const hasIncompleteShift = Object.entries(scheduleInputs).some(([day, conf]) => {
+    const hasIncompleteShift = Object.entries(safeInputs).some(([day, conf]) => {
       return conf?.type === 'shift' && (!conf.start || !conf.end);
     });
     if (hasIncompleteShift) {
@@ -349,7 +351,7 @@ export default function EmployeeRosterModule({
       return;
     }
 
-    const hasAnyShift = Object.values(scheduleInputs).some((conf) => conf?.type === 'shift' && conf.start && conf.end);
+    const hasAnyShift = Object.values(safeInputs).some((conf) => conf?.type === 'shift' && conf.start && conf.end);
     if (!hasAnyShift) {
       showToast?.('يرجى تحديد وردية عمل واحدة على الأقل في الأسبوع قبل تقديم الجدول');
       return;
@@ -495,47 +497,51 @@ export default function EmployeeRosterModule({
               </tr>
             </thead>
             <tbody>
-              {daysOfWeek.map((day) => (
-                <tr key={day}>
-                  <td style={{ fontWeight: 'bold' }}>{day}</td>
-                  <td>
-                    <select
-                      value={scheduleInputs[day]?.type || 'shift'}
-                      onChange={(e) => handleScheduleChange(day, 'type', e.target.value)}
-                      style={{ padding: '4px 8px', borderRadius: '6px' }}
-                    >
-                      <option value="shift">وردية عمل (Shift)</option>
-                      <option value="off">راحة أسبوعية (OFF)</option>
-                    </select>
-                  </td>
-                  <td>
-                    {scheduleInputs[day]?.type === 'shift' ? (
-                      <input
-                        type="time"
-                        value={scheduleInputs[day]?.start || ''}
-                        onChange={(e) => handleScheduleChange(day, 'start', e.target.value)}
-                        placeholder="08:00"
-                        required
-                      />
-                    ) : (
-                      <span style={{ color: 'var(--muted)' }}>—</span>
-                    )}
-                  </td>
-                  <td>
-                    {scheduleInputs[day]?.type === 'shift' ? (
-                      <input
-                        type="time"
-                        value={scheduleInputs[day]?.end || ''}
-                        onChange={(e) => handleScheduleChange(day, 'end', e.target.value)}
-                        placeholder="16:00"
-                        required
-                      />
-                    ) : (
-                      <span style={{ color: 'var(--muted)' }}>—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {daysOfWeek.map((day) => {
+                const safeInputs = (scheduleInputs && typeof scheduleInputs === 'object') ? scheduleInputs : {};
+                const dayConfig = safeInputs[day] || { type: 'shift', start: '', end: '' };
+                return (
+                  <tr key={day}>
+                    <td style={{ fontWeight: 'bold' }}>{day}</td>
+                    <td>
+                      <select
+                        value={dayConfig.type || 'shift'}
+                        onChange={(e) => handleScheduleChange(day, 'type', e.target.value)}
+                        style={{ padding: '4px 8px', borderRadius: '6px' }}
+                      >
+                        <option value="shift">وردية عمل (Shift)</option>
+                        <option value="off">راحة أسبوعية (OFF)</option>
+                      </select>
+                    </td>
+                    <td>
+                      {dayConfig.type === 'shift' ? (
+                        <input
+                          type="time"
+                          value={dayConfig.start || ''}
+                          onChange={(e) => handleScheduleChange(day, 'start', e.target.value)}
+                          placeholder="08:00"
+                          required
+                        />
+                      ) : (
+                        <span style={{ color: 'var(--muted)' }}>—</span>
+                      )}
+                    </td>
+                    <td>
+                      {dayConfig.type === 'shift' ? (
+                        <input
+                          type="time"
+                          value={dayConfig.end || ''}
+                          onChange={(e) => handleScheduleChange(day, 'end', e.target.value)}
+                          placeholder="16:00"
+                          required
+                        />
+                      ) : (
+                        <span style={{ color: 'var(--muted)' }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

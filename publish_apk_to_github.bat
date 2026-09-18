@@ -18,8 +18,8 @@ if not exist "%APK_FILE%" (
 )
 
 echo.
-set /p TAG_NAME="أدخل رقم الإصدار الجديد (مثال: v1.2.39): "
-if "%TAG_NAME%"=="" set "TAG_NAME=v1.2.39"
+set /p TAG_NAME="أدخل رقم الإصدار الجديد (مثال: v1.2.40): "
+if "%TAG_NAME%"=="" set "TAG_NAME=v1.2.40"
 
 echo.
 set /p NOTES="أدخل ملاحظات التحديث للموظفين (أو اضغط Enter للافتراضي): "
@@ -51,7 +51,9 @@ if %errorlevel% neq 0 (
 
 echo.
 echo [3/3] رفع التحديث الجديد إلى GitHub Releases...
-gh release create %TAG_NAME% "%APK_FILE%#بوابة_الموظف.apk" --title "تحديث بوابة الموظف %TAG_NAME%" --notes "%NOTES%"
+set "APK_ENG=%BASE_DIR%pharmacy-employee-portal.apk"
+if not exist "%APK_ENG%" copy /y "%APK_FILE%" "%APK_ENG%" >nul
+gh release create %TAG_NAME% "%APK_ENG%" "%APK_FILE%" --title "تحديث بوابة الموظف %TAG_NAME%" --notes "%NOTES%"
 
 if %errorlevel% equ 0 (
     echo.

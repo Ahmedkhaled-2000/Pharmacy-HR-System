@@ -527,7 +527,9 @@ export function checkAndTriggerCycleEndRosterReminder(state, emp) {
 }
 
 export function normalizeSchedule(rawSchedule) {
-  if (!rawSchedule || typeof rawSchedule !== 'object') return null;
+  if (!rawSchedule || typeof rawSchedule !== 'object') {
+    return { ...DEFAULT_WEEKLY_SCHEDULE };
+  }
   const dayKeyMap = {
     'saturday': 'السبت',
     'sunday': 'الأحد',
@@ -576,7 +578,7 @@ export function normalizeSchedule(rawSchedule) {
     }
   });
 
-  return Object.keys(normalized).length > 0 ? normalized : rawSchedule;
+  return Object.keys(normalized).length > 0 ? normalized : { ...DEFAULT_WEEKLY_SCHEDULE };
 }
 
 export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 = null) {

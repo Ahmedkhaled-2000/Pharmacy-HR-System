@@ -1,8 +1,11 @@
+import { registerPlugin } from '@capacitor/core';
 import { getRealTodayStr } from '../utils/timeEngine';
 import { fmt, arabicWeekday, AR_MONTHS, getEmployeeApprovedLeaves } from './formatters';
 import { getEmployeeDaySchedule } from './rosterEngine';
 import { getEffectiveShiftHours, isApprovedPermissionForDate } from './latePenaltyEngine';
 import { getCycleDateRange } from './periodEngine';
+
+export const NativePrint = registerPlugin('NativePrint');
 
 /**
  * printHelper.js
@@ -123,6 +126,16 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة كش
     </body>
     </html>
   `;
+
+  // 0. On Android Native (Capacitor), trigger Android's native PrintManager (PDF export & WiFi printing)
+  if (typeof window !== 'undefined' && window.Capacitor?.isNativePlatform && window.Capacitor.isNativePlatform() && window.Capacitor.getPlatform() === 'android') {
+    try {
+      NativePrint.printHtml({ html: fullDocumentHTML, title: documentTitle });
+      return;
+    } catch (err) {
+      console.warn('[triggerDirectPrint] NativePrint failed, falling back to web print:', err);
+    }
+  }
 
   // 1. Try opening a clean popup window first (most reliable on desktop browsers & prevents any clipping)
   try {

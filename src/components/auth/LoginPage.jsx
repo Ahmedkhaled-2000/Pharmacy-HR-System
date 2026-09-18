@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff, Fingerprint, Sparkles } from 'lucide-react';
-import { isBiometricAvailable } from '../../utils/webauthn';
+import { isBiometricAvailable, authenticateUserBiometrics } from '../../utils/webauthn';
 import { BiometricAuth } from '@aparajita/capacitor-biometric-auth';
 
 export default function LoginPage({ onLogin, state, themeMode = 'light', toggleTheme }) {
@@ -14,7 +14,12 @@ export default function LoginPage({ onLogin, state, themeMode = 'light', toggleT
   const [hasBiometricSupport, setHasBiometricSupport] = useState(false);
   const [savedBiometricUser, setSavedBiometricUser] = useState(null);
   const [rememberBiometric, setRememberBiometric] = useState(() => {
-    try { return localStorage.getItem('app_biometric_enabled') === 'true'; } catch { return false; }
+    try {
+      const saved = localStorage.getItem('app_biometric_enabled');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
   });
 
   const orgName = state?.orgSettings?.orgName?.trim() || 'مجموعة الصيدليات الطبية';
@@ -23,15 +28,22 @@ export default function LoginPage({ onLogin, state, themeMode = 'light', toggleT
 
   // فحص توفر البصمة الحيوية على الجهاز واسترجاع الحساب المحفوظ
   useEffect(() => {
+    // 1. استرجاع الحساب المحفوظ مسبقاً على هذا الجهاز أو المتصفح
+    try {
+      const saved = localStorage.getItem('app_saved_biometric_user');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.username) {
+          setSavedBiometricUser(parsed);
+          setHasBiometricSupport(true);
+        }
+      }
+    } catch {}
+
+    // 2. التحقق من دعم عتاد البصمة أو المتصفح
     isBiometricAvailable().then((available) => {
-      setHasBiometricSupport(available);
       if (available) {
-        try {
-          const saved = localStorage.getItem('app_saved_biometric_user');
-          if (saved) {
-            setSavedBiometricUser(JSON.parse(saved));
-          }
-        } catch {}
+        setHasBiometricSupport(true);
       }
     }).catch(() => {});
   }, []);
@@ -48,30 +60,49 @@ export default function LoginPage({ onLogin, state, themeMode = 'light', toggleT
       } catch {}
     }
 
+    const typedUser = String(username || '').trim();
+    const typedPass = String(password || '').trim();
+
+    // إذا لم تكن هناك بصمة مربوطة مسبقاً ولكن المستخدم أدخل بياناته في الحقول
+    if ((!targetUser || !targetUser.username) && typedUser && typedPass) {
+      targetUser = {
+        username: typedUser,
+        password: typedPass,
+        displayName: typedUser
+      };
+    }
+
     if (!targetUser || !targetUser.username) {
-      setErrorMsg('لم يتم ربط بصمة مسبقاً على هذا الجهاز. يرجى إدخال اسم المستخدم وكلمة المرور وتفعيل خيار "تفعيل الدخول بالبصمة" أولاً.');
+      setErrorMsg('سجّل دخولك بكود الموظف وكلمة المرور لمرة واحدة أولاً، وسيتم تفعيل الدخول الفوري ببصمتك دائماً.');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      if (window.Capacitor?.isNativePlatform && window.Capacitor.isNativePlatform()) {
-        await BiometricAuth.authenticate({
-          reason: `تسجيل الدخول كـ ${targetUser.displayName || targetUser.username}`,
-          cancelTitle: 'إلغاء',
-          allowDeviceCredential: true,
-          androidTitle: 'بصمة الإصبع أو الوجه',
-          androidSubtitle: 'تأكيد الهوية للدخول الفوري إلى منظومة الصيدليات'
-        });
-      }
+      // 1. استدعاء المصادقة بالبصمة (تطبيق أندرويد + متصفح الويب)
+      const authRes = await authenticateUserBiometrics({
+        username: targetUser.username,
+        displayName: targetUser.displayName,
+        savedCredentialId: targetUser.credentialId || null
+      });
 
+      // 2. تسجيل الدخول المباشر
       const res = await onLogin(targetUser.username, targetUser.password);
       if (res && typeof res === 'object' && !res.success) {
         setErrorMsg(res.error || 'اسم المستخدم أو كلمة المرور للبصمة المحفوظة غير صحيحة');
+      } else {
+        // تحديث بيانات البصمة المحفوظة
+        try {
+          localStorage.setItem('app_biometric_enabled', 'true');
+          localStorage.setItem('app_saved_biometric_user', JSON.stringify({
+            ...targetUser,
+            credentialId: authRes?.credentialId || targetUser.credentialId || null
+          }));
+        } catch {}
       }
     } catch (err) {
       console.warn('[BiometricAuth Error]:', err);
-      setErrorMsg('تم إلغاء التحقق بالبصمة أو لم يتم التعرف على الهوية.');
+      setErrorMsg(err.message || 'تم إلغاء التحقق بالبصمة أو لم يتم التعرف على الهوية.');
     } finally {
       setIsSubmitting(false);
     }
@@ -257,24 +288,27 @@ export default function LoginPage({ onLogin, state, themeMode = 'light', toggleT
         </h1>
 
         {/* Subtitle / Management Tag */}
-        <p
+        <div
           style={{
-            margin: '0 0 26px 0',
-            fontSize: 'clamp(12.5px, 3.4vw, 14px)',
-            fontWeight: 600,
-            color: '#0d9488',
-            textAlign: 'center',
+            margin: '0 0 20px 0',
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px'
+            gap: '4px',
+            width: '100%',
+            textAlign: 'center'
           }}
         >
-          <span>🔐</span>
-          <span>
-            {generalManager ? `إدارة: ${generalManager} · تسجيل الدخول` : 'بوابة تسجيل الدخول والموارد البشرية'}
-          </span>
-        </p>
+          {generalManager && (
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f766e', lineHeight: '1.4' }}>
+              إدارة: {generalManager}
+            </div>
+          )}
+          <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#64748b', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <span>🔐</span>
+            <span>بوابة تسجيل الدخول إلى النظام</span>
+          </div>
+        </div>
 
         {/* Error Notification */}
         {errorMsg && (

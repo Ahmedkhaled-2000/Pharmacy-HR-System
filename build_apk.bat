@@ -87,11 +87,13 @@ call gradlew.bat assembleDebug
 if exist "app\build\outputs\apk\debug\app-debug.apk" (
     copy /y "app\build\outputs\apk\debug\app-debug.apk" "%USERPROFILE%\Desktop\بوابة_الموظف.apk" >nul
     copy /y "app\build\outputs\apk\debug\app-debug.apk" "%BASE_DIR%بوابة_الموظف.apk" >nul
+    copy /y "app\build\outputs\apk\debug\app-debug.apk" "%BASE_DIR%pharmacy-employee-portal.apk" >nul
     echo.
     echo ===================================================
     echo  SUCCESS! تم استخراج ملف التطبيق بنجاح:
     echo  1. على سطح المكتب: %USERPROFILE%\Desktop\بوابة_الموظف.apk
     echo  2. في مجلد المشروع: %BASE_DIR%بوابة_الموظف.apk
+    echo  3. ملف التحديث السحابي: %BASE_DIR%pharmacy-employee-portal.apk
     echo ===================================================
 ) else (
     echo.
