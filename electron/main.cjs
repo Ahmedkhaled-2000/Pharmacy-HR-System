@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const url = require('url');
 const http = require('http');
+const { execFile } = require('child_process');
 
 // ── تسجيل معرّف التطبيق في نظام ويندوز لتثبيت إشعارات Action Center و Toast بالصوت والشعار ──
 app.setAppUserModelId('com.pharmacy.hr.system');
@@ -72,6 +73,7 @@ const DESKTOP_CONFIG_FILE = path.join(userDataPath, 'desktop_config.json');
 const DEFAULT_DESKTOP_CONFIG = {
   appName: 'منظومة إدارة الموارد البشرية والرواتب',
   customLogoPath: null,
+  customIcoPath: null,
   zoomFactor: 0.92,
   enableNotifications: true,
   notificationSound: true,
@@ -112,6 +114,182 @@ function saveDesktopConfig(newConfig) {
     console.error('[Desktop Config] Failed to save config:', err);
     return { success: false, error: err.message };
   }
+}
+
+/**
+ * توليد هيكل ملف ICO قياسي متوافق مع كافة إصدارات ويندوز من بيانات PNG ثنائية
+ */
+function generateIcoFromPngBuffer(pngBuffer) {
+  const header = Buffer.alloc(22);
+  // ICONDIR
+  header.writeUInt16LE(0, 0);   // Reserved
+  header.writeUInt16LE(1, 2);   // ICO type: 1
+  header.writeUInt16LE(1, 4);   // Count: 1 image
+
+  // ICONDIRENTRY
+  header.writeUInt8(0, 6);       // Width: 0 (256px)
+  header.writeUInt8(0, 7);       // Height: 0 (256px)
+  header.writeUInt8(0, 8);       // Color count: 0 (no palette)
+  header.writeUInt8(0, 9);       // Reserved
+  header.writeUInt16LE(1, 10);   // Color planes: 1
+  header.writeUInt16LE(32, 12);  // Bits per pixel: 32
+  header.writeUInt32LE(pngBuffer.length, 14); // Image size
+  header.writeUInt32LE(22, 18);  // Image offset (22 bytes header)
+
+  return Buffer.concat([header, pngBuffer]);
+}
+
+/**
+ * تحويل أي ملف صورة إلى ملف .ico أصلي صالح لنظام تشغيل ويندوز واختصارات سطح المكتب
+ */
+function createIcoFromImage(imagePath, targetIcoPath) {
+  try {
+    if (!fs.existsSync(imagePath)) return false;
+
+    if (path.extname(imagePath).toLowerCase() === '.ico') {
+      fs.copyFileSync(imagePath, targetIcoPath);
+      return true;
+    }
+
+    let nImg = nativeImage.createFromPath(imagePath);
+    if (nImg.isEmpty()) {
+      const fileBuf = fs.readFileSync(imagePath);
+      nImg = nativeImage.createFromBuffer(fileBuf);
+    }
+
+    if (nImg.isEmpty()) {
+      return false;
+    }
+
+    const pngBuf = nImg.resize({ width: 256, height: 256 }).toPNG();
+    const icoBuf = generateIcoFromPngBuffer(pngBuf);
+    fs.writeFileSync(targetIcoPath, icoBuf);
+    return true;
+  } catch (err) {
+    console.error('[Create ICO Error]:', err);
+    return false;
+  }
+}
+
+/**
+ * تحديث اختصارات سطح المكتب وقائمة ابدأ في نظام ويندوز باسم التطبيق وشعاره
+ * وتنبيه Windows Explorer لإعادة رسم الأيقونات فوراً
+ */
+function updateWindowsDesktopShortcuts(customIcoPath, customAppName) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      return resolve({ success: true, message: 'Non-windows platform' });
+    }
+
+    try {
+      const config = getDesktopConfig();
+      const appName = (customAppName || config.appName || 'منظومة الموارد البشرية والرواتب').trim();
+      const defaultIco = path.join(__dirname, '../assets/icon.ico');
+      const resolvedIco = (customIcoPath && fs.existsSync(customIcoPath)) ? customIcoPath : defaultIco;
+
+      // تحديد مسار الملف التنفيذي للبرنامج
+      let targetExe = process.execPath;
+      const installedExe = 'C:\\Program Files\\pharmacy-hr-system\\منظومة الموارد البشرية.exe';
+      if (!app.isPackaged && fs.existsSync(installedExe)) {
+        targetExe = installedExe;
+      }
+
+      const script = `
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$sh = New-Object -ComObject WScript.Shell
+$userDesktop = [Environment]::GetFolderPath('Desktop')
+$pubDesktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
+$userPrograms = [Environment]::GetFolderPath('Programs')
+
+$targetExe = "${targetExe.replace(/\\/g, '\\\\')}"
+$iconFile = "${resolvedIco.replace(/\\/g, '\\\\')}"
+$appName = "${appName.replace(/"/g, '`"')}"
+$linkName = "$appName.lnk"
+
+# 1. تحديث أو استبدال اختصارات سطح المكتب للمستخدم الحالي
+if (Test-Path $userDesktop) {
+  Get-ChildItem -Path $userDesktop -Filter '*.lnk' | ForEach-Object {
+    try {
+      $sc = $sh.CreateShortcut($_.FullName)
+      if (($sc.TargetPath -and $sc.TargetPath.ToLower() -eq $targetExe.ToLower()) -or $_.Name -like '*منظومة*' -or $_.Name -like '*Pharmacy*') {
+        if ($_.Name -ne $linkName) {
+          Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+        }
+      }
+    } catch {}
+  }
+
+  $userLnk = Join-Path $userDesktop $linkName
+  $uSc = $sh.CreateShortcut($userLnk)
+  $uSc.TargetPath = $targetExe
+  $uSc.WorkingDirectory = [System.IO.Path]::GetDirectoryName($targetExe)
+  $uSc.IconLocation = "$iconFile,0"
+  $uSc.Description = $appName
+  $uSc.Save()
+}
+
+# 2. تحديث قائمة ابدأ للمستخدم الحالي
+if (Test-Path $userPrograms) {
+  Get-ChildItem -Path $userPrograms -Filter '*.lnk' -Recurse | ForEach-Object {
+    try {
+      $sc = $sh.CreateShortcut($_.FullName)
+      if (($sc.TargetPath -and $sc.TargetPath.ToLower() -eq $targetExe.ToLower()) -or $_.Name -like '*منظومة*' -or $_.Name -like '*Pharmacy*') {
+        if ($_.Name -ne $linkName) {
+          Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+        }
+      }
+    } catch {}
+  }
+
+  $startLnk = Join-Path $userPrograms $linkName
+  $sSc = $sh.CreateShortcut($startLnk)
+  $sSc.TargetPath = $targetExe
+  $sSc.WorkingDirectory = [System.IO.Path]::GetDirectoryName($targetExe)
+  $sSc.IconLocation = "$iconFile,0"
+  $sSc.Description = $appName
+  $sSc.Save()
+}
+
+# 3. محاولة تحديث سطح المكتب العام إن كانت الصلاحيات تسمح
+if (Test-Path $pubDesktop) {
+  try {
+    Get-ChildItem -Path $pubDesktop -Filter '*.lnk' | ForEach-Object {
+      if ($_.Name -like '*منظومة*' -or $_.Name -like '*Pharmacy*') {
+        $pSc = $sh.CreateShortcut($_.FullName)
+        $pSc.IconLocation = "$iconFile,0"
+        $pSc.Description = $appName
+        $pSc.Save()
+      }
+    }
+  } catch {}
+}
+
+# 4. إنعاش كاش أيقونات مستكشف ملفات ويندوز فوراً
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class ShellNotifier {
+    [DllImport("shell32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    public static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+}
+"@ -ErrorAction SilentlyContinue
+
+[ShellNotifier]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
+`;
+
+      execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true }, (err, stdout, stderr) => {
+        if (err) {
+          console.warn('[Desktop Shortcuts] PowerShell update error:', err.message);
+          return resolve({ success: false, error: err.message });
+        }
+        console.log('[Desktop Shortcuts] Shortcuts and icons refreshed successfully:', appName);
+        resolve({ success: true, appName, iconPath: resolvedIco });
+      });
+    } catch (e) {
+      console.error('[Desktop Shortcuts] Exception updating shortcuts:', e);
+      resolve({ success: false, error: e.message });
+    }
+  });
 }
 
 // ── 1.5. خادم الويب المحلي فائق السرعة لدعم بصمة الويندوز WebAuthn / Windows Hello ──
@@ -276,7 +454,9 @@ function createMainWindow() {
   const desktopConfig = getDesktopConfig();
 
   let resolvedIcon = undefined;
-  if (desktopConfig.customLogoPath && fs.existsSync(desktopConfig.customLogoPath)) {
+  if (desktopConfig.customIcoPath && fs.existsSync(desktopConfig.customIcoPath)) {
+    resolvedIcon = desktopConfig.customIcoPath;
+  } else if (desktopConfig.customLogoPath && fs.existsSync(desktopConfig.customLogoPath)) {
     resolvedIcon = desktopConfig.customLogoPath;
   } else {
     const iconPath = path.join(__dirname, '../assets/icon.ico');
@@ -1174,15 +1354,32 @@ ipcMain.handle('desktop:get-config', async () => {
 
 // 2. حفظ إعدادات المنظومة المكتبية
 ipcMain.handle('desktop:save-config', async (_event, newConfig) => {
+  const currentConfig = getDesktopConfig();
   const result = saveDesktopConfig(newConfig);
-  if (result.success && newConfig.autoLaunch !== undefined) {
-    try {
-      app.setLoginItemSettings({
-        openAtLogin: Boolean(newConfig.autoLaunch),
-        path: process.execPath
-      });
-    } catch (e) {
-      console.warn('[AutoLaunch] Could not set login item settings:', e.message);
+
+  if (result.success) {
+    const updated = result.config;
+
+    // تحديث عنوان نافذة البرنامج في الوقت الفعلي
+    if (newConfig.appName && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setTitle(newConfig.appName);
+    }
+
+    // إذا تم تعديل اسم التطبيق، نقوم بتحديث اختصار سطح المكتب والاسم فوراً
+    if (newConfig.appName && newConfig.appName !== currentConfig.appName) {
+      const icoToUse = updated.customIcoPath || updated.customLogoPath;
+      updateWindowsDesktopShortcuts(icoToUse, newConfig.appName);
+    }
+
+    if (newConfig.autoLaunch !== undefined) {
+      try {
+        app.setLoginItemSettings({
+          openAtLogin: Boolean(newConfig.autoLaunch),
+          path: process.execPath
+        });
+      } catch (e) {
+        console.warn('[AutoLaunch] Could not set login item settings:', e.message);
+      }
     }
   }
   return result;
@@ -1221,27 +1418,42 @@ ipcMain.handle('desktop:select-logo', async () => {
     const selectedPath = filePaths[0];
     const ext = path.extname(selectedPath) || '.png';
     const targetFile = path.join(userDataPath, `app_logo${ext}`);
+    const targetIco = path.join(userDataPath, 'app_icon.ico');
 
     fs.copyFileSync(selectedPath, targetFile);
 
+    // توليد ملف ICO صالح لويندوز وسطح المكتب
+    createIcoFromImage(targetFile, targetIco);
+
+    const config = getDesktopConfig();
+    const updatedAppName = config.appName || 'منظومة إدارة الموارد البشرية والرواتب';
+
     // تحديث الإعدادات المحفوظة
-    saveDesktopConfig({ customLogoPath: targetFile });
+    saveDesktopConfig({
+      customLogoPath: targetFile,
+      customIcoPath: fs.existsSync(targetIco) ? targetIco : targetFile
+    });
+
+    // تحديث اختصارات سطح المكتب وأيقونات الويندوز فوراً
+    updateWindowsDesktopShortcuts(targetIco, updatedAppName);
 
     // قراءة محتوى الصورة كـ Base64 ليتسنى للواجهة عرضها فوراً
     const imageBuffer = fs.readFileSync(targetFile);
     const mimeType = ext === '.ico' ? 'image/x-icon' : ext === '.svg' ? 'image/svg+xml' : `image/${ext.replace('.', '')}`;
     const base64Data = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
 
-    // تحديث أيقونة النافذة الحالية مباشرة إن أمكن
+    // تحديث أيقونة النافذة الحالية مباشرة
     try {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.setIcon(targetFile);
+        const liveIcon = fs.existsSync(targetIco) ? targetIco : targetFile;
+        mainWindow.setIcon(liveIcon);
       }
     } catch {}
 
     return {
       success: true,
       filePath: targetFile,
+      icoPath: targetIco,
       base64Data: base64Data
     };
   } catch (err) {
@@ -1253,14 +1465,40 @@ ipcMain.handle('desktop:select-logo', async () => {
 // 5. استعادة الشعار الافتراضي للمنظومة
 ipcMain.handle('desktop:reset-logo', async () => {
   try {
-    saveDesktopConfig({ customLogoPath: null });
+    const defaultIconPng = path.join(__dirname, '../assets/icon.png');
+    const defaultIconIco = path.join(__dirname, '../assets/icon.ico');
+
+    const icoFile = path.join(userDataPath, 'app_icon.ico');
+    if (fs.existsSync(icoFile)) {
+      try { fs.unlinkSync(icoFile); } catch {}
+    }
+
+    saveDesktopConfig({ customLogoPath: null, customIcoPath: null });
+
+    const config = getDesktopConfig();
+    updateWindowsDesktopShortcuts(defaultIconIco, config.appName);
+
     try {
-      const defaultIcon = path.join(__dirname, '../assets/icon.png');
-      if (fs.existsSync(defaultIcon) && mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.setIcon(defaultIcon);
+      if (fs.existsSync(defaultIconPng) && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setIcon(defaultIconPng);
       }
     } catch {}
+
     return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// 5.5. مزامنة يدوية فورية لاختصارات وأيقونة سطح المكتب
+ipcMain.handle('desktop:sync-desktop-shortcut', async () => {
+  try {
+    const config = getDesktopConfig();
+    const icoPath = (config.customIcoPath && fs.existsSync(config.customIcoPath))
+      ? config.customIcoPath
+      : path.join(__dirname, '../assets/icon.ico');
+    const res = await updateWindowsDesktopShortcuts(icoPath, config.appName);
+    return res;
   } catch (err) {
     return { success: false, error: err.message };
   }

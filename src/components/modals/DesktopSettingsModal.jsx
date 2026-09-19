@@ -34,6 +34,8 @@ export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved })
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [testNotifSent, setTestNotifSent] = useState(false);
   const [cacheCleared, setCacheCleared] = useState(false);
+  const [syncingShortcut, setSyncingShortcut] = useState(false);
+  const [shortcutSyncResult, setShortcutSyncResult] = useState(null);
 
   // الحالة الأصلية عند فتح المودال (لإمكانية التراجع عن المعاينة الحية للزووم عند الإلغاء)
   const [originalConfig, setOriginalConfig] = useState(null);
@@ -157,6 +159,29 @@ export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved })
       setTimeout(() => setCacheCleared(false), 3500);
     } catch (err) {
       console.error('Clear cache failed:', err);
+    }
+  };
+
+  // مزامنة يدوية فورية لأيقونة واختصار سطح المكتب
+  const handleSyncDesktopShortcut = async () => {
+    if (!window.desktopAPI?.syncDesktopShortcut) return;
+    setSyncingShortcut(true);
+    setShortcutSyncResult(null);
+    try {
+      await window.desktopAPI.saveDesktopConfig?.({
+        appName: appName.trim() || 'منظومة إدارة الموارد البشرية والرواتب'
+      });
+      const res = await window.desktopAPI.syncDesktopShortcut();
+      if (res && res.success) {
+        setShortcutSyncResult({ success: true, text: 'تم تحديث أيقونة واسم سطح المكتب وقائمة ابدأ بنجاح!' });
+      } else {
+        setShortcutSyncResult({ success: false, text: res?.error || 'تعذر تحديث اختصار سطح المكتب' });
+      }
+    } catch (e) {
+      setShortcutSyncResult({ success: false, text: e.message });
+    } finally {
+      setSyncingShortcut(false);
+      setTimeout(() => setShortcutSyncResult(null), 4500);
     }
   };
 
@@ -518,6 +543,95 @@ export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved })
                         {appName || 'منظومة إدارة الموارد البشرية والرواتب'}
                       </span>
                     </div>
+                  </div>
+
+                  {/* بطاقة تحديث أيقونة واسم سطح المكتب ونظام ويندوز */}
+                  <div
+                    style={{
+                      background: 'rgba(59, 130, 246, 0.05)',
+                      border: '1px solid rgba(59, 130, 246, 0.2)',
+                      borderRadius: '14px',
+                      padding: '16px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: '10px', flex: '1 1 300px' }}>
+                        <div
+                          style={{
+                            width: '36px',
+                            height: '36px',
+                            borderRadius: '10px',
+                            background: 'rgba(59, 130, 246, 0.15)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#60a5fa',
+                            flexShrink: 0
+                          }}
+                        >
+                          <Monitor style={{ width: '18px', height: '18px' }} />
+                        </div>
+                        <div>
+                          <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#f8fafc' }}>
+                            أيقونة واسم سطح المكتب ونظام ويندوز
+                          </h4>
+                          <p style={{ margin: '4px 0 0 0', fontSize: '11.5px', color: '#94a3b8', lineHeight: 1.5 }}>
+                            عند تغيير الشعار أو اسم التطبيق، يتم تلقائياً تحديث اختصار سطح المكتب (Desktop Shortcut) وقائمة ابدأ فوراً مع إنعاش ذاكرة Windows Explorer.
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleSyncDesktopShortcut}
+                        disabled={syncingShortcut}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '8px 14px',
+                          background: syncingShortcut ? 'rgba(59, 130, 246, 0.4)' : 'rgba(59, 130, 246, 0.2)',
+                          border: '1px solid rgba(59, 130, 246, 0.4)',
+                          borderRadius: '8px',
+                          color: '#93c5fd',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: syncingShortcut ? 'not-allowed' : 'pointer',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <RefreshCw style={{ width: '13px', height: '13px', animation: syncingShortcut ? 'spin 1s linear infinite' : 'none' }} />
+                        <span>{syncingShortcut ? 'جاري التحديث...' : 'تحديث أيقونة سطح المكتب الآن'}</span>
+                      </button>
+                    </div>
+
+                    {shortcutSyncResult && (
+                      <div
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          background: shortcutSyncResult.success ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                          border: `1px solid ${shortcutSyncResult.success ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                          color: shortcutSyncResult.success ? '#34d399' : '#f87171'
+                        }}
+                      >
+                        {shortcutSyncResult.success ? (
+                          <Check style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                        ) : (
+                          <AlertCircle style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                        )}
+                        <span>{shortcutSyncResult.text}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

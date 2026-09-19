@@ -92,5 +92,6 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   showDesktopNotification: (options) => ipcRenderer.invoke('desktop:show-notification', options),
   getAutoLaunch: () => ipcRenderer.invoke('desktop:get-auto-launch'),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('desktop:set-auto-launch', enabled),
-  clearDesktopCache: () => ipcRenderer.invoke('desktop:clear-cache')
+  clearDesktopCache: () => ipcRenderer.invoke('desktop:clear-cache'),
+  syncDesktopShortcut: () => ipcRenderer.invoke('desktop:sync-desktop-shortcut')
 });

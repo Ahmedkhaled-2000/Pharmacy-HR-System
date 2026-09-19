@@ -158,3 +158,31 @@ export function compressMobileImage(file, maxWidth = 256, maxHeight = 256) {
     reader.readAsDataURL(file);
   });
 }
+
+/**
+ * إرسال طلب لتثبيت أيقونة التطبيق المخصصة بالشعار والاسم على شاشة الهاتف الرئيسية
+ * عبر بلجن DynamicIcon الأصلي في نظام Android
+ */
+export async function pinCustomMobileShortcut(base64Image, appName = 'بوابة الموظف') {
+  if (typeof window === 'undefined') return { success: false, message: 'بيئة غير مدعومة' };
+  
+  const DynamicIcon = window.Capacitor?.Plugins?.DynamicIcon;
+  if (!DynamicIcon) {
+    return {
+      success: false,
+      message: 'خاصية تثبيت الأيقونة على الشاشة الرئيسية متاحة حصرياً داخل تطبيق الأندرويد المثبت على الهاتف'
+    };
+  }
+
+  try {
+    const res = await DynamicIcon.pinCustomShortcut({
+      base64Image: base64Image || null,
+      appName: appName || 'بوابة الموظف'
+    });
+    return { success: true, ...res };
+  } catch (err) {
+    console.error('[DynamicIcon] Pin Shortcut failed:', err);
+    return { success: false, message: err.message || 'فشل تثبيت الأيقونة على الشاشة الرئيسية' };
+  }
+}
+

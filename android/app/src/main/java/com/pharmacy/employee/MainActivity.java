@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NativePrintPlugin.class);
         registerPlugin(NativeNotificationPlugin.class);
         registerPlugin(BiometricAuthNative.class);
+        registerPlugin(DynamicIconPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

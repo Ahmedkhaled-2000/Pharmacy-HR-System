@@ -216,7 +216,7 @@ export async function downloadAndInstallNativeUpdate({ downloadUrl, sha256Checks
 }
 
 export const LATEST_ANDROID_APK_FILENAME = 'pharmacy-employee-portal.apk';
-export const LATEST_ANDROID_VERSION = '1.2.46';
+export const LATEST_ANDROID_VERSION = '1.2.47';
 export const GITHUB_LATEST_APK_URL = 'https://github.com/Ahmedkhaled-2000/Pharmacy-HR-System/releases/latest/download/pharmacy-employee-portal.apk';
 
 /**

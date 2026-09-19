@@ -16,7 +16,8 @@ import {
   Download,
   Image as ImageIcon,
   Zap,
-  ShieldCheck
+  ShieldCheck,
+  Sparkles
 } from 'lucide-react';
 import {
   getMobileConfig,
@@ -24,6 +25,7 @@ import {
   applyMobileScale,
   triggerHaptic,
   compressMobileImage,
+  pinCustomMobileShortcut,
   DEFAULT_MOBILE_CONFIG
 } from '../../utils/mobileConfigHelper';
 import {
@@ -72,6 +74,8 @@ export default function AndroidSettingsModal({ isOpen, onClose, onConfigSaved })
   const [notificationVibration, setNotificationVibration] = useState(true);
   const [backgroundService247, setBackgroundService247] = useState(true);
   const [permissionGranted, setPermissionGranted] = useState(true);
+  const [pinningShortcut, setPinningShortcut] = useState(false);
+  const [pinShortcutMessage, setPinShortcutMessage] = useState(null);
 
   const fileInputRef = useRef(null);
 
@@ -147,6 +151,28 @@ export default function AndroidSettingsModal({ isOpen, onClose, onConfigSaved })
     triggerHaptic('light');
     setLogoPreview('./assets/icon.png');
     setHasCustomLogo(false);
+  };
+
+  // تثبيت أيقونة التطبيق المخصصة بالشعار والاسم على شاشة الهاتف الرئيسية
+  const handlePinHomeScreenShortcut = async () => {
+    triggerHaptic('medium');
+    setPinningShortcut(true);
+    setPinShortcutMessage(null);
+    try {
+      const res = await pinCustomMobileShortcut(hasCustomLogo ? logoPreview : null, appName);
+      if (res && res.success) {
+        setPinShortcutMessage({ success: true, text: res.message || 'تم طلب تثبيت الأيقونة بنجاح، يرجى تأكيد رسالة النظام لإضافتها' });
+        triggerHaptic('success');
+      } else {
+        setPinShortcutMessage({ success: false, text: res?.message || 'فشل تثبيت الأيقونة على الشاشة الرئيسية' });
+        triggerHaptic('warning');
+      }
+    } catch (err) {
+      setPinShortcutMessage({ success: false, text: err.message || 'حدث خطأ غير متوقع' });
+      triggerHaptic('warning');
+    } finally {
+      setPinningShortcut(false);
+    }
   };
 
   // طلب إذن إشعارات أندرويد 13+
@@ -563,6 +589,90 @@ export default function AndroidSettingsModal({ isOpen, onClose, onConfigSaved })
                         </span>
                       </div>
                     </div>
+                  </div>
+
+                  {/* ── كارد تثبيت الأيقونة المخصصة بالشعار والاسم على شاشة الهاتف الرئيسية ── */}
+                  <div
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(5, 150, 105, 0.14) 100%)',
+                      border: '1.5px solid rgba(16, 185, 129, 0.35)',
+                      borderRadius: '14px',
+                      padding: '16px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div
+                        style={{
+                          width: '34px',
+                          height: '34px',
+                          borderRadius: '8px',
+                          background: 'rgba(16, 185, 129, 0.2)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#34d399',
+                          fontSize: '17px'
+                        }}
+                      >
+                        📱
+                      </div>
+                      <div>
+                        <h4 style={{ fontSize: '13.5px', fontWeight: 700, margin: 0, color: '#ffffff' }}>
+                          تثبيت الأيقونة والاسم على شاشة الهاتف
+                        </h4>
+                        <p style={{ fontSize: '11px', margin: '2px 0 0 0', color: '#94a3b8' }}>
+                          وضع اختصار مباشر على شاشة الهاتف الرئيسية يحمل الشعار والاسم الجديدين
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handlePinHomeScreenShortcut}
+                      disabled={pinningShortcut}
+                      style={{
+                        width: '100%',
+                        padding: '11px 14px',
+                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        border: 'none',
+                        borderRadius: '10px',
+                        color: '#ffffff',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        cursor: pinningShortcut ? 'wait' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <Sparkles style={{ width: '15px', height: '15px' }} />
+                      <span>{pinningShortcut ? 'جاري إرسال الطلب للنظام...' : 'تثبيت الأيقونة بالشعار والاسم على شاشة الهاتف'}</span>
+                    </button>
+
+                    {pinShortcutMessage && (
+                      <div
+                        style={{
+                          padding: '9px 12px',
+                          borderRadius: '8px',
+                          fontSize: '11.5px',
+                          background: pinShortcutMessage.success ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                          color: pinShortcutMessage.success ? '#6ee7b7' : '#fca5a5',
+                          border: `1px solid ${pinShortcutMessage.success ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '7px'
+                        }}
+                      >
+                        {pinShortcutMessage.success ? <Check style={{ width: '14px', height: '14px', flexShrink: 0 }} /> : <AlertCircle style={{ width: '14px', height: '14px', flexShrink: 0 }} />}
+                        <span>{pinShortcutMessage.text}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

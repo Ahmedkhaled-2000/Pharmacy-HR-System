@@ -1151,7 +1151,7 @@ export default function DesktopLayout({
           downloadAction: 'android-app',
           label: '📱 تنزيل تطبيق الأندرويد (APK)',
           icon: '🤖',
-          badge: 'v1.2.46',
+          badge: 'v1.2.47',
           desc: 'تحميل تطبيق الهاتف المحمول للموظفين ومديري الفروع مع التحديث المباشر'
         },
         {
@@ -1314,7 +1314,7 @@ export default function DesktopLayout({
       id: 'download-android-app-branch',
       label: '📱 تحميل تطبيق الأندرويد (APK)',
       icon: '🤖',
-      badge: 'v1.2.46',
+      badge: 'v1.2.47',
       isSingle: true,
       downloadAction: 'android-app'
     },
