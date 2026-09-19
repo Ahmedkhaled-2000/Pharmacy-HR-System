@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, CheckCircle2, Download, Sparkles, AlertCircle, Info } from 'lucide-react';
+import { RefreshCw, CheckCircle2, Download, Sparkles, AlertCircle, Info, Settings } from 'lucide-react';
+import DesktopSettingsModal from '../modals/DesktopSettingsModal';
 
 /**
  * DesktopSystemTitleBar.jsx
@@ -18,9 +19,27 @@ export default function DesktopSystemTitleBar() {
   const [updateInfo, setUpdateInfo] = useState(null);
   const [downloadPercent, setDownloadPercent] = useState(0);
   const [statusMessage, setStatusMessage] = useState('');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [desktopConfig, setDesktopConfig] = useState(null);
 
   useEffect(() => {
     if (!isDesktop) return;
+
+    // استعلام عن إعدادات وتخصيصات الديسكتوب المحفوظة
+    if (window.desktopAPI?.getDesktopConfig) {
+      window.desktopAPI.getDesktopConfig().then((cfg) => {
+        if (cfg) setDesktopConfig(cfg);
+      }).catch(() => {});
+    }
+
+    // الاستماع لاختصار لوحة المفاتيح Ctrl + , أو F2 لفتح نافذة إعدادات تطبيق الويندوز
+    const handleShortcut = (e) => {
+      if ((e.ctrlKey && (e.key === ',' || e.key === '،')) || e.key === 'F2') {
+        e.preventDefault();
+        setIsSettingsOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleShortcut);
 
     // استعلام عن وضع الشاشة الكاملة مبدئياً
     if (window.desktopAPI?.isFullScreen) {
@@ -116,6 +135,7 @@ export default function DesktopSystemTitleBar() {
     window.addEventListener('resize', handleResize);
     return () => {
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('keydown', handleShortcut);
       if (unsubscribeMax) unsubscribeMax();
       if (unsubscribeUpdate) unsubscribeUpdate();
       if (unsubscribeFullScreen) unsubscribeFullScreen();
@@ -245,8 +265,9 @@ export default function DesktopSystemTitleBar() {
   };
 
   return (
-    <header
-      className="desktop-native-titlebar"
+    <>
+      <header
+        className="desktop-native-titlebar"
       onDoubleClick={handleDoubleClick}
       style={{
         height: '32px',
@@ -283,11 +304,11 @@ export default function DesktopSystemTitleBar() {
           WebkitAppRegion: 'drag'
         }}
       >
-        {/* أيقونة المنظومة الرسمية المصغرة */}
+        {/* أيقونة المنظومة الرسمية المصغرة / الشعار المخصص */}
         <img
-          src="./assets/icon.png"
+          src={desktopConfig?.logoBase64 || './assets/icon.png'}
           onError={(e) => {
-            e.target.style.display = 'none';
+            e.target.src = './assets/icon.png';
           }}
           alt=""
           style={{
@@ -306,7 +327,7 @@ export default function DesktopSystemTitleBar() {
             color: 'inherit'
           }}
         >
-          منظومة إدارة الموارد البشرية والرواتب
+          {desktopConfig?.appName || 'منظومة إدارة الموارد البشرية والرواتب'}
         </span>
 
         {/* شارة الإصدار الحالي */}
@@ -367,6 +388,47 @@ export default function DesktopSystemTitleBar() {
           }}
         >
           {renderButtonContent()}
+        </button>
+
+        {/* زر ترس إعدادات تطبيق الويندوز */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsSettingsOpen(true);
+          }}
+          className="titlebar-settings-btn app-no-drag"
+          title="إعدادات وتخصيص تطبيق الويندوز (الهوية، نسبة التكبير، وإشعارات الويندوز) [Ctrl+,]"
+          style={{
+            WebkitAppRegion: 'no-drag',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '5px',
+            padding: '2px 9px',
+            height: '24px',
+            borderRadius: '7px',
+            border: '1px solid rgba(255, 255, 255, 0.14)',
+            background: 'rgba(255, 255, 255, 0.05)',
+            color: '#e2e8f0',
+            cursor: 'pointer',
+            marginRight: '6px',
+            fontSize: '11px',
+            transition: 'all 0.15s ease'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(59, 130, 246, 0.25)';
+            e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.5)';
+            e.currentTarget.style.color = '#93c5fd';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.14)';
+            e.currentTarget.style.color = '#e2e8f0';
+          }}
+        >
+          <Settings style={{ width: '12px', height: '12px' }} />
+          <span>الإعدادات</span>
         </button>
       </div>
 
@@ -485,5 +547,15 @@ export default function DesktopSystemTitleBar() {
         </button>
       </div>
     </header>
+
+    {/* نافذة إعدادات تطبيق الويندوز المنبثقة */}
+    <DesktopSettingsModal
+      isOpen={isSettingsOpen}
+      onClose={() => setIsSettingsOpen(false)}
+      onConfigSaved={(newCfg) => {
+        setDesktopConfig(prev => ({ ...prev, ...newCfg }));
+      }}
+    />
+    </>
   );
 }

@@ -19,7 +19,7 @@ import {
   apiTerminateOwnerSessions,
   STORAGE_KEY
 } from '../../utils/apiClient';
-import { emitRevokeSession, CLIENT_SESSION_ID } from '../../utils/socketClient';
+import { emitRevokeSession, CLIENT_SESSION_ID, getSocket } from '../../utils/socketClient';
 import { clearPendingQueue, saveStateLocally, clearLocalDatabase } from '../../utils/offlineStorage';
 import { broadcastStateChange } from '../../utils/offlineSync';
 import GmailConfigCard from './GmailConfigCard';
@@ -623,6 +623,26 @@ export default function SettingsModule({
       handleFetchDriveBackups();
     }
   }, [activeTab]);
+
+  // الاستماع اللحظي لاكتمال النسخ الاحتياطي التلقائي المجدول عبر الـ WebSockets
+  useEffect(() => {
+    let s = null;
+    try {
+      s = getSocket?.();
+      if (s) {
+        const onBackupDone = (data) => {
+          if (data && data.success) {
+            handleFetchDriveBackups();
+            showToast?.(`☁️ تم حفظ نسخة احتياطية على Google Drive: ${data.fileName || ''}`);
+          }
+        };
+        s.on('drive:backup-completed', onBackupDone);
+        return () => {
+          s.off('drive:backup-completed', onBackupDone);
+        };
+      }
+    } catch {}
+  }, []);
 
   // Factory Reset / Data Wipe States
   const [showWipeModal, setShowWipeModal] = useState(false);
@@ -2903,9 +2923,16 @@ export default function SettingsModule({
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                 <div style={{ fontSize: '13.5px', color: 'var(--text)' }}>
                   {driveConfig?.serviceUrl ? (
-                    <span>
-                      ✅ خدمة جوجل درايف مهيأة. يتم إنشاء مجلد مخصص <strong>💾 النسخ الاحتياطية للمنظومة</strong> وتدوير أقدم النسخ تلقائياً بعد 20 نسخة.
-                    </span>
+                    <div>
+                      <span>
+                        ✅ خدمة جوجل درايف مهيأة. يتم إنشاء مجلد مخصص <strong>💾 النسخ الاحتياطية للمنظومة</strong> وتدوير أقدم النسخ تلقائياً بعد {driveConfig.retentionCount || 20} نسخة.
+                      </span>
+                      {driveConfig.autoBackupEnabled && (
+                        <div style={{ marginTop: '6px', fontSize: '12.5px', color: '#0284c7', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>⏰ النسخ السحابي التلقائي مفعل: أخذ لقطة وحفظها يومياً في تمام الساعة <strong>{driveConfig.autoBackupTime || '03:00'}</strong> بتوقيت مصر عبر خادم السيرفر 24/7.</span>
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <span>
                       ⚠️ لم يتم إدخال رابط Webhook الخاص بـ Google Drive بعد. يمكنك إعداده من تبويب <strong>Google Drive</strong> بالأعلى.

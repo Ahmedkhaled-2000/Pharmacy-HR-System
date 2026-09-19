@@ -6,6 +6,7 @@
 
 import express from 'express';
 import http from 'http';
+import https from 'https';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
 import pg from 'pg';
@@ -433,9 +434,14 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
     try { stateValue = JSON.parse(stateValue); } catch {}
   }
 
-  // فصل المرفقات والصور تلقائياً لحماية قاعدة البيانات من التضخم
+  // فصل المرفقات والصور فقط إذا تم الإشارة الصريحة لوجود مرفقات جديدة لمنع إجهاد المعالج على 4.2MB في الحفظ العادي
   if (stateValue && typeof stateValue === 'object') {
-    stateValue = await autoExtractStateAttachments(stateValue);
+    if (stateValue._hasNewAttachments || stateValue._attachmentsPending) {
+      stateValue = await autoExtractStateAttachments(stateValue);
+      delete stateValue._hasNewAttachments;
+      delete stateValue._attachmentsPending;
+    }
+
     if (Array.isArray(stateValue._deletedIds) && stateValue._deletedIds.length > 150) {
       stateValue._deletedIds = stateValue._deletedIds.slice(-150);
     }
@@ -458,50 +464,71 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
   const jsonString = typeof stateValue === 'string' ? stateValue : JSON.stringify(stateValue);
   const now = new Date().toISOString();
 
-  // 1. حفظ دائم في PostgreSQL
+  // الحصول على الإصدار الأحدث من الذاكرة لضمان الـ Fast-Ack اللحظي (< 1ms)
+  let currentVersion = 1;
+  if (isRedisConnected && redis) {
+    try {
+      const vStr = await redis.get(`hr:version:${key}`);
+      if (vStr) {
+        const parsedV = JSON.parse(vStr);
+        currentVersion = (parseInt(parsedV.version, 10) || 1);
+      }
+    } catch {}
+  }
+  const newVersion = currentVersion + 1;
+
+  // 1. تحديث الكاش في ذاكرة Redis المحلية فورياً (< 0.5ms)
+  if (isRedisConnected && redis) {
+    try {
+      await redis.set(`hr:settings:${key}`, jsonString, 'EX', 86400 * 7);
+      await redis.set(`hr:version:${key}`, JSON.stringify({ version: newVersion, updated_at: now }));
+    } catch (e) {
+      console.warn('[Redis Write Warn]:', e.message);
+    }
+  }
+
+  // 2. الحفظ الدائم في PostgreSQL (Write-Behind في الخلفية لعدم تعطيل العميل)
   const query = `
     INSERT INTO public.app_settings (key_name, value_data, version, updated_at)
-    VALUES ($1, $2::jsonb, 1, $3)
+    VALUES ($1, $2::jsonb, $3, $4)
     ON CONFLICT (key_name) DO UPDATE
     SET value_data = EXCLUDED.value_data,
         version = public.app_settings.version + 1,
         updated_at = EXCLUDED.updated_at
     RETURNING version, updated_at;
   `;
-  const res = await db.query(query, [key, jsonString, now]);
-  const newVersion = res.rows[0]?.version || 1;
-  const updatedAt = res.rows[0]?.updated_at || now;
 
-  // 2. تحديث الكاش في Redis فورياً
-  if (isRedisConnected && redis) {
-    try {
-      await redis.set(`hr:settings:${key}`, jsonString, 'EX', 86400 * 7);
-      await redis.set(`hr:version:${key}`, JSON.stringify({ version: newVersion, updated_at: updatedAt }));
-    } catch (e) {
-      console.warn('[Redis Write Warn]:', e.message);
-    }
+  const pgPromise = db.query(query, [key, jsonString, newVersion, now])
+    .then((res) => {
+      const finalVer = res.rows[0]?.version || newVersion;
+      // تسجيل عملية المزامنة
+      db.query(
+        'INSERT INTO public.sync_logs (action_type, entity_key, version, client_ip, created_at) VALUES ($1, $2, $3, $4, $5)',
+        ['SAVE_STATE', key, finalVer, clientIp, now]
+      ).catch(() => {});
+    })
+    .catch((dbErr) => {
+      console.error('[PostgreSQL Write-Behind Error]:', dbErr.message);
+    });
+
+  // إذا كان خادم Redis غير متصل، ننتظر كتابة PostgreSQL لضمان موثوقية وأمان البيانات
+  if (!isRedisConnected || !redis) {
+    await pgPromise;
   }
-
-  // 3. تسجيل عملية المزامنة
-  db.query(
-    'INSERT INTO public.sync_logs (action_type, entity_key, version, client_ip, created_at) VALUES ($1, $2, $3, $4, $5)',
-    ['SAVE_STATE', key, newVersion, clientIp, now]
-  ).catch(() => {});
 
   const payload = typeof value === 'string' ? JSON.parse(value) : value;
 
-  // 4. بث التحديث اللحظي لجميع الأجهزة والتبويبات المتصلة عبر WebSockets (< 5ms)
-  // لا يتم بث كائن الـ 2.2MB الضخم أثناء تفريغ الطابور الدفعي (batch-worker) لمنع اختناق الشبكة والمعالج
+  // 3. بث التحديث اللحظي لجميع الأجهزة والتبويبات المتصلة عبر WebSockets (< 5ms)
   if (clientIp !== 'batch-worker') {
     io.emit('state:updated', {
       key,
       value: payload,
       version: newVersion,
-      updated_at: updatedAt,
+      updated_at: now,
     });
   }
 
-  return { success: true, version: newVersion, updated_at: updatedAt, value: payload };
+  return { success: true, version: newVersion, updated_at: now, value: payload };
 }
 
 // ── 6. مسارات الـ REST API ───────────────────────────────────────────────────
@@ -589,6 +616,45 @@ app.post('/api/settings', async (req, res) => {
   } catch (err) {
     console.error('[API POST /settings Error]:', err);
     res.status(500).json({ success: false, error: 'Failed to update settings' });
+  }
+});
+
+// حفظ وتحديث جزء محدد فقط من البيانات (Slice / Delta Saving) - فائق السرعة والخفة (< 20KB بدلاً من 4.2MB)
+app.post('/api/settings/slice', async (req, res) => {
+  try {
+    const { key = STORAGE_KEY, sliceKey, sliceValue } = req.body;
+    if (!sliceKey || sliceValue === undefined) {
+      return res.status(400).json({ success: false, error: 'Missing sliceKey or sliceValue' });
+    }
+
+    // جلب أحدث حالة من الذاكرة الفورية
+    const existing = await getSettingsFromStorage(key);
+    if (!existing || typeof existing !== 'object') {
+      return res.status(500).json({ success: false, error: 'Current system state unavailable' });
+    }
+
+    // تحديث الجزء المطلوب فقط في الحالة
+    existing[sliceKey] = sliceValue;
+
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const result = await saveSettingsToStorage(key, existing, clientIp);
+
+    // بث التغيير الذري اللحظي لجميع الأجهزة
+    io.emit('entity:changed', {
+      entityType: sliceKey,
+      action: 'slice_update',
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({
+      success: true,
+      sliceKey,
+      version: result.version,
+      updated_at: result.updated_at
+    });
+  } catch (err) {
+    console.error('[API POST /settings/slice Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -1887,6 +1953,382 @@ app.post('/api/system/reset', async (req, res) => {
     res.status(500).json({ success: false, error: 'System reset failed' });
   }
 });
+
+// ── 8.2. مسارات النسخ الاحتياطي السحابي التلقائي واليدوي على Google Drive ────
+
+/**
+ * دالة مساعدة لإرسال الطلبات إلى Google Apps Script مع تتبع التحويل (302 Redirect) تلقائياً
+ * ومعالجة الـ Server-to-Server بدون قيود CORS للمتصفح نهائياً
+ */
+function forwardToGoogleDrive(serviceUrl, payload, timeoutMs = 90000) {
+  return new Promise((resolve) => {
+    if (!serviceUrl || typeof serviceUrl !== 'string' || !serviceUrl.startsWith('http')) {
+      return resolve({ success: false, error: 'رابط Google Drive Webhook غير صالح أو غير مهيأ' });
+    }
+
+    try {
+      const postData = JSON.stringify(payload);
+      const parsedUrl = new URL(serviceUrl);
+      const transport = parsedUrl.protocol === 'http:' ? http : https;
+
+      const req = transport.request(serviceUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8',
+          'Content-Length': Buffer.byteLength(postData)
+        },
+        timeout: timeoutMs
+      }, (res) => {
+        // إذا كان هناك إعادة توجيه (301, 302, 303, 307, 308) كما هو المعتاد من Google Apps Script
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+          const redirectUrl = res.headers.location;
+          const redirectTransport = redirectUrl.startsWith('http:') ? http : https;
+
+          const getReq = redirectTransport.get(redirectUrl, { timeout: timeoutMs }, (redirectRes) => {
+            let body = '';
+            redirectRes.on('data', chunk => { body += chunk; });
+            redirectRes.on('end', () => {
+              try {
+                const json = JSON.parse(body);
+                resolve({ success: true, data: json });
+              } catch (err) {
+                resolve({
+                  success: false,
+                  error: 'استجابة غير صالحة من خدمة Google Apps Script: ' + body.slice(0, 300)
+                });
+              }
+            });
+          });
+
+          getReq.on('timeout', () => {
+            getReq.destroy();
+            resolve({ success: false, error: 'انتهت مهلة انتظار استجابة Google Drive بعد إعادة التوجيه' });
+          });
+          getReq.on('error', (err) => {
+            resolve({ success: false, error: 'خطأ أثناء الاتصال بإعادة توجيه Google Drive: ' + err.message });
+          });
+          return;
+        }
+
+        let body = '';
+        res.on('data', chunk => { body += chunk; });
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(body);
+            resolve({ success: true, data: json });
+          } catch (err) {
+            resolve({ success: false, error: 'استجابة غير صالحة من Google Apps Script: ' + body.slice(0, 300) });
+          }
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        resolve({ success: false, error: 'انتهت مهلة الاتصال بـ Google Apps Script (Timeout)' });
+      });
+
+      req.on('error', (err) => {
+        resolve({ success: false, error: 'تعذر الاتصال بـ Google Apps Script: ' + err.message });
+      });
+
+      req.write(postData);
+      req.end();
+    } catch (e) {
+      resolve({ success: false, error: 'خطأ داخلي أثناء معالجة طلب Google Drive: ' + e.message });
+    }
+  });
+}
+
+// فحص الاتصال بخدمة Google Drive بدون قيود CORS
+app.post('/api/drive/test', async (req, res) => {
+  try {
+    const { serviceUrl, parentFolderId } = req.body || {};
+    let url = serviceUrl;
+    let folderId = parentFolderId;
+
+    if (!url) {
+      const stored = await getSettingsFromStorage(STORAGE_KEY);
+      const cfg = stored?.orgSettings?.driveConfig || {};
+      url = cfg.serviceUrl;
+      folderId = folderId || cfg.parentFolderId;
+    }
+
+    if (!url) {
+      return res.status(400).json({ success: false, error: 'يرجى إدخال رابط Google Apps Script Webhook أولاً' });
+    }
+
+    const result = await forwardToGoogleDrive(url, {
+      action: 'test',
+      parentFolderId: folderId || ''
+    });
+
+    if (result.success && result.data?.success) {
+      return res.json(result.data);
+    }
+    res.status(502).json({ success: false, error: result.data?.error || result.error || 'فشل فحص الاتصال بـ Google Drive' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// رفع نسخة احتياطية فورية للمنظومة على Google Drive (عبر السيرفر بدون CORS)
+app.post('/api/drive/backup', async (req, res) => {
+  try {
+    const stored = await getSettingsFromStorage(STORAGE_KEY);
+    const driveConfig = req.body?.driveConfig || stored?.orgSettings?.driveConfig;
+
+    if (!driveConfig || !driveConfig.serviceUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'خدمة Google Drive غير مهيأة أو لم يتم إدخال رابط الويب (Webhook URL)'
+      });
+    }
+
+    let backupJson = req.body?.backupJson;
+    let fileName = req.body?.fileName;
+    const now = new Date();
+    const version = stored?.version || stored?._version || 1;
+
+    if (!backupJson) {
+      const dateStr = now.toISOString().slice(0, 10);
+      const timeStr = now.toTimeString().slice(0, 5).replace(':', '-');
+      fileName = fileName || `Backup_${dateStr}_${timeStr}_v${version}.json`;
+      const payload = {
+        export_date: now.toISOString(),
+        version,
+        state: stored
+      };
+      backupJson = JSON.stringify(payload);
+    }
+
+    const forwardRes = await forwardToGoogleDrive(driveConfig.serviceUrl, {
+      action: 'upload_system_backup',
+      parentFolderId: driveConfig.parentFolderId || '',
+      fileName: fileName || `Backup_${now.toISOString().slice(0, 10)}_v${version}.json`,
+      backupJson,
+      retentionLimit: driveConfig.retentionCount || 20
+    });
+
+    if (!forwardRes.success || !forwardRes.data?.success) {
+      const errMsg = forwardRes.data?.error || forwardRes.error || 'فشل رفع النسخة إلى Google Drive';
+      return res.status(502).json({ success: false, error: errMsg });
+    }
+
+    // تحديث تاريخ آخر نسخة احتياطية ناجحة في إعدادات المنظومة
+    try {
+      if (stored && stored.orgSettings) {
+        if (!stored.orgSettings.driveConfig) stored.orgSettings.driveConfig = {};
+        stored.orgSettings.driveConfig.lastAutoBackupAt = now.toISOString();
+        stored.orgSettings.driveConfig.lastBackupStatus = 'success';
+        await saveSettingsToStorage(STORAGE_KEY, stored, 'drive-backup');
+      }
+    } catch (saveErr) {
+      console.warn('[Drive Backup Status Save Warn]:', saveErr.message);
+    }
+
+    // إشعار فوري لجميع الأجهزة والواجهات بنجاح الرفع
+    io.emit('drive:backup-completed', {
+      timestamp: now.toISOString(),
+      fileName: forwardRes.data.fileName,
+      fileUrl: forwardRes.data.fileUrl,
+      downloadUrl: forwardRes.data.downloadUrl,
+      folderUrl: forwardRes.data.folderUrl,
+      success: true
+    });
+
+    res.json(forwardRes.data);
+  } catch (err) {
+    console.error('[API Drive Backup Error]:', err);
+    res.status(500).json({ success: false, error: err.message || 'حدث خطأ أثناء رفع النسخة الاحتياطية' });
+  }
+});
+
+// استعراض قائمة النسخ الاحتياطية المحفوظة في Google Drive
+app.get('/api/drive/backups', async (req, res) => {
+  try {
+    const stored = await getSettingsFromStorage(STORAGE_KEY);
+    const driveConfig = stored?.orgSettings?.driveConfig;
+
+    if (!driveConfig || !driveConfig.serviceUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'لم يتم إدخال رابط خدمة Google Drive بعد في الإعدادات'
+      });
+    }
+
+    const forwardRes = await forwardToGoogleDrive(driveConfig.serviceUrl, {
+      action: 'list_system_backups',
+      parentFolderId: driveConfig.parentFolderId || ''
+    });
+
+    if (!forwardRes.success || !forwardRes.data?.success) {
+      return res.status(502).json({
+        success: false,
+        error: forwardRes.data?.error || forwardRes.error || 'فشل جلب قائمة النسخ من Google Drive'
+      });
+    }
+
+    res.json(forwardRes.data);
+  } catch (err) {
+    console.error('[API Drive Backups List Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// جلب إعدادات الجدولة التلقائية
+app.get('/api/drive/schedule', async (req, res) => {
+  try {
+    const stored = await getSettingsFromStorage(STORAGE_KEY);
+    const driveConfig = stored?.orgSettings?.driveConfig || {};
+    res.json({
+      success: true,
+      schedule: {
+        enabled: Boolean(driveConfig.enabled),
+        autoBackupEnabled: Boolean(driveConfig.autoBackupEnabled),
+        autoBackupTime: driveConfig.autoBackupTime || '03:00',
+        retentionCount: parseInt(driveConfig.retentionCount, 10) || 20,
+        lastAutoBackupAt: driveConfig.lastAutoBackupAt || null,
+        lastScheduledBackupDate: driveConfig.lastScheduledBackupDate || null
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// تحديث إعدادات الجدولة التلقائية
+app.post('/api/drive/schedule', async (req, res) => {
+  try {
+    const { autoBackupEnabled, autoBackupTime, retentionCount } = req.body || {};
+    const stored = await getSettingsFromStorage(STORAGE_KEY);
+    if (!stored) return res.status(500).json({ success: false, error: 'تعذر تحميل إعدادات المنظومة' });
+    if (!stored.orgSettings) stored.orgSettings = {};
+    if (!stored.orgSettings.driveConfig) stored.orgSettings.driveConfig = {};
+
+    if (autoBackupEnabled !== undefined) stored.orgSettings.driveConfig.autoBackupEnabled = Boolean(autoBackupEnabled);
+    if (autoBackupTime !== undefined) stored.orgSettings.driveConfig.autoBackupTime = String(autoBackupTime).trim();
+    if (retentionCount !== undefined) stored.orgSettings.driveConfig.retentionCount = parseInt(retentionCount, 10) || 20;
+
+    await saveSettingsToStorage(STORAGE_KEY, stored, req.ip || 'drive-schedule');
+    io.emit('drive:schedule-updated', stored.orgSettings.driveConfig);
+
+    res.json({ success: true, driveConfig: stored.orgSettings.driveConfig });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── محرك النسخ الاحتياطي التلقائي المجدول على Google Drive (24/7 Daily Auto-Backup) ──
+let isRunningAutoBackup = false;
+
+function getSchedulerHourMinute(date = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: process.env.TZ || 'Africa/Cairo',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).format(date);
+  } catch {
+    const h = String(date.getHours()).padStart(2, '0');
+    const m = String(date.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  }
+}
+
+function getSchedulerDateKey(date = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: process.env.TZ || 'Africa/Cairo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(date);
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+async function checkAndRunScheduledDriveBackup() {
+  if (isRunningAutoBackup) return;
+  try {
+    const stored = await getSettingsFromStorage(STORAGE_KEY);
+    if (!stored) return;
+
+    const driveConfig = stored?.orgSettings?.driveConfig;
+    if (!driveConfig || !driveConfig.enabled || !driveConfig.autoBackupEnabled || !driveConfig.serviceUrl) {
+      return;
+    }
+
+    const targetTime = (driveConfig.autoBackupTime || '03:00').trim();
+    const now = new Date();
+    const currentTime = getSchedulerHourMinute(now);
+    const todayDateKey = getSchedulerDateKey(now);
+
+    // التحقق هل الوقت الحالي يطابق وقت الجدولة المحدد من قبل المستخدم
+    if (currentTime !== targetTime) {
+      return;
+    }
+
+    // التحقق هل تم عمل نسخة احتياطية لهذا اليوم مسبقاً لمنع التكرار
+    if (driveConfig.lastScheduledBackupDate === todayDateKey) {
+      return;
+    }
+
+    console.log(`⏰ [Drive Scheduled Backup] حان موعد النسخ الاحتياطي التلقائي اليومي (${currentTime}). جاري البدء بأخذ اللقطة...`);
+    isRunningAutoBackup = true;
+
+    const dateStr = todayDateKey;
+    const timeStr = currentTime.replace(':', '-');
+    const version = stored.version || 1;
+    const fileName = `Auto_Backup_${dateStr}_${timeStr}_v${version}.json`;
+
+    const backupPayload = {
+      export_date: now.toISOString(),
+      version,
+      type: 'automated_daily_backup',
+      state: stored
+    };
+
+    const forwardRes = await forwardToGoogleDrive(driveConfig.serviceUrl, {
+      action: 'upload_system_backup',
+      parentFolderId: driveConfig.parentFolderId || '',
+      fileName,
+      backupJson: JSON.stringify(backupPayload),
+      retentionLimit: driveConfig.retentionCount || 20
+    });
+
+    if (forwardRes.success && forwardRes.data?.success) {
+      console.log(`✅ [Drive Scheduled Backup] تم حفظ النسخة الاحتياطية اليومية بنجاح على Google Drive: ${fileName}`);
+      driveConfig.lastScheduledBackupDate = todayDateKey;
+      driveConfig.lastAutoBackupAt = now.toISOString();
+      driveConfig.lastBackupStatus = 'success';
+
+      await saveSettingsToStorage(STORAGE_KEY, stored, 'auto-drive-scheduler');
+
+      io.emit('drive:backup-completed', {
+        timestamp: now.toISOString(),
+        fileName: forwardRes.data.fileName,
+        fileUrl: forwardRes.data.fileUrl,
+        downloadUrl: forwardRes.data.downloadUrl,
+        folderUrl: forwardRes.data.folderUrl,
+        isScheduled: true,
+        success: true
+      });
+    } else {
+      console.error(`❌ [Drive Scheduled Backup] تعذر حفظ النسخة الاحتياطية:`, forwardRes.data?.error || forwardRes.error);
+      driveConfig.lastBackupStatus = 'failed: ' + (forwardRes.data?.error || forwardRes.error);
+      await saveSettingsToStorage(STORAGE_KEY, stored, 'auto-drive-scheduler');
+    }
+  } catch (err) {
+    console.error('❌ [Drive Scheduled Backup Error]:', err.message);
+  } finally {
+    isRunningAutoBackup = false;
+  }
+}
+
+// تشغيل فاحص الجدولة التلقائي كل 60 ثانية على مدار الساعة 24/7
+setInterval(checkAndRunScheduledDriveBackup, 60 * 1000);
 
 // ── 8.5. مسارات منظومة الحسابات العامة (Accounting & General Ledger API) ──
 app.get('/api/accounts', async (req, res) => {

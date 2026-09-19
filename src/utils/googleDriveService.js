@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { fmt, arabicWeekday } from './formatters';
+import { API_BASE_URL } from './apiClient';
 
 /**
  * استخراج إعدادات Google Drive المعتمدة بأعلى أولوية (LocalStorage أولاً ثم State)
@@ -23,7 +24,14 @@ export function getAuthoritativeDriveConfig(state) {
     autoSyncOnEmployeeSave: localConfig?.autoSyncOnEmployeeSave !== undefined 
       ? Boolean(localConfig.autoSyncOnEmployeeSave) 
       : (stateConfig.autoSyncOnEmployeeSave ?? true),
-    lastCheckedAt: localConfig?.lastCheckedAt || stateConfig.lastCheckedAt || ''
+    lastCheckedAt: localConfig?.lastCheckedAt || stateConfig.lastCheckedAt || '',
+    autoBackupEnabled: localConfig?.autoBackupEnabled !== undefined 
+      ? Boolean(localConfig.autoBackupEnabled) 
+      : Boolean(stateConfig.autoBackupEnabled),
+    autoBackupTime: localConfig?.autoBackupTime || stateConfig.autoBackupTime || '03:00',
+    retentionCount: parseInt(localConfig?.retentionCount || stateConfig.retentionCount, 10) || 20,
+    lastAutoBackupAt: stateConfig.lastAutoBackupAt || localConfig?.lastAutoBackupAt || '',
+    lastScheduledBackupDate: stateConfig.lastScheduledBackupDate || localConfig?.lastScheduledBackupDate || ''
   };
 }
 
@@ -98,6 +106,33 @@ export async function testGoogleDriveConnection(driveConfig) {
     return { success: false, error: 'يرجى إدخال رابط خدمة Google Drive (Apps Script Webhook URL)' };
   }
 
+  // المحاولة الأولى: عبر وكيل السيرفر لتفادي أي أخطاء CORS في المتصفح وتتبع الـ Redirects تلقائياً
+  try {
+    const proxyUrl = `${API_BASE_URL}/drive/test`;
+    const proxyRes = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serviceUrl: driveConfig.serviceUrl,
+        parentFolderId: driveConfig.parentFolderId || ''
+      })
+    });
+    if (proxyRes.ok) {
+      const pData = await proxyRes.json();
+      if (pData && pData.success) {
+        return {
+          success: true,
+          folderName: pData.folderName || 'المجلد الرئيسي',
+          folderUrl: pData.folderUrl || '',
+          message: 'تم الاتصال بحساب Google Drive بنجاح ✅'
+        };
+      }
+    }
+  } catch (proxyErr) {
+    console.warn('[Drive Test] Proxy check skipped or failed, falling back to direct fetch:', proxyErr.message);
+  }
+
+  // المحاولة البديلة: استدعاء مباشر في حال تعذر السيرفر
   try {
     const res = await fetch(driveConfig.serviceUrl, {
       method: 'POST',
@@ -1060,28 +1095,65 @@ export async function createOrGetBackupsFolder(driveConfig) {
 
 /**
  * رفع نسخة احتياطية كاملة للمنظومة إلى Google Drive
+ * يستخدم وكيل السيرفر الخلفي أولاً لمنع أخطاء CORS ونقل البيانات بأعلى سرعة وموثوقية
  */
 export async function uploadSystemBackupToDrive(systemState, driveConfig, onProgress = () => {}) {
   if (!driveConfig || !driveConfig.serviceUrl) {
     return { success: false, error: 'خدمة Google Drive غير مفعلة أو لم يتم إدخال الرابط' };
   }
 
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+  const timeStr = now.toTimeString().slice(0, 5).replace(':', '-');
+  const version = systemState?.version || systemState?._version || 1;
+  const fileName = `Backup_${dateStr}_${timeStr}_v${version}.json`;
+
+  onProgress('جاري تجهيز بيانات النسخة الاحتياطية...');
+  const payload = {
+    export_date: now.toISOString(),
+    version,
+    state: systemState
+  };
+  const jsonString = JSON.stringify(payload);
+
+  // 1. المحاولة الأساسية الاحترافية: عبر وكيل السيرفر الخلفي (Server Proxy)
+  // تحمي من CORS، وتتبع الـ 302 Redirect لـ Google Apps Script تلقائياً وتمنع سقوط المتصفح
   try {
-    onProgress('جاري تجهيز بيانات النسخة الاحتياطية...');
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
-    const timeStr = now.toTimeString().slice(0, 5).replace(':', '-');
-    const version = systemState?.version || systemState?._version || 1;
-    const fileName = `Backup_${dateStr}_${timeStr}_v${version}.json`;
+    onProgress('جاري الرفع الآمن عبر السيرفر إلى Google Drive...');
+    const proxyUrl = `${API_BASE_URL}/drive/backup`;
+    const res = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        driveConfig,
+        fileName,
+        backupJson: jsonString,
+        retentionLimit: driveConfig.retentionCount || 20
+      })
+    });
 
-    const payload = {
-      export_date: now.toISOString(),
-      version,
-      state: systemState
-    };
-    const jsonString = JSON.stringify(payload);
+    const data = await res.json();
+    if (res.ok && data && data.success) {
+      return {
+        success: true,
+        fileId: data.fileId,
+        fileName: data.fileName || fileName,
+        fileUrl: data.fileUrl || data.webViewLink,
+        downloadUrl: data.downloadUrl,
+        folderUrl: data.folderUrl,
+        purgedOldBackups: data.purgedOldBackups || 0,
+        message: 'تم حفظ النسخة الاحتياطية في Google Drive بنجاح ✅'
+      };
+    } else if (data && data.error && !res.ok && res.status !== 502 && res.status !== 404) {
+      return { success: false, error: data.error };
+    }
+  } catch (proxyErr) {
+    console.warn('[Drive Backup] Server proxy failed or unreachable, trying direct upload:', proxyErr.message);
+  }
 
-    onProgress('جاري رفع النسخة الاحتياطية إلى Google Drive...');
+  // 2. المحاولة البديلة (Direct Upload Fallback)
+  try {
+    onProgress('جاري رفع النسخة الاحتياطية مباشرة إلى Google Drive...');
     const res = await fetch(driveConfig.serviceUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -1089,7 +1161,8 @@ export async function uploadSystemBackupToDrive(systemState, driveConfig, onProg
         action: 'upload_system_backup',
         parentFolderId: driveConfig.parentFolderId || '',
         fileName,
-        backupJson: jsonString
+        backupJson: jsonString,
+        retentionLimit: driveConfig.retentionCount || 20
       })
     });
 
@@ -1098,7 +1171,7 @@ export async function uploadSystemBackupToDrive(systemState, driveConfig, onProg
       return {
         success: true,
         fileId: data.fileId,
-        fileName: data.fileName,
+        fileName: data.fileName || fileName,
         fileUrl: data.fileUrl || data.webViewLink,
         downloadUrl: data.downloadUrl,
         folderUrl: data.folderUrl,
@@ -1109,8 +1182,13 @@ export async function uploadSystemBackupToDrive(systemState, driveConfig, onProg
       return { success: false, error: data?.error || 'فشل رفع النسخة الاحتياطية إلى Google Drive' };
     }
   } catch (err) {
-    console.error('Drive Backup Upload Error:', err);
-    return { success: false, error: err.message || 'حدث خطأ أثناء الاتصال بـ Google Drive' };
+    console.error('Drive Backup Direct Upload Error:', err);
+    return {
+      success: false,
+      error: (err.message && err.message.includes('Failed to fetch'))
+        ? 'فشل الاتصال بـ Google Apps Script (Failed to fetch / CORS). يرجى التأكد من تحديث كود Apps Script إلى الإصدار الجديد بالضغط على "كود سكربت الربط" ونشره.'
+        : (err.message || 'حدث خطأ أثناء الاتصال بـ Google Drive')
+    };
   }
 }
 
@@ -1121,6 +1199,26 @@ export async function listSystemBackupsFromDrive(driveConfig) {
   if (!driveConfig || !driveConfig.serviceUrl) {
     return { success: false, error: 'Google Drive service is not configured' };
   }
+
+  // 1. المحاولة عبر السيرفر أولاً
+  try {
+    const proxyUrl = `${API_BASE_URL}/drive/backups`;
+    const res = await fetch(proxyUrl);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success) {
+        return {
+          success: true,
+          backups: data.backups || [],
+          folderUrl: data.folderUrl
+        };
+      }
+    }
+  } catch (proxyErr) {
+    console.warn('[Drive Backups List] Proxy failed, falling back to direct:', proxyErr.message);
+  }
+
+  // 2. المحاولة المباشرة
   try {
     const res = await fetch(driveConfig.serviceUrl, {
       method: 'POST',
@@ -1141,6 +1239,34 @@ export async function listSystemBackupsFromDrive(driveConfig) {
     return { success: false, error: data?.error || 'فشل جلب قائمة النسخ' };
   } catch (err) {
     return { success: false, error: err.message };
+  }
+}
+
+/**
+ * تحديث إعدادات الجدولة التلقائية في السيرفر الخلفي
+ */
+export async function saveDriveScheduleToBackend(scheduleData) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/drive/schedule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scheduleData)
+    });
+    return await res.json();
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * استرجاع إعدادات الجدولة التلقائية من السيرفر الخلفي
+ */
+export async function fetchDriveScheduleFromBackend() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/drive/schedule`);
+    return await res.json();
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 }
 

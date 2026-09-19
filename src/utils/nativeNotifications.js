@@ -14,10 +14,18 @@ export function isAndroidNative() {
     Boolean(window.Capacitor?.isNativePlatform && window.Capacitor.isNativePlatform() && window.Capacitor.getPlatform() === 'android');
 }
 
+export function isDesktopApp() {
+  return typeof window !== 'undefined' && Boolean(window.desktopAPI?.isDesktop);
+}
+
 /**
- * طلب إذن إشعارات النظام (Android 13+ والمتصفح)
+ * طلب إذن إشعارات النظام (Windows, Android 13+, والمتصفح)
  */
 export async function requestSystemNotificationPermission() {
+  if (isDesktopApp()) {
+    return true; // في بيئة ويندوز يتم التعامل مع الإشعارات أصلياً دون الحاجة لإذن متصفح
+  }
+
   if (isAndroidNative()) {
     try {
       const res = await NativeNotification.requestPermission();
@@ -81,7 +89,21 @@ export async function showSystemNotification({ title, body, id = null, icon = nu
 
   markNotificationAsDispatched(idStr);
 
-  // 1. نظام أندرويد الأصلي (Capacitor)
+  // 1. تطبيق الويندوز المكتبي الأصلي (Windows Toast & Action Center)
+  if (isDesktopApp() && window.desktopAPI?.showDesktopNotification) {
+    try {
+      const res = await window.desktopAPI.showDesktopNotification({
+        title: title || 'منظومة الموارد البشرية والرواتب',
+        body: body || 'لديك إشعار جديد في المنظومة.',
+        icon: icon || null
+      });
+      if (res?.success) return true;
+    } catch (e) {
+      console.warn('[NativeNotifications] Windows desktop notification error:', e);
+    }
+  }
+
+  // 2. نظام أندرويد الأصلي (Capacitor)
   if (isAndroidNative()) {
     try {
       // استخراج رقم عددي ثابت لـ Android Notification ID
@@ -101,7 +123,7 @@ export async function showSystemNotification({ title, body, id = null, icon = nu
     }
   }
 
-  // 2. بيئة المتصفح (Web Notification)
+  // 3. بيئة المتصفح (Web Notification)
   if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
     try {
       new Notification(title || 'منظومة الموارد البشرية', {

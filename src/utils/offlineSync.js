@@ -8,6 +8,7 @@ import {
   STORAGE_KEY,
   apiFetchSettings,
   apiSaveSettings,
+  apiSaveSettingsSlice,
   apiFetchVersion,
   apiSubmitRequestAtomic,
   apiHardDeleteEntity
@@ -107,44 +108,112 @@ export async function fetchRemoteState(options = {}) {
 }
 
 // ── حفظ الحالة بدمج ذكي يمنع مسح طلبات الأجهزة الأخرى ───────────────────
-let saveQueueTimer = null;
-let latestQueuedState = null;
+let bgSyncTimer = null;
+let bgPendingState = null;
+let bgPendingSlice = null;
+
+/**
+ * دالة المزامنة السحابية الصامتة في الخلفية (Background Asynchronous Cloud Sync)
+ * تعمل بنظام التجميع الذكي (Debounced Buffer) وتمنع إرهاق الشبكة أو تجميد المتصفح
+ */
+async function dispatchBackgroundCloudSync(cleanUpdated, options = {}) {
+  const { onSyncSuccess, onSyncFail, onQueuedOffline, sliceKey, sliceValue } = options;
+  bgPendingState = cleanUpdated;
+  if (sliceKey && sliceValue !== undefined) {
+    bgPendingSlice = { sliceKey, sliceValue };
+  }
+
+  if (bgSyncTimer) {
+    clearTimeout(bgSyncTimer);
+  }
+
+  return new Promise((resolve) => {
+    bgSyncTimer = setTimeout(async () => {
+      bgSyncTimer = null;
+      const stateToPush = bgPendingState;
+      const sliceToPush = bgPendingSlice;
+      bgPendingSlice = null;
+
+      if (!stateToPush) return resolve({ success: true });
+
+      try {
+        let res;
+        // إذا كان هناك قسم محدد تم تعديله، نستخدم مسار الحفظ الجزئي الخفيف جداً (< 20KB)
+        if (sliceToPush && sliceToPush.sliceKey && sliceToPush.sliceValue !== undefined) {
+          res = await apiSaveSettingsSlice(sliceToPush.sliceKey, sliceToPush.sliceValue, {
+            timeout: 20000,
+            isBackground: true
+          });
+        } else {
+          res = await apiSaveSettings(STORAGE_KEY, stateToPush, {
+            timeout: 45000,
+            isBackground: true
+          });
+        }
+
+        if (!res?.success) {
+          throw new Error(res?.error || 'Failed to save to Database');
+        }
+
+        isNetworkOffline = false;
+        const finalState = res?.value && typeof res.value === 'object' ? normalizeState(res.value) : stateToPush;
+        saveStateLocally(finalState).catch(() => {});
+        clearPendingQueue().catch(() => {});
+        broadcastStateChange(finalState);
+
+        onSyncSuccess?.(finalState);
+        resolve({ success: true, mergedState: finalState });
+      } catch (e) {
+        isNetworkOffline = true;
+        console.warn('[Sync] Background save error, queued for auto-sync:', e.message);
+        await addToPendingQueue({ type: 'SAVE_STATE', state: stateToPush }).catch(() => {});
+        onQueuedOffline?.();
+        onSyncFail?.(e.message);
+        resolve({ success: false, queued: true, error: e.message });
+      }
+    }, 120); // 120ms debounce buffer لتجميع العمليات المتتالية
+  });
+}
 
 export async function smartSaveState(updatedState, options = {}) {
-  const { onSyncSuccess, onSyncFail, onQueuedOffline } = options;
+  const { onSyncSuccess, onSyncFail, onQueuedOffline, waitForServer = false, sliceKey, sliceValue } = options;
   const cleanUpdated = normalizeState(updatedState);
 
-  // 1. بث التغيير لكافة التبويبات فورياً في نفس الجهاز (0ms Instant Broadcast)
+  // 1. بث التغيير لكافة التبويبات فورياً في نفس الجهاز (0ms Instant Local Broadcast)
   broadcastStateChange(cleanUpdated);
 
-  // 2. تحديث الكاش المحلي بشكل غير معطل للواجهة
+  // 2. تحديث الكاش المحلي في IndexedDB فورياً بدون تعطيل الواجهة
   saveStateLocally(cleanUpdated).catch((err) => {
     console.warn('[Sync] Local storage async write warning:', err);
   });
 
-  // نحاول الحفظ مباشرة حتى لو كان navigator.onLine يزعم الأوفلاين
-  try {
-    const res = await apiSaveSettings(STORAGE_KEY, cleanUpdated, { timeout: 60000 });
-
-    if (!res?.success) {
-      throw new Error(res?.error || 'Failed to save to Database');
+  // إذا طلب العميل صراحة الانتظار المتزامن للسيرفر (مثل عمليات تصفير النظام الحساسة)
+  if (waitForServer) {
+    try {
+      const res = await apiSaveSettings(STORAGE_KEY, cleanUpdated, { timeout: 60000 });
+      if (!res?.success) throw new Error(res?.error || 'Failed to save to Database');
+      isNetworkOffline = false;
+      const finalState = res?.value && typeof res.value === 'object' ? normalizeState(res.value) : cleanUpdated;
+      saveStateLocally(finalState).catch(() => {});
+      clearPendingQueue().catch(() => {});
+      broadcastStateChange(finalState);
+      onSyncSuccess?.(finalState);
+      return { success: true, queued: false, mergedState: finalState };
+    } catch (e) {
+      isNetworkOffline = true;
+      console.warn('[Sync] Network error during save, queued for auto-sync:', e.message);
+      await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState }).catch(() => {});
+      onQueuedOffline?.();
+      return { success: false, queued: true, error: e.message, mergedState: updatedState };
     }
-
-    isNetworkOffline = false;
-    const finalState = res?.value && typeof res.value === 'object' ? normalizeState(res.value) : cleanUpdated;
-    saveStateLocally(finalState).catch(() => {});
-    clearPendingQueue().catch(() => {});
-    broadcastStateChange(finalState);
-
-    onSyncSuccess?.(finalState);
-    return { success: true, queued: false, mergedState: finalState };
-  } catch (e) {
-    isNetworkOffline = true;
-    console.warn('[Sync] Network error during save, queued for auto-sync:', e.message);
-    await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState }).catch(() => {});
-    onQueuedOffline?.();
-    return { success: false, queued: true, error: e.message, mergedState: updatedState };
   }
+
+  // 3. النمط التفاؤلي الفوري الافتراضي (True Optimistic UI):
+  // إطلاق الحفظ السحابي في الخلفية بصمت
+  dispatchBackgroundCloudSync(cleanUpdated, { onSyncSuccess, onSyncFail, onQueuedOffline, sliceKey, sliceValue });
+
+  // 4. إرجاع النتيجة فوراً للواجهة والمودال (< 5ms) لتأكيد الحفظ اللحظي بدون أي انتظار
+  return { success: true, queued: false, mergedState: cleanUpdated };
 }
 
 // ── مزامنة يدوية مع دمج ذكي عند عودة الاتصال مع قفل التزامن (Concurrency Mutex) ──

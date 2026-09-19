@@ -80,5 +80,17 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   },
 
   // 8. توليد ملفات الـ PDF البرمجية
-  generatePdfBase64: (htmlContent, printOptions) => ipcRenderer.invoke('print:generate-pdf-base64', htmlContent, printOptions)
+  generatePdfBase64: (htmlContent, printOptions) => ipcRenderer.invoke('print:generate-pdf-base64', htmlContent, printOptions),
+
+  // 9. إعدادات وتخصيصات تطبيق الويندوز ونظام الإشعارات الأصلي
+  getDesktopConfig: () => ipcRenderer.invoke('desktop:get-config'),
+  saveDesktopConfig: (config) => ipcRenderer.invoke('desktop:save-config', config),
+  setZoomFactor: (factor) => ipcRenderer.invoke('desktop:set-zoom', factor),
+  selectLogoFile: () => ipcRenderer.invoke('desktop:select-logo'),
+  resetLogo: () => ipcRenderer.invoke('desktop:reset-logo'),
+  relaunchApp: () => ipcRenderer.invoke('desktop:relaunch-app'),
+  showDesktopNotification: (options) => ipcRenderer.invoke('desktop:show-notification', options),
+  getAutoLaunch: () => ipcRenderer.invoke('desktop:get-auto-launch'),
+  setAutoLaunch: (enabled) => ipcRenderer.invoke('desktop:set-auto-launch', enabled),
+  clearDesktopCache: () => ipcRenderer.invoke('desktop:clear-cache')
 });

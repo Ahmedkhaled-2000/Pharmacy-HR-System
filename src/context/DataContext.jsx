@@ -760,80 +760,38 @@ export function DataProvider({ children, showToast = () => {} }) {
       console.warn('[Sync] Instant delta broadcast error:', broadcastErr);
     }
 
+    // استخراج sliceKey إن وُجد لتسريع الحفظ السحابي وتفادي إرسال 4.2MB
+    const sliceKey = deltaHint?.entityType || null;
+    const sliceValue = sliceKey && updatedState[sliceKey] !== undefined ? updatedState[sliceKey] : null;
+
     setIsSyncing(true);
     const result = await smartSaveState(updatedState, {
+      sliceKey,
+      sliceValue,
       onSyncSuccess: (finalMerged) => {
+        setIsSyncing(false);
         setLastSyncTime(nowTimeStr());
         setPendingSyncCount(0);
       },
       onSyncFail: (msg) => {
+        setIsSyncing(false);
         console.error('Database write error:', msg);
-        showToast('⚠️ تعذر الحفظ في قاعدة البيانات السحابية، تم الحفظ محلياً');
+        showToast?.('⚠️ تعذر الحفظ في قاعدة البيانات السحابية، تم الحفظ محلياً');
       },
       onQueuedOffline: async () => {
-        showToast('📴 أنت أوف لاين - تم الحفظ محلياً وسيتم التزامن عند عودة الإنترنت');
+        setIsSyncing(false);
+        showToast?.('📴 أنت أوف لاين - تم الحفظ محلياً وسيتم التزامن عند عودة الإنترنت');
       }
     });
-    setIsSyncing(false);
 
-    // ── تطبيق استجابة السحابة بأمان كامل بدون تضاعف البيانات ──
-    // نتجاهل mergedState من السحابة بعد الحفظ المباشر لأن:
-    // 1. الحالة المحدّثة (updatedState) تم تمريرها بالفعل لـ setState في المكوّن الذي طلب الحفظ
-    // 2. دمج mergedState مع prev عبر smartMergeStates قد يُعيد إدراج بيانات قديمة أو يُضاعف الموظفين
-    // الاستثناء الوحيد: إذا جاء mergedState من السحابة بموظفين إضافيين من أجهزة أخرى
+    // تحديث فوري وسلس لحالة التطبيق بدون أي تجميد
     if (result?.mergedState) {
-      setState((prev) => {
-        const incoming = normalizeState(result.mergedState);
-        // ── دمج حذر: الموظفون في updatedState لهم الأولوية المطلقة ──
-        const merged = normalizeState(smartMergeStates(prev, incoming));
-
-        // ── تأكيد أولوية الموظفين المُعدَّلين حديثاً وحمايتهم من الارتداد (ID + Code + NationalId) ──
-        const updatedEmployees = Array.isArray(updatedState.employees) ? updatedState.employees : [];
-        if (updatedEmployees.length > 0) {
-          const cleanMergedEmps = [];
-          const matchedUpdatedIndices = new Set();
-
-          for (const e of (merged.employees || [])) {
-            const cleanCode = e.code ? String(e.code).trim().toLowerCase() : null;
-            const cleanNid = e.nationalId ? String(e.nationalId).replace(/\D/g, '') : null;
-            const eId = e.id ? String(e.id) : null;
-
-            const matchIdx = updatedEmployees.findIndex((upd, idx) => {
-              if (matchedUpdatedIndices.has(idx)) return false;
-              if (eId && upd.id && String(upd.id) === eId) return true;
-              if ((!eId || !upd.id) && cleanCode && upd.code && String(upd.code).trim().toLowerCase() === cleanCode) return true;
-              return false;
-            });
-
-            if (matchIdx !== -1) {
-              matchedUpdatedIndices.add(matchIdx);
-              const upd = updatedEmployees[matchIdx];
-              cleanMergedEmps.push({
-                ...e,
-                ...upd,
-                id: e.id || upd.id,
-                updatedAt: upd.updatedAt || new Date().toISOString()
-              });
-            } else {
-              cleanMergedEmps.push(e);
-            }
-          }
-
-          updatedEmployees.forEach((upd, idx) => {
-            if (!matchedUpdatedIndices.has(idx)) {
-              cleanMergedEmps.push(upd);
-            }
-          });
-
-          return normalizeState({ ...merged, employees: cleanMergedEmps });
-        }
-
-        return normalizeState(merged);
-      });
+      setState(result.mergedState);
+    } else {
+      setState(updatedState);
     }
 
-    const finalState = result?.mergedState || updatedState;
-    saveAutoBackupOnModification(finalState, 'تعديل وحفظ بالمنظومة').catch((e) => {
+    saveAutoBackupOnModification(result?.mergedState || updatedState, 'تعديل وحفظ بالمنظومة').catch((e) => {
       console.warn('[AutoBackup] Snapshot trigger skipped:', e);
     });
 

@@ -448,7 +448,20 @@ export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
     timeout: options.timeout || 60000,
     retries: options.retries !== undefined ? options.retries : 2,
     noCache: true,
-    isBackground: false
+    isBackground: options.isBackground || false
+  });
+}
+
+// ── حفظ جزء محدد فقط من البيانات (Slice Saving) بحجم خفيف جداً (< 20KB) وسرعة فائقة ──
+export async function apiSaveSettingsSlice(sliceKey, sliceValue, options = {}) {
+  resetBackendCircuitBreaker();
+  return await request('settings/slice', {
+    method: 'POST',
+    body: JSON.stringify({ key: STORAGE_KEY, sliceKey, sliceValue }),
+    timeout: options.timeout || 20000,
+    retries: options.retries !== undefined ? options.retries : 2,
+    noCache: true,
+    isBackground: options.isBackground || false
   });
 }
 

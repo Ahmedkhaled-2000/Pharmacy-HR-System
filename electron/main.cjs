@@ -4,11 +4,14 @@
  * تشمل إدارة النوافذ، قاعدة البيانات المحلية المحمية، ومحرك التحديث التلقائي الصامت
  */
 
-const { app, BrowserWindow, ipcMain, Menu, dialog, powerMonitor, net, protocol, utilityProcess, shell, session } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog, powerMonitor, net, protocol, utilityProcess, shell, session, Notification, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const url = require('url');
 const http = require('http');
+
+// ── تسجيل معرّف التطبيق في نظام ويندوز لتثبيت إشعارات Action Center و Toast بالصوت والشعار ──
+app.setAppUserModelId('com.pharmacy.hr.system');
 
 // ── تهيئة سويتشات الكروميوم للصلاحيات الكاملة وبصمة الويندوز WebAuthn و Windows Hello ──────
 app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer,WebAuthentication');
@@ -63,6 +66,53 @@ if (!fs.existsSync(userDataPath)) {
 const LOCAL_STATE_FILE = path.join(userDataPath, 'local_state.json');
 const LOCAL_BACKUP_FILE = path.join(userDataPath, 'local_state.bak.json');
 const LOCAL_PENDING_FILE = path.join(userDataPath, 'pending_queue.json');
+const DESKTOP_CONFIG_FILE = path.join(userDataPath, 'desktop_config.json');
+
+// ── 1.2. محرك إدارة إعدادات وتخصيصات تطبيق الويندوز (Desktop Customization Config) ──
+const DEFAULT_DESKTOP_CONFIG = {
+  appName: 'منظومة إدارة الموارد البشرية والرواتب',
+  customLogoPath: null,
+  zoomFactor: 0.92,
+  enableNotifications: true,
+  notificationSound: true,
+  autoLaunch: false
+};
+
+function getDesktopConfig() {
+  try {
+    if (fs.existsSync(DESKTOP_CONFIG_FILE)) {
+      const data = JSON.parse(fs.readFileSync(DESKTOP_CONFIG_FILE, 'utf8'));
+      const merged = { ...DEFAULT_DESKTOP_CONFIG, ...data };
+      if (merged.customLogoPath && fs.existsSync(merged.customLogoPath)) {
+        try {
+          const imgBuf = fs.readFileSync(merged.customLogoPath);
+          const ext = path.extname(merged.customLogoPath).toLowerCase();
+          const mime = ext === '.ico' ? 'image/x-icon' : ext === '.svg' ? 'image/svg+xml' : `image/${ext.replace('.', '') || 'png'}`;
+          merged.logoBase64 = `data:${mime};base64,${imgBuf.toString('base64')}`;
+        } catch {}
+      }
+      return merged;
+    }
+  } catch (err) {
+    console.warn('[Desktop Config] Failed to read config:', err.message);
+  }
+  return { ...DEFAULT_DESKTOP_CONFIG };
+}
+
+function saveDesktopConfig(newConfig) {
+  try {
+    const current = getDesktopConfig();
+    const updated = { ...current, ...newConfig };
+    // لا نحفظ logoBase64 في الملف لتفادي تضخيم الـ JSON
+    const toSave = { ...updated };
+    delete toSave.logoBase64;
+    fs.writeFileSync(DESKTOP_CONFIG_FILE, JSON.stringify(toSave, null, 2), 'utf8');
+    return { success: true, config: updated };
+  } catch (err) {
+    console.error('[Desktop Config] Failed to save config:', err);
+    return { success: false, error: err.message };
+  }
+}
 
 // ── 1.5. خادم الويب المحلي فائق السرعة لدعم بصمة الويندوز WebAuthn / Windows Hello ──
 let localStaticServer = null;
@@ -223,16 +273,25 @@ if (!gotTheLock) {
 
 // ── 3. إنشاء نافذة التطبيق الرئيسية ─────────────────────────────────────
 function createMainWindow() {
-  const iconPath = path.join(__dirname, '../assets/icon.ico');
-  const fallbackIconPath = path.join(__dirname, '../assets/icon.png');
-  const resolvedIcon = fs.existsSync(iconPath) ? iconPath : (fs.existsSync(fallbackIconPath) ? fallbackIconPath : undefined);
+  const desktopConfig = getDesktopConfig();
+
+  let resolvedIcon = undefined;
+  if (desktopConfig.customLogoPath && fs.existsSync(desktopConfig.customLogoPath)) {
+    resolvedIcon = desktopConfig.customLogoPath;
+  } else {
+    const iconPath = path.join(__dirname, '../assets/icon.ico');
+    const fallbackIconPath = path.join(__dirname, '../assets/icon.png');
+    resolvedIcon = fs.existsSync(iconPath) ? iconPath : (fs.existsSync(fallbackIconPath) ? fallbackIconPath : undefined);
+  }
+
+  const appTitle = desktopConfig.appName || 'منظومة إدارة الموارد البشرية والرواتب';
 
   mainWindow = new BrowserWindow({
     width: 1366,
     height: 850,
     minWidth: 1024,
     minHeight: 700,
-    title: 'منظومة إدارة الموارد البشرية والرواتب',
+    title: appTitle,
     icon: resolvedIcon,
     backgroundColor: '#0f172a',
     frame: false, // نافذة مخصصة لإتاحة وضع عناصر شريط العنوان المكتبي بدقة (عنوان يميناً، أزرار يساراً)
@@ -262,9 +321,10 @@ function createMainWindow() {
   // إظهار النافذة بسلاسة بمجرد اكتمال تجهيز المحتوى الأولي
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    // ضبط نسبة العرض (Zoom Factor) لتكون 92% لضمان المحاذاة التامة والراحة البصرية لجميع الشاشات
+    // ضبط نسبة العرض (Zoom Factor) من الإعدادات المحفوظة
     try {
-      mainWindow.webContents.setZoomFactor(0.92);
+      const zoom = Number(desktopConfig.zoomFactor) || 0.92;
+      mainWindow.webContents.setZoomFactor(zoom);
     } catch {}
     if (isDev) {
       // mainWindow.webContents.openDevTools();
@@ -1102,6 +1162,207 @@ ipcMain.handle('print:generate-pdf-base64', async (_event, htmlContent, printOpt
     if (pdfWindow && !pdfWindow.isDestroyed()) {
       pdfWindow.destroy();
     }
+  }
+});
+
+// ── 5.5. إدارة إعدادات وتخصيصات تطبيق الويندوز وإشعارات النظام (Desktop Settings & Native Windows Notifications) ──
+
+// 1. استرجاع إعدادات المنظومة المكتبية
+ipcMain.handle('desktop:get-config', async () => {
+  return getDesktopConfig();
+});
+
+// 2. حفظ إعدادات المنظومة المكتبية
+ipcMain.handle('desktop:save-config', async (_event, newConfig) => {
+  const result = saveDesktopConfig(newConfig);
+  if (result.success && newConfig.autoLaunch !== undefined) {
+    try {
+      app.setLoginItemSettings({
+        openAtLogin: Boolean(newConfig.autoLaunch),
+        path: process.execPath
+      });
+    } catch (e) {
+      console.warn('[AutoLaunch] Could not set login item settings:', e.message);
+    }
+  }
+  return result;
+});
+
+// 3. تغيير نسبة التكبير لحظياً للمعاينة في الوقت الفعلي
+ipcMain.handle('desktop:set-zoom', async (_event, factor) => {
+  const num = Number(factor);
+  if (mainWindow && !mainWindow.isDestroyed() && !isNaN(num) && num >= 0.5 && num <= 2.5) {
+    try {
+      mainWindow.webContents.setZoomFactor(num);
+      return { success: true, zoom: num };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+  return { success: false, error: 'Invalid zoom factor' };
+});
+
+// 4. اختيار وحفظ شعار جديد للتطبيق
+ipcMain.handle('desktop:select-logo', async () => {
+  try {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: 'اختر شعار المنظومة الجديد',
+      buttonLabel: 'تعيين كشعار للبرنامج',
+      filters: [
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'ico', 'svg', 'webp'] }
+      ],
+      properties: ['openFile']
+    });
+
+    if (canceled || !filePaths || filePaths.length === 0) {
+      return { canceled: true };
+    }
+
+    const selectedPath = filePaths[0];
+    const ext = path.extname(selectedPath) || '.png';
+    const targetFile = path.join(userDataPath, `app_logo${ext}`);
+
+    fs.copyFileSync(selectedPath, targetFile);
+
+    // تحديث الإعدادات المحفوظة
+    saveDesktopConfig({ customLogoPath: targetFile });
+
+    // قراءة محتوى الصورة كـ Base64 ليتسنى للواجهة عرضها فوراً
+    const imageBuffer = fs.readFileSync(targetFile);
+    const mimeType = ext === '.ico' ? 'image/x-icon' : ext === '.svg' ? 'image/svg+xml' : `image/${ext.replace('.', '')}`;
+    const base64Data = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
+
+    // تحديث أيقونة النافذة الحالية مباشرة إن أمكن
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setIcon(targetFile);
+      }
+    } catch {}
+
+    return {
+      success: true,
+      filePath: targetFile,
+      base64Data: base64Data
+    };
+  } catch (err) {
+    console.error('[Select Logo Error]:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// 5. استعادة الشعار الافتراضي للمنظومة
+ipcMain.handle('desktop:reset-logo', async () => {
+  try {
+    saveDesktopConfig({ customLogoPath: null });
+    try {
+      const defaultIcon = path.join(__dirname, '../assets/icon.png');
+      if (fs.existsSync(defaultIcon) && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setIcon(defaultIcon);
+      }
+    } catch {}
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// 6. إعادة تشغيل نظيفة للتطبيق لتطبيق التعديلات على مستوى الويندوز
+ipcMain.handle('desktop:relaunch-app', async () => {
+  try {
+    app.relaunch();
+    app.exit(0);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// 7. إطلاق إشعار ويندوز أصلي (Windows Action Center & Toast Notification)
+ipcMain.handle('desktop:show-notification', async (_event, { title, body, icon, silent = false }) => {
+  try {
+    if (!Notification.isSupported()) {
+      return { success: false, error: 'Notifications not supported on this platform' };
+    }
+
+    const config = getDesktopConfig();
+    if (config.enableNotifications === false) {
+      return { success: false, reason: 'disabled_in_settings' };
+    }
+
+    // تحديد أيقونة الإشعار
+    let notifIcon = undefined;
+    if (icon && typeof icon === 'string' && fs.existsSync(icon)) {
+      notifIcon = icon;
+    } else if (config.customLogoPath && fs.existsSync(config.customLogoPath)) {
+      notifIcon = config.customLogoPath;
+    } else {
+      const defaultIcon = path.join(__dirname, '../assets/icon.png');
+      if (fs.existsSync(defaultIcon)) notifIcon = defaultIcon;
+    }
+
+    const notifTitle = title || config.appName || 'منظومة إدارة الموارد البشرية والرواتب';
+    const notifBody = body || '';
+    const isSilent = silent || config.notificationSound === false;
+
+    const notification = new Notification({
+      title: notifTitle,
+      body: notifBody,
+      icon: notifIcon,
+      silent: isSilent,
+      urgency: 'normal'
+    });
+
+    // عند نقر المستخدم على الإشعار من أي مكان في نظام ويندوز يتم التركيز على نافذة البرنامج
+    notification.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        if (!mainWindow.isVisible()) mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+
+    notification.show();
+    return { success: true };
+  } catch (err) {
+    console.error('[Show Notification Error]:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// 8. فحص وتعيين التشغيل التلقائي مع إقلاع ويندوز
+ipcMain.handle('desktop:get-auto-launch', async () => {
+  try {
+    const settings = app.getLoginItemSettings();
+    return { enabled: settings.openAtLogin };
+  } catch {
+    return { enabled: false };
+  }
+});
+
+ipcMain.handle('desktop:set-auto-launch', async (_event, enabled) => {
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: Boolean(enabled),
+      path: process.execPath
+    });
+    saveDesktopConfig({ autoLaunch: Boolean(enabled) });
+    return { success: true, enabled: Boolean(enabled) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// 9. تنظيف الكاش والذاكرة المؤقتة للديسكتوب
+ipcMain.handle('desktop:clear-cache', async () => {
+  try {
+    const ses = session.defaultSession;
+    await ses.clearCache();
+    await ses.clearStorageData({
+      storages: ['cachestorage', 'serviceworkers', 'shadercache']
+    });
+    return { success: true, message: 'تم تنظيف الذاكرة المؤقتة بنجاح' };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
 });
 
