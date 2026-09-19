@@ -3,6 +3,7 @@ import { fmt } from '../../utils/formatters';
 import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
+import { getActivePayrollMonth, isPayrollMonthFrozen } from '../../utils/periodEngine';
 
 export default function EmployeeLoansModule({
   emp,
@@ -145,9 +146,12 @@ export default function EmployeeLoansModule({
   const startDay = state.orgSettings?.loanRequestStartDay !== undefined ? parseInt(state.orgSettings.loanRequestStartDay, 10) : 1;
   const endDay = state.orgSettings?.loanRequestEndDay !== undefined ? parseInt(state.orgSettings.loanRequestEndDay, 10) : 10;
   
-  const isWithinLoanWindow = (startDay <= endDay) 
+  const activePayrollMonth = getActivePayrollMonth(state?.orgSettings || {});
+  const isCurrentPeriodFrozen = isPayrollMonthFrozen(activePayrollMonth, state?.orgSettings || {});
+
+  const isWithinLoanWindow = !isCurrentPeriodFrozen && ((startDay <= endDay) 
     ? (currentDay >= startDay && currentDay <= endDay)
-    : (currentDay >= startDay || currentDay <= endDay);
+    : (currentDay >= startDay || currentDay <= endDay));
 
   // Full monthly salary calculation based on the selected target branch: (سعر الساعة للفرع × عدد ساعات العمل للفرع)
   const activeBranchDetail = (emp?.branchesDetails && emp.branchesDetails.length > 0)
@@ -170,6 +174,11 @@ export default function EmployeeLoansModule({
   // Submit Loan Request
   const handleSubmitLoan = async (e) => {
     e.preventDefault();
+
+    if (isCurrentPeriodFrozen) {
+      showToast?.(`⚠️ لا يمكن إرسال طلب سلفة الآن: دورة رواتب شهر (${activePayrollMonth}) مغلقة ومجمدة رسمياً من الإدارة العليا.`);
+      return;
+    }
 
     if (!isWithinLoanWindow) {
       showToast(`⚠️ لا يمكن إرسال طلب سلفة الآن! فترة التقديم المسموح بها هي من يوم ${startDay} إلى يوم ${endDay} من كل شهر.`);
@@ -259,6 +268,12 @@ export default function EmployeeLoansModule({
   // Submit Credit Medicine Request
   const handleSubmitMed = async (e) => {
     e.preventDefault();
+
+    if (isCurrentPeriodFrozen) {
+      showToast?.(`⚠️ لا يمكن إرسال طلب أدوية آجل: دورة رواتب شهر (${activePayrollMonth}) مغلقة ومجمدة رسمياً من الإدارة العليا.`);
+      return;
+    }
+
     const validItems = medItems.filter((i) => i.name.trim() && parseFloat(i.price) > 0);
     if (validItems.length === 0) {
       showToast('يرجى إضافة دواء واحد على الأقل مع الاسم والسعر الصحيح');
@@ -387,8 +402,13 @@ export default function EmployeeLoansModule({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
             <h4 style={{ margin: 0, fontSize: '15px' }}>طلب سلفة مالية (شهرية / مقسمة)</h4>
             <button
-              className={`btn ${isWithinLoanWindow ? 'btn-start' : 'btn-ghost'}`}
+              type="button"
+              className={`btn ${!isCurrentPeriodFrozen && isWithinLoanWindow ? 'btn-start' : 'btn-ghost'}`}
               onClick={() => {
+                if (isCurrentPeriodFrozen) {
+                  showToast?.(`⚠️ التقديم متوقف: دورة رواتب شهر (${activePayrollMonth}) مغلقة ومجمدة رسمياً من الإدارة العليا.`);
+                  return;
+                }
                 if (!isWithinLoanWindow) {
                   showToast(`⚠️ التقديم متاح فقط من يوم ${startDay} إلى يوم ${endDay} من كل شهر.`);
                   return;
@@ -397,9 +417,18 @@ export default function EmployeeLoansModule({
               }}
               style={{ fontSize: '13px', padding: '6px 14px' }}
             >
-              {showLoanForm ? '✕ إغلاق' : '+ طلب سلفة جديد'}
+              {isCurrentPeriodFrozen ? '🔒 دورة الشهر مجمدة' : (showLoanForm ? '✕ إغلاق' : '+ طلب سلفة جديد')}
             </button>
           </div>
+
+          {isCurrentPeriodFrozen && (
+            <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '18px' }}>🔒</span>
+              <span style={{ color: '#991b1b', fontSize: '13px', fontWeight: 'bold' }}>
+                دورة رواتب شهر ({activePayrollMonth}) مغلقة ومجمدة رسمياً من الإدارة العليا. تم إيقاف تقديم طلبات السلف والأدوية الآجل لهذه الفترة.
+              </span>
+            </div>
+          )}
 
           {showLoanForm && (
             <form onSubmit={handleSubmitLoan} className="card settings-card fade-in" style={{ padding: '16px', background: 'var(--surface-muted)', border: '1px solid var(--primary-tint)', marginBottom: '20px' }}>

@@ -8,26 +8,24 @@ import { io } from 'socket.io-client';
 
 const getSocketUrl = () => {
   if (typeof window !== 'undefined' && window.location) {
-    const { hostname, origin } = window.location;
-    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+    const { hostname, origin, protocol } = window.location;
+    const isLocalhost = !hostname || hostname === 'localhost' || hostname === '127.0.0.1';
+    const isApp = protocol === 'app:' || protocol === 'file:' || protocol === 'capacitor:';
 
-    if (!isLocalhost) {
-      const remoteSocketUrl = import.meta.env?.VITE_SOCKET_URL;
-      if (remoteSocketUrl && !remoteSocketUrl.includes('localhost') && !remoteSocketUrl.includes('127.0.0.1')) {
-        return remoteSocketUrl;
-      }
-      if (hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site') || hostname === '63.183.147.199') {
-        return origin;
-      }
-      return 'http://63.183.147.199';
+    if (!isLocalhost && !isApp && origin && origin.startsWith('http')) {
+      return origin;
     }
   }
 
-  // في بيئة التطوير المحلي أو الافتراضي
+  // في بيئة التطوير المحلي أو المنصات الأخرى
   if (import.meta.env?.VITE_SOCKET_URL) {
-    return import.meta.env.VITE_SOCKET_URL;
+    let sUrl = import.meta.env.VITE_SOCKET_URL;
+    if (typeof window !== 'undefined' && window.location?.protocol === 'https:' && sUrl.startsWith('http:')) {
+      sUrl = sUrl.replace(/^http:/, 'https:');
+    }
+    return sUrl;
   }
-  return 'http://63.183.147.199';
+  return 'https://63-183-147-199.sslip.io';
 };
 
 export const SOCKET_SERVER_URL = getSocketUrl();
@@ -281,4 +279,118 @@ export function subscribeToEntityChanges(onEntityChanged) {
     s.off('entity:changed', handler);
   };
 }
+
+// قناة البث المحلي الفوري لإبطال الجلسات بين التبويبات والنوافذ (0ms Cross-Tab Broadcast)
+const authRevocationChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
+  ? new BroadcastChannel('pharmacy-auth-revocation-channel')
+  : null;
+
+/**
+ * بث أمر إبطال وطرد الجلسات الفوري لجميع الأجهزة والصفحات المتصلة (< 10ms)
+ * يدعم البث عبر: WebSockets + BroadcastChannel + localStorage StorageEvent
+ * @param {Object} params
+ * @param {'owner'|'admin'|'branch'|'employee'} params.role - الدور المستهدف
+ * @param {string|number} [params.targetId] - معرف الموظف أو الفرع
+ * @param {string} [params.targetCode] - كود الموظف أو كود الفرع
+ * @param {number} [params.sessionVersion] - رقم إصدار الجلسة الجديد
+ * @param {string} [params.exceptClientId] - استثناء الجهاز الحالي إن وجد
+ * @param {string} [params.reason] - سبب الإبطال ('password_changed' | 'manual_termination' | 'suspended')
+ * @param {boolean} [params.includeAdmin] - هل يشمل طرد جلسات الأدمن أيضاً
+ */
+export function emitRevokeSession({ role, targetId = null, targetCode = null, sessionVersion = null, exceptClientId = null, reason = 'password_changed', includeAdmin = false }) {
+  if (!role) return false;
+
+  const payload = {
+    role,
+    targetId: targetId ? String(targetId) : null,
+    targetCode: targetCode ? String(targetCode) : null,
+    sessionVersion: sessionVersion !== null ? Number(sessionVersion) : null,
+    exceptClientId: exceptClientId || null,
+    reason,
+    includeAdmin: Boolean(includeAdmin),
+    clientId: CLIENT_SESSION_ID,
+    timestamp: new Date().toISOString()
+  };
+
+  // 1. بث فوري محلياً للتبويبات والنوافذ الأخرى على نفس المتصفح/الجهاز عبر BroadcastChannel
+  try {
+    authRevocationChannel?.postMessage(payload);
+  } catch (e) {
+    console.warn('[BroadcastChannel] Error posting revocation:', e);
+  }
+
+  // 2. إطلاق حدث التخزين المحلي storage event لكافة التبويبات الأخرى
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('pharmacy_auth_revocation_event', JSON.stringify({ ...payload, _t: Date.now() }));
+    }
+  } catch {}
+
+  // 3. بث فوري سحابي عبر WebSockets لجميع الأجهزة الأخرى عبر السيرفر (< 5ms)
+  const s = getSocket();
+  if (s && s.connected) {
+    try {
+      s.emit('auth:revoke_session', payload);
+      return true;
+    } catch (e) {
+      console.warn('[Socket.io] Error emitting auth:revoke_session:', e);
+    }
+  }
+  return false;
+}
+
+/**
+ * الاشتراك في إشارات إبطال وطرد الجلسات اللحظية الواردة من السيرفر أو الأجهزة الأخرى (< 10ms)
+ * يشترك عبر 3 قنوات متوازية: WebSockets + BroadcastChannel + Window Storage Event
+ * @param {Function} onRevoked - دالة استدعاء عند تلقي أمر الإبطال
+ */
+export function subscribeToSessionRevocations(onRevoked) {
+  if (typeof onRevoked !== 'function') return () => {};
+
+  const safeHandler = (payload) => {
+    try {
+      if (!payload || !payload.role) return;
+      onRevoked(payload);
+    } catch (e) {
+      console.warn('[SessionRevocation] Error handling revocation signal:', e);
+    }
+  };
+
+  // 1. الاستماع عبر WebSockets
+  const s = getSocket();
+  if (s) {
+    s.on('auth:session_revoked', safeHandler);
+  }
+
+  // 2. الاستماع عبر BroadcastChannel
+  const bcHandler = (event) => {
+    if (event?.data) safeHandler(event.data);
+  };
+  authRevocationChannel?.addEventListener('message', bcHandler);
+
+  // 3. الاستماع عبر Storage Event (للتبويبات الأخرى في نفس المتصفح)
+  const storageHandler = (e) => {
+    if (e.key === 'pharmacy_auth_revocation_event' && e.newValue) {
+      try {
+        const parsed = JSON.parse(e.newValue);
+        safeHandler(parsed);
+      } catch {}
+    }
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', storageHandler);
+  }
+
+  return () => {
+    if (s) {
+      s.off('auth:session_revoked', safeHandler);
+    }
+    authRevocationChannel?.removeEventListener('message', bcHandler);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('storage', storageHandler);
+    }
+  };
+}
+
+
 

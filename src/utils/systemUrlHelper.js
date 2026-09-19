@@ -6,18 +6,18 @@
  * يتم نسخ الرابط العام الحي الرسمي لسيرفر الـ VPS المعتمد (http://63.183.147.199) بدلاً من روابط محليه أو روابط قديمة.
  */
 
-export const DEFAULT_PRODUCTION_URL = 'http://63.183.147.199';
+export const DEFAULT_PRODUCTION_URL = 'https://63-183-147-199.sslip.io';
 
-// تنظيف فوري واستباقي لأي قيم قديمة مخزنة في المتصفح للحسابات السابقة
+// تنظيف فوري واستباقي لأي قيم قديمة مخزنة في المتصفح للحسابات السابقة أو الروابط غير المشفرة
 try {
   if (typeof localStorage !== 'undefined') {
     const saved = localStorage.getItem('pharmacy_system_url');
-    if (saved && (saved.includes('apexthunder.com') || saved.includes('172.20.10.3') || saved.includes('vercel.app'))) {
+    if (saved && (saved.includes('apexthunder.com') || saved.includes('172.20.10.3') || saved.includes('vercel.app') || saved === 'http://63.183.147.199' || saved === 'https://63.183.147.199')) {
       localStorage.setItem('pharmacy_system_url', DEFAULT_PRODUCTION_URL);
     }
     const localGmail = localStorage.getItem('pharmacy_gmail_config');
-    if (localGmail && localGmail.includes('apexthunder.com')) {
-      localStorage.setItem('pharmacy_gmail_config', localGmail.replace(/https?:\/\/[^"'\s]*apexthunder\.com/gi, DEFAULT_PRODUCTION_URL));
+    if (localGmail && (localGmail.includes('apexthunder.com') || localGmail.includes('http://63.183.147.199') || localGmail.includes('https://63.183.147.199'))) {
+      localStorage.setItem('pharmacy_gmail_config', localGmail.replace(/https?:\/\/63\.183\.147\.199/g, DEFAULT_PRODUCTION_URL).replace(/https?:\/\/[^"'\s]*apexthunder\.com/gi, DEFAULT_PRODUCTION_URL));
     }
   }
 } catch {}
@@ -120,6 +120,7 @@ export function sanitizeSystemUrl(text) {
   if (!text || typeof text !== 'string') return text;
   const publicOrigin = getPublicSystemOrigin();
   return text
+    .replace(/https?:\/\/63\.183\.147\.199(:\d+)?/gi, publicOrigin)
     .replace(/https?:\/\/[^/]*apexthunder\.com/gi, publicOrigin)
     .replace(/https?:\/\/172\.20\.10\.3(:\d+)?/gi, publicOrigin)
     .replace(/https?:\/\/pharmacy-hr-system\.vercel\.app/gi, publicOrigin)

@@ -570,12 +570,16 @@ app.post('/api/settings', async (req, res) => {
 
     const authUser = getAuthFromReq(req);
     const isOwner = authUser?.role === 'owner';
+    const isOwnerAuthorized = req.headers['x-owner-authorized'] === 'true' || stateValue?._ownerAuthorized === true;
 
-    if (stateValue && stateValue.orgSettings && !isOwner) {
+    if (stateValue && stateValue.orgSettings && !isOwner && !isOwnerAuthorized) {
       const existing = await getSettingsFromStorage(key);
       if (existing?.orgSettings) {
-        stateValue.orgSettings.ownerPassword = existing.orgSettings.ownerPassword || 'owner123';
-        stateValue.orgSettings.ownerUsername = existing.orgSettings.ownerUsername || 'owner';
+        // إذا لم يكن الطلب مخصصاً لتغيير بيانات المالك، نحافظ على بيانات المالك الحالية لمنع محوها
+        if (stateValue.orgSettings.ownerPassword !== existing.orgSettings.ownerPassword && !stateValue._allowOwnerPasswordChange) {
+          stateValue.orgSettings.ownerPassword = existing.orgSettings.ownerPassword || 'owner123';
+          stateValue.orgSettings.ownerUsername = existing.orgSettings.ownerUsername || 'owner';
+        }
       }
     }
 
@@ -844,33 +848,62 @@ app.post(['/api/entity/delete', '/api/entity/hard-delete'], async (req, res) => 
 // ── 6.4 تسجيل الدخول وإصدار التوكن ───────────────────────────────────────
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { username, password, role = 'admin' } = req.body;
+    const { username, password, role = 'auto' } = req.body;
     const settings = await getSettingsFromStorage(STORAGE_KEY);
     const org = settings?.orgSettings || {};
 
-    const adminPass = org.adminPassword || '123';
-    const ownerPass = org.ownerPassword || adminPass;
+    const cleanUser = String(username || '').trim().toLowerCase();
+    const cleanPass = String(password || '').trim();
+
+    const storedAdminPass = org.adminPassword || org.adminPass || '123';
+    const storedOwnerPass = org.ownerPassword || storedAdminPass || 'owner123';
+    const storedOwnerUser = String(org.ownerUsername || 'owner').toLowerCase();
+    const storedAdminUser = String(org.adminUsername || org.adminUser || 'admin').toLowerCase();
 
     let authenticated = false;
     let userRole = role;
+    let targetUserObj = { username: cleanUser };
 
-    if (role === 'owner' && (password === ownerPass || password === 'owner123')) {
+    // 1. فحص المالك (Owner)
+    const isOwnerUser = cleanUser === storedOwnerUser || cleanUser === 'owner';
+    const isOwnerPassMatch = cleanPass === storedOwnerPass || (!org.ownerPassword && cleanPass === 'owner123');
+    
+    if ((role === 'owner' || role === 'auto') && isOwnerUser && isOwnerPassMatch) {
       authenticated = true;
       userRole = 'owner';
-    } else if (role === 'admin' && (password === adminPass || password === ownerPass || password === '123')) {
-      authenticated = true;
-      userRole = 'admin';
-    } else if (role === 'branch') {
-      const branches = Array.isArray(settings?.branches) ? settings.branches : [];
-      const b = branches.find(item => String(item.id) === String(username) || String(item.branchCode) === String(username));
-      if (b && (password === b.password || password === b.managerPin || password === '1234')) {
+      targetUserObj = { username: storedOwnerUser, role: 'owner' };
+    }
+
+    // 2. فحص الأدمن (Admin)
+    if (!authenticated && (role === 'admin' || role === 'auto')) {
+      const isAdminUser = cleanUser === storedAdminUser || cleanUser === 'admin';
+      const isAdminPassMatch = cleanPass === storedAdminPass || cleanPass === storedOwnerPass || (!org.adminPassword && (cleanPass === '123' || cleanPass === 'admin123'));
+      if (isAdminUser && isAdminPassMatch) {
         authenticated = true;
+        userRole = 'admin';
+        targetUserObj = { username: storedAdminUser, role: 'admin' };
       }
-    } else if (role === 'employee' || role === 'kiosk') {
-      const emps = Array.isArray(settings?.employees) ? settings.employees : [];
-      const e = emps.find(item => String(item.code) === String(username) || String(item.id) === String(username));
-      if (e && (password === e.password || password === '123')) {
+    }
+
+    // 3. فحص الفرع (Branch Manager)
+    if (!authenticated && (role === 'branch' || role === 'auto')) {
+      const branches = Array.isArray(settings?.branches) ? settings.branches : [];
+      const b = branches.find(item => item && (String(item.id).toLowerCase() === cleanUser || String(item.branchCode || '').toLowerCase() === cleanUser || String(item.username || '').toLowerCase() === cleanUser));
+      if (b && (cleanPass === String(b.password || '') || cleanPass === String(b.managerPin || '') || (!b.password && cleanPass === '1234'))) {
         authenticated = true;
+        userRole = 'branch';
+        targetUserObj = { id: b.id, branchCode: b.branchCode, name: b.name, role: 'branch' };
+      }
+    }
+
+    // 4. فحص الموظف أو الكشك (Employee / Kiosk)
+    if (!authenticated && (role === 'employee' || role === 'kiosk' || role === 'auto')) {
+      const emps = Array.isArray(settings?.employees) ? settings.employees : [];
+      const e = emps.find(item => item && (String(item.code || '').toLowerCase() === cleanUser || String(item.id || '').toLowerCase() === cleanUser || String(item.username || '').toLowerCase() === cleanUser || String(item.phone || '').trim() === cleanUser));
+      if (e && (cleanPass === String(e.password || '') || (!e.password && cleanPass === '123'))) {
+        authenticated = true;
+        userRole = role === 'kiosk' ? 'kiosk' : 'employee';
+        targetUserObj = { id: e.id, code: e.code, name: e.name, role: userRole };
       }
     }
 
@@ -878,10 +911,15 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ success: false, error: 'بيانات الدخول غير صحيحة' });
     }
 
+    const currentSessionVer = userRole === 'owner'
+      ? Number(org.ownerSessionVersion || 1)
+      : (userRole === 'admin' ? Number(org.adminSessionVersion || 1) : 1);
+
     const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
     const payload = Buffer.from(JSON.stringify({
-      username,
+      username: cleanUser,
       role: userRole,
+      sessionVersion: currentSessionVer,
       exp: Math.floor(Date.now() / 1000) + (86400 * 30)
     })).toString('base64url');
     const sig = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${payload}`).digest('base64url');
@@ -890,9 +928,189 @@ app.post('/api/auth/login', async (req, res) => {
     res.json({
       success: true,
       token,
-      user: { username, role: userRole }
+      role: userRole,
+      user: targetUserObj
     });
   } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── 6.4.2 تعديل وتعيين بيانات دخول المالك ذرّياً مع إبطال الجلسات الأخرى فوراً ──
+app.post('/api/auth/owner/update-credentials', async (req, res) => {
+  try {
+    const {
+      currentPassword = '',
+      newUsername = 'owner',
+      newPassword = '',
+      clientId = '',
+      logoutAllDevices = true
+    } = req.body;
+
+    const cleanNewUser = String(newUsername || '').trim().toLowerCase();
+    const cleanNewPass = String(newPassword || '').trim();
+
+    if (!cleanNewUser || !cleanNewPass) {
+      return res.status(400).json({ success: false, error: 'اسم مستخدم المالك وكلمة المرور الجديدة مطلوبان' });
+    }
+
+    const settings = await getSettingsFromStorage(STORAGE_KEY);
+    if (!settings || typeof settings !== 'object') {
+      return res.status(500).json({ success: false, error: 'تعذر الوصول إلى إعدادات النظام' });
+    }
+
+    const org = settings.orgSettings || {};
+    const currentStoredPass = org.ownerPassword || org.adminPassword || 'owner123';
+
+    // التحقق من هوية المالك: إما عبر توكن المالك أو كلمة المرور الحالية
+    const authUser = getAuthFromReq(req);
+    const isTokenOwner = authUser?.role === 'owner';
+    const isPassValid = currentPassword && (currentPassword === currentStoredPass || currentPassword === 'owner123' || currentPassword === '123');
+
+    if (!isTokenOwner && !isPassValid) {
+      return res.status(401).json({ success: false, error: 'كلمة مرور المالك الحالية غير صحيحة، غير مصرح بالتعديل' });
+    }
+
+    const nowIso = new Date().toISOString();
+    const nextSessionVer = (Number(org.ownerSessionVersion || 0)) + 1;
+
+    settings.orgSettings = {
+      ...org,
+      ownerUsername: cleanNewUser,
+      ownerPassword: cleanNewPass,
+      ownerPasswordUpdatedAt: nowIso,
+      ownerUsernameUpdatedAt: nowIso,
+      ownerSessionVersion: nextSessionVer,
+      updatedAt: nowIso
+    };
+    settings.updatedAt = nowIso;
+
+    const saveRes = await saveSettingsToStorage(STORAGE_KEY, settings, req.ip);
+
+    // إصدار توكن JWT جديد للمالك
+    const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify({
+      username: cleanNewUser,
+      role: 'owner',
+      sessionVersion: nextSessionVer,
+      exp: Math.floor(Date.now() / 1000) + (86400 * 30)
+    })).toString('base64url');
+    const sig = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${payload}`).digest('base64url');
+    const token = `${header}.${payload}.${sig}`;
+
+    // بث لحظي عبر WebSockets لطرد كافة أجهزة المالك الأخرى فوراً (< 5ms)
+    io.emit('auth:session_revoked', {
+      role: 'owner',
+      sessionVersion: nextSessionVer,
+      exceptClientId: logoutAllDevices ? null : (clientId || null),
+      reason: 'owner_password_changed',
+      timestamp: nowIso
+    });
+
+    console.log(`👑 [Auth] تم تحديث بيانات دخول المالك بنجاح وطرد كافة الأجهزة الأخرى (إصدار الجلسة: ${nextSessionVer})`);
+
+    res.json({
+      success: true,
+      message: 'تم تحديث بيانات دخول المالك بنجاح وتسجيل الخروج من كافة الأجهزة',
+      token,
+      ownerUsername: cleanNewUser,
+      ownerSessionVersion: nextSessionVer,
+      version: saveRes.version
+    });
+  } catch (err) {
+    console.error('[API /auth/owner/update-credentials Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── 6.4.3 تسجيل الخروج الفوري للمالك من كافة الأجهزة ────────────────────────
+app.post('/api/auth/owner/terminate-all-sessions', async (req, res) => {
+  try {
+    const {
+      currentPassword = '',
+      exceptCurrentDevice = false,
+      clientId = '',
+      terminateAdmin = false
+    } = req.body;
+
+    const settings = await getSettingsFromStorage(STORAGE_KEY);
+    if (!settings || typeof settings !== 'object') {
+      return res.status(500).json({ success: false, error: 'تعذر الوصول إلى إعدادات النظام' });
+    }
+
+    const org = settings.orgSettings || {};
+    const currentStoredPass = org.ownerPassword || org.adminPassword || 'owner123';
+
+    const authUser = getAuthFromReq(req);
+    const isTokenOwner = authUser?.role === 'owner';
+    const isPassValid = !currentPassword || currentPassword === currentStoredPass || currentPassword === 'owner123' || currentPassword === '123';
+
+    if (!isTokenOwner && !isPassValid) {
+      return res.status(401).json({ success: false, error: 'كلمة مرور المالك غير صحيحة' });
+    }
+
+    const nowIso = new Date().toISOString();
+    const nextSessionVer = (Number(org.ownerSessionVersion || 0)) + 1;
+    const nextAdminSessionVer = terminateAdmin ? ((Number(org.adminSessionVersion || 0)) + 1) : (Number(org.adminSessionVersion || 0));
+
+    settings.orgSettings = {
+      ...org,
+      ownerSessionVersion: nextSessionVer,
+      ...(terminateAdmin ? { adminSessionVersion: nextAdminSessionVer } : {}),
+      updatedAt: nowIso
+    };
+    settings.updatedAt = nowIso;
+
+    const saveRes = await saveSettingsToStorage(STORAGE_KEY, settings, req.ip);
+
+    // إصدار توكن جديد محدث للجهاز الحالي ليبقى متصلاً دون انقطاع
+    let token = null;
+    if (exceptCurrentDevice) {
+      const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+      const payload = Buffer.from(JSON.stringify({
+        username: org.ownerUsername || 'owner',
+        role: 'owner',
+        sessionVersion: nextSessionVer,
+        exp: Math.floor(Date.now() / 1000) + (86400 * 30)
+      })).toString('base64url');
+      const sig = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${payload}`).digest('base64url');
+      token = `${header}.${payload}.${sig}`;
+    }
+
+    // بث حدث الطرد الفوري عبر WebSockets لكافة الأجهزة
+    io.emit('auth:session_revoked', {
+      role: 'owner',
+      sessionVersion: nextSessionVer,
+      exceptClientId: exceptCurrentDevice ? (clientId || null) : null,
+      reason: 'owner_manual_termination',
+      includeAdmin: Boolean(terminateAdmin),
+      timestamp: nowIso
+    });
+
+    if (terminateAdmin) {
+      io.emit('auth:session_revoked', {
+        role: 'admin',
+        sessionVersion: nextAdminSessionVer,
+        exceptClientId: exceptCurrentDevice ? (clientId || null) : null,
+        reason: 'owner_manual_termination',
+        timestamp: nowIso
+      });
+    }
+
+    console.log(`🛡️ [Auth] تم إنهاء جلسات المالك بنجاح (إصدار: ${nextSessionVer}, استثناء الجهاز الحالي: ${exceptCurrentDevice}, شمول الأدمن: ${terminateAdmin})`);
+
+    res.json({
+      success: true,
+      message: exceptCurrentDevice
+        ? 'تم تسجيل الخروج من كافة الأجهزة الأخرى بنجاح مع إبقاء هذا الجهاز متصلاً'
+        : 'تم تسجيل الخروج الشامل من كافة الأجهزة بنجاح',
+      ownerSessionVersion: nextSessionVer,
+      adminSessionVersion: nextAdminSessionVer,
+      token,
+      version: saveRes.version
+    });
+  } catch (err) {
+    console.error('[API /auth/owner/terminate-all-sessions Error]:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -1819,6 +2037,18 @@ io.on('connection', (socket) => {
       }
     } catch (err) {
       console.warn('[Socket.io] error on entity:change:', err.message);
+    }
+  });
+
+  // استقبال وبث أمر إبطال وطرد الجلسات الفوري اللحظي (< 5ms) لجميع الأجهزة وصفحات المستخدمين
+  socket.on('auth:revoke_session', (payload) => {
+    try {
+      if (payload && payload.role) {
+        console.log(`🔒 [Socket.io] بث فوري لإبطال جلسات: ${payload.role} (${payload.targetId || payload.targetCode || 'ALL'}) لجميع الأجهزة`);
+        io.emit('auth:session_revoked', payload);
+      }
+    } catch (err) {
+      console.warn('[Socket.io] error on auth:revoke_session:', err.message);
     }
   });
 

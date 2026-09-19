@@ -6,6 +6,7 @@ import {
 } from './branchMatcher.js';
 import { isEmployeeActive } from './formatters.js';
 import { getEffectiveShiftHours } from './latePenaltyEngine.js';
+import { computeEmployeeLoanDeductionsForPeriod } from './loansEngine.js';
 
 /**
  * احتساب ملخص الراتب الفعلي للموظف من واقع الورديات وساعات البصمة والبدلات والخصومات
@@ -156,23 +157,14 @@ export function calculateEmployeeActualSummary({
   });
   const lateDeduction = empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.penaltyAmount) || 0), 0);
 
-  // السلف
-  const empLoans = (state?.loans || []).filter(l => {
-    if (String(l.employeeId) !== String(emp.id)) return false;
-    if (l.status !== 'approved' && !l.adminApproved) return false;
-    if (isTargetFilterActive) {
-      if (l.branchId) return isBranchMatch(l.branchId, targetBranchObj);
-      return isPrimaryForAdjustments;
-    }
-    return true;
-  });
-  const loanDeduction = empLoans.reduce((acc, l) => {
-    const rem = parseFloat(l.remainingAmount ?? l.amount) || 0;
-    if (rem <= 0) return acc;
-    const isInstallment = l.type === 'installment_loan' || l.isInstallment === true;
-    const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || rem;
-    return isInstallment ? acc + Math.min(rem, monthlyDeduction) : acc + rem;
-  }, 0);
+  // السلف والأقساط الشهرية عبر محرك السلف المركزي
+  const loanCalc = computeEmployeeLoanDeductionsForPeriod(
+    emp.id,
+    targetMonthStr || null,
+    state,
+    targetBranchId || null
+  );
+  const loanDeduction = loanCalc.totalDeduction;
 
   // البدلات (تُحتسب إذا كان الفرع هو الأساسي أو بدون فلترة فرع)
   let managementAllowance = parseFloat(emp.managementAllowance) || 0;

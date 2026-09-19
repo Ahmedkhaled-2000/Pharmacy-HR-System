@@ -5,6 +5,7 @@ import { syncEmployeeEntireDrive } from '../../utils/googleDriveService';
 import { normalizeState, parseAnnualLeaveBalance } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
 import { useAuth } from '../../context/AuthContext';
+import { emitRevokeSession } from '../../utils/socketClient';
 
 export default function EmployeeFileModal({
   isOpen,
@@ -879,6 +880,17 @@ export default function EmployeeFileModal({
       if (isSaving) return;
       setIsSaving(true);
       try {
+        const isPasswordChanged = editingEmp && String(editingEmp.password || '').trim() !== String(password || '').trim();
+        if (isPasswordChanged) {
+          emitRevokeSession({
+            role: 'employee',
+            targetId: employeeData.id,
+            targetCode: employeeData.code,
+            sessionVersion: employeeData.sessionVersion,
+            reason: 'employee_password_changed'
+          });
+        }
+
         if (onSave) {
           await onSave(employeeData);
         } else if (setState) {

@@ -1,6 +1,7 @@
 import { loadExcelJS } from './excelExport';
 import { fmt, arabicMonthLabel } from './formatters';
 import { getEffectiveShiftHours, computeLatenessFinancialAmount, isApprovedPermissionForDate } from './latePenaltyEngine';
+import { getEmployeeUnifiedLoans, computeEmployeeLoanDeductionsForPeriod } from './loansEngine';
 
 const XLSX_STYLES = {
   headerBg: 'FF0F766E',      // Deep Teal Header
@@ -167,7 +168,13 @@ export async function exportComprehensiveCompanyPayrollExcel({
       const rDate = r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '');
       return rDate && filterFn(rDate);
     });
-    const loans = state.loans || [];
+    const activeTargetMonth = !isCustom ? (monthPicker || formattedDate.slice(0, 7)) : null;
+    const allUnifiedLoans = [];
+    employees.forEach((emp) => {
+      const empUnified = getEmployeeUnifiedLoans(emp.id, state);
+      allUnifiedLoans.push(...empUnified);
+    });
+    const loans = allUnifiedLoans.length > 0 ? allUnifiedLoans : (state.loans || []);
     const finances = (state.finances || state.incomeExpenses || []).filter((f) => f.date && filterFn(f.date));
 
     // Compute Grand Payroll
@@ -932,16 +939,33 @@ export async function exportComprehensiveCompanyPayrollExcel({
       const branchObj = branches.find((b) => String(b.id) === String(loan.branchId || emp.branchId));
       const bName = branchObj?.name || 'الفرع الرئيسي';
 
-      const totalAmt = parseFloat(loan.amount) || 0;
-      const paidAmt = parseFloat(loan.paidAmount) || 0;
-      const remAmt = Math.max(0, totalAmt - paidAmt);
-      const periodDed = Math.min(remAmt, parseFloat(loan.monthlyDeduction || loan.installmentAmount) || remAmt);
+      const totalAmt = parseFloat(loan.totalAmount || loan.amount) || 0;
+      let paidAmt = parseFloat(loan.paidAmount) || 0;
+      let remAmt = Math.max(0, totalAmt - paidAmt);
+      let periodDed = 0;
 
-      let typeName = 'سلفة نقدية';
-      if (loan.type === 'meds' || loan.type === 'credit_medicine') typeName = '💊 مشتريات أدوية آجل';
-      else if (loan.loanType === 'installment') typeName = '💳 سلفة مقسطة';
+      let typeName = loan.type === 'meds' ? '💊 مشتريات أدوية آجل' : (loan.loanType === 'installment' ? '💳 سلفة مقسطة' : '💳 سلفة نقدية شهرية');
+      let statusDesc = remAmt === 0 ? '🟢 تم السداد بالكامل' : '🔴 مستحق السداد';
 
-      const statusDesc = remAmt === 0 ? '🟢 تم السداد بالكامل' : (paidAmt > 0 ? '⏳ سداد جزئي جاري' : '🔴 مستحق السداد');
+      if (activeTargetMonth && emp.id) {
+        const loanCalc = computeEmployeeLoanDeductionsForPeriod(emp.id, activeTargetMonth, state);
+        const matchItem = loanCalc.items.find((it) => String(it.loanId) === String(loan.id));
+        if (matchItem) {
+          periodDed = matchItem.deductedThisMonth;
+          paidAmt = matchItem.paidAmount;
+          remAmt = matchItem.remainingBalance;
+          typeName = matchItem.typeLabel;
+          statusDesc = remAmt === 0
+            ? '🟢 تم السداد بالكامل'
+            : (matchItem.isInstallment ? `⏳ قسط (${matchItem.currentInstallmentNumber}/${matchItem.installmentsCount})` : '⏳ جاري السداد');
+        } else if (remAmt === 0) {
+          statusDesc = '🟢 تم السداد بالكامل سابقاً';
+        } else {
+          statusDesc = '⚪ لا خصم بهذه الدورة';
+        }
+      } else {
+        periodDed = Math.min(remAmt, parseFloat(loan.monthlyDeduction || loan.installmentAmount) || remAmt);
+      }
 
       const rowVals = [
         idx + 1,

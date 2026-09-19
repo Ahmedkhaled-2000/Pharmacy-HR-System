@@ -8,31 +8,43 @@ export const STORAGE_KEY = 'pharmacy-tracker-data';
 export const WORK_DAYS_PER_MONTH = 26;
 export const WORK_HOURS_PER_DAY = 8;
 
-// تحديد رابط الـ API تلقائياً
+// تحديد رابط الـ API تلقائياً مع الحماية المطلقة من أخطاء Mixed Content
 const getApiBaseUrl = () => {
   // 1. أولوية الرابط المخصص المحفوظ في التخزين المحلي (سواء في تطبيق سطح المكتب أو المتصفح)
   if (typeof window !== 'undefined') {
     try {
       const customApi = localStorage.getItem('app_custom_cloud_api_url');
-      if (customApi && customApi.startsWith('http')) return customApi.replace(/\/+$/, '');
+      if (customApi && customApi.startsWith('http')) {
+        let clean = customApi.replace(/\/+$/, '');
+        if (window.location?.protocol === 'https:' && clean.startsWith('http:')) {
+          clean = clean.replace(/^http:/, 'https:');
+        }
+        return clean;
+      }
     } catch {}
   }
 
-  // 2. إذا تم تحديد الرابط في متغيرات البيئة (.env) وكان رابطاً مطلقاً
-  if (import.meta.env?.VITE_API_URL && import.meta.env.VITE_API_URL.startsWith('http')) {
-    return import.meta.env.VITE_API_URL.replace(/\/+$/, '');
-  }
-
-  // 3. في بيئة المتصفح المباشرة على نطاق السيرفر أو pharmacore.site
+  // 2. في بيئة المتصفح المباشرة: استخدام نفس المنشأ (Same-Origin) دائماً إذا لم نكن على localhost/electron
   if (typeof window !== 'undefined' && window.location) {
-    const { origin, hostname } = window.location;
-    if (hostname && (hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site') || hostname === '63.183.147.199')) {
+    const { origin, hostname, protocol } = window.location;
+    const isLocal = !hostname || hostname === 'localhost' || hostname === '127.0.0.1';
+    const isApp = protocol === 'app:' || protocol === 'file:' || protocol === 'capacitor:';
+    if (!isLocal && !isApp && origin && origin.startsWith('http')) {
       return `${origin}/api`;
     }
   }
 
-  // 4. الرابط السحابي المركزي الموحد لكافة المنصات (تطبيق الويندوز المكتبي، المتصفح على Vercel، التطوير المحلي)
-  return 'http://63.183.147.199/api';
+  // 3. إذا تم تحديد الرابط في متغيرات البيئة (.env)
+  if (import.meta.env?.VITE_API_URL && import.meta.env.VITE_API_URL.startsWith('http')) {
+    let envUrl = import.meta.env.VITE_API_URL.replace(/\/+$/, '');
+    if (typeof window !== 'undefined' && window.location?.protocol === 'https:' && envUrl.startsWith('http:')) {
+      envUrl = envUrl.replace(/^http:/, 'https:');
+    }
+    return envUrl;
+  }
+
+  // 4. الرابط السحابي المركزي الموثوق والمشفر عالمياً (HTTPS)
+  return 'https://63-183-147-199.sslip.io/api';
 };
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -352,6 +364,66 @@ export async function apiLogin(usernameOrCreds, password = '', role = 'auto') {
     success: false,
     error: 'اسم المستخدم أو كلمة المرور غير صحيحة'
   };
+}
+
+// ── 0.1 تعديل وتعيين بيانات دخول المالك ذرّياً مع طرد كافة الأجهزة الأخرى ──────
+export async function apiUpdateOwnerCredentials({
+  currentPassword = '',
+  newUsername = 'owner',
+  newPassword = '',
+  clientId = '',
+  logoutAllDevices = true
+} = {}) {
+  resetBackendCircuitBreaker();
+  const res = await request('auth/owner/update-credentials', {
+    method: 'POST',
+    body: JSON.stringify({
+      currentPassword,
+      newUsername,
+      newPassword,
+      clientId,
+      logoutAllDevices
+    }),
+    timeout: 30000,
+    retries: 2,
+    noCache: true,
+    isBackground: false
+  });
+  if (res?.token) {
+    try {
+      localStorage.setItem('app_auth_token', res.token);
+    } catch {}
+  }
+  return res;
+}
+
+// ── 0.2 تسجيل خروج المالك الفوري من كافة الأجهزة ────────────────────────────
+export async function apiTerminateOwnerSessions({
+  currentPassword = '',
+  exceptCurrentDevice = false,
+  clientId = '',
+  terminateAdmin = false
+} = {}) {
+  resetBackendCircuitBreaker();
+  const res = await request('auth/owner/terminate-all-sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      currentPassword,
+      exceptCurrentDevice,
+      clientId,
+      terminateAdmin
+    }),
+    timeout: 30000,
+    retries: 2,
+    noCache: true,
+    isBackground: false
+  });
+  if (res?.token) {
+    try {
+      localStorage.setItem('app_auth_token', res.token);
+    } catch {}
+  }
+  return res;
 }
 
 // ── 1. دوال إعدادات وبيانات التطبيق الرئيسية (Settings / State) ────────────────

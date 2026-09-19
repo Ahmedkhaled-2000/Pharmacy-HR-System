@@ -4,6 +4,7 @@ import { fmt, arabicWeekday, AR_MONTHS, getEmployeeApprovedLeaves } from './form
 import { getEmployeeDaySchedule } from './rosterEngine';
 import { getEffectiveShiftHours, isApprovedPermissionForDate } from './latePenaltyEngine';
 import { getCycleDateRange } from './periodEngine';
+import { computeEmployeeLoanDeductionsForPeriod } from './loansEngine';
 
 export const NativePrint = registerPlugin('NativePrint');
 
@@ -646,88 +647,14 @@ export function generateOfficialPayslipHTML({
     };
   });
 
-  // 4. Loans & Credit Medicine (السلف ومشتريات الأدوية)
-  const cycleRange = getCycleDateRange(month, orgSettings);
-  const cyclePredicate = (d) => d && d >= cycleRange.startDate && d <= cycleRange.endDate;
-
-  const loanBreakdownMap = new Map();
-  (state?.requests || [])
-    .filter(
-      (r) =>
-        String(r.employeeId) === String(emp?.id) &&
-        (r.status === 'approved' || r.adminApproved || r.status === 'partial') &&
-        (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine')
-    )
-    .forEach((r) => loanBreakdownMap.set(String(r.id), r));
-
-  (state?.loans || [])
-    .filter(
-      (l) =>
-        String(l.employeeId) === String(emp?.id) &&
-        l.status !== 'pending' &&
-        l.status !== 'pending_admin' &&
-        l.status !== 'rejected' &&
-        l.status !== 'cancelled' &&
-        (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine')
-    )
-    .forEach((l) => {
-      const existing = loanBreakdownMap.get(String(l.id));
-      loanBreakdownMap.set(String(l.id), { ...(existing || {}), ...l });
-    });
-
-  const empLoans = Array.from(loanBreakdownMap.values()).map((l) => {
-    const total = parseFloat(l.amount || l.totalAmount) || 0;
-    const paid = parseFloat(l.paidAmount) || 0;
-    const rem = Math.max(0, total - paid);
-
-    const history = l.paymentsHistory || l.payments || l.paidHistory || [];
-    const paymentsInCycle = history.filter((p) => {
-      const pDate = p.date || '';
-      const pMonth = p.month || '';
-      if (pDate && cyclePredicate(pDate)) return true;
-      if (month && (pMonth === month || (p.note && p.note.includes(month)))) return true;
-      return false;
-    });
-    const paidInCycle = paymentsInCycle.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-
-    const isInstallment = l.loanType === 'installment' || parseInt(l.installmentsCount || l.monthsCount, 10) > 1 || (parseFloat(l.monthlyDeduction || l.installmentAmount) > 0 && parseFloat(l.monthlyDeduction || l.installmentAmount) < total);
-    const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || (isInstallment ? Math.ceil(total / (parseInt(l.installmentsCount || l.monthsCount, 10) || 1)) : rem);
-    const itemDate = l.date || (l.createdAt ? l.createdAt.slice(0, 10) : '');
-
-    let deductedThisMonth = 0;
-    let previouslyPaid = 0;
-
-    if (paidInCycle > 0) {
-      deductedThisMonth = paidInCycle;
-      previouslyPaid = Math.max(0, paid - paidInCycle);
-    } else if (rem > 0) {
-      if (isInstallment) {
-        deductedThisMonth = Math.min(rem, monthlyDeduction);
-      } else if (cyclePredicate(itemDate) || rem > 0) {
-        deductedThisMonth = rem;
-      }
-      previouslyPaid = paid;
-    }
-
-    if (deductedThisMonth <= 0) return null;
-
-    const remainingBalance = Math.max(0, total - (previouslyPaid + deductedThisMonth));
-
-    return {
-      id: l.id,
-      date: paymentsInCycle[0]?.date || itemDate || cycleRange.startDate,
-      typeLabel: (l.type === 'meds' || l.type === 'credit_medicine')
-        ? '💊 مشتريات أدوية بالآجل'
-        : isInstallment
-        ? `💳 قسط سلفة مقسطة (${l.currentInstallmentNumber || 1}/${l.installmentsCount || l.monthsCount || 1})`
-        : '💳 سلفة نقدية شهرية',
-      totalAmount: total,
-      paidAmount: previouslyPaid,
-      deductedThisMonth,
-      remainingBalance,
-      notes: l.reason || l.details || l.notes || '—'
-    };
-  }).filter(Boolean);
+  // 4. Loans & Credit Medicine (السلف ومشتريات الأدوية عبر المحرك المركزي الموحد)
+  const loansCalc = computeEmployeeLoanDeductionsForPeriod(
+    emp?.id,
+    month,
+    state,
+    selectedBranchId || null
+  );
+  const empLoans = summary.loansBreakdown || loansCalc.items || [];
 
   // 5. Absence deductions (الغياب)
   const absenceDaysCount = summary.absenceDaysCount || 0;

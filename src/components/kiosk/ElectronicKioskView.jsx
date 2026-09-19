@@ -22,7 +22,7 @@ export default function ElectronicKioskView({
   submitRequest,
   kioskBranchId
 }) {
-  const { setState, saveState } = useData();
+  const { setState, saveState, isOffline, isLoading, isSyncing } = useData() || {};
   const uiContext = useOptionalUI();
   const { kioskConfirmModal } = uiContext || {};
   const { orgSettings, employees, ipRestrictions } = state;
@@ -183,6 +183,20 @@ export default function ElectronicKioskView({
     e.preventDefault();
     if (!inputCode) return;
     const cleanCode = normalizeDigits(inputCode);
+
+    // فحص وقائي: التأكد من اكتمال تحميل سجلات الموظفين من قاعدة البيانات السحابية
+    if (!employees || employees.length === 0) {
+      setKioskAlertModal({
+        isOpen: true,
+        type: 'warning',
+        title: 'جارِ المزامنة مع قاعدة البيانات',
+        note: 'جاري تحميل سجلات الموظفين والورديات من الخادم السحابي، يرجى الانتظار ثوانٍ معدودة والمحاولة ثانية.',
+        countdown: 4,
+        onClose: () => setKioskAlertModal(null)
+      });
+      return;
+    }
+
     const emp = (employees || []).find(e => 
       String(e.code || '').trim() === cleanCode || 
       normalizeDigits(e.code) === cleanCode || 
@@ -1021,10 +1035,31 @@ export default function ElectronicKioskView({
             boxShadow: '0 20px 40px -15px rgba(0,0,0,0.25)'
           }}
         >
-          {/* Top Status Bar */}
-          <div style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px solid rgba(15, 23, 42, 0.08)' }}>
+          {/* Top Status Bar with Live Secure DB Status */}
+          <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px solid rgba(15, 23, 42, 0.08)', flexWrap: 'wrap', gap: '6px' }}>
             <span style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(15, 23, 42, 0.04)', padding: '4px 14px', borderRadius: '20px' }}>
               {isGeneralKioskLink ? '⚡ كشك البصمة العام' : '🏢 كشك فرع مخصص'}
+            </span>
+            <span style={{
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 12px',
+              borderRadius: '20px',
+              background: isOffline ? '#fee2e2' : (isLoading || isSyncing ? '#fef3c7' : '#dcfce7'),
+              color: isOffline ? '#b91c1c' : (isLoading || isSyncing ? '#b45309' : '#15803d'),
+              border: `1px solid ${isOffline ? '#fca5a5' : (isLoading || isSyncing ? '#fde68a' : '#86efac')}`
+            }}>
+              <span style={{
+                width: '7px',
+                height: '7px',
+                borderRadius: '50%',
+                background: isOffline ? '#ef4444' : (isLoading || isSyncing ? '#f59e0b' : '#22c55e'),
+                boxShadow: isOffline ? 'none' : '0 0 6px #22c55e'
+              }}></span>
+              {isOffline ? '📴 غير متصل' : (isLoading || isSyncing ? '⏳ جاري المزامنة...' : '🔒 اتصال آمن بقاعدة البيانات')}
             </span>
           </div>
 

@@ -493,7 +493,13 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
                 borderRadius: '8px',
                 cursor: 'pointer'
               }}
-              onClick={() => { window.location.href = window.location.href.replace(/^http:/, 'https:'); }}
+              onClick={() => {
+                if (window.location.hostname === '63.183.147.199' || window.location.hostname.includes('sslip.io')) {
+                  window.location.href = 'https://63-183-147-199.sslip.io' + window.location.pathname + window.location.search;
+                } else {
+                  window.location.href = window.location.href.replace(/^http:/, 'https:');
+                }
+              }}
             >
               🔒 التبديل إلى رابط HTTPS المشفر (لتشغيل البث الحي للكاميرا)
             </button>

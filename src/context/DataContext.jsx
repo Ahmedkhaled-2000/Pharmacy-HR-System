@@ -63,6 +63,7 @@ import {
   putRequestsBatch
 } from '../utils/localDatabase';
 import { emitEntityChange } from '../utils/socketClient';
+import { computeEmployeeLoanDeductionsForPeriod } from '../utils/loansEngine';
 
 /**
  * كاشف التغييرات الذرية فائق السرعة
@@ -165,7 +166,9 @@ export function DataProvider({ children, showToast = () => {} }) {
     setCurrentBranch,
     currentEmpUser,
     setCurrentEmpUser,
-    setIsAdminLoggedIn
+    setIsAdminLoggedIn,
+    handleLogout,
+    validateSessionAgainstData
   } = useAuth();
 
   // Core Data State with Default Settings
@@ -541,6 +544,10 @@ export function DataProvider({ children, showToast = () => {} }) {
       }
 
       // التحقق من صلاحية الجلسات ومطابقتها لأحدث بيانات واعتمادات عند تحميل البيانات
+      if (validateSessionAgainstData) {
+        validateSessionAgainstData(normalized);
+      }
+
       const activeRole = localStorage.getItem('app_auth_role') || authRoleRef.current;
       const activeEmp = currentEmpUserRef.current;
       const activeBranch = currentBranchRef.current;
@@ -551,11 +558,14 @@ export function DataProvider({ children, showToast = () => {} }) {
         const srvOwnerPass = normalized?.orgSettings?.ownerPassword;
         const srvOwnerVer = Number(normalized?.orgSettings?.ownerSessionVersion || 0);
         if ((myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
-            (srvOwnerVer > 0 && myOwnerVer > 0 && srvOwnerVer > myOwnerVer)) {
-          localStorage.removeItem('app_auth_role');
-          localStorage.removeItem('app_owner_authenticated');
-          setAuthRole('none');
-          setIsAdminLoggedIn(false);
+            (srvOwnerVer > 0 && srvOwnerVer > myOwnerVer)) {
+          if (handleLogout) handleLogout();
+          else {
+            localStorage.removeItem('app_auth_role');
+            localStorage.removeItem('app_owner_authenticated');
+            setAuthRole('none');
+            setIsAdminLoggedIn(false);
+          }
         }
       } else if (activeRole === 'admin') {
         const myAdminPass = localStorage.getItem('app_admin_password_snapshot');
@@ -563,33 +573,42 @@ export function DataProvider({ children, showToast = () => {} }) {
         const srvAdminPass = normalized?.orgSettings?.adminPassword || normalized?.orgSettings?.adminPass;
         const srvAdminVer = Number(normalized?.orgSettings?.adminSessionVersion || 0);
         if ((myAdminPass && srvAdminPass && myAdminPass !== srvAdminPass) ||
-            (srvAdminVer > 0 && myAdminVer > 0 && srvAdminVer > myAdminVer)) {
-          localStorage.removeItem('app_auth_role');
-          localStorage.removeItem('app_is_admin');
-          setAuthRole('none');
-          setIsAdminLoggedIn(false);
+            (srvAdminVer > 0 && srvAdminVer > myAdminVer)) {
+          if (handleLogout) handleLogout();
+          else {
+            localStorage.removeItem('app_auth_role');
+            localStorage.removeItem('app_is_admin');
+            setAuthRole('none');
+            setIsAdminLoggedIn(false);
+          }
         }
       } else if (activeRole === 'employee' && activeEmp) {
         const liveEmp = (normalized.employees || []).find(e => String(e.id) === String(activeEmp.id) || String(e.code) === String(activeEmp.code));
         const myEmpPass = localStorage.getItem('app_emp_password_snapshot');
         const myEmpVer = Number(localStorage.getItem('app_emp_session_version') || 0);
         if (!liveEmp || (myEmpPass && liveEmp.password && myEmpPass !== liveEmp.password) ||
-            (Number(liveEmp.sessionVersion || 0) > myEmpVer && myEmpVer > 0)) {
-          localStorage.removeItem('app_auth_role');
-          localStorage.removeItem('app_current_emp_user');
-          setAuthRole('none');
-          setCurrentEmpUser(null);
+            (Number(liveEmp.sessionVersion || 0) > myEmpVer)) {
+          if (handleLogout) handleLogout();
+          else {
+            localStorage.removeItem('app_auth_role');
+            localStorage.removeItem('app_current_emp_user');
+            setAuthRole('none');
+            setCurrentEmpUser(null);
+          }
         }
       } else if (activeRole === 'branch' && activeBranch) {
         const liveBranch = (normalized.branches || []).find(b => String(b.id) === String(activeBranch.id) || String(b.branchCode) === String(activeBranch.branchCode));
         const myBranchPass = localStorage.getItem('app_branch_password_snapshot');
         const myBranchVer = Number(localStorage.getItem('app_branch_session_version') || 0);
         if (!liveBranch || (myBranchPass && liveBranch.password && myBranchPass !== liveBranch.password) ||
-            (Number(liveBranch.sessionVersion || 0) > myBranchVer && myBranchVer > 0)) {
-          localStorage.removeItem('app_auth_role');
-          localStorage.removeItem('app_current_branch');
-          setAuthRole('none');
-          setCurrentBranch(null);
+            (Number(liveBranch.sessionVersion || 0) > myBranchVer)) {
+          if (handleLogout) handleLogout();
+          else {
+            localStorage.removeItem('app_auth_role');
+            localStorage.removeItem('app_current_branch');
+            setAuthRole('none');
+            setCurrentBranch(null);
+          }
         }
       }
 
@@ -716,6 +735,8 @@ export function DataProvider({ children, showToast = () => {} }) {
     currentEmpUser,
     setCurrentEmpUser,
     setIsAdminLoggedIn,
+    handleLogout,
+    validateSessionAgainstData,
     setIsLoading,
     setIsOffline,
     setPendingSyncCount,
@@ -1192,24 +1213,19 @@ export function DataProvider({ children, showToast = () => {} }) {
     const lateDeduction = empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.penaltyAmount) || 0), 0);
     const lateDeductionMinutes = empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.deductionMinutes) || 0), 0);
 
-    // السلف (تُخصم من الفرع الأساسي فقط للموظف حتى لا تتكرر إذا داوم بعدة فروع)
-    const empLoans = (state.loans || []).filter(l => {
-      if (String(l.employeeId) !== String(empId)) return false;
-      if (l.status !== 'approved' && !l.adminApproved) return false;
-      if (isTargetFilterActive) {
-        if (l.branchId) return isBranchMatch(l.branchId, targetBranchObj);
-        return isPrimaryForAdjustments;
-      }
-      return true;
-    });
+    // السلف والأقساط الشهرية (محسوبة بدقة عبر محرك السلف الموحد loansEngine)
+    const activeTargetMonth = (monthStr && typeof monthStr === 'string' && monthStr.length >= 7)
+      ? monthStr.slice(0, 7)
+      : null;
 
-    const loanDeduction = empLoans.reduce((acc, l) => {
-      const rem = parseFloat(l.remainingAmount ?? l.amount) || 0;
-      if (rem <= 0) return acc;
-      const isInstallment = l.type === 'installment_loan' || l.isInstallment === true;
-      const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || rem;
-      return isInstallment ? acc + Math.min(rem, monthlyDeduction) : acc + rem;
-    }, 0);
+    const loanCalculation = computeEmployeeLoanDeductionsForPeriod(
+      empId,
+      activeTargetMonth,
+      state,
+      targetBranchId || null
+    );
+    const loanDeduction = loanCalculation.totalDeduction;
+    const loansBreakdown = loanCalculation.items;
 
     // الإجازات المعتمدة
     const empApprovedLeaves = getEmployeeApprovedLeaves(emp, state, effectiveFilterFn);
@@ -1369,6 +1385,7 @@ export function DataProvider({ children, showToast = () => {} }) {
       manualDeduction,
       loanDeduction,
       loansDeduction: loanDeduction,
+      loansBreakdown,
       absenceDeduction: totalAbsenceDeduction,
       absenceDaysCount: totalAbsenceDaysCount,
       unpaidLeaveDaysCount,

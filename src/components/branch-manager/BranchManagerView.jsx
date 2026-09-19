@@ -18,7 +18,7 @@ import BranchDirectivesModule from '../branches/BranchDirectivesModule';
 import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, isShiftManualPunch, calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, fmt } from '../../utils/formatters';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
-import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '../../utils/periodEngine';
+import { getCycleDateRange, createDatePredicate, getActivePayrollMonth, isPayrollPeriodFrozenForDate, isPayrollMonthFrozen } from '../../utils/periodEngine';
 import { getRealDate, getRealTodayStr } from '../../utils/timeEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { getBranchIdentifiers, isEmployeeInBranch } from '../../utils/disciplinaryPenaltyEngine';
@@ -1206,6 +1206,12 @@ export default function BranchManagerView({
 
   const handleSubmitRosterEditRequest = async (e) => {
     e.preventDefault();
+    const activeTargetMonth = state.monthPicker || getActivePayrollMonth(state.orgSettings || {});
+    if (isPayrollMonthFrozen(activeTargetMonth, state.orgSettings || {})) {
+      showToast?.(`⚠️ لا يمكن إرسال طلب تعديل الجدول: دورة رواتب شهر (${activeTargetMonth}) مغلقة ومجمدة رسمياً.`);
+      return;
+    }
+
     if (!rosterEditEmpId || !rosterEditDetails.trim()) {
       showToast?.('يرجى تحديد الموظف وإدخال التفاصيل');
       return;
@@ -1263,6 +1269,13 @@ export default function BranchManagerView({
 
   const handleSubmitEmployeeAdjustment = async (e) => {
     e.preventDefault();
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const freezeCheck = isPayrollPeriodFrozenForDate(todayStr, state.orgSettings || {});
+    if (freezeCheck.isFrozen) {
+      showToast?.(freezeCheck.reason);
+      return;
+    }
+
     const amount = parseFloat(adjAmount);
     if (!adjEmpId || !amount || amount <= 0 || !adjReason.trim()) {
       showToast?.('يرجى ملء بيانات المكافأة/الخصم بشكل صحيح');
@@ -1327,6 +1340,12 @@ export default function BranchManagerView({
     e.preventDefault();
     if (!manualPunchData.employeeId || !manualPunchData.date || !manualPunchData.reason.trim()) {
       showToast?.('يرجى ملء كافة حقول طلب البصمة اليدوية وكتابة السبب');
+      return;
+    }
+
+    const freezeCheck = isPayrollPeriodFrozenForDate(manualPunchData.date, state.orgSettings || {});
+    if (freezeCheck.isFrozen) {
+      showToast?.(freezeCheck.reason);
       return;
     }
 
@@ -1410,6 +1429,13 @@ export default function BranchManagerView({
   // Handle Bonus Request Submission
   const handleSubmitBonusRequest = async (e) => {
     e.preventDefault();
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const freezeCheck = isPayrollPeriodFrozenForDate(todayStr, state.orgSettings || {});
+    if (freezeCheck.isFrozen) {
+      showToast?.(freezeCheck.reason);
+      return;
+    }
+
     const amount = parseFloat(bonusData.amount);
     if (!bonusData.employeeId || !amount || amount <= 0 || !bonusData.reason.trim()) {
       showToast?.('يرجى تحديد الموظف والمبلغ والسبب بشكل صحيح');
@@ -1478,6 +1504,12 @@ export default function BranchManagerView({
     e.preventDefault();
     if (!leaveData.employeeId || !leaveData.startDate || !leaveData.endDate || !leaveData.reason.trim()) {
       showToast?.('يرجى ملء كافة بيانات طلب الإجازة');
+      return;
+    }
+
+    const freezeCheck = isPayrollPeriodFrozenForDate(leaveData.startDate, state.orgSettings || {});
+    if (freezeCheck.isFrozen) {
+      showToast?.(freezeCheck.reason);
       return;
     }
 

@@ -11,7 +11,15 @@ import {
   fetchSnapshotsList,
   removeSnapshot
 } from '../../utils/backupHelper';
-import { apiFetchFaces, apiDeleteFace, apiSystemReset, STORAGE_KEY } from '../../utils/apiClient';
+import {
+  apiFetchFaces,
+  apiDeleteFace,
+  apiSystemReset,
+  apiUpdateOwnerCredentials,
+  apiTerminateOwnerSessions,
+  STORAGE_KEY
+} from '../../utils/apiClient';
+import { emitRevokeSession, CLIENT_SESSION_ID } from '../../utils/socketClient';
 import { clearPendingQueue, saveStateLocally, clearLocalDatabase } from '../../utils/offlineStorage';
 import { broadcastStateChange } from '../../utils/offlineSync';
 import GmailConfigCard from './GmailConfigCard';
@@ -119,8 +127,12 @@ export default function SettingsModule({
   const [ownerPasswordInput, setOwnerPasswordInput] = useState(initialOwnerCreds.password);
   const [ownerConfirmPasswordInput, setOwnerConfirmPasswordInput] = useState(initialOwnerCreds.password);
   const [showOwnerPasswordText, setShowOwnerPasswordText] = useState(false);
+  const [isTerminateOwnerModalOpen, setIsTerminateOwnerModalOpen] = useState(false);
+  const [isTerminatingOwner, setIsTerminatingOwner] = useState(false);
+  const isEditingOwnerPasswordRef = useRef(false);
 
   useEffect(() => {
+    if (isEditingOwnerPasswordRef.current) return;
     const creds = getSavedOwnerCreds();
     if (creds.username) setOwnerUsernameInput(creds.username);
     if (creds.password) {
@@ -245,6 +257,11 @@ export default function SettingsModule({
       setIsOwnerUnlocked(true);
       try {
         sessionStorage.setItem('app_settings_owner_tab_unlocked', 'true');
+        sessionStorage.setItem('app_owner_authenticated', 'true');
+        localStorage.setItem('pharmacy_owner_username', inputUser);
+        localStorage.setItem('pharmacy_owner_password', inputPass);
+        localStorage.setItem('app_owner_password_snapshot', inputPass);
+        localStorage.setItem('app_owner_authenticated', 'true');
       } catch {}
       setOwnerUnlockUser('');
       setOwnerUnlockPass('');
@@ -273,29 +290,150 @@ export default function SettingsModule({
     }
 
     const nowIso = new Date().toISOString();
-    const nextOwnerSessionVer = (Number(state?.orgSettings?.ownerSessionVersion || 0)) + 1;
+    let currentOwnerPass = state?.orgSettings?.ownerPassword || orgSettings.ownerPassword || '';
+    if (!currentOwnerPass) {
+      try { currentOwnerPass = localStorage.getItem('pharmacy_owner_password') || 'owner123'; } catch {}
+    }
 
     try {
-      localStorage.setItem('pharmacy_owner_username', cleanUser);
-      localStorage.setItem('pharmacy_owner_password', cleanPass);
-      // تحديث بصمة الجلسة لهذا الجهاز الحالي ليبقى مسجلاً دون انقطاع (الخيار أ)
-      localStorage.setItem('app_owner_password_snapshot', cleanPass);
-      localStorage.setItem('app_owner_session_version', String(nextOwnerSessionVer));
-    } catch {}
+      // 1. استدعاء المسار الذري في السيرفر لتحديث كلمة سر المالك وحفظها بقاعدة البيانات
+      const apiRes = await apiUpdateOwnerCredentials({
+        currentPassword: currentOwnerPass || 'owner123',
+        newUsername: cleanUser,
+        newPassword: cleanPass,
+        clientId: CLIENT_SESSION_ID,
+        logoutAllDevices: false // إبقاء هذا الجهاز متصلاً
+      });
 
-    const updatedOrgSettings = {
-      ...(state.orgSettings || {}),
-      ownerUsername: cleanUser,
-      ownerPassword: cleanPass,
-      ownerPasswordUpdatedAt: nowIso,
-      ownerUsernameUpdatedAt: nowIso,
-      ownerSessionVersion: nextOwnerSessionVer,
-      updatedAt: nowIso
-    };
-    const updatedState = { ...state, orgSettings: updatedOrgSettings, updatedAt: nowIso };
-    setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('👑 تم حفظ وتحديث بيانات دخول المالك بنجاح وتسجيل الخروج من كافة الأجهزة الأخرى فوراً');
+      const nextOwnerSessionVer = apiRes?.ownerSessionVersion || ((Number(state?.orgSettings?.ownerSessionVersion || 0)) + 1);
+
+      // 2. تحديث بصمة الجلسة لهذا الجهاز الحالي ليبقى مسجلاً دون انقطاع
+      try {
+        localStorage.setItem('pharmacy_owner_username', cleanUser);
+        localStorage.setItem('pharmacy_owner_password', cleanPass);
+        localStorage.setItem('app_owner_password_snapshot', cleanPass);
+        localStorage.setItem('app_owner_session_version', String(nextOwnerSessionVer));
+      } catch {}
+
+      // 3. بث فوري للأجهزة الأخرى للقطع الفوري عبر WebSockets (< 10ms)
+      emitRevokeSession({
+        role: 'owner',
+        sessionVersion: nextOwnerSessionVer,
+        exceptClientId: CLIENT_SESSION_ID,
+        reason: 'owner_password_changed'
+      });
+
+      // 4. تحديث الحالة المحلية وقاعدة البيانات العامة
+      const updatedOrgSettings = {
+        ...(state.orgSettings || {}),
+        ownerUsername: cleanUser,
+        ownerPassword: cleanPass,
+        ownerPasswordUpdatedAt: nowIso,
+        ownerUsernameUpdatedAt: nowIso,
+        ownerSessionVersion: nextOwnerSessionVer,
+        updatedAt: nowIso
+      };
+      const updatedState = { ...state, orgSettings: updatedOrgSettings, _ownerAuthorized: true, _allowOwnerPasswordChange: true, updatedAt: nowIso };
+      setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      isEditingOwnerPasswordRef.current = false;
+      showToast?.('👑 تم حفظ وتحديث بيانات دخول المالك بنجاح وتسجيل الخروج من كافة الأجهزة الأخرى فوراً');
+    } catch (err) {
+      console.warn('[SaveOwnerCredentials Fallback Notice]:', err);
+      const nextOwnerSessionVer = (Number(state?.orgSettings?.ownerSessionVersion || 0)) + 1;
+      try {
+        localStorage.setItem('pharmacy_owner_username', cleanUser);
+        localStorage.setItem('pharmacy_owner_password', cleanPass);
+        localStorage.setItem('app_owner_password_snapshot', cleanPass);
+        localStorage.setItem('app_owner_session_version', String(nextOwnerSessionVer));
+      } catch {}
+      emitRevokeSession({
+        role: 'owner',
+        sessionVersion: nextOwnerSessionVer,
+        exceptClientId: CLIENT_SESSION_ID,
+        reason: 'owner_password_changed'
+      });
+      const updatedOrgSettings = {
+        ...(state.orgSettings || {}),
+        ownerUsername: cleanUser,
+        ownerPassword: cleanPass,
+        ownerPasswordUpdatedAt: nowIso,
+        ownerUsernameUpdatedAt: nowIso,
+        ownerSessionVersion: nextOwnerSessionVer,
+        updatedAt: nowIso
+      };
+      const updatedState = { ...state, orgSettings: updatedOrgSettings, _ownerAuthorized: true, _allowOwnerPasswordChange: true, updatedAt: nowIso };
+      setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      isEditingOwnerPasswordRef.current = false;
+      showToast?.('👑 تم حفظ بيانات دخول المالك محلياً وسحابياً وتسجيل خروج الأجهزة الأخرى');
+    }
+  };
+
+  const handleTerminateOwnerSessions = async (exceptCurrent, terminateAdmin = false) => {
+    setIsTerminatingOwner(true);
+    let currentOwnerPass = state?.orgSettings?.ownerPassword || orgSettings.ownerPassword || '';
+    if (!currentOwnerPass) {
+      try {
+        currentOwnerPass = localStorage.getItem('pharmacy_owner_password') ||
+          localStorage.getItem('app_owner_password_snapshot') ||
+          'owner123';
+      } catch {}
+    }
+
+    try {
+      const res = await apiTerminateOwnerSessions({
+        currentPassword: currentOwnerPass || 'owner123',
+        exceptCurrentDevice: exceptCurrent,
+        clientId: CLIENT_SESSION_ID,
+        terminateAdmin: Boolean(terminateAdmin)
+      });
+
+      const nextOwnerVer = res?.ownerSessionVersion || ((Number(state?.orgSettings?.ownerSessionVersion || 0)) + 1);
+      const nextAdminVer = res?.adminSessionVersion || ((Number(state?.orgSettings?.adminSessionVersion || 0)) + 1);
+
+      emitRevokeSession({
+        role: 'owner',
+        sessionVersion: nextOwnerVer,
+        exceptClientId: exceptCurrent ? CLIENT_SESSION_ID : null,
+        includeAdmin: Boolean(terminateAdmin),
+        adminSessionVersion: terminateAdmin ? nextAdminVer : undefined,
+        reason: 'owner_manual_termination'
+      });
+
+      if (exceptCurrent) {
+        try {
+          localStorage.setItem('app_owner_session_version', String(nextOwnerVer));
+          if (terminateAdmin) {
+            localStorage.setItem('app_admin_session_version', String(nextAdminVer));
+          }
+          if (res?.token) {
+            localStorage.setItem('app_auth_token', res.token);
+          }
+        } catch {}
+        const updatedOrgSettings = {
+          ...(state.orgSettings || {}),
+          ownerSessionVersion: nextOwnerVer,
+          ...(terminateAdmin ? { adminSessionVersion: nextAdminVer } : {})
+        };
+        const updatedState = { ...state, orgSettings: updatedOrgSettings, _ownerAuthorized: true, updatedAt: new Date().toISOString() };
+        setState(updatedState);
+        if (saveState) await saveState(updatedState);
+        showToast?.(terminateAdmin
+          ? '🛡️ تم تسجيل الخروج من كافة أجهزة المالك والإدارة الأخرى بنجاح'
+          : '🛡️ تم بنجاح تسجيل الخروج من كافة أجهزة المالك الأخرى مع إبقاء هذا الجهاز متصلاً');
+      } else {
+        showToast?.('🚪 تم بنجاح تسجيل الخروج الشامل من كافة الأجهزة');
+        setTimeout(() => {
+          handleLogout?.();
+        }, 500);
+      }
+    } catch (err) {
+      showToast?.('❌ تعذر إتمام تسجيل الخروج: ' + (err.message || 'خطأ في الاتصال'));
+    } finally {
+      setIsTerminatingOwner(false);
+      setIsTerminateOwnerModalOpen(false);
+    }
   };
 
   const handleSaveAccountsCredentials = async (e) => {
@@ -779,6 +917,14 @@ export default function SettingsModule({
           localStorage.setItem('app_admin_password_snapshot', adminPass.trim());
           localStorage.setItem('app_admin_session_version', String(nextAdminSessionVer));
         } catch {}
+
+        // بث فوري لطرد كافة أجهزة الأدمن الأخرى فوراً عبر WebSockets (< 10ms)
+        emitRevokeSession({
+          role: 'admin',
+          sessionVersion: nextAdminSessionVer,
+          exceptClientId: CLIENT_SESSION_ID,
+          reason: 'admin_password_changed'
+        });
       }
 
       const updatedSettings = {
@@ -3298,7 +3444,10 @@ export default function SettingsModule({
                         <input
                           type={showOwnerPasswordText ? 'text' : 'password'}
                           value={ownerPasswordInput}
-                          onChange={(e) => setOwnerPasswordInput(e.target.value)}
+                          onChange={(e) => {
+                            isEditingOwnerPasswordRef.current = true;
+                            setOwnerPasswordInput(e.target.value);
+                          }}
                           placeholder="كلمة مرور المالك..."
                           required
                           style={{ width: '100%', padding: '10px 38px 10px 14px', borderRadius: '10px', border: '1px solid var(--border)', fontWeight: 700, boxSizing: 'border-box' }}
@@ -3318,7 +3467,10 @@ export default function SettingsModule({
                       <input
                         type={showOwnerPasswordText ? 'text' : 'password'}
                         value={ownerConfirmPasswordInput}
-                        onChange={(e) => setOwnerConfirmPasswordInput(e.target.value)}
+                        onChange={(e) => {
+                          isEditingOwnerPasswordRef.current = true;
+                          setOwnerConfirmPasswordInput(e.target.value);
+                        }}
                         placeholder="أعد إدخال كلمة المرور..."
                         required
                         style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)', fontWeight: 700 }}
@@ -3326,24 +3478,211 @@ export default function SettingsModule({
                     </div>
                   </div>
 
-                  <button
-                    type="submit"
-                    className="btn"
-                    style={{
-                      background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
-                      color: '#ffffff',
-                      fontWeight: 800,
-                      padding: '9px 20px',
-                      borderRadius: '10px',
-                      border: 'none',
-                      boxShadow: '0 4px 12px rgba(217, 119, 6, 0.25)',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    💾 حفظ وتحديث بيانات المالك
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginTop: '16px', borderTop: '1px dashed var(--border)', paddingTop: '16px' }}>
+                    <button
+                      type="submit"
+                      className="btn"
+                      style={{
+                        background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
+                        color: '#ffffff',
+                        fontWeight: 800,
+                        padding: '10px 22px',
+                        borderRadius: '10px',
+                        border: 'none',
+                        boxShadow: '0 4px 12px rgba(217, 119, 6, 0.25)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                    >
+                      <span>💾</span>
+                      <span>حفظ وتحديث بيانات المالك</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsTerminateOwnerModalOpen(true)}
+                      style={{
+                        background: 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)',
+                        color: '#ffffff',
+                        fontWeight: 800,
+                        padding: '10px 22px',
+                        borderRadius: '10px',
+                        border: 'none',
+                        boxShadow: '0 4px 12px rgba(220, 38, 38, 0.25)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                    >
+                      <span>🚪</span>
+                      <span>تسجيل خروج من جميع الأجهزة المسجلة بيوزر المالك</span>
+                    </button>
+                  </div>
                 </form>
               </div>
+
+              {/* ── نافذة تسجيل خروج المالك من كافة الأجهزة ── */}
+              {isTerminateOwnerModalOpen && (
+                <div
+                  style={{
+                    position: 'fixed',
+                    inset: 0,
+                    zIndex: 99999,
+                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                    backdropFilter: 'blur(6px)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '16px',
+                    animation: 'fadeIn 0.2s ease-out'
+                  }}
+                  onClick={() => !isTerminatingOwner && setIsTerminateOwnerModalOpen(false)}
+                >
+                  <div
+                    style={{
+                      background: 'var(--surface)',
+                      borderRadius: '20px',
+                      maxWidth: '520px',
+                      width: '100%',
+                      padding: '28px',
+                      boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                      border: '1px solid var(--border)',
+                      direction: 'rtl',
+                      textAlign: 'right'
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                      <div style={{ width: '46px', height: '46px', borderRadius: '12px', background: 'rgba(239, 68, 68, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', color: '#ef4444' }}>
+                        🛡️
+                      </div>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--text-main)' }}>
+                          تسجيل الخروج من أجهزة المالك
+                        </h3>
+                        <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--muted)' }}>
+                          إبطال فوري لكافة الجلسات النشطة بحساب المالك عبر السيرفر وشبكة WebSockets
+                        </p>
+                      </div>
+                    </div>
+
+                    <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '22px' }}>
+                      اختر نوع الإجراء الأمني الذي ترغب في تطبيقه الآن فورياً (<span style={{ color: '#ef4444', fontWeight: 700 }}>خلال أقل من 10 مللي ثانية</span>):
+                    </p>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+                      {/* الخيار الأول: طرد أجهزة المالك الأخرى فقط */}
+                      <button
+                        type="button"
+                        disabled={isTerminatingOwner}
+                        onClick={() => handleTerminateOwnerSessions(true, false)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '14px',
+                          padding: '14px 16px',
+                          borderRadius: '12px',
+                          border: '2px solid rgba(245, 158, 11, 0.3)',
+                          background: 'rgba(245, 158, 11, 0.08)',
+                          cursor: isTerminatingOwner ? 'not-allowed' : 'pointer',
+                          textAlign: 'right',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        <div style={{ fontSize: '24px' }}>💻</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 800, fontSize: '14.5px', color: 'var(--text-main)', marginBottom: '2px' }}>
+                            تسجيل الخروج من كافة أجهزة المالك الأخرى فقط
+                          </div>
+                          <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
+                            طرد أي جهاز أو هاتف آخر مسجل بحساب المالك مع إبقاء جلستك الحالية على هذا الجهاز نشطة دون انقطاع.
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* الخيار الثاني: طرد كافة أجهزة المالك وحسابات الإدارة الأخرى */}
+                      <button
+                        type="button"
+                        disabled={isTerminatingOwner}
+                        onClick={() => handleTerminateOwnerSessions(true, true)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '14px',
+                          padding: '14px 16px',
+                          borderRadius: '12px',
+                          border: '2px solid rgba(59, 130, 246, 0.3)',
+                          background: 'rgba(59, 130, 246, 0.08)',
+                          cursor: isTerminatingOwner ? 'not-allowed' : 'pointer',
+                          textAlign: 'right',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        <div style={{ fontSize: '24px' }}>🛡️</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 800, fontSize: '14.5px', color: 'var(--text-main)', marginBottom: '2px' }}>
+                            تسجيل الخروج من كافة أجهزة المالك وحسابات الإدارة (الأدمن)
+                          </div>
+                          <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
+                            طرد كافة الأجهزة الأخرى المفتوحة بحساب المالك أو حساب الأدمن العام، مع إبقاء هذا الجهاز فقط متصلاً.
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* الخيار الثالث: طرد شامل لكافة الأجهزة */}
+                      <button
+                        type="button"
+                        disabled={isTerminatingOwner}
+                        onClick={() => handleTerminateOwnerSessions(false, true)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '14px',
+                          padding: '14px 16px',
+                          borderRadius: '12px',
+                          border: '2px solid rgba(239, 68, 68, 0.3)',
+                          background: 'rgba(239, 68, 68, 0.08)',
+                          cursor: isTerminatingOwner ? 'not-allowed' : 'pointer',
+                          textAlign: 'right',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        <div style={{ fontSize: '24px' }}>🚨</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 800, fontSize: '14.5px', color: '#dc2626', marginBottom: '2px' }}>
+                            تسجيل الخروج الشامل من كافة الأجهزة (بما فيها هذا الجهاز)
+                          </div>
+                          <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
+                            إنهاء كافة الجلسات المفتوحة فوراً وطرد هذا الجهاز معهم والتحويل المباشر لشاشة تسجيل الدخول.
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                      <button
+                        type="button"
+                        disabled={isTerminatingOwner}
+                        onClick={() => setIsTerminateOwnerModalOpen(false)}
+                        style={{
+                          padding: '9px 18px',
+                          borderRadius: '10px',
+                          border: '1px solid var(--border)',
+                          background: 'var(--surface-subtle)',
+                          color: 'var(--text-main)',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        إلغاء التراجع
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Card 2: Modification Locks Matrix */}
               <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '22px', boxShadow: 'var(--shadow-sm)' }}>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { isEmployeeActive, getEmpDisplayName } from '../../utils/formatters';
+import { emitRevokeSession } from '../../utils/socketClient';
 
 export default function BranchEditorModal({
   isOpen = false,
@@ -328,8 +329,18 @@ export default function BranchEditorModal({
       updatedAt: new Date().toISOString()
     };
 
+    if (isPasswordChanged) {
+      emitRevokeSession({
+        role: 'branch',
+        targetId: branchData.id,
+        targetCode: branchData.branchCode,
+        sessionVersion: nextBranchSessionVer,
+        reason: 'branch_password_changed'
+      });
+    }
+
     onSaveBranch(branchData);
-    showToast?.(editingBranch ? `✅ تم تعديل بيانات فرع "${branchName}" بنجاح` : `🎉 تم إنشاء فرع "${branchName}" بنجاح`);
+    showToast?.(editingBranch ? `✅ تم تعديل بيانات فرع "${branchName}" بنجاح وتسجيل الخروج من باقي الأجهزة` : `🎉 تم إنشاء فرع "${branchName}" بنجاح`);
     onClose();
   };
 

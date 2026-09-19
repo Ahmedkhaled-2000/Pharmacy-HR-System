@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { getValidAuthToken, apiLogin } from '../utils/apiClient';
+import { subscribeToSessionRevocations, CLIENT_SESSION_ID } from '../utils/socketClient';
 
 const AuthContext = createContext(null);
 
@@ -115,35 +116,144 @@ export function AuthProvider({ children }) {
     } catch {}
   }, [authRole, currentBranch, currentEmpUser, activeNavTab, activeSubTab, isAdminLoggedIn]);
 
+  // ── الاستماع اللحظي الفوري لأوامر إبطال وطرد الجلسات عبر WebSockets (< 10ms) ──
+  useEffect(() => {
+    const unsubscribe = subscribeToSessionRevocations((payload) => {
+      if (!payload || !payload.role) return;
+      const { role, targetId, targetCode, exceptClientId, reason } = payload;
+
+      // إذا كان هذا التبويب/الجهاز هو المستثنى الصريح
+      if (exceptClientId && exceptClientId === CLIENT_SESSION_ID) {
+        return;
+      }
+
+      const activeRole = localStorage.getItem('app_auth_role') || authRole;
+
+      // 1. طرد فوري للمالك
+      if (role === 'owner') {
+        const isOwnerActive =
+          activeRole === 'owner' ||
+          localStorage.getItem('app_owner_authenticated') === 'true' ||
+          sessionStorage.getItem('app_owner_authenticated') === 'true' ||
+          sessionStorage.getItem('app_settings_owner_tab_unlocked') === 'true';
+
+        const isAdminActive =
+          activeRole === 'admin' ||
+          localStorage.getItem('app_is_admin') === 'true' ||
+          isAdminLoggedIn;
+
+        const shouldKick = isOwnerActive || (Boolean(payload.includeAdmin) && isAdminActive);
+
+        if (shouldKick) {
+          console.warn('🔒 [AuthContext] تم استلام أمر طرد فوري لجلسات المالك/الإدارة');
+          handleLogout();
+          setTimeout(() => {
+            alert('🔒 تم إنهاء الجلسات أو تسجيل الخروج من حساب المالك. تم تسجيل الخروج فوراً لحماية الحساب.');
+          }, 100);
+          return;
+        }
+      }
+
+      // 2. طرد فوري للأدمن
+      if (role === 'admin') {
+        const isAdminActive =
+          activeRole === 'admin' ||
+          localStorage.getItem('app_is_admin') === 'true' ||
+          isAdminLoggedIn;
+
+        if (isAdminActive) {
+          console.warn('🔒 [AuthContext] تم استلام أمر طرد فوري لجلسات الأدمن');
+          handleLogout();
+          setTimeout(() => {
+            alert('🔒 تم تغيير كلمة مرور حساب الإدارة (الأدمن) أو إنهاء جلسات الأدمن. تم تسجيل الخروج من هذا الجهاز.');
+          }, 100);
+          return;
+        }
+      }
+
+      // 3. طرد فوري لمدير الفرع
+      if (role === 'branch' && activeRole === 'branch') {
+        const bSnapshotId = localStorage.getItem('app_branch_id_snapshot');
+        const bCurrId = currentBranch?.id;
+        const bCurrCode = currentBranch?.branchCode || currentBranch?.code;
+        const isMatch = (targetId && (String(bSnapshotId) === String(targetId) || String(bCurrId) === String(targetId))) ||
+                        (targetCode && (String(bCurrCode).toLowerCase() === String(targetCode).toLowerCase()));
+        if (isMatch) {
+          console.warn('🔒 [AuthContext] تم استلام أمر طرد فوري لحساب الفرع:', targetId || targetCode);
+          handleLogout();
+          setTimeout(() => {
+            alert('🔒 تم تعديل كلمة مرور الفرع. تم تسجيل الخروج من هذا الجهاز.');
+          }, 100);
+          return;
+        }
+      }
+
+      // 4. طرد فوري للموظف
+      if (role === 'employee' && activeRole === 'employee') {
+        const eSnapshotId = localStorage.getItem('app_emp_id_snapshot');
+        const eSnapshotCode = localStorage.getItem('app_emp_code_snapshot');
+        const eCurrId = currentEmpUser?.id;
+        const eCurrCode = currentEmpUser?.code;
+        const isMatch = (targetId && (String(eSnapshotId) === String(targetId) || String(eCurrId) === String(targetId))) ||
+                        (targetCode && (String(eSnapshotCode).toLowerCase() === String(targetCode).toLowerCase() || String(eCurrCode).toLowerCase() === String(targetCode).toLowerCase()));
+        if (isMatch) {
+          console.warn('🔒 [AuthContext] تم استلام أمر طرد فوري لحساب الموظف:', targetId || targetCode);
+          handleLogout();
+          setTimeout(() => {
+            alert('🔒 تم تعديل كلمة المرور أو إيقاف حساب الموظف. تم تسجيل الخروج فوراً.');
+          }, 100);
+          return;
+        }
+      }
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, [authRole, currentBranch, currentEmpUser, isAdminLoggedIn]);
+
   // التحقق من صحة الجلسة ومطابقتها لحالة البيانات الفعلية وإنهاء الجلسات عند تغيير كلمات المرور
   const validateSessionAgainstData = (latestState) => {
     if (!latestState) return;
 
     const savedRole = localStorage.getItem('app_auth_role') || authRole;
 
-    // 0. فحص تغيير كلمة مرور المالك
-    if (savedRole === 'owner') {
+    // 0. فحص تغيير كلمة مرور المالك أو تقدم رقم الجلسة
+    const isOwnerSession =
+      savedRole === 'owner' ||
+      localStorage.getItem('app_owner_authenticated') === 'true' ||
+      sessionStorage.getItem('app_owner_authenticated') === 'true' ||
+      sessionStorage.getItem('app_settings_owner_tab_unlocked') === 'true';
+
+    if (isOwnerSession) {
       const myOwnerPass = localStorage.getItem('app_owner_password_snapshot');
       const myOwnerVer = Number(localStorage.getItem('app_owner_session_version') || 0);
       const srvOwnerPass = latestState?.orgSettings?.ownerPassword;
       const srvOwnerVer = Number(latestState?.orgSettings?.ownerSessionVersion || 0);
 
       if ((myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
-          (srvOwnerVer > 0 && myOwnerVer > 0 && srvOwnerVer > myOwnerVer)) {
+          (srvOwnerVer > 0 && srvOwnerVer > myOwnerVer)) {
+        console.warn('🔒 [AuthContext] انتهاء جلسة المالك بسبب تقدم رقم الجلسة بالسيرفر');
         handleLogout();
         return;
       }
     }
 
-    // 0.5 فحص تغيير كلمة مرور الأدمن
-    if (savedRole === 'admin') {
+    // 0.5 فحص تغيير كلمة مرور الأدمن أو تقدم رقم الجلسة
+    const isAdminSession =
+      savedRole === 'admin' ||
+      localStorage.getItem('app_is_admin') === 'true' ||
+      isAdminLoggedIn;
+
+    if (isAdminSession) {
       const myAdminPass = localStorage.getItem('app_admin_password_snapshot');
       const myAdminVer = Number(localStorage.getItem('app_admin_session_version') || 0);
       const srvAdminPass = latestState?.orgSettings?.adminPassword || latestState?.orgSettings?.adminPass;
       const srvAdminVer = Number(latestState?.orgSettings?.adminSessionVersion || 0);
 
       if ((myAdminPass && srvAdminPass && myAdminPass !== srvAdminPass) ||
-          (srvAdminVer > 0 && myAdminVer > 0 && srvAdminVer > myAdminVer)) {
+          (srvAdminVer > 0 && srvAdminVer > myAdminVer)) {
+        console.warn('🔒 [AuthContext] انتهاء جلسة الأدمن بسبب تقدم رقم الجلسة بالسيرفر');
         handleLogout();
         return;
       }
@@ -159,7 +269,7 @@ export function AuthProvider({ children }) {
       const myEmpPass = localStorage.getItem('app_emp_password_snapshot');
       const myEmpVer = Number(localStorage.getItem('app_emp_session_version') || 0);
       if ((myEmpPass && liveEmp.password && myEmpPass !== liveEmp.password) ||
-          (Number(liveEmp.sessionVersion || 0) > myEmpVer && myEmpVer > 0)) {
+          (Number(liveEmp.sessionVersion || 0) > myEmpVer)) {
         handleLogout();
         return;
       }
@@ -175,7 +285,7 @@ export function AuthProvider({ children }) {
       const myBranchPass = localStorage.getItem('app_branch_password_snapshot');
       const myBranchVer = Number(localStorage.getItem('app_branch_session_version') || 0);
       if ((myBranchPass && liveBranch.password && myBranchPass !== liveBranch.password) ||
-          (Number(liveBranch.sessionVersion || 0) > myBranchVer && myBranchVer > 0)) {
+          (Number(liveBranch.sessionVersion || 0) > myBranchVer)) {
         handleLogout();
         return;
       }
@@ -305,6 +415,8 @@ export function AuthProvider({ children }) {
       localStorage.removeItem('app_emp_password_snapshot');
       localStorage.removeItem('app_emp_session_version');
       localStorage.removeItem('app_auth_token');
+      localStorage.removeItem('pharmacy_owner_password');
+      localStorage.removeItem('pharmacy_owner_username');
       sessionStorage.removeItem('app_owner_authenticated');
       sessionStorage.removeItem('app_settings_owner_tab_unlocked');
     } catch {}

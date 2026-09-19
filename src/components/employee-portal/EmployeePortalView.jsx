@@ -4666,7 +4666,7 @@ export default function EmployeePortalView({
                       <div>
                         <span style={{ fontSize: '12px', opacity: 0.85, display: 'block' }}>إجمالي الخصومات والسلف (-)</span>
                         <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '2px', color: '#fecaca' }}>
-                          {canViewSalary ? `-${fmt((summary.totalDeduction || 0) + (summary.loansDeduction || 0) + absenceDeduction)} ج.م` : '🔒 مقيد'}
+                          {canViewSalary ? `-${fmt(summary.totalDeduction || 0)} ج.م` : '🔒 مقيد'}
                         </div>
                       </div>
 

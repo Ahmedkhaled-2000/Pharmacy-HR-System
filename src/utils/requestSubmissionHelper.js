@@ -13,6 +13,7 @@ import { apiSubmitRequestAtomic } from './apiClient';
 import { enqueueNewRequest } from './syncEngine';
 import { broadcastStateChange } from './offlineSync';
 import { normalizeState } from './formatters';
+import { isPayrollPeriodFrozenForDate } from './periodEngine';
 
 export async function dispatchEmployeeRequest({
   request,
@@ -29,6 +30,18 @@ export async function dispatchEmployeeRequest({
 }) {
   if (!request || !request.id) {
     throw new Error('Invalid request payload: missing request or request.id');
+  }
+
+  // فحص ما إذا كانت الفترة تقع ضمن دورة رواتب مجمدة رسمياً من الإدارة العليا
+  const targetDate = request.startDate || request.date || request.endDate || request.createdAt?.slice(0, 10) || new Date().toISOString().slice(0, 10);
+  const freezeCheck = isPayrollPeriodFrozenForDate(targetDate, state?.orgSettings || {});
+
+  if (freezeCheck.isFrozen) {
+    const errorMsg = `⚠️ لا يمكن إرسال الطلب: دورة رواتب شهر (${freezeCheck.month}) مغلقة ومجمدة رسمياً من الإدارة العليا.`;
+    if (typeof showToast === 'function') {
+      showToast(errorMsg);
+    }
+    return { success: false, error: errorMsg, isFrozen: true };
   }
 
   const reqBranchId = request.branchId || request.branch_id || null;

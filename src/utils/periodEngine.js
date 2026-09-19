@@ -332,3 +332,78 @@ export function getCycleRemainingTime(orgSettings = {}, refDate = getRealDate())
     range
   };
 }
+
+/**
+ * تحديد الشهر المالي الذي ينتمي إليه تاريخ معين (YYYY-MM)
+ * @param {string} dateStr - بصيغة YYYY-MM-DD
+ * @param {object} orgSettings - إعدادات المؤسسة
+ * @returns {string} YYYY-MM
+ */
+export function getPayrollMonthForDate(dateStr, orgSettings = {}) {
+  if (!dateStr) return getActivePayrollMonth(orgSettings);
+  const clean = String(dateStr).slice(0, 10);
+  const [yStr, mStr, dStr] = clean.split('-');
+  const y = parseInt(yStr, 10);
+  const m = parseInt(mStr, 10);
+  const d = parseInt(dStr, 10);
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return getActivePayrollMonth(orgSettings);
+
+  const settings = extractPayrollSettings(orgSettings);
+  if (settings.periodType === 'custom' && settings.customFrom && settings.customTo) {
+    if (clean >= settings.customFrom && clean <= settings.customTo) {
+      return settings.customFrom.slice(0, 7);
+    }
+  }
+
+  const { startDay, endDay } = settings;
+  if (startDay > endDay) {
+    // دورة عبر شهرين (مثلاً: من 26 في الشهر السابق إلى 25 في الشهر الحالي)
+    if (d >= startDay) {
+      let nextY = y;
+      let nextM = m + 1;
+      if (nextM > 12) {
+        nextM = 1;
+        nextY = y + 1;
+      }
+      return `${nextY}-${String(nextM).padStart(2, '0')}`;
+    } else {
+      return `${y}-${String(m).padStart(2, '0')}`;
+    }
+  } else {
+    // دورة في نفس الشهر (مثلاً: من 1 إلى 30)
+    return `${y}-${String(m).padStart(2, '0')}`;
+  }
+}
+
+/**
+ * فحص ما إذا كانت دورة شهر معين مجمدة رسمياً
+ * @param {string} monthStr - بصيغة YYYY-MM
+ * @param {object} orgSettings - إعدادات المؤسسة
+ * @returns {boolean}
+ */
+export function isPayrollMonthFrozen(monthStr, orgSettings = {}) {
+  if (!monthStr) return false;
+  return Boolean(
+    orgSettings?.payrollPeriodFrozen?.[monthStr]?.isFrozen ||
+    orgSettings?.isPeriodFrozen
+  );
+}
+
+/**
+ * فحص ما إذا كان تاريخ معين يقع داخل دورة رواتب مجمدة رسمياً
+ * يمنع إرسال طلبات الإجازات والاستئذانات والسلف لأي تاريخ يقع في فترة مجمدة
+ * @param {string} dateStr - بصيغة YYYY-MM-DD
+ * @param {object} orgSettings - إعدادات المؤسسة
+ * @returns {object} { isFrozen: boolean, month: string, reason: string }
+ */
+export function isPayrollPeriodFrozenForDate(dateStr, orgSettings = {}) {
+  if (!dateStr) return { isFrozen: false, month: '', reason: '' };
+  const targetMonth = getPayrollMonthForDate(dateStr, orgSettings);
+  const frozen = isPayrollMonthFrozen(targetMonth, orgSettings);
+  return {
+    isFrozen: frozen,
+    month: targetMonth,
+    reason: frozen ? `دورة رواتب شهر (${targetMonth}) مغلقة ومجمدة رسمياً من الإدارة العليا.` : ''
+  };
+}
+

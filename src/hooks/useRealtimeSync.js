@@ -51,6 +51,8 @@ export function useRealtimeSync(props = {}) {
     currentEmpUser = null,
     setCurrentEmpUser = () => {},
     setIsAdminLoggedIn = () => {},
+    handleLogout = null,
+    validateSessionAgainstData = null,
     setIsLoading = () => {},
     setIsOffline = () => {},
     setPendingSyncCount = () => {},
@@ -89,10 +91,13 @@ export function useRealtimeSync(props = {}) {
       sessionStorage.clear();
       clearLocalDatabase().catch(() => {});
 
-      setAuthRole('none');
-      setIsAdminLoggedIn(false);
-      setCurrentEmpUser(null);
-      setCurrentBranch(null);
+      if (handleLogout) handleLogout();
+      else {
+        setAuthRole('none');
+        setIsAdminLoggedIn(false);
+        setCurrentEmpUser(null);
+        setCurrentBranch(null);
+      }
       setState(normalized);
       showToast('🚨 تم تصفير ومسح قاعدة البيانات بالكامل. تم تسجيل الخروج بنجاح والبدء من جديد.');
       setTimeout(() => {
@@ -101,48 +106,66 @@ export function useRealtimeSync(props = {}) {
       return;
     }
 
-    // ── فحص إبطال الجلسات اللحظي عند تغيير كلمات المرور على أي جهاز ──
+    // ── فحص إبطال الجلسات اللحظي عند تغيير كلمات المرور أو ترقية رقم الجلسة ──
     const currentActiveRole = localStorage.getItem('app_auth_role') || authRole;
+    const isOwnerActive =
+      currentActiveRole === 'owner' ||
+      localStorage.getItem('app_owner_authenticated') === 'true' ||
+      sessionStorage.getItem('app_owner_authenticated') === 'true' ||
+      sessionStorage.getItem('app_settings_owner_tab_unlocked') === 'true';
 
-    if (currentActiveRole === 'owner') {
+    const isAdminActive =
+      currentActiveRole === 'admin' ||
+      localStorage.getItem('app_is_admin') === 'true';
+
+    if (isOwnerActive) {
       const myOwnerPass = localStorage.getItem('app_owner_password_snapshot');
       const myOwnerVer = Number(localStorage.getItem('app_owner_session_version') || 0);
       const srvOwnerPass = normalized?.orgSettings?.ownerPassword;
       const srvOwnerVer = Number(normalized?.orgSettings?.ownerSessionVersion || 0);
 
       const isRevoked = (myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
-                        (srvOwnerVer > 0 && myOwnerVer > 0 && srvOwnerVer > myOwnerVer);
+                        (srvOwnerVer > 0 && srvOwnerVer > myOwnerVer);
 
       if (isRevoked) {
-        localStorage.removeItem('app_auth_role');
-        localStorage.removeItem('app_owner_authenticated');
-        localStorage.removeItem('app_owner_password_snapshot');
-        localStorage.removeItem('app_owner_session_version');
-        localStorage.removeItem('app_is_admin');
-        sessionStorage.clear();
-        setAuthRole('none');
-        setIsAdminLoggedIn(false);
-        showToast('🔒 تم تغيير كلمة مرور المالك من جهاز آخر. تم تسجيل الخروج تلقائياً لضمان الأمان.');
+        if (handleLogout) {
+          handleLogout();
+        } else {
+          localStorage.removeItem('app_auth_role');
+          localStorage.removeItem('app_owner_authenticated');
+          localStorage.removeItem('app_owner_password_snapshot');
+          localStorage.removeItem('app_owner_session_version');
+          localStorage.removeItem('pharmacy_owner_password');
+          localStorage.removeItem('app_is_admin');
+          sessionStorage.clear();
+          setAuthRole('none');
+          setIsAdminLoggedIn(false);
+        }
+        showToast('🔒 تم إنهاء جلسات المالك أو تغيير كلمة المرور. تم تسجيل الخروج تلقائياً لضمان الأمان.');
         return;
       }
-    } else if (currentActiveRole === 'admin') {
+    } else if (isAdminActive) {
       const myAdminPass = localStorage.getItem('app_admin_password_snapshot');
       const myAdminVer = Number(localStorage.getItem('app_admin_session_version') || 0);
       const srvAdminPass = normalized?.orgSettings?.adminPassword || normalized?.orgSettings?.adminPass;
       const srvAdminVer = Number(normalized?.orgSettings?.adminSessionVersion || 0);
 
       const isRevoked = (myAdminPass && srvAdminPass && myAdminPass !== srvAdminPass) ||
-                        (srvAdminVer > 0 && myAdminVer > 0 && srvAdminVer > myAdminVer);
+                        (srvAdminVer > 0 && srvAdminVer > myAdminVer);
 
       if (isRevoked) {
-        localStorage.removeItem('app_auth_role');
-        localStorage.removeItem('app_is_admin');
-        localStorage.removeItem('app_admin_password_snapshot');
-        localStorage.removeItem('app_admin_session_version');
-        sessionStorage.clear();
-        setAuthRole('none');
-        setIsAdminLoggedIn(false);
-        showToast('🔒 تم تغيير كلمة مرور الإدارة من جهاز آخر. تم تسجيل الخروج تلقائياً لضمان الأمان.');
+        if (handleLogout) {
+          handleLogout();
+        } else {
+          localStorage.removeItem('app_auth_role');
+          localStorage.removeItem('app_is_admin');
+          localStorage.removeItem('app_admin_password_snapshot');
+          localStorage.removeItem('app_admin_session_version');
+          sessionStorage.clear();
+          setAuthRole('none');
+          setIsAdminLoggedIn(false);
+        }
+        showToast('🔒 تم إنهاء جلسات الإدارة من جهاز آخر. تم تسجيل الخروج تلقائياً لضمان الأمان.');
         return;
       }
     } else if (currentActiveRole === 'branch' && currentBranch) {
@@ -152,7 +175,7 @@ export function useRealtimeSync(props = {}) {
 
       if (liveBranch) {
         const isRevoked = (myBranchPass && liveBranch.password && myBranchPass !== liveBranch.password) ||
-                          (Number(liveBranch.sessionVersion || 0) > myBranchVer && myBranchVer > 0);
+                          (Number(liveBranch.sessionVersion || 0) > myBranchVer);
         if (isRevoked) {
           localStorage.removeItem('app_auth_role');
           localStorage.removeItem('app_current_branch');
@@ -171,7 +194,7 @@ export function useRealtimeSync(props = {}) {
 
       if (liveEmp) {
         const isRevoked = (myEmpPass && liveEmp.password && myEmpPass !== liveEmp.password) ||
-                          (Number(liveEmp.sessionVersion || 0) > myEmpVer && myEmpVer > 0);
+                          (Number(liveEmp.sessionVersion || 0) > myEmpVer);
         if (isRevoked) {
           localStorage.removeItem('app_auth_role');
           localStorage.removeItem('app_current_emp_user');

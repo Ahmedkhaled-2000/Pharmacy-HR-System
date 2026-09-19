@@ -8,6 +8,7 @@ import { normalizeState } from '../../utils/formatters';
 import { getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { syncEmployeeEntireDrive } from '../../utils/googleDriveService';
 import { getJobsList, getDepartmentsList } from '../../utils/jobsHelper';
+import { emitRevokeSession } from '../../utils/socketClient';
 
 import EmployeeModal from '../employees/EmployeeModal';
 import EmployeeIDCardModal from '../employees/EmployeeIDCardModal';
@@ -189,6 +190,11 @@ export default function GlobalModalsContainer() {
 
     const performSaveEmp = async () => {
       let updatedEmps = [];
+      const isPassChanged = editingEmp && String(editingEmp.password || '').trim() !== String(empPassword || '').trim();
+      const nextEmpSessionVer = isPassChanged
+        ? (Number(editingEmp?.sessionVersion || 0)) + 1
+        : (Number(editingEmp?.sessionVersion || 0));
+
       if (editingEmp) {
         updatedEmps = (state.employees || []).map((e) =>
           e.id === editingEmp.id
@@ -203,12 +209,24 @@ export default function GlobalModalsContainer() {
                 workHoursPerDay: String(workHoursPerDay),
                 workDaysPerMonth: String(workDaysPerMonth),
                 password: empPassword.trim(),
+                passwordChangedAt: isPassChanged ? new Date().toISOString() : (editingEmp.passwordChangedAt || null),
+                sessionVersion: nextEmpSessionVer,
                 annualLeaveBalance,
                 photoUrl: empPhotoUrl,
                 updatedAt: new Date().toISOString()
               }
             : e
         );
+
+        if (isPassChanged) {
+          emitRevokeSession({
+            role: 'employee',
+            targetId: editingEmp.id,
+            targetCode: cleanEmpCode,
+            sessionVersion: nextEmpSessionVer,
+            reason: 'employee_password_changed'
+          });
+        }
       } else {
         const newEmp = {
           id: `emp_${Date.now()}`,
@@ -221,6 +239,7 @@ export default function GlobalModalsContainer() {
           workHoursPerDay: String(workHoursPerDay),
           workDaysPerMonth: String(workDaysPerMonth),
           password: empPassword.trim(),
+          sessionVersion: 1,
           annualLeaveBalance,
           photoUrl: empPhotoUrl,
           status: 'على رأس العمل',
@@ -235,7 +254,7 @@ export default function GlobalModalsContainer() {
       const updatedState = { ...state, employees: updatedEmps };
       setState(updatedState);
       setIsEmpModalOpen(false);
-      showToast(editingEmp ? 'تم تحديث بيانات الموظف بنجاح' : 'تمت إضافة الموظف الجديد بنجاح');
+      showToast(editingEmp ? (isPassChanged ? 'تم تحديث بيانات الموظف بنجاح وتسجيل الخروج من باقي الأجهزة' : 'تم تحديث بيانات الموظف بنجاح') : 'تمت إضافة الموظف الجديد بنجاح');
 
       if (saveState) {
         await saveState(updatedState);

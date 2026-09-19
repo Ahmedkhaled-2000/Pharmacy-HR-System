@@ -4,6 +4,7 @@ import { fmt, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import { getCycleDateRange } from '../../utils/periodEngine';
+import { autoSettlePeriodLoans, revertPeriodLoanSettlements } from '../../utils/loansEngine';
 import { useUI } from '../../context/UIContext';
 
 export default function PayrollModule({
@@ -181,11 +182,38 @@ export default function PayrollModule({
       payrollPeriodFrozen: frozenMap
     };
 
-    const updatedState = { ...state, orgSettings: updatedSettings };
+    let updatedLoans = state.loans;
+    let updatedRequests = state.requests;
+    let settledCount = 0;
+    let revertedCount = 0;
+
+    if (nextStatus) {
+      const settlementRes = autoSettlePeriodLoans(monthPicker, state);
+      updatedLoans = settlementRes.updatedLoans;
+      updatedRequests = settlementRes.updatedRequests;
+      settledCount = settlementRes.settledCount;
+    } else {
+      const revertRes = revertPeriodLoanSettlements(monthPicker, state);
+      updatedLoans = revertRes.updatedLoans;
+      updatedRequests = revertRes.updatedRequests;
+      revertedCount = revertRes.revertedCount;
+    }
+
+    const updatedState = {
+      ...state,
+      orgSettings: updatedSettings,
+      loans: updatedLoans,
+      requests: updatedRequests
+    };
+
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
 
-    showToast?.(nextStatus ? `🔒 تم تجميد دورة رواتب شهر (${monthPicker}) بنجاح` : `🔓 تم فك تجميد دورة رواتب شهر (${monthPicker})`);
+    showToast?.(
+      nextStatus
+        ? `🔒 تم تجميد دورة رواتب شهر (${monthPicker}) بنجاح${settledCount > 0 ? ` وتوثيق خصم (${settledCount}) سلفة وقسط آلياً` : ''}`
+        : `🔓 تم فك تجميد دورة رواتب شهر (${monthPicker})${revertedCount > 0 ? ` وإلغاء قيود (${revertedCount}) تسوية آلية` : ''}`
+    );
   };
 
   // Helper to compute date range description for active settings via Period Engine
@@ -658,6 +686,18 @@ export default function PayrollModule({
                   </div>
                 )}
 
+                {(empSum.loansDeduction > 0 || empSum.loanDeduction > 0) && (
+                  <div style={{ background: '#fef2f2', padding: '14px', borderRadius: '10px', border: '1.5px solid #fca5a5' }}>
+                    <span style={{ fontSize: '12px', color: '#991b1b', fontWeight: 'bold' }}>💳 السلف والأقساط الشهرية</span>
+                    <h4 style={{ margin: '4px 0 0 0', color: '#b91c1c' }}>
+                      -{fmt(empSum.loansDeduction || empSum.loanDeduction)} ج.م
+                    </h4>
+                    <div style={{ fontSize: '11px', color: '#7f1d1d', marginTop: '2px' }}>
+                      خصم دوري آلي من راتب الدورة ({empSum.loansBreakdown?.length || 1} بند)
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ background: '#fef2f2', padding: '14px', borderRadius: '10px', border: '1px solid #fecaca' }}>
                   <span style={{ fontSize: '12px', color: '#991b1b' }}>إجمالي الخصومات الشاملة</span>
                   <h4 style={{ margin: '4px 0 0 0', color: '#dc2626' }}>
@@ -749,6 +789,60 @@ export default function PayrollModule({
                   </div>
                 );
               })()}
+
+              {/* Loans and Installments Detailed Breakdown Table */}
+              {Array.isArray(empSum.loansBreakdown) && empSum.loansBreakdown.length > 0 && (
+                <div style={{ marginBottom: '22px', background: 'var(--surface)', border: '1.5px solid #fca5a5', borderRadius: '12px', padding: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                    <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#991b1b', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>💳</span> جدول السلف والأقساط الشهرية المخصومة تلقائياً ({empSum.loansBreakdown.length} بند)
+                    </h4>
+                    <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#991b1b', background: '#fee2e2', padding: '3px 10px', borderRadius: '6px' }}>
+                      إجمالي المخصوم بالدورة: -{fmt(empSum.loansDeduction || empSum.loanDeduction)} ج.م
+                    </span>
+                  </div>
+
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', background: 'var(--surface)', borderRadius: '8px', overflow: 'hidden', border: '1px solid #fecaca' }}>
+                      <thead>
+                        <tr style={{ background: '#fee2e2', color: '#991b1b', borderBottom: '1px solid #fca5a5' }}>
+                          <th style={{ padding: '8px 10px' }}>البيان ونوع السلفة</th>
+                          <th style={{ padding: '8px 10px' }}>تاريخ البدء</th>
+                          <th style={{ padding: '8px 10px' }}>أصل المبلغ</th>
+                          <th style={{ padding: '8px 10px' }}>المسدد سابقاً</th>
+                          <th style={{ padding: '8px 10px' }}>المخصوم بهذا الشهر</th>
+                          <th style={{ padding: '8px 10px' }}>المتبقي بعد الخصم</th>
+                          <th style={{ padding: '8px 10px' }}>حالة القسط</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {empSum.loansBreakdown.map((l) => (
+                          <tr key={l.id} style={{ borderBottom: '1px solid #fee2e2' }}>
+                            <td style={{ padding: '7px 10px', fontWeight: 700, textAlign: 'right' }}>{l.typeLabel}</td>
+                            <td style={{ padding: '7px 10px' }}>{l.date}</td>
+                            <td style={{ padding: '7px 10px' }}>{fmt(l.totalAmount)} ج.م</td>
+                            <td style={{ padding: '7px 10px', color: '#16a34a' }}>{fmt(l.paidAmount)} ج.م</td>
+                            <td style={{ padding: '7px 10px', fontWeight: 800, color: '#dc2626' }}>-{fmt(l.deductedThisMonth)} ج.م</td>
+                            <td style={{ padding: '7px 10px', fontWeight: 800, color: '#b91c1c' }}>{fmt(l.remainingBalance)} ج.م</td>
+                            <td style={{ padding: '7px 10px' }}>
+                              <span style={{
+                                background: l.remainingBalance === 0 ? '#dcfce7' : '#fee2e2',
+                                color: l.remainingBalance === 0 ? '#166534' : '#991b1b',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: 700
+                              }}>
+                                {l.remainingBalance === 0 ? '✅ مسددة بالكامل' : (l.isInstallment ? `⏳ سداد جاري (${l.currentInstallmentNumber}/${l.installmentsCount})` : '⏳ جاري السداد')}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               <div style={{ background: 'linear-gradient(135deg, #0d9488, #0f766e)', color: '#fff', padding: '18px', borderRadius: '12px', textAlign: 'center', marginBottom: '20px' }}>
                 <span style={{ fontSize: '13px', opacity: 0.9 }}>صافي الراتب النهائي المستحق للفترة ({getPeriodDesc()})</span>
