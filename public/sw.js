@@ -6,8 +6,13 @@
 const CACHE_NAME = 'pharmacy-portal-v3-' + Date.now();
 const OFFLINE_URL = '/offline.html';
 
-// ── Install: Force Immediate Activation ──────────────────────────────────────
+// ── Install: Force Immediate Activation & Precache Offline Page ─────────────
 self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll([OFFLINE_URL, '/favicon.ico']).catch(() => {});
+    })
+  );
   self.skipWaiting();
 });
 
@@ -17,8 +22,11 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) => {
       return Promise.all(
         keys.map((key) => {
-          console.log('[SW] Purging outdated cache:', key);
-          return caches.delete(key);
+          if (key !== CACHE_NAME) {
+            console.log('[SW] Purging outdated cache:', key);
+            return caches.delete(key);
+          }
+          return Promise.resolve();
         })
       );
     }).then(() => {
@@ -39,9 +47,11 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET, chrome extensions, API endpoints, SSE streams, and external domains
+  // Skip non-GET, localhost, 127.0.0.1, chrome extensions, API endpoints, SSE streams, and external domains
   if (
     request.method !== 'GET' ||
+    url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1' ||
     url.protocol === 'chrome-extension:' ||
     url.pathname.startsWith('/api') ||
     url.pathname.includes('/api/') ||
@@ -52,14 +62,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For HTML documents: Always fetch fresh from network with no-cache header
+  // For HTML documents: Always fetch fresh from network with fallback
   if (request.mode === 'navigate' || request.destination === 'document') {
     event.respondWith(
-      fetch(request, { cache: 'no-cache' })
+      fetch(request)
         .catch(async () => {
           const offlinePage = await caches.match(OFFLINE_URL);
           if (offlinePage) return offlinePage;
-          return new Response('Offline - No connection', { status: 503, statusText: 'Offline' });
+          const cachedIndex = await caches.match('/index.html');
+          if (cachedIndex) return cachedIndex;
+          return new Response(
+            '<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>غير متصل</title><style>body{background:#0f172a;color:#f8fafc;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;padding:20px;}button{background:#0d9488;color:#fff;border:none;padding:12px 24px;border-radius:10px;font-size:16px;cursor:pointer;margin-top:20px;font-weight:bold;}</style></head><body><h2>تعذر الاتصال بالإنترنت</h2><p>يرجى التحقق من اتصال الشبكة وإعادة المحاولة.</p><button onclick="window.location.reload()">🔄 إعادة المحاولة</button></body></html>',
+            { headers: { 'Content-Type': 'text/html; charset=utf-8' }, status: 503, statusText: 'Offline' }
+          );
         })
     );
     return;

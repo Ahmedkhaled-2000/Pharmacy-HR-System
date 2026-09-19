@@ -117,7 +117,32 @@
           }).catch(function() {});
         }
 
-        if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+        var isElectronApp = !!(
+          window.desktopAPI ||
+          (navigator.userAgent && navigator.userAgent.indexOf('Electron') !== -1) ||
+          window.location.protocol === 'app:'
+        );
+
+        if (isElectronApp) {
+          // ── تطبيق ويندوز المكتبي (Electron) ──
+          // منع تسجيل أي Service Worker نهائياً وإلغاء أي تسجيل سابق لتفادي شاشة Offline وانقطاع الاتصال
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(registrations) {
+              registrations.forEach(function(reg) {
+                console.log('[Desktop Electron] Unregistering obsolete ServiceWorker:', reg.scope);
+                reg.unregister();
+              });
+            }).catch(function() {});
+          }
+          if ('caches' in window) {
+            caches.keys().then(function(keys) {
+              keys.forEach(function(key) {
+                caches.delete(key);
+              });
+            }).catch(function() {});
+          }
+        } else if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+          // ── بيئة متصفح الويب وتطبيق الهاتف الذكي PWA فقط ──
           let refreshing = false;
           navigator.serviceWorker.addEventListener('controllerchange', () => {
             if (refreshing) return;

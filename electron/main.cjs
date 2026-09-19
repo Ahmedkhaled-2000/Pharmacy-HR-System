@@ -4,7 +4,7 @@
  * تشمل إدارة النوافذ، قاعدة البيانات المحلية المحمية، ومحرك التحديث التلقائي الصامت
  */
 
-const { app, BrowserWindow, ipcMain, Menu, dialog, powerMonitor, net, protocol, utilityProcess, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog, powerMonitor, net, protocol, utilityProcess, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const url = require('url');
@@ -116,11 +116,25 @@ function startLocalStaticServer(distDir) {
         res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
         res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
 
-        const stream = fs.createReadStream(filePath);
-        stream.pipe(res);
-        stream.on('error', () => {
-          res.writeHead(500);
-          res.end('Server error');
+        fs.readFile(filePath, (err, data) => {
+          if (err) {
+            const fallbackPath = path.join(distDir, 'index.html');
+            if (filePath !== fallbackPath && fs.existsSync(fallbackPath)) {
+              res.setHeader('Content-Type', 'text/html; charset=utf-8');
+              return fs.readFile(fallbackPath, (_fallbackErr, fallbackData) => {
+                if (_fallbackErr) {
+                  res.writeHead(500);
+                  return res.end('Internal Server Error');
+                }
+                res.writeHead(200);
+                res.end(fallbackData);
+              });
+            }
+            res.writeHead(404);
+            return res.end('Not Found');
+          }
+          res.writeHead(200);
+          res.end(data);
         });
       } catch (err) {
         res.writeHead(500);
@@ -148,7 +162,7 @@ function startLocalStaticServer(distDir) {
 // دالة جلب البيانات المركزية المباشرة من خادم VPS السحابي
 function fetchCloudDataDirect() {
   return new Promise((resolve, reject) => {
-    const req = http.get('http://63.183.147.199/api/settings?key=pharmacy-tracker-data', { timeout: 8000 }, (res) => {
+    const req = http.get('http://63.183.147.199/api/settings?key=pharmacy-tracker-data', { timeout: 2500 }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
@@ -322,12 +336,27 @@ function createMainWindow() {
     return true;
   });
 
-  // تحميل مسار الواجهة عبر خادم الـ Localhost لدعم WebAuthn وبصمة Windows Hello قانونياً
+  // معالجة فشل التحميل التلقائي والانتقال فوراً وبسلاسة إلى بروتوكول app:// المحلي
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.warn(`[MainWindow did-fail-load] code: ${errorCode}, desc: ${errorDescription}, url: ${validatedURL}`);
+    if (validatedURL && (validatedURL.includes('127.0.0.1') || validatedURL.includes('localhost'))) {
+      console.log('[MainWindow Fallback] Switching to direct local protocol app://-/index.html ...');
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.loadURL('app://-/index.html').catch(e => {
+            console.error('[Protocol fallback error]:', e.message);
+          });
+        }
+      }, 300);
+    }
+  });
+
+  // تحميل مسار الواجهة عبر 127.0.0.1 لدعم WebAuthn وبصمة Windows Hello بدون الاعتماد على الـ DNS
   if (isDev) {
     const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
     mainWindow.loadURL(devUrl);
   } else {
-    mainWindow.loadURL(`http://localhost:${localStaticPort}/index.html`);
+    mainWindow.loadURL(`http://127.0.0.1:${localStaticPort}/index.html`);
   }
 
   mainWindow.on('closed', () => {
@@ -1078,6 +1107,15 @@ ipcMain.handle('print:generate-pdf-base64', async (_event, htmlContent, printOpt
 
 // ── 6. دورة حياة التطبيق (App Lifecycle) ──────────────────────────────────
 app.whenReady().then(async () => {
+  // تفريغ مخازن الـ Service Workers والكاش لحماية تطبيق الويندوز من الشاشة السوداء
+  try {
+    const ses = session.defaultSession;
+    await ses.clearStorageData({ storages: ['serviceworkers', 'cachestorage'] });
+    console.log('[Desktop Session] Successfully cleared serviceworkers & cachestorage.');
+  } catch (sesErr) {
+    console.warn('[Desktop Session Clear Warning]:', sesErr.message);
+  }
+
   // فحص وإتاحة المنفذ 3100 في جدار حماية ويندوز لربط باقي الأجهزة بالصيدلية
   ensureFirewallPortAllowed();
   // تشغيل خادم الواتساب تلقائياً في الخلفية فور إقلاع التطبيق
@@ -1107,7 +1145,7 @@ app.whenReady().then(async () => {
       try {
         const reqUrl = new URL(request.url);
         let pathname = decodeURIComponent(reqUrl.pathname);
-        if (pathname.startsWith('/')) pathname = pathname.slice(1);
+        pathname = pathname.replace(/^\/?(?:-\/)?/, '');
         if (!pathname || pathname === '/') pathname = 'index.html';
 
         const distDir = path.normalize(path.join(__dirname, '../dist'));
@@ -1117,7 +1155,7 @@ app.whenReady().then(async () => {
           return new Response('Forbidden', { status: 403 });
         }
 
-        if (fs.existsSync(filePath)) {
+        if (fs.existsSync(filePath) && !fs.statSync(filePath).isDirectory()) {
           return net.fetch(url.pathToFileURL(filePath).toString());
         }
 
