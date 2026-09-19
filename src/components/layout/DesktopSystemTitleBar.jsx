@@ -32,14 +32,16 @@ export default function DesktopSystemTitleBar() {
       }).catch(() => {});
     }
 
-    // الاستماع لاختصار لوحة المفاتيح Ctrl + , أو F2 لفتح نافذة إعدادات تطبيق الويندوز
+    // الاستماع لاختصار لوحة المفاتيح Ctrl + , أو F2 أو أحداث النظام لفتح نافذة إعدادات تطبيق الويندوز
     const handleShortcut = (e) => {
       if ((e.ctrlKey && (e.key === ',' || e.key === '،')) || e.key === 'F2') {
         e.preventDefault();
         setIsSettingsOpen(prev => !prev);
       }
     };
+    const handleOpenSettingsEvent = () => setIsSettingsOpen(true);
     window.addEventListener('keydown', handleShortcut);
+    window.addEventListener('open-desktop-settings', handleOpenSettingsEvent);
 
     // استعلام عن وضع الشاشة الكاملة مبدئياً
     if (window.desktopAPI?.isFullScreen) {
@@ -136,6 +138,7 @@ export default function DesktopSystemTitleBar() {
     return () => {
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('keydown', handleShortcut);
+      window.removeEventListener('open-desktop-settings', handleOpenSettingsEvent);
       if (unsubscribeMax) unsubscribeMax();
       if (unsubscribeUpdate) unsubscribeUpdate();
       if (unsubscribeFullScreen) unsubscribeFullScreen();
@@ -390,7 +393,7 @@ export default function DesktopSystemTitleBar() {
           {renderButtonContent()}
         </button>
 
-        {/* زر ترس إعدادات تطبيق الويندوز */}
+        {/* زر ترس إعدادات وتخصيص تطبيق الويندوز */}
         <button
           type="button"
           onClick={(e) => {
@@ -398,37 +401,14 @@ export default function DesktopSystemTitleBar() {
             setIsSettingsOpen(true);
           }}
           className="titlebar-settings-btn app-no-drag"
-          title="إعدادات وتخصيص تطبيق الويندوز (الهوية، نسبة التكبير، وإشعارات الويندوز) [Ctrl+,]"
+          title="إعدادات وتخصيص تطبيق الويندوز (الهوية، نسبة التكبير، وإشعارات الويندوز) [Ctrl+, أو F2]"
           style={{
             WebkitAppRegion: 'no-drag',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '5px',
-            padding: '2px 9px',
-            height: '24px',
-            borderRadius: '7px',
-            border: '1px solid rgba(255, 255, 255, 0.14)',
-            background: 'rgba(255, 255, 255, 0.05)',
-            color: '#e2e8f0',
-            cursor: 'pointer',
-            marginRight: '6px',
-            fontSize: '11px',
-            transition: 'all 0.15s ease'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(59, 130, 246, 0.25)';
-            e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.5)';
-            e.currentTarget.style.color = '#93c5fd';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.14)';
-            e.currentTarget.style.color = '#e2e8f0';
+            marginRight: '6px'
           }}
         >
-          <Settings style={{ width: '12px', height: '12px' }} />
-          <span>الإعدادات</span>
+          <Settings className="titlebar-settings-icon" style={{ width: '13px', height: '13px', flexShrink: 0, pointerEvents: 'none' }} />
+          <span style={{ pointerEvents: 'none' }}>الإعدادات</span>
         </button>
       </div>
 
