@@ -2040,7 +2040,7 @@ export default function EmployeePortalView({
         label: '📱 تحميل تطبيق الأندرويد (APK)',
         icon: '🤖',
         isSingle: true,
-        badge: 'v1.2.41',
+        badge: 'v1.2.46',
         action: 'download_android'
       }
     ];
@@ -3098,7 +3098,7 @@ export default function EmployeePortalView({
             <button
               type="button"
               onClick={triggerAndroidApkDownload}
-              title="تنزيل تطبيق الأندرويد لهواتف الموظفين بصيغة APK (الإصدار v1.2.41)"
+              title="تنزيل تطبيق الأندرويد لهواتف الموظفين بصيغة APK (الإصدار v1.2.46)"
               style={{
                 border: '1px solid #10b981',
                 background: 'linear-gradient(135deg, #059669, #10b981)',
@@ -3123,7 +3123,7 @@ export default function EmployeePortalView({
                 padding: '1px 5px',
                 borderRadius: '4px',
                 fontWeight: 800
-              }}>v1.2.41</span>
+              }}>v1.2.46</span>
             </button>
 
             {toggleTheme && (
@@ -3620,7 +3620,7 @@ export default function EmployeePortalView({
                 }}
               >
                 <span>📱</span>
-                <span>تنزيل تطبيق الأندرويد (v1.2.41)</span>
+                <span>تنزيل تطبيق الأندرويد (v1.2.46)</span>
               </button>
               <button
                 type="button"
