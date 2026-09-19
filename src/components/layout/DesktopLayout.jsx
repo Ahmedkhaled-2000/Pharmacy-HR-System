@@ -4,6 +4,7 @@ import { getCycleDateRange } from '../../utils/periodEngine';
 import { getNotificationTarget, getNotificationTargetTab, isRequestNotification } from '../../utils/notificationEngine';
 import { triggerAndroidApkDownload } from '../../utils/nativeAppUpdater';
 import { getPublicSystemUrl } from '../../utils/systemUrlHelper';
+import AndroidSettingsModal from '../modals/AndroidSettingsModal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🌟 ADAPTIVE DROPDOWN ITEM WITH SMART BIDIRECTIONAL FLYOUT (Anti-Clipping Engine)
@@ -649,6 +650,7 @@ export default function DesktopLayout({
   const [hoveredFlyoutId, setHoveredFlyoutId] = useState(null);
   const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
   const [notifDropdownTab, setNotifDropdownTab] = useState('system'); // 'system' | 'requests'
+  const [isAndroidSettingsOpen, setIsAndroidSettingsOpen] = useState(false);
   const menuContainerRef = useRef(null);
   const notifDropdownRef = useRef(null);
   const topMenuRefs = useRef([]);
@@ -1938,6 +1940,27 @@ return (
           }}
         >
           <span>{themeMode === 'dark' ? '☀️' : '🌙'}</span>
+        </button>
+
+        {/* زر ترس إعدادات وتخصيص تطبيق الأندرويد والهاتف */}
+        <button
+          type="button"
+          onClick={() => setIsAndroidSettingsOpen(true)}
+          style={{
+            border: '1px solid var(--border)',
+            background: 'var(--surface)',
+            padding: '4px 7px',
+            borderRadius: '7px',
+            cursor: 'pointer',
+            fontSize: '13px',
+            color: 'var(--text)',
+            display: 'flex',
+            alignItems: 'center',
+            lineHeight: 1
+          }}
+          title="إعدادات وتخصيص التطبيق وتكبير الخطوط"
+        >
+          ⚙️
         </button>
 
 
@@ -3373,6 +3396,12 @@ return (
   }}>
     {children}
   </main>
+
+  {/* نافذة إعدادات وتخصيص تطبيق الأندرويد والهاتف */}
+  <AndroidSettingsModal
+    isOpen={isAndroidSettingsOpen}
+    onClose={() => setIsAndroidSettingsOpen(false)}
+  />
 </div>
 );
 }

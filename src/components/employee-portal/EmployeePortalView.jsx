@@ -30,6 +30,8 @@ import { apiSubmitRequestAtomic } from '../../utils/apiClient';
 import { broadcastStateChange } from '../../utils/offlineSync';
 import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 import { triggerAndroidApkDownload } from '../../utils/nativeAppUpdater';
+import AndroidSettingsModal from '../modals/AndroidSettingsModal';
+import { getMobileConfig } from '../../utils/mobileConfigHelper';
 import '../../portal.css';
 
 // ─────────────────────────────────────────
@@ -140,6 +142,9 @@ export default function EmployeePortalView({
   onDeleteNotification,
   onClearReadNotifications,
 }) {
+  const [isAndroidSettingsOpen, setIsAndroidSettingsOpen] = useState(false);
+  const [mobileConfig, setMobileConfig] = useState(() => getMobileConfig());
+
   const emp = useMemo(() => {
     if (!currentEmpUser) return null;
     const found = (state?.employees || []).find((e) =>
@@ -2253,9 +2258,9 @@ export default function EmployeePortalView({
                 ☰
               </button>
 
-              {(orgSettings?.logoUrl || state?.orgSettings?.logoUrl) ? (
+              {(mobileConfig?.customLogoBase64 || orgSettings?.logoUrl || state?.orgSettings?.logoUrl) ? (
                 <img
-                  src={orgSettings?.logoUrl || state?.orgSettings?.logoUrl}
+                  src={mobileConfig?.customLogoBase64 || orgSettings?.logoUrl || state?.orgSettings?.logoUrl}
                   alt="شعار المؤسسة"
                   style={{ width: '28px', height: '28px', borderRadius: '7px', objectFit: 'contain', background: '#fff', padding: '2px', border: '1px solid var(--border)', flexShrink: 0 }}
                 />
@@ -2278,7 +2283,7 @@ export default function EmployeePortalView({
               )}
 
               <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)', whiteSpace: 'nowrap' }}>
-                {orgSettings?.orgName || state?.orgSettings?.orgName || 'بوابة الموظف'}
+                {mobileConfig?.appName || orgSettings?.orgName || state?.orgSettings?.orgName || 'بوابة الموظف'}
               </span>
             </div>
 
@@ -2554,6 +2559,27 @@ export default function EmployeePortalView({
                   {themeMode === 'dark' ? '☀️' : '🌙'}
                 </button>
               )}
+
+              {/* زر ترس إعدادات وتخصيص تطبيق الأندرويد والهاتف */}
+              <button
+                type="button"
+                onClick={() => setIsAndroidSettingsOpen(true)}
+                style={{
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface)',
+                  padding: '4px 6px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  lineHeight: 1,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                title="إعدادات وتخصيص التطبيق والخطوط"
+              >
+                ⚙️
+              </button>
 
               <button
                 type="button"
@@ -6562,6 +6588,13 @@ export default function EmployeePortalView({
             </div>
           </div>
         )}
+
+        {/* نافذة إعدادات وتخصيص تطبيق الأندرويد والهاتف */}
+        <AndroidSettingsModal
+          isOpen={isAndroidSettingsOpen}
+          onClose={() => setIsAndroidSettingsOpen(false)}
+          onConfigSaved={(newCfg) => setMobileConfig(newCfg)}
+        />
       </div>
     );
   }
