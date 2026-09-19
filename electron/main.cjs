@@ -174,6 +174,7 @@ function createIcoFromImage(imagePath, targetIcoPath) {
 /**
  * تحديث اختصارات سطح المكتب وقائمة ابدأ في نظام ويندوز باسم التطبيق وشعاره
  * وتنبيه Windows Explorer لإعادة رسم الأيقونات فوراً
+ * يستخدم واجهة IShellLinkW القياسية عبر ملف UTF-8 مع BOM لضمان الدعم الكامل للأسماء العربية
  */
 function updateWindowsDesktopShortcuts(customIcoPath, customAppName) {
   return new Promise((resolve) => {
@@ -184,87 +185,186 @@ function updateWindowsDesktopShortcuts(customIcoPath, customAppName) {
     try {
       const config = getDesktopConfig();
       const appName = (customAppName || config.appName || 'منظومة الموارد البشرية والرواتب').trim();
-      const defaultIco = path.join(__dirname, '../assets/icon.ico');
-      const resolvedIco = (customIcoPath && fs.existsSync(customIcoPath)) ? customIcoPath : defaultIco;
 
-      // تحديد مسار الملف التنفيذي للبرنامج
-      let targetExe = process.execPath;
-      const installedExe = 'C:\\Program Files\\pharmacy-hr-system\\منظومة الموارد البشرية.exe';
-      if (!app.isPackaged && fs.existsSync(installedExe)) {
-        targetExe = installedExe;
+      // إنشاء مجلد آمن للملفات ومسار خالي من مشاكل الترميز
+      const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE, 'AppData', 'Local');
+      const safeDir = path.join(localAppData, 'pharmacy-hr-system');
+      if (!fs.existsSync(safeDir)) {
+        try { fs.mkdirSync(safeDir, { recursive: true }); } catch {}
       }
 
-      const script = `
+      // تجهيز ملف الأيقونة .ico في المسار الآمن
+      const safeIcoPath = path.join(safeDir, 'app_icon.ico');
+      const defaultIco = path.join(__dirname, '../assets/icon.ico');
+      const srcIco = (customIcoPath && fs.existsSync(customIcoPath)) ? customIcoPath : defaultIco;
+
+      if (fs.existsSync(srcIco)) {
+        try { fs.copyFileSync(srcIco, safeIcoPath); } catch {}
+      }
+
+      const finalIcoPath = fs.existsSync(safeIcoPath) ? safeIcoPath : srcIco;
+
+      // تحديد مسار الملف التنفيذي الفعلي
+      let targetExe = process.execPath;
+      const installedDir = 'C:\\Program Files\\pharmacy-hr-system';
+      if (!app.isPackaged && fs.existsSync(installedDir)) {
+        try {
+          const files = fs.readdirSync(installedDir);
+          const foundExe = files.find(f => f.endsWith('.exe') && !f.startsWith('Uninstall'));
+          if (foundExe) {
+            targetExe = path.join(installedDir, foundExe);
+          }
+        } catch {}
+      }
+
+      const workingDir = path.dirname(targetExe);
+
+      // كتابة ملف Payload بصيغة UTF-8 JSON لمنع أي مشاكل ترميز في الرموز العربية
+      const payload = {
+        appName,
+        targetExe,
+        workingDir,
+        iconPath: finalIcoPath,
+        description: appName
+      };
+
+      const payloadFile = path.join(safeDir, 'shortcut_sync.json');
+      fs.writeFileSync(payloadFile, JSON.stringify(payload, null, 2), 'utf8');
+
+      // سكربت PowerShell يعتمد على IShellLinkW الأصلي
+      const psScript = `
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$sh = New-Object -ComObject WScript.Shell
+
+$payloadFile = "${payloadFile.replace(/\\/g, '\\\\')}"
+if (-not (Test-Path $payloadFile)) { exit 0 }
+$data = Get-Content -Raw -Path $payloadFile -Encoding UTF8 | ConvertFrom-Json
+
+$source = @"
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+
+[ComImport]
+[Guid("00021401-0000-0000-C000-000000000046")]
+public class ShellLink {}
+
+[ComImport]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+[Guid("000214F9-0000-0000-C000-000000000046")]
+public interface IShellLinkW {
+    void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszFile, int cchMaxPath, out IntPtr pfd, uint fFlags);
+    void GetIDList(out IntPtr ppidl);
+    void SetIDList(IntPtr pidl);
+    void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszName, int cchMaxName);
+    void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+    void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszDir, int cchMaxPath);
+    void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+    void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszArgs, int cchMaxPath);
+    void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+    void GetHotkey(out short pwHotkey);
+    void SetHotkey(short wHotkey);
+    void GetShowCmd(out int piShowCmd);
+    void SetShowCmd(int iShowCmd);
+    void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszIconPath, int cchIconPath, out int piIcon);
+    void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+    void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+    void Resolve(IntPtr hwnd, uint fFlags);
+    void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+}
+
+public static class ShortcutHelper {
+    public static void SaveLink(string lnkPath, string target, string workDir, string icon, string desc) {
+        ShellLink link = new ShellLink();
+        IShellLinkW shellLink = (IShellLinkW)link;
+        shellLink.SetPath(target);
+        if (!string.IsNullOrEmpty(workDir)) shellLink.SetWorkingDirectory(workDir);
+        if (!string.IsNullOrEmpty(icon)) shellLink.SetIconLocation(icon, 0);
+        if (!string.IsNullOrEmpty(desc)) shellLink.SetDescription(desc);
+        IPersistFile file = (IPersistFile)link;
+        file.Save(lnkPath, true);
+    }
+}
+"@
+
+Add-Type -TypeDefinition $source -Language CSharp
+
 $userDesktop = [Environment]::GetFolderPath('Desktop')
-$pubDesktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
 $userPrograms = [Environment]::GetFolderPath('Programs')
+$pubDesktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
+$pubPrograms = [Environment]::GetFolderPath('CommonPrograms')
+$linkName = "$($data.appName).lnk"
 
-$targetExe = "${targetExe.replace(/\\/g, '\\\\')}"
-$iconFile = "${resolvedIco.replace(/\\/g, '\\\\')}"
-$appName = "${appName.replace(/"/g, '`"')}"
-$linkName = "$appName.lnk"
-
-# 1. تحديث أو استبدال اختصارات سطح المكتب للمستخدم الحالي
+# 1. تنظيف أي اختصارات سابقة للبرنامج على سطح مكتب المستخدم بأسماء قديمة
 if (Test-Path $userDesktop) {
   Get-ChildItem -Path $userDesktop -Filter '*.lnk' | ForEach-Object {
-    try {
-      $sc = $sh.CreateShortcut($_.FullName)
-      if (($sc.TargetPath -and $sc.TargetPath.ToLower() -eq $targetExe.ToLower()) -or $_.Name -like '*منظومة*' -or $_.Name -like '*Pharmacy*') {
-        if ($_.Name -ne $linkName) {
-          Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
-        }
-      }
-    } catch {}
+    if ($_.Name -ne $linkName -and ($_.Name -like '*منظومة*' -or $_.Name -like '*Pharmacy*' -or $_.Name -like 'PharmaHR*')) {
+      try {
+        $_.Attributes = 'Normal'
+        Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+      } catch {}
+    }
   }
 
   $userLnk = Join-Path $userDesktop $linkName
-  $uSc = $sh.CreateShortcut($userLnk)
-  $uSc.TargetPath = $targetExe
-  $uSc.WorkingDirectory = [System.IO.Path]::GetDirectoryName($targetExe)
-  $uSc.IconLocation = "$iconFile,0"
-  $uSc.Description = $appName
-  $uSc.Save()
+  [ShortcutHelper]::SaveLink($userLnk, $data.targetExe, $data.workingDir, $data.iconPath, $data.description)
+  try { [System.IO.File]::SetLastWriteTime($userLnk, [DateTime]::Now) } catch {}
 }
 
-# 2. تحديث قائمة ابدأ للمستخدم الحالي
+# 2. تحديث قائمة ابدأ الخاصة بالمستخدم
 if (Test-Path $userPrograms) {
   Get-ChildItem -Path $userPrograms -Filter '*.lnk' -Recurse | ForEach-Object {
-    try {
-      $sc = $sh.CreateShortcut($_.FullName)
-      if (($sc.TargetPath -and $sc.TargetPath.ToLower() -eq $targetExe.ToLower()) -or $_.Name -like '*منظومة*' -or $_.Name -like '*Pharmacy*') {
-        if ($_.Name -ne $linkName) {
-          Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
-        }
-      }
-    } catch {}
+    if ($_.Name -ne $linkName -and ($_.Name -like '*منظومة*' -or $_.Name -like '*Pharmacy*' -or $_.Name -like 'PharmaHR*')) {
+      try {
+        $_.Attributes = 'Normal'
+        Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+      } catch {}
+    }
   }
 
   $startLnk = Join-Path $userPrograms $linkName
-  $sSc = $sh.CreateShortcut($startLnk)
-  $sSc.TargetPath = $targetExe
-  $sSc.WorkingDirectory = [System.IO.Path]::GetDirectoryName($targetExe)
-  $sSc.IconLocation = "$iconFile,0"
-  $sSc.Description = $appName
-  $sSc.Save()
+  [ShortcutHelper]::SaveLink($startLnk, $data.targetExe, $data.workingDir, $data.iconPath, $data.description)
+  try { [System.IO.File]::SetLastWriteTime($startLnk, [DateTime]::Now) } catch {}
 }
 
-# 3. محاولة تحديث سطح المكتب العام إن كانت الصلاحيات تسمح
+# 3. إزالة أو تحديث أي اختصارات من سطح المكتب العام (Public Desktop)
 if (Test-Path $pubDesktop) {
-  try {
-    Get-ChildItem -Path $pubDesktop -Filter '*.lnk' | ForEach-Object {
-      if ($_.Name -like '*منظومة*' -or $_.Name -like '*Pharmacy*') {
-        $pSc = $sh.CreateShortcut($_.FullName)
-        $pSc.IconLocation = "$iconFile,0"
-        $pSc.Description = $appName
-        $pSc.Save()
-      }
+  Get-ChildItem -Path $pubDesktop -Filter '*.lnk' | ForEach-Object {
+    if ($_.Name -ne $linkName -and ($_.Name -like '*منظومة*' -or $_.Name -like '*Pharmacy*' -or $_.Name -like 'PharmaHR*')) {
+      try {
+        $_.Attributes = 'Normal'
+        Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+      } catch {}
     }
-  } catch {}
+  }
+  $pubLnk = Join-Path $pubDesktop $linkName
+  if (Test-Path $pubLnk) {
+    try {
+      [ShortcutHelper]::SaveLink($pubLnk, $data.targetExe, $data.workingDir, $data.iconPath, $data.description)
+      [System.IO.File]::SetLastWriteTime($pubLnk, [DateTime]::Now)
+    } catch {}
+  }
 }
 
-# 4. إنعاش كاش أيقونات مستكشف ملفات ويندوز فوراً
+# 4. إزالة أو تحديث أي اختصارات من قائمة ابدأ العامة (Common Programs)
+if (Test-Path $pubPrograms) {
+  Get-ChildItem -Path $pubPrograms -Filter '*.lnk' -Recurse | ForEach-Object {
+    if ($_.Name -ne $linkName -and ($_.Name -like '*منظومة*' -or $_.Name -like '*Pharmacy*' -or $_.Name -like 'PharmaHR*')) {
+      try {
+        $_.Attributes = 'Normal'
+        Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+      } catch {}
+    }
+  }
+  $pubStartLnk = Join-Path $pubPrograms $linkName
+  if (Test-Path $pubStartLnk) {
+    try {
+      [ShortcutHelper]::SaveLink($pubStartLnk, $data.targetExe, $data.workingDir, $data.iconPath, $data.description)
+      [System.IO.File]::SetLastWriteTime($pubStartLnk, [DateTime]::Now)
+    } catch {}
+  }
+}
+
+# 5. إنعاش كاش أيقونات مستكشف ملفات ويندوز فوراً
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -275,18 +375,22 @@ public class ShellNotifier {
 "@ -ErrorAction SilentlyContinue
 
 [ShellNotifier]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
+try { & ie4uinit.exe -show } catch {}
 `;
 
-      execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true }, (err, stdout, stderr) => {
+      const psFile = path.join(safeDir, 'update_shortcuts.ps1');
+      fs.writeFileSync(psFile, '\uFEFF' + psScript, 'utf8');
+
+      execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', psFile], { windowsHide: true }, (err, stdout, stderr) => {
         if (err) {
-          console.warn('[Desktop Shortcuts] PowerShell update error:', err.message);
+          console.warn('[Desktop Shortcuts] PowerShell error:', err.message);
           return resolve({ success: false, error: err.message });
         }
-        console.log('[Desktop Shortcuts] Shortcuts and icons refreshed successfully:', appName);
-        resolve({ success: true, appName, iconPath: resolvedIco });
+        console.log('[Desktop Shortcuts] Successfully refreshed:', appName, finalIcoPath);
+        resolve({ success: true, appName, iconPath: finalIcoPath });
       });
     } catch (e) {
-      console.error('[Desktop Shortcuts] Exception updating shortcuts:', e);
+      console.error('[Desktop Shortcuts] Exception:', e);
       resolve({ success: false, error: e.message });
     }
   });
@@ -509,6 +613,17 @@ function createMainWindow() {
     if (isDev) {
       // mainWindow.webContents.openDevTools();
     }
+    // مزامنة ذاتية هادئة لاختصارات وأيقونة سطح المكتب بعد إقلاع التطبيق (Self-healing Desktop Shortcut Sync)
+    setTimeout(async () => {
+      try {
+        const cfg = getDesktopConfig();
+        const icoToUse = cfg.customIcoPath || cfg.customLogoPath;
+        await updateWindowsDesktopShortcuts(icoToUse, cfg.appName);
+      } catch (e) {
+        console.warn('[Desktop Startup Sync Warning]:', e.message);
+      }
+    }, 2500);
+
     // فحص فوري للتحديثات بعد ثانية واحدة من ظهور النافذة
     setTimeout(() => {
       checkForAppUpdates(false);
@@ -1365,10 +1480,12 @@ ipcMain.handle('desktop:save-config', async (_event, newConfig) => {
       mainWindow.setTitle(newConfig.appName);
     }
 
-    // إذا تم تعديل اسم التطبيق، نقوم بتحديث اختصار سطح المكتب والاسم فوراً
-    if (newConfig.appName && newConfig.appName !== currentConfig.appName) {
-      const icoToUse = updated.customIcoPath || updated.customLogoPath;
-      updateWindowsDesktopShortcuts(icoToUse, newConfig.appName);
+    // مزامنة وتحديث اختصار سطح المكتب والاسم فوراً وبشكل متزامن
+    const icoToUse = updated.customIcoPath || updated.customLogoPath;
+    try {
+      await updateWindowsDesktopShortcuts(icoToUse, updated.appName);
+    } catch (scErr) {
+      console.warn('[Desktop Shortcuts Sync Error]:', scErr.message);
     }
 
     if (newConfig.autoLaunch !== undefined) {
@@ -1435,7 +1552,7 @@ ipcMain.handle('desktop:select-logo', async () => {
     });
 
     // تحديث اختصارات سطح المكتب وأيقونات الويندوز فوراً
-    updateWindowsDesktopShortcuts(targetIco, updatedAppName);
+    await updateWindowsDesktopShortcuts(targetIco, updatedAppName);
 
     // قراءة محتوى الصورة كـ Base64 ليتسنى للواجهة عرضها فوراً
     const imageBuffer = fs.readFileSync(targetFile);
@@ -1476,7 +1593,7 @@ ipcMain.handle('desktop:reset-logo', async () => {
     saveDesktopConfig({ customLogoPath: null, customIcoPath: null });
 
     const config = getDesktopConfig();
-    updateWindowsDesktopShortcuts(defaultIconIco, config.appName);
+    await updateWindowsDesktopShortcuts(defaultIconIco, config.appName);
 
     try {
       if (fs.existsSync(defaultIconPng) && mainWindow && !mainWindow.isDestroyed()) {

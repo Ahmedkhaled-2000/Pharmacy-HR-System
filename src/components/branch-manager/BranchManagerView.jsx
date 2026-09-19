@@ -1792,7 +1792,7 @@ export default function BranchManagerView({
               boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
               transition: 'all 0.15s ease'
             }}
-            title="تحميل تطبيق الأندرويد لمدير الفرع والموظفين بصيغة APK (الإصدار v1.2.47)"
+            title="تحميل تطبيق الأندرويد لمدير الفرع والموظفين بصيغة APK (الإصدار v1.2.48)"
           >
             <span style={{ fontSize: '15px' }}>📱</span>
             <span>تنزيل تطبيق الأندرويد</span>
@@ -1801,7 +1801,7 @@ export default function BranchManagerView({
               padding: '1px 6px',
               borderRadius: '6px',
               fontSize: '10px'
-            }}>v1.2.47</span>
+            }}>v1.2.48</span>
           </button>
           <div style={{ flex: isMobileScreen ? 1 : 'none', background: 'rgba(255,255,255,0.15)', padding: isMobileScreen ? '6px 10px' : '8px 16px', borderRadius: '10px', textAlign: 'center' }}>
             <span style={{ fontSize: '11px', display: 'block', opacity: 0.85 }}>عدد موظفي الفرع</span>
