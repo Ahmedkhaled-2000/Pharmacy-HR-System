@@ -538,13 +538,30 @@ export default function SettingsModule({
   // Router IP Restrictions
   const ipRestrictions = state.ipRestrictions || { enabled: false, allowedIps: [] };
   const [ipEnabled, setIpEnabled] = useState(ipRestrictions.enabled);
-  const [approvedIPs, setApprovedIPs] = useState(
-    ipRestrictions.allowedIps.length > 0 
-      ? ipRestrictions.allowedIps.map(ipObj => typeof ipObj === 'string' ? ipObj : ipObj.ip) 
-      : (orgSettings.approvedIPs || ['192.168.1.1', '10.0.0.1'])
-  );
+  const [approvedIPs, setApprovedIPs] = useState(() => {
+    if (ipRestrictions.allowedIps && ipRestrictions.allowedIps.length > 0) {
+      return ipRestrictions.allowedIps.map((ipObj, idx) =>
+        typeof ipObj === 'string'
+          ? { ip: ipObj, label: `راوتر ${idx + 1}` }
+          : { ip: ipObj.ip, label: ipObj.label || `راوتر ${idx + 1}` }
+      );
+    }
+    if (orgSettings.approvedIPs && orgSettings.approvedIPs.length > 0) {
+      return orgSettings.approvedIPs.map((ip, idx) =>
+        typeof ip === 'string'
+          ? { ip, label: `راوتر ${idx + 1}` }
+          : { ip: ip.ip, label: ip.label || `راوتر ${idx + 1}` }
+      );
+    }
+    return [
+      { ip: '192.168.1.1', label: 'راوتر رئيسي' },
+      { ip: '10.0.0.1', label: 'راوتر فرعي' }
+    ];
+  });
   const [newIP, setNewIP] = useState('');
+  const [newIPLabel, setNewIPLabel] = useState('');
   const [isFetchingIp, setIsFetchingIp] = useState(false);
+  const [capturedIpModal, setCapturedIpModal] = useState(null);
 
   // Backup State & Auto-Backup
   const fileInputRef = useRef(null);
@@ -969,12 +986,18 @@ export default function SettingsModule({
         loanRequestStartDay: parseInt(loanRequestStartDay, 10) || 1,
         loanRequestEndDay: parseInt(loanRequestEndDay, 10) || 10,
         maxMonthlyLoanSalaryPercent: parseFloat(maxMonthlyLoanSalaryPercent) || 50,
-        approvedIPs, // keeping this for legacy components
+        approvedIPs: approvedIPs.map(item => (typeof item === 'string' ? item : item.ip)), // keeping this for legacy components
         updatedAt: nowIso
       };
       const updatedIpRestrictions = {
         enabled: ipEnabled,
-        allowedIps: approvedIPs.map(ip => ({ label: `راوتر`, ip }))
+        allowedIps: approvedIPs
+          .map(item => (
+            typeof item === 'string'
+              ? { label: 'راوتر معتمد', ip: item.trim() }
+              : { label: (item.label || 'راوتر معتمد').trim(), ip: (item.ip || '').trim() }
+          ))
+          .filter(item => Boolean(item.ip))
       };
       const updatedState = { ...state, orgSettings: updatedSettings, ipRestrictions: updatedIpRestrictions, updatedAt: nowIso };
       if (setState) setState(updatedState);
@@ -1050,21 +1073,73 @@ export default function SettingsModule({
   };
 
   const handleAddIP = () => {
-    if (!newIP.trim()) return;
-    if (approvedIPs.includes(newIP.trim())) return;
-    const updated = [...approvedIPs, newIP.trim()];
+    const cleanIp = newIP.trim();
+    if (!cleanIp) {
+      showToast?.('⚠️ يرجى إدخال عنوان الـ IP أولاً');
+      return;
+    }
+    const exists = approvedIPs.some(item => (typeof item === 'string' ? item : item.ip) === cleanIp);
+    if (exists) {
+      showToast?.('⚠️ هذا الـ IP مضاف مسبقاً في قائمة الراوترات المعتمدة!');
+      return;
+    }
+    const label = newIPLabel.trim() || `راوتر ${approvedIPs.length + 1}`;
+    const updated = [...approvedIPs, { ip: cleanIp, label }];
     setApprovedIPs(updated);
     setNewIP('');
+    setNewIPLabel('');
+    showToast?.(`✅ تم إضافة الراوتر "${label}" بنجاح!`);
   };
 
   const handleAddCurrentIP = async () => {
     setIsFetchingIp(true);
-    const ip = await fetchCurrentIP();
-    if (ip && !approvedIPs.includes(ip)) {
-      setApprovedIPs([...approvedIPs, ip]);
-      showToast?.('✅ تم التقاط عنوان الـ IP الحالي بنجاح!');
+    try {
+      const ip = await fetchCurrentIP();
+      if (!ip) {
+        showToast?.('❌ تعذر التقاط عنوان الـ IP للجهاز الحالي. يرجى التأكد من اتصال الإنترنت.');
+        return;
+      }
+      const existing = approvedIPs.find(item => (typeof item === 'string' ? item : item.ip) === ip);
+      if (existing) {
+        const existingLabel = typeof existing === 'string' ? 'راوتر معتمد' : (existing.label || 'راوتر معتمد');
+        showToast?.(`⚠️ عنوان الـ IP الحالي (${ip}) مضاف بالفعل باسم "${existingLabel}"!`);
+        return;
+      }
+      // Open modal to name the captured IP
+      setCapturedIpModal({
+        ip,
+        label: newIPLabel.trim() || `راوتر الصيدلية (${new Date().toLocaleDateString('ar-EG')})`
+      });
+    } catch {
+      showToast?.('❌ حدث خطأ أثناء التقاط عنوان الـ IP');
+    } finally {
+      setIsFetchingIp(false);
     }
-    setIsFetchingIp(false);
+  };
+
+  const handleConfirmAddCapturedIP = () => {
+    if (!capturedIpModal || !capturedIpModal.ip) return;
+    const finalLabel = capturedIpModal.label.trim() || `راوتر ${approvedIPs.length + 1}`;
+    const cleanIp = capturedIpModal.ip.trim();
+    const updated = [...approvedIPs, { ip: cleanIp, label: finalLabel }];
+    setApprovedIPs(updated);
+    setCapturedIpModal(null);
+    setNewIP('');
+    setNewIPLabel('');
+    showToast?.(`✅ تم التقاط وإضافة "${finalLabel}" بنجاح! اضغط على حفظ الإعدادات لتطبيق التغيير.`);
+  };
+
+  const handleEditIPLabel = (idx) => {
+    const item = approvedIPs[idx];
+    const currentLabel = typeof item === 'string' ? 'راوتر معتمد' : (item.label || 'راوتر معتمد');
+    const currentIp = typeof item === 'string' ? item : item.ip;
+    const newLabel = window.prompt(`تعديل اسم أو تسمية الراوتر (${currentIp}):`, currentLabel);
+    if (newLabel !== null && newLabel.trim()) {
+      const updated = [...approvedIPs];
+      updated[idx] = { ip: currentIp, label: newLabel.trim() };
+      setApprovedIPs(updated);
+      showToast?.(`✅ تم تحديث تسمية الراوتر إلى "${newLabel.trim()}"`);
+    }
   };
 
   // ── Complete System Permission Catalog (19 Unified Core Permissions) ──
@@ -2678,40 +2753,137 @@ export default function SettingsModule({
             </label>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
-            <input
-              type="text"
-              placeholder="مثال: 192.168.1.100"
-              value={newIP}
-              onChange={(e) => setNewIP(e.target.value)}
-              style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', flex: 1, minWidth: '200px' }}
-            />
-            <button className="btn btn-start" onClick={handleAddIP}>➕ إضافة راوتر معتمد</button>
-            <button 
-              className="btn btn-outline" 
-              onClick={handleAddCurrentIP}
-              disabled={isFetchingIp}
-            >
-              {isFetchingIp ? '⏳ جاري التقاط الـ IP...' : '📡 التقاط الـ IP للجهاز الحالي'}
-            </button>
-          </div>
+          {/* Quick Capture & Add Bar */}
+          <div style={{ background: '#f8fafc', border: '1px solid var(--border)', padding: '16px', borderRadius: '12px', marginBottom: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', alignItems: 'end' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', marginBottom: '6px', color: 'var(--text)' }}>
+                  🏷️ اسم أو تسمية الراوتر / الفرع:
+                </label>
+                <input
+                  type="text"
+                  placeholder="مثال: راوتر الفرع الرئيسي، الإدارة..."
+                  value={newIPLabel}
+                  onChange={(e) => setNewIPLabel(e.target.value)}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: '#fff', boxSizing: 'border-box' }}
+                />
+              </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-            {approvedIPs.map((ip, idx) => (
-              <div key={idx} style={{ background: '#f1f5f9', border: '1px solid var(--border)', padding: '8px 14px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontWeight: 'bold', fontFamily: 'monospace' }}>🌐 {ip}</span>
-                <button
-                  style={{ border: 'none', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}
-                  onClick={() => setApprovedIPs(approvedIPs.filter((_, i) => i !== idx))}
-                  title="حذف"
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', marginBottom: '6px', color: 'var(--text)' }}>
+                  🌐 عنوان الـ IP للراوتر (خارجي أو محلي):
+                </label>
+                <input
+                  type="text"
+                  placeholder="مثال: 192.168.1.100 أو IP عام"
+                  value={newIP}
+                  onChange={(e) => setNewIP(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddIP(); }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', direction: 'ltr', textAlign: 'right', background: '#fff', fontFamily: 'monospace', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button 
+                  type="button"
+                  className="btn btn-start" 
+                  onClick={handleAddIP}
+                  style={{ flex: 1, minWidth: '130px', padding: '9px 14px', fontSize: '13px' }}
                 >
-                  🗑️
+                  ➕ إضافة راوتر معتمد
+                </button>
+                <button 
+                  type="button"
+                  className="btn btn-outline" 
+                  onClick={handleAddCurrentIP}
+                  disabled={isFetchingIp}
+                  style={{ flex: 1.2, minWidth: '170px', padding: '9px 14px', fontSize: '13px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                >
+                  {isFetchingIp ? (
+                    <><span>⏳</span> جاري التقاط الـ IP...</>
+                  ) : (
+                    <><span>📡</span> التقاط الـ IP للجهاز الحالي</>
+                  )}
                 </button>
               </div>
-            ))}
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '8px' }}>
+              💡 عند الضغط على "📡 التقاط الـ IP للجهاز الحالي"، سيتم قراءة IP الاتصال الحالي تلقائياً وتظهر نافذة لتسمية الراوتر باسم مخصص وحفظه فوراً.
+            </div>
+          </div>
+
+          {/* Routers List */}
+          <div style={{ marginBottom: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--text)' }}>
+                قائمة الراوترات وعناوين الشبكة المعتمدة ({approvedIPs.length}):
+              </span>
+            </div>
+
+            {approvedIPs.length === 0 ? (
+              <div style={{ padding: '24px', textAlign: 'center', background: '#f8fafc', borderRadius: '10px', border: '1px dashed var(--border)', color: 'var(--muted)', fontSize: '13px' }}>
+                لم يتم إضافة أي راوترات معتمدة حتى الآن.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                {approvedIPs.map((item, idx) => {
+                  const ipVal = typeof item === 'string' ? item : item.ip;
+                  const labelVal = typeof item === 'string' ? 'راوتر معتمد' : (item.label || 'راوتر معتمد');
+                  return (
+                    <div 
+                      key={idx} 
+                      style={{ 
+                        background: '#ffffff', 
+                        border: '1px solid var(--border)', 
+                        padding: '8px 14px', 
+                        borderRadius: '10px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '12px',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '14px' }}>🌐</span>
+                          <span style={{ fontWeight: 'bold', fontSize: '13px', color: 'var(--primary-dark, #0f766e)' }}>
+                            {labelVal}
+                          </span>
+                        </div>
+                        <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#64748b', direction: 'ltr', textAlign: 'left' }}>
+                          {ipVal}
+                        </div>
+                      </div>
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', borderRight: '1px solid #e2e8f0', paddingRight: '8px' }}>
+                        <button
+                          type="button"
+                          style={{ border: 'none', background: '#f1f5f9', color: '#475569', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px', fontSize: '12px' }}
+                          onClick={() => handleEditIPLabel(idx)}
+                          title="تعديل تسمية الراوتر"
+                        >
+                          ✏️ تسمية
+                        </button>
+                        <button
+                          type="button"
+                          style={{ border: 'none', background: '#fee2e2', color: '#dc2626', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px', fontSize: '12px' }}
+                          onClick={() => setApprovedIPs(approvedIPs.filter((_, i) => i !== idx))}
+                          title="حذف هذا الراوتر"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
           
-          <div style={{ marginTop: '24px', borderTop: '1px solid var(--border)', paddingTop: '20px', display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ marginTop: '24px', borderTop: '1px solid var(--border)', paddingTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+              ⚠️ تأكد من الضغط على زر الحفظ لتثبيت قيود وعناوين الراوترات المعتمدة في النظام.
+            </span>
             <button className="btn btn-start" onClick={handleSaveGeneral} style={{ padding: '10px 24px', fontSize: '15px' }}>
               💾 حفظ الإعدادات وتطبيق القيود
             </button>
@@ -4522,6 +4694,73 @@ export default function SettingsModule({
                     <span>تأكيد مسح وتصفير البيانات نهائياً</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Captured IP Naming Modal */}
+      {capturedIpModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, backdropFilter: 'blur(4px)', padding: '16px' }}>
+          <div style={{ background: '#ffffff', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '460px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid var(--border)', textAlign: 'right' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'var(--primary-tint, rgba(16,185,129,0.1))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
+                📡
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '17px', color: 'var(--primary-dark)', fontFamily: 'Cairo' }}>
+                  تم التقاط عنوان الـ IP للجهاز بنجاح
+                </h3>
+                <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
+                  يرجى تحديد تسمية أو اسم لهذا الراوتر لتمييزه بسهولة
+                </p>
+              </div>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: '11px', color: '#64748b' }}>عنوان الـ IP الملتقط:</div>
+                <div style={{ fontSize: '16px', fontWeight: 'bold', fontFamily: 'monospace', color: '#0f766e', direction: 'ltr', textAlign: 'left' }}>
+                  {capturedIpModal.ip}
+                </div>
+              </div>
+              <span style={{ fontSize: '11px', background: '#dcfce7', color: '#15803d', padding: '3px 10px', borderRadius: '20px', fontWeight: 'bold' }}>
+                متصل الآن 🟢
+              </span>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px', color: 'var(--text)' }}>
+                🏷️ اسم أو تسمية الراوتر / الجهاز:
+              </label>
+              <input
+                type="text"
+                value={capturedIpModal.label}
+                onChange={(e) => setCapturedIpModal({ ...capturedIpModal, label: e.target.value })}
+                placeholder="مثال: راوتر الفرع الرئيسي، راوتر الإدارة..."
+                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '14px', boxSizing: 'border-box' }}
+                autoFocus
+                onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmAddCapturedIP(); }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setCapturedIpModal(null)}
+                style={{ padding: '8px 18px', fontSize: '13px' }}
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                className="btn btn-start"
+                onClick={handleConfirmAddCapturedIP}
+                style={{ padding: '8px 22px', fontSize: '13px' }}
+              >
+                ➕ حفظ وإضافة الراوتر
               </button>
             </div>
           </div>

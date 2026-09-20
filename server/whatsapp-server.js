@@ -442,7 +442,7 @@ app.post(['/render-pdf', '/api/render-pdf'], async (req, res) => {
 });
 
 // إرسال رسالة فردية مع محاكاة بشرية لمكافحة الحظر ودعم PDF مباشر
-app.post(['/send-message', '/api/send-message'], async (req, res) => {
+app.post(['/send', '/api/send', '/send-message', '/api/send-message'], async (req, res) => {
   const { phone, message, pdfBase64, pdfHtml, fileName } = req.body;
 
   if (!phone || (!message && !pdfBase64 && !pdfHtml)) {

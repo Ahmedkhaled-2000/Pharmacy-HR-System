@@ -232,7 +232,7 @@ export default function SalaryIncreasesHub({
         emp.resolvedBranchName
       );
 
-      const res = await fetch(`${waServerUrl}/api/send`, {
+      const res = await fetch(`${waServerUrl}/api/send-message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true' },
         body: JSON.stringify({
@@ -244,11 +244,11 @@ export default function SalaryIncreasesHub({
         })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
         showToast(`✅ تم إرسال شهادة الزيادة بنجاح للموظف: ${getEmpDisplayName(emp)}`);
       } else {
-        showToast(`❌ تعذر الإرسال: ${data.message || 'خطأ غير معروف في خادم الواتساب'}`);
+        showToast(`❌ تعذر الإرسال: ${data.error || data.message || 'خطأ غير معروف في خادم الواتساب'}`);
       }
     } catch (err) {
       showToast(`❌ فشل الاتصال بالسيرفر: ${err.message}`);
@@ -333,7 +333,7 @@ export default function SalaryIncreasesHub({
           );
         }
 
-        const res = await fetch(`${waServerUrl}/api/send`, {
+        const res = await fetch(`${waServerUrl}/api/send-message`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true' },
           body: JSON.stringify({
@@ -345,12 +345,12 @@ export default function SalaryIncreasesHub({
           })
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (res.ok && data.success) {
           successCount++;
         } else {
           failedCount++;
-          failures.push({ name: getEmpDisplayName(emp), reason: data.message || 'فشل الإرسال' });
+          failures.push({ name: getEmpDisplayName(emp), reason: data.error || data.message || 'فشل الإرسال' });
         }
       } catch (err) {
         failedCount++;
