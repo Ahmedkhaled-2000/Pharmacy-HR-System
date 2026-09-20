@@ -672,16 +672,20 @@ function generateSvgBarcode(code) {
  * توليد كود HTML رسمي وفخم لشهادة زيادة الراتب للطباعة أو التوليد كـ PDF وإرساله عبر الواتساب
  */
 export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, orgSettings = {}, branchName = '') {
-  const orgName = orgSettings?.orgName || 'مؤسسة الصيدليات وإدارة الموارد البشرية';
-  const empName = emp ? (emp.displayName || emp.name || 'الموظف') : 'الزميل الفاضل';
-  const empCode = emp?.code || '---';
+  const orgName = orgSettings?.orgName || 'مؤسسة صيدليات د. أحمد خالد';
+  const empName = emp ? (emp.displayName || emp.name || 'الموظف') : (increaseData.employeeName || 'الزميل الفاضل');
+  const empCode = emp?.code || increaseData.employeeCode || '---';
   const jobTitle = increaseData.jobTitle || emp?.jobTitle || 'عضو الكادر المهني';
   const branch = increaseData.branchName || branchName || emp?.branchName || 'الفرع الرئيسي';
-  const issueDate = increaseData.issueDate || new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
-  const effectiveDate = increaseData.effectiveDate || increaseData.date || issueDate;
-  const decisionNumber = increaseData.decisionNumber || `INC-${(effectiveDate || '').replace(/[^0-9]/g, '') || '2026'}`;
+  const empPhone = increaseData.phone || emp?.phone || emp?.phoneNumber || 'غير مسجل';
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const decisionDate = increaseData.decisionDate || increaseData.issueDate || todayStr;
+  const effectiveDate = increaseData.effectiveDate || increaseData.date || decisionDate;
+  const issueDate = increaseData.issueDate || decisionDate;
+  const decisionNumber = increaseData.decisionNumber || `INC-${(decisionDate || '').replace(/[^0-9]/g, '') || '2026'}`;
   
-  const incTypeLabel = increaseData.type === 'exceptional' ? 'زيادة استثنائية لكفاءة وتميز' : (increaseData.typeLabel || 'زيادة سنوية دورية');
+  const incTypeLabel = increaseData.type === 'exceptional' ? 'زيادة استثنائية لكفاءة وتميز' : (increaseData.type === 'adjustment' ? 'تعديل هيكلي ومواءمة أجور' : (increaseData.typeLabel || 'زيادة سنوية دورية'));
   const rateBefore = fmt(increaseData.rateBefore !== undefined ? increaseData.rateBefore : 0);
   const rateAfter = fmt(increaseData.rateAfter !== undefined ? increaseData.rateAfter : 0);
   const diff = (parseFloat(increaseData.rateAfter) || 0) - (parseFloat(increaseData.rateBefore) || 0);
@@ -691,7 +695,7 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
     : (parseFloat(increaseData.rateBefore) > 0 ? (((diff) / parseFloat(increaseData.rateBefore)) * 100).toFixed(1) : '0');
 
   const appreciationText = increaseData.appreciationText || 
-    'تقديراً لجهودكم المتميزة، وعطائكم المتواصل، وإخلاصكم المشهود في خدمة وتطوير العمل والارتقاء بالأداء العام للمؤسسة، يسرنا منحكم هذه الزيادة متمنين لكم دوام التوفيق والتميز.';
+    'تقديراً لجهودكم المتميزة، وعطائكم المتواصل، وإخلاصكم المشهود في خدمة وتطوير العمل والارتقاء بالأداء العام للمؤسسة، يسر الإدارة اعتماد هذه الزيادة وترقيتكم المالية متمنين لكم دوام التوفيق والتميز.';
   
   const signatory1Title = increaseData.signatory1Title || 'المدير العام للمؤسسة';
   const signatory1Name = increaseData.signatory1Name || orgSettings?.managerName || orgSettings?.generalManagerName || 'الإدارة العليا';
@@ -701,6 +705,7 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
   const showStamp = increaseData.showStamp !== false;
   const showBarcode = increaseData.showBarcode !== false;
   const showLogo = increaseData.showLogo !== false;
+  const logoUrl = orgSettings?.logoUrl || orgSettings?.logo || '';
   const qrDataUrl = increaseData.qrDataUrl || '';
   const barcodeSvg = generateSvgBarcode(decisionNumber);
 
@@ -712,7 +717,7 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
   <style>
     @page {
       size: A4 portrait;
-      margin: 8mm 10mm;
+      margin: 6mm 8mm;
     }
     * {
       box-sizing: border-box;
@@ -731,41 +736,42 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
       padding: 6px;
     }
     .cert-frame {
-      border: 3.5px solid #064e3b;
-      box-shadow: inset 0 0 0 3px #ffffff, inset 0 0 0 5.5px #d97706, inset 0 0 0 7.5px #ffffff, inset 0 0 0 9px #10b981;
-      border-radius: 16px;
-      padding: 24px 28px 20px 28px;
+      border: 3px solid #064e3b;
+      box-shadow: inset 0 0 0 2.5px #ffffff, inset 0 0 0 4.5px #d97706, inset 0 0 0 6.5px #ffffff, inset 0 0 0 8px #10b981;
+      border-radius: 14px;
+      padding: 20px 24px 18px 24px;
       position: relative;
       background: #ffffff;
-      min-height: 268mm;
+      min-height: 270mm;
       max-height: 275mm;
       box-sizing: border-box;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
       page-break-inside: avoid;
+      overflow: hidden;
     }
     .corner {
       position: absolute;
       color: #d97706;
-      font-size: 16px;
+      font-size: 15px;
       line-height: 1;
       user-select: none;
       pointer-events: none;
     }
-    .corner-tl { top: 12px; left: 14px; }
-    .corner-tr { top: 12px; right: 14px; }
-    .corner-bl { bottom: 12px; left: 14px; }
-    .corner-br { bottom: 12px; right: 14px; }
+    .corner-tl { top: 10px; left: 12px; }
+    .corner-tr { top: 10px; right: 12px; }
+    .corner-bl { bottom: 10px; left: 12px; }
+    .corner-br { bottom: 10px; right: 12px; }
 
     .watermark {
       position: absolute;
-      top: 52%;
+      top: 50%;
       left: 50%;
-      transform: translate(-50%, -50%) rotate(-28deg);
-      font-size: 68px;
+      transform: translate(-50%, -50%) rotate(-25deg);
+      font-size: 64px;
       font-weight: 900;
-      color: rgba(16, 185, 129, 0.035);
+      color: rgba(16, 185, 129, 0.032);
       pointer-events: none;
       white-space: nowrap;
       user-select: none;
@@ -775,14 +781,14 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
       justify-content: space-between;
       align-items: center;
       border-bottom: 2px solid #047857;
-      padding-bottom: 14px;
-      margin-bottom: 14px;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
     }
     .org-section {
       text-align: right;
     }
     .org-name {
-      font-size: 22px;
+      font-size: 21px;
       font-weight: 900;
       color: #064e3b;
       line-height: 1.2;
@@ -800,82 +806,97 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
     }
     .logo-container {
       text-align: center;
-      min-width: 90px;
+      min-width: 80px;
     }
     .cert-badge-wrap {
       text-align: center;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
     .cert-badge {
       display: inline-block;
       background: linear-gradient(135deg, #064e3b 0%, #047857 50%, #0f766e 100%);
       color: #ffffff;
-      padding: 8px 36px;
-      border-radius: 28px;
-      font-size: 18px;
+      padding: 7px 32px;
+      border-radius: 24px;
+      font-size: 17px;
       font-weight: 900;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.4px;
       border: 1.5px solid #fbbf24;
-      box-shadow: 0 4px 14px rgba(6, 78, 59, 0.25);
+      box-shadow: 0 4px 12px rgba(6, 78, 59, 0.2);
     }
-    .decision-meta {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+    .decision-meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .meta-card {
       background: #f8fafc;
       border: 1px solid #e2e8f0;
       border-radius: 8px;
-      padding: 8px 14px;
-      margin-bottom: 14px;
-      font-size: 12px;
-      color: #334155;
-      font-weight: 700;
+      padding: 6px 10px;
+      text-align: center;
     }
-    .decision-meta strong {
+    .meta-card-label {
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #64748b;
+      margin-bottom: 2px;
+    }
+    .meta-card-value {
+      font-size: 12px;
+      font-weight: 800;
       color: #064e3b;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .emp-banner {
       background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
       border: 1.5px solid #a7f3d0;
       border-radius: 10px;
-      padding: 14px 18px;
-      margin-bottom: 14px;
+      padding: 12px 16px;
+      margin-bottom: 12px;
     }
     .emp-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px 24px;
-      font-size: 13.5px;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px 16px;
+      font-size: 13px;
     }
     .grid-item {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
     .lbl {
       font-weight: 700;
       color: #475569;
-      min-width: 110px;
+      font-size: 12px;
+      white-space: nowrap;
     }
     .val {
       font-weight: 800;
       color: #0f172a;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .appreciation-box {
-      font-size: 13.5px;
-      line-height: 1.85;
+      font-size: 13px;
+      line-height: 1.8;
       color: #1e293b;
-      margin-bottom: 16px;
+      margin-bottom: 12px;
       text-align: justify;
       background: #ffffff;
-      padding: 14px 18px;
+      padding: 12px 16px;
       border-radius: 8px;
       border: 1px solid #e2e8f0;
       border-right: 4px solid #059669;
       box-shadow: 0 1px 3px rgba(0,0,0,0.02);
     }
     .rates-card {
-      margin-bottom: 16px;
+      margin-bottom: 12px;
       border: 1.5px solid #cbd5e1;
       border-radius: 10px;
       overflow: hidden;
@@ -884,7 +905,7 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
       background: linear-gradient(to left, #f1f5f9, #f8fafc);
       padding: 8px 14px;
       font-weight: 800;
-      font-size: 13px;
+      font-size: 12.5px;
       color: #334155;
       border-bottom: 1px solid #cbd5e1;
       display: flex;
@@ -895,41 +916,41 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
       width: 100%;
       border-collapse: collapse;
       text-align: center;
-      font-size: 13.5px;
+      font-size: 13px;
     }
     .rates-table th {
       background: #f8fafc;
-      padding: 9px;
+      padding: 8px;
       font-weight: 800;
       color: #475569;
       border-bottom: 1.5px solid #e2e8f0;
     }
     .rates-table td {
-      padding: 11px;
+      padding: 10px;
       font-weight: 800;
       border-bottom: 1px solid #e2e8f0;
     }
     .old-rate {
       color: #64748b;
-      font-size: 14.5px;
+      font-size: 14px;
     }
     .new-rate {
       color: #047857;
-      font-size: 17px;
+      font-size: 16px;
       font-weight: 900;
       background: #ecfdf5;
     }
     .diff-rate {
       color: #16a34a;
-      font-size: 14.5px;
+      font-size: 14px;
     }
     .effective-box {
-      margin-top: 10px;
-      padding: 10px 16px;
+      margin-top: 8px;
+      padding: 9px 14px;
       background: #f0fdf4;
       border: 1px solid #bbf7d0;
       border-radius: 8px;
-      font-size: 13px;
+      font-size: 12.5px;
       font-weight: 800;
       color: #065f46;
       display: flex;
@@ -940,23 +961,23 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
       gap: 12px;
-      margin-top: 16px;
-      padding-top: 14px;
+      margin-top: 14px;
+      padding-top: 12px;
       border-top: 1.5px solid #e2e8f0;
       text-align: center;
-      font-size: 12.5px;
+      font-size: 12px;
       align-items: center;
     }
     .sign-box {
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      min-height: 85px;
+      min-height: 80px;
     }
     .sign-title {
       font-weight: 800;
       color: #334155;
-      margin-bottom: 30px;
+      margin-bottom: 26px;
     }
     .sign-name {
       font-weight: 700;
@@ -972,17 +993,17 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
     .seal-box {
       border: 2px dashed #059669;
       border-radius: 50%;
-      width: 82px;
-      height: 82px;
+      width: 76px;
+      height: 76px;
       margin: 0 auto;
       display: flex;
       align-items: center;
       justify-content: center;
       text-align: center;
-      font-size: 10.5px;
+      font-size: 10px;
       font-weight: 800;
       color: #059669;
-      transform: rotate(-8deg);
+      transform: rotate(-6deg);
       line-height: 1.3;
       background: rgba(16, 185, 129, 0.03);
     }
@@ -997,25 +1018,30 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
     }
     .cert-footer {
       text-align: center;
-      font-size: 11px;
+      font-size: 10.5px;
       color: #94a3b8;
-      margin-top: 14px;
-      padding-top: 8px;
+      margin-top: 12px;
+      padding-top: 6px;
       border-top: 1px dashed #e2e8f0;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
     @media print {
-      body {
+      html, body {
         padding: 0 !important;
         margin: 0 !important;
         background: #ffffff !important;
+        width: 210mm !important;
+        height: 297mm !important;
+        overflow: hidden !important;
       }
       .cert-frame {
-        height: 275mm !important;
-        max-height: 275mm !important;
-        min-height: 275mm !important;
+        width: 196mm !important;
+        height: 278mm !important;
+        max-height: 278mm !important;
+        min-height: 278mm !important;
+        margin: 6mm auto !important;
         page-break-inside: avoid !important;
         page-break-after: avoid !important;
         page-break-before: avoid !important;
@@ -1045,10 +1071,10 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
 
         ${showLogo ? `
           <div class="logo-container">
-            ${orgSettings?.logoUrl ? `
-              <img src="${orgSettings.logoUrl}" alt="Logo" style="max-height: 52px; max-width: 140px; object-fit: contain;" />
+            ${logoUrl ? `
+              <img src="${logoUrl}" alt="Logo" style="max-height: 50px; max-width: 130px; object-fit: contain;" />
             ` : `
-              <svg width="46" height="46" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <svg width="44" height="44" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M24 4L7 11V22C7 32.5 14.3 42.2 24 45C33.7 42.2 41 32.5 41 22V11L24 4Z" fill="#047857" stroke="#d97706" stroke-width="2"/>
                 <path d="M24 14V34M14 24H34" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/>
               </svg>
@@ -1058,7 +1084,7 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
 
         ${showBarcode ? `
           <div style="text-align: left;">
-            <div style="font-size: 9.5px; font-weight: 700; color: #64748b; margin-bottom: 2px;">كود الاعتماد الرقمي</div>
+            <div style="font-size: 9px; font-weight: 700; color: #64748b; margin-bottom: 2px;">كود الاعتماد الرقمي</div>
             ${barcodeSvg}
             <div style="font-size: 9.5px; font-weight: 800; color: #047857; text-align: center; font-family: monospace;">${decisionNumber}</div>
           </div>
@@ -1067,15 +1093,27 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
 
       <!-- Badge -->
       <div class="cert-badge-wrap">
-        <div class="cert-badge">📜 شهادة زيادة راتب وترقية مالية رسمية</div>
+        <div class="cert-badge">📜 شهادة زيادة راتب وترقية مالية معتمدة</div>
       </div>
 
-      <!-- Decision Meta Strip -->
-      <div class="decision-meta">
-        <span>📋 رقم القرار: <strong>${decisionNumber}</strong></span>
-        <span>🏷️ نوع القرار: <strong>${incTypeLabel}</strong></span>
-        <span>📅 تاريخ التحرير: <strong>${issueDate}</strong></span>
-        <span>🏢 الفرع المخصص: <strong>${branch}</strong></span>
+      <!-- Decision Meta Grid (Anti-Collision 4-Columns) -->
+      <div class="decision-meta-grid">
+        <div class="meta-card">
+          <div class="meta-card-label">📋 رقم القرار الإداري</div>
+          <div class="meta-card-value">${decisionNumber}</div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-card-label">🏷️ نوع وحالة القرار</div>
+          <div class="meta-card-value">${incTypeLabel}</div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-card-label">📅 تاريخ صدور القرار</div>
+          <div class="meta-card-value">${decisionDate}</div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-card-label">⏱️ تاريخ سريان التطبيق</div>
+          <div class="meta-card-value">${effectiveDate}</div>
+        </div>
       </div>
 
       <!-- Employee Banner -->
@@ -1086,7 +1124,7 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
             <span class="val">${empName}</span>
           </div>
           <div class="grid-item">
-            <span class="lbl">الرقم التعريفي (الكود):</span>
+            <span class="lbl">الرقم التعريفي:</span>
             <span class="val">${empCode}</span>
           </div>
           <div class="grid-item">
@@ -1096,6 +1134,14 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
           <div class="grid-item">
             <span class="lbl">مقر العمل والفرع:</span>
             <span class="val">${branch}</span>
+          </div>
+          <div class="grid-item">
+            <span class="lbl">رقم الهاتف:</span>
+            <span class="val">${empPhone}</span>
+          </div>
+          <div class="grid-item">
+            <span class="lbl">مرجع الاعتماد:</span>
+            <span class="val" style="color: #059669;">سجل الموارد البشرية</span>
           </div>
         </div>
       </div>
@@ -1109,7 +1155,7 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
       <div class="rates-card">
         <div class="rates-header">
           <span>📊 تفاصيل تعديل الأجر وسعر الساعة المعتمد بالمنظومة:</span>
-          <span style="font-size: 11.5px; color: #059669; font-weight: 800;">مطابق للائحة الأجور والرواتب الرسمية</span>
+          <span style="font-size: 11px; color: #059669; font-weight: 800;">مطابق للائحة الأجور والرواتب الرسمية</span>
         </div>
         <table class="rates-table">
           <thead>
@@ -1133,8 +1179,8 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
 
       <!-- Effective Date Notice -->
       <div class="effective-box">
-        <span>⏱️ تاريخ بدء سريان وتطبيق الزيادة رسمياً:</span>
-        <span style="font-size: 14px; color: #064e3b; font-weight: 900;">اعتباراً من: ${effectiveDate}</span>
+        <span>⏱️ تاريخ بدء سريان وتطبيق الزيادة رسمياً على كشوف المرتبات:</span>
+        <span style="font-size: 13.5px; color: #064e3b; font-weight: 900;">اعتباراً من: ${effectiveDate}</span>
       </div>
     </div>
 
@@ -1157,8 +1203,8 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
 
           ${qrDataUrl ? `
             <div class="qr-verify-box" title="امسح الرمز للتحقق من صحة القرار">
-              <img src="${qrDataUrl}" alt="QR Code" style="width: 44px; height: 44px; display: block;" />
-              <div style="font-size: 9px; font-weight: 700; color: #475569; text-align: right; line-height: 1.2;">
+              <img src="${qrDataUrl}" alt="QR Code" style="width: 42px; height: 42px; display: block;" />
+              <div style="font-size: 8.5px; font-weight: 700; color: #475569; text-align: right; line-height: 1.2;">
                 التحقق الرقمي<br />
                 <span style="color: #059669;">QR Verified</span>
               </div>
@@ -1173,12 +1219,13 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
       </div>
 
       <div class="cert-footer">
-        <span>وثيقة رسمية صادرة إلكترونياً ومقيدة بالسجل المالي لنظام إدارة الموارد البشرية</span>
-        <span style="font-weight: 800; color: #064e3b;">رقم القيد: ${decisionNumber}</span>
+        <span>وثيقة رسمية صادرة ومقيدة بالسجل المالي لنظام إدارة الموارد البشرية</span>
+        <span style="font-weight: 800; color: #064e3b;">رقم القرار المرجعي: ${decisionNumber}</span>
       </div>
     </div>
   </div>
 </body>
 </html>`;
 }
+
 

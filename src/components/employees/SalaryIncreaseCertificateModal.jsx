@@ -27,16 +27,26 @@ function SalaryIncreaseCertificateContent({
     return increaseRecord || currentEmployee?.lastIncrease || (currentEmployee?.salaryIncreases && currentEmployee.salaryIncreases[currentEmployee.salaryIncreases.length - 1]) || {};
   }, [increaseRecord, currentEmployee]);
 
-  const defaultEffDate = inc.effectiveDate || inc.date || todayStr;
-  const defaultDecNum = inc.decisionNumber || `INC-${defaultEffDate.replace(/[^0-9]/g, '')}-${currentEmployee?.code || 'EMP'}`;
+  const defaultDecDate = inc.decisionDate || inc.issueDate || todayStr;
+  const defaultEffDate = inc.effectiveDate || inc.date || defaultDecDate;
+  const defaultDecNum = inc.decisionNumber || `INC-${defaultDecDate.replace(/[^0-9]/g, '')}-${currentEmployee?.code || 'EMP'}`;
 
   // ── 1. الحقول القابلة للتعديل للشهادة الفردية ───────────────────────────
   const [decisionNumber, setDecisionNumber] = useState(defaultDecNum);
   const [increaseType, setIncreaseType] = useState(inc.type || 'annual');
-  const [issueDate, setIssueDate] = useState(todayStr);
+  const [decisionDate, setDecisionDate] = useState(defaultDecDate);
+  const [issueDate, setIssueDate] = useState(defaultDecDate);
   const [effectiveDate, setEffectiveDate] = useState(defaultEffDate);
-  const [rateBefore, setRateBefore] = useState(parseFloat(inc.rateBefore !== undefined ? inc.rateBefore : (currentEmployee?.salary || 0)) || 0);
-  const [rateAfter, setRateAfter] = useState(parseFloat(inc.rateAfter !== undefined ? inc.rateAfter : (currentEmployee?.salary || 0)) || 0);
+  const [rateBefore, setRateBefore] = useState(() => {
+    if (inc.rateBefore !== undefined && inc.rateBefore !== null) return parseFloat(inc.rateBefore) || 0;
+    if (currentEmployee?.rateBefore !== undefined) return parseFloat(currentEmployee.rateBefore) || 0;
+    return parseFloat(currentEmployee?.salary || 0) || 0;
+  });
+  const [rateAfter, setRateAfter] = useState(() => {
+    if (inc.rateAfter !== undefined && inc.rateAfter !== null) return parseFloat(inc.rateAfter) || 0;
+    if (currentEmployee?.rateAfter !== undefined) return parseFloat(currentEmployee.rateAfter) || 0;
+    return parseFloat(currentEmployee?.salary || 0) || 0;
+  });
   const [jobTitle, setJobTitle] = useState(currentEmployee?.jobTitle || 'عضو الكادر المهني');
   const [branchName, setBranchName] = useState(currentEmployee?.branchName || 'الفرع الرئيسي');
 
@@ -195,12 +205,14 @@ function SalaryIncreaseCertificateContent({
     decisionNumber,
     type: increaseType,
     typeLabel: increaseType === 'exceptional' ? 'زيادة استثنائية لكفاءة وتميز' : (increaseType === 'adjustment' ? 'تعديل هيكلي للأجر' : 'زيادة سنوية دورية'),
+    decisionDate,
     issueDate,
     effectiveDate,
     rateBefore,
     rateAfter,
     jobTitle,
     branchName,
+    phone: recipientPhone,
     percentage: diffPct,
     appreciationText,
     signatory1Title,
@@ -211,7 +223,7 @@ function SalaryIncreaseCertificateContent({
     showBarcode,
     showLogo,
     qrDataUrl
-  }), [decisionNumber, increaseType, issueDate, effectiveDate, rateBefore, rateAfter, jobTitle, branchName, diffPct, appreciationText, signatory1Title, signatory1Name, signatory2Title, signatory2Name, showStamp, showBarcode, showLogo, qrDataUrl]);
+  }), [decisionNumber, increaseType, decisionDate, issueDate, effectiveDate, rateBefore, rateAfter, jobTitle, branchName, recipientPhone, diffPct, appreciationText, signatory1Title, signatory1Name, signatory2Title, signatory2Name, showStamp, showBarcode, showLogo, qrDataUrl]);
 
   const certificateHtml = useMemo(() => {
     return generateSalaryIncreaseCertificateHtml(
@@ -482,20 +494,32 @@ function SalaryIncreaseCertificateContent({
               <span
                 style={{
                   fontSize: '11px',
-                  fontWeight: 700,
-                  padding: '2px 8px',
+                  fontWeight: 800,
+                  padding: '3px 10px',
                   borderRadius: '12px',
-                  background: serverHealth.status === 'connected' ? 'rgba(34, 197, 94, 0.25)' : 'rgba(239, 68, 68, 0.25)',
-                  border: `1px solid ${serverHealth.status === 'connected' ? '#4ade80' : '#f87171'}`,
+                  background: serverHealth.status === 'connected'
+                    ? 'rgba(34, 197, 94, 0.25)'
+                    : (serverHealth.status === 'qr_ready' || serverHealth.status === 'checking' ? 'rgba(234, 179, 8, 0.3)' : 'rgba(239, 68, 68, 0.25)'),
+                  border: `1px solid ${
+                    serverHealth.status === 'connected'
+                      ? '#4ade80'
+                      : (serverHealth.status === 'qr_ready' || serverHealth.status === 'checking' ? '#facc15' : '#f87171')
+                  }`,
                   color: '#ffffff',
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '4px'
+                  gap: '5px'
                 }}
                 title={serverHealth.message}
               >
-                <span>{serverHealth.status === 'connected' ? '🟢' : (serverHealth.status === 'checking' ? '🟡' : '🔴')}</span>
-                <span>{serverHealth.status === 'connected' ? 'سيرفر الواتساب متصل' : (serverHealth.status === 'checking' ? 'فحص السيرفر...' : 'السيرفر غير متصل')}</span>
+                <span>{serverHealth.status === 'connected' ? '🟢' : (serverHealth.status === 'qr_ready' ? '🟡' : (serverHealth.status === 'checking' ? '⏳' : '🔴'))}</span>
+                <span>
+                  {serverHealth.status === 'connected'
+                    ? `خادم الواتساب متصل ${serverHealth.phone ? '(+' + serverHealth.phone + ')' : ''}`
+                    : (serverHealth.status === 'qr_ready'
+                      ? 'بانتظار مسح QR'
+                      : (serverHealth.status === 'checking' ? 'جاري فحص الاتصال...' : 'خادم الواتساب غير متصل'))}
+                </span>
               </span>
             </div>
             <div style={{ fontSize: '12px', opacity: 0.92, marginTop: '3px' }}>
@@ -625,19 +649,22 @@ function SalaryIncreaseCertificateContent({
 
                   <div>
                     <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '3px' }}>
-                      تاريخ التحرير:
+                      تاريخ صدور القرار:
                     </label>
                     <input
                       type="date"
-                      value={issueDate}
-                      onChange={(e) => setIssueDate(e.target.value)}
+                      value={decisionDate}
+                      onChange={(e) => {
+                        setDecisionDate(e.target.value);
+                        setIssueDate(e.target.value);
+                      }}
                       style={{ width: '100%', height: '32px', borderRadius: '6px', border: '1px solid #cbd5e1', padding: '0 8px', fontSize: '11.5px', fontWeight: 700 }}
                     />
                   </div>
 
                   <div>
                     <label style={{ fontSize: '11px', fontWeight: 700, color: '#047857', display: 'block', marginBottom: '3px' }}>
-                      تاريخ بدء السريان: *
+                      تاريخ سريان التطبيق: *
                     </label>
                     <input
                       type="date"

@@ -303,20 +303,14 @@ async function connectToWhatsApp() {
           return;
         }
 
-        // تشخيص حالات الفشل النهائي للجلسة التي تتطلب تصفير المفاتيح وتوليد QR جديد
-        const isTerminalFailure = 
-          (statusCode === DisconnectReason.loggedOut && Boolean(serverState.phone)) || // 401 بعد أن كان مقترناً بالفعل
-          statusCode === 403 || // Forbidden
-          statusCode === 405 || // Method Not Allowed
-          statusCode === 440 || // Connection Replaced
-          statusCode === 411 || // Multidevice Mismatch
-          statusCode === 500 || // Bad Session
-          consecutiveFailures >= 5;
+        // تسجيل الخروج الصريح فقط من تطبيق واتساب (كود 401 loggedOut) هو ما يتطلب تصفير المفاتيح
+        // لا نقوم بمسح الجلسة أبداً عند أخطاء الشبكة المؤقتة (500 أو 440 أو انقطاع الإنترنت)
+        const isExplicitLoggedOut = statusCode === DisconnectReason.loggedOut;
 
-        console.warn(`[WhatsApp Gateway] ⚠️ Connection closed (statusCode: ${statusCode}, message: ${errorMessage}, isTerminalFailure: ${isTerminalFailure})`);
+        console.warn(`[WhatsApp Gateway] ⚠️ Connection closed (statusCode: ${statusCode}, message: ${errorMessage}, isLoggedOut: ${isExplicitLoggedOut})`);
 
-        if (isTerminalFailure) {
-          console.warn('[WhatsApp Gateway] 🔄 Session terminated or corrupted. Auto-purging session for fresh QR pairing...');
+        if (isExplicitLoggedOut) {
+          console.warn('[WhatsApp Gateway] 🔄 Explicit logout detected from mobile app. Purging auth session for fresh pairing...');
           serverState.status = 'DISCONNECTED';
           serverState.phone = '';
           serverState.deviceName = '';
@@ -327,9 +321,13 @@ async function connectToWhatsApp() {
           if (reconnectTimer) clearTimeout(reconnectTimer);
           reconnectTimer = setTimeout(connectToWhatsApp, 2500);
         } else {
+          // الحفاظ على المفاتيح وإعادة الاتصال التلقائي المتدرج
           consecutiveFailures++;
+          serverState.status = serverState.phone ? 'CONNECTING' : 'DISCONNECTED';
           if (reconnectTimer) clearTimeout(reconnectTimer);
-          const delay = Math.min(2000 * Math.max(1, consecutiveFailures), 6000);
+          // تدرج زمني: 2ث، 4ث، 6ث... بحد أقصى 15 ثانية لمنع الضغط وحماية السيرفر
+          const delay = Math.min(2000 * Math.max(1, consecutiveFailures), 15000);
+          console.log(`[WhatsApp Gateway] ⏳ Network/reconnect drop. Preserving session & reconnecting in ${delay / 1000}s (attempt: ${consecutiveFailures})...`);
           reconnectTimer = setTimeout(connectToWhatsApp, delay);
         }
       }
@@ -338,23 +336,36 @@ async function connectToWhatsApp() {
   } catch (err) {
     isConnecting = false;
     consecutiveFailures++;
-    serverState.status = 'DISCONNECTED';
+    serverState.status = serverState.phone ? 'CONNECTING' : 'DISCONNECTED';
     serverState.lastError = err.message;
     console.error('[WhatsApp Gateway] Connection initialization error:', err);
 
-    if (consecutiveFailures >= 3) {
-      console.warn('[WhatsApp Gateway] ⚠️ Multiple consecutive initialization errors, resetting auth directory...');
-      purgeAuthDir();
-      consecutiveFailures = 0;
-    }
-
+    // لا نمسح الجلسة أبداً في حالة خطأ التهيئة، بل نعيد المحاولة بأمان
     if (reconnectTimer) clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connectToWhatsApp, 3000);
+    const delay = Math.min(3000 * Math.max(1, consecutiveFailures), 20000);
+    reconnectTimer = setTimeout(connectToWhatsApp, delay);
   }
 }
 
-// بدء الاتصال تلقائياً
+// بدء الاتصال تلقائياً عند إقلاع الخادم
 connectToWhatsApp();
+
+// ── حارس ذاتي ذكي (24/7 Watchdog Loop) ──────────────────────────────────
+// فحص دوري خفيف كل 30 ثانية للتأكد من استمرار عمل الاتصال في الخلفية
+// حتى لو لم يكن المتصفح مفتوحاً، مع الحفاظ الكامل على استقرار الـ VPS
+setInterval(() => {
+  try {
+    const credsFile = path.join(AUTH_DIR, 'creds.json');
+    const hasValidCreds = fs.existsSync(credsFile);
+
+    if (serverState.status !== 'CONNECTED' && !isConnecting && hasValidCreds) {
+      console.log('[WhatsApp Watchdog] 🛡️ Periodic check: WhatsApp is disconnected but paired session exists. Auto-reconnecting now...');
+      connectToWhatsApp();
+    }
+  } catch (watchdogErr) {
+    console.warn('[WhatsApp Watchdog] Warning during health tick:', watchdogErr.message);
+  }
+}, 30000);
 
 // ── مسارات الـ REST API ───────────────────────────────────────────────────
 

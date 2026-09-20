@@ -5,6 +5,7 @@ import { useUI } from '../../context/UIContext';
 import EmployeeTerminationModal from './EmployeeTerminationModal';
 import EmployeeComprehensiveDossierModal from './EmployeeComprehensiveDossierModal';
 import EmployeeSalaryDetailsModal from './EmployeeSalaryDetailsModal';
+import SalaryIncreasesHub from './SalaryIncreasesHub';
 
 export default function EmployeeCardsGrid({
   state,
@@ -56,6 +57,7 @@ export default function EmployeeCardsGrid({
   const [rehireNotes, setRehireNotes] = useState('');
   const [isRehiring, setIsRehiring] = useState(false);
   const [previewPhotoEmp, setPreviewPhotoEmp] = useState(null);
+  const [showSalaryIncreasesHub, setShowSalaryIncreasesHub] = useState(false);
   // Branch Cards Collapse/Expand state (Default is collapsed as requested by user)
   const [expandedBranches, setExpandedBranches] = useState({});
 
@@ -391,6 +393,25 @@ export default function EmployeeCardsGrid({
             }}
           >
             <span>📞</span> أرقام الموظفين
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => setShowSalaryIncreasesHub(true)}
+            style={{
+              background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+              color: '#065f46',
+              border: '1.5px solid #a7f3d0',
+              fontWeight: 800,
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 4px rgba(6, 95, 70, 0.08)'
+            }}
+            title="سجل وشهادات الزيادات والعلاوات والإرسال الجماعي عبر الواتساب"
+          >
+            <span>📜</span> شهادات الزيادات والإرسال الجماعي
           </button>
           <label className="btn btn-ghost" style={{ cursor: 'pointer', margin: 0, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span>📤</span> استيراد الموظفين Excel
@@ -1260,6 +1281,16 @@ export default function EmployeeCardsGrid({
             setSelectedSalaryEmp(null);
             openEditEmpModal(target);
           }}
+        />
+      )}
+
+      {/* ── MODAL 5: SALARY INCREASES HUB & BULK DISPATCH ── */}
+      {showSalaryIncreasesHub && (
+        <SalaryIncreasesHub
+          isOpen={showSalaryIncreasesHub}
+          onClose={() => setShowSalaryIncreasesHub(false)}
+          state={state}
+          showToast={showToast}
         />
       )}
     </>
