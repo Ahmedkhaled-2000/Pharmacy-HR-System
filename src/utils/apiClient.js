@@ -437,7 +437,16 @@ export async function apiFetchSettings(key = STORAGE_KEY, options = {}) {
     isBackground: options.isBackground !== undefined ? options.isBackground : true
   });
   if (res?.notModified) return { notModified: true };
-  return res?.value || null;
+  let val = res?.value || null;
+  if (val && typeof val === 'object') {
+    try {
+      const sStr = JSON.stringify(val);
+      if (sStr.includes('http://63.183.147.199/api/attachments') || sStr.includes('http://63-183-147-199.sslip.io/api/attachments')) {
+        val = JSON.parse(sStr.replace(/https?:\/\/(?:63\.183\.147\.199|63-183-147-199\.sslip\.io)\/api\/attachments/g, '/api/attachments'));
+      }
+    } catch {}
+  }
+  return val;
 }
 
 export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {

@@ -332,8 +332,19 @@ async function initDatabaseTables() {
           client_ip VARCHAR(50) NULL,
           created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
-      CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON public.audit_logs(action);
-      CREATE INDEX IF NOT EXISTS idx_audit_logs_date ON public.audit_logs(created_at DESC);
+      -- 8. جدول المرفقات والوسائط المفصولة
+      CREATE TABLE IF NOT EXISTS public.app_attachments (
+          id VARCHAR(120) PRIMARY KEY,
+          entity_type VARCHAR(64) DEFAULT 'auto',
+          entity_id VARCHAR(128) DEFAULT 'item',
+          field_name VARCHAR(64) DEFAULT 'file',
+          file_data TEXT NOT NULL,
+          mime_type VARCHAR(64) DEFAULT 'image/jpeg',
+          file_size BIGINT DEFAULT 0,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_app_attachments_entity ON public.app_attachments(entity_type, entity_id);
     `;
 
     await db.query(schemaSql);
@@ -352,7 +363,13 @@ async function getSettingsFromStorage(key) {
     try {
       const cached = await redis.get(`hr:settings:${key}`);
       if (cached) {
-        return JSON.parse(cached);
+        let parsed = JSON.parse(cached);
+        if (cached.includes('http://63.183.147.199/api/attachments') || cached.includes('http://63-183-147-199.sslip.io/api/attachments')) {
+          const cleaned = cached.replace(/https?:\/\/(?:63\.183\.147\.199|63-183-147-199\.sslip\.io)\/api\/attachments/g, '/api/attachments');
+          parsed = JSON.parse(cleaned);
+          redis.set(`hr:settings:${key}`, cleaned, 'EX', 86400 * 7).catch(() => {});
+        }
+        return parsed;
       }
     } catch (e) {
       console.warn('[Redis Read Warn]:', e.message);
@@ -363,7 +380,14 @@ async function getSettingsFromStorage(key) {
   const res = await db.query('SELECT value_data as value, version, updated_at FROM public.app_settings WHERE key_name = $1', [key]);
   if (res.rows.length > 0) {
     const row = res.rows[0];
-    const data = row.value;
+    let data = row.value;
+
+    const sStr = JSON.stringify(data);
+    if (sStr.includes('http://63.183.147.199/api/attachments') || sStr.includes('http://63-183-147-199.sslip.io/api/attachments')) {
+      const cleaned = sStr.replace(/https?:\/\/(?:63\.183\.147\.199|63-183-147-199\.sslip\.io)\/api\/attachments/g, '/api/attachments');
+      data = JSON.parse(cleaned);
+      db.query('UPDATE public.app_settings SET value_data = $1::jsonb WHERE key_name = $2', [cleaned, key]).catch(() => {});
+    }
 
     // تحديث الكاش في Redis لاستعلامات المرات القادمة
     if (isRedisConnected && redis) {
@@ -398,7 +422,7 @@ async function autoExtractStateAttachments(obj, pathParts = []) {
           SET file_data = EXCLUDED.file_data, mime_type = EXCLUDED.mime_type, file_size = EXCLUDED.file_size, updated_at = NOW()
         `, [attId, pathParts[0] || 'auto', pathParts[1] || 'item', pathParts[pathParts.length - 1] || 'file', obj, mimeType, size]);
 
-        return `http://63.183.147.199/api/attachments?id=${attId}&raw=1`;
+        return `/api/attachments?id=${attId}&raw=1`;
       } catch (e) {
         console.warn('[AutoExtract Attachment Warn]:', e.message);
         return obj;
@@ -461,7 +485,12 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
     }
   }
 
-  const jsonString = typeof stateValue === 'string' ? stateValue : JSON.stringify(stateValue);
+  let cleanJsonString = typeof stateValue === 'string' ? stateValue : JSON.stringify(stateValue);
+  if (cleanJsonString.includes('http://63.183.147.199/api/attachments') || cleanJsonString.includes('http://63-183-147-199.sslip.io/api/attachments')) {
+    cleanJsonString = cleanJsonString.replace(/https?:\/\/(?:63\.183\.147\.199|63-183-147-199\.sslip\.io)\/api\/attachments/g, '/api/attachments');
+    try { stateValue = JSON.parse(cleanJsonString); } catch {}
+  }
+  const jsonString = cleanJsonString;
   const now = new Date().toISOString();
 
   // الحصول على الإصدار الأحدث من الذاكرة لضمان الـ Fast-Ack اللحظي (< 1ms)
@@ -1256,7 +1285,7 @@ app.post(['/api/attachments', '/api/attachment'], async (req, res) => {
     res.json({
       success: true,
       id,
-      url: `api/attachments?id=${id}&raw=1`,
+      url: `/api/attachments?id=${id}&raw=1`,
       file_size: size
     });
   } catch (err) {
@@ -1679,7 +1708,7 @@ app.get('/api/app/update-manifest', async (req, res) => {
       latest_version: '1.2.41',
       latest_version_code: 5,
       min_supported_code: 1,
-      download_url: 'http://63.183.147.199/downloads/pharmacy-hr-employee-1.2.41.apk',
+      download_url: '/downloads/pharmacy-hr-employee-1.2.41.apk',
       sha256_checksum: '',
       file_size: 99099961,
       mandatory_update: false,

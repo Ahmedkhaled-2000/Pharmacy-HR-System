@@ -148,7 +148,7 @@ export async function loadStateLocally() {
     });
 
     if (result && typeof result === 'object') {
-      return result;
+      return sanitizeInsecureAttachmentUrls(result);
     }
   } catch {
     // متابعة للتراجع إلى LocalStorage
@@ -161,7 +161,7 @@ export async function loadStateLocally() {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed?.value && typeof parsed.value === 'object') {
-          return parsed.value;
+          return sanitizeInsecureAttachmentUrls(parsed.value);
         }
       }
     }
@@ -170,10 +170,23 @@ export async function loadStateLocally() {
   // 3. التراجع إلى Memory Store
   const mem = memoryStore.get('app_state');
   if (mem?.value && typeof mem.value === 'object') {
-    return mem.value;
+    return sanitizeInsecureAttachmentUrls(mem.value);
   }
 
   return null;
+}
+
+// ── تنظيف تلقائي لمنع أخطاء Mixed Content في المتصفحات ─────────────────────
+export function sanitizeInsecureAttachmentUrls(data) {
+  if (!data) return data;
+  try {
+    const str = typeof data === 'string' ? data : JSON.stringify(data);
+    if (str.includes('http://63.183.147.199/api/attachments') || str.includes('http://63-183-147-199.sslip.io/api/attachments')) {
+      const clean = str.replace(/https?:\/\/(?:63\.183\.147\.199|63-183-147-199\.sslip\.io)\/api\/attachments/g, '/api/attachments');
+      return typeof data === 'string' ? clean : JSON.parse(clean);
+    }
+  } catch {}
+  return data;
 }
 
 // ── إضافة لقطة احتياطية تلقائية ─────────────────────────────────────────
