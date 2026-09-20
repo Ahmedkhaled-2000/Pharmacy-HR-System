@@ -56,6 +56,8 @@ export default function Dashboard({
     branchSales: false
   });
 
+  const [selectedLateDate, setSelectedLateDate] = useState(() => getRealTodayStr());
+
   const isCardExpanded = (cardKey) => Boolean(expandedCards[cardKey]);
 
   const toggleCard = (cardKey) => {
@@ -689,8 +691,13 @@ export default function Dashboard({
         const allLeaves = [...(state?.leaveRequests || []), ...(state?.requests || [])];
         const absentEmpsToday = employees.filter((emp) => {
           if (!emp || !emp.id) return false;
-          const activeShift = state?.activeShifts?.[emp.id];
-          if (activeShift) return false;
+          const rawActive = state?.activeShifts?.[emp.id] || state?.activeShifts?.[String(emp.id)];
+          const isShiftToday = rawActive && (
+            rawActive.date
+              ? String(rawActive.date).slice(0, 10) === todayDate
+              : (rawActive.timestamp ? String(rawActive.timestamp).slice(0, 10) === todayDate : false)
+          );
+          if (rawActive && isShiftToday) return false;
           const hasPunchedToday = todayPunches.some((p) => p && String(p.employeeId) === String(emp.id));
           if (hasPunchedToday) return false;
           const onLeaveToday = allLeaves.some(
@@ -822,25 +829,36 @@ export default function Dashboard({
 
       {/* ── 3.5 Today's Late Employees Card (مطابقة لائحة التأخيرات الرسمية 5 فئات وإظهار تفاصيل التأخير) ── */}
       {(() => {
+        const targetDate = selectedLateDate || todayDate;
         const latePolicy = getEffectiveLatePolicy(state);
         const permanentGraceTier = latePolicy?.tiers?.[0] || DEFAULT_LATE_PENALTY_POLICY.tiers[0];
         const permanentGraceMax = permanentGraceTier?.maxMinutes !== undefined ? permanentGraceTier.maxMinutes : 10;
-        const monthKey = todayDate.slice(0, 7);
-        const arDay = arabicWeekday(todayDate);
+        const monthKey = targetDate.slice(0, 7);
+        const arDay = arabicWeekday(targetDate);
 
         const lateEmployeesToday = [];
 
         employees.forEach((emp) => {
           if (!emp || !emp.id) return;
-          // Check if employee punched in today or has active shift today
-          const punchToday = punches.find((p) => p && String(p.employeeId) === String(emp.id) && (p.date || p.timestamp || '').startsWith(todayDate));
-          const activeShiftToday = state?.activeShifts?.[emp.id];
+          // Check if employee punched in on targetDate or has an active shift strictly on targetDate
+          const punchToday = punches.find((p) => p && String(p.employeeId) === String(emp.id) && (
+            String(p.date || '').slice(0, 10) === targetDate || 
+            (p.timestamp && String(p.timestamp).slice(0, 10) === targetDate)
+          ));
+          
+          const rawActiveShift = (targetDate === todayDate) ? (state?.activeShifts?.[emp.id] || state?.activeShifts?.[String(emp.id)]) : null;
+          const isShiftDateToday = rawActiveShift && (
+            rawActiveShift.date
+              ? String(rawActiveShift.date).slice(0, 10) === targetDate
+              : (rawActiveShift.timestamp ? String(rawActiveShift.timestamp).slice(0, 10) === targetDate : false)
+          );
+          const activeShiftToday = isShiftDateToday ? rawActiveShift : null;
           const timeIn = punchToday?.timeIn || activeShiftToday?.timeIn;
 
           if (!timeIn) return;
 
-          // Find scheduled shift
-          const sched = getScheduledShiftForDate(emp.id, todayDate, state);
+          // Find scheduled shift on targetDate
+          const sched = getScheduledShiftForDate(emp.id, targetDate, state);
           if (!sched || !sched.start) return;
 
           const diffMinutes = calculateLatenessMinutes(sched.start, timeIn);
@@ -849,14 +867,14 @@ export default function Dashboard({
           // Classify into Late Penalty Policy Tier
           const tier = classifyLateTier(diffMinutes, latePolicy) || DEFAULT_LATE_PENALTY_POLICY.tiers[0];
           if (!tier) return;
-          const approvedPerm = isApprovedPermissionForDate(emp.id, todayDate, state);
+          const approvedPerm = isApprovedPermissionForDate(emp.id, targetDate, state);
 
           // Calculate occurrences in this tier for the current month
           const pastCycleIncidents = (state?.lateIncidents || []).filter((inc) => {
             if (!inc) return false;
             if (String(inc.employeeId) !== String(emp.id)) return false;
             if (inc.status === 'cancelled') return false;
-            if (inc.date === todayDate) return false; // exclude today's current record
+            if (inc.date === targetDate) return false; // exclude target record
             if (filterFn && !filterFn(inc.date)) return false;
             const incTier = inc.tierKey || inc.tierId;
             return incTier === tier.id || incTier === tier.key;
@@ -870,12 +888,12 @@ export default function Dashboard({
           const branchObj = branches.find((b) => b && String(b.id) === String(effectiveBranchId)) || branches.find((b) => b && empBelongsToBranch(emp, b.id));
           const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
 
-          const incId = `late_inc_${emp.id}_${todayDate}_${timeIn.replace(':', '')}`;
-          const existingInc = (state?.lateIncidents || []).find((i) => i && (i.id === incId || (String(i.employeeId) === String(emp.id) && i.date === todayDate)));
+          const incId = `late_inc_${emp.id}_${targetDate}_${timeIn.replace(':', '')}`;
+          const existingInc = (state?.lateIncidents || []).find((i) => i && (i.id === incId || (String(i.employeeId) === String(emp.id) && i.date === targetDate)));
 
-          const reqId = `req_late_${emp.id}_${todayDate}`;
+          const reqId = `req_late_${emp.id}_${targetDate}`;
           const penaltyReq = (state?.requests || []).find(
-            (r) => r && (r.id === reqId || r.id === `req_${incId}` || (String(r.employeeId) === String(emp.id) && r.date === todayDate && (r.subType === 'lateness' || r.type === 'penalty')))
+            (r) => r && (r.id === reqId || r.id === `req_${incId}` || (String(r.employeeId) === String(emp.id) && r.date === targetDate && (r.subType === 'lateness' || r.type === 'penalty')))
           );
 
           let actionType = 'grace';
@@ -936,7 +954,7 @@ export default function Dashboard({
             incId,
             reqId,
             shiftId: punchToday?.id || activeShiftToday?.id || '',
-            date: todayDate,
+            date: targetDate,
             branchId: effectiveBranchId,
             branchName,
             scheduledStart: sched.start,
@@ -1341,7 +1359,7 @@ export default function Dashboard({
                 </span>
                 <div>
                   <h4 style={{ margin: 0, fontSize: '17px', color: 'var(--accent, #ea580c)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
-                    🏃‍♂️ موظفو اليوم المتأخرون عن مواعيد العمل المجدولة ({todayDate})
+                    🏃‍♂️ موظفو اليوم المتأخرون عن مواعيد العمل المجدولة ({targetDate})
                   </h4>
                   {isCardExpanded('lateToday') && (
                     <div style={{ fontSize: '13px', color: 'var(--accent, #d97706)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -1354,9 +1372,30 @@ export default function Dashboard({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface, #ffffff)', border: '1px solid var(--border, #cbd5e1)', padding: '4px 10px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                  <label htmlFor="late-target-date" style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--muted, #64748b)' }}>📅 اليوم المحدد:</label>
+                  <input
+                    id="late-target-date"
+                    type="date"
+                    value={selectedLateDate}
+                    onChange={(e) => setSelectedLateDate(e.target.value)}
+                    style={{ border: 'none', background: 'transparent', fontSize: '13px', fontWeight: 'bold', color: 'var(--accent, #ea580c)', cursor: 'pointer', outline: 'none' }}
+                  />
+                  {selectedLateDate !== todayDate && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedLateDate(todayDate)}
+                      style={{ border: 'none', background: 'var(--accent, #ea580c)', color: '#ffffff', padding: '3px 8px', borderRadius: '5px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}
+                      title="العودة إلى تاريخ اليوم"
+                    >
+                      اليوم
+                    </button>
+                  )}
+                </div>
+
                 <span style={{ background: lateEmployeesToday.length > 0 ? '#ea580c' : 'var(--success, #16a34a)', color: '#ffffff', padding: '5px 16px', borderRadius: '99px', fontSize: '13.5px', fontWeight: 'bold', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-                  {lateEmployeesToday.length} موظف تأخر اليوم
+                  {lateEmployeesToday.length} {targetDate === todayDate ? 'موظف تأخر اليوم' : 'موظف متأخر'}
                 </span>
                 {deductionCount > 0 && (
                   <span style={{ background: 'var(--danger, #dc2626)', color: '#ffffff', padding: '5px 14px', borderRadius: '99px', fontSize: '13px', fontWeight: 'bold' }}>
