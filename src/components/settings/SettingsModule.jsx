@@ -2798,28 +2798,6 @@ export default function SettingsModule({
                   onChange={(e) => setNewIPLabel(e.target.value)}
                   style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: '#fff', boxSizing: 'border-box' }}
                 />
-                {branchSuggestions.length > 0 && (
-                  <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '6px' }}>
-                    {branchSuggestions.slice(0, 4).map((suggest) => (
-                      <button
-                        key={suggest}
-                        type="button"
-                        onClick={() => setNewIPLabel(suggest)}
-                        style={{
-                          border: '1px solid #e2e8f0',
-                          background: '#f8fafc',
-                          color: '#475569',
-                          padding: '2px 8px',
-                          borderRadius: '6px',
-                          fontSize: '11px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        + {suggest}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
 
               <div>

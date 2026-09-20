@@ -56,6 +56,8 @@ export default function Dashboard({
     branchSales: false
   });
 
+  const [selectedLiveDate, setSelectedLiveDate] = useState(() => getRealTodayStr());
+  const [selectedAbsentDate, setSelectedAbsentDate] = useState(() => getRealTodayStr());
   const [selectedLateDate, setSelectedLateDate] = useState(() => getRealTodayStr());
 
   const isCardExpanded = (cardKey) => Boolean(expandedCards[cardKey]);
@@ -157,8 +159,11 @@ export default function Dashboard({
     return acc + (h * dailyHourlyRate);
   }, 0);
 
-  // Filtered Adjustments
-  const periodAdjustments = (state.adjustments || []).filter((a) => matchesFilterDate(a.date));
+  // Filtered Adjustments (exclusively for currently active/existing employees)
+  const activeEmpIds = new Set(employees.map((e) => String(e.id)));
+  const periodAdjustments = (state.adjustments || []).filter(
+    (a) => matchesFilterDate(a.date) && activeEmpIds.has(String(a.employeeId))
+  );
   const totalBonuses = periodAdjustments
     .filter((a) => a.type === 'bonus')
     .reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
@@ -437,274 +442,315 @@ export default function Dashboard({
       )}
 
       {/* ── 3. Separate Live Punch Cards for Every Branch (Collapsible by Default) ── */}
-      <div 
-        onClick={() => toggleCard('branchLive')}
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: '8px',
-          marginBottom: isCardExpanded('branchLive') ? '14px' : '20px',
-          background: 'var(--surface, #ffffff)',
-          border: '1px solid var(--border, #e2e8f0)',
-          borderRadius: '14px',
-          padding: '14px 20px',
-          cursor: 'pointer',
-          userSelect: 'none',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
-          transition: 'all 0.2s ease'
-        }}
-        title={isCardExpanded('branchLive') ? 'اضغط لطي بطاقات الفروع' : 'اضغط لعرض بطاقات الفروع'}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '18px' }}>⏱️</span>
-          <h4 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
-            بطاقات الحضور والبصمات الحية لكل فرع منفصل ({todayDate})
-          </h4>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{
-            background: 'var(--primary-light, #f0fdfa)',
-            color: 'var(--primary-dark, #0f766e)',
-            border: '1px solid var(--primary-tint, #ccfbf1)',
-            padding: '4px 10px',
-            borderRadius: '99px',
-            fontSize: '12px',
-            fontWeight: '800'
-          }}>
-            🏢 {branches.length} فروع
-          </span>
-          <span style={{
-            fontSize: '13px',
-            color: 'var(--muted)',
-            display: 'inline-block',
-            transition: 'transform 0.2s ease',
-            transform: isCardExpanded('branchLive') ? 'rotate(180deg)' : 'rotate(0deg)'
-          }}>
-            ▼
-          </span>
-        </div>
-      </div>
-      
-      {isCardExpanded('branchLive') && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '18px', marginBottom: '28px' }}>
-          {branches.map((b) => {
-            if (!b || !b.id) return null;
-            const branchEmps = employees.filter((e) => e && isEmployeeActive(e) && empBelongsToBranch(e, b.id));
-            const branchTodayPunches = todayPunches.filter((p) => {
-              if (!p) return false;
-              if (p.branchId) return String(p.branchId) === String(b.id);
-              return String(branchEmps.find((e) => e && String(e.id) === String(p.employeeId))?.branchId || '') === String(b.id);
-            });
-            const branchActiveCount = branchEmps.filter((e) => {
-              if (!e || !e.id || !isEmployeeActive(e)) return false;
-              const act = state?.activeShifts?.[e.id];
-              if (!act) return false;
-              const isToday = act.date ? String(act.date) === String(todayDate) : true;
-              return isToday && String(act.branchId || e.branchId) === String(b.id);
-            }).length;
-            const allLeaves = [...(state?.leaveRequests || []), ...(state?.requests || [])];
-            const totalLiveCount = branchActiveCount;
-            const isBranchExpanded = isCardExpanded(`branch_${b.id}`);
-
-            return (
-              <div
-                key={b.id}
-                style={{
-                  background: 'var(--surface, #ffffff)',
-                  border: '1px solid var(--border, #e2e8f0)',
-                  padding: isBranchExpanded ? '20px' : '14px 18px',
-                  borderRadius: '16px',
-                  boxShadow: '0 4px 20px -2px rgba(15, 23, 42, 0.05), 0 2px 6px rgba(0, 0, 0, 0.02)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: isBranchExpanded ? '14px' : '0',
-                  transition: 'all 0.2s ease'
-                }}
-              >
+      {(() => {
+        const targetLiveDate = selectedLiveDate || todayDate;
+        return (
+          <>
+            <div 
+              onClick={() => toggleCard('branchLive')}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '8px',
+                marginBottom: isCardExpanded('branchLive') ? '14px' : '20px',
+                background: 'var(--surface, #ffffff)',
+                border: '1px solid var(--border, #e2e8f0)',
+                borderRadius: '14px',
+                padding: '14px 20px',
+                cursor: 'pointer',
+                userSelect: 'none',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
+                transition: 'all 0.2s ease'
+              }}
+              title={isCardExpanded('branchLive') ? 'اضغط لطي بطاقات الفروع' : 'اضغط لعرض بطاقات الفروع'}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>⏱️</span>
+                <h4 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
+                  بطاقات الحضور والبصمات الحية لكل فرع منفصل ({targetLiveDate})
+                </h4>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                 <div 
-                  onClick={() => toggleCard(`branch_${b.id}`)}
-                  style={{ 
-                    display: 'flex', 
-                    justifyContent: 'space-between', 
-                    alignItems: 'center', 
-                    paddingBottom: isBranchExpanded ? '12px' : '0', 
-                    borderBottom: isBranchExpanded ? '1px solid var(--border, #f1f5f9)' : 'none',
-                    cursor: 'pointer',
-                    userSelect: 'none'
-                  }}
-                  title={isBranchExpanded ? 'اضغط لطي موظفي هذا الفرع' : 'اضغط لعرض تفاصيل موظفي هذا الفرع'}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface, #ffffff)', border: '1px solid var(--border, #cbd5e1)', padding: '4px 10px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }} 
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{
-                      fontSize: '12px',
-                      color: 'var(--muted)',
-                      display: 'inline-block',
-                      transition: 'transform 0.2s ease',
-                      transform: isBranchExpanded ? 'rotate(180deg)' : 'rotate(0deg)'
-                    }}>
-                      ▼
-                    </span>
-                    <h4 style={{ margin: 0, color: 'var(--primary-dark, #0f766e)', fontSize: '16px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      🏢 فرع {b.name}
-                    </h4>
-                  </div>
-                  <span style={{
-                    background: totalLiveCount > 0 ? '#dcfce7' : '#f1f5f9',
-                    color: totalLiveCount > 0 ? '#15803d' : '#64748b',
-                    border: `1px solid ${totalLiveCount > 0 ? '#bbf7d0' : '#e2e8f0'}`,
-                    padding: '4px 10px',
-                    borderRadius: '99px',
-                    fontSize: '12px',
-                    fontWeight: '800',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '5px'
-                  }}>
-                    <span style={{
-                      width: '6px',
-                      height: '6px',
-                      borderRadius: '50%',
-                      background: totalLiveCount > 0 ? '#22c55e' : '#94a3b8'
-                    }} />
-                    {totalLiveCount} بصمة حية بالفرع
-                  </span>
+                  <label htmlFor="live-target-date" style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--muted, #64748b)' }}>📅 اليوم المحدد:</label>
+                  <input
+                    id="live-target-date"
+                    type="date"
+                    value={selectedLiveDate}
+                    onChange={(e) => setSelectedLiveDate(e.target.value)}
+                    style={{ border: 'none', background: 'transparent', fontSize: '13px', fontWeight: 'bold', color: 'var(--primary-dark, #0f766e)', cursor: 'pointer', outline: 'none' }}
+                  />
+                  {selectedLiveDate !== todayDate && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedLiveDate(todayDate)}
+                      style={{ border: 'none', background: 'var(--primary, #0d9488)', color: '#ffffff', padding: '3px 8px', borderRadius: '5px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}
+                      title="العودة إلى تاريخ اليوم"
+                    >
+                      اليوم
+                    </button>
+                  )}
                 </div>
 
-                {isBranchExpanded && (
-                  <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {branchEmps.length === 0 ? (
-                      <span style={{ color: 'var(--muted, #94a3b8)', textAlign: 'center', padding: '12px 0' }}>
-                        لا يوجد موظفين مسجلين بهذا الفرع.
-                      </span>
-                    ) : (
-                      branchEmps.map((emp) => {
-                        if (!emp || !emp.id) return null;
-                        const activeShift = state?.activeShifts?.[emp.id];
-                        const isShiftToday = activeShift && (activeShift.date ? String(activeShift.date) === String(todayDate) : true);
-                        const isActiveInThisBranch = activeShift && isShiftToday && isEmployeeActive(emp) && (String(activeShift.branchId || emp.branchId) === String(b.id));
-                        const isActiveInOtherBranch = activeShift && isShiftToday && isEmployeeActive(emp) && !isActiveInThisBranch;
-
-                        const empTodayPunchesInThisBranch = todayPunches.filter((p) => {
-                          if (!p) return false;
-                          if (String(p.employeeId) !== String(emp.id)) return false;
-                          if (p.branchId) return String(p.branchId) === String(b.id);
-                          return String(emp.branchId) === String(b.id);
-                        });
-
-                        const onLeaveToday = allLeaves.some(
-                          (r) => r && String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayDate && r.endDate >= todayDate
-                        );
-
-                        const daySched = getEmployeeDaySchedule(emp.id, todayDate, state);
-                        const isOffToday = daySched?.type === 'off' || daySched?.isOff === true;
-                        const isSwapped = Boolean(daySched?.isSwapped);
-
-                        let statusText = 'لم يبصم بهذا الفرع';
-                        let badgeBg = '#fff1f2';
-                        let badgeColor = '#e11d48';
-                        let badgeBorder = '#fecdd3';
-
-                        if (isActiveInThisBranch) {
-                          if (activeShift.isOnBreak || activeShift.isPaused) {
-                            statusText = '⏸️ في استراحة';
-                            badgeBg = '#fffbeb';
-                            badgeColor = '#b45309';
-                            badgeBorder = '#fde68a';
-                          } else {
-                            statusText = '🟢 حاضر حالياً';
-                            badgeBg = '#ecfdf5';
-                            badgeColor = '#047857';
-                            badgeBorder = '#a7f3d0';
-                          }
-                        } else if (isActiveInOtherBranch) {
-                          const otherBranchObj = branches.find((br) => br && String(br.id) === String(activeShift?.branchId));
-                          statusText = `🏢 بوردية بفرع ${otherBranchObj ? otherBranchObj.name : 'آخر'}`;
-                          badgeBg = '#f1f5f9';
-                          badgeColor = '#475569';
-                          badgeBorder = '#e2e8f0';
-                        } else if (empTodayPunchesInThisBranch.length > 0) {
-                          statusText = '🟢 تم الحضور اليوم';
-                          badgeBg = '#f0f9ff';
-                          badgeColor = '#0284c7';
-                          badgeBorder = '#bae6fd';
-                        } else if (onLeaveToday) {
-                          statusText = '🏖️ إجازة معتمدة';
-                          badgeBg = '#f0fdf4';
-                          badgeColor = '#16a34a';
-                          badgeBorder = '#bbf7d0';
-                        } else if (isOffToday) {
-                          statusText = isSwapped
-                            ? `🔄 💤 راحة متبدلة`
-                            : '💤 راحة أسبوعية (OFF)';
-                          badgeBg = '#f8fafc';
-                          badgeColor = '#64748b';
-                          badgeBorder = '#e2e8f0';
-                        } else if (isSwapped && daySched?.start && daySched?.end) {
-                          statusText = `🔄 وردية متبدلة (${daySched.start})`;
-                          badgeBg = '#fffbeb';
-                          badgeColor = '#d97706';
-                          badgeBorder = '#fde68a';
-                        }
-
-                        return (
-                          <div
-                            key={emp.id}
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              padding: '8px 12px',
-                              borderRadius: '10px',
-                              background: 'var(--surface-muted, #f8fafc)',
-                              border: '1px solid var(--border, #f1f5f9)'
-                            }}
-                          >
-                            <span style={{ fontWeight: '700', color: 'var(--text, #0f172a)', fontSize: '13.5px' }}>
-                              👤 {emp.name}
-                            </span>
-                            <span style={{
-                              background: badgeBg,
-                              color: badgeColor,
-                              border: `1px solid ${badgeBorder}`,
-                              padding: '3px 8px',
-                              borderRadius: '6px',
-                              fontSize: '11.5px',
-                              fontWeight: '800'
-                            }}>
-                              {statusText}
-                            </span>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
+                <span style={{
+                  background: 'var(--primary-light, #f0fdfa)',
+                  color: 'var(--primary-dark, #0f766e)',
+                  border: '1px solid var(--primary-tint, #ccfbf1)',
+                  padding: '4px 10px',
+                  borderRadius: '99px',
+                  fontSize: '12px',
+                  fontWeight: '800'
+                }}>
+                  🏢 {branches.length} فروع
+                </span>
+                <span style={{
+                  fontSize: '13px',
+                  color: 'var(--muted)',
+                  display: 'inline-block',
+                  transition: 'transform 0.2s ease',
+                  transform: isCardExpanded('branchLive') ? 'rotate(180deg)' : 'rotate(0deg)'
+                }}>
+                  ▼
+                </span>
               </div>
-            );
-          })}
-        </div>
-      )}
+            </div>
+            
+            {isCardExpanded('branchLive') && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '18px', marginBottom: '28px' }}>
+                {branches.map((b) => {
+                  if (!b || !b.id) return null;
+                  const branchEmps = employees.filter((e) => e && isEmployeeActive(e) && empBelongsToBranch(e, b.id));
+                  const branchTargetPunches = punches.filter((p) => {
+                    if (!p) return false;
+                    const pDate = String(p.date || p.timestamp || '').slice(0, 10);
+                    if (pDate !== targetLiveDate) return false;
+                    if (p.branchId) return String(p.branchId) === String(b.id);
+                    return String(branchEmps.find((e) => e && String(e.id) === String(p.employeeId))?.branchId || '') === String(b.id);
+                  });
+                  const branchActiveCount = (targetLiveDate === todayDate)
+                    ? branchEmps.filter((e) => {
+                        if (!e || !e.id || !isEmployeeActive(e)) return false;
+                        const act = state?.activeShifts?.[e.id] || state?.activeShifts?.[String(e.id)];
+                        if (!act) return false;
+                        const isToday = act.date ? String(act.date).slice(0, 10) === targetLiveDate : true;
+                        return isToday && String(act.branchId || e.branchId) === String(b.id);
+                      }).length
+                    : branchTargetPunches.length;
+                  const allLeaves = [...(state?.leaveRequests || []), ...(state?.requests || [])];
+                  const totalLiveCount = branchActiveCount;
+                  const isBranchExpanded = isCardExpanded(`branch_${b.id}`);
+
+                  return (
+                    <div
+                      key={b.id}
+                      style={{
+                        background: 'var(--surface, #ffffff)',
+                        border: '1px solid var(--border, #e2e8f0)',
+                        padding: isBranchExpanded ? '20px' : '14px 18px',
+                        borderRadius: '16px',
+                        boxShadow: '0 4px 20px -2px rgba(15, 23, 42, 0.05), 0 2px 6px rgba(0, 0, 0, 0.02)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: isBranchExpanded ? '14px' : '0',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      <div 
+                        onClick={() => toggleCard(`branch_${b.id}`)}
+                        style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center', 
+                          paddingBottom: isBranchExpanded ? '12px' : '0', 
+                          borderBottom: isBranchExpanded ? '1px solid var(--border, #f1f5f9)' : 'none',
+                          cursor: 'pointer',
+                          userSelect: 'none'
+                        }}
+                        title={isBranchExpanded ? 'اضغط لطي موظفي هذا الفرع' : 'اضغط لعرض تفاصيل موظفي هذا الفرع'}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{
+                            fontSize: '12px',
+                            color: 'var(--muted)',
+                            display: 'inline-block',
+                            transition: 'transform 0.2s ease',
+                            transform: isBranchExpanded ? 'rotate(180deg)' : 'rotate(0deg)'
+                          }}>
+                            ▼
+                          </span>
+                          <h4 style={{ margin: 0, color: 'var(--primary-dark, #0f766e)', fontSize: '16px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            🏢 فرع {b.name}
+                          </h4>
+                        </div>
+                        <span style={{
+                          background: totalLiveCount > 0 ? '#dcfce7' : '#f1f5f9',
+                          color: totalLiveCount > 0 ? '#15803d' : '#64748b',
+                          border: `1px solid ${totalLiveCount > 0 ? '#bbf7d0' : '#e2e8f0'}`,
+                          padding: '4px 10px',
+                          borderRadius: '99px',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px'
+                        }}>
+                          <span style={{
+                            width: '6px',
+                            height: '6px',
+                            borderRadius: '50%',
+                            background: totalLiveCount > 0 ? '#22c55e' : '#94a3b8'
+                          }} />
+                          {targetLiveDate === todayDate ? `${totalLiveCount} بصمة حية بالفرع` : `${branchTargetPunches.length} بصمة مسجلة بالفرع`}
+                        </span>
+                      </div>
+
+                      {isBranchExpanded && (
+                        <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {branchEmps.length === 0 ? (
+                            <span style={{ color: 'var(--muted, #94a3b8)', textAlign: 'center', padding: '12px 0' }}>
+                              لا يوجد موظفين مسجلين بهذا الفرع.
+                            </span>
+                          ) : (
+                            branchEmps.map((emp) => {
+                              if (!emp || !emp.id) return null;
+                              const rawActive = (targetLiveDate === todayDate) ? (state?.activeShifts?.[emp.id] || state?.activeShifts?.[String(emp.id)]) : null;
+                              const isShiftTarget = rawActive && (rawActive.date ? String(rawActive.date).slice(0, 10) === targetLiveDate : true);
+                              const isActiveInThisBranch = rawActive && isShiftTarget && isEmployeeActive(emp) && (String(rawActive.branchId || emp.branchId) === String(b.id));
+                              const isActiveInOtherBranch = rawActive && isShiftTarget && isEmployeeActive(emp) && !isActiveInThisBranch;
+
+                              const empTargetPunchesInThisBranch = punches.filter((p) => {
+                                if (!p) return false;
+                                const pDate = String(p.date || p.timestamp || '').slice(0, 10);
+                                if (pDate !== targetLiveDate) return false;
+                                if (String(p.employeeId) !== String(emp.id)) return false;
+                                if (p.branchId) return String(p.branchId) === String(b.id);
+                                return String(emp.branchId) === String(b.id);
+                              });
+
+                              const onLeaveToday = allLeaves.some(
+                                (r) => r && String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= targetLiveDate && r.endDate >= targetLiveDate
+                              );
+
+                              const daySched = getEmployeeDaySchedule(emp.id, targetLiveDate, state);
+                              const isOffToday = daySched?.type === 'off' || daySched?.isOff === true;
+                              const isSwapped = Boolean(daySched?.isSwapped);
+
+                              let statusText = targetLiveDate === todayDate ? 'لم يبصم بهذا الفرع' : 'لم يسجل حضور بالفرع';
+                              let badgeBg = '#fff1f2';
+                              let badgeColor = '#e11d48';
+                              let badgeBorder = '#fecdd3';
+
+                              if (isActiveInThisBranch) {
+                                if (rawActive.isOnBreak || rawActive.isPaused) {
+                                  statusText = '⏸️ في استراحة';
+                                  badgeBg = '#fffbeb';
+                                  badgeColor = '#b45309';
+                                  badgeBorder = '#fde68a';
+                                } else {
+                                  statusText = '🟢 حاضر حالياً';
+                                  badgeBg = '#ecfdf5';
+                                  badgeColor = '#047857';
+                                  badgeBorder = '#a7f3d0';
+                                }
+                              } else if (isActiveInOtherBranch) {
+                                const otherBranchObj = branches.find((br) => br && String(br.id) === String(rawActive?.branchId));
+                                statusText = `🏢 بوردية بفرع ${otherBranchObj ? otherBranchObj.name : 'آخر'}`;
+                                badgeBg = '#f1f5f9';
+                                badgeColor = '#475569';
+                                badgeBorder = '#e2e8f0';
+                              } else if (empTargetPunchesInThisBranch.length > 0) {
+                                statusText = targetLiveDate === todayDate ? '🟢 تم الحضور اليوم' : `✔️ سجل حضور (${empTargetPunchesInThisBranch[0].timeIn || 'مسجل'})`;
+                                badgeBg = '#f0f9ff';
+                                badgeColor = '#0284c7';
+                                badgeBorder = '#bae6fd';
+                              } else if (onLeaveToday) {
+                                statusText = '🏖️ إجازة معتمدة';
+                                badgeBg = '#f0fdf4';
+                                badgeColor = '#16a34a';
+                                badgeBorder = '#bbf7d0';
+                              } else if (isOffToday) {
+                                statusText = isSwapped
+                                  ? `🔄 💤 راحة متبدلة`
+                                  : '💤 راحة أسبوعية (OFF)';
+                                badgeBg = '#f8fafc';
+                                badgeColor = '#64748b';
+                                badgeBorder = '#e2e8f0';
+                              } else if (isSwapped && daySched?.start && daySched?.end) {
+                                statusText = `🔄 وردية متبدلة (${daySched.start})`;
+                                badgeBg = '#fffbeb';
+                                badgeColor = '#d97706';
+                                badgeBorder = '#fde68a';
+                              }
+
+                              return (
+                                <div
+                                  key={emp.id}
+                                  style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    padding: '8px 12px',
+                                    borderRadius: '10px',
+                                    background: 'var(--surface-muted, #f8fafc)',
+                                    border: '1px solid var(--border, #f1f5f9)'
+                                  }}
+                                >
+                                  <span style={{ fontWeight: '700', color: 'var(--text, #0f172a)', fontSize: '13.5px' }}>
+                                    👤 {emp.name}
+                                  </span>
+                                  <span style={{
+                                    background: badgeBg,
+                                    color: badgeColor,
+                                    border: `1px solid ${badgeBorder}`,
+                                    padding: '3px 8px',
+                                    borderRadius: '6px',
+                                    fontSize: '11.5px',
+                                    fontWeight: '800'
+                                  }}>
+                                    {statusText}
+                                  </span>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {/* ── 3.5 Absent Employees Card Today ── */}
       {(() => {
+        const targetAbsentDate = selectedAbsentDate || todayDate;
         const allLeaves = [...(state?.leaveRequests || []), ...(state?.requests || [])];
         const absentEmpsToday = employees.filter((emp) => {
           if (!emp || !emp.id) return false;
-          const rawActive = state?.activeShifts?.[emp.id] || state?.activeShifts?.[String(emp.id)];
+          const rawActive = (targetAbsentDate === todayDate) ? (state?.activeShifts?.[emp.id] || state?.activeShifts?.[String(emp.id)]) : null;
           const isShiftToday = rawActive && (
             rawActive.date
-              ? String(rawActive.date).slice(0, 10) === todayDate
-              : (rawActive.timestamp ? String(rawActive.timestamp).slice(0, 10) === todayDate : false)
+              ? String(rawActive.date).slice(0, 10) === targetAbsentDate
+              : (rawActive.timestamp ? String(rawActive.timestamp).slice(0, 10) === targetAbsentDate : false)
           );
           if (rawActive && isShiftToday) return false;
-          const hasPunchedToday = todayPunches.some((p) => p && String(p.employeeId) === String(emp.id));
+          const hasPunchedToday = punches.some((p) => p && String(p.employeeId) === String(emp.id) && (
+            String(p.date || '').slice(0, 10) === targetAbsentDate ||
+            (p.timestamp && String(p.timestamp).slice(0, 10) === targetAbsentDate)
+          ));
           if (hasPunchedToday) return false;
           const onLeaveToday = allLeaves.some(
-            (r) => r && String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayDate && r.endDate >= todayDate
+            (r) => r && String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= targetAbsentDate && r.endDate >= targetAbsentDate
           );
           if (onLeaveToday) return false;
-          const daySched = getEmployeeDaySchedule(emp.id, todayDate, state);
+          const daySched = getEmployeeDaySchedule(emp.id, targetAbsentDate, state);
           if (daySched?.type === 'off' || daySched?.isOff === true) return false; // Employee is on rest day / OFF today!
           return true;
         });
@@ -747,20 +793,44 @@ export default function Dashboard({
                   ▼
                 </span>
                 <h4 style={{ margin: 0, fontSize: '17px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
-                  🚨 الموظفون الغائبون / لم يبصموا اليوم ({todayDate})
+                  🚨 الموظفون الغائبون / لم يبصموا {targetAbsentDate === todayDate ? 'اليوم' : ''} ({targetAbsentDate})
                 </h4>
               </div>
-              <span style={{
-                background: 'var(--danger)',
-                color: '#ffffff',
-                padding: '5px 14px',
-                borderRadius: '99px',
-                fontSize: '13px',
-                fontWeight: '800',
-                boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)'
-              }}>
-                {absentEmpsToday.length} موظف غائب
-              </span>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface, #ffffff)', border: '1px solid var(--border, #cbd5e1)', padding: '4px 10px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                  <label htmlFor="absent-target-date" style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--muted, #64748b)' }}>📅 اليوم المحدد:</label>
+                  <input
+                    id="absent-target-date"
+                    type="date"
+                    value={selectedAbsentDate}
+                    onChange={(e) => setSelectedAbsentDate(e.target.value)}
+                    style={{ border: 'none', background: 'transparent', fontSize: '13px', fontWeight: 'bold', color: 'var(--danger, #dc2626)', cursor: 'pointer', outline: 'none' }}
+                  />
+                  {selectedAbsentDate !== todayDate && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedAbsentDate(todayDate)}
+                      style={{ border: 'none', background: 'var(--danger, #dc2626)', color: '#ffffff', padding: '3px 8px', borderRadius: '5px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}
+                      title="العودة إلى تاريخ اليوم"
+                    >
+                      اليوم
+                    </button>
+                  )}
+                </div>
+
+                <span style={{
+                  background: 'var(--danger)',
+                  color: '#ffffff',
+                  padding: '5px 14px',
+                  borderRadius: '99px',
+                  fontSize: '13px',
+                  fontWeight: '800',
+                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)'
+                }}>
+                  {absentEmpsToday.length} {targetAbsentDate === todayDate ? 'موظف غائب اليوم' : 'موظف لم يبصم'}
+                </span>
+              </div>
             </div>
 
             {isCardExpanded('absentToday') && (
