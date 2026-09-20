@@ -15,47 +15,6 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
 
   const isHand = biometricType === 'hand';
   const [facingMode, setFacingMode] = useState('user'); // 'user' (أمامية) or 'environment' (خلفية)
-  const nativeCameraInputRef = useRef(null);
-
-  const handleNativePhotoCapture = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setStatus('جارِ فحص وتحليل بصمة الوجه الملتقطة بالذكاء الاصطناعي...');
-    setIsInitializing(true);
-    setErrorMsg(null);
-    try {
-      const img = new Image();
-      img.src = URL.createObjectURL(file);
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-      });
-
-      await initFaceRecognition();
-      const embedding = await getFaceEmbedding(img);
-      if (!embedding) {
-        throw new Error('لم يتم رصد أي وجه في الصورة الملتقطة. يرجى التقاط صورة واضحة ومباشرة للوجه.');
-      }
-
-      const savedDescriptor = loadFaceDescriptor(employee.id);
-      if (!savedDescriptor) {
-        throw new Error('لا توجد بصمة وجه مسجلة مسبقاً لهذا الموظف.');
-      }
-
-      const isMatch = compareFaces(embedding, savedDescriptor);
-      if (isMatch) {
-        setStatus('✅ تم التحقق من بصمة الوجه بنجاح!');
-        onVerifySuccess?.({ method: 'face_native_camera', timestamp: Date.now() });
-      } else {
-        setFailedAttempts(prev => prev + 1);
-        throw new Error('بصمة الوجه غير مطابقة للموظف المسجل.');
-      }
-    } catch (err) {
-      setErrorMsg(err.message || 'تعذر التحقق من صورة الوجه.');
-    } finally {
-      setIsInitializing(false);
-    }
-  };
 
   useEffect(() => {
     let stream = null;
@@ -469,15 +428,6 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
 
         </div>
         <div className="modal-footer" style={{ flexDirection: 'column', gap: '10px' }}>
-          <input
-            type="file"
-            accept="image/*"
-            capture="user"
-            ref={nativeCameraInputRef}
-            style={{ display: 'none' }}
-            onChange={handleNativePhotoCapture}
-          />
-
           {errorMsg && typeof window !== 'undefined' && window.location.protocol === 'http:' && !window.location.hostname.includes('localhost') && (
             <button
               type="button"
@@ -502,28 +452,6 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
               }}
             >
               🔒 التبديل إلى رابط HTTPS المشفر (لتشغيل البث الحي للكاميرا)
-            </button>
-          )}
-
-          {errorMsg && !isHand && (
-            <button
-              type="button"
-              className="btn btn-primary"
-              style={{
-                width: '100%',
-                padding: '12px',
-                fontSize: '14px',
-                fontWeight: 800,
-                background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: '10px',
-                boxShadow: '0 4px 14px rgba(59, 130, 246, 0.4)',
-                cursor: 'pointer'
-              }}
-              onClick={() => nativeCameraInputRef.current?.click()}
-            >
-              📸 التقاط بصمة الوجه عبر كاميرا الهاتف مباشرة
             </button>
           )}
 

@@ -3,6 +3,8 @@ import { fmt, getEmpDisplayName } from '../../utils/formatters';
 import { getJobsList } from '../../utils/jobsHelper';
 import { compressImage } from '../../utils/imageCompressor';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
+import { triggerDirectPrint } from '../../utils/printHelper';
+import { generateSalaryIncreaseCertificateHtml } from '../../utils/whatsappTemplates';
 
 export default function EmployeeProfileModule({
   emp,
@@ -599,6 +601,126 @@ export default function EmployeeProfileModule({
           </div>
         </div>
       </div>
+
+      {/* ── SECTION 3: SALARY INCREASES & RAISES HISTORY (سجل الزيادات والعلاوات) ── */}
+      {Array.isArray(emp.salaryIncreases) && emp.salaryIncreases.length > 0 && (
+        <div
+          style={{
+            background: 'linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%)',
+            borderRadius: '16px',
+            border: '1.5px solid #a7f3d0',
+            padding: '24px',
+            boxShadow: '0 4px 20px rgba(16, 185, 129, 0.06)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', borderBottom: '1.5px solid #d1fae5', paddingBottom: '12px' }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#065f46', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>📈</span> سجل الزيادات السنوية والاستثنائية المعتمدة
+              </h3>
+              <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#047857' }}>
+                بيان رسمي موثق بكافة قرارات الزيادات السنوية والعلاوات الاستثنائية الصادرة من الإدارة العليا
+              </p>
+            </div>
+            <span style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac', padding: '4px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 800 }}>
+              {emp.salaryIncreases.length} زيادة معتمدة
+            </span>
+          </div>
+
+          <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #d1fae5' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'center' }}>
+              <thead>
+                <tr style={{ background: '#ecfdf5', color: '#065f46', borderBottom: '2px solid #a7f3d0', fontWeight: 800 }}>
+                  <th style={{ padding: '10px 8px', width: '40px' }}>#</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>نوع الزيادة</th>
+                  <th style={{ padding: '10px 12px' }}>تاريخ التطبيق</th>
+                  <th style={{ padding: '10px 12px' }}>سعر الساعة قبل</th>
+                  <th style={{ padding: '10px 12px' }}>سعر الساعة بعد</th>
+                  <th style={{ padding: '10px 12px' }}>مقدار الزيادة والنسبة</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>البيان والملاحظات</th>
+                  <th style={{ padding: '10px 8px', width: '75px' }}>الشهادة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {emp.salaryIncreases.map((inc, idx) => {
+                  const diff = (inc.rateAfter || 0) - (inc.rateBefore || 0);
+                  const pct = inc.percentage !== undefined ? inc.percentage : (inc.rateBefore > 0 ? (((diff) / inc.rateBefore) * 100).toFixed(1) : 0);
+
+                  return (
+                    <tr key={inc.id || idx} style={{ borderBottom: '1px solid #e2e8f0', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                      <td style={{ padding: '10px 8px', color: '#64748b', fontWeight: 700 }}>{idx + 1}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                        <span
+                          style={{
+                            background: inc.type === 'exceptional' ? '#f3e8ff' : '#dcfce7',
+                            color: inc.type === 'exceptional' ? '#7e22ce' : '#15803d',
+                            border: `1px solid ${inc.type === 'exceptional' ? '#d8b4fe' : '#86efac'}`,
+                            padding: '3px 10px',
+                            borderRadius: '6px',
+                            fontSize: '11.5px',
+                            fontWeight: 800
+                          }}
+                        >
+                          {inc.type === 'exceptional' ? '⭐ زيادة استثنائية' : '🌱 زيادة سنوية دورية'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px', fontWeight: 700, color: '#0f766e', whiteSpace: 'nowrap' }}>
+                        📅 {inc.effectiveDate || inc.date || '—'}
+                      </td>
+                      <td style={{ padding: '10px 12px', color: '#64748b', fontWeight: 600 }}>
+                        {fmt(inc.rateBefore)} ج.م / س
+                      </td>
+                      <td style={{ padding: '10px 12px', color: '#059669', fontWeight: 800, fontSize: '14px' }}>
+                        {fmt(inc.rateAfter)} ج.م / س
+                      </td>
+                      <td style={{ padding: '10px 12px', fontWeight: 800, color: '#16a34a' }}>
+                        +{fmt(diff)} ج.م
+                        {parseFloat(pct) > 0 && (
+                          <span style={{ fontSize: '11px', color: '#059669', marginRight: '4px' }}>
+                            (+{pct}%)
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '12px', color: '#334155' }}>
+                        {inc.notes || 'قرار رسمي معتمد من الإدارة'}
+                      </td>
+                      <td style={{ padding: '8px 6px' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const html = generateSalaryIncreaseCertificateHtml(emp, inc, state?.orgSettings || {});
+                            triggerDirectPrint(html, `شهادة زيادة راتب - ${getEmpDisplayName(emp)}`);
+                          }}
+                          title="طباعة شهادة الزيادة الرسمية المعتمدة"
+                          style={{
+                            background: '#ecfdf5',
+                            color: '#065f46',
+                            border: '1px solid #10b981',
+                            borderRadius: '6px',
+                            padding: '4px 8px',
+                            cursor: 'pointer',
+                            fontSize: '11px',
+                            fontWeight: 800,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px'
+                          }}
+                        >
+                          <span>📜</span>
+                          <span>طباعة</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* ── MODAL: REQUEST PROFILE DATA UPDATE (STRICT FIELD RESTRICTION) ── */}
       {showEditModal && (

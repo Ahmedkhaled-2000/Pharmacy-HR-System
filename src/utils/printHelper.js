@@ -656,10 +656,12 @@ export function generateOfficialPayslipHTML({
   );
   const empLoans = summary.loansBreakdown || loansCalc.items || [];
 
+  const isVariableSchedule = Boolean(emp?.noMonthlySchedule);
+
   // 5. Absence deductions (الغياب)
-  const absenceDaysCount = summary.absenceDaysCount || 0;
-  const absenceDeductionTotal = summary.absenceDeduction || 0;
-  const absenceItem = absenceDaysCount > 0 ? [{
+  const absenceDaysCount = isVariableSchedule ? 0 : (summary.absenceDaysCount || 0);
+  const absenceDeductionTotal = isVariableSchedule ? 0 : (summary.absenceDeduction || 0);
+  const absenceItem = (!isVariableSchedule && absenceDaysCount > 0) ? [{
     id: 'absence_summary',
     date: `${month} (غيابات الشهر)`,
     typeLabel: '🚫 غياب بدون إذن رسمي',
@@ -753,9 +755,10 @@ export function generateOfficialPayslipHTML({
   // 2. Approved leave days (سنوي / اعتيادي / بدون أجر / مرضي)
   const leaveDayItems = [];
   empApprovedLeaves.forEach(l => {
-    const isUnpaid = l.leaveType === 'unpaid' || l.type === 'unpaid_leave' || l.isUnpaid === true;
-    const isSick = l.leaveType === 'sick' || l.type === 'sick_leave';
-    const isAnnual = !isUnpaid && !isSick;
+    const isWeeklyRest = l.leaveType === 'weekly_rest' || l.type === 'weekly_rest';
+    const isUnpaid = !isWeeklyRest && (l.leaveType === 'unpaid' || l.type === 'unpaid_leave' || l.isUnpaid === true);
+    const isSick = !isWeeklyRest && (l.leaveType === 'sick' || l.type === 'sick_leave');
+    const isAnnual = !isWeeklyRest && !isUnpaid && !isSick;
     const days = parseFloat(l.daysCount || l.days || 1) || 1;
     const deductionAmt = isUnpaid ? Math.round(days * dailyRate * 100) / 100 : 0;
 
@@ -766,7 +769,14 @@ export function generateOfficialPayslipHTML({
     let effectColor = '#15803d';
     let financialStatus = 'مدفوعة الأجر بالكامل';
 
-    if (isUnpaid) {
+    if (isWeeklyRest) {
+      category = 'weekly_rest';
+      categoryBadge = '<span style="background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9px;">🛋️ راحة أسبوعية</span>';
+      typeLabel = 'راحة أسبوعية مدفوعة (طلب معتمد)';
+      effectLabel = '🟢 مدفوعة الأجر (لا خصم)';
+      effectColor = '#0284c7';
+      financialStatus = 'مدفوعة الأجر بالكامل';
+    } else if (isUnpaid) {
       category = 'unpaid';
       categoryBadge = '<span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9px;">💸 إجازة بدون أجر</span>';
       typeLabel = 'إجازة بدون أجر';
@@ -860,11 +870,12 @@ export function generateOfficialPayslipHTML({
     });
   });
 
-  // Approved leaves (annual, unpaid, sick)
+  // Approved leaves (annual, unpaid, sick, weekly_rest)
   empApprovedLeaves.forEach((l) => {
-    const isUnpaid = l.leaveType === 'unpaid' || l.type === 'unpaid_leave' || l.isUnpaid === true;
-    const isSick = l.leaveType === 'sick' || l.type === 'sick_leave';
-    const isAnnual = !isUnpaid && !isSick;
+    const isWeeklyRest = l.leaveType === 'weekly_rest' || l.type === 'weekly_rest';
+    const isUnpaid = !isWeeklyRest && (l.leaveType === 'unpaid' || l.type === 'unpaid_leave' || l.isUnpaid === true);
+    const isSick = !isWeeklyRest && (l.leaveType === 'sick' || l.type === 'sick_leave');
+    const isAnnual = !isWeeklyRest && !isUnpaid && !isSick;
 
     const lStart = l.startDate || l.date;
     const lEnd = l.endDate || l.date || lStart;
@@ -875,7 +886,11 @@ export function generateOfficialPayslipHTML({
     let typeLabel = 'إجازة سنوية / اعتيادية';
     let effectColor = '#15803d';
 
-    if (isUnpaid) {
+    if (isWeeklyRest) {
+      categoryBadge = '<span style="background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🛋️ راحة أسبوعية</span>';
+      typeLabel = 'راحة أسبوعية مدفوعة (طلب معتمد)';
+      effectColor = '#0284c7';
+    } else if (isUnpaid) {
       categoryBadge = '<span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">💸 إجازة بدون أجر</span>';
       typeLabel = 'إجازة بدون أجر';
       effectColor = '#dc2626';
@@ -902,7 +917,7 @@ export function generateOfficialPayslipHTML({
         statusLabel: typeLabel,
         effectLabel: isUnpaid ? `مخصوم (-${fmt(singleDayDeduction)} ج.م)` : 'مدفوعة الأجر',
         effectColor,
-        reason: l.reason || l.details || l.notes || (isAnnual ? 'إجازة سنوية اعتيادية معتمدة' : (isUnpaid ? 'إجازة بدون أجر معتمدة' : 'إجازة مرضية معتمدة'))
+        reason: l.reason || l.details || l.notes || (isWeeklyRest ? 'راحة أسبوعية مدفوعة معتمدة' : (isAnnual ? 'إجازة سنوية اعتيادية معتمدة' : (isUnpaid ? 'إجازة بدون أجر معتمدة' : 'إجازة مرضية معتمدة')))
       });
     } else {
       while (cur <= endD) {
@@ -926,7 +941,7 @@ export function generateOfficialPayslipHTML({
             statusLabel: typeLabel,
             effectLabel: isUnpaid ? `مخصوم (-${fmt(singleDayDeduction)} ج.م)` : 'مدفوعة الأجر',
             effectColor,
-            reason: l.reason || l.details || l.notes || (isAnnual ? 'إجازة سنوية اعتيادية معتمدة' : (isUnpaid ? 'إجازة بدون أجر معتمدة' : 'إجازة مرضية معتمدة'))
+            reason: l.reason || l.details || l.notes || (isWeeklyRest ? 'راحة أسبوعية مدفوعة معتمدة' : (isAnnual ? 'إجازة سنوية اعتيادية معتمدة' : (isUnpaid ? 'إجازة بدون أجر معتمدة' : 'إجازة مرضية معتمدة')))
           });
         }
         cur.setDate(cur.getDate() + 1);
@@ -938,33 +953,36 @@ export function generateOfficialPayslipHTML({
   unifiedTableRows.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
   // 3. Absence days (أيام الغياب غير المبرر عن الورديات المجدولة - للأيام المنقضية فقط)
+  // لا تنطبق على الموظفين ذوي طبيعة العمل المتغيرة بدون جدول شهري ثابت
   const absenceDayItems = [];
-  const today = getRealTodayStr();
-  cycleDates.forEach(dateStr => {
-    if (dateStr >= today) return; // لا تحتسب الأيام الحالية أو المستقبلية كغياب
-    if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;
-    const daySched = getEmployeeDaySchedule(emp.id, dateStr, state);
-    if (daySched && daySched.type !== 'off' && !daySched.isOff) {
-      const shiftBranch = daySched.branchId ? getBranchName(daySched.branchId) : '';
-      const shiftTime = (daySched.start && daySched.end) ? `${daySched.start} - ${daySched.end}` : 'وردية كاملة';
-      absenceDayItems.push({
-        id: `abs_${dateStr}`,
-        date: dateStr,
-        dateRangeLabel: `${arabicWeekday(dateStr)} ${dateStr}`,
-        dayName: arabicWeekday(dateStr),
-        scheduledShift: `${shiftTime}${daySched.isSwapped ? ` (بديل عن ${daySched.swappedWithName || 'الزميل'})` : ''}${shiftBranch ? ` (${shiftBranch})` : ''}`,
-        deductionAmt: dailyRate,
-        effectLabel: `🔴 مخصوم (-${fmt(dailyRate)} ج.م)`,
-        effectColor: '#dc2626',
-        reason: daySched.isSwapped ? `غياب عن وردية متبدلة معتمدة لتغطية ${daySched.swappedWithName || 'الزميل'}` : 'غياب بدون إذن رسمي / عدم تسجيل بصمة حضور أو تقديم طلب إجازة'
-      });
-    }
-  });
+  if (!isVariableSchedule) {
+    const today = getRealTodayStr();
+    cycleDates.forEach(dateStr => {
+      if (dateStr >= today) return; // لا تحتسب الأيام الحالية أو المستقبلية كغياب
+      if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;
+      const daySched = getEmployeeDaySchedule(emp.id, dateStr, state);
+      if (daySched && daySched.type !== 'off' && !daySched.isOff) {
+        const shiftBranch = daySched.branchId ? getBranchName(daySched.branchId) : '';
+        const shiftTime = (daySched.start && daySched.end) ? `${daySched.start} - ${daySched.end}` : 'وردية كاملة';
+        absenceDayItems.push({
+          id: `abs_${dateStr}`,
+          date: dateStr,
+          dateRangeLabel: `${arabicWeekday(dateStr)} ${dateStr}`,
+          dayName: arabicWeekday(dateStr),
+          scheduledShift: `${shiftTime}${daySched.isSwapped ? ` (بديل عن ${daySched.swappedWithName || 'الزميل'})` : ''}${shiftBranch ? ` (${shiftBranch})` : ''}`,
+          deductionAmt: dailyRate,
+          effectLabel: `🔴 مخصوم (-${fmt(dailyRate)} ج.م)`,
+          effectColor: '#dc2626',
+          reason: daySched.isSwapped ? `غياب عن وردية متبدلة معتمدة لتغطية ${daySched.swappedWithName || 'الزميل'}` : 'غياب بدون إذن رسمي / عدم تسجيل بصمة حضور أو تقديم طلب إجازة'
+        });
+      }
+    });
+  }
 
-  const totalAbsenceDaysCount = summary.absenceDaysCount !== undefined ? summary.absenceDaysCount : absenceDayItems.length;
-  const totalAbsenceDeductionAmt = summary.absenceDeduction !== undefined ? summary.absenceDeduction : Math.round(totalAbsenceDaysCount * dailyRate * 100) / 100;
+  const totalAbsenceDaysCount = isVariableSchedule ? 0 : (summary.absenceDaysCount !== undefined ? summary.absenceDaysCount : absenceDayItems.length);
+  const totalAbsenceDeductionAmt = isVariableSchedule ? 0 : (summary.absenceDeduction !== undefined ? summary.absenceDeduction : Math.round(totalAbsenceDaysCount * dailyRate * 100) / 100);
 
-  if (absenceDayItems.length === 0 && totalAbsenceDaysCount > 0) {
+  if (!isVariableSchedule && absenceDayItems.length === 0 && totalAbsenceDaysCount > 0) {
     for (let i = 0; i < totalAbsenceDaysCount; i++) {
       absenceDayItems.push({
         id: `abs_sum_${i + 1}`,
@@ -1409,7 +1427,7 @@ export function generateOfficialPayslipHTML({
       ` : ''}
 
       <!-- Absences Record Table (If exists) -->
-      ${absenceDayItems.length > 0 ? `
+      ${!isVariableSchedule && absenceDayItems.length > 0 ? `
         <div style="margin-bottom: 8px; page-break-inside: avoid;">
           <div style="font-weight: 800; color: #b91c1c; font-size: 11px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center;">
             <span>🚫 رابعاً: سجل أيام الغياب غير المبرر عن العمل (${absenceDayItems.length} يوم):</span>

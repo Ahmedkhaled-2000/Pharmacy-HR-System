@@ -275,3 +275,40 @@ export function installClipboardUrlSanitizer() {
   };
   navigator.clipboard._hasUrlSanitizer = true;
 }
+
+/**
+ * استرجاع رابط خادم الواتساب المعتمد والنشط بحسب البيئة (VPS / Localhost / Desktop)
+ */
+export function getResolvedWhatsAppServerUrl(state = null) {
+  if (typeof window !== 'undefined') {
+    try {
+      const localOverride = (localStorage.getItem('pharmacy_wa_server_url') || '').trim();
+      if (localOverride && !localOverride.includes('apexthunder.com') && !localOverride.includes('172.20.10.3')) {
+        return localOverride.replace(/\/+$/, '');
+      }
+    } catch {}
+
+    const { hostname, origin } = window.location || {};
+    if (
+      hostname === '63.183.147.199' ||
+      (hostname && hostname.includes('sslip.io')) ||
+      hostname === 'pharmacore.site' ||
+      (hostname && hostname.endsWith('.pharmacore.site'))
+    ) {
+      return `${origin}/whatsapp`;
+    }
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://127.0.0.1:3100';
+    }
+    if (hostname && /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(hostname) && !hostname.includes('172.20.10.3')) {
+      return `http://${hostname}:3100`;
+    }
+  }
+
+  const lanUrl = (state?.orgSettings?.waServerLanUrl || '').trim();
+  if (lanUrl && !lanUrl.includes('apexthunder.com') && !lanUrl.includes('172.20.10.3')) {
+    return lanUrl.replace(/\/+$/, '');
+  }
+
+  return 'https://63-183-147-199.sslip.io/whatsapp';
+}

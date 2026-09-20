@@ -4,7 +4,8 @@ import {
   WHATSAPP_TEMPLATE_CATEGORIES,
   READY_WHATSAPP_TEMPLATES,
   populateWhatsAppTemplate,
-  generatePayslipPrintHtml
+  generatePayslipPrintHtml,
+  generateSalaryIncreaseCertificateHtml
 } from '../../utils/whatsappTemplates';
 import { Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck, LogOut, Globe, Network, Copy, Check, ExternalLink, Smartphone, Wifi, ShieldCheck, QrCode, Download } from 'lucide-react';
 import QRCode from 'qrcode';
@@ -78,13 +79,21 @@ export default function WhatsAppCenterModule({
       return localOverride.replace(/\/+$/, '');
     }
 
-    // 2. إذا كان المتصفح يعمل عبر خادم الـ VPS أو السحابة أو النطاق العام (63.183.147.199 أو pharmacore.site)
+    // 2. إذا كان المتصفح يعمل عبر خادم الـ VPS أو السحابة أو النطاق العام (63.183.147.199 أو sslip.io أو pharmacore.site)
     if (typeof window !== 'undefined' && window.location) {
       const { hostname, origin } = window.location;
-      if (hostname === '63.183.147.199' || hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site')) {
+      if (
+        hostname === '63.183.147.199' ||
+        hostname.includes('sslip.io') ||
+        hostname === 'pharmacore.site' ||
+        hostname.endsWith('.pharmacore.site')
+      ) {
         return `${origin}/whatsapp`;
       }
-      if (isPrivateLanIp(hostname) && hostname !== 'localhost' && hostname !== '127.0.0.1' && !hostname.includes('172.20.10.3')) {
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return 'http://127.0.0.1:3100';
+      }
+      if (isPrivateLanIp(hostname) && !hostname.includes('172.20.10.3')) {
         return `http://${hostname}:3100`;
       }
     }
@@ -105,7 +114,10 @@ export default function WhatsAppCenterModule({
       return configured.replace(/\/+$/, '');
     }
 
-    // 5. الافتراضي الدائم: سيرفر الـ VPS السحابي ليعمل 24 ساعة
+    // 5. الافتراضي الدائم: سيرفر الـ VPS السحابي ليعمل 24 ساعة بمطابقة البروتوكول
+    if (typeof window !== 'undefined' && window.location?.protocol === 'https:') {
+      return `${window.location.origin}/whatsapp`;
+    }
     return 'http://63.183.147.199/whatsapp';
   }, [deviceServerUrl, isDesktop, state?.orgSettings?.waServerUrl, state?.orgSettings?.waServerLanUrl, isPrivateLanIp]);
 
@@ -113,7 +125,12 @@ export default function WhatsAppCenterModule({
   const primaryLanUrl = useMemo(() => {
     if (typeof window !== 'undefined' && window.location) {
       const { hostname, origin } = window.location;
-      if (hostname === '63.183.147.199' || hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site')) {
+      if (
+        hostname === '63.183.147.199' ||
+        hostname.includes('sslip.io') ||
+        hostname === 'pharmacore.site' ||
+        hostname.endsWith('.pharmacore.site')
+      ) {
         return `${origin}/whatsapp`;
       }
     }
@@ -128,13 +145,16 @@ export default function WhatsAppCenterModule({
     if (networkInfo?.suggestedLanUrl && !networkInfo.suggestedLanUrl.includes('172.20.10.3')) {
       return networkInfo.suggestedLanUrl.replace(/\/+$/, '');
     }
+    if (typeof window !== 'undefined' && window.location?.protocol === 'https:') {
+      return `${window.location.origin}/whatsapp`;
+    }
     return 'http://63.183.147.199/whatsapp';
   }, [networkInfo, state?.orgSettings?.waServerLanUrl, state?.orgSettings?.waServerUrl]);
 
   // هل الخادم الحالي هو سيرفر الـ VPS السحابي؟
   const isVpsServer = useMemo(() => {
     const url = primaryLanUrl || serverUrl || '';
-    return Boolean(url.includes('63.183.147.199') || url.includes('pharmacore.site') || url.includes('/whatsapp'));
+    return Boolean(url.includes('63.183.147.199') || url.includes('sslip.io') || url.includes('pharmacore.site') || url.includes('/whatsapp'));
   }, [primaryLanUrl, serverUrl]);
 
   // هل خدمة الـ IP معلنة ومفعلة حالياً للهواتف والأجهزة الأخرى؟
@@ -247,13 +267,27 @@ export default function WhatsAppCenterModule({
     if (!selectedTemplate) return;
     const branchObj = previewEmp ? branches.find(b => b.id === previewEmp.branchId) : null;
     const summary = previewEmp ? getEmpSummaryData(previewEmp.id) : {};
+    const inc = previewEmp?.lastIncrease || (previewEmp?.salaryIncreases && previewEmp.salaryIncreases[previewEmp.salaryIncreases.length - 1]) || {};
+    const promoData = {
+      type: inc.type || 'annual',
+      typeLabel: inc.type === 'exceptional' ? 'زيادة استثنائية لكفاءة وتميز' : 'زيادة سنوية دورية',
+      effectiveDate: inc.effectiveDate || inc.date,
+      rateBefore: inc.rateBefore !== undefined ? inc.rateBefore : (previewEmp?.salary || 0),
+      rateAfter: inc.rateAfter !== undefined ? inc.rateAfter : (previewEmp?.salary || 0),
+      percentage: inc.percentage,
+      decisionNumber: inc.decisionNumber,
+      appreciationText: inc.notes,
+      includePdf: Boolean(selectedTemplate.supportsPdf)
+    };
+
     const populated = populateWhatsAppTemplate(
       selectedTemplate.text,
       previewEmp,
       summary,
       orgSettings,
       monthLabel,
-      branchObj?.name
+      branchObj?.name,
+      promoData
     );
     setEditableMessage(populated);
     setAttachPdfPayslip(Boolean(selectedTemplate.supportsPdf));
@@ -601,14 +635,30 @@ export default function WhatsAppCenterModule({
 
     const branchObj = branches.find(b => b.id === emp.branchId);
     const summary = getEmpSummaryData(emp.id);
+    const inc = emp?.lastIncrease || (emp?.salaryIncreases && emp.salaryIncreases[emp.salaryIncreases.length - 1]) || {};
+    const isPromotion = selectedTemplate?.category === 'promotions';
+    const promoData = {
+      type: inc.type || 'annual',
+      typeLabel: inc.type === 'exceptional' ? 'زيادة استثنائية لكفاءة وتميز' : 'زيادة سنوية دورية',
+      effectiveDate: inc.effectiveDate || inc.date,
+      rateBefore: inc.rateBefore !== undefined ? inc.rateBefore : (emp?.salary || 0),
+      rateAfter: inc.rateAfter !== undefined ? inc.rateAfter : (emp?.salary || 0),
+      percentage: inc.percentage,
+      decisionNumber: inc.decisionNumber,
+      appreciationText: inc.notes,
+      includePdf: attachPdfPayslip
+    };
+
     const msgText = customText || (selectedTemplate
-      ? populateWhatsAppTemplate(selectedTemplate.text, emp, summary, orgSettings, monthLabel, branchObj?.name)
+      ? populateWhatsAppTemplate(selectedTemplate.text, emp, summary, orgSettings, monthLabel, branchObj?.name, promoData)
       : editableMessage);
 
-    // إذا كان خيار الـ PDF مفعل، نفتح نافذة الطباعة لتنزيل الكشف كـ PDF
+    // إذا كان خيار الـ PDF مفعل، نفتح نافذة الطباعة لتنزيل الكشف أو الشهادة كـ PDF
     if (attachPdfPayslip && selectedTemplate?.supportsPdf) {
       try {
-        const html = generatePayslipPrintHtml(emp, summary, orgSettings, monthLabel, branchObj?.name);
+        const html = isPromotion
+          ? generateSalaryIncreaseCertificateHtml(emp, promoData, orgSettings, branchObj?.name)
+          : generatePayslipPrintHtml(emp, summary, orgSettings, monthLabel, branchObj?.name);
         const printWin = window.open('', '_blank', 'width=850,height=900');
         if (printWin) {
           printWin.document.write(html);
@@ -902,6 +952,20 @@ export default function WhatsAppCenterModule({
         const branchObj = branches.find(b => b.id === emp.branchId);
         const summary = getEmpSummaryData(emp.id);
 
+        const inc = emp?.lastIncrease || (emp?.salaryIncreases && emp.salaryIncreases[emp.salaryIncreases.length - 1]) || {};
+        const isPromotion = selectedTemplate?.category === 'promotions';
+        const promoData = {
+          type: inc.type || 'annual',
+          typeLabel: inc.type === 'exceptional' ? 'زيادة استثنائية لكفاءة وتميز' : 'زيادة سنوية دورية',
+          effectiveDate: inc.effectiveDate || inc.date,
+          rateBefore: inc.rateBefore !== undefined ? inc.rateBefore : (emp?.salary || 0),
+          rateAfter: inc.rateAfter !== undefined ? inc.rateAfter : (emp?.salary || 0),
+          percentage: inc.percentage,
+          decisionNumber: inc.decisionNumber,
+          appreciationText: inc.notes,
+          includePdf: attachPdfPayslip
+        };
+
         // تخصيص نص الرسالة لكل موظف إذا كان قالباً، أو استخدام النص المكتوب
         let msgBody = editableMessage;
         if (selectedTemplate) {
@@ -911,7 +975,8 @@ export default function WhatsAppCenterModule({
             summary,
             orgSettings,
             monthLabel,
-            branchObj?.name
+            branchObj?.name,
+            promoData
           );
         }
 
@@ -919,27 +984,27 @@ export default function WhatsAppCenterModule({
         let pdfBase64 = null;
         let pdfHtml = null;
         if (attachPdfPayslip && selectedTemplate?.supportsPdf) {
-          pdfHtml = generatePayslipPrintHtml(
-            emp,
-            summary,
-            orgSettings,
-            monthLabel,
-            branchObj?.name
-          );
+          pdfHtml = isPromotion
+            ? generateSalaryIncreaseCertificateHtml(emp, promoData, orgSettings, branchObj?.name)
+            : generatePayslipPrintHtml(emp, summary, orgSettings, monthLabel, branchObj?.name);
 
-          setSendProgressText(`توليد كشف PDF معتمد (${i + 1}/${validRecipients.length}): ${getEmpDisplayName(emp)}...`);
+          setSendProgressText(`توليد مستند PDF معتمد (${i + 1}/${validRecipients.length}): ${getEmpDisplayName(emp)}...`);
           pdfBase64 = await generateEmpPdfBase64(emp, summary, pdfHtml);
         }
 
         // استخدام رقم الواتساب المخصص للموظف أو أول رقم صالح في قائمة الأرقام
         const empWaPhone = getEmpWhatsAppPhone(emp);
+        const fileName = isPromotion
+          ? `شهادة_زيادة_راتب_${getEmpDisplayName(emp).replace(/\s+/g, '_')}_${(emp.code || 'EMP')}.pdf`
+          : `كشف_مرتب_${getEmpDisplayName(emp).replace(/\s+/g, '_')}_${activeMonth}.pdf`;
+
         messagesPayload.push({
           phone: empWaPhone,
           message: msgBody,
           empName: getEmpDisplayName(emp),
           pdfBase64,
           pdfHtml,
-          fileName: `كشف_مرتب_${getEmpDisplayName(emp).replace(/\s+/g, '_')}_${activeMonth}.pdf`
+          fileName
         });
       }
 
@@ -1808,10 +1873,14 @@ export default function WhatsAppCenterModule({
                 />
                 <div>
                   <strong style={{ fontSize: '13.5px', color: 'var(--text)' }}>
-                    📄 إرفاق كشف المرتب كملف PDF معتمد مع كل رسالة واتساب
+                    {selectedTemplate?.category === 'promotions'
+                      ? '📜 إرفاق شهادة زيادة الراتب كـ PDF رسمي معتمد مع كل رسالة واتساب'
+                      : '📄 إرفاق كشف المرتب كملف PDF معتمد مع كل رسالة واتساب'}
                   </strong>
                   <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
-                    يقوم محرك التطبيق المكتبي بتوليد ملف PDF عالي الدقة A4 لكل موظف بمفردات مرتبه وإرساله فوراً كمستند معتمد.
+                    {selectedTemplate?.category === 'promotions'
+                      ? 'يقوم السيرفر بتوليد شهادة زيادة راتب رسمية فاخرة A4 لكل موظف بقرار ونسبة الزيادة وإرسالها فوراً كمستند معتمد.'
+                      : 'يقوم محرك التطبيق المكتبي بتوليد ملف PDF عالي الدقة A4 لكل موظف بمفردات مرتبه وإرساله فوراً كمستند معتمد.'}
                   </div>
                 </div>
               </label>

@@ -21,8 +21,9 @@ export default function EmployeeLeaveModule({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const annualQuota = parseAnnualLeaveBalance(emp.annualLeaveBalance, 21);
-  const [leaveType, setLeaveType] = useState(annualQuota > 0 ? 'annual' : 'unpaid'); // 'annual' | 'unpaid'
+  const isVariableSchedule = Boolean(emp?.noMonthlySchedule);
+  const annualQuota = parseAnnualLeaveBalance(emp?.annualLeaveBalance, 21);
+  const [leaveType, setLeaveType] = useState(isVariableSchedule ? 'weekly_rest' : (annualQuota > 0 ? 'annual' : 'unpaid')); // 'weekly_rest' | 'annual' | 'unpaid'
   const [startDate, setStartDate] = useState(() => getRealTodayStr());
   const [endDate, setEndDate] = useState(() => getRealTodayStr());
   const [reason, setReason] = useState('');
@@ -304,6 +305,9 @@ export default function EmployeeLeaveModule({
             <div className="field" style={{ flex: '1 1 180px' }}>
               <label style={{ fontWeight: '700' }}>نوع الإجازة</label>
               <select value={leaveType} onChange={(e) => setLeaveType(e.target.value)}>
+                {isVariableSchedule && (
+                  <option value="weekly_rest">🛋️ راحة أسبوعية (مدفوعة الأجر - ضمن الراتب)</option>
+                )}
                 {annualQuota > 0 && (
                   <option value="annual">🌴 إجازة سنوية (مدفوعة الأجر - لا تؤثر على الراتب)</option>
                 )}

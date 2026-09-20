@@ -29,10 +29,18 @@ export default function WhatsAppStatusCard({
     } catch {}
     if (typeof window !== 'undefined' && window.location) {
       const { hostname, origin } = window.location;
-      if (hostname === '63.183.147.199' || hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site')) {
+      if (
+        hostname === '63.183.147.199' ||
+        hostname.includes('sslip.io') ||
+        hostname === 'pharmacore.site' ||
+        hostname.endsWith('.pharmacore.site')
+      ) {
         return `${origin}/whatsapp`;
       }
-      if (isPrivateLanIp(hostname) && hostname !== 'localhost' && hostname !== '127.0.0.1' && !hostname.includes('172.20.10.3')) {
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return 'http://127.0.0.1:3100';
+      }
+      if (isPrivateLanIp(hostname) && !hostname.includes('172.20.10.3')) {
         return `http://${hostname}:3100`;
       }
     }
@@ -42,6 +50,9 @@ export default function WhatsAppStatusCard({
     const custom = (waServerUrlInput || '').trim();
     if (custom && !custom.includes('apexthunder.com') && !custom.includes('localhost:3001') && !custom.includes('172.20.10.3')) {
       return custom.replace(/\/+$/, '');
+    }
+    if (typeof window !== 'undefined' && window.location?.protocol === 'https:') {
+      return `${window.location.origin}/whatsapp`;
     }
     return 'http://63.183.147.199/whatsapp';
   };

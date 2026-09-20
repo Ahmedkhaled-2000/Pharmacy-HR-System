@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { compressImage } from '../../utils/imageCompressor';
 import { DEFAULT_JOBS, isManagementJob, DEFAULT_DEPARTMENTS, getJobsList, getDepartmentsList } from '../../utils/jobsHelper';
 import { syncEmployeeEntireDrive } from '../../utils/googleDriveService';
-import { normalizeState, parseAnnualLeaveBalance } from '../../utils/formatters';
+import { normalizeState, parseAnnualLeaveBalance, fmt } from '../../utils/formatters';
+import { getRealTodayStr } from '../../utils/timeEngine';
 import { useUI } from '../../context/UIContext';
 import { useAuth } from '../../context/AuthContext';
 import { emitRevokeSession } from '../../utils/socketClient';
+import SalaryIncreaseCertificateModal from './SalaryIncreaseCertificateModal';
 
 export default function EmployeeFileModal({
   isOpen,
@@ -185,6 +187,92 @@ export default function EmployeeFileModal({
 
   const handleRemoveExtraAllowance = (id) => {
     setExtraAllowances(extraAllowances.filter(a => a.id !== id));
+  };
+
+  // Salary Increases / Raises States (سجل الزيادات السنوية والاستثنائية)
+  const [salaryIncreases, setSalaryIncreases] = useState([]);
+  const [showIncreasesModal, setShowIncreasesModal] = useState(false);
+  const [newRaiseType, setNewRaiseType] = useState('annual'); // 'annual' | 'exceptional'
+  const [newRaiseDate, setNewRaiseDate] = useState('');
+  const [newRaiseRateBefore, setNewRaiseRateBefore] = useState('');
+  const [newRaiseRateAfter, setNewRaiseRateAfter] = useState('');
+  const [newRaiseNotes, setNewRaiseNotes] = useState('');
+
+  // Certificate Modal State
+  const [isCertModalOpen, setIsCertModalOpen] = useState(false);
+  const [certModalIncreaseRecord, setCertModalIncreaseRecord] = useState(null);
+
+  const handleOpenCertificateModal = (incRecord = null) => {
+    setCertModalIncreaseRecord(incRecord);
+    setIsCertModalOpen(true);
+  };
+
+  const handleOpenIncreasesModal = () => {
+    const currentRate = (branchesDetails && branchesDetails[0]?.salary !== undefined && branchesDetails[0]?.salary !== '')
+      ? branchesDetails[0].salary
+      : (editingEmp?.salary || '0');
+    setNewRaiseRateBefore(String(parseFloat(currentRate) || 0));
+    setNewRaiseRateAfter('');
+    setNewRaiseNotes('');
+    setNewRaiseType('annual');
+    setNewRaiseDate(getRealTodayStr());
+    setShowIncreasesModal(true);
+  };
+
+  const handleAddNewRaise = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const rateBeforeNum = parseFloat(newRaiseRateBefore) || 0;
+    const rateAfterNum = parseFloat(newRaiseRateAfter) || 0;
+
+    if (!rateAfterNum || rateAfterNum <= 0) {
+      if (showToast) showToast('⚠️ يرجى إدخال سعر الساعة بعد الزيادة بشكل صحيح (أكبر من صفر)');
+      else alert('يرجى إدخال سعر الساعة بعد الزيادة بشكل صحيح (أكبر من صفر)');
+      return;
+    }
+
+    if (!newRaiseDate) {
+      if (showToast) showToast('⚠️ يرجى تحديد تاريخ تطبيق الزيادة');
+      else alert('يرجى تحديد تاريخ تطبيق الزيادة');
+      return;
+    }
+
+    const diff = Math.round((rateAfterNum - rateBeforeNum) * 100) / 100;
+    const pct = rateBeforeNum > 0 ? Math.round(((rateAfterNum - rateBeforeNum) / rateBeforeNum) * 1000) / 10 : 0;
+
+    const newRaiseItem = {
+      id: 'inc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      type: newRaiseType, // 'annual' | 'exceptional'
+      effectiveDate: newRaiseDate,
+      rateBefore: rateBeforeNum,
+      rateAfter: rateAfterNum,
+      diffAmount: diff,
+      percentage: pct,
+      notes: newRaiseNotes?.trim() || '',
+      createdAt: new Date().toISOString()
+    };
+
+    const updatedIncreases = [newRaiseItem, ...salaryIncreases];
+    setSalaryIncreases(updatedIncreases);
+
+    // تحديث سعر الساعة الحالي تلقائياً للفرع المعين به الموظف
+    const updatedBd = branchesDetails.map((b, i) => i === 0 ? { ...b, salary: String(rateAfterNum) } : b);
+    setBranchesDetails(updatedBd);
+
+    // تفريغ النموذج وتحديث سعر الأساس للزيادة القادمة
+    setNewRaiseRateBefore(String(rateAfterNum));
+    setNewRaiseRateAfter('');
+    setNewRaiseNotes('');
+
+    if (showToast) {
+      showToast(`✅ تم إدراج ${newRaiseType === 'exceptional' ? 'الزيادة الاستثنائية' : 'الزيادة السنوية'} بنجاح وتحديث سعر الساعة الحالي للموظف إلى ${rateAfterNum} ج.م`);
+    }
+  };
+
+  const handleRemoveRaise = (raiseId) => {
+    if (window.confirm('هل أنت متأكد من حذف هذا السجل من سجل الزيادات والعلاوات؟')) {
+      setSalaryIncreases(salaryIncreases.filter(item => item.id !== raiseId));
+      if (showToast) showToast('تم حذف سجل الزيادة بنجاح');
+    }
   };
 
   // Branch Selection & Re-activation Handler
@@ -435,12 +523,14 @@ export default function EmployeeFileModal({
       );
 
       setDocuments(Array.isArray(editingEmp.documents) ? editingEmp.documents.filter(d => d && d.fileUrl) : []);
+      setSalaryIncreases(Array.isArray(editingEmp.salaryIncreases) ? [...editingEmp.salaryIncreases] : []);
 
       setDriveFolderId(editingEmp.driveFolderId || '');
       setDriveFolderUrl(editingEmp.driveFolderUrl || '');
       setBiometricFolderId(editingEmp.biometricFolderId || '');
       setDriveLastSyncAt(editingEmp.driveLastSyncAt || '');
     } else {
+      setSalaryIncreases([]);
       setName('');
       setPhone('');
       setPhones([
@@ -879,6 +969,7 @@ export default function EmployeeFileModal({
       annualLeaveBalance: parseAnnualLeaveBalance(annualLeaveBalance, 21),
       noMonthlySchedule: Boolean(noMonthlySchedule),
       weeklyRestDays: Array.isArray(weeklyRestDays) && weeklyRestDays.length > 0 ? weeklyRestDays : ['الجمعة'],
+      salaryIncreases: Array.isArray(salaryIncreases) ? salaryIncreases : [],
       documents,
       driveFolderId,
       driveFolderUrl,
@@ -1951,6 +2042,157 @@ export default function EmployeeFileModal({
               )}
 
               
+              {/* ── كارت ملخص آخر زيادة في الأجر وسجل الزيادات والعلاوات ── */}
+              {(() => {
+                const sortedIncreases = [...salaryIncreases].sort((a, b) => (b.effectiveDate || b.date || '').localeCompare(a.effectiveDate || a.date || ''));
+                const lastIncrease = sortedIncreases[0] || null;
+
+                return (
+                  <div
+                    style={{
+                      background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 50%, #ffffff 100%)',
+                      border: '1.5px solid #a7f3d0',
+                      borderRadius: '14px',
+                      padding: '16px 18px',
+                      boxShadow: '0 2px 6px rgba(16, 185, 129, 0.08)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '20px' }}>📈</span>
+                        <h4 style={{ margin: 0, color: '#065f46', fontFamily: 'Cairo', fontSize: '15px', fontWeight: 800 }}>
+                          سجل الزيادات والعلاوات (تاريخ ومعدل آخر زيادة)
+                        </h4>
+                        {lastIncrease && (
+                          <span
+                            style={{
+                              background: lastIncrease.type === 'exceptional' ? '#f3e8ff' : '#dcfce7',
+                              color: lastIncrease.type === 'exceptional' ? '#7e22ce' : '#15803d',
+                              border: `1px solid ${lastIncrease.type === 'exceptional' ? '#d8b4fe' : '#86efac'}`,
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              fontSize: '11px',
+                              fontWeight: 700
+                            }}
+                          >
+                            {lastIncrease.type === 'exceptional' ? '⭐ زيادة استثنائية' : '🌱 زيادة سنوية دورية'}
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenCertificateModal(lastIncrease || {
+                            rateBefore: (branchesDetails && branchesDetails[0]?.salary !== undefined && branchesDetails[0]?.salary !== '')
+                              ? branchesDetails[0].salary
+                              : (editingEmp?.salary || 0),
+                            rateAfter: (branchesDetails && branchesDetails[0]?.salary !== undefined && branchesDetails[0]?.salary !== '')
+                              ? branchesDetails[0].salary
+                              : (editingEmp?.salary || 0),
+                            type: 'annual'
+                          })}
+                          style={{
+                            background: '#ecfdf5',
+                            color: '#065f46',
+                            border: '1.5px solid #10b981',
+                            borderRadius: '8px',
+                            padding: '7px 12px',
+                            fontSize: '12.5px',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: '0 1px 3px rgba(16, 185, 129, 0.2)'
+                          }}
+                          title="إصدار وطباعة شهادة زيادة راتب رسمية وإرسالها عبر الواتساب"
+                        >
+                          <span>📜</span>
+                          <span>استخراج شهادة زيادة رسمية</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleOpenIncreasesModal}
+                          style={{
+                            background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '8px',
+                            padding: '7px 14px',
+                            fontSize: '12.5px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: '0 2px 4px rgba(4, 120, 87, 0.2)',
+                            transition: 'all 0.2s ease'
+                          }}
+                        >
+                          <span>📋</span>
+                          <span>{lastIncrease ? `سجل الزيادات والعلاوات (${salaryIncreases.length})` : '➕ إضافة زيادة / فتح السجل'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {lastIncrease ? (
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                          gap: '10px',
+                          background: '#ffffff',
+                          padding: '12px',
+                          borderRadius: '10px',
+                          border: '1px solid #d1fae5'
+                        }}
+                      >
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>📅 تاريخ آخر زيادة</div>
+                          <div style={{ fontSize: '14px', fontWeight: 800, color: '#0f766e', marginTop: '2px' }}>
+                            {lastIncrease.effectiveDate || '—'}
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>📉 سعر الساعة قبل الزيادة</div>
+                          <div style={{ fontSize: '14px', fontWeight: 800, color: '#64748b', marginTop: '2px' }}>
+                            {fmt(lastIncrease.rateBefore)} ج.م / س
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>📈 سعر الساعة بعد الزيادة</div>
+                          <div style={{ fontSize: '14px', fontWeight: 800, color: '#059669', marginTop: '2px' }}>
+                            {fmt(lastIncrease.rateAfter)} ج.م / س
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>💹 مقدار الزيادة ونسبتها</div>
+                          <div style={{ fontSize: '14px', fontWeight: 800, color: '#16a34a', marginTop: '2px' }}>
+                            +{fmt((lastIncrease.rateAfter || 0) - (lastIncrease.rateBefore || 0))} ج.م
+                            {lastIncrease.rateBefore > 0 && (
+                              <span style={{ fontSize: '11.5px', color: '#059669', marginRight: '4px' }}>
+                                (+{((((lastIncrease.rateAfter || 0) - (lastIncrease.rateBefore || 0)) / lastIncrease.rateBefore) * 100).toFixed(1)}%)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '12.5px', color: '#4b5563', padding: '6px 4px' }}>
+                        ℹ️ لم يتم تسجيل أي زيادات سنوية أو استثنائية سابقة لهذا الموظف. يمكنك الضغط على زر <strong>(➕ إضافة زيادة / فتح السجل)</strong> لتوثيق زيادة جديدة وتطبيقها تلقائياً على سعر الساعة الحالي.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Active Branches Financial Cards */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontFamily: 'Cairo', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -2729,6 +2971,351 @@ export default function EmployeeFileModal({
               )}
             </div>
           </div>
+        )}
+
+        {/* Inner Salary Increases Management Modal */}
+        {showIncreasesModal && (
+          <div className="modal-overlay" style={{ zIndex: 100000, background: 'rgba(15, 23, 42, 0.7)', backdropFilter: 'blur(4px)' }}>
+            <div
+              className="modal-card fade-in"
+              style={{
+                maxWidth: '780px',
+                width: '95%',
+                maxHeight: '90vh',
+                overflowY: 'auto',
+                borderRadius: '16px',
+                border: '2px solid #059669',
+                padding: '24px',
+                background: '#ffffff',
+                boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)'
+              }}
+            >
+              {/* Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1.5px solid #e2e8f0', paddingBottom: '14px', marginBottom: '18px' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#065f46', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📈</span>
+                    <span>سجل الزيادات والعلاوات — {name || editingEmp?.name || 'الموظف'}</span>
+                  </h3>
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                    كود: <strong>{code || editingEmp?.code || '—'}</strong> | الوظيفة: <strong>{jobTitle || editingEmp?.jobTitle || '—'}</strong> | عدد الزيادات المسجلة: <strong>{salaryIncreases.length}</strong>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={() => setShowIncreasesModal(false)}
+                  style={{ fontSize: '18px', background: '#f1f5f9', border: 'none', borderRadius: '8px', width: '34px', height: '34px', cursor: 'pointer' }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Section 1: Add New Increase Form */}
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)',
+                  border: '1.5px solid #a7f3d0',
+                  borderRadius: '12px',
+                  padding: '16px',
+                  marginBottom: '20px'
+                }}
+              >
+                <h4 style={{ margin: '0 0 12px 0', fontSize: '14.5px', fontWeight: 800, color: '#065f46', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>➕</span> تسجيل زيادة جديدة واعتمادها في السجل
+                </h4>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                  {/* Increase Type */}
+                  <div className="field">
+                    <label style={{ fontWeight: 700, fontSize: '12px', marginBottom: '4px', display: 'block' }}>
+                      نوع الزيادة:
+                    </label>
+                    <select
+                      value={newRaiseType}
+                      onChange={(e) => setNewRaiseType(e.target.value)}
+                      style={{ width: '100%', height: '38px', borderRadius: '8px', border: '1.5px solid #cbd5e1', fontWeight: 700, fontSize: '13px' }}
+                    >
+                      <option value="annual">🌱 زيادة سنوية دورية</option>
+                      <option value="exceptional">⭐ زيادة استثنائية / تميز</option>
+                    </select>
+                  </div>
+
+                  {/* Effective Date */}
+                  <div className="field">
+                    <label style={{ fontWeight: 700, fontSize: '12px', marginBottom: '4px', display: 'block' }}>
+                      تاريخ التطبيق الفعلي:
+                    </label>
+                    <input
+                      type="date"
+                      value={newRaiseDate}
+                      onChange={(e) => setNewRaiseDate(e.target.value)}
+                      style={{ width: '100%', height: '38px', borderRadius: '8px', border: '1.5px solid #cbd5e1', fontWeight: 700, fontSize: '13px' }}
+                      required
+                    />
+                  </div>
+
+                  {/* Rate Before */}
+                  <div className="field">
+                    <label style={{ fontWeight: 700, fontSize: '12px', marginBottom: '4px', display: 'block' }}>
+                      سعر الساعة قبل الزيادة:
+                    </label>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <input
+                        type="number"
+                        step="any"
+                        value={newRaiseRateBefore}
+                        onChange={(e) => setNewRaiseRateBefore(e.target.value)}
+                        placeholder="650"
+                        style={{ width: '100%', height: '38px', borderRadius: '8px', border: '1.5px solid #cbd5e1', fontWeight: 700, fontSize: '13px', paddingLeft: '40px' }}
+                      />
+                      <span style={{ position: 'absolute', left: '10px', fontSize: '11px', color: '#64748b', fontWeight: 600 }}>ج.م</span>
+                    </div>
+                  </div>
+
+                  {/* Rate After */}
+                  <div className="field">
+                    <label style={{ fontWeight: 700, fontSize: '12px', marginBottom: '4px', display: 'block', color: '#047857' }}>
+                      سعر الساعة بعد الزيادة: *
+                    </label>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <input
+                        type="number"
+                        step="any"
+                        value={newRaiseRateAfter}
+                        onChange={(e) => setNewRaiseRateAfter(e.target.value)}
+                        placeholder="750"
+                        required
+                        style={{ width: '100%', height: '38px', borderRadius: '8px', border: '2px solid #059669', fontWeight: 800, fontSize: '14px', paddingLeft: '40px', background: '#ffffff' }}
+                      />
+                      <span style={{ position: 'absolute', left: '10px', fontSize: '11px', color: '#059669', fontWeight: 700 }}>ج.م</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Notes & Justification */}
+                <div style={{ marginTop: '10px' }}>
+                  <label style={{ fontWeight: 700, fontSize: '12px', marginBottom: '4px', display: 'block' }}>
+                    البيان وملاحظات الاعتماد:
+                  </label>
+                  <input
+                    type="text"
+                    value={newRaiseNotes}
+                    onChange={(e) => setNewRaiseNotes(e.target.value)}
+                    placeholder="مثال: زيادة التقييم السنوي لعام 2026 / ترقية استثنائية للإشراف"
+                    style={{ width: '100%', height: '38px', borderRadius: '8px', border: '1.5px solid #cbd5e1', fontSize: '13px', padding: '0 10px' }}
+                  />
+                </div>
+
+                {/* Live Diff Preview & Action Button */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginTop: '14px', paddingTop: '10px', borderTop: '1px dashed #a7f3d0' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '13px' }}>
+                    {parseFloat(newRaiseRateAfter) > 0 && (
+                      <span style={{ color: '#065f46', fontWeight: 800 }}>
+                        صافي الفرق: +{fmt((parseFloat(newRaiseRateAfter) || 0) - (parseFloat(newRaiseRateBefore) || 0))} ج.م
+                        {parseFloat(newRaiseRateBefore) > 0 && (
+                          <span style={{ color: '#059669', marginRight: '6px' }}>
+                            (+{((((parseFloat(newRaiseRateAfter) || 0) - (parseFloat(newRaiseRateBefore) || 0)) / (parseFloat(newRaiseRateBefore) || 1)) * 100).toFixed(1)}%)
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleAddNewRaise}
+                    style={{
+                      background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '8px 18px',
+                      fontWeight: 800,
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      boxShadow: '0 2px 6px rgba(4, 120, 87, 0.25)'
+                    }}
+                  >
+                    <span>💾</span>
+                    <span>اعتماد الزيادة وتحديث الراتب الحالي</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Section 2: Historical Increases Table */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>📜</span> السجل التاريخي للزيادات والعلاوات
+                  </h4>
+                  <span style={{ fontSize: '12px', background: '#f1f5f9', color: '#475569', padding: '2px 8px', borderRadius: '6px', fontWeight: 700 }}>
+                    {salaryIncreases.length} حركة مسجلة
+                  </span>
+                </div>
+
+                {salaryIncreases.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '30px', background: '#f8fafc', borderRadius: '12px', border: '1px dashed #cbd5e1', color: '#64748b', fontSize: '13px' }}>
+                    <div style={{ fontSize: '30px', marginBottom: '6px' }}>📋</div>
+                    لا توجد زيادات سنوية أو استثنائية مسجلة لهذا الموظف حتى الآن.
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center' }}>
+                      <thead>
+                        <tr style={{ background: '#f8fafc', color: '#334155', borderBottom: '1.5px solid #cbd5e1', fontWeight: 800 }}>
+                          <th style={{ padding: '8px 6px', width: '35px' }}>#</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'right' }}>نوع الزيادة</th>
+                          <th style={{ padding: '8px 10px' }}>تاريخ التطبيق</th>
+                          <th style={{ padding: '8px 10px' }}>السعر قبل</th>
+                          <th style={{ padding: '8px 10px' }}>السعر بعد</th>
+                          <th style={{ padding: '8px 10px' }}>مقدار الزيادة والنسبة</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'right' }}>البيان والملاحظات</th>
+                          <th style={{ padding: '8px 6px', width: '75px' }}>الشهادة</th>
+                          <th style={{ padding: '8px 6px', width: '45px' }}>حذف</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {salaryIncreases.map((inc, idx) => {
+                          const diff = (inc.rateAfter || 0) - (inc.rateBefore || 0);
+                          const pct = inc.percentage !== undefined ? inc.percentage : (inc.rateBefore > 0 ? (((diff) / inc.rateBefore) * 100).toFixed(1) : 0);
+
+                          return (
+                            <tr key={inc.id || idx} style={{ borderBottom: '1px solid #e2e8f0', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                              <td style={{ padding: '8px 6px', color: '#64748b', fontWeight: 600 }}>{idx + 1}</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                                <span
+                                  style={{
+                                    background: inc.type === 'exceptional' ? '#f3e8ff' : '#dcfce7',
+                                    color: inc.type === 'exceptional' ? '#7e22ce' : '#15803d',
+                                    border: `1px solid ${inc.type === 'exceptional' ? '#d8b4fe' : '#86efac'}`,
+                                    padding: '2px 8px',
+                                    borderRadius: '6px',
+                                    fontSize: '11px',
+                                    fontWeight: 700
+                                  }}
+                                >
+                                  {inc.type === 'exceptional' ? '⭐ زيادة استثنائية' : '🌱 زيادة سنوية دورية'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '8px 10px', fontWeight: 700, color: '#0f766e', whiteSpace: 'nowrap' }}>
+                                {inc.effectiveDate || inc.date || '—'}
+                              </td>
+                              <td style={{ padding: '8px 10px', color: '#64748b', fontWeight: 600 }}>
+                                {fmt(inc.rateBefore)} ج.م
+                              </td>
+                              <td style={{ padding: '8px 10px', color: '#059669', fontWeight: 800 }}>
+                                {fmt(inc.rateAfter)} ج.م
+                              </td>
+                              <td style={{ padding: '8px 10px', fontWeight: 700, color: '#16a34a' }}>
+                                +{fmt(diff)} ج.م
+                                {parseFloat(pct) > 0 && (
+                                  <span style={{ fontSize: '10.5px', color: '#059669', marginRight: '4px' }}>
+                                    (+{pct}%)
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', fontSize: '11.5px', color: '#334155' }}>
+                                {inc.notes || '—'}
+                              </td>
+                              <td style={{ padding: '8px 6px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenCertificateModal(inc)}
+                                  title="استخراج وإرسال شهادة زيادة راتب رسمية لهذه الحركة"
+                                  style={{
+                                    background: '#ecfdf5',
+                                    color: '#065f46',
+                                    border: '1px solid #10b981',
+                                    borderRadius: '6px',
+                                    padding: '3px 8px',
+                                    cursor: 'pointer',
+                                    fontSize: '11px',
+                                    fontWeight: 800,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px'
+                                  }}
+                                >
+                                  <span>📜</span>
+                                  <span>شهادة</span>
+                                </button>
+                              </td>
+                              <td style={{ padding: '8px 6px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveRaise(inc.id)}
+                                  title="حذف هذا السجل"
+                                  style={{
+                                    background: '#fee2e2',
+                                    color: '#dc2626',
+                                    border: '1px solid #fca5a5',
+                                    borderRadius: '6px',
+                                    padding: '3px 6px',
+                                    cursor: 'pointer',
+                                    fontSize: '11px'
+                                  }}
+                                >
+                                  🗑️
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '18px', paddingTop: '12px', borderTop: '1px solid #e2e8f0' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowIncreasesModal(false)}
+                  style={{
+                    background: '#f1f5f9',
+                    color: '#334155',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '8px',
+                    padding: '8px 20px',
+                    fontWeight: 700,
+                    fontSize: '13px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  إغلاق النافذة
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── نافذة استخراج شهادة زيادة الراتب وإرسالها بالواتساب ── */}
+        {isCertModalOpen && (
+          <SalaryIncreaseCertificateModal
+            isOpen={isCertModalOpen}
+            onClose={() => {
+              setIsCertModalOpen(false);
+              setCertModalIncreaseRecord(null);
+            }}
+            employee={{
+              ...currentEmp,
+              salaryIncreases,
+              lastIncrease: salaryIncreases[0] || currentEmp?.lastIncrease,
+              salary: (branchesDetails && branchesDetails[0]?.salary !== undefined && branchesDetails[0]?.salary !== '')
+                ? branchesDetails[0].salary
+                : currentEmp?.salary
+            }}
+            allEmployees={allEmployees}
+            increaseRecord={certModalIncreaseRecord}
+            orgSettings={state?.orgSettings || {}}
+            state={state}
+            showToast={showToast}
+          />
         )}
       </div>
     </div>

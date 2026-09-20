@@ -22,6 +22,7 @@ import {
 import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../utils/jobsHelper';
 import { apiArchiveDeleteEmployee } from '../utils/archiveApiClient';
 import { hardDeleteEntityFast } from '../utils/offlineSync';
+import { isBranchMatch } from '../utils/branchMatcher';
 import { useData } from '../context/DataContext';
 import { useUI } from '../context/UIContext';
 
@@ -328,6 +329,25 @@ export function useAttendanceEngine() {
     const targetBranchId = branchId || emp.branchId || (emp.branchesDetails && emp.branchesDetails[0]?.branchId);
     const branch = (currentState.branches || []).find((b) => String(b.id) === String(targetBranchId));
     if (!branch || !branch.closingTime) return currentState;
+
+    // شرط أساسي: إرسال تنبيه الانصراف المبكر قبل الإغلاق فقط إذا كان الموظف هو آخر من تبقى بالفرع
+    // إذا كان هناك أي زميل آخر لديه وردية مفتوحة أو متواجد حالياً بالفرع، فلا يتم إرسال التنبيه
+    const otherActiveInBranch = Object.entries(currentState.activeShifts || {}).some(([otherEmpId, activeData]) => {
+      if (String(otherEmpId) === String(empId)) return false;
+      if (!activeData) return false;
+      return isBranchMatch(activeData.branchId, branch) || String(activeData.branchId) === String(targetBranchId);
+    });
+
+    const otherOpenShiftInBranch = (currentState.shifts || []).some((s) => {
+      if (!s) return false;
+      if (String(s.employeeId) === String(empId)) return false;
+      if (!s.isOpen && s.timeOut) return false;
+      return isBranchMatch(s.branchId, branch) || String(s.branchId) === String(targetBranchId);
+    });
+
+    if (otherActiveInBranch || otherOpenShiftInBranch) {
+      return currentState;
+    }
 
     try {
       const [cH, cM] = branch.closingTime.split(':').map(Number);

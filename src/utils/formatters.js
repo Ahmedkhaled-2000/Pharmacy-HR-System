@@ -1214,7 +1214,8 @@ export function getRequestTypeArabicName(type, leaveType) {
   const cleanType = String(type || '').trim().toLowerCase();
   const cleanLeaveType = String(leaveType || '').trim().toLowerCase();
 
-  if (cleanType === 'leave' || cleanType === 'leave_request' || cleanType === 'annual_leave' || cleanType === 'sick_leave' || cleanType === 'unpaid_leave') {
+  if (cleanType === 'leave' || cleanType === 'leave_request' || cleanType === 'annual_leave' || cleanType === 'sick_leave' || cleanType === 'unpaid_leave' || cleanType === 'weekly_rest') {
+    if (cleanLeaveType === 'weekly_rest' || cleanType === 'weekly_rest') return '🛋️ راحة أسبوعية';
     if (cleanLeaveType === 'annual' || cleanType === 'annual_leave') return '🏖️ إجازة سنوية';
     if (cleanLeaveType === 'unpaid' || cleanType === 'unpaid_leave') return '⏱️ إجازة غير مدفوعة';
     if (cleanLeaveType === 'sick' || cleanType === 'sick_leave') return '🏥 إجازة مرضية';

@@ -4443,54 +4443,17 @@ export default function EmployeePortalView({
                     </span>
                   </div>
 
-                  {/* تحديد وتعديل أيام الراحة الأسبوعية */}
+                  {/* إشعار نظام الدوام المرن بالساعات */}
                   <div style={{ background: '#ffffff', borderRadius: '12px', padding: '14px 16px', border: '1px solid #ddd6fe', marginTop: '10px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
-                      <span style={{ fontSize: '13.5px', fontWeight: 800, color: '#4c1d95' }}>
-                        🛋️ أيام الراحة الأسبوعية الخاصة بك:
-                      </span>
-                      <span style={{ fontSize: '12px', color: '#6d28d9', fontWeight: 600 }}>
-                        (انقر على أي يوم لتبديل وتحديث يوم راحتك — محدد حالياً: {(emp.weeklyRestDays || ['الجمعة']).join('، ')})
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      {['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'].map((day) => {
-                        const currentRestDays = Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.length > 0 ? emp.weeklyRestDays : ['الجمعة'];
-                        const isSelected = currentRestDays.includes(day);
-                        return (
-                          <button
-                            key={day}
-                            type="button"
-                            onClick={() => handleToggleWeeklyRestDay(day)}
-                            style={{
-                              padding: '7px 16px',
-                              borderRadius: '10px',
-                              fontSize: '13px',
-                              fontWeight: 800,
-                              cursor: 'pointer',
-                              border: isSelected ? '1.5px solid #7c3aed' : '1px solid #e2e8f0',
-                              background: isSelected ? '#7c3aed' : '#f8fafc',
-                              color: isSelected ? '#ffffff' : '#475569',
-                              boxShadow: isSelected ? '0 2px 8px rgba(124, 58, 237, 0.28)' : 'none',
-                              transition: 'all 0.18s ease'
-                            }}
-                          >
-                            {isSelected ? '✓ ' : ''}{day}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <p style={{ margin: '10px 0 0 0', fontSize: '11.5px', color: 'var(--muted)', lineHeight: '1.5' }}>
-                      💡 <strong>ملاحظة:</strong> أيام الراحة الأسبوعية لا يُحسب فيها أي غياب. وفي حال حضورك وعملك بالصيدلية في يوم الراحة، يتم احتساب كامل ساعاتك وتسجيل أجرها مباشرة ضمن مسير رواتبك.
+                    <p style={{ margin: 0, fontSize: '13px', color: '#5b21b6', lineHeight: '1.6', fontWeight: 600 }}>
+                      💡 <strong>نظام الدوام المرن بالساعات:</strong> يتم احتساب مستحقاتك بدقة بناءً على الساعات الفعلية المقضية وفق البصمة. للحصول على راحة أسبوعية مدفوعة الأجر، يرجى تقديم طلب من تبويب <strong>"الإجازات"</strong> باختيار نوع <strong>"راحة أسبوعية"</strong> ليتم اعتماده وإدراجه في كشف راتبك رسمياً.
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* Absence Alert */}
-              {absenceDays.length > 0 && (
+              {/* Absence Alert (يظهر فقط لموظفي الجداول الشهرية الثابتة) */}
+              {!emp.noMonthlySchedule && absenceDays.length > 0 && (
                 <div style={{
                   marginBottom: '20px',
                   padding: '14px 18px',
@@ -6151,6 +6114,86 @@ export default function EmployeePortalView({
                         <div className="ep-net-amount">{fmt(summary.netSalary)}<span className="ep-net-currency"> ج.م</span></div>
                       </div>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Official Salary Increases History Card */}
+              {Array.isArray(emp.salaryIncreases) && emp.salaryIncreases.length > 0 && (
+                <div className="card" style={{ marginTop: '16px', background: '#f0fdf4', border: '1.5px solid #a7f3d0', borderRadius: '14px', padding: '18px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '18px' }}>📈</span>
+                      <h4 style={{ margin: 0, color: '#065f46', fontFamily: 'Cairo', fontSize: '15px', fontWeight: 800 }}>
+                        سجل الزيادات السنوية والاستثنائية المعتمدة
+                      </h4>
+                    </div>
+                    <span style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700 }}>
+                      {emp.salaryIncreases.length} زيادة معتمدة
+                    </span>
+                  </div>
+
+                  <div style={{ overflowX: 'auto', borderRadius: '10px', border: '1px solid #d1fae5', background: '#ffffff' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center' }}>
+                      <thead>
+                        <tr style={{ background: '#ecfdf5', color: '#065f46', borderBottom: '1.5px solid #a7f3d0', fontWeight: 800 }}>
+                          <th style={{ padding: '8px 6px', width: '35px' }}>#</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'right' }}>نوع الزيادة</th>
+                          <th style={{ padding: '8px 10px' }}>تاريخ التطبيق</th>
+                          <th style={{ padding: '8px 10px' }}>السعر قبل</th>
+                          <th style={{ padding: '8px 10px' }}>السعر بعد</th>
+                          <th style={{ padding: '8px 10px' }}>مقدار الزيادة والنسبة</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'right' }}>البيان والملاحظات</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {emp.salaryIncreases.map((inc, idx) => {
+                          const diff = (inc.rateAfter || 0) - (inc.rateBefore || 0);
+                          const pct = inc.percentage !== undefined ? inc.percentage : (inc.rateBefore > 0 ? (((diff) / inc.rateBefore) * 100).toFixed(1) : 0);
+
+                          return (
+                            <tr key={inc.id || idx} style={{ borderBottom: '1px solid #e2e8f0', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                              <td style={{ padding: '8px 6px', color: '#64748b', fontWeight: 700 }}>{idx + 1}</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                                <span
+                                  style={{
+                                    background: inc.type === 'exceptional' ? '#f3e8ff' : '#dcfce7',
+                                    color: inc.type === 'exceptional' ? '#7e22ce' : '#15803d',
+                                    border: `1px solid ${inc.type === 'exceptional' ? '#d8b4fe' : '#86efac'}`,
+                                    padding: '2px 8px',
+                                    borderRadius: '6px',
+                                    fontSize: '11px',
+                                    fontWeight: 700
+                                  }}
+                                >
+                                  {inc.type === 'exceptional' ? '⭐ زيادة استثنائية' : '🌱 زيادة سنوية دورية'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '8px 10px', fontWeight: 700, color: '#0f766e', whiteSpace: 'nowrap' }}>
+                                📅 {inc.effectiveDate || inc.date || '—'}
+                              </td>
+                              <td style={{ padding: '8px 10px', color: '#64748b', fontWeight: 600 }}>
+                                {fmt(inc.rateBefore)} ج.م / س
+                              </td>
+                              <td style={{ padding: '8px 10px', color: '#059669', fontWeight: 800 }}>
+                                {fmt(inc.rateAfter)} ج.م / س
+                              </td>
+                              <td style={{ padding: '8px 10px', fontWeight: 800, color: '#16a34a' }}>
+                                +{fmt(diff)} ج.م
+                                {parseFloat(pct) > 0 && (
+                                  <span style={{ fontSize: '10.5px', color: '#059669', marginRight: '4px' }}>
+                                    (+{pct}%)
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', fontSize: '11.5px', color: '#334155' }}>
+                                {inc.notes || 'قرار رسمي معتمد من الإدارة'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}

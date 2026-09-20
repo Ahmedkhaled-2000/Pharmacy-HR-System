@@ -158,14 +158,22 @@ let isConnecting = false;
 let reconnectTimer = null;
 let consecutiveFailures = 0;
 
-// تنظيف مجلد الجلسة بشكل آمن
+// تنظيف محتويات مجلد الجلسة بشكل آمن (متوافق مع مجلدات Docker وحظر EBUSY)
 function purgeAuthDir() {
   try {
     if (fs.existsSync(AUTH_DIR)) {
-      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+      const entries = fs.readdirSync(AUTH_DIR);
+      for (const entry of entries) {
+        try {
+          fs.rmSync(path.join(AUTH_DIR, entry), { recursive: true, force: true });
+        } catch (fileErr) {
+          console.warn(`[WhatsApp Gateway] Warning deleting ${entry}:`, fileErr.message);
+        }
+      }
+    } else {
+      fs.mkdirSync(AUTH_DIR, { recursive: true });
     }
-    fs.mkdirSync(AUTH_DIR, { recursive: true });
-    console.log('[WhatsApp Gateway] 🧹 Auth directory purged and recreated successfully.');
+    console.log('[WhatsApp Gateway] 🧹 Auth directory contents purged successfully.');
   } catch (err) {
     console.warn('[WhatsApp Gateway] Warning purging AUTH_DIR:', err.message);
   }
@@ -193,17 +201,13 @@ async function connectToWhatsApp() {
       sock = null;
     }
 
-    // 1. فحص سلامة الجلسة المخزنة: لو كان creds.json موجوداً ولكن مسجل كـ registered: false أو تالف، يتم تنظيفه فوراً
+    // فحص ملف creds.json - تنظيفه فقط إذا كان تالفاً (غير صالح كـ JSON)
     const credsFile = path.join(AUTH_DIR, 'creds.json');
     if (fs.existsSync(credsFile)) {
       try {
-        const credsData = JSON.parse(fs.readFileSync(credsFile, 'utf8'));
-        if (credsData && credsData.registered === false) {
-          console.warn('[WhatsApp Gateway] ⚠️ Stale unregistered credentials detected, auto-purging session...');
-          purgeAuthDir();
-        }
+        JSON.parse(fs.readFileSync(credsFile, 'utf8'));
       } catch {
-        console.warn('[WhatsApp Gateway] ⚠️ Corrupted creds.json, purging session...');
+        console.warn('[WhatsApp Gateway] ⚠️ Corrupted creds.json, purging session contents...');
         purgeAuthDir();
       }
     }
@@ -287,15 +291,15 @@ async function connectToWhatsApp() {
         const errorMessage = lastDisconnect?.error?.message || '';
 
         // تشخيص حالات الفشل النهائي للجلسة التي تتطلب تصفير المفاتيح وتوليد QR جديد
+        // ملاحظة هامة: لا نحذف الجلسة إذا كان السيرفر في وضع QR_READY لأن كود 401 طبيعي عند انتهاء مهلة الـ QR
         const isTerminalFailure = 
-          statusCode === DisconnectReason.loggedOut || // 401
-          statusCode === 428 || // Precondition Required / Connection Terminated
+          (statusCode === DisconnectReason.loggedOut && Boolean(serverState.phone)) || // 401 بعد أن كان مقترناً بالفعل
           statusCode === 403 || // Forbidden
           statusCode === 405 || // Method Not Allowed
           statusCode === 440 || // Connection Replaced
           statusCode === 411 || // Multidevice Mismatch
           statusCode === 500 || // Bad Session
-          consecutiveFailures >= 3;
+          consecutiveFailures >= 5;
 
         console.warn(`[WhatsApp Gateway] ⚠️ Connection closed (statusCode: ${statusCode}, message: ${errorMessage}, isTerminalFailure: ${isTerminalFailure})`);
 
@@ -309,12 +313,15 @@ async function connectToWhatsApp() {
           purgeAuthDir();
 
           if (reconnectTimer) clearTimeout(reconnectTimer);
-          reconnectTimer = setTimeout(connectToWhatsApp, 2000);
+          reconnectTimer = setTimeout(connectToWhatsApp, 2500);
         } else {
           consecutiveFailures++;
-          serverState.status = 'DISCONNECTED';
+          // إذا كان لدينا QR صالح، نحتفظ به في الواجهة
+          if (serverState.status !== 'QR_READY') {
+            serverState.status = 'DISCONNECTED';
+          }
           if (reconnectTimer) clearTimeout(reconnectTimer);
-          const delay = Math.min(3000 * consecutiveFailures, 10000);
+          const delay = Math.min(2500 * Math.max(1, consecutiveFailures), 8000);
           reconnectTimer = setTimeout(connectToWhatsApp, delay);
         }
       }

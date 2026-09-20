@@ -26,7 +26,8 @@ export function getFormattedRequestBadge(type, leaveType, targetAction) {
   const cleanLeaveType = String(resolvedLeaveType || '').trim().toLowerCase();
   const cleanAction = String(resolvedAction || '').trim().toLowerCase();
 
-  if (cleanType === 'leave' || cleanType === 'leave_request' || cleanType === 'annual_leave' || cleanType === 'sick_leave' || cleanType === 'unpaid_leave') {
+  if (cleanType === 'leave' || cleanType === 'leave_request' || cleanType === 'annual_leave' || cleanType === 'sick_leave' || cleanType === 'unpaid_leave' || cleanType === 'weekly_rest') {
+    if (cleanLeaveType === 'weekly_rest' || cleanType === 'weekly_rest') return <span className="badge badge-info" style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd' }}>🛋️ راحة أسبوعية</span>;
     if (cleanLeaveType === 'annual' || cleanType === 'annual_leave') return <span className="badge badge-success">🏖️ إجازة سنوية</span>;
     if (cleanLeaveType === 'unpaid' || cleanType === 'unpaid_leave') return <span className="badge badge-warning">⏱️ إجازة غير مدفوعة</span>;
     if (cleanLeaveType === 'sick' || cleanType === 'sick_leave') return <span className="badge badge-danger">🏥 إجازة مرضية</span>;
