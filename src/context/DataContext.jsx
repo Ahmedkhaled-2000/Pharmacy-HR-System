@@ -444,6 +444,22 @@ export function DataProvider({ children, showToast = () => {} }) {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const isSyncingWatchdogRef = useRef(null);
+
+  // صمام أمان زمني هندسي: يضمن عدم بقاء الأيقونة زرقاء لأكثر من 6 ثوانٍ تحت أي ظرف
+  const startSyncing = useCallback(() => {
+    setIsSyncing(true);
+    if (isSyncingWatchdogRef.current) clearTimeout(isSyncingWatchdogRef.current);
+    isSyncingWatchdogRef.current = setTimeout(() => {
+      setIsSyncing(false);
+    }, 6000);
+  }, []);
+
+  const stopSyncing = useCallback(() => {
+    if (isSyncingWatchdogRef.current) clearTimeout(isSyncingWatchdogRef.current);
+    setIsSyncing(false);
+  }, []);
+
   const [lastSyncTime, setLastSyncTime] = useState('الآن');
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
@@ -764,25 +780,31 @@ export function DataProvider({ children, showToast = () => {} }) {
     const sliceKey = deltaHint?.entityType || null;
     const sliceValue = sliceKey && updatedState[sliceKey] !== undefined ? updatedState[sliceKey] : null;
 
-    setIsSyncing(true);
-    const result = await smartSaveState(updatedState, {
-      sliceKey,
-      sliceValue,
-      onSyncSuccess: (finalMerged) => {
-        setIsSyncing(false);
-        setLastSyncTime(nowTimeStr());
-        setPendingSyncCount(0);
-      },
-      onSyncFail: (msg) => {
-        setIsSyncing(false);
-        console.error('Database write error:', msg);
-        showToast?.('⚠️ تعذر الحفظ في قاعدة البيانات السحابية، تم الحفظ محلياً');
-      },
-      onQueuedOffline: async () => {
-        setIsSyncing(false);
-        showToast?.('📴 أنت أوف لاين - تم الحفظ محلياً وسيتم التزامن عند عودة الإنترنت');
-      }
-    });
+    startSyncing();
+    let result = null;
+    try {
+      result = await smartSaveState(updatedState, {
+        sliceKey,
+        sliceValue,
+        onSyncSuccess: (finalMerged) => {
+          stopSyncing();
+          setLastSyncTime(nowTimeStr());
+          setPendingSyncCount(0);
+        },
+        onSyncFail: (msg) => {
+          stopSyncing();
+          console.error('Database write error:', msg);
+          showToast?.('⚠️ تعذر الحفظ في قاعدة البيانات السحابية، تم الحفظ محلياً');
+        },
+        onQueuedOffline: async () => {
+          stopSyncing();
+          showToast?.('📴 أنت أوف لاين - تم الحفظ محلياً وسيتم التزامن عند عودة الإنترنت');
+        }
+      });
+    } catch (saveErr) {
+      stopSyncing();
+      console.warn('[Sync] smartSaveState error:', saveErr);
+    }
 
     // تحديث فوري وسلس لحالة التطبيق بدون أي تجميد
     if (result?.mergedState) {
@@ -801,7 +823,7 @@ export function DataProvider({ children, showToast = () => {} }) {
 
   // Manual Live Sync Trigger with Instant Feedback
   const triggerManualSync = async () => {
-    setIsSyncing(true);
+    startSyncing();
     try {
       const res = await syncNow((msg) => console.log('[ManualSync]', msg));
       if (res?.success) {
@@ -827,7 +849,7 @@ export function DataProvider({ children, showToast = () => {} }) {
       showToast('⚠️ تعذر إتمام المزامنة: ' + (e?.message || 'خطأ اتصال'));
       return false;
     } finally {
-      setIsSyncing(false);
+      stopSyncing();
     }
   };
 

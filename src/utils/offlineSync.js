@@ -111,6 +111,7 @@ export async function fetchRemoteState(options = {}) {
 let bgSyncTimer = null;
 let bgPendingState = null;
 let bgPendingSlice = null;
+let bgPendingCallbacks = [];
 
 /**
  * دالة المزامنة السحابية الصامتة في الخلفية (Background Asynchronous Cloud Sync)
@@ -123,30 +124,41 @@ async function dispatchBackgroundCloudSync(cleanUpdated, options = {}) {
     bgPendingSlice = { sliceKey, sliceValue };
   }
 
-  if (bgSyncTimer) {
-    clearTimeout(bgSyncTimer);
-  }
-
   return new Promise((resolve) => {
+    bgPendingCallbacks.push({ onSyncSuccess, onSyncFail, onQueuedOffline, resolve });
+
+    if (bgSyncTimer) {
+      clearTimeout(bgSyncTimer);
+    }
+
     bgSyncTimer = setTimeout(async () => {
       bgSyncTimer = null;
+      const callbacksToNotify = [...bgPendingCallbacks];
+      bgPendingCallbacks = [];
+
       const stateToPush = bgPendingState;
       const sliceToPush = bgPendingSlice;
       bgPendingSlice = null;
 
-      if (!stateToPush) return resolve({ success: true });
+      if (!stateToPush) {
+        callbacksToNotify.forEach(cb => {
+          try { cb.onSyncSuccess?.(null); } catch {}
+          cb.resolve({ success: true });
+        });
+        return;
+      }
 
       try {
         let res;
         // إذا كان هناك قسم محدد تم تعديله، نستخدم مسار الحفظ الجزئي الخفيف جداً (< 20KB)
         if (sliceToPush && sliceToPush.sliceKey && sliceToPush.sliceValue !== undefined) {
           res = await apiSaveSettingsSlice(sliceToPush.sliceKey, sliceToPush.sliceValue, {
-            timeout: 20000,
+            timeout: 25000,
             isBackground: true
           });
         } else {
           res = await apiSaveSettings(STORAGE_KEY, stateToPush, {
-            timeout: 45000,
+            timeout: 60000,
             isBackground: true
           });
         }
@@ -161,17 +173,21 @@ async function dispatchBackgroundCloudSync(cleanUpdated, options = {}) {
         clearPendingQueue().catch(() => {});
         broadcastStateChange(finalState);
 
-        onSyncSuccess?.(finalState);
-        resolve({ success: true, mergedState: finalState });
+        callbacksToNotify.forEach(cb => {
+          try { cb.onSyncSuccess?.(finalState); } catch {}
+          cb.resolve({ success: true, mergedState: finalState });
+        });
       } catch (e) {
         isNetworkOffline = true;
         console.warn('[Sync] Background save error, queued for auto-sync:', e.message);
         await addToPendingQueue({ type: 'SAVE_STATE', state: stateToPush }).catch(() => {});
-        onQueuedOffline?.();
-        onSyncFail?.(e.message);
-        resolve({ success: false, queued: true, error: e.message });
+        callbacksToNotify.forEach(cb => {
+          try { cb.onQueuedOffline?.(); } catch {}
+          try { cb.onSyncFail?.(e.message); } catch {}
+          cb.resolve({ success: false, queued: true, error: e.message });
+        });
       }
-    }, 120); // 120ms debounce buffer لتجميع العمليات المتتالية
+    }, 150); // 150ms debounce buffer لتجميع العمليات المتتالية
   });
 }
 
@@ -229,7 +245,7 @@ export async function syncNow(onProgress) {
       const localState = await loadStateLocally();
 
       // محاولة مباشرة لجلب النسخة السحابية
-      const remoteState = await fetchRemoteState({ timeout: 10000, useETag: false });
+      const remoteState = await fetchRemoteState({ timeout: 20000, useETag: false });
       
       if (!remoteState && isNetworkOffline) {
         return { success: false, reason: 'offline' };
@@ -248,7 +264,21 @@ export async function syncNow(onProgress) {
       const validRemote = remoteState && !remoteState.notModified ? remoteState : null;
       const mergedState = validRemote ? smartMergeStates(localState, validRemote) : localState;
 
-      const res = await apiSaveSettings(STORAGE_KEY, mergedState, { timeout: 15000 });
+      // فحص قائمة العمليات المعلقة محلياً
+      const pendingQueue = await getPendingQueue().catch(() => []);
+      const hasPendingLocalMutations = Array.isArray(pendingQueue) && pendingQueue.length > 0;
+
+      // تحسين هندسي فائق: إذا كانت النسخة السحابية صالحة ومحدثة ولا توجد تعديلات محلية معلقة
+      // لا نعيد رفع 4.8MB عبر الإنترنت الضعيف! نكتفي بالحفظ المحلي والتأكيد الفوري (< 10ms)
+      if (validRemote && !hasPendingLocalMutations) {
+        await saveStateLocally(mergedState);
+        broadcastStateChange(mergedState);
+        onProgress?.('البيانات مطابقة للسحابة ومحدثة بنجاح ✅');
+        return { success: true, mergedState };
+      }
+
+      // إذا كانت هناك تعديلات محلية، يتم الرفع بمهلة آمنة 60 ثانية
+      const res = await apiSaveSettings(STORAGE_KEY, mergedState, { timeout: 60000 });
       if (!res?.success) {
         throw new Error(res?.error || 'Manual sync save failed');
       }
@@ -301,15 +331,32 @@ export function listenToConnectionChanges(onOnline, onOffline) {
   window.addEventListener('online', handleOnlineEvent);
   window.addEventListener('offline', handleOfflineEvent);
 
-  // مسبار نبض نشط دوري كل 2.5 ثانية عند انقطاع الإنترنت (Fast Heartbeat Probe)
-  // يكتشف عودة الإنترنت فوراً حتى لو لم يطلق الويندوز حدث 'online'
+  // مسبار نبض نشط دوري متكيف (Heartbeat Probe مع Exponential Backoff)
+  // يكتشف عودة الإنترنت بذكاء دون إرهاق الشبكة أو تكرار المحاولات الفاشلة
+  let consecutiveProbeFailures = 0;
+  let lastProbeAttempt = 0;
+
   const probeInterval = setInterval(async () => {
-    if (isNetworkOffline) {
-      const isActuallyOnline = await verifyRealConnection(2000);
+    if (isNetworkOffline && !isProbing) {
+      const now = Date.now();
+      const backoffMs = Math.min(30000, 3000 * Math.pow(1.5, Math.min(consecutiveProbeFailures, 6)));
+      if (now - lastProbeAttempt < backoffMs) return;
+      lastProbeAttempt = now;
+
+      const isActuallyOnline = await verifyRealConnection(2500);
       if (isActuallyOnline) {
         console.log('[Sync] Active probe discovered internet is back! Syncing now...');
         await triggerInstantReconnection();
+        if (!isNetworkOffline) {
+          consecutiveProbeFailures = 0;
+        } else {
+          consecutiveProbeFailures++;
+        }
+      } else {
+        consecutiveProbeFailures++;
       }
+    } else {
+      consecutiveProbeFailures = 0;
     }
   }, 2500);
 

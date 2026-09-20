@@ -69,13 +69,15 @@ export default function WhatsAppCenterModule({
   const isPrivateLanIp = useCallback((hostname) => {
     if (!hostname) return false;
     if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
+    // استبعاد عناوين شبكات الدوكر الافتراضية
+    if (/^172\.(17|18|19)\./.test(hostname)) return false;
     return /^(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})$/.test(hostname);
   }, []);
 
   const isDesktop = typeof window !== 'undefined' && Boolean(window.desktopAPI?.isDesktop);
 
   // احتساب رابط السيرفر ديناميكياً:
-  // - في متصفح الويب والـ VPS: الاتصال التلقائي بسيرفر الـ VPS السحابي عبر /whatsapp لمنع Mixed Content نهائياً
+  // - في متصفح الويب والـ VPS: الاتصال التلقائي بسيرفر الـ VPS السحابي عبر /whatsapp لمنع Mixed Content وحظر المتصفح نهائياً
   // - في تطبيق الويندوز: تشغيل مباشر ومحمي على 127.0.0.1:3100
   const serverUrl = useMemo(() => {
     const isHttps = typeof window !== 'undefined' && window.location?.protocol === 'https:';
@@ -84,15 +86,7 @@ export default function WhatsAppCenterModule({
 
     // 1. في بيئة المتصفح السحابية / VPS (أي HTTPS أو نطاق VPS):
     // استخدام نفس المنشأ عبر /whatsapp مباشرة لمنع Mixed Content وحظر المتصفح نهائياً
-    if (isHttps) {
-      return `${origin}/whatsapp`;
-    }
-    if (
-      hostname === '63.183.147.199' ||
-      hostname.includes('sslip.io') ||
-      hostname === 'pharmacore.site' ||
-      hostname.endsWith('.pharmacore.site')
-    ) {
+    if (isHttps || hostname === '63.183.147.199' || hostname.includes('sslip.io') || hostname.includes('pharmacore.site')) {
       return `${origin}/whatsapp`;
     }
 
@@ -101,9 +95,9 @@ export default function WhatsAppCenterModule({
       return 'http://127.0.0.1:3100';
     }
 
-    // 3. رابط مخصص مثبت محلياً لهذا الجهاز
+    // 3. رابط مخصص مثبت محلياً لهذا الجهاز (مع تصفية أي عناوين دوكر داخلية)
     const localOverride = (deviceServerUrl || '').trim();
-    if (localOverride && !localOverride.includes('apexthunder.com') && !localOverride.includes('172.20.10.3')) {
+    if (localOverride && !localOverride.includes('apexthunder.com') && !localOverride.includes('172.20.10.3') && !localOverride.includes('172.18.') && !localOverride.includes('172.17.')) {
       return localOverride.replace(/\/+$/, '');
     }
 
@@ -115,14 +109,14 @@ export default function WhatsAppCenterModule({
       return `http://${hostname}:3100`;
     }
 
-    // 5. الإعدادات المحفوظة بالمنظومة
+    // 5. الإعدادات المحفوظة بالمنظومة (تجاهل عناوين الدوكر الداخلية)
     const lanUrl = (state?.orgSettings?.waServerLanUrl || '').trim();
-    if (lanUrl && !lanUrl.includes('apexthunder.com') && !lanUrl.includes('172.20.10.3')) {
+    if (lanUrl && !lanUrl.includes('apexthunder.com') && !lanUrl.includes('172.20.10.3') && !lanUrl.includes('172.18.') && !lanUrl.includes('172.17.')) {
       return lanUrl.replace(/\/+$/, '');
     }
 
     const configured = (state?.orgSettings?.waServerUrl || '').trim();
-    if (configured && !configured.includes('apexthunder.com') && !configured.includes('localhost:3001') && !configured.includes('172.20.10.3')) {
+    if (configured && !configured.includes('apexthunder.com') && !configured.includes('localhost:3001') && !configured.includes('172.20.10.3') && !configured.includes('172.18.') && !configured.includes('172.17.')) {
       return configured.replace(/\/+$/, '');
     }
 
@@ -404,90 +398,59 @@ export default function WhatsAppCenterModule({
 
     if (!statusFound) {
       setWaStatus('DISCONNECTED');
-      // محاولة الإيقاظ التلقائي الذكي الصامت لمرة واحدة عند تحميل الصفحة في حال تعذر الوصول
+      // محاولة الإيقاظ التلقائي الذكي الصامت لمرة واحدة فقط داخل بيئة سطح المكتب Electron
       if (!autoWakeupAttempted.current) {
         autoWakeupAttempted.current = true;
         try {
           if (isDesktop && window.desktopAPI?.restartWhatsAppServer) {
             window.desktopAPI.restartWhatsAppServer();
-          } else if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-            const iframe = document.createElement('iframe');
-            iframe.style.display = 'none';
-            iframe.src = 'hr-whatsapp://start';
-            document.body.appendChild(iframe);
             setTimeout(() => {
-              try { document.body.removeChild(iframe); } catch {}
-            }, 3000);
+              fetchWaStatus(true);
+            }, 3500);
           }
-          setTimeout(() => {
-            fetchWaStatus(true);
-          }, 3500);
         } catch {}
       } else if (!silent) {
         showToast?.('⚠️ تعذر الوصول لخادم الواتساب، يرجى التأكد من تشغيله أو الضغط على "استكشاف تلقائي للشبكة".');
       }
     }
 
-    // 4. جلب معلومات الشبكة المحلية عبر IPC المكتبي أولاً إذا كان متاحاً
+    // 4. جلب معلومات الشبكة المحلية عبر IPC المكتبي أولاً إذا كان متاحاً (قراءة فقط بدون تعديل قاعدة البيانات)
     if (typeof window !== 'undefined' && window.desktopAPI?.getNetworkInfo) {
       try {
         const net = await window.desktopAPI.getNetworkInfo();
         if (net && net.localIps?.length > 0) {
           setNetworkInfo(net);
-          if (net.suggestedLanUrl && (!state?.orgSettings?.waServerLanUrl || state?.orgSettings?.waServerLanUrl !== net.suggestedLanUrl) && setState) {
-            setState(prev => {
-              const nextState = {
-                ...prev,
-                orgSettings: {
-                  ...(prev?.orgSettings || {}),
-                  waServerLanUrl: net.suggestedLanUrl,
-                  waServerLanIps: net.localIps
-                }
-              };
-              saveState?.(nextState);
-              return nextState;
-            });
-          }
           return;
         }
       } catch {}
     }
 
-    // 5. استكشاف عناوين الشبكة المحلية عبر HTTP في الخلفية لمساعدة الأجهزة الأخرى
-    try {
-      let netRes = await fetch(`${activeUrl.replace(/\/$/, '')}/api/network-info`, {
-        headers: { 'bypass-tunnel-reminder': 'true' },
-        signal: AbortSignal.timeout(2000)
-      }).catch(() => null);
-
-      if (!netRes || !netRes.ok) {
-        netRes = await fetch('http://127.0.0.1:3100/api/network-info', {
-          signal: AbortSignal.timeout(1500)
+    // 5. استكشاف عناوين الشبكة المحلية في الخلفية (لبيئة سطح المكتب أو عند عدم العمل بـ HTTPS)
+    const isHttps = typeof window !== 'undefined' && window.location?.protocol === 'https:';
+    if (!isHttps || isDesktop) {
+      try {
+        let netRes = await fetch(`${activeUrl.replace(/\/$/, '')}/api/network-info`, {
+          headers: { 'bypass-tunnel-reminder': 'true' },
+          signal: AbortSignal.timeout(2000)
         }).catch(() => null);
-      }
 
-      if (netRes && netRes.ok) {
-        const netData = await netRes.json();
-        if (netData?.localIps?.length > 0) {
-          setNetworkInfo(netData);
-          if (netData.suggestedLanUrl && (!state?.orgSettings?.waServerLanUrl || state?.orgSettings?.waServerLanUrl !== netData.suggestedLanUrl) && setState) {
-            setState(prev => {
-              const nextState = {
-                ...prev,
-                orgSettings: {
-                  ...(prev?.orgSettings || {}),
-                  waServerLanUrl: netData.suggestedLanUrl,
-                  waServerLanIps: netData.localIps
-                }
-              };
-              saveState?.(nextState);
-              return nextState;
-            });
+        if (!netRes || !netRes.ok) {
+          if (isDesktop) {
+            netRes = await fetch('http://127.0.0.1:3100/api/network-info', {
+              signal: AbortSignal.timeout(1500)
+            }).catch(() => null);
           }
         }
-      }
-    } catch {}
-  }, [serverUrl, showToast, state?.orgSettings?.waServerLanUrl, setState, saveState]);
+
+        if (netRes && netRes.ok) {
+          const netData = await netRes.json();
+          if (netData?.localIps?.length > 0) {
+            setNetworkInfo(netData);
+          }
+        }
+      } catch {}
+    }
+  }, [serverUrl, showToast, isDesktop]);
 
   // 4. دالة الاستكشاف التلقائي لشبكة الصيدلية (LAN Auto-Discovery)
   const runLanAutoDiscovery = useCallback(async (showFeedback = true) => {
@@ -582,8 +545,9 @@ export default function WhatsAppCenterModule({
       addCandidate(`http://${ip}:3100`);
     });
 
-    // 8. في الويب: فحص 127.0.0.1 كاحتمال أخير
-    if (!isDesktop) {
+    // 8. فحص 127.0.0.1 كاحتمال أخير فقط عند العمل محلياً (غير مشفر بـ HTTPS أو في الديسكتوب)
+    const isHttps = typeof window !== 'undefined' && window.location?.protocol === 'https:';
+    if (!isHttps && isDesktop) {
       addCandidate('http://127.0.0.1:3100');
       addCandidate('http://localhost:3100');
     }
@@ -709,9 +673,10 @@ export default function WhatsAppCenterModule({
     }
   }, []);
 
-  // في متصفح الويب: استكشاف تلقائي لخادم الصيدلية على الشبكة المحلية في الخلفية فور التحميل
+  // في متصفح الويب المحلي فقط (غير مشفر بـ HTTPS): استكشاف تلقائي لخادم الصيدلية على الشبكة المحلية
   useEffect(() => {
-    if (!isDesktop && !deviceServerUrl) {
+    const isHttps = typeof window !== 'undefined' && window.location?.protocol === 'https:';
+    if (!isDesktop && !deviceServerUrl && !isHttps) {
       const timer = setTimeout(() => {
         runLanAutoDiscovery(false);
       }, 1200);
@@ -719,13 +684,17 @@ export default function WhatsAppCenterModule({
     }
   }, [isDesktop, deviceServerUrl, runLanAutoDiscovery]);
 
-  // استرجاع وترقية روابط الـ HTTP القديمة المخزنة تلقائياً عند الدخول بـ HTTPS
+  // استرجاع وترقية روابط الـ HTTP القديمة المخزنة تلقائياً عند الدخول بـ HTTPS لمرة واحدة وبشكل آمن
   useEffect(() => {
     if (typeof window !== 'undefined' && window.location?.protocol === 'https:') {
-      const currentWaUrl = state?.orgSettings?.waServerUrl || '';
-      const currentLanUrl = state?.orgSettings?.waServerLanUrl || '';
-      if (currentWaUrl.startsWith('http:') || currentLanUrl.startsWith('http:')) {
-        handleSaveServerUrl(`${window.location.origin}/whatsapp`);
+      const currentWaUrl = (state?.orgSettings?.waServerUrl || '').trim();
+      const currentLanUrl = (state?.orgSettings?.waServerLanUrl || '').trim();
+      const expectedVpsUrl = `${window.location.origin}/whatsapp`;
+      if (
+        (currentWaUrl && currentWaUrl.startsWith('http:') && !currentWaUrl.includes('/whatsapp')) ||
+        (currentLanUrl && (currentLanUrl.startsWith('http:') || currentLanUrl.includes('172.18.') || currentLanUrl.includes('172.17.')) && !currentLanUrl.includes('/whatsapp'))
+      ) {
+        handleSaveServerUrl(expectedVpsUrl);
       }
     }
   }, [state?.orgSettings?.waServerUrl, state?.orgSettings?.waServerLanUrl]);

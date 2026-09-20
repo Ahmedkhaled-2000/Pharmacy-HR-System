@@ -115,8 +115,12 @@ function getLocalNetworkIps() {
   const interfaces = os.networkInterfaces();
   const ips = [];
   for (const name of Object.keys(interfaces)) {
+    // تجاهل واجهات الدوكر والشبكات الافتراضية
+    if (name.startsWith('docker') || name.startsWith('br-') || name.startsWith('veth')) continue;
     for (const iface of interfaces[name] || []) {
       if (iface.family === 'IPv4' && !iface.internal) {
+        // استبعاد عناوين شبكات الدوكر الافتراضية
+        if (/^172\.(17|18|19)\./.test(iface.address)) continue;
         ips.push({ interface: name, address: iface.address });
       }
     }
@@ -399,14 +403,20 @@ app.get(['/status', '/api/status'], (req, res) => {
 
 // نقطة فحص عناوين الشبكة المحلية لربط الأجهزة الأخرى (الموبايلات وأجهزة الصيدلية)
 app.get(['/network-info', '/api/network-info'], (req, res) => {
+  const isHttps = req.headers['x-forwarded-proto'] === 'https';
+  const host = req.headers['host'] || '';
   const ips = getLocalNetworkIps();
   const primaryIp = ips[0]?.address || '127.0.0.1';
+  const suggestedLanUrl = (isHttps && host)
+    ? `https://${host}/whatsapp`
+    : (primaryIp !== '127.0.0.1' ? `http://${primaryIp}:${PORT}` : `http://127.0.0.1:${PORT}`);
+
   res.json({
     status: serverState.status,
     port: PORT,
     localIps: ips,
     primaryIp,
-    suggestedLanUrl: `http://${primaryIp}:${PORT}`,
+    suggestedLanUrl,
     phone: serverState.phone,
     deviceName: serverState.deviceName
   });
