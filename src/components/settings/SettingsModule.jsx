@@ -560,6 +560,7 @@ export default function SettingsModule({
   });
   const [newIP, setNewIP] = useState('');
   const [newIPLabel, setNewIPLabel] = useState('');
+  const [isFetchingIp, setIsFetchingIp] = useState(false);
   const [capturedIpModal, setCapturedIpModal] = useState(null);
   const [editingIpModal, setEditingIpModal] = useState(null);
 
