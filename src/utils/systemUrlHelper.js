@@ -281,14 +281,15 @@ export function installClipboardUrlSanitizer() {
  */
 export function getResolvedWhatsAppServerUrl(state = null) {
   if (typeof window !== 'undefined') {
-    try {
-      const localOverride = (localStorage.getItem('pharmacy_wa_server_url') || '').trim();
-      if (localOverride && !localOverride.includes('apexthunder.com') && !localOverride.includes('172.20.10.3')) {
-        return localOverride.replace(/\/+$/, '');
-      }
-    } catch {}
-
+    const isHttps = window.location?.protocol === 'https:';
     const { hostname, origin } = window.location || {};
+
+    // 1. عند العمل عبر اتصال مشفر HTTPS (خادم VPS أو أي نطاق عام):
+    // يجب حتماً استخدام نفس المنشأ عبر /whatsapp لمنع حظر المتصفح لـ Mixed Content
+    if (isHttps) {
+      return `${origin}/whatsapp`;
+    }
+
     if (
       hostname === '63.183.147.199' ||
       (hostname && hostname.includes('sslip.io')) ||
@@ -297,6 +298,18 @@ export function getResolvedWhatsAppServerUrl(state = null) {
     ) {
       return `${origin}/whatsapp`;
     }
+
+    try {
+      const localOverride = (
+        localStorage.getItem('PHARMACY_DEVICE_WA_URL') || 
+        localStorage.getItem('pharmacy_wa_server_url') || 
+        ''
+      ).trim();
+      if (localOverride && !localOverride.includes('apexthunder.com') && !localOverride.includes('172.20.10.3')) {
+        return localOverride.replace(/\/+$/, '');
+      }
+    } catch {}
+
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://127.0.0.1:3100';
     }
@@ -307,7 +320,18 @@ export function getResolvedWhatsAppServerUrl(state = null) {
 
   const lanUrl = (state?.orgSettings?.waServerLanUrl || '').trim();
   if (lanUrl && !lanUrl.includes('apexthunder.com') && !lanUrl.includes('172.20.10.3')) {
+    if (typeof window !== 'undefined' && window.location?.protocol === 'https:' && lanUrl.startsWith('http:')) {
+      return `${window.location.origin}/whatsapp`;
+    }
     return lanUrl.replace(/\/+$/, '');
+  }
+
+  const configured = (state?.orgSettings?.waServerUrl || '').trim();
+  if (configured && !configured.includes('apexthunder.com') && !configured.includes('localhost:3001') && !configured.includes('172.20.10.3')) {
+    if (typeof window !== 'undefined' && window.location?.protocol === 'https:' && configured.startsWith('http:')) {
+      return `${window.location.origin}/whatsapp`;
+    }
+    return configured.replace(/\/+$/, '');
   }
 
   return 'https://63-183-147-199.sslip.io/whatsapp';

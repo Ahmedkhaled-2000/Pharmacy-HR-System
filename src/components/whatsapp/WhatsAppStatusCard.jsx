@@ -21,22 +21,30 @@ export default function WhatsAppStatusCard({
   };
 
   const getResolvedServerUrl = () => {
-    try {
-      const localDevice = (localStorage.getItem('PHARMACY_DEVICE_WA_URL') || '').trim();
-      if (localDevice && !localDevice.includes('apexthunder.com') && !localDevice.includes('172.20.10.3')) {
-        return localDevice.replace(/\/+$/, '');
+    if (typeof window !== 'undefined') {
+      const isHttps = window.location?.protocol === 'https:';
+      const { hostname, origin } = window.location || {};
+
+      // عند التصفح بـ HTTPS: يجب دائماً استخدام /whatsapp لمنع حظر Mixed Content
+      if (isHttps) {
+        return `${origin}/whatsapp`;
       }
-    } catch {}
-    if (typeof window !== 'undefined' && window.location) {
-      const { hostname, origin } = window.location;
       if (
         hostname === '63.183.147.199' ||
-        hostname.includes('sslip.io') ||
+        (hostname && hostname.includes('sslip.io')) ||
         hostname === 'pharmacore.site' ||
-        hostname.endsWith('.pharmacore.site')
+        (hostname && hostname.endsWith('.pharmacore.site'))
       ) {
         return `${origin}/whatsapp`;
       }
+
+      try {
+        const localDevice = (localStorage.getItem('PHARMACY_DEVICE_WA_URL') || '').trim();
+        if (localDevice && !localDevice.includes('apexthunder.com') && !localDevice.includes('172.20.10.3')) {
+          return localDevice.replace(/\/+$/, '');
+        }
+      } catch {}
+
       if (hostname === 'localhost' || hostname === '127.0.0.1') {
         return 'http://127.0.0.1:3100';
       }
@@ -49,12 +57,12 @@ export default function WhatsAppStatusCard({
     }
     const custom = (waServerUrlInput || '').trim();
     if (custom && !custom.includes('apexthunder.com') && !custom.includes('localhost:3001') && !custom.includes('172.20.10.3')) {
+      if (typeof window !== 'undefined' && window.location?.protocol === 'https:' && custom.startsWith('http:')) {
+        return `${window.location.origin}/whatsapp`;
+      }
       return custom.replace(/\/+$/, '');
     }
-    if (typeof window !== 'undefined' && window.location?.protocol === 'https:') {
-      return `${window.location.origin}/whatsapp`;
-    }
-    return 'http://63.183.147.199/whatsapp';
+    return 'https://63-183-147-199.sslip.io/whatsapp';
   };
 
   const triggerServerWakeup = () => {

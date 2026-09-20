@@ -10,7 +10,8 @@ import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   Browsers,
-  fetchLatestBaileysVersion
+  fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 
@@ -226,11 +227,13 @@ async function connectToWhatsApp() {
 
     sock = makeWASocket({
       version: waVersion,
-      auth: state,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+      },
       logger: pino({ level: 'silent' }),
       printQRInTerminal: false,
-      // ملف تعريف متصفح Chrome حديث على ويندوز معتمد 100% لتفادي خطأ 428
-      browser: ['Windows', 'Chrome', '131.0.0.0'],
+      browser: Browsers.appropriate('Chrome'),
       syncFullHistory: false,
       connectTimeoutMs: 60000,
       keepAliveIntervalMs: 25000,
@@ -290,8 +293,17 @@ async function connectToWhatsApp() {
         const statusCode = (lastDisconnect?.error)?.output?.statusCode || (lastDisconnect?.error)?.status;
         const errorMessage = lastDisconnect?.error?.message || '';
 
+        // معالجة مهلة مسح الـ QR (Code 408) - إعادة توليد رمز QR طازج فوراً دون تصنيفها كفشل
+        if (statusCode === 408 || errorMessage.includes('QR refs') || errorMessage.includes('timed out')) {
+          console.log('[WhatsApp Gateway] ⏱️ QR code expired waiting for scan. Auto-refreshing clean QR code...');
+          consecutiveFailures = 0;
+          serverState.status = 'QR_READY';
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(connectToWhatsApp, 1200);
+          return;
+        }
+
         // تشخيص حالات الفشل النهائي للجلسة التي تتطلب تصفير المفاتيح وتوليد QR جديد
-        // ملاحظة هامة: لا نحذف الجلسة إذا كان السيرفر في وضع QR_READY لأن كود 401 طبيعي عند انتهاء مهلة الـ QR
         const isTerminalFailure = 
           (statusCode === DisconnectReason.loggedOut && Boolean(serverState.phone)) || // 401 بعد أن كان مقترناً بالفعل
           statusCode === 403 || // Forbidden
@@ -316,12 +328,8 @@ async function connectToWhatsApp() {
           reconnectTimer = setTimeout(connectToWhatsApp, 2500);
         } else {
           consecutiveFailures++;
-          // إذا كان لدينا QR صالح، نحتفظ به في الواجهة
-          if (serverState.status !== 'QR_READY') {
-            serverState.status = 'DISCONNECTED';
-          }
           if (reconnectTimer) clearTimeout(reconnectTimer);
-          const delay = Math.min(2500 * Math.max(1, consecutiveFailures), 8000);
+          const delay = Math.min(2000 * Math.max(1, consecutiveFailures), 6000);
           reconnectTimer = setTimeout(connectToWhatsApp, delay);
         }
       }
@@ -341,7 +349,7 @@ async function connectToWhatsApp() {
     }
 
     if (reconnectTimer) clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connectToWhatsApp, 4000);
+    reconnectTimer = setTimeout(connectToWhatsApp, 3000);
   }
 }
 
@@ -360,8 +368,12 @@ app.get(['/health', '/api/health'], (req, res) => {
   });
 });
 
-// استعلام حالة السيرفر ورمز الـ QR المباشر
+// استعلام حالة السيرفر ورمز الـ QR المباشر مع إيقاظ تلقائي
 app.get(['/status', '/api/status'], (req, res) => {
+  if (serverState.status === 'DISCONNECTED' && !sock && !isConnecting) {
+    console.log('[WhatsApp Gateway] ⚡ Connection dormant, auto-waking up on status probe...');
+    connectToWhatsApp();
+  }
   res.json({
     status: serverState.status,
     phone: serverState.phone,

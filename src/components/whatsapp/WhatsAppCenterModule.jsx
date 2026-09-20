@@ -47,7 +47,12 @@ export default function WhatsAppCenterModule({
   const [deviceServerUrl, setDeviceServerUrl] = useState(() => {
     try {
       const v = (localStorage.getItem('PHARMACY_DEVICE_WA_URL') || '').trim();
-      if (v.includes('172.20.10.3') || v.includes('apexthunder.com')) {
+      // تنظيف العناوين غير المتوافقة مع أمان HTTPS أو العناوين القديمة
+      if (
+        v.includes('172.20.10.3') || 
+        v.includes('apexthunder.com') ||
+        (typeof window !== 'undefined' && window.location?.protocol === 'https:' && v.startsWith('http:'))
+      ) {
         localStorage.removeItem('PHARMACY_DEVICE_WA_URL');
         return '';
       }
@@ -70,40 +75,47 @@ export default function WhatsAppCenterModule({
   const isDesktop = typeof window !== 'undefined' && Boolean(window.desktopAPI?.isDesktop);
 
   // احتساب رابط السيرفر ديناميكياً:
-  // - في متصفح الويب والـ VPS: الاتصال التلقائي بسيرفر الـ VPS السحابي عبر /whatsapp ليعمل 24 ساعة لجميع الموبايلات والأجهزة
+  // - في متصفح الويب والـ VPS: الاتصال التلقائي بسيرفر الـ VPS السحابي عبر /whatsapp لمنع Mixed Content نهائياً
   // - في تطبيق الويندوز: تشغيل مباشر ومحمي على 127.0.0.1:3100
   const serverUrl = useMemo(() => {
-    // 1. رابط مخصص مثبت لهذا الجهاز/المتصفح فقط (تم استبعاد أي عناوين قديمة)
+    const isHttps = typeof window !== 'undefined' && window.location?.protocol === 'https:';
+    const origin = typeof window !== 'undefined' ? (window.location?.origin || '') : '';
+    const hostname = typeof window !== 'undefined' ? (window.location?.hostname || '') : '';
+
+    // 1. في بيئة المتصفح السحابية / VPS (أي HTTPS أو نطاق VPS):
+    // استخدام نفس المنشأ عبر /whatsapp مباشرة لمنع Mixed Content وحظر المتصفح نهائياً
+    if (isHttps) {
+      return `${origin}/whatsapp`;
+    }
+    if (
+      hostname === '63.183.147.199' ||
+      hostname.includes('sslip.io') ||
+      hostname === 'pharmacore.site' ||
+      hostname.endsWith('.pharmacore.site')
+    ) {
+      return `${origin}/whatsapp`;
+    }
+
+    // 2. تطبيق الويندوز المكتبي (Desktop):
+    if (isDesktop) {
+      return 'http://127.0.0.1:3100';
+    }
+
+    // 3. رابط مخصص مثبت محلياً لهذا الجهاز
     const localOverride = (deviceServerUrl || '').trim();
     if (localOverride && !localOverride.includes('apexthunder.com') && !localOverride.includes('172.20.10.3')) {
       return localOverride.replace(/\/+$/, '');
     }
 
-    // 2. إذا كان المتصفح يعمل عبر خادم الـ VPS أو السحابة أو النطاق العام (63.183.147.199 أو sslip.io أو pharmacore.site)
-    if (typeof window !== 'undefined' && window.location) {
-      const { hostname, origin } = window.location;
-      if (
-        hostname === '63.183.147.199' ||
-        hostname.includes('sslip.io') ||
-        hostname === 'pharmacore.site' ||
-        hostname.endsWith('.pharmacore.site')
-      ) {
-        return `${origin}/whatsapp`;
-      }
-      if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        return 'http://127.0.0.1:3100';
-      }
-      if (isPrivateLanIp(hostname) && !hostname.includes('172.20.10.3')) {
-        return `http://${hostname}:3100`;
-      }
-    }
-
-    // 3. في حالة تطبيق الويندوز (سطح المكتب): تشغيل مباشر ومحمي على 127.0.0.1:3100
-    if (isDesktop) {
+    // 4. الشبكة المحلية (Localhost / LAN IP):
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://127.0.0.1:3100';
     }
+    if (isPrivateLanIp(hostname) && !hostname.includes('172.20.10.3')) {
+      return `http://${hostname}:3100`;
+    }
 
-    // 4. الرابط المعمم في إعدادات المنظومة
+    // 5. الإعدادات المحفوظة بالمنظومة
     const lanUrl = (state?.orgSettings?.waServerLanUrl || '').trim();
     if (lanUrl && !lanUrl.includes('apexthunder.com') && !lanUrl.includes('172.20.10.3')) {
       return lanUrl.replace(/\/+$/, '');
@@ -114,18 +126,15 @@ export default function WhatsAppCenterModule({
       return configured.replace(/\/+$/, '');
     }
 
-    // 5. الافتراضي الدائم: سيرفر الـ VPS السحابي ليعمل 24 ساعة بمطابقة البروتوكول
-    if (typeof window !== 'undefined' && window.location?.protocol === 'https:') {
-      return `${window.location.origin}/whatsapp`;
-    }
-    return 'http://63.183.147.199/whatsapp';
+    return 'https://63-183-147-199.sslip.io/whatsapp';
   }, [deviceServerUrl, isDesktop, state?.orgSettings?.waServerUrl, state?.orgSettings?.waServerLanUrl, isPrivateLanIp]);
 
   // احتساب عنوان خادم الواتساب المقترح لربط الهواتف والموبايلات والأجهزة
   const primaryLanUrl = useMemo(() => {
     if (typeof window !== 'undefined' && window.location) {
-      const { hostname, origin } = window.location;
+      const { hostname, origin, protocol } = window.location;
       if (
+        protocol === 'https:' ||
         hostname === '63.183.147.199' ||
         hostname.includes('sslip.io') ||
         hostname === 'pharmacore.site' ||
@@ -145,10 +154,7 @@ export default function WhatsAppCenterModule({
     if (networkInfo?.suggestedLanUrl && !networkInfo.suggestedLanUrl.includes('172.20.10.3')) {
       return networkInfo.suggestedLanUrl.replace(/\/+$/, '');
     }
-    if (typeof window !== 'undefined' && window.location?.protocol === 'https:') {
-      return `${window.location.origin}/whatsapp`;
-    }
-    return 'http://63.183.147.199/whatsapp';
+    return 'https://63-183-147-199.sslip.io/whatsapp';
   }, [networkInfo, state?.orgSettings?.waServerLanUrl, state?.orgSettings?.waServerUrl]);
 
   // هل الخادم الحالي هو سيرفر الـ VPS السحابي؟
@@ -178,15 +184,15 @@ export default function WhatsAppCenterModule({
 
   // زر التبديل الفوري لسيرفر الـ VPS السحابي
   const handleSwitchToVpsServer = async () => {
-    const vpsUrl = typeof window !== 'undefined' && window.location?.origin && (window.location.hostname === '63.183.147.199' || window.location.hostname.includes('pharmacore.site'))
+    const vpsUrl = typeof window !== 'undefined' && window.location?.origin
       ? `${window.location.origin}/whatsapp`
-      : 'http://63.183.147.199/whatsapp';
+      : 'https://63-183-147-199.sslip.io/whatsapp';
     try {
-      localStorage.setItem('PHARMACY_DEVICE_WA_URL', vpsUrl);
-      setDeviceServerUrl(vpsUrl);
+      localStorage.removeItem('PHARMACY_DEVICE_WA_URL');
+      setDeviceServerUrl('');
     } catch {}
     await handleSaveServerUrl(vpsUrl);
-    showToast?.('⚡ تم تحويل خادم الواتساب إلى سيرفر الـ VPS (63.183.147.199) ليعمل على مدار 24 ساعة!');
+    showToast?.('⚡ تم تحويل خادم الواتساب إلى سيرفر الـ VPS السحابي ليعمل على مدار 24 ساعة!');
   };
 
   // إظهار باركود QR للهواتف لربط الموبايل بنقرة واحدة
@@ -339,14 +345,20 @@ export default function WhatsAppCenterModule({
 
   // 3. فحص حالة الخادم الحقيقية
   const fetchWaStatus = useCallback(async (silent = false, overrideUrl = null) => {
-    const activeUrl = overrideUrl || serverUrl;
+    let activeUrl = (overrideUrl || serverUrl || '').trim();
+
+    // حماية قاطعة للمتصفح: منع Mixed Content نهائياً عند العمل على HTTPS
+    if (typeof window !== 'undefined' && window.location?.protocol === 'https:' && (activeUrl.startsWith('http:') || !activeUrl)) {
+      activeUrl = `${window.location.origin}/whatsapp`;
+    }
+
     let statusFound = false;
 
     // 1. محاولة الاتصال بالرابط النشط
     try {
       const res = await fetch(`${activeUrl.replace(/\/$/, '')}/api/status`, {
         headers: { 'bypass-tunnel-reminder': 'true' },
-        signal: AbortSignal.timeout(3000)
+        signal: AbortSignal.timeout(3500)
       });
       if (res.ok) {
         const data = await res.json();
@@ -360,8 +372,8 @@ export default function WhatsAppCenterModule({
       }
     } catch {}
 
-    // 2. Fallback: إذا فشل الرابط النشط وكان مختلفاً عن 127.0.0.1، نجرب 127.0.0.1 محلياً
-    if (!statusFound && activeUrl !== 'http://127.0.0.1:3100') {
+    // 2. Fallback: إذا فشل الرابط النشط وكان التطبيق لا يعمل على HTTPS ولم نكن على 127.0.0.1
+    if (!statusFound && typeof window !== 'undefined' && window.location?.protocol !== 'https:' && activeUrl !== 'http://127.0.0.1:3100') {
       try {
         const fallbackRes = await fetch('http://127.0.0.1:3100/api/status', {
           headers: { 'bypass-tunnel-reminder': 'true' },
@@ -707,14 +719,28 @@ export default function WhatsAppCenterModule({
     }
   }, [isDesktop, deviceServerUrl, runLanAutoDiscovery]);
 
-  // فحص دوري
+  // استرجاع وترقية روابط الـ HTTP القديمة المخزنة تلقائياً عند الدخول بـ HTTPS
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location?.protocol === 'https:') {
+      const currentWaUrl = state?.orgSettings?.waServerUrl || '';
+      const currentLanUrl = state?.orgSettings?.waServerLanUrl || '';
+      if (currentWaUrl.startsWith('http:') || currentLanUrl.startsWith('http:')) {
+        handleSaveServerUrl(`${window.location.origin}/whatsapp`);
+      }
+    }
+  }, [state?.orgSettings?.waServerUrl, state?.orgSettings?.waServerLanUrl]);
+
+  // فحص دوري متكيف وذكي:
+  // - عند انتظار مسح الـ QR: فحص سريع كل 2.5 ثانية للالتقاط اللحظي للاقتران فور مسح الباركود
+  // - عند الاتصال: فحص هادئ كل 10 ثوانٍ للتأكد من استمرار الجلسة
   useEffect(() => {
     fetchWaStatus(true);
+    const pollTime = waStatus === 'QR_READY' ? 2500 : 10000;
     const interval = setInterval(() => {
       fetchWaStatus(true);
-    }, 10000);
+    }, pollTime);
     return () => clearInterval(interval);
-  }, [fetchWaStatus]);
+  }, [fetchWaStatus, waStatus]);
 
   // إعادة تشغيل خادم الواتساب
   const handleRestartServer = async () => {
@@ -1315,33 +1341,22 @@ export default function WhatsAppCenterModule({
             </button>
           </div>
 
-          {/* تنبيه أمني ذكي للمتصفحات عند العمل على HTTPS */}
-          {typeof window !== 'undefined' && window.location?.protocol === 'https:' && waStatus === 'DISCONNECTED' && (
+          {/* تنبيه أمان الاتصال المشفر عبر HTTPS */}
+          {typeof window !== 'undefined' && window.location?.protocol === 'https:' && (
             <div style={{
-              background: 'rgba(59, 130, 246, 0.08)',
-              border: '1px solid rgba(59, 130, 246, 0.3)',
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
               borderRadius: '10px',
               padding: '10px 14px',
               marginBottom: '14px',
               fontSize: '12.5px',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
               gap: '8px'
             }}>
-              <span style={{ color: '#1e40af' }}>
-                💡 <strong>ملاحظة أمنية للمتصفح:</strong> قد تمنع متصفحات Chrome/Edge الاتصال المباشر بخادم الواتساب المحلي من موقع HTTPS. يمكنك فتح المنظومة عبر رابط HTTP المباشر للاتصال بدون حظر أمني:
+              <span style={{ color: '#065f46' }}>
+                🔒 <strong>اتصال مشفر وآمن (HTTPS):</strong> خادم الواتساب المدمج يعمل عبر نفس النطاق السحابي المشفر (/whatsapp) بدون أي حظر أمني لكافة الهواتف وأجهزة الصيدلية.
               </span>
-              <a
-                href="http://63.183.147.199"
-                target="_blank"
-                rel="noreferrer"
-                className="btn"
-                style={{ background: '#2563eb', color: '#fff', fontSize: '11.5px', padding: '4px 10px', borderRadius: '6px', textDecoration: 'none' }}
-              >
-                🌐 التبديل لرابط HTTP المباشر
-              </a>
             </div>
           )}
 
@@ -1603,17 +1618,9 @@ export default function WhatsAppCenterModule({
             {waStatus === 'DISCONNECTED' && 'اضغط على زر "إعادة تشغيل الخادم" لتشغيله في الخلفية وحل أي تعليق تلقائياً.'}
             {waStatus === 'checking' && 'يتم التحقق من استجابة المقبس الخلفي للواتساب...'}
           </span>
-          {typeof window !== 'undefined' && window.location?.protocol === 'https:' && waStatus === 'DISCONNECTED' && (
+          {typeof window !== 'undefined' && waStatus === 'DISCONNECTED' && (
             <div style={{ marginTop: '8px', padding: '6px 12px', background: 'rgba(0,0,0,0.25)', borderRadius: '6px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <span>⚠️ إذا حظر المتصفح الاتصال بالخادم المحلي (Mixed Content):</span>
-              <a
-                href="http://63.183.147.199"
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: '#fef08a', fontWeight: 800, textDecoration: 'underline' }}
-              >
-                🌐 اضغط هنا لفتح المنظومة عبر رابط HTTP المباشر بدون حظر أمني
-              </a>
+              <span>💡 اضغط على زر "فحص الاتصال" أو "إعادة تشغيل الخادم" لإيقاظ الخادم والاتصال الفوري دون تأخير.</span>
             </div>
           )}
         </div>
