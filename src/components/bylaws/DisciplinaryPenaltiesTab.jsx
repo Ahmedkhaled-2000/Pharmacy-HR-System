@@ -2792,110 +2792,330 @@ export default function DisciplinaryPenaltiesTab({
 
       {/* ── Modal: Inspect & Audit Trail ── */}
       {inspectedPenalty && (
-        <div className="modal-backdrop" onClick={() => setInspectedPenalty(null)}>
-          <div className="modal-card" style={{ maxWidth: '620px', width: '95%' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '10px', marginBottom: '14px' }}>
-              <h3 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--primary-dark)' }}>
-                🔍 تفاصيل القرار وسجل التدقيق (Audit Log)
-              </h3>
-              <button type="button" className="btn btn-ghost" onClick={() => setInspectedPenalty(null)}>✕</button>
+        <div className="modal-backdrop" onClick={() => setInspectedPenalty(null)} style={{ background: 'rgba(15, 23, 42, 0.7)', backdropFilter: 'blur(4px)', zIndex: 1200 }}>
+          <div
+            className="modal-card"
+            style={{
+              maxWidth: '680px',
+              width: '95%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              borderRadius: '16px',
+              padding: '0',
+              border: '1px solid #cbd5e1',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              background: '#ffffff'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{ padding: '18px 22px', borderBottom: '1px solid #e2e8f0', background: 'linear-gradient(to left, #f8fafc, #ffffff)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: 'linear-gradient(135deg, #0284c7, #0369a1)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', boxShadow: '0 4px 8px -2px rgba(2, 132, 199, 0.3)' }}>
+                  ⚖️
+                </div>
+                <div>
+                  <h3 style={{ fontFamily: 'Cairo, Tajawal, sans-serif', margin: 0, fontSize: '17px', fontWeight: 800, color: '#0f172a' }}>
+                    تفاصيل القرار التأديبي وسجل التدقيق
+                  </h3>
+                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
+                    سجل الوقائع المعتمدة، الأثر المالي، والمسار الزمني الرقمي (Audit Log)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInspectedPenalty(null)}
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '50%',
+                  border: '1px solid #cbd5e1',
+                  background: '#f8fafc',
+                  color: '#64748b',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '15px',
+                  cursor: 'pointer',
+                  padding: 0
+                }}
+                title="إغلاق"
+              >
+                ✕
+              </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', fontSize: '13px', marginBottom: '16px' }}>
-              <div><strong>رقم القرار: </strong>{inspectedPenalty.id}</div>
-              <div><strong>الموظف: </strong>{inspectedPenalty.employeeName} ({inspectedPenalty.employeeCode || '—'})</div>
-              <div><strong>التاريخ: </strong>{inspectedPenalty.date}</div>
-              <div><strong>منشئ المخالفة: </strong>{renderPenaltyCreatorBadge(inspectedPenalty)}</div>
-              <div><strong>فئة المخالفة: </strong>{inspectedPenalty.categoryName}</div>
-              <div><strong>نوع المخالفة: </strong>{inspectedPenalty.ruleTitle}</div>
-              <div><strong>العداد: </strong>المرة {inspectedPenalty.occurrenceNumber || 1}</div>
-              <div><strong>الإجراء: </strong>{inspectedPenalty.actionTitle}</div>
-              <div><strong>الخصم المالي: </strong>{inspectedPenalty.amount || 0} ج.م ({inspectedPenalty.deductionDays || 0} يوم)</div>
-            </div>
-
-            {inspectedPenalty.details && (
-              <div style={{ background: 'var(--surface-muted)', padding: '10px', borderRadius: '8px', marginBottom: '12px', fontSize: '13px' }}>
-                <strong>وصف الواقعة: </strong>{inspectedPenalty.details}
+            {/* Modal Body */}
+            <div style={{ padding: '20px 22px' }}>
+              {/* Top Status & Date Banner */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '12px 16px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {inspectedPenalty.status === 'cancelled' || inspectedPenalty.isCancelled ? (
+                    <span className="badge badge-danger" style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px' }}>🚫 قرار ملغي ومسترد</span>
+                  ) : inspectedPenalty.status === 'rejected' ? (
+                    <span className="badge badge-danger" style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px' }}>❌ قرار مرفوض</span>
+                  ) : inspectedPenalty.status === 'approved' || inspectedPenalty.adminApproved ? (
+                    <span className="badge badge-success" style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px' }}>✅ معتمد ومطبق بالراتب</span>
+                  ) : (
+                    <span className="badge badge-warning" style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px' }}>⏳ معلق بانتظار قرار الإدارة</span>
+                  )}
+                  <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace', background: '#ffffff', padding: '3px 8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                    #{String(inspectedPenalty.id).slice(-12)}
+                  </span>
+                </div>
+                <div style={{ fontSize: '12.5px', color: '#475569', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <span>📅 تاريخ الواقعة:</span>
+                  <span style={{ color: '#0f172a', fontWeight: 700 }}>{inspectedPenalty.date}</span>
+                </div>
               </div>
-            )}
 
-            {inspectedPenalty.investigationNotes && (
-              <div style={{ background: '#eff6ff', padding: '10px', borderRadius: '8px', marginBottom: '12px', fontSize: '13px', border: '1px solid #bfdbfe' }}>
-                <strong>ملاحظات التحقيق: </strong>{inspectedPenalty.investigationNotes}
-              </div>
-            )}
-
-            {(inspectedPenalty.attachmentName || inspectedPenalty.attachmentData) && (
-              <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '10px', marginBottom: '14px', border: '1px solid #e2e8f0' }}>
-                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span>📎</span>
-                  <span>المستندات والأدلة المرفقة:</span>
-                  <span style={{ color: '#2563eb' }}>{inspectedPenalty.attachmentName || 'ملف مرفق'}</span>
-                  {inspectedPenalty.attachmentSize && <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'normal' }}>({inspectedPenalty.attachmentSize})</span>}
+              {/* Grid 1: Employee & Branch & Origin */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 'bold' }}>
+                    👤
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>الموظف المعني:</span>
+                    <strong style={{ fontSize: '13.5px', color: '#0f172a' }}>{inspectedPenalty.employeeName}</strong>
+                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>كود: {inspectedPenalty.employeeCode || '—'}</span>
+                  </div>
                 </div>
 
-                {inspectedPenalty.attachmentData && (
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: '#f0fdf4', color: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 'bold' }}>
+                    🏢
+                  </div>
                   <div>
-                    {inspectedPenalty.attachmentType === 'image' && (
-                      <div style={{ textAlign: 'center', marginTop: '6px' }}>
-                        <img
-                          src={inspectedPenalty.attachmentData}
-                          alt={inspectedPenalty.attachmentName}
-                          style={{ maxHeight: '220px', maxWidth: '100%', borderRadius: '8px', border: '1px solid #cbd5e1', objectFit: 'contain' }}
-                        />
-                      </div>
-                    )}
+                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>الفرع التابع له:</span>
+                    <strong style={{ fontSize: '13.5px', color: '#0f172a' }}>{inspectedPenalty.branchName || 'الفرع الرئيسي'}</strong>
+                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>مقر العمل</span>
+                  </div>
+                </div>
 
-                    {inspectedPenalty.attachmentType === 'pdf' && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fef2f2', padding: '10px 14px', borderRadius: '8px', border: '1px solid #fecaca' }}>
-                        <span style={{ fontSize: '24px' }}>📄</span>
-                        <div style={{ flex: 1 }}>
-                          <strong style={{ color: '#991b1b', fontSize: '13px', display: 'block' }}>{inspectedPenalty.attachmentName}</strong>
-                          <span style={{ fontSize: '11.5px', color: '#7f1d1d' }}>مستند PDF رسمي</span>
-                        </div>
-                        <a
-                          href={inspectedPenalty.attachmentData}
-                          download={inspectedPenalty.attachmentName || 'document.pdf'}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="btn btn-ghost"
-                          style={{ fontSize: '12px', padding: '5px 12px', background: '#fee2e2', color: '#991b1b', fontWeight: 'bold' }}
-                        >
-                          👁️ فتح / تحميل PDF
-                        </a>
-                      </div>
-                    )}
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: '#faf5ff', color: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 'bold' }}>
+                    🛡️
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>جهة التوثيق والإصدار:</span>
+                    <div style={{ marginTop: '2px' }}>{renderPenaltyCreatorBadge(inspectedPenalty)}</div>
+                  </div>
+                </div>
+              </div>
 
-                    {inspectedPenalty.attachmentType === 'video' && (
-                      <div style={{ marginTop: '6px', textAlign: 'center' }}>
-                        <video
-                          controls
-                          src={inspectedPenalty.attachmentData}
-                          style={{ maxHeight: '220px', maxWidth: '100%', borderRadius: '8px', background: '#000' }}
-                        />
-                      </div>
-                    )}
+              {/* Card 2: Violation & Rule */}
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px 16px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span
+                      style={{
+                        background: '#0284c7',
+                        color: '#ffffff',
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        padding: '3px 8px',
+                        borderRadius: '6px'
+                      }}
+                    >
+                      {inspectedPenalty.categoryName || 'مخالفة لائحية'}
+                    </span>
+                    <span style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', fontSize: '11px', fontWeight: 'bold', padding: '2px 8px', borderRadius: '6px' }}>
+                      المرة {inspectedPenalty.occurrenceNumber || 1}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b', lineHeight: 1.6 }}>
+                  {inspectedPenalty.ruleTitle}
+                </div>
+
+                {inspectedPenalty.details && inspectedPenalty.details !== inspectedPenalty.ruleTitle && (
+                  <div style={{ marginTop: '8px', padding: '10px 12px', background: '#f8fafc', borderRight: '3px solid #0284c7', borderRadius: '6px', fontSize: '12.5px', color: '#475569', lineHeight: 1.6 }}>
+                    <strong style={{ color: '#0f172a', display: 'block', fontSize: '12px', marginBottom: '2px' }}>بيان وتفاصيل الواقعة:</strong>
+                    {inspectedPenalty.details}
+                  </div>
+                )}
+
+                {inspectedPenalty.investigationNotes && (
+                  <div style={{ marginTop: '8px', padding: '10px 12px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', fontSize: '12.5px', color: '#1e40af' }}>
+                    <strong>📝 ملاحظات التحقيق والشئون الإدارية: </strong>{inspectedPenalty.investigationNotes}
                   </div>
                 )}
               </div>
-            )}
 
-            {/* Audit Timeline */}
-            <div style={{ marginTop: '14px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
-              <strong style={{ fontSize: '13px', display: 'block', marginBottom: '8px' }}>📜 سجل التدقيق الزمني (Audit Trail):</strong>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {(inspectedPenalty.auditLog || [
-                  { action: 'created', by: inspectedPenalty.createdByName || 'المسؤول', timestamp: inspectedPenalty.createdAt, note: 'تسجيل المخالفة' }
-                ]).map((log, i) => (
-                  <div key={i} style={{ background: '#f8fafc', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)', marginBottom: '2px' }}>
-                      <span>بواسطة: <strong>{log.by}</strong></span>
-                      <span>{log.timestamp ? new Date(log.timestamp).toLocaleString('ar-EG') : '—'}</span>
-                    </div>
-                    <div>{log.note || log.action}</div>
-                  </div>
-                ))}
+              {/* Card 3: Financial & Disciplinary Action */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px 16px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <span style={{ fontSize: '11.5px', color: '#64748b', display: 'block' }}>الإجراء التأديبي المتخذ:</span>
+                  <strong style={{ fontSize: '14px', color: '#0f172a' }}>{inspectedPenalty.actionTitle}</strong>
+                  {inspectedPenalty.deductionDays > 0 && (
+                    <span style={{ fontSize: '11.5px', color: '#dc2626', display: 'block', marginTop: '2px', fontWeight: 600 }}>
+                      مستقطع: {inspectedPenalty.deductionDays} يوم عمل
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ textAlign: 'left' }}>
+                  <span style={{ fontSize: '11.5px', color: '#64748b', display: 'block' }}>المقدار المالي:</span>
+                  {inspectedPenalty.amount > 0 ? (
+                    <span style={{ fontSize: '20px', fontWeight: 800, color: '#dc2626', display: 'block' }}>
+                      {inspectedPenalty.amount} <span style={{ fontSize: '13px', fontWeight: 600 }}>ج.م</span>
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '13px', fontWeight: 700, color: '#16a34a', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '3px 10px', borderRadius: '6px', display: 'inline-block' }}>
+                      بدون خصم مالي
+                    </span>
+                  )}
+                </div>
               </div>
+
+              {/* Attachments (if any) */}
+              {(inspectedPenalty.attachmentName || inspectedPenalty.attachmentData) && (
+                <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '10px', marginBottom: '16px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>📎</span>
+                    <span>المستندات والأدلة المرفقة:</span>
+                    <span style={{ color: '#2563eb' }}>{inspectedPenalty.attachmentName || 'ملف مرفق'}</span>
+                    {inspectedPenalty.attachmentSize && <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'normal' }}>({inspectedPenalty.attachmentSize})</span>}
+                  </div>
+
+                  {inspectedPenalty.attachmentData && (
+                    <div>
+                      {inspectedPenalty.attachmentType === 'image' && (
+                        <div style={{ textAlign: 'center', marginTop: '6px' }}>
+                          <img
+                            src={inspectedPenalty.attachmentData}
+                            alt={inspectedPenalty.attachmentName}
+                            style={{ maxHeight: '220px', maxWidth: '100%', borderRadius: '8px', border: '1px solid #cbd5e1', objectFit: 'contain' }}
+                          />
+                        </div>
+                      )}
+
+                      {inspectedPenalty.attachmentType === 'pdf' && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fef2f2', padding: '10px 14px', borderRadius: '8px', border: '1px solid #fecaca' }}>
+                          <span style={{ fontSize: '24px' }}>📄</span>
+                          <div style={{ flex: 1 }}>
+                            <strong style={{ color: '#991b1b', fontSize: '13px', display: 'block' }}>{inspectedPenalty.attachmentName}</strong>
+                            <span style={{ fontSize: '11.5px', color: '#7f1d1d' }}>مستند PDF رسمي</span>
+                          </div>
+                          <a
+                            href={inspectedPenalty.attachmentData}
+                            download={inspectedPenalty.attachmentName || 'document.pdf'}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn btn-ghost"
+                            style={{ fontSize: '12px', padding: '5px 12px', background: '#fee2e2', color: '#991b1b', fontWeight: 'bold' }}
+                          >
+                            👁️ فتح / تحميل PDF
+                          </a>
+                        </div>
+                      )}
+
+                      {inspectedPenalty.attachmentType === 'video' && (
+                        <div style={{ marginTop: '6px', textAlign: 'center' }}>
+                          <video
+                            controls
+                            src={inspectedPenalty.attachmentData}
+                            style={{ maxHeight: '220px', maxWidth: '100%', borderRadius: '8px', background: '#000' }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Objection Section (if employee submitted an objection) */}
+              {inspectedPenalty.objection && (
+                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '12px', padding: '14px 16px', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <strong style={{ color: '#b45309', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>✋</span> تظلم الموظف المقدم:
+                    </strong>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 'bold',
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      background: inspectedPenalty.objection.status === 'approved' ? '#dcfce7' : inspectedPenalty.objection.status === 'rejected' ? '#fee2e2' : '#fef3c7',
+                      color: inspectedPenalty.objection.status === 'approved' ? '#166534' : inspectedPenalty.objection.status === 'rejected' ? '#991b1b' : '#92400e'
+                    }}>
+                      {inspectedPenalty.objection.status === 'approved' ? '✅ تم قبول التظلم' : inspectedPenalty.objection.status === 'rejected' ? '❌ تم رفض التظلم' : '⏳ التظلم قيد المراجعة'}
+                    </span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '12.5px', color: '#78350f', lineHeight: 1.6 }}>
+                    "{inspectedPenalty.objection.reason}"
+                  </p>
+                </div>
+              )}
+
+              {/* Audit Timeline */}
+              <div style={{ marginTop: '16px', borderTop: '1px solid #e2e8f0', paddingTop: '14px' }}>
+                <strong style={{ fontSize: '13.5px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px' }}>
+                  <span>📜</span> سجل التدقيق الزمني (Audit Trail):
+                </strong>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {(inspectedPenalty.auditLog || [
+                    { action: 'created', by: inspectedPenalty.createdByName || 'المسؤول', timestamp: inspectedPenalty.createdAt, note: 'تسجيل وتوثيق المخالفة في النظام' }
+                  ]).map((log, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px' }}>
+                      <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: log.action === 'approved' ? '#16a34a' : log.action === 'cancelled' ? '#dc2626' : '#0284c7', marginTop: '5px' }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', marginBottom: '2px' }}>
+                          <span style={{ fontWeight: 700, color: '#1e293b' }}>{log.note || log.action}</span>
+                          <span style={{ fontSize: '11px', color: '#64748b' }}>
+                            {log.timestamp ? new Date(log.timestamp).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '11.5px', color: '#64748b' }}>بواسطة: <strong style={{ color: '#334155' }}>{log.by}</strong></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ padding: '14px 22px', borderTop: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                {/* Admin Quick Actions in Modal if pending */}
+                {isAdmin && (inspectedPenalty.status === 'pending_admin' || inspectedPenalty.status === 'pending') && (
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-start"
+                      style={{ padding: '6px 14px', fontSize: '12px', background: '#16a34a' }}
+                      onClick={() => {
+                        handleApprovePenalty(inspectedPenalty);
+                        setInspectedPenalty(null);
+                      }}
+                    >
+                      ✅ اعتماد القرار وتطبيق الخصم
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ padding: '6px 14px', fontSize: '12px', color: '#dc2626', border: '1px solid #fca5a5' }}
+                      onClick={() => {
+                        handleRejectPenalty(inspectedPenalty);
+                        setInspectedPenalty(null);
+                      }}
+                    >
+                      ❌ رفض القرار
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ padding: '6px 20px', fontSize: '13px', background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', color: '#334155', fontWeight: 600 }}
+                onClick={() => setInspectedPenalty(null)}
+              >
+                إغلاق
+              </button>
             </div>
           </div>
         </div>
