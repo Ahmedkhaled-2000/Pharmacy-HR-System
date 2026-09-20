@@ -76,6 +76,79 @@ export default function BylawsModule({
   const [adminRejectReplyReq, setAdminRejectReplyReq] = useState(null);
   const [adminRejectReplyText, setAdminRejectReplyText] = useState('');
 
+  // Penalty Record Inspection Modal State
+  const [inspectedPenaltyRecord, setInspectedPenaltyRecord] = useState(null);
+
+  // Clear all penalties & disciplinary records to start fresh
+  const handleClearAllPenaltiesLog = async () => {
+    const isConfirmed = await showConfirm({
+      title: '⚠️ مسح سجل الجزاءات والمخالفات والبدء من جديد',
+      message: 'هل أنت متأكد من رغبتك في مسح كافة سجلات الجزاءات والمخالفات، وسجل القرارات والاعتمادات، وتصفير التقرير الشهري بالكامل للبدء من جديد؟ سيتم حذف جميع المخالفات والخصومات التأديبية المسجلة نهائياً.',
+      confirmText: 'نعم، مسح السجل والبدء من جديد',
+      cancelText: 'تراجع وإلغاء',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
+
+    // Filter out penalty, lateness, and objection requests
+    const cleanRequests = (state.requests || []).filter((r) => {
+      if (!r) return false;
+      const t = r.type;
+      const st = r.subType;
+      const idStr = String(r.id || '');
+      if (
+        t === 'disciplinary_penalty' ||
+        st === 'disciplinary_penalty' ||
+        t === 'penalty' ||
+        t === 'deduction' ||
+        st === 'penalty' ||
+        t === 'late_penalty' ||
+        t === 'penalty_objection' ||
+        t === 'early_exit' ||
+        st === 'lateness' ||
+        idStr.startsWith('req_late_inc_') ||
+        idStr.startsWith('obj_req_') ||
+        idStr.startsWith('obj_inc_')
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    // Clear late incidents
+    const cleanLateIncidents = [];
+
+    // Filter out penalty adjustments from financial adjustments
+    const cleanAdjustments = (state.adjustments || []).filter((a) => {
+      if (!a) return false;
+      const idStr = String(a.id || '');
+      if (
+        a.type === 'penalty' ||
+        a.type === 'deduction' ||
+        idStr.startsWith('adj_pen_') ||
+        idStr.startsWith('adj_disc_') ||
+        (a.reason && (a.reason.includes('جزاء') || a.reason.includes('مخالفة') || a.reason.includes('تأخير') || a.reason.includes('عجز الجرد')))
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    const updatedState = {
+      ...state,
+      requests: cleanRequests,
+      lateIncidents: cleanLateIncidents,
+      adjustments: cleanAdjustments,
+      disciplinaryRecords: [],
+      disciplinaryDecisions: []
+    };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('✅ تم مسح سجل الجزاءات والمخالفات والقرارات بنجاح والبدء من جديد');
+  };
+
   // ── Clause / Section Management Handlers ──
   const handleAddBylawSection = () => {
     const nextNum = bylawsSections.length;
@@ -1344,6 +1417,29 @@ export default function BylawsModule({
                 استعراض كافة الخصومات والجزاءات لجميع الموظفين بالفروع مع إمكانية التصفية المباشرة
               </p>
             </div>
+            {isAdmin && (
+              <button
+                type="button"
+                className="btn btn-outline"
+                style={{
+                  borderColor: '#ef4444',
+                  color: '#dc2626',
+                  fontWeight: 'bold',
+                  fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  background: '#ffffff',
+                  boxShadow: '0 1px 3px rgba(220,38,38,0.08)'
+                }}
+                onClick={handleClearAllPenaltiesLog}
+                title="مسح سجل الجزاءات والمخالفات والقرارات والبدء من جديد"
+              >
+                <span>🗑️</span> مسح السجل والبدء من جديد
+              </button>
+            )}
           </div>
 
           {/* Metric Summary Cards */}
@@ -1552,25 +1648,24 @@ export default function BylawsModule({
               )}
             </div>
           ) : (
-            <div className="table-responsive" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid var(--border)', borderRadius: '12px' }}>
-              <table className="bylaws-table" style={{ width: '100%', minWidth: '1150px', borderCollapse: 'collapse', textAlign: 'right' }}>
+            <div className="table-responsive" style={{ border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden', background: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+              <table className="bylaws-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right' }}>
                 <thead>
-                  <tr style={{ background: 'var(--background)', borderBottom: '2px solid var(--border)' }}>
-                    <th style={{ padding: '12px 14px', width: '95px' }}>التاريخ</th>
-                    <th style={{ padding: '12px 14px', width: '160px' }}>الموظف</th>
-                    <th style={{ padding: '12px 14px', width: '130px' }}>الفرع</th>
-                    <th style={{ padding: '12px 14px', width: '170px' }}>بند ونوع الجزاء</th>
-                    <th style={{ padding: '12px 14px', width: '110px' }}>المقدار المالي</th>
-                    <th style={{ padding: '12px 14px', width: '240px' }}>البيان والتفاصيل</th>
-                    <th style={{ padding: '12px 14px', width: '135px' }}>الحالة</th>
-                    <th style={{ padding: '12px 14px', width: '160px', textAlign: 'center' }}>الاعتراضات والإجراءات</th>
+                  <tr style={{ background: '#f8fafc', borderBottom: '2px solid var(--border)' }}>
+                    <th style={{ padding: '12px 10px', width: '95px', color: '#475569', fontSize: '13px' }}>التاريخ</th>
+                    <th style={{ padding: '12px 10px', color: '#475569', fontSize: '13px' }}>الموظف</th>
+                    <th style={{ padding: '12px 10px', color: '#475569', fontSize: '13px' }}>الفرع</th>
+                    <th style={{ padding: '12px 10px', width: '120px', color: '#475569', fontSize: '13px' }}>المقدار المالي</th>
+                    <th style={{ padding: '12px 10px', color: '#475569', fontSize: '13px' }}>البيان والسبب</th>
+                    <th style={{ padding: '12px 10px', width: '135px', color: '#475569', fontSize: '13px' }}>الحالة</th>
+                    <th style={{ padding: '12px 10px', width: '160px', textAlign: 'center', color: '#475569', fontSize: '13px' }}>معاينة وإجراءات</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredPenalties.length === 0 ? (
                     <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: 'var(--muted)' }}>
-                        لا توجد جزاءات أو خصومات مسجلة في هذا النطاق.
+                      <td colSpan={7} style={{ textAlign: 'center', padding: '36px', color: 'var(--muted)', fontSize: '14px' }}>
+                        ✨ لا توجد جزاءات أو خصومات مسجلة في هذا النطاق.
                       </td>
                     </tr>
                   ) : (
@@ -1583,108 +1678,139 @@ export default function BylawsModule({
                       const objStatus = p.objection?.status;
 
                       return (
-                        <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td style={{ padding: '12px 14px', fontWeight: 600 }}>{p.date}</td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <strong>{p.employeeName}</strong>
-                            <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)' }}>
-                              {p.employeeCode}
+                        <tr key={p.id} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.15s ease' }}>
+                          <td style={{ padding: '10px', fontWeight: 600, fontSize: '12.5px', color: '#334155' }}>
+                            {p.date}
+                          </td>
+                          <td style={{ padding: '10px' }}>
+                            <strong style={{ fontSize: '13.5px', color: 'var(--text)' }}>{p.employeeName}</strong>
+                            <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', marginTop: '2px' }}>
+                              كود: {p.employeeCode}
                             </span>
                           </td>
-                          <td style={{ padding: '12px 14px' }}>{p.branchName}</td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <span className="badge badge-primary">{p.category}</span>
-                            <strong style={{ display: 'block', fontSize: '13px', marginTop: '2px' }}>{p.ruleTitle}</strong>
+                          <td style={{ padding: '10px', fontSize: '12.5px', color: '#475569' }}>
+                            {p.branchName}
                           </td>
-                          <td style={{ padding: '12px 14px', fontWeight: '800', color: p.amount > 0 ? '#dc2626' : 'var(--muted)' }}>
-                            {p.amount > 0 ? `${p.amount} ج.م` : 'بدون خصم مالي'}
+                          <td style={{ padding: '10px' }}>
+                            {p.amount > 0 ? (
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                background: '#fee2e2',
+                                color: '#dc2626',
+                                fontWeight: 800,
+                                fontSize: '12.5px'
+                              }}>
+                                {p.amount} ج.م
+                              </span>
+                            ) : (
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                background: '#f0fdf4',
+                                color: '#166534',
+                                fontWeight: 600,
+                                fontSize: '11.5px'
+                              }}>
+                                بدون خصم
+                              </span>
+                            )}
                           </td>
-                          <td style={{ padding: '12px 14px', width: '240px', maxWidth: '240px', wordBreak: 'break-word', fontSize: '12.5px' }}>
+                          <td style={{ padding: '10px', fontSize: '12.5px' }}>
                             <div style={{ fontWeight: 600, color: 'var(--text)' }}>{p.reason}</div>
                             {p.details && p.details !== p.reason && (
-                              <span style={{ display: 'block', marginTop: '3px', fontSize: '11px', color: 'var(--muted)', lineHeight: '1.4' }}>{p.details}</span>
+                              <span
+                                style={{
+                                  display: 'block',
+                                  marginTop: '2px',
+                                  fontSize: '11px',
+                                  color: 'var(--muted)',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  maxWidth: '260px'
+                                }}
+                                title={p.details}
+                              >
+                                {p.details}
+                              </span>
                             )}
                           </td>
-                          <td style={{ padding: '12px 14px' }}>
+                          <td style={{ padding: '10px' }}>
                             {isCancelled ? (
-                              <span className="badge badge-danger">ملغي ومسترد</span>
+                              <span className="badge badge-danger" style={{ fontSize: '11px' }}>ملغي ومسترد</span>
                             ) : isRejected ? (
-                              <span className="badge badge-danger">مرفوض</span>
+                              <span className="badge badge-danger" style={{ fontSize: '11px' }}>مرفوض</span>
                             ) : isApproved ? (
                               isGrace ? (
-                                <span className="badge" style={{ background: 'rgba(16,185,129,0.15)', color: '#047857', border: '1px solid rgba(16,185,129,0.3)', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700 }}>
-                                  سماح (بدون خصم)
+                                <span className="badge" style={{ background: 'rgba(16,185,129,0.15)', color: '#047857', border: '1px solid rgba(16,185,129,0.3)', padding: '3px 7px', borderRadius: '6px', fontSize: '11px', fontWeight: 700 }}>
+                                  سماح
                                 </span>
                               ) : (
-                                <span className="badge badge-success">معتمد ومخصوم</span>
+                                <span className="badge badge-success" style={{ fontSize: '11px' }}>معتمد ومخصوم</span>
                               )
                             ) : (
-                              <span className="badge badge-warning">معلق بانتظار الإدارة</span>
+                              <span className="badge badge-warning" style={{ fontSize: '11px' }}>معلق بانتظار الإدارة</span>
                             )}
                           </td>
-                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                            {isAdmin ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                {hasObjection && objStatus === 'pending' && (
-                                  <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: '6px 8px', borderRadius: '6px', fontSize: '11px' }}>
-                                    <strong style={{ color: '#b45309', display: 'block' }}>اعتراض مقدم:</strong>
-                                    <span style={{ display: 'block', margin: '2px 0' }}>"{p.objection.reason}"</span>
-                                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
-                                      <button
-                                        type="button"
-                                        className="btn btn-start"
-                                        style={{ fontSize: '10.5px', padding: '2px 6px', background: '#16a34a' }}
-                                        onClick={() => handleAdminApproveObjection(p.id)}
-                                        title="قبول الاعتراض وإلغاء الجزاء"
-                                      >
-                                        قبول وإلغاء
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="btn btn-ghost"
-                                        style={{ fontSize: '10.5px', padding: '2px 6px', color: '#dc2626' }}
-                                        onClick={() => { setAdminRejectReplyReq(p); setAdminRejectReplyText(''); }}
-                                        title="رفض الاعتراض وتثبيت الجزاء"
-                                      >
-                                        رفض
-                                      </button>
-                                    </div>
+                          <td style={{ padding: '10px', textAlign: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                style={{ padding: '3px 8px', fontSize: '11.5px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                                onClick={() => setInspectedPenaltyRecord(p)}
+                                title="معاينة تفاصيل المخالفة"
+                              >
+                                🔍 تفاصيل
+                              </button>
+
+                              {isAdmin ? (
+                                hasObjection && objStatus === 'pending' ? (
+                                  <div style={{ display: 'flex', gap: '3px' }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-start"
+                                      style={{ fontSize: '10.5px', padding: '2px 6px', background: '#16a34a' }}
+                                      onClick={() => handleAdminApproveObjection(p.id)}
+                                      title="قبول الاعتراض وإلغاء الجزاء"
+                                    >
+                                      قبول
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost"
+                                      style={{ fontSize: '10.5px', padding: '2px 6px', color: '#dc2626', border: '1px solid #fca5a5' }}
+                                      onClick={() => { setAdminRejectReplyReq(p); setAdminRejectReplyText(''); }}
+                                      title="رفض الاعتراض"
+                                    >
+                                      رفض
+                                    </button>
                                   </div>
-                                )}
-                                {hasObjection && objStatus === 'approved' && (
-                                  <span className="badge badge-success" style={{ fontSize: '11px' }}>✅ تم قبول الاعتراض</span>
-                                )}
-                                {hasObjection && objStatus === 'rejected' && (
-                                  <span className="badge badge-danger" style={{ fontSize: '11px' }}>❌ تم رفض الاعتراض</span>
-                                )}
-                                {!hasObjection && (
-                                  <span style={{ color: 'var(--muted)', fontSize: '12px' }}>—</span>
-                                )}
-                              </div>
-                            ) : (
-                              userRole === 'employee' ? (
+                                ) : hasObjection && objStatus === 'approved' ? (
+                                  <span className="badge badge-success" style={{ fontSize: '10.5px' }}>✅ قُبل</span>
+                                ) : hasObjection && objStatus === 'rejected' ? (
+                                  <span className="badge badge-danger" style={{ fontSize: '10.5px' }}>❌ رُفض</span>
+                                ) : null
+                              ) : userRole === 'employee' ? (
                                 hasObjection ? (
-                                  <div>
-                                    <span className={`badge ${objStatus === 'approved' ? 'badge-success' : objStatus === 'rejected' ? 'badge-danger' : 'badge-warning'}`} style={{ fontSize: '11px' }}>
-                                      {objStatus === 'approved' ? 'تم قبول الاعتراض' : objStatus === 'rejected' ? 'تم رفض الاعتراض' : 'الاعتراض قيد المراجعة'}
-                                    </span>
-                                  </div>
+                                  <span className={`badge ${objStatus === 'approved' ? 'badge-success' : objStatus === 'rejected' ? 'badge-danger' : 'badge-warning'}`} style={{ fontSize: '10.5px' }}>
+                                    {objStatus === 'approved' ? 'قُبل الاعتراض' : objStatus === 'rejected' ? 'رُفض الاعتراض' : 'قيد المراجعة'}
+                                  </span>
                                 ) : !isCancelled ? (
                                   <button
                                     type="button"
                                     className="btn btn-outline"
-                                    style={{ color: '#dc2626', borderColor: '#dc2626', fontSize: '11.5px', padding: '4px 8px' }}
+                                    style={{ color: '#dc2626', borderColor: '#dc2626', fontSize: '10.5px', padding: '2px 6px' }}
                                     onClick={() => { setObjectionTargetReq(p); setObjectionReason(''); }}
                                   >
-                                    ✋ تقديم اعتراض
+                                    ✋ تظلم
                                   </button>
-                                ) : (
-                                  <span style={{ color: 'var(--muted)', fontSize: '12px' }}>—</span>
-                                )
-                              ) : (
-                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>{isApproved ? (isGrace ? 'سماح' : 'معتمد') : isRejected ? 'مرفوض' : 'معلق'}</span>
-                              )
-                            )}
+                                ) : null
+                              ) : null}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1790,6 +1916,66 @@ export default function BylawsModule({
                 onClick={() => handleAdminRejectObjection(adminRejectReplyReq.id, adminRejectReplyText)}
               >
                 تأكيد الرفض وتثبيت الجزاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: View Full Penalty Record Details */}
+      {inspectedPenaltyRecord && (
+        <div className="modal-backdrop" onClick={() => setInspectedPenaltyRecord(null)}>
+          <div className="modal-card" style={{ maxWidth: '640px', width: '95%', padding: '24px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '12px', marginBottom: '16px' }}>
+              <h3 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>🔍</span> تفاصيل المخالفة والجزاء اللائحي
+              </h3>
+              <button type="button" className="btn btn-ghost" onClick={() => setInspectedPenaltyRecord(null)} style={{ fontSize: '16px', padding: '4px 8px' }}>✕</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', background: 'var(--surface-muted)', padding: '14px', borderRadius: '10px', marginBottom: '16px', fontSize: '13px' }}>
+              <div><span style={{ color: 'var(--muted)' }}>الموظف: </span><strong>{inspectedPenaltyRecord.employeeName}</strong></div>
+              <div><span style={{ color: 'var(--muted)' }}>الكود: </span><strong>{inspectedPenaltyRecord.employeeCode || '—'}</strong></div>
+              <div><span style={{ color: 'var(--muted)' }}>الفرع: </span><strong>{inspectedPenaltyRecord.branchName || 'الفرع الرئيسي'}</strong></div>
+              <div><span style={{ color: 'var(--muted)' }}>التاريخ: </span><strong>{inspectedPenaltyRecord.date}</strong></div>
+              <div><span style={{ color: 'var(--muted)' }}>فئة الجزاء: </span><span className="badge badge-primary">{inspectedPenaltyRecord.category || 'انضباط ولائحة'}</span></div>
+              <div>
+                <span style={{ color: 'var(--muted)' }}>المقدار المالي: </span>
+                <strong style={{ color: inspectedPenaltyRecord.amount > 0 ? '#dc2626' : '#15803d' }}>
+                  {inspectedPenaltyRecord.amount > 0 ? `${inspectedPenaltyRecord.amount} ج.م` : 'بدون خصم (سماح)'}
+                </strong>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--muted)', marginBottom: '4px' }}>بند اللائحة والواقعة:</div>
+              <div style={{ padding: '10px 12px', background: '#ffffff', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '13.5px', fontWeight: 600, color: 'var(--primary-dark)' }}>
+                {inspectedPenaltyRecord.ruleTitle || inspectedPenaltyRecord.reason || 'مخالفة لائحية'}
+              </div>
+            </div>
+
+            {inspectedPenaltyRecord.details && (
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--muted)', marginBottom: '4px' }}>البيان والتفاصيل الإضافية:</div>
+                <div style={{ padding: '10px 12px', background: '#ffffff', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '13px', lineHeight: '1.6', color: 'var(--text)' }}>
+                  {inspectedPenaltyRecord.details}
+                </div>
+              </div>
+            )}
+
+            {inspectedPenaltyRecord.objection && (
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px', marginBottom: '14px' }}>
+                <div style={{ fontWeight: 'bold', color: '#b45309', fontSize: '13px', marginBottom: '4px' }}>✋ بيانات تظلم الموظف:</div>
+                <div style={{ fontSize: '12.5px', color: '#78350f' }}>"{inspectedPenaltyRecord.objection.reason}"</div>
+                <div style={{ marginTop: '6px', fontSize: '11.5px', color: '#92400e' }}>
+                  الحالة: <strong>{inspectedPenaltyRecord.objection.status === 'approved' ? 'مقبول وتم إلغاء الجزاء' : inspectedPenaltyRecord.objection.status === 'rejected' ? 'مرفوض' : 'قيد المراجعة'}</strong>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setInspectedPenaltyRecord(null)}>
+                إغلاق
               </button>
             </div>
           </div>

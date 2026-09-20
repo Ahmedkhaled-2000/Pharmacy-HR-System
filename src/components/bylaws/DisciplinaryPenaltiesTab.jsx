@@ -1391,6 +1391,76 @@ export default function DisciplinaryPenaltiesTab({
     showToast?.('📥 تم تصدير تقرير الجزاءات التأديبية بنجاح');
   };
 
+  // Clear all penalties, decisions & monthly reports to start fresh
+  const handleClearAllPenaltiesLog = async () => {
+    const isConfirmed = await showConfirm({
+      title: '⚠️ مسح سجل الجزاءات والمخالفات والبدء من جديد',
+      message: 'هل أنت متأكد من رغبتك في مسح كافة سجلات الجزاءات والمخالفات، وسجل القرارات والاعتمادات، وتصفير التقرير الشهري بالكامل للبدء من جديد؟ سيتم حذف جميع المخالفات والخصومات التأديبية المسجلة نهائياً.',
+      confirmText: 'نعم، مسح السجل والبدء من جديد',
+      cancelText: 'تراجع وإلغاء',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
+
+    // Filter out penalty, lateness, and objection requests
+    const cleanRequests = (state.requests || []).filter((r) => {
+      if (!r) return false;
+      const t = r.type;
+      const st = r.subType;
+      const idStr = String(r.id || '');
+      if (
+        t === 'disciplinary_penalty' ||
+        st === 'disciplinary_penalty' ||
+        t === 'penalty' ||
+        t === 'deduction' ||
+        st === 'penalty' ||
+        t === 'late_penalty' ||
+        t === 'penalty_objection' ||
+        t === 'early_exit' ||
+        st === 'lateness' ||
+        idStr.startsWith('req_late_inc_') ||
+        idStr.startsWith('obj_req_') ||
+        idStr.startsWith('obj_inc_')
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    // Clear late incidents
+    const cleanLateIncidents = [];
+
+    // Filter out penalty adjustments from financial adjustments
+    const cleanAdjustments = (state.adjustments || []).filter((a) => {
+      if (!a) return false;
+      const idStr = String(a.id || '');
+      if (
+        a.type === 'penalty' ||
+        a.type === 'deduction' ||
+        idStr.startsWith('adj_pen_') ||
+        idStr.startsWith('adj_disc_') ||
+        (a.reason && (a.reason.includes('جزاء') || a.reason.includes('مخالفة') || a.reason.includes('تأخير') || a.reason.includes('عجز الجرد')))
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    const updatedState = {
+      ...state,
+      requests: cleanRequests,
+      lateIncidents: cleanLateIncidents,
+      adjustments: cleanAdjustments,
+      disciplinaryRecords: [],
+      disciplinaryDecisions: []
+    };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('✅ تم مسح سجل الجزاءات والمخالفات والقرارات بنجاح والبدء من جديد');
+  };
+
   return (
     <div style={{ fontFamily: "'Tajawal', sans-serif" }}>
       {/* Sub Navigation Bar */}
@@ -2208,30 +2278,55 @@ export default function DisciplinaryPenaltiesTab({
                 ))}
               </select>
             </div>
+
+            {isAdmin && (
+              <div style={{ marginRight: 'auto' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{
+                    borderColor: '#ef4444',
+                    color: '#dc2626',
+                    fontWeight: 'bold',
+                    fontSize: '12.5px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '7px 14px',
+                    borderRadius: '8px',
+                    background: '#ffffff',
+                    boxShadow: '0 1px 2px rgba(220,38,38,0.06)'
+                  }}
+                  onClick={handleClearAllPenaltiesLog}
+                  title="مسح سجل الجزاءات والمخالفات والقرارات بالكامل والبدء من جديد"
+                >
+                  <span>🗑️</span> مسح السجل والبدء من جديد
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Records Table */}
-          <div style={{ background: '#ffffff', border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden' }}>
-            <table className="bylaws-table">
+          <div style={{ background: '#ffffff', border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+            <table className="bylaws-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right' }}>
               <thead>
-                <tr>
-                  <th>التاريخ</th>
-                  <th>الموظف</th>
-                  <th>الفرع</th>
-                  <th>فئة ونوع المخالفة</th>
-                  <th>العداد والتكرار</th>
-                  <th>الإجراء التأديبي</th>
-                  <th>قيمة الخصم</th>
-                  <th>منشئ المخالفة</th>
-                  <th>الحالة</th>
-                  <th>الإجراءات والتدقيق</th>
+                <tr style={{ background: '#f8fafc', borderBottom: '2px solid var(--border)' }}>
+                  <th style={{ padding: '12px 10px', width: '90px', color: '#475569', fontSize: '13px' }}>التاريخ</th>
+                  <th style={{ padding: '12px 10px', color: '#475569', fontSize: '13px' }}>الموظف</th>
+                  <th style={{ padding: '12px 10px', color: '#475569', fontSize: '13px' }}>الفرع</th>
+                  <th style={{ padding: '12px 10px', width: '110px', textAlign: 'center', color: '#475569', fontSize: '13px' }}>نوع الفئة</th>
+                  <th style={{ padding: '12px 10px', width: '75px', textAlign: 'center', color: '#475569', fontSize: '13px' }}>العداد</th>
+                  <th style={{ padding: '12px 10px', color: '#475569', fontSize: '13px' }}>الإجراء والخصم</th>
+                  <th style={{ padding: '12px 10px', width: '135px', color: '#475569', fontSize: '13px' }}>منشئ المخالفة</th>
+                  <th style={{ padding: '12px 10px', width: '110px', color: '#475569', fontSize: '13px' }}>الحالة</th>
+                  <th style={{ padding: '12px 10px', width: '160px', textAlign: 'center', color: '#475569', fontSize: '13px' }}>الإجراءات والتدقيق</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredPenalties.length === 0 ? (
                   <tr>
-                    <td colSpan={10} style={{ textAlign: 'center', padding: '30px', color: 'var(--muted)' }}>
-                      لا توجد قرارات أو مخالفات تأديبية مطابقة للبحث.
+                    <td colSpan={9} style={{ textAlign: 'center', padding: '36px', color: 'var(--muted)', fontSize: '14px' }}>
+                      ✨ لا توجد قرارات أو مخالفات تأديبية مطابقة للبحث.
                     </td>
                   </tr>
                 ) : (
@@ -2247,79 +2342,72 @@ export default function DisciplinaryPenaltiesTab({
 
                     const defaultCat = policy?.[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
                     const cat = resolveDisciplinaryCategory(pen, policy) || defaultCat;
-                    const cleanTitle = String(pen.ruleTitle || pen.reason || 'مخالفة لائحية')
-                      .replace(/^CAT_ADMIN_PENALTY\s*/i, '')
-                      .replace(/^late_[a-z0-9_]+\s*/i, '');
 
                     return (
-                      <tr key={pen.id} style={{ opacity: isCancelled ? 0.6 : 1 }}>
-                        <td>{pen.date}</td>
-                        <td>
-                          <strong>{emp ? getEmpDisplayName(emp) : (pen.employeeName || '—')}</strong>
-                          <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)' }}>
+                      <tr key={pen.id} style={{ opacity: isCancelled ? 0.6 : 1, borderBottom: '1px solid var(--border)', transition: 'background 0.15s ease' }}>
+                        <td style={{ padding: '10px', fontWeight: 600, fontSize: '12.5px', color: '#334155' }}>{pen.date}</td>
+                        <td style={{ padding: '10px' }}>
+                          <strong style={{ fontSize: '13px', color: 'var(--text)' }}>{emp ? getEmpDisplayName(emp) : (pen.employeeName || '—')}</strong>
+                          <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', marginTop: '2px' }}>
                             {pen.employeeCode || emp?.code || '—'}
                           </span>
                         </td>
-                        <td>{bObj?.name || 'الفرع الرئيسي'}</td>
-                        <td>
+                        <td style={{ padding: '10px', fontSize: '12.5px', color: '#475569' }}>{bObj?.name || 'الفرع الرئيسي'}</td>
+                        <td style={{ padding: '10px', textAlign: 'center' }}>
                           <span
                             className="badge badge-primary"
                             style={{
                               background: cat?.color || '#0284c7',
                               color: '#ffffff',
-                              fontSize: '11px',
+                              fontSize: '11.5px',
                               fontWeight: 'bold',
-                              padding: '2px 8px'
+                              padding: '3px 10px',
+                              borderRadius: '6px',
+                              display: 'inline-block'
                             }}
+                            title={cat?.name || `فئة ${cat?.code || '—'}`}
                           >
-                            فئة {cat.code}
+                            {cat?.name ? cat.name.split('—')[0].trim() : `فئة ${cat?.code || '—'}`}
                           </span>
-                          <strong style={{ display: 'block', fontSize: '12.5px', marginTop: '2px' }}>{cleanTitle}</strong>
-                          {pen.isOverride && (
-                            <span className="badge badge-danger" style={{ fontSize: '10px', marginTop: '2px' }}>⚡ تجاوز تلقائي</span>
-                          )}
                         </td>
-                        <td>
-                          <span style={{ fontWeight: 'bold', color: '#047857' }}>المرة {pen.occurrenceNumber || 1}</span>
+                        <td style={{ padding: '10px', textAlign: 'center' }}>
+                          <span style={{ fontWeight: 'bold', color: '#047857', fontSize: '12px' }}>المرة {pen.occurrenceNumber || 1}</span>
                         </td>
-                        <td>
-                          <strong style={{ color: pen.deductionDays > 0 ? '#dc2626' : '#1e293b' }}>
+                        <td style={{ padding: '10px' }}>
+                          <strong style={{ color: pen.deductionDays > 0 ? '#b91c1c' : '#1e293b', fontSize: '12.5px', display: 'block' }}>
                             {pen.actionTitle}
                           </strong>
-                        </td>
-                        <td>
                           {pen.amount > 0 ? (
-                            <span style={{ color: '#dc2626', fontWeight: 'bold' }}>
-                              {pen.amount} ج.م
-                              <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)' }}>
-                                ({pen.deductionDays} يوم)
-                              </span>
+                            <span style={{ color: '#dc2626', fontWeight: 800, fontSize: '11.5px', display: 'block', marginTop: '2px' }}>
+                              خصم {pen.amount} ج.م ({pen.deductionDays || 0} يوم)
                             </span>
                           ) : (
-                            <span style={{ color: 'var(--muted)' }}>—</span>
+                            <span style={{ color: 'var(--muted)', fontSize: '11px', display: 'block', marginTop: '2px' }}>
+                              بدون خصم مالي
+                            </span>
                           )}
                         </td>
-                        <td>
+                        <td style={{ padding: '10px' }}>
                           {renderPenaltyCreatorBadge(pen)}
                         </td>
-                        <td>
+                        <td style={{ padding: '10px' }}>
                           {isCancelled ? (
-                            <span className="badge badge-danger">ملغي</span>
+                            <span className="badge badge-danger" style={{ fontSize: '11px' }}>ملغي</span>
                           ) : isRejected ? (
-                            <span className="badge badge-danger">مرفوض</span>
+                            <span className="badge badge-danger" style={{ fontSize: '11px' }}>مرفوض</span>
                           ) : isApproved ? (
-                            <span className="badge badge-success">معتمد ومطبق</span>
+                            <span className="badge badge-success" style={{ fontSize: '11px' }}>معتمد ومطبق</span>
                           ) : (
-                            <span className="badge badge-warning">معلق للاعتماد</span>
+                            <span className="badge badge-warning" style={{ fontSize: '11px' }}>معلق للاعتماد</span>
                           )}
                         </td>
-                        <td>
-                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <td style={{ padding: '10px', textAlign: 'center' }}>
+                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center' }}>
                             {/* Inspect / Audit log button */}
                             <button
                               type="button"
                               className="btn btn-ghost"
-                              style={{ padding: '3px 8px', fontSize: '11.5px' }}
+                              style={{ padding: '3px 8px', fontSize: '11.5px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px' }}
                               title="استعراض التفاصيل وسجل التدقيق"
                               onClick={() => setInspectedPenalty(pen)}
                             >
@@ -2353,7 +2441,7 @@ export default function DisciplinaryPenaltiesTab({
                                 <button
                                   type="button"
                                   className="btn btn-start"
-                                  style={{ padding: '3px 8px', fontSize: '11.5px', background: '#16a34a' }}
+                                  style={{ padding: '3px 8px', fontSize: '11px', background: '#16a34a' }}
                                   onClick={() => handleApprovePenalty(pen)}
                                 >
                                   ✅ اعتماد
@@ -2361,7 +2449,7 @@ export default function DisciplinaryPenaltiesTab({
                                 <button
                                   type="button"
                                   className="btn btn-ghost"
-                                  style={{ padding: '3px 8px', fontSize: '11.5px', color: '#dc2626' }}
+                                  style={{ padding: '3px 8px', fontSize: '11px', color: '#dc2626', border: '1px solid #fca5a5' }}
                                   onClick={() => handleRejectPenalty(pen)}
                                 >
                                   ❌ رفض
@@ -2384,7 +2472,7 @@ export default function DisciplinaryPenaltiesTab({
                                 <button
                                   type="button"
                                   className="btn btn-ghost"
-                                  style={{ padding: '2px 6px', fontSize: '10.5px', color: '#dc2626' }}
+                                  style={{ padding: '2px 6px', fontSize: '10.5px', color: '#dc2626', border: '1px solid #fca5a5' }}
                                   title="رفض التظلم"
                                   onClick={() => {
                                     setAdminRejectReplyPen(pen);
@@ -2480,55 +2568,149 @@ export default function DisciplinaryPenaltiesTab({
             </div>
           </div>
 
-          <div style={{ background: '#ffffff', border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden' }}>
-            <table className="bylaws-table">
+          {/* Executive KPI Summary Cards for Selected Report Month */}
+          {(() => {
+            const reportList = filteredPenalties.filter((p) => (p.date || p.createdAt || '').startsWith(reportMonth));
+            const totalMonthAmt = reportList.reduce((acc, p) => acc + (p.status === 'approved' || p.adminApproved ? (parseFloat(p.amount) || 0) : 0), 0);
+            const totalMonthDays = reportList.reduce((acc, p) => acc + (p.status === 'approved' || p.adminApproved ? (parseFloat(p.deductionDays) || 0) : 0), 0);
+            const uniqueEmpsCount = new Set(reportList.map((p) => p.employeeId)).size;
+
+            return (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                  gap: '12px',
+                  marginBottom: '16px'
+                }}
+              >
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 16px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>إجمالي وقائع الشهر</span>
+                  <h4 style={{ margin: '4px 0 0', fontSize: '20px', color: '#1e293b' }}>{reportList.length} مخالفة</h4>
+                </div>
+                <div style={{ background: '#fff1f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '12px 16px' }}>
+                  <span style={{ fontSize: '12px', color: '#991b1b' }}>إجمالي الخصومات المنفذة</span>
+                  <h4 style={{ margin: '4px 0 0', fontSize: '20px', color: '#dc2626' }}>{totalMonthAmt.toLocaleString()} ج.م</h4>
+                </div>
+                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 16px' }}>
+                  <span style={{ fontSize: '12px', color: '#92400e' }}>إجمالي أيام الخصم</span>
+                  <h4 style={{ margin: '4px 0 0', fontSize: '20px', color: '#b45309' }}>{totalMonthDays} يوم</h4>
+                </div>
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '12px 16px' }}>
+                  <span style={{ fontSize: '12px', color: '#166534' }}>الموظفون المتأثرون</span>
+                  <h4 style={{ margin: '4px 0 0', fontSize: '20px', color: '#15803d' }}>{uniqueEmpsCount} موظف</h4>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Monthly Report Table */}
+          <div style={{ background: '#ffffff', border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+            <table className="bylaws-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right' }}>
               <thead>
-                <tr>
-                  <th>الموظف</th>
-                  <th>الفرع</th>
-                  <th>التاريخ</th>
-                  <th>فئة المخالفة</th>
-                  <th>نوع المخالفة</th>
-                  <th>العداد</th>
-                  <th>الإجراء</th>
-                  <th>أيام الخصم</th>
-                  <th>القيمة (ج.م)</th>
-                  <th>الحالة</th>
+                <tr style={{ background: '#f8fafc', borderBottom: '2px solid var(--border)' }}>
+                  <th style={{ padding: '12px 10px', color: '#475569', fontSize: '13px' }}>الموظف والفرع</th>
+                  <th style={{ padding: '12px 10px', width: '95px', color: '#475569', fontSize: '13px' }}>التاريخ</th>
+                  <th style={{ padding: '12px 10px', color: '#475569', fontSize: '13px' }}>فئة ونوع المخالفة</th>
+                  <th style={{ padding: '12px 10px', color: '#475569', fontSize: '13px' }}>العداد والإجراء</th>
+                  <th style={{ padding: '12px 10px', width: '130px', color: '#475569', fontSize: '13px' }}>الخصم المالي</th>
+                  <th style={{ padding: '12px 10px', width: '115px', color: '#475569', fontSize: '13px' }}>الحالة</th>
+                  <th style={{ padding: '12px 10px', width: '90px', textAlign: 'center', color: '#475569', fontSize: '13px' }}>معاينة</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredPenalties
                   .filter((p) => (p.date || p.createdAt || '').startsWith(reportMonth))
-                  .map((pen) => {
-                    const emp = allEmployeesList.find((e) => e && String(e.id) === String(pen.employeeId));
-                    const bObj = branches.find((b) => b && String(b.id) === String(pen.branchId));
-                    return (
-                      <tr key={pen.id}>
-                        <td><strong>{pen.employeeName || emp?.name}</strong> ({pen.employeeCode || emp?.code || '—'})</td>
-                        <td>{bObj?.name || 'الفرع الرئيسي'}</td>
-                        <td>{pen.date}</td>
-                        <td><span className="badge badge-primary">{pen.categoryCode || '—'}</span></td>
-                        <td>{pen.ruleTitle}</td>
-                        <td>المرة {pen.occurrenceNumber || 1}</td>
-                        <td><strong>{pen.actionTitle}</strong></td>
-                        <td>{pen.deductionDays || 0}</td>
-                        <td style={{ fontWeight: 'bold', color: pen.amount > 0 ? '#dc2626' : 'inherit' }}>
-                          {pen.amount || 0} ج.م
-                        </td>
-                        <td>
-                          {pen.status === 'approved' ? (
-                            <span className="badge badge-success">معتمد ومخصوم</span>
-                          ) : pen.status === 'rejected' ? (
-                            <span className="badge badge-danger">مرفوض</span>
-                          ) : pen.status === 'cancelled' ? (
-                            <span className="badge badge-danger">ملغي</span>
-                          ) : (
-                            <span className="badge badge-warning">معلق</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  .length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ textAlign: 'center', padding: '36px', color: 'var(--muted)', fontSize: '14px' }}>
+                      ✨ لا توجد مخالفات أو جزاءات مسجلة لهذا الشهر ({reportMonth}).
+                    </td>
+                  </tr>
+                ) : (
+                  filteredPenalties
+                    .filter((p) => (p.date || p.createdAt || '').startsWith(reportMonth))
+                    .map((pen) => {
+                      const emp = allEmployeesList.find((e) => e && String(e.id) === String(pen.employeeId));
+                      const bObj = branches.find((b) => b && String(b.id) === String(pen.branchId));
+                      const defaultCat = policy?.[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
+                      const cat = resolveDisciplinaryCategory(pen, policy) || defaultCat;
+
+                      return (
+                        <tr key={pen.id} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.15s ease' }}>
+                          <td style={{ padding: '10px' }}>
+                            <strong style={{ fontSize: '13px', color: 'var(--text)' }}>{pen.employeeName || emp?.name}</strong>
+                            <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', marginTop: '2px' }}>
+                              كود: {pen.employeeCode || emp?.code || '—'} | {bObj?.name || 'الفرع الرئيسي'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px', fontWeight: 600, fontSize: '12.5px', color: '#334155' }}>
+                            {pen.date}
+                          </td>
+                          <td style={{ padding: '10px' }}>
+                            <span
+                              className="badge badge-primary"
+                              style={{
+                                background: cat?.color || '#0284c7',
+                                color: '#ffffff',
+                                fontSize: '11px',
+                                fontWeight: 'bold',
+                                padding: '2px 8px',
+                                borderRadius: '4px'
+                              }}
+                            >
+                              فئة {cat.code}
+                            </span>
+                            <span style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginTop: '2px', color: '#1e293b' }}>
+                              {pen.ruleTitle}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px' }}>
+                            <span style={{ fontSize: '11px', color: '#047857', fontWeight: 'bold', display: 'block' }}>
+                              المرة {pen.occurrenceNumber || 1}
+                            </span>
+                            <strong style={{ fontSize: '12.5px', color: '#334155' }}>{pen.actionTitle}</strong>
+                          </td>
+                          <td style={{ padding: '10px' }}>
+                            {pen.amount > 0 ? (
+                              <div>
+                                <span style={{ color: '#dc2626', fontWeight: 800, fontSize: '12.5px' }}>
+                                  {pen.amount} ج.م
+                                </span>
+                                <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)' }}>
+                                  ({pen.deductionDays || 0} يوم)
+                                </span>
+                              </div>
+                            ) : (
+                              <span style={{ color: 'var(--muted)', fontSize: '11.5px' }}>بدون خصم</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '10px' }}>
+                            {pen.status === 'approved' ? (
+                              <span className="badge badge-success" style={{ fontSize: '11px' }}>معتمد ومخصوم</span>
+                            ) : pen.status === 'rejected' ? (
+                              <span className="badge badge-danger" style={{ fontSize: '11px' }}>مرفوض</span>
+                            ) : pen.status === 'cancelled' ? (
+                              <span className="badge badge-danger" style={{ fontSize: '11px' }}>ملغي</span>
+                            ) : (
+                              <span className="badge badge-warning" style={{ fontSize: '11px' }}>معلق</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '10px', textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ padding: '3px 8px', fontSize: '11.5px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                              title="استعراض التفاصيل الكاملة وسجل التدقيق"
+                              onClick={() => setInspectedPenalty(pen)}
+                            >
+                              🔍 تفاصيل
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                )}
               </tbody>
             </table>
           </div>
