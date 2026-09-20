@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { fetchCurrentIP } from '../../utils/deviceAuth';
 import {
   exportFullBackup,
@@ -563,6 +563,26 @@ export default function SettingsModule({
   const [isFetchingIp, setIsFetchingIp] = useState(false);
   const [capturedIpModal, setCapturedIpModal] = useState(null);
   const [editingIpModal, setEditingIpModal] = useState(null);
+
+  // Dynamic branch suggestions derived from registered branches in system
+  const branchSuggestions = useMemo(() => {
+    const list = [];
+    const registered = (state?.branches || [])
+      .map((b) => (typeof b === 'string' ? b : b?.name)?.trim())
+      .filter(Boolean);
+
+    registered.forEach((name) => {
+      const withRouter = name.startsWith('راوتر') || name.startsWith('شبكة') ? name : `راوتر ${name}`;
+      if (!list.includes(withRouter)) list.push(withRouter);
+      if (!list.includes(name) && name !== withRouter) list.push(name);
+    });
+
+    ['راوتر الإدارة العامة', 'راوتر الفرع الرئيسي', 'شبكة الصيدلية'].forEach((item) => {
+      if (!list.includes(item)) list.push(item);
+    });
+
+    return list;
+  }, [state?.branches]);
 
   // Backup State & Auto-Backup
   const fileInputRef = useRef(null);
@@ -2778,6 +2798,28 @@ export default function SettingsModule({
                   onChange={(e) => setNewIPLabel(e.target.value)}
                   style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: '#fff', boxSizing: 'border-box' }}
                 />
+                {branchSuggestions.length > 0 && (
+                  <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '6px' }}>
+                    {branchSuggestions.slice(0, 4).map((suggest) => (
+                      <button
+                        key={suggest}
+                        type="button"
+                        onClick={() => setNewIPLabel(suggest)}
+                        style={{
+                          border: '1px solid #e2e8f0',
+                          background: '#f8fafc',
+                          color: '#475569',
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        + {suggest}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -4728,36 +4770,119 @@ export default function SettingsModule({
 
       {/* Captured IP Naming Modal */}
       {capturedIpModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, backdropFilter: 'blur(4px)', padding: '16px' }}>
-          <div style={{ background: '#ffffff', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '460px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid var(--border)', textAlign: 'right' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'var(--primary-tint, rgba(16,185,129,0.1))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
+        <div 
+          style={{ 
+            position: 'fixed', 
+            inset: 0, 
+            background: 'rgba(15, 23, 42, 0.7)', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            zIndex: 99999, 
+            backdropFilter: 'blur(6px)', 
+            padding: '16px' 
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setCapturedIpModal(null);
+          }}
+        >
+          <div 
+            style={{ 
+              background: '#ffffff', 
+              borderRadius: '20px', 
+              padding: '26px 30px', 
+              width: '100%', 
+              maxWidth: '480px', 
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(226, 232, 240, 0.8)', 
+              textAlign: 'right',
+              position: 'relative'
+            }}
+          >
+            {/* Close Button */}
+            <button
+              type="button"
+              onClick={() => setCapturedIpModal(null)}
+              style={{
+                position: 'absolute',
+                top: '18px',
+                left: '18px',
+                border: 'none',
+                background: '#f1f5f9',
+                color: '#64748b',
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '15px',
+                fontWeight: 'bold',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#64748b'; }}
+              title="إغلاق النافذة"
+            >
+              ✕
+            </button>
+
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '20px' }}>
+              <div 
+                style={{ 
+                  width: '48px', 
+                  height: '48px', 
+                  borderRadius: '14px', 
+                  background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  fontSize: '24px',
+                  boxShadow: '0 8px 16px -4px rgba(13, 148, 136, 0.35)',
+                  color: '#ffffff',
+                  flexShrink: 0
+                }}
+              >
                 📡
               </div>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '17px', color: 'var(--primary-dark)', fontFamily: 'Cairo' }}>
+              <div style={{ paddingLeft: '32px' }}>
+                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: '#0f766e', fontFamily: 'Cairo, sans-serif' }}>
                   تم التقاط عنوان الـ IP للجهاز بنجاح
                 </h3>
-                <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
+                <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#64748b' }}>
                   يرجى تحديد تسمية أو اسم لهذا الراوتر لتمييزه بسهولة
                 </p>
               </div>
             </div>
 
-            <div style={{ background: '#f8fafc', padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {/* IP Info Badge */}
+            <div 
+              style={{ 
+                background: '#f8fafc', 
+                padding: '12px 16px', 
+                borderRadius: '12px', 
+                marginBottom: '18px', 
+                border: '1px solid #e2e8f0', 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center' 
+              }}
+            >
               <div>
-                <div style={{ fontSize: '11px', color: '#64748b' }}>عنوان الـ IP الملتقط:</div>
-                <div style={{ fontSize: '16px', fontWeight: 'bold', fontFamily: 'monospace', color: '#0f766e', direction: 'ltr', textAlign: 'left' }}>
+                <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '2px' }}>عنوان الـ IP الملتقط:</div>
+                <div style={{ fontSize: '16px', fontWeight: '800', fontFamily: 'monospace', color: '#0f766e', direction: 'ltr', textAlign: 'left' }}>
                   {capturedIpModal.ip}
                 </div>
               </div>
-              <span style={{ fontSize: '11px', background: '#dcfce7', color: '#15803d', padding: '3px 10px', borderRadius: '20px', fontWeight: 'bold' }}>
+              <span style={{ fontSize: '11.5px', background: '#dcfce7', color: '#15803d', padding: '4px 12px', borderRadius: '20px', fontWeight: 'bold', border: '1px solid #bbf7d0' }}>
                 متصل الآن 🟢
               </span>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px', color: 'var(--text)' }}>
+            {/* Label Input */}
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', marginBottom: '8px', color: '#1e293b' }}>
                 🏷️ اسم أو تسمية الراوتر / الجهاز:
               </label>
               <input
@@ -4765,18 +4890,65 @@ export default function SettingsModule({
                 value={capturedIpModal.label}
                 onChange={(e) => setCapturedIpModal({ ...capturedIpModal, label: e.target.value })}
                 placeholder="مثال: راوتر الفرع الرئيسي، راوتر الإدارة..."
-                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '14px', boxSizing: 'border-box' }}
+                style={{ 
+                  width: '100%', 
+                  padding: '11px 14px', 
+                  borderRadius: '10px', 
+                  border: '1.5px solid #0d9488', 
+                  fontSize: '14px', 
+                  fontWeight: '600',
+                  boxSizing: 'border-box',
+                  outline: 'none',
+                  boxShadow: '0 0 0 3px rgba(13, 148, 136, 0.12)',
+                  color: '#0f172a'
+                }}
                 autoFocus
-                onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmAddCapturedIP(); }}
+                onKeyDown={(e) => { 
+                  if (e.key === 'Enter') handleConfirmAddCapturedIP(); 
+                  if (e.key === 'Escape') setCapturedIpModal(null);
+                }}
               />
             </div>
 
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+            {/* Quick Suggestions from Registered Branches */}
+            {branchSuggestions.length > 0 && (
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ fontSize: '11.5px', color: '#64748b', marginBottom: '6px' }}>
+                  💡 اقتراحات سريعة للاختيار (الفروع المسجلة بالنظام):
+                </div>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {branchSuggestions.map((suggest) => (
+                    <button
+                      key={suggest}
+                      type="button"
+                      onClick={() => setCapturedIpModal({ ...capturedIpModal, label: suggest })}
+                      style={{
+                        border: '1px solid #cbd5e1',
+                        background: '#f8fafc',
+                        color: '#334155',
+                        padding: '4px 10px',
+                        borderRadius: '8px',
+                        fontSize: '11.5px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = '#e0f2fe'; e.currentTarget.style.borderColor = '#38bdf8'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#cbd5e1'; }}
+                    >
+                      + {suggest}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
               <button
                 type="button"
                 className="btn btn-outline"
                 onClick={() => setCapturedIpModal(null)}
-                style={{ padding: '8px 18px', fontSize: '13px' }}
+                style={{ padding: '9px 18px', fontSize: '13px', borderRadius: '10px' }}
               >
                 إلغاء
               </button>
@@ -4784,7 +4956,16 @@ export default function SettingsModule({
                 type="button"
                 className="btn btn-start"
                 onClick={handleConfirmAddCapturedIP}
-                style={{ padding: '8px 22px', fontSize: '13px' }}
+                style={{ 
+                  padding: '9px 24px', 
+                  fontSize: '13px', 
+                  borderRadius: '10px',
+                  background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
+                  boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
               >
                 ➕ حفظ وإضافة الراوتر
               </button>
@@ -4935,33 +5116,37 @@ export default function SettingsModule({
               />
             </div>
 
-            {/* Quick Suggestions */}
-            <div style={{ marginBottom: '22px' }}>
-              <div style={{ fontSize: '11.5px', color: '#64748b', marginBottom: '6px' }}>💡 اقتراحات سريعة للاختيار:</div>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {['راوتر الفرع الرئيسي', 'راوتر فرع الحضرة', 'راوتر الإدارة', 'شبكة الصيدلية'].map((suggest) => (
-                  <button
-                    key={suggest}
-                    type="button"
-                    onClick={() => setEditingIpModal({ ...editingIpModal, label: suggest })}
-                    style={{
-                      border: '1px solid #e2e8f0',
-                      background: '#f8fafc',
-                      color: '#334155',
-                      padding: '4px 10px',
-                      borderRadius: '8px',
-                      fontSize: '11.5px',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease'
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = '#e0f2fe'; e.currentTarget.style.borderColor = '#38bdf8'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#e2e8f0'; }}
-                  >
-                    + {suggest}
-                  </button>
-                ))}
+            {/* Quick Suggestions from Registered Branches */}
+            {branchSuggestions.length > 0 && (
+              <div style={{ marginBottom: '22px' }}>
+                <div style={{ fontSize: '11.5px', color: '#64748b', marginBottom: '6px' }}>
+                  💡 اقتراحات سريعة للاختيار (الفروع المسجلة بالنظام):
+                </div>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {branchSuggestions.map((suggest) => (
+                    <button
+                      key={suggest}
+                      type="button"
+                      onClick={() => setEditingIpModal({ ...editingIpModal, label: suggest })}
+                      style={{
+                        border: '1px solid #cbd5e1',
+                        background: '#f8fafc',
+                        color: '#334155',
+                        padding: '4px 10px',
+                        borderRadius: '8px',
+                        fontSize: '11.5px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = '#e0f2fe'; e.currentTarget.style.borderColor = '#38bdf8'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#cbd5e1'; }}
+                    >
+                      + {suggest}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Actions */}
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
