@@ -531,6 +531,13 @@ export default function PayrollModule({
                       }}>
                         <span>🏬 {branchNameDisplay}</span>
                       </div>
+                      {emp.noMonthlySchedule && (
+                        <div style={{ marginTop: '3px' }}>
+                          <span style={{ background: '#ede9fe', color: '#6d28d9', padding: '1px 7px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', border: '1px solid #c4b5fd' }}>
+                            ⏱️ مواعيد متغيرة
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td>
                       <strong style={{ color: '#0f766e' }}>{empSum.hours || 0} س أساسي</strong>
@@ -613,6 +620,15 @@ export default function PayrollModule({
                 </div>
                 <button className="btn btn-ghost" onClick={() => setSelectedEmpModal(null)}>✕ إغلاق</button>
               </div>
+
+              {selectedEmpModal.noMonthlySchedule && (
+                <div style={{ background: '#f5f3ff', border: '1.5px solid #c4b5fd', color: '#5b21b6', padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                  <span>⏱️ نظام الدوام: مواعيد متغيرة (ليس له جدول شهري) — احتساب الراتب كلياً على الساعات الفعلية للبصمة</span>
+                  <span style={{ background: '#ede9fe', padding: '4px 12px', borderRadius: '8px', fontSize: '12px', color: '#6d28d9' }}>
+                    🛋️ أيام الراحة الأسبوعية: {(selectedEmpModal.weeklyRestDays || ['الجمعة']).join('، ')}
+                  </span>
+                </div>
+              )}
 
               {/* Salary Breakdown */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '20px' }}>

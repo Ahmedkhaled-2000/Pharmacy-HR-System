@@ -288,7 +288,29 @@ export default function RosterPreviewModal({
           ) : (
             /* Single branch standard rendering */
             <div>
-              {hasApprovedRoster ? (
+              {employee.noMonthlySchedule ? (
+                <div style={{ background: '#f5f3ff', border: '1.5px solid #c4b5fd', padding: '16px 20px', borderRadius: '12px', color: '#5b21b6', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '24px' }}>⏱️</span>
+                      <strong style={{ fontSize: '15px', color: '#6d28d9' }}>
+                        حالة اعتماد الجدول الشهري: ليس لديه جدول شهري مواعيد متغيرة
+                      </strong>
+                    </div>
+                    <span style={{ background: '#7c3aed', color: '#fff', fontSize: '12px', fontWeight: 800, padding: '4px 12px', borderRadius: '99px' }}>
+                      ساعات حرة عبر البصمة
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#4c1d95', lineHeight: '1.7' }}>
+                    ✓ هذا الموظف يعمل بنظام الساعات المرنة دون مواعيد شفتات ثابتة، ولا تطبق عليه لائحة التأخيرات أو الساعات الإضافية أو الغياب الجدولي.
+                    <br />
+                    🛋️ <strong>أيام الراحة الأسبوعية المعتمدة للموظف:</strong>{' '}
+                    <span style={{ fontWeight: 800, color: '#7c3aed' }}>
+                      {(employee.weeklyRestDays || ['الجمعة']).join('، ')}
+                    </span>
+                  </div>
+                </div>
+              ) : hasApprovedRoster ? (
                 <div style={{ background: '#f0fdf4', border: '1px solid #86efac', padding: '12px 16px', borderRadius: '10px', fontSize: '13px', color: '#166534', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                   <span>
                     حالة اعتماد الجدول الشهري:{' '}
@@ -334,6 +356,40 @@ export default function RosterPreviewModal({
                   </thead>
                   <tbody>
                     {daysOfWeek.map((day) => {
+                      if (employee.noMonthlySchedule) {
+                        const isRest = (employee.weeklyRestDays || ['الجمعة']).includes(day.label);
+                        return (
+                          <tr key={day.key} style={{ background: isRest ? '#fef2f2' : '#f5f3ff' }}>
+                            <td style={{ fontWeight: '800' }}>{day.label}</td>
+                            <td>
+                              {isRest ? (
+                                <span className="badge badge-danger">🔴 راحة أسبوعية (Off)</span>
+                              ) : (
+                                <span className="badge" style={{ background: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd' }}>
+                                  ⏱️ دوام حر بالساعات
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ fontWeight: '700', color: isRest ? 'var(--muted)' : '#6d28d9' }}>
+                              {isRest ? '—' : 'بصمة الحضور'}
+                            </td>
+                            <td style={{ fontWeight: '700', color: isRest ? 'var(--muted)' : '#6d28d9' }}>
+                              {isRest ? '—' : 'بصمة الانصراف'}
+                            </td>
+                            <td style={{ fontWeight: '700' }}>
+                              {isRest ? '0 ساعة' : 'حسب البصمة'}
+                            </td>
+                            <td>
+                              {isRest ? (
+                                <span style={{ color: '#dc2626', fontSize: '12px', fontWeight: 700 }}>راحة معتمدة</span>
+                              ) : (
+                                <span style={{ color: '#6d28d9', fontSize: '12px', fontWeight: 700 }}>ساعات فعلية</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      }
+
                       const shiftInfo = getDayShiftInfo(singleSchedule, day, employee.workHoursPerDay || 8);
                       const { isOff, notScheduled, checkIn, checkOut, hours } = shiftInfo;
 

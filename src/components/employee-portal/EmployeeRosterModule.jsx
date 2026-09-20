@@ -554,6 +554,25 @@ export default function EmployeeRosterModule({
     );
   };
 
+  // الموظف الذي ليس له جدول شهري (مواعيد متغيرة)
+  if (emp?.noMonthlySchedule) {
+    return (
+      <div className="card ep-tab-content fade-in" style={{ padding: '32px 24px', textAlign: 'center' }}>
+        <div style={{ fontSize: '46px', marginBottom: '12px' }}>⏱️</div>
+        <h3 style={{ margin: '0 0 10px 0', color: '#5b21b6', fontWeight: 800 }}>
+          أنت مسجل بنظام العمل بمواعيد متغيرة (ليس له جدول شهري)
+        </h3>
+        <p style={{ color: 'var(--muted)', fontSize: '14px', maxWidth: '640px', margin: '0 auto 16px auto', lineHeight: '1.7' }}>
+          حسابك معفى من إعداد أو إرسال الجداول الشهرية، ولا تطبق عليك لائحة التأخيرات أو المواعيد المقيدة أو الساعات الإضافية. يتم احتساب مستحقاتك وأجرك مباشرة بناءً على عدد الساعات الفعلية المقضية وفق بصمة الحضور والانصراف.
+        </p>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: '#f5f3ff', border: '1px solid #c4b5fd', color: '#6d28d9', padding: '10px 20px', borderRadius: '14px', fontSize: '13.5px', fontWeight: 'bold' }}>
+          <span>🛋️ أيام راحتك الأسبوعية المحددة:</span>
+          <span>{Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.length > 0 ? emp.weeklyRestDays.join('، ') : 'الجمعة'}</span>
+        </div>
+      </div>
+    );
+  }
+
   // Multi-branch render when all branches are selected (!selectedBranchId)
   if (isMultiBranch && !selectedBranchId) {
     return (

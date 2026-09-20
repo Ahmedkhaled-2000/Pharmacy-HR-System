@@ -272,6 +272,8 @@ export default function EmployeeFileModal({
   const [terminationReason, setTerminationReason] = useState('');
   const [password, setPassword] = useState('');
   const [annualLeaveBalance, setAnnualLeaveBalance] = useState('21');
+  const [noMonthlySchedule, setNoMonthlySchedule] = useState(false);
+  const [weeklyRestDays, setWeeklyRestDays] = useState(['الجمعة']);
 
   // 4. Documents Data (Array of { id, title, fileUrl, fileType, uploadedAt })
   const [documents, setDocuments] = useState([]);
@@ -425,6 +427,12 @@ export default function EmployeeFileModal({
       setPassword(editingEmp.password || '');
 
       setAnnualLeaveBalance(editingEmp.annualLeaveBalance !== undefined && editingEmp.annualLeaveBalance !== null && editingEmp.annualLeaveBalance !== '' ? String(editingEmp.annualLeaveBalance) : '21');
+      setNoMonthlySchedule(Boolean(editingEmp.noMonthlySchedule));
+      setWeeklyRestDays(
+        Array.isArray(editingEmp.weeklyRestDays) && editingEmp.weeklyRestDays.length > 0
+          ? editingEmp.weeklyRestDays
+          : ['الجمعة']
+      );
 
       setDocuments(Array.isArray(editingEmp.documents) ? editingEmp.documents.filter(d => d && d.fileUrl) : []);
 
@@ -480,6 +488,8 @@ export default function EmployeeFileModal({
       setPassword('');
 
       setAnnualLeaveBalance('21');
+      setNoMonthlySchedule(false);
+      setWeeklyRestDays(['الجمعة']);
 
       setDocuments([]);
     }
@@ -867,6 +877,8 @@ export default function EmployeeFileModal({
         ? (Number(editingEmp?.sessionVersion || 0)) + 1
         : (Number(editingEmp?.sessionVersion || 0)),
       annualLeaveBalance: parseAnnualLeaveBalance(annualLeaveBalance, 21),
+      noMonthlySchedule: Boolean(noMonthlySchedule),
+      weeklyRestDays: Array.isArray(weeklyRestDays) && weeklyRestDays.length > 0 ? weeklyRestDays : ['الجمعة'],
       documents,
       driveFolderId,
       driveFolderUrl,
@@ -1794,6 +1806,94 @@ export default function EmployeeFileModal({
                   onChange={(e) => setAnnualLeaveBalance(e.target.value)}
                   placeholder="21"
                 />
+              </div>
+
+              {/* ── خيار ليس له جدول شهري (مواعيد متغيرة واحتساب الأجر بالساعات) ── */}
+              <div
+                style={{
+                  gridColumn: 'span 2',
+                  background: noMonthlySchedule ? '#f5f3ff' : '#f8fafc',
+                  border: `1.5px solid ${noMonthlySchedule ? '#8b5cf6' : 'var(--border)'}`,
+                  borderRadius: '12px',
+                  padding: '16px',
+                  transition: 'all 0.25s ease'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', margin: 0, fontWeight: 'bold', color: noMonthlySchedule ? '#5b21b6' : 'var(--text)' }}>
+                    <input
+                      type="checkbox"
+                      checked={noMonthlySchedule}
+                      onChange={(e) => setNoMonthlySchedule(e.target.checked)}
+                      style={{ width: '20px', height: '20px', accentColor: '#7c3aed', cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: '14.5px' }}>
+                      ⏱️ ليس له جدول شهري (مواعيد متغيرة واحتساب الراتب بالساعات الفعلية)
+                    </span>
+                  </label>
+                  {noMonthlySchedule && (
+                    <span style={{ background: '#ede9fe', color: '#6d28d9', fontSize: '11.5px', fontWeight: 'bold', padding: '3px 10px', borderRadius: '20px', border: '1px solid #c4b5fd' }}>
+                      ✓ نظام الدوام المرن بالساعات مفعل
+                    </span>
+                  )}
+                </div>
+
+                <p style={{ margin: '8px 30px 0 0', fontSize: '12.5px', color: noMonthlySchedule ? '#5b21b6' : 'var(--muted)', lineHeight: '1.6' }}>
+                  {noMonthlySchedule 
+                    ? '✓ يتم إعفاء هذا الموظف من لائحة التأخيرات والساعات الإضافية والمواعيد الثابتة. يتم إخفاء صفحة الجدول الشهري من بوابته، ويعتمد مسير الرواتب كلياً على عدد الساعات الفعلية المقضية وفق البصمة.'
+                    : 'تفعيل هذا الخيار يعفي الموظف من قيود الجدول الشهري الثابت وتطبيقه على نظام الدوام الحر بالساعات عبر البصمة.'}
+                </p>
+
+                {/* محدد أيام الراحة الأسبوعية عند تفعيل الخيار */}
+                {noMonthlySchedule && (
+                  <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px dashed #c4b5fd' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                      <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#4c1d95' }}>
+                        🛋️ أيام الراحة الأسبوعية المحددة للموظف:
+                      </span>
+                      <span style={{ fontSize: '11.5px', color: '#6d28d9' }}>
+                        (انقر على اليوم لتحديده أو إلغائه — محدد: {weeklyRestDays.length} يوم)
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'].map((day) => {
+                        const isSelected = weeklyRestDays.includes(day);
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            onClick={() => {
+                              if (isSelected) {
+                                if (weeklyRestDays.length === 1) {
+                                  if (showToast) showToast('⚠️ يجب تحديد يوم راحة أسبوعية واحد على الأقل للموظف');
+                                  return;
+                                }
+                                setWeeklyRestDays(weeklyRestDays.filter(d => d !== day));
+                              } else {
+                                setWeeklyRestDays([...weeklyRestDays, day]);
+                              }
+                            }}
+                            style={{
+                              padding: '6px 14px',
+                              borderRadius: '8px',
+                              fontSize: '12.5px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              border: isSelected ? '1.5px solid #7c3aed' : '1px solid #cbd5e1',
+                              background: isSelected ? '#7c3aed' : '#ffffff',
+                              color: isSelected ? '#ffffff' : '#475569',
+                              boxShadow: isSelected ? '0 2px 6px rgba(124, 58, 237, 0.25)' : 'none',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            {isSelected ? '✓ ' : ''}{day}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* ── قسم تعيين نظام الدخول للموظف ── */}

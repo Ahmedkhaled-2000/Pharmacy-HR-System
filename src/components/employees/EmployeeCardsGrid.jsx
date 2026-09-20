@@ -793,6 +793,11 @@ export default function EmployeeCardsGrid({
                                 title="يوجد طلب اعتماد جهاز قيد الانتظار"
                               ></span>
                             )}
+                            {emp.noMonthlySchedule && (
+                              <span style={{ background: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd', fontSize: '11px', fontWeight: 700, padding: '1px 7px', borderRadius: '4px', marginRight: '6px' }}>
+                                ⏱️ مواعيد متغيرة
+                              </span>
+                            )}
                           </div>
                           <span style={{ color: 'var(--muted)', fontSize: '13px', display: 'block' }}>
                             {emp.jobTitle} {emp.department ? ` · قسم: ${emp.department}` : ''} {(emp.phone || emp.phones?.[0]?.number) ? ` · 📞 ${emp.phone || emp.phones?.[0]?.number}` : ''}

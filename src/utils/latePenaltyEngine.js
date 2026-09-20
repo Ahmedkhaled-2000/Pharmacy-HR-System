@@ -283,6 +283,9 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
   const emp = (state.employees || []).find((e) => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
   const empCodeStr = emp?.code ? String(emp.code) : '';
 
+  // الموظف الذي ليس له جدول شهري لا يمتلك مواعيد شفتات محددة أو ملزمة
+  if (emp?.noMonthlySchedule) return null;
+
   // 1. فحص طلبات تبديل الورديات المعتمدة أولاً
   const approvedSwaps = (state.shiftSwaps || state.requests || []).filter(
     (s) => (s.type === 'shift_swap' || s.subType === 'shift_swap') &&
@@ -493,6 +496,9 @@ export function recalculateEmployeeCycleLateness({
   const empIdStr = String(employeeId);
   const emp = (state.employees || []).find((e) => e && String(e.id) === empIdStr);
   if (!emp) return { incidents: [], updatedRequests: state.requests || [] };
+
+  // لا يتم تطبيق لائحة التأخيرات على الموظف الذي ليس له جدول شهري
+  if (emp.noMonthlySchedule) return { incidents: [], updatedRequests: state.requests || [] };
 
   const policy = getEffectiveLatePolicy(state);
   if (!policy.enabled) return { incidents: [], updatedRequests: state.requests || [] };
@@ -821,7 +827,8 @@ export function getEffectiveShiftHours(shift, state) {
 
   // إذا كانت الوردية تحتوي على وقت إضافي، نعتمد الساعات الأساسية المقررة (regularHours)
   // لكي لا يتم صرف الإضافي تلقائياً قبل اعتماد الإدارة، وتجنباً للازدواج المالي عند صرفه في بند الوقت الإضافي
-  if ((parseFloat(shift.overtimeHours) > 0 || shift.overtimeStatus) && shift.regularHours !== undefined) {
+  // باستثناء موظف الساعات المتغيرة حيث تحسب ساعاته الفعلية كاملة بدون تقسيم إضافي
+  if (!emp?.noMonthlySchedule && (parseFloat(shift.overtimeHours) > 0 || shift.overtimeStatus) && shift.regularHours !== undefined) {
     return parseFloat(shift.regularHours) || 0;
   }
 

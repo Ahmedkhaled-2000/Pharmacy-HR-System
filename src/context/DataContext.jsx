@@ -929,6 +929,7 @@ export function DataProvider({ children, showToast = () => {} }) {
   const getAbsenceDaysCount = useCallback((empId, monthStr) => {
     if (!monthStr || monthStr.length !== 7) return 0;
     const emp = getEmp(empId);
+    if (emp?.noMonthlySchedule) return 0;
     const empIdStr = String(empId);
     const empCodeStr = emp?.code ? String(emp.code) : '';
     const range = getPayrollCutoffRange(monthStr);
@@ -1097,11 +1098,13 @@ export function DataProvider({ children, showToast = () => {} }) {
       const hours = bShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
       const baseEarnings = hours * rate;
 
-      const approvedOtHours = bShifts
+      const isFlexibleSchedule = Boolean(emp?.noMonthlySchedule);
+
+      const approvedOtHours = isFlexibleSchedule ? 0 : bShifts
         .filter(s => s.overtimeStatus === 'approved' || (parseFloat(s.overtimeHours) > 0 && s.adminApproved))
         .reduce((acc, s) => acc + (parseFloat(s.overtimeHours) || 0), 0);
 
-      const pendingOtHours = bShifts
+      const pendingOtHours = isFlexibleSchedule ? 0 : bShifts
         .filter(s => s.overtimeStatus === 'pending' || (parseFloat(s.overtimeHours) > 0 && !s.overtimeStatus && !s.adminApproved))
         .reduce((acc, s) => acc + (parseFloat(s.overtimeHours) || 0), 0);
 
@@ -1109,9 +1112,9 @@ export function DataProvider({ children, showToast = () => {} }) {
 
       let absenceDaysCount = 0;
       let absenceDeduction = 0;
-      // استقطاع الغياب يُحسب على الفرع الأساسي فقط للموظف حتى لا يتكرر
+      // استقطاع الغياب يُحسب على الفرع الأساسي فقط للموظف حتى لا يتكرر (ويُعفى منه الموظف الذي ليس له جدول شهري)
       const isPrimaryBranch = isBranchMatch(emp.branchId || (emp.branchesDetails && emp.branchesDetails[0]?.branchId), bObj);
-      if (isPrimaryBranch || (!isTargetFilterActive && bId === branches[0]?.branchId)) {
+      if (!isFlexibleSchedule && (isPrimaryBranch || (!isTargetFilterActive && bId === branches[0]?.branchId))) {
         absenceDaysCount = getAbsenceDaysCount(empId, monthStr);
         absenceDeduction = absenceDaysCount * dailyRate;
         totalAbsenceDaysCount += absenceDaysCount;
@@ -1156,8 +1159,9 @@ export function DataProvider({ children, showToast = () => {} }) {
     const totalBonus = empAdjs.filter(a => a.type === 'bonus').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
     const manualDeduction = empAdjs.filter(a => a.type === 'deduction').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
 
-    // الجزاءات والتأخيرات
-    const empLateIncidents = (state.lateIncidents || []).filter(i => {
+    // الجزاءات والتأخيرات (لا تطبق على موظف الساعات المتغيرة بدون جدول)
+    const isFlexibleSchedule = Boolean(emp?.noMonthlySchedule);
+    const empLateIncidents = isFlexibleSchedule ? [] : (state.lateIncidents || []).filter(i => {
       if (String(i.employeeId) !== String(empId)) return false;
       if (!effectiveFilterFn(i.date)) return false;
       if (i.status === 'cancelled') return false;
@@ -1168,8 +1172,8 @@ export function DataProvider({ children, showToast = () => {} }) {
       return true;
     });
 
-    const lateDeduction = empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.penaltyAmount) || 0), 0);
-    const lateDeductionMinutes = empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.deductionMinutes) || 0), 0);
+    const lateDeduction = isFlexibleSchedule ? 0 : empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.penaltyAmount) || 0), 0);
+    const lateDeductionMinutes = isFlexibleSchedule ? 0 : empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.deductionMinutes) || 0), 0);
 
     // السلف والأقساط الشهرية (محسوبة بدقة عبر محرك السلف الموحد loansEngine)
     const activeTargetMonth = (monthStr && typeof monthStr === 'string' && monthStr.length >= 7)
@@ -1337,6 +1341,8 @@ export function DataProvider({ children, showToast = () => {} }) {
       dailyAllowanceTotal,
       dailyAllowancesBreakdown,
       isManagement: isMgmt,
+      noMonthlySchedule: isFlexibleSchedule,
+      weeklyRestDays: emp.weeklyRestDays || ['الجمعة'],
       totalDeduction,
       lateDeduction,
       lateDeductionMinutes,

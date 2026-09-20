@@ -1028,7 +1028,7 @@ export default function EmployeePortalView({
   const canApplyResignation = isPermActive('canApplyResignation', true);
 
   const canViewShifts = isPermActive('canViewShifts', true);
-  const canViewRoster = isPermActive('canViewRoster', true);
+  const canViewRoster = isPermActive('canViewRoster', true) && !emp?.noMonthlySchedule;
   const canStartEnd = isPermActive('canStartEnd', true);
   const canLivePunch = isPermActive('canLivePunch', true);
   const canEnrollBiometric = isPermActive('canEnrollBiometric', true);
@@ -1062,6 +1062,42 @@ export default function EmployeePortalView({
 
   const canViewBranchAddresses = isPermActive('canViewBranchAddresses', true);
   const showDeliveryAddresses = Boolean(isDeliveryRole && canViewBranchAddresses);
+
+  // تبديل وتحديث يوم راحة أسبوعية لموظف الساعات المتغيرة
+  const handleToggleWeeklyRestDay = async (day) => {
+    if (!emp) return;
+    const currentDays = Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.length > 0
+      ? emp.weeklyRestDays
+      : ['الجمعة'];
+
+    let nextDays;
+    if (currentDays.includes(day)) {
+      if (currentDays.length === 1) {
+        showToast?.('⚠️ يجب تحديد يوم راحة أسبوعية واحد على الأقل');
+        return;
+      }
+      nextDays = currentDays.filter(d => d !== day);
+    } else {
+      nextDays = [...currentDays, day];
+    }
+
+    const updatedEmployees = (state.employees || []).map(e => {
+      if (String(e.id) === String(emp.id) || (e.code && String(e.code) === String(emp.code))) {
+        return { ...e, weeklyRestDays: nextDays };
+      }
+      return e;
+    });
+
+    const updatedState = { ...state, employees: updatedEmployees };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    if (setCurrentEmpUser && currentEmpUser) {
+      setCurrentEmpUser(prev => prev ? ({ ...prev, weeklyRestDays: nextDays }) : prev);
+    }
+
+    showToast?.(`✅ تم تحديث أيام الراحة الأسبوعية الخاصة بك: (${nextDays.join('، ')})`);
+  };
 
   // Active Tab Security Guard: Redirect immediately to 'dashboard' if the employee is viewing a tab that gets turned off
   useEffect(() => {
@@ -1367,7 +1403,7 @@ export default function EmployeePortalView({
 
   // Build list of absence days (work day in roster/swaps, no punch recorded, not a leave day)
   const absenceDays = useMemo(() => {
-    if (!emp) return [];
+    if (!emp || emp.noMonthlySchedule) return [];
     const today = getRealTodayStr();
     const results = [];
     const dates = [];
@@ -4375,6 +4411,83 @@ export default function EmployeePortalView({
                   </div>
                 );
               })()}
+
+              {/* ── Flexible Schedule & Weekly Rest Days Card (For employees with noMonthlySchedule) ── */}
+              {emp?.noMonthlySchedule && (
+                <div
+                  className="card fade-in"
+                  style={{
+                    marginBottom: '20px',
+                    background: 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)',
+                    border: '1.5px solid #c4b5fd',
+                    borderRadius: '14px',
+                    padding: '18px 22px',
+                    boxShadow: '0 4px 14px rgba(109, 40, 217, 0.08)'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '28px' }}>⏱️</span>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#5b21b6', fontWeight: 800 }}>
+                          نظام العمل بمواعيد متغيرة (احتساب الأجر بالساعات الفعلية)
+                        </h3>
+                        <p style={{ margin: '3px 0 0', fontSize: '0.85rem', color: '#6d28d9' }}>
+                          أنت معفى من قيود المواعيد الثابتة ولائحة التأخيرات والساعات الإضافية، وراتبك يعتمد كلياً على ساعات البصمة المسجلة.
+                        </p>
+                      </div>
+                    </div>
+
+                    <span style={{ background: '#7c3aed', color: '#ffffff', fontSize: '12px', fontWeight: 800, padding: '4px 12px', borderRadius: '99px' }}>
+                      ⚡ دوام حر بالساعات
+                    </span>
+                  </div>
+
+                  {/* تحديد وتعديل أيام الراحة الأسبوعية */}
+                  <div style={{ background: '#ffffff', borderRadius: '12px', padding: '14px 16px', border: '1px solid #ddd6fe', marginTop: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+                      <span style={{ fontSize: '13.5px', fontWeight: 800, color: '#4c1d95' }}>
+                        🛋️ أيام الراحة الأسبوعية الخاصة بك:
+                      </span>
+                      <span style={{ fontSize: '12px', color: '#6d28d9', fontWeight: 600 }}>
+                        (انقر على أي يوم لتبديل وتحديث يوم راحتك — محدد حالياً: {(emp.weeklyRestDays || ['الجمعة']).join('، ')})
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'].map((day) => {
+                        const currentRestDays = Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.length > 0 ? emp.weeklyRestDays : ['الجمعة'];
+                        const isSelected = currentRestDays.includes(day);
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            onClick={() => handleToggleWeeklyRestDay(day)}
+                            style={{
+                              padding: '7px 16px',
+                              borderRadius: '10px',
+                              fontSize: '13px',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                              border: isSelected ? '1.5px solid #7c3aed' : '1px solid #e2e8f0',
+                              background: isSelected ? '#7c3aed' : '#f8fafc',
+                              color: isSelected ? '#ffffff' : '#475569',
+                              boxShadow: isSelected ? '0 2px 8px rgba(124, 58, 237, 0.28)' : 'none',
+                              transition: 'all 0.18s ease'
+                            }}
+                          >
+                            {isSelected ? '✓ ' : ''}{day}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <p style={{ margin: '10px 0 0 0', fontSize: '11.5px', color: 'var(--muted)', lineHeight: '1.5' }}>
+                      💡 <strong>ملاحظة:</strong> أيام الراحة الأسبوعية لا يُحسب فيها أي غياب. وفي حال حضورك وعملك بالصيدلية في يوم الراحة، يتم احتساب كامل ساعاتك وتسجيل أجرها مباشرة ضمن مسير رواتبك.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Absence Alert */}
               {absenceDays.length > 0 && (

@@ -144,6 +144,7 @@ export default function RosterModule({
 
     return (state.employees || []).filter((emp) => {
       if (!isEmployeeActive(emp)) return false;
+      if (emp.noMonthlySchedule) return false;
       if (schedBranchFilter && emp.branchId !== schedBranchFilter && (!emp.branchesDetails || !emp.branchesDetails.some(bd => String(bd.branchId) === String(schedBranchFilter)))) {
         return false;
       }
@@ -298,6 +299,27 @@ export default function RosterModule({
 
   // Helper to determine exact roster status for an employee
   const getEmployeeRosterStatusInfo = (emp, targetBranch) => {
+    if (emp?.noMonthlySchedule) {
+      const restDaysList = Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.length > 0
+        ? emp.weeklyRestDays.join('، ')
+        : 'الجمعة';
+      return {
+        key: 'no_schedule_variable',
+        badge: (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            <span className="badge" style={{ background: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd', fontWeight: 'bold' }}>
+              ⏱️ ليس لديه جدول شهري مواعيد متغيرة
+            </span>
+            <span style={{ fontSize: '11px', color: '#7c3aed', fontWeight: 600 }}>
+              🛋️ أيام الراحة: {restDaysList}
+            </span>
+          </div>
+        ),
+        empRoster: null,
+        pendingReq: null
+      };
+    }
+
     const bId = targetBranch || emp.branchId || emp.branchesDetails?.[0]?.branchId;
     const empRoster = getResolvedEmployeeRoster(emp, bId, state);
     const hasApproved = Boolean(
@@ -395,6 +417,7 @@ export default function RosterModule({
       if (statusFilter === 'approved' && info.key !== 'approved' && info.key !== 'approved_empty') return false;
       if (statusFilter === 'pending' && info.key !== 'pending') return false;
       if (statusFilter === 'none' && info.key !== 'none') return false;
+      if (statusFilter === 'no_schedule_variable' && info.key !== 'no_schedule_variable') return false;
     }
     return true;
   });
@@ -897,6 +920,7 @@ export default function RosterModule({
             <option value="approved">🟢 معتمد من الإدارة والفرع</option>
             <option value="pending">⏳ قيد المراجعة والاعتماد</option>
             <option value="none">❌ عدم وجود جدول معتمد</option>
+            <option value="no_schedule_variable">⏱️ ليس لديه جدول شهري مواعيد متغيرة</option>
           </select>
         </div>
       </div>

@@ -374,7 +374,7 @@ export default function PayslipPrintModal({
         effectLabel: isSwapRest ? '🟢 راحة متبدلة معتمدة' : '🟢 راحة مجدولة معتمدة',
         effectColor: isSwapRest ? '#d97706' : '#0284c7',
         financialStatus: 'مدفوعة (ضمن الراتب)',
-        reason: daySched.swapNote || 'يوم راحة أسبوعية مجدولة بالجدول الشهري'
+        reason: daySched.swapNote || (emp.noMonthlySchedule ? 'يوم راحة أسبوعية محدد للموظف' : 'يوم راحة أسبوعية مجدولة بالجدول الشهري')
       });
     }
   });
@@ -875,7 +875,11 @@ export default function PayslipPrintModal({
               <div>كود الموظف: <strong>{emp.code}</strong></div>
               <div>المسمى الوظيفي: <strong>{emp.jobTitle}</strong></div>
               <div>الفرع / الفروع: <strong>{branchNames}</strong></div>
-              <div>رقم الهاتف: <strong>{emp.phone || '—'}</strong></div>
+              {emp.noMonthlySchedule ? (
+                <div>نظام العمل: <strong style={{ color: '#6d28d9' }}>مواعيد متغيرة (أيام الراحة: {(emp.weeklyRestDays || ['الجمعة']).join('، ')})</strong></div>
+              ) : (
+                <div>رقم الهاتف: <strong>{emp.phone || '—'}</strong></div>
+              )}
               <div>هاتف الطوارئ: <strong>{emp.relativePhone || emp.emergencyPhone || '—'}</strong></div>
             </div>
 

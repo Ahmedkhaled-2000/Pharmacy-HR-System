@@ -176,6 +176,18 @@ export function findEmployeeRoster(empId, monthOrDate, state, targetBranchId = n
  * استخراج جدول الموظف الأساسي ليوم محدد بدون حساب التبديلات
  */
 export function getEmployeeBaseDaySchedule(empId, dateStr, state) {
+  const empIdStr = String(empId);
+  const emp = (state?.employees || []).find(e => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
+  if (emp?.noMonthlySchedule) {
+    const arDay = arabicWeekday(dateStr);
+    const restDays = Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.length > 0 ? emp.weeklyRestDays : ['الجمعة'];
+    const isRest = restDays.some(d => String(d).trim().replace(/[إأآ]/g, 'ا') === arDay.replace(/[إأآ]/g, 'ا'));
+    if (isRest) {
+      return { type: 'off', isOff: true, hours: 0, start: '', end: '', label: 'راحة أسبوعية' };
+    }
+    return { type: 'shift', isOff: false, hours: parseFloat(emp.workHoursPerDay || emp.workHours) || 8, start: '', end: '', variable: true, label: 'دوام حر بالساعات' };
+  }
+
   const roster = findEmployeeRoster(empId, dateStr, state);
   const jsDay = new Date(dateStr + 'T00:00:00').getDay();
   return getDayScheduleFromMap(roster?.schedule, jsDay, dateStr);
@@ -195,6 +207,17 @@ export function getEmployeeDaySchedule(empId, dateStr, state) {
   const empIdStr = String(empId);
   const emp = (state?.employees || []).find(e => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
   const empCodeStr = emp?.code ? String(emp.code) : '';
+
+  // الموظف الذي ليس له جدول شهري (مواعيد متغيرة): يعتمد على أيام الراحة المحددة له
+  if (emp?.noMonthlySchedule) {
+    const arDay = arabicWeekday(dateStr);
+    const restDays = Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.length > 0 ? emp.weeklyRestDays : ['الجمعة'];
+    const isRest = restDays.some(d => String(d).trim().replace(/[إأآ]/g, 'ا') === arDay.replace(/[إأآ]/g, 'ا'));
+    if (isRest) {
+      return { type: 'off', isOff: true, hours: 0, start: '', end: '', label: 'راحة أسبوعية' };
+    }
+    return { type: 'shift', isOff: false, hours: parseFloat(emp.workHoursPerDay || emp.workHours) || 8, start: '', end: '', variable: true, label: 'دوام حر بالساعات' };
+  }
 
   // 1. فحص طلبات تبديل الشيفت المعتمدة التي يكون هذا الموظف طرفاً فيها وتخص هذا التاريخ
   const allSwapRequests = [
@@ -447,6 +470,7 @@ export function applyShiftSwapToRosters(targetReq, currentRosters = [], employee
  */
 export function checkAndTriggerCycleEndRosterReminder(state, emp) {
   if (!emp || !state) return null;
+  if (emp.noMonthlySchedule) return null;
   const empIdStr = String(emp.id || emp.code || '');
   if (!empIdStr) return null;
 
