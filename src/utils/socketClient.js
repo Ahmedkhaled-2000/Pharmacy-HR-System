@@ -105,7 +105,7 @@ export function subscribeToLiveFaces(onUpdated, onDeleted) {
 /**
  * الاشتراك الفوري في أحداث إرسال وحفظ الطلبات اللحظية والدفعية (< 5ms)
  */
-export function subscribeToLiveRequests(onRequestCreated, onBatchSaved) {
+export function subscribeToLiveRequests(onRequestCreated, onBatchSaved, onPurged) {
   const s = getSocket();
   if (!s) return () => {};
 
@@ -125,12 +125,22 @@ export function subscribeToLiveRequests(onRequestCreated, onBatchSaved) {
     }
   };
 
+  const purgeHandler = (payload) => {
+    try {
+      onPurged?.(payload);
+    } catch (e) {
+      console.warn('[Socket.io] Error handling requests:purged:', e);
+    }
+  };
+
   s.on('request:created', createHandler);
   s.on('requests:batch_saved', batchHandler);
+  s.on('requests:purged', purgeHandler);
 
   return () => {
     s.off('request:created', createHandler);
     s.off('requests:batch_saved', batchHandler);
+    s.off('requests:purged', purgeHandler);
   };
 }
 

@@ -148,11 +148,11 @@ export function findEmployeeRoster(empId, monthOrDate, state, targetBranchId = n
     return approvedRosters[0];
   }
 
-  // 2. البحث في طلبات تعديل الجداول المعتمدة
+  // 2. البحث في طلبات تعديل الجداول والشيفتات المعتمدة
   const approvedReqs = (state.requests || []).filter(req =>
     matchesEmployee(req) &&
     matchesBranch(req) &&
-    (req.type === 'roster_update' || req.type === 'roster_edit' || req.type === 'roster_edit_request') &&
+    (req.type === 'roster_update' || req.type === 'roster_edit' || req.type === 'roster_edit_request' || req.type === 'shift_adjustment') &&
     (req.status === 'approved' || req.adminApproved) &&
     (req.schedule || req.newSchedule) &&
     matchesDateOrMonth(req)
@@ -217,6 +217,69 @@ export function getEmployeeDaySchedule(empId, dateStr, state) {
       return { type: 'off', isOff: true, hours: 0, start: '', end: '', label: 'راحة أسبوعية' };
     }
     return { type: 'shift', isOff: false, hours: parseFloat(emp.workHoursPerDay || emp.workHours) || 8, start: '', end: '', variable: true, label: 'دوام حر بالساعات' };
+  }
+
+  // 0. فحص طلبات تعديل الشيفت المعتمدة (Shift Adjustments) لهذا الموظف والتاريخ
+  const approvedShiftAdj = (state?.requests || []).find(r => {
+    if (!r) return false;
+    const isAdj = r.type === 'shift_adjustment' || r.type === 'roster_edit';
+    if (!isAdj) return false;
+    const isApproved = r.status === 'approved' || r.adminApproved === true || (r.branchApproved && r.isDirectToAdmin);
+    if (!isApproved) return false;
+    const isEmpMatch = String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr);
+    if (!isEmpMatch) return false;
+
+    if (r.date === dateStr) return true;
+    if (Array.isArray(r.dates) && r.dates.includes(dateStr)) return true;
+    if (r.schedule && r.schedule[dateStr]) return true;
+    if (r.newSchedule && r.newSchedule[dateStr]) return true;
+    if (r.replacementRestDate === dateStr) return true;
+    return false;
+  });
+
+  if (approvedShiftAdj) {
+    const schedItem = (approvedShiftAdj.schedule && approvedShiftAdj.schedule[dateStr]) ||
+                      (approvedShiftAdj.newSchedule && approvedShiftAdj.newSchedule[dateStr]);
+    if (schedItem) {
+      const isOff = schedItem.type === 'off' || schedItem.isOff === true;
+      return {
+        ...schedItem,
+        type: isOff ? 'off' : 'shift',
+        isOff,
+        start: isOff ? '' : (schedItem.start || '08:00'),
+        end: isOff ? '' : (schedItem.end || '16:00'),
+        hours: isOff ? 0 : (schedItem.hours !== undefined ? schedItem.hours : 8),
+        isAdjusted: true,
+        adjustmentRequestId: approvedShiftAdj.id,
+        adjustmentLabel: isOff ? '🛋️ راحة معتمدة بطلب تعديل شيفت' : '🔄 شيفت معدل بطلب رسمي'
+      };
+    }
+
+    if (approvedShiftAdj.actionType === 'set_rest_day' || approvedShiftAdj.replacementRestDate === dateStr) {
+      return {
+        type: 'off',
+        isOff: true,
+        hours: 0,
+        start: '',
+        end: '',
+        isAdjusted: true,
+        adjustmentRequestId: approvedShiftAdj.id,
+        adjustmentLabel: '🛋️ راحة معتمدة بطلب تعديل شيفت'
+      };
+    }
+
+    if (approvedShiftAdj.newStartTime && approvedShiftAdj.newEndTime) {
+      return {
+        type: 'shift',
+        isOff: false,
+        start: approvedShiftAdj.newStartTime,
+        end: approvedShiftAdj.newEndTime,
+        hours: 8,
+        isAdjusted: true,
+        adjustmentRequestId: approvedShiftAdj.id,
+        adjustmentLabel: '🔄 شيفت معدل بطلب رسمي'
+      };
+    }
   }
 
   // 1. فحص طلبات تبديل الشيفت المعتمدة التي يكون هذا الموظف طرفاً فيها وتخص هذا التاريخ

@@ -23,6 +23,7 @@ import {
   nowTimeStr,
   shouldShowRequestToBranch
 } from '../utils/formatters';
+import { clearAllRequestsLocal } from '../utils/localDatabase';
 import {
   listenToLiveBroadcasts,
   listenToConnectionChanges,
@@ -442,6 +443,22 @@ export function useRealtimeSync(props = {}) {
       handleIncomingRequestPayload,
       (batchPayload) => {
         console.log(`📦 [RealtimeSync] تم اكتمال الحفظ الدفعي لـ (${batchPayload?.count || 0}) طلب على السيرفر (v${batchPayload?.version})`);
+      },
+      (purgePayload) => {
+        console.log('🗑️ [RealtimeSync] استلام إشعار مسح وتطهير سجل الطلبات بالكامل من السيرفر');
+        clearAllRequestsLocal().catch(() => {});
+        const nowIso = purgePayload?.clearedAt || new Date().toISOString();
+        try { localStorage.setItem('app_requests_cleared_at', nowIso); } catch {}
+        setState((prev) => ({
+          ...prev,
+          requests: [],
+          leaveRequests: [],
+          shiftSwaps: [],
+          resignationRequests: [],
+          permissionRequests: [],
+          notifications: (prev.notifications || []).filter((n) => !n.requestId && !String(n.id || '').startsWith('req_')),
+          _requestsClearedAt: nowIso
+        }));
       }
     );
 

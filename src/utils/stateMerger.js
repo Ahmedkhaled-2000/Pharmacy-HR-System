@@ -581,6 +581,11 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
     }
   }
 
+  // 7. حماية صفة الإخفاء من شاشة الإدارة العليا hiddenFromAdmin
+  if (localItem.hiddenFromAdmin || remoteItem.hiddenFromAdmin) {
+    mergedBase.hiddenFromAdmin = true;
+  }
+
   return mergedBase;
 }
 
@@ -875,6 +880,29 @@ export function smartMergeStates(localState, remoteState) {
     effectiveRemote.employeeNotes = filterPreWipe(effectiveRemote.employeeNotes, localWipeTime);
     effectiveRemote.evaluations = filterPreWipe(effectiveRemote.evaluations, localWipeTime);
     effectiveRemote.activeShifts = {};
+  }
+
+  // معالجة ومراعاة تاريخ تطهير ومسح الطلبات _requestsClearedAt لمنع إعادة إحياء أي طلبات قديمة
+  const remoteReqClearTime = remoteState._requestsClearedAt ? new Date(remoteState._requestsClearedAt).getTime() : 0;
+  const localReqClearTime = localState._requestsClearedAt ? new Date(localState._requestsClearedAt).getTime() : 0;
+  const effectiveReqClearTime = Math.max(remoteReqClearTime, localReqClearTime);
+
+  if (effectiveReqClearTime > 0) {
+    effectiveLocal.requests = filterPreWipe(effectiveLocal.requests, effectiveReqClearTime);
+    effectiveLocal.leaveRequests = filterPreWipe(effectiveLocal.leaveRequests, effectiveReqClearTime);
+    effectiveLocal.shiftSwaps = filterPreWipe(effectiveLocal.shiftSwaps, effectiveReqClearTime);
+    effectiveLocal.resignationRequests = filterPreWipe(effectiveLocal.resignationRequests, effectiveReqClearTime);
+    if (Array.isArray(effectiveLocal.permissionRequests)) {
+      effectiveLocal.permissionRequests = filterPreWipe(effectiveLocal.permissionRequests, effectiveReqClearTime);
+    }
+
+    effectiveRemote.requests = filterPreWipe(effectiveRemote.requests, effectiveReqClearTime);
+    effectiveRemote.leaveRequests = filterPreWipe(effectiveRemote.leaveRequests, effectiveReqClearTime);
+    effectiveRemote.shiftSwaps = filterPreWipe(effectiveRemote.shiftSwaps, effectiveReqClearTime);
+    effectiveRemote.resignationRequests = filterPreWipe(effectiveRemote.resignationRequests, effectiveReqClearTime);
+    if (Array.isArray(effectiveRemote.permissionRequests)) {
+      effectiveRemote.permissionRequests = filterPreWipe(effectiveRemote.permissionRequests, effectiveReqClearTime);
+    }
   }
 
   const mergedShifts = mergeArrays(effectiveLocal.shifts, effectiveRemote.shifts, { prefix: 'shift', deletedIds });
@@ -1188,7 +1216,8 @@ export function smartMergeStates(localState, remoteState) {
     branchDirectives: mergeArrays(effectiveLocal.branchDirectives, effectiveRemote.branchDirectives, { prefix: 'bdir', deletedIds }),
     adminDirectives: mergeArrays(effectiveLocal.adminDirectives, effectiveRemote.adminDirectives, { prefix: 'adir', deletedIds }),
     _notificationsClearedAt: effectiveLocal._notificationsClearedAt || effectiveRemote._notificationsClearedAt || null,
+    _requestsClearedAt: effectiveReqClearTime > 0 ? (remoteReqClearTime >= localReqClearTime ? effectiveRemote._requestsClearedAt : effectiveLocal._requestsClearedAt) : (effectiveRemote._requestsClearedAt || effectiveLocal._requestsClearedAt || null),
     _wipedAt: isRemoteWipeNewer ? effectiveRemote._wipedAt : (isLocalWipeNewer ? effectiveLocal._wipedAt : (effectiveRemote._wipedAt || effectiveLocal._wipedAt || null)),
-    _deletedIds: Array.from(deletedIds).slice(-3000)
+    _deletedIds: Array.from(deletedIds).slice(-10000)
   };
 }

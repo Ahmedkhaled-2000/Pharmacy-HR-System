@@ -286,7 +286,47 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
   // الموظف الذي ليس له جدول شهري لا يمتلك مواعيد شفتات محددة أو ملزمة
   if (emp?.noMonthlySchedule) return null;
 
-  // 1. فحص طلبات تبديل الورديات المعتمدة أولاً
+  // 1. فحص طلبات تعديل الشيفت المعتمدة أولاً (Shift Adjustment Requests)
+  const approvedShiftAdj = (state.requests || []).find(
+    (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
+      r.type === 'shift_adjustment' &&
+      (r.status === 'approved' || r.adminApproved) &&
+      (r.date === dateStr || (Array.isArray(r.dates) && r.dates.includes(dateStr)) || (r.schedule && r.schedule[dateStr]))
+  );
+
+  if (approvedShiftAdj) {
+    const schedItem = (approvedShiftAdj.schedule && approvedShiftAdj.schedule[dateStr]) ||
+                      (approvedShiftAdj.newSchedule && approvedShiftAdj.newSchedule[dateStr]);
+    if (schedItem) {
+      const isOff = schedItem.type === 'off' || schedItem.isOff === true;
+      if (isOff) {
+        return { type: 'off', isOff: true, start: '', end: '', branchId: emp?.branchId || '', source: 'shift_adjustment' };
+      }
+      return {
+        start: schedItem.start,
+        end: schedItem.end || '',
+        type: schedItem.type || 'work',
+        branchId: approvedShiftAdj.branchId || schedItem.branchId || emp?.branchId || '',
+        rosterId: approvedShiftAdj.id,
+        source: 'shift_adjustment'
+      };
+    }
+    if (approvedShiftAdj.actionType === 'set_rest_day' || approvedShiftAdj.replacementRestDate === dateStr) {
+      return { type: 'off', isOff: true, start: '', end: '', branchId: emp?.branchId || '', source: 'shift_adjustment' };
+    }
+    if (approvedShiftAdj.newStartTime) {
+      return {
+        start: approvedShiftAdj.newStartTime,
+        end: approvedShiftAdj.newEndTime || '',
+        type: 'work',
+        branchId: approvedShiftAdj.branchId || emp?.branchId || '',
+        rosterId: approvedShiftAdj.id,
+        source: 'shift_adjustment'
+      };
+    }
+  }
+
+  // 2. فحص طلبات تبديل الورديات المعتمدة
   const approvedSwaps = (state.shiftSwaps || state.requests || []).filter(
     (s) => (s.type === 'shift_swap' || s.subType === 'shift_swap') &&
       (s.status === 'approved' || s.adminApproved) &&
@@ -595,6 +635,15 @@ export function recalculateEmployeeCycleLateness({
     let cancellationReason = '';
     let objectionData = prevInc?.objection || null;
 
+    // فحص ما إذا كان هناك طلب تعديل شيفت معتمد لهذا الموظف وهذا التاريخ
+    const approvedShiftAdj = (state.requests || []).find(
+      (r) =>
+        (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
+        r.type === 'shift_adjustment' &&
+        (r.status === 'approved' || r.adminApproved) &&
+        (r.date === shift.date || (Array.isArray(r.dates) && r.dates.includes(shift.date)) || (r.schedule && r.schedule[shift.date]))
+    );
+
     if (approvedPerm) {
       // ✅ تم إلغاء الخصم والجزاء لوجود إذن معتمد رسمي
       actionType = 'grace';
@@ -603,6 +652,17 @@ export function recalculateEmployeeCycleLateness({
       penaltyAmount = 0;
       status = 'approved_permission_exempt';
       overrideReason = `تم إلغاء الجزاء والخصم تلقائياً لوجود إذن معتمد (${approvedPerm.permType === 'early' ? 'إذن خروج مبكر' : 'إذن تأخير'} من ${approvedPerm.startTime || '—'} إلى ${approvedPerm.endTime || '—'})${approvedPerm.reason ? ' - سبب الإذن: ' + approvedPerm.reason : ''}`;
+      occurrenceNumber = 0;
+    } else if (approvedShiftAdj) {
+      // ✅ تم إلغاء الجزاء والخصم رسمياً لاعتماد طلب تعديل الشيفت
+      actionType = 'grace';
+      actionLabel = 'سماح (تعديل شيفت معتمد)';
+      deductionMins = 0;
+      penaltyAmount = 0;
+      status = 'cancelled';
+      isCancelled = true;
+      cancellationReason = `تم إلغاء الجزاء لاعتماد طلب تعديل الشيفت (${approvedShiftAdj.id || ''})`;
+      overrideReason = 'تم اعتماد تعديل موعد الشيفت وإلغاء أي جزاء تأخير';
       occurrenceNumber = 0;
     } else if (isObjectionApproved) {
       // ✅ تم قبول التظلم والاعتراض رسمياً من الإدارة العليا وإلغاء الخصم المالي

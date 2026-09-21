@@ -516,6 +516,19 @@ export async function apiHardDeleteEntity(type, id, key = STORAGE_KEY) {
   });
 }
 
+// ── 1.2.1 مسح وتطهير سجل الطلبات بالكامل من السيرفر وقاعدة البيانات ──
+export async function apiPurgeAllRequests(key = STORAGE_KEY, preservedPending = []) {
+  resetBackendCircuitBreaker();
+  return await request('requests/purge-all', {
+    method: 'POST',
+    body: JSON.stringify({ key, preservedPending }),
+    timeout: 30000,
+    retries: 2,
+    noCache: true,
+    isBackground: false
+  });
+}
+
 // ── 1.3 المزامنة التزايدية الذكية للطلبات (Incremental Delta Sync & Batch Push) ──
 export async function apiPushSyncBatch(operationsBatch) {
   resetBackendCircuitBreaker();

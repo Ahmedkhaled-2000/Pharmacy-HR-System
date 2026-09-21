@@ -1240,6 +1240,13 @@ try {
                     $rId = (string)($n['requestId'] ?? '');
                     return $nId !== $entityId && $nId !== $rawReqId && $rId !== $entityId && $rId !== $rawReqId;
                 }));
+
+                // حذف مادي مباشر من جدول requests إن وجد
+                try {
+                    Database::execute("DELETE FROM requests WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?", [
+                        $entityId, $rawReqId, "req_{$rawReqId}", "leave_{$rawReqId}", "swap_{$rawReqId}"
+                    ]);
+                } catch (Throwable) {}
             } elseif (in_array($entityType, ['recruitment', 'recruitment_application', 'application', 'applicant'], true)) {
                 $rawAppId = preg_replace('/^app_/', '', $entityId);
                 $deletedKeys[] = $rawAppId;
@@ -1313,6 +1320,128 @@ try {
                 'success' => true,
                 'message' => "Entity {$entityType} ({$entityId}) deleted permanently from database",
                 'version' => $newVer,
+                'updated_at' => $freshRow['updated_at'] ?? date('Y-m-d H:i:s')
+            ]);
+            break;
+
+        // ==================================================================
+        // 6.2.1 مسح وتطهير سجل الطلبات بالكامل من قاعدة البيانات والسيرفر
+        // ==================================================================
+        case 'requests/purge-all':
+        case 'requests/clear-all':
+            if ($method !== 'POST') {
+                jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
+            }
+            requireAuth(['admin', 'owner']);
+
+            $payload = getRequestData();
+            $targetKey = (string)($payload['key'] ?? DEFAULT_STORAGE_KEY);
+            $preservedPending = (array)($payload['preservedPending'] ?? []);
+
+            $isPending = function($r) {
+                if (!is_array($r)) return false;
+                if (!empty($r['adminApproved'])) return false;
+                $status = strtolower(trim((string)($r['status'] ?? '')));
+                if (in_array($status, ['approved', 'paid', 'rejected', 'cancelled'], true)) {
+                    return false;
+                }
+                return true;
+            };
+
+            // 1. حذف الطلبات المنتهية فقط من جدول requests واستثناء الطلبات قيد الاعتماد
+            try {
+                Database::execute("DELETE FROM requests WHERE status NOT IN ('pending', 'pending_admin', 'pending_target', 'pending_local', 'queued', 'syncing')");
+            } catch (Throwable) {}
+
+            $row = Database::queryOne("SELECT value_data, version FROM app_settings WHERE key_name = ? LIMIT 1", [$targetKey]);
+            if (!$row || empty($row['value_data'])) {
+                jsonResponse(['success' => false, 'error' => 'State not found'], 404);
+            }
+
+            $appState = is_string($row['value_data']) ? json_decode($row['value_data'], true) : $row['value_data'];
+            if (!is_array($appState)) $appState = [];
+
+            $nowIso = date('c');
+
+            // أرشفة الإجازات والاستئذانات المعتمدة قبل المسح
+            $candidateReqs = array_merge((array)($appState['requests'] ?? []), (array)($appState['leaveRequests'] ?? []));
+            $leaveMap = [];
+            foreach ((array)($appState['leaveHistory'] ?? []) as $lh) {
+                if (isset($lh['id'])) $leaveMap[(string)$lh['id']] = $lh;
+            }
+            $permMap = [];
+            foreach ((array)($appState['permissions'] ?? []) as $p) {
+                if (isset($p['id'])) $permMap[(string)$p['id']] = $p;
+            }
+
+            foreach ($candidateReqs as $r) {
+                if (!is_array($r)) continue;
+                $isApproved = ($r['status'] ?? '') === 'approved' || !empty($r['adminApproved']);
+                $rType = (string)($r['type'] ?? '');
+                if ($isApproved && in_array($rType, ['leave', 'leave_request', 'leave_comp_off'], true)) {
+                    $lId = $r['id'] ?? ('lhist_' . time() . '_' . substr(md5(uniqid()), 0, 4));
+                    $r['status'] = 'approved';
+                    $r['adminApproved'] = true;
+                    $r['archivedAt'] = $nowIso;
+                    $leaveMap[(string)$lId] = $r;
+                }
+                if ($isApproved && in_array($rType, ['permission', 'late_permission', 'early_leave'], true)) {
+                    $pId = $r['id'] ?? ('perm_' . time() . '_' . substr(md5(uniqid()), 0, 4));
+                    $r['status'] = 'approved';
+                    $r['adminApproved'] = true;
+                    $r['archivedAt'] = $nowIso;
+                    $permMap[(string)$pId] = $r;
+                }
+            }
+
+            $appState['leaveHistory'] = array_values($leaveMap);
+            $appState['permissions'] = array_values($permMap);
+
+            // استثناء وحماية الطلبات قيد الاعتماد
+            $pendingMap = [];
+            foreach ((array)($appState['requests'] ?? []) as $r) {
+                if ($isPending($r) && isset($r['id'])) $pendingMap[(string)$r['id']] = $r;
+            }
+            foreach ($preservedPending as $r) {
+                if ($isPending($r) && isset($r['id'])) $pendingMap[(string)$r['id']] = $r;
+            }
+
+            $appState['requests'] = array_values($pendingMap);
+            $appState['leaveRequests'] = array_values(array_filter((array)($appState['leaveRequests'] ?? []), $isPending));
+            $appState['shiftSwaps'] = array_values(array_filter((array)($appState['shiftSwaps'] ?? []), $isPending));
+            $appState['resignationRequests'] = array_values(array_filter((array)($appState['resignationRequests'] ?? []), $isPending));
+            if (isset($appState['permissionRequests']) && is_array($appState['permissionRequests'])) {
+                $appState['permissionRequests'] = array_values(array_filter($appState['permissionRequests'], $isPending));
+            }
+
+            // تنظيف الإشعارات غير المرتبطة بطلب قيد الاعتماد
+            $appState['notifications'] = array_values(array_filter((array)($appState['notifications'] ?? []), function($n) use ($pendingMap) {
+                if (!is_array($n)) return false;
+                $rId = (string)($n['requestId'] ?? '');
+                if ($rId && isset($pendingMap[$rId])) return true;
+                $nId = (string)($n['id'] ?? '');
+                return empty($rId) && !str_starts_with($nId, 'req_');
+            }));
+
+            $appState['_requestsClearedAt'] = $nowIso;
+            $appState['_requestsUpdatedAt'] = $nowIso;
+
+            $jsonString = json_encode($appState, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+            $updateSql = "UPDATE app_settings SET value_data = ?::jsonb, version = version + 1, updated_at = NOW() WHERE key_name = ?";
+            Database::execute($updateSql, [$jsonString, $targetKey]);
+
+            MicroCache::invalidate('settings_' . $targetKey);
+            MicroCache::invalidate('version_' . $targetKey);
+
+            $freshRow = Database::queryOne("SELECT version, updated_at FROM app_settings WHERE key_name = ?", [$targetKey]);
+            $newVer = (int)($freshRow['version'] ?? ($row['version'] + 1));
+
+            jsonResponse([
+                'success' => true,
+                'message' => 'تم مسح وتطهير سجل الطلبات المنتهية مع الحفاظ التام على الطلبات قيد الاعتماد',
+                'clearedAt' => $nowIso,
+                'version' => $newVer,
+                'pendingPreserved' => count($pendingMap),
                 'updated_at' => $freshRow['updated_at'] ?? date('Y-m-d H:i:s')
             ]);
             break;

@@ -11,7 +11,8 @@ import {
   apiSaveSettingsSlice,
   apiFetchVersion,
   apiSubmitRequestAtomic,
-  apiHardDeleteEntity
+  apiHardDeleteEntity,
+  apiPurgeAllRequests
 } from './apiClient';
 import {
   saveStateLocally,
@@ -21,6 +22,11 @@ import {
   getPendingCount,
   clearLocalDatabase,
 } from './offlineStorage';
+import {
+  deleteRequestLocal,
+  clearAllRequestsLocal,
+  bulkDeleteRequestsLocal
+} from './localDatabase';
 export { clearLocalDatabase, saveStateLocally };
 import { smartMergeStates } from './stateMerger';
 import { normalizeState } from './formatters';
@@ -469,20 +475,35 @@ export async function submitRequestFast(requestObj, notificationObj = null, opti
 
 // ── تنفيذ الحذف النهائي البات للكيان من قاعدة البيانات السحابية والمحلية ──────
 export async function hardDeleteEntityFast(type, id) {
-  // 1. تسجيل فوري في localStorage لمنع أي وميض محلي مع عزل تام لكل صنف
+  const idStr = String(id);
+  const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_|emp_)/, '');
+  const normType = String(type || '').toLowerCase();
+  const isRequest = normType.includes('req') || normType === 'request' || normType.includes('leave') || normType.includes('loan') || normType.includes('swap');
+
+  // 1. مسح فوري من قاعدة البيانات المحلية IndexedDB لمنع ارتداده عبر getAllLocalRequests
+  if (isRequest) {
+    try {
+      deleteRequestLocal(idStr).catch(() => {});
+      if (rawId) {
+        deleteRequestLocal(rawId).catch(() => {});
+        deleteRequestLocal(`req_${rawId}`).catch(() => {});
+      }
+    } catch {}
+  }
+
+  // 2. تسجيل فوري في localStorage لمنع أي وميض محلي مع عزل تام لكل صنف
   try {
     const rawLocalDeleted = localStorage.getItem('app_deleted_ids_snapshot');
     const list = rawLocalDeleted ? JSON.parse(rawLocalDeleted) : [];
-    const idStr = String(id);
-    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_|emp_)/, '');
     const set = new Set(list);
     set.add(idStr);
 
-    const normType = String(type || '').toLowerCase();
-    if (normType.includes('req') || normType === 'request') {
+    if (isRequest) {
       set.add(`req_${rawId}`);
-    } else if (normType.includes('leave')) {
       set.add(`leave_${rawId}`);
+      set.add(`swap_${rawId}`);
+      set.add(`loan_${rawId}`);
+      if (rawId) set.add(rawId);
     } else if (normType.includes('emp')) {
       set.add(`emp_${rawId}`);
       set.add(`emp_del_${rawId}`);
@@ -490,15 +511,41 @@ export async function hardDeleteEntityFast(type, id) {
       set.add(`notif_${rawId}`);
     }
 
-    localStorage.setItem('app_deleted_ids_snapshot', JSON.stringify(Array.from(set).slice(-3000)));
+    localStorage.setItem('app_deleted_ids_snapshot', JSON.stringify(Array.from(set).slice(-10000)));
   } catch {}
 
-  // 2. إرسال أمر الحذف النهائي البات للسيرفر
+  // 3. إرسال أمر الحذف النهائي البات للسيرفر وقاعدة البيانات
   try {
     await apiHardDeleteEntity(type, id, STORAGE_KEY);
     console.log(`🗑️ [HardDelete] تم تنفيذ الحذف النهائي للـ ${type} (${id}) بنجاح.`);
   } catch (err) {
     console.warn(`[HardDelete] فشل إرسال أمر الحذف النهائي للسيرفر:`, err.message);
+  }
+}
+
+// ── مسح وتطهير سجل الطلبات المنتهية مع استثناء وحماية الطلبات قيد الاعتماد ──
+export async function purgeAllRequestsCloudAndLocal(preservedPending = []) {
+  const nowIso = new Date().toISOString();
+
+  // 1. مسح متجر IndexedDB المحلي للطلبات مع إعادة حفظ الطلبات قيد الاعتماد المستثناة
+  try {
+    await clearAllRequestsLocal();
+    if (Array.isArray(preservedPending) && preservedPending.length > 0) {
+      await putRequestsBatch(preservedPending);
+    }
+    localStorage.setItem('app_requests_cleared_at', nowIso);
+  } catch (err) {
+    console.warn('[PurgeAllRequests] Local clear warning:', err);
+  }
+
+  // 2. استدعاء السيرفر لحذف الطلبات المنتهية من قاعدة البيانات مع الحفاظ على قيد الاعتماد
+  try {
+    const res = await apiPurgeAllRequests(STORAGE_KEY, preservedPending);
+    console.log('🗑️ [PurgeAllRequests] تم تطهير الطلبات المنتهية من السيرفر بنجاح:', res);
+    return res;
+  } catch (err) {
+    console.warn('⚠️ [PurgeAllRequests] تعذر استدعاء السيرفر (تم التطهير محلياً):', err.message);
+    return { success: false, error: err.message };
   }
 }
 

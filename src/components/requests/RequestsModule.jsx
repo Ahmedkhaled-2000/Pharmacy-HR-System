@@ -3,13 +3,23 @@ import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch, getE
 import { notifyEmployeeEarlyExitWarning, notifyOnPenaltyApplied } from '../../utils/gmailService';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { shouldRouteDirectToAdmin, isBranchWithoutManager, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from '../../utils/jobsHelper';
-import { normalizeSchedule } from '../roster/RosterModule';
-import { syncNow, fetchRemoteState, hardDeleteEntityFast } from '../../utils/offlineSync';
+import { syncNow, fetchRemoteState, hardDeleteEntityFast, purgeAllRequestsCloudAndLocal } from '../../utils/offlineSync';
+import { putRequestsBatch } from '../../utils/localDatabase';
 import { createRequestDecisionNotification } from '../../utils/notificationEngine';
 import { useUI } from '../../context/UIContext';
 import { saveFaceDescriptor, saveHandDescriptor, deleteFaceDescriptor, deleteHandDescriptor } from '../../utils/faceStorage';
 import { enqueueRequestDecision, executeFullSync } from '../../utils/syncEngine';
 import { getLifecycleBadge, REQUEST_STATES } from '../../utils/requestLifecycle';
+
+export function isPendingRequest(r) {
+  if (!r) return false;
+  if (r.adminApproved === true) return false;
+  const status = String(r.status || '').toLowerCase().trim();
+  if (status === 'approved' || status === 'paid' || status === 'rejected' || status === 'cancelled') {
+    return false;
+  }
+  return true;
+}
 
 export function getFormattedRequestBadge(type, leaveType, targetAction) {
   let resolvedType = type;
@@ -55,6 +65,15 @@ export function getFormattedRequestBadge(type, leaveType, targetAction) {
   }
   if (cleanType === 'swap' || cleanType === 'shift_swap' || cleanType === 'تبديل') {
     return <span className="badge badge-primary">🔄 تبديل وردية</span>;
+  }
+  if (cleanType === 'shift_adjustment' || cleanType === 'تعديل شيفت') {
+    return <span className="badge" style={{ background: '#7c3aed', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🔄 تعديل موعد شيفت</span>;
+  }
+  if (cleanType === 'comp_off_grant') {
+    return <span className="badge" style={{ background: '#059669', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🛋️ احتساب بدل راحة</span>;
+  }
+  if (cleanType === 'leave_comp_off' || cleanType === 'comp_off') {
+    return <span className="badge" style={{ background: '#0891b2', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🛋️ إجازة بدل راحة</span>;
   }
   if (cleanType === 'roster_update' || cleanType === 'roster_edit' || cleanType === 'roster_edit_request' || cleanType === 'schedule_edit') {
     return <span className="badge badge-warning">📅 تعديل جدول شهري</span>;
@@ -226,8 +245,10 @@ export default function RequestsModule({
   }, [state._deletedIds]);
 
   const allRequests = useMemo(() => {
-    const isIdDeleted = (id) => {
+    const isIdDeleted = (id, reqObj = null) => {
       if (!id) return false;
+      // الطلبات قيد الاعتماد لا تعتبر محذوفة أبداً ومحمية من الحذف
+      if (reqObj && isPendingRequest(reqObj)) return false;
       const s = String(id);
       const raw = s.replace(/^(req_|leave_|swap_|res_|loan_)/, '');
       return (
@@ -249,7 +270,7 @@ export default function RequestsModule({
       const idStr = String(r.id);
       const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_)/, '');
 
-      if (isIdDeleted(idStr) || isIdDeleted(`req_${rawId}`)) return;
+      if (isIdDeleted(idStr, r) || isIdDeleted(`req_${rawId}`, r)) return;
       if (existingIds.has(idStr) || existingIds.has(`req_${rawId}`)) return;
 
       // Resignations are managed exclusively in their dedicated module
@@ -404,7 +425,7 @@ export default function RequestsModule({
     }).filter((r) => {
       if (!r || !r.id) return false;
       const idStr = String(r.id);
-      if (isIdDeleted(idStr)) {
+      if (isIdDeleted(idStr, r)) {
         return false;
       }
       if (isBranch) {
@@ -417,7 +438,17 @@ export default function RequestsModule({
     });
   }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.resignationRequests, state.lateIncidents, state.adjustments, state.employees, state.approvalRules, isBranch, cIdStr, branchEmpIdSet, deletedIdsSet]);
 
-  const hiddenAdminCount = isBranch ? 0 : allRequests.filter(r => r && r.hiddenFromAdmin).length;
+  const adminHiddenSet = useMemo(() => {
+    return new Set((state.adminHiddenRequestIds || []).map(String));
+  }, [state.adminHiddenRequestIds]);
+
+  const isHiddenFromAdmin = (r) => {
+    if (!r) return false;
+    const rId = String(r.id || '');
+    return Boolean(r.hiddenFromAdmin || adminHiddenSet.has(rId));
+  };
+
+  const hiddenAdminCount = isBranch ? 0 : allRequests.filter(isHiddenFromAdmin).length;
   
   // Higher management view: hide items with hiddenFromAdmin unless user toggles showHiddenAdminRequests
   const visibleAdminRequests = isBranch
@@ -425,10 +456,19 @@ export default function RequestsModule({
     : allRequests.filter((r) => {
         if (!r) return false;
         if (showHiddenAdminRequests) return true;
-        return !r.hiddenFromAdmin;
+        return !isHiddenFromAdmin(r);
       });
 
   const requests = visibleAdminRequests;
+
+  const clearableAdminRequestsCount = useMemo(() => {
+    return visibleAdminRequests.filter(r => !isPendingRequest(r)).length;
+  }, [visibleAdminRequests]);
+
+  const clearableAllRequestsCount = useMemo(() => {
+    return allRequests.filter(r => !isPendingRequest(r)).length;
+  }, [allRequests]);
+
   const employees = state.employees || [];
 
   const getRequestDate = (r) => {
@@ -543,6 +583,10 @@ export default function RequestsModule({
       } else if (filterType === 'biometric') {
         const isBio = r.type === 'biometric_verification' || r.type === 'biometric_registration' || r.type === 'biometric_reset' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
         if (!isBio) return false;
+      } else if (filterType === 'shift_adjustment') {
+        if (r.type !== 'shift_adjustment') return false;
+      } else if (filterType === 'comp_off') {
+        if (r.type !== 'comp_off_grant' && r.type !== 'leave_comp_off' && r.leaveType !== 'comp_off') return false;
       } else if (r.type !== filterType) {
         return false;
       }
@@ -1026,25 +1070,126 @@ export default function RequestsModule({
         }
       }
 
+      // Shift Adjustment Approval: Update Roster, Waive Penalties and Clear Late Deductions
+      if (approvedTargetReq.type === 'shift_adjustment') {
+        const targetEmp = (state.employees || []).find(e => String(e.id) === String(approvedTargetReq.employeeId));
+        const datesToAdjust = Array.isArray(approvedTargetReq.dates) && approvedTargetReq.dates.length > 0
+          ? approvedTargetReq.dates
+          : (approvedTargetReq.date ? [approvedTargetReq.date] : []);
+
+        const normalizedSch = normalizeSchedule(approvedTargetReq.schedule || approvedTargetReq.newSchedule);
+        const targetMonth = approvedTargetReq.month || (datesToAdjust[0] ? datesToAdjust[0].slice(0, 7) : new Date().toISOString().slice(0, 7));
+
+        if (normalizedSch && Object.keys(normalizedSch).length > 0) {
+          const existingRosterIdx = updatedRosters.findIndex(
+            (ros) => String(ros.employeeId) === String(approvedTargetReq.employeeId) &&
+                     (ros.month === targetMonth || !ros.month)
+          );
+
+          if (existingRosterIdx >= 0) {
+            updatedRosters[existingRosterIdx] = {
+              ...updatedRosters[existingRosterIdx],
+              schedule: {
+                ...(updatedRosters[existingRosterIdx].schedule || {}),
+                ...normalizedSch
+              },
+              updatedAt: new Date().toISOString()
+            };
+          } else {
+            updatedRosters.unshift({
+              id: `roster_${Date.now()}`,
+              employeeId: approvedTargetReq.employeeId,
+              branchId: targetEmp?.branchId || approvedTargetReq.branchId || null,
+              month: targetMonth,
+              schedule: normalizedSch,
+              status: 'approved',
+              approvedAt: new Date().toISOString()
+            });
+          }
+        }
+
+        // Cancel any late penalties on these dates for this employee
+        updatedRequests = updatedRequests.map((r) => {
+          if (
+            String(r.employeeId) === String(approvedTargetReq.employeeId) &&
+            datesToAdjust.includes(r.date) &&
+            (r.subType === 'lateness' || r.type === 'late_penalty' || String(r.id).startsWith('req_late_inc_'))
+          ) {
+            return {
+              ...r,
+              status: 'cancelled',
+              isCancelled: true,
+              amount: 0,
+              deductionMinutes: 0,
+              actionType: 'grace',
+              cancellationReason: `تم إلغاء الجزاء تلقائياً لاعتماد تعديل الشيفت (${approvedTargetReq.id || ''})`
+            };
+          }
+          return r;
+        });
+
+        // Remove adjustments linked to penalties on these dates
+        updatedAdjustments = updatedAdjustments.filter((a) => {
+          if (
+            String(a.employeeId) === String(approvedTargetReq.employeeId) &&
+            datesToAdjust.includes(a.date) &&
+            (a.type === 'penalty' || a.type === 'deduction' || String(a.id).startsWith('adj_pen_') || String(a.id).startsWith('adj_disc_'))
+          ) {
+            return false;
+          }
+          return true;
+        });
+      }
+
+      // Comp-Off Grant Approval: Credit employee's compOffBalance
+      if (approvedTargetReq.type === 'comp_off_grant') {
+        const creditDays = parseFloat(approvedTargetReq.daysCount || approvedTargetReq.compOffDays || 1) || 1;
+        updatedEmployees = updatedEmployees.map((e) => {
+          if (e && String(e.id) === String(approvedTargetReq.employeeId)) {
+            const curBal = parseFloat(e.compOffBalance || 0);
+            return {
+              ...e,
+              compOffBalance: curBal + creditDays
+            };
+          }
+          return e;
+        });
+      }
+
       let updatedLeaveRequests = [...(state.leaveRequests || [])];
       let updatedLeaveHistory = [...(state.leaveHistory || [])];
-      if (approvedTargetReq.type === 'leave' || approvedTargetReq.type === 'leave_request') {
+      if (['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave', 'leave_comp_off', 'comp_off'].includes(approvedTargetReq.type) || approvedTargetReq.leaveType === 'comp_off') {
+        const leaveTypeResolved = approvedTargetReq.leaveType || (approvedTargetReq.type === 'leave_comp_off' || approvedTargetReq.type === 'comp_off' ? 'comp_off' : 'annual');
+        const daysCountResolved = parseInt(approvedTargetReq.daysCount || approvedTargetReq.days || 1, 10);
         const approvedLeaveObj = {
           id: approvedTargetReq.id || `leave_${Date.now()}`,
           originalRequestId: approvedTargetReq.id,
           employeeId: approvedTargetReq.employeeId,
           employeeCode: approvedTargetReq.employeeCode,
           employeeName: approvedTargetReq.employeeName,
-          leaveType: approvedTargetReq.leaveType || 'annual',
+          leaveType: leaveTypeResolved,
           startDate: approvedTargetReq.startDate || approvedTargetReq.date,
           endDate: approvedTargetReq.endDate || approvedTargetReq.startDate || approvedTargetReq.date,
-          daysCount: parseInt(approvedTargetReq.daysCount || approvedTargetReq.days || 1, 10),
+          daysCount: daysCountResolved,
           status: 'approved',
           adminApproved: true,
           branchApproved: true,
           reason: approvedTargetReq.reason || approvedTargetReq.details || '',
           approvedAt: new Date().toISOString()
         };
+
+        if (leaveTypeResolved === 'comp_off' || approvedTargetReq.type === 'leave_comp_off') {
+          updatedEmployees = updatedEmployees.map((e) => {
+            if (e && String(e.id) === String(approvedTargetReq.employeeId)) {
+              const curBal = parseFloat(e.compOffBalance || 0);
+              return {
+                ...e,
+                compOffBalance: Math.max(0, curBal - daysCountResolved)
+              };
+            }
+            return e;
+          });
+        }
 
         updatedLeaveRequests = updatedLeaveRequests.map((lr) => {
           if (lr.id === approvedTargetReq.id || (String(lr.employeeId) === String(approvedTargetReq.employeeId) && lr.startDate === approvedTargetReq.startDate)) {
@@ -1842,7 +1987,7 @@ export default function RequestsModule({
       };
 
       try {
-        hardDeleteEntityFast('request', reqId).catch(() => {});
+        await hardDeleteEntityFast('request', reqId);
       } catch {}
 
       if (setState) setState(updatedState);
@@ -1979,56 +2124,90 @@ export default function RequestsModule({
     showToast?.(isAccepted ? '✅ تم قبول الاعتراض وإلغاء الجزاء' : '❌ تم رفض الاعتراض وتثبيت الجزاء');
   };
 
-  // 1. Clear / Hide requests from Higher Management screen ONLY (Does NOT affect Employee or Branch Manager screens)
+  // 1. Clear / Hide completed requests from Higher Management screen ONLY (Excludes pending requests)
   const handleClearAdminViewOnly = async () => {
-    if (visibleAdminRequests.length === 0) {
-      showToast?.('لا توجد أي طلبات ظاهرة حالياً لمسحها من شاشة الإدارة');
+    const clearableRequests = visibleAdminRequests.filter(r => !isPendingRequest(r));
+    const pendingCount = visibleAdminRequests.length - clearableRequests.length;
+
+    if (clearableRequests.length === 0) {
+      showToast?.('ℹ️ جميع الطلبات المعروضة حالياً هي طلبات قيد الاعتماد ولا يمكن إخفاؤها لحين البت فيها.');
       return;
     }
     const isConfirmed = await showConfirm({
       title: 'تفريغ شاشة الإدارة العليا',
-      message: `تأكيد تفريغ شاشة الإدارة العليا (${visibleAdminRequests.length} طلب):\n\nهل تريد مسح وإخفاء هذه الطلبات من شاشة الإدارة العليا فقط لترتيب وتنظيف الشاشة؟\n\n✅ ملاحظة هامة:\n1. لن يتم حذف الطلبات نهائياً من النظام، وتظل محفوظة في سجلات الموظف والفرع.\n2. يمكنك في أي وقت الضغط على زر "عرض المؤرشف" لاستعادتها أو معاينتها.`,
-      confirmText: 'تفريغ الشاشة',
+      message: `تأكيد تفريغ شاشة الإدارة العليا (${clearableRequests.length} طلب منجز ومرفوض):\n\n` +
+        `• سيتم مسح وإخفاء الطلبات المنتهية فقط من شاشة الإدارة لترتيب الشاشة.\n` +
+        (pendingCount > 0 ? `• ✅ تم استثناء وحماية (${pendingCount}) طلب قيد الاعتماد وستظل ظاهرة في شاشتك لمراجعتها.\n` : '') +
+        `• لن يتم حذف أي طلبات نهائياً من النظام، ويمكنك في أي وقت الضغط على زر "عرض المؤرشف" لاستعادتها.`,
+      confirmText: `تفريغ الشاشة (${clearableRequests.length})`,
       cancelText: 'إلغاء وتراجع',
       type: 'info',
       icon: '🧹'
     });
     if (!isConfirmed) return;
 
-    const visibleIds = new Set(visibleAdminRequests.map((r) => String(r.id)));
+    const visibleIds = new Set(clearableRequests.map((r) => String(r.id)));
+    const nowIso = new Date().toISOString();
 
     const hideItem = (item) => {
+      // استثناء الطلبات قيد الاعتماد من الإخفاء دائماً
+      if (item && isPendingRequest(item)) return item;
       if (item && item.id && visibleIds.has(String(item.id))) {
-        return { ...item, hiddenFromAdmin: true };
+        return { ...item, hiddenFromAdmin: true, updatedAt: nowIso };
       }
       return item;
     };
 
+    const updatedRequests = (state.requests || []).map(hideItem);
+    const updatedLeaveRequests = (state.leaveRequests || []).map(hideItem);
+    const updatedShiftSwaps = (state.shiftSwaps || []).map(hideItem);
+    const updatedLoans = (state.loans || []).map(hideItem);
+    const updatedResignations = (state.resignationRequests || []).map(hideItem);
+
+    // تحديث الكاش المحلي في IndexedDB لضمان عدم ارتداد الطلبات بدون إخفاء
+    putRequestsBatch(updatedRequests).catch(() => {});
+
+    const updatedHiddenList = Array.from(new Set([
+      ...(state.adminHiddenRequestIds || []),
+      ...Array.from(visibleIds)
+    ]));
+
     const updatedState = {
       ...state,
-      requests: (state.requests || []).map(hideItem),
-      leaveRequests: (state.leaveRequests || []).map(hideItem),
-      shiftSwaps: (state.shiftSwaps || []).map(hideItem),
-      loans: (state.loans || []).map(hideItem),
-      resignationRequests: (state.resignationRequests || []).map(hideItem)
+      adminHiddenRequestIds: updatedHiddenList,
+      requests: updatedRequests,
+      leaveRequests: updatedLeaveRequests,
+      shiftSwaps: updatedShiftSwaps,
+      loans: updatedLoans,
+      resignationRequests: updatedResignations
     };
 
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🧹 تم مسح وإخفاء الطلبات من شاشة الإدارة العليا بنجاح');
+    showToast?.(`🧹 تم مسح وإخفاء (${clearableRequests.length}) طلب منجز مع الإبقاء على (${pendingCount}) طلب قيد الاعتماد.`);
   };
 
   // Restore Hidden Requests in Higher Management screen
   const handleRestoreAdminView = async () => {
-    const unhideItem = (item) => (item ? { ...item, hiddenFromAdmin: false } : item);
+    const nowIso = new Date().toISOString();
+    const unhideItem = (item) => (item ? { ...item, hiddenFromAdmin: false, updatedAt: nowIso } : item);
+
+    const updatedRequests = (state.requests || []).map(unhideItem);
+    const updatedLeaveRequests = (state.leaveRequests || []).map(unhideItem);
+    const updatedShiftSwaps = (state.shiftSwaps || []).map(unhideItem);
+    const updatedLoans = (state.loans || []).map(unhideItem);
+    const updatedResignations = (state.resignationRequests || []).map(unhideItem);
+
+    putRequestsBatch(updatedRequests).catch(() => {});
 
     const updatedState = {
       ...state,
-      requests: (state.requests || []).map(unhideItem),
-      leaveRequests: (state.leaveRequests || []).map(unhideItem),
-      shiftSwaps: (state.shiftSwaps || []).map(unhideItem),
-      loans: (state.loans || []).map(unhideItem),
-      resignationRequests: (state.resignationRequests || []).map(unhideItem)
+      adminHiddenRequestIds: [],
+      requests: updatedRequests,
+      leaveRequests: updatedLeaveRequests,
+      shiftSwaps: updatedShiftSwaps,
+      loans: updatedLoans,
+      resignationRequests: updatedResignations
     };
 
     if (setState) setState(updatedState);
@@ -2037,34 +2216,74 @@ export default function RequestsModule({
     showToast?.('↩️ تم استعادة كافة الطلبات للظهور في شاشة الإدارة العليا');
   };
 
-  // 2. Clear / Delete Requests List from the ENTIRE system permanently
+  // 2. Clear / Delete Requests List from the ENTIRE system permanently (EXCLUDES PENDING REQUESTS)
   const handleClearAllRequests = async () => {
     const currentReqs = allRequests || [];
-    if (currentReqs.length === 0) {
-      showToast?.('لا توجد أي طلبات حالياً في النظام لمسحها');
+    const clearableReqs = currentReqs.filter(r => !isPendingRequest(r));
+    const pendingReqs = currentReqs.filter(isPendingRequest);
+
+    if (clearableReqs.length === 0) {
+      showToast?.('ℹ️ لا توجد أي طلبات سابقة منتهية لمسحها، وجميع الطلبات الحالية قيد الاعتماد ومحمية من الحذف.');
       return;
     }
     const isConfirmed = await showConfirm({
-      title: 'مسح السجل العام لكافة الطلبات',
-      message: `⚠️ تحذير: مسح السجل العام لكافة الطلبات:\n\nهل تريد حذف كافة الطلبات (${currentReqs.length} طلب) نهائياً من النظام بالكامل لجميع الشاشات؟\n\n(ملاحظة: إذا كنت ترغب في تفريغ شاشة الإدارة العليا فقط دون التأثير على الموظف والفرع، اضغط "إلغاء" واستخدم زر "مسح شاشة الإدارة فقط").`,
-      confirmText: 'مسح السجل بالكامل',
+      title: 'مسح السجل العام للطلبات المنتهية',
+      message: `⚠️ تأكيد مسح السجل العام للطلبات:\n\n` +
+        `• سيتم حذف (${clearableReqs.length}) طلب منجز ومرفوض نهائياً من قاعدة البيانات والسيرفر.\n` +
+        `• 🛡️ استثناء فوري: تم استثناء وحماية (${pendingReqs.length}) طلب قيد الاعتماد ولن يتم مسحها إطلاقاً لحين البت فيها.\n` +
+        `• ✅ تم أرشفة رصيد وسجلات الإجازات والاستئذانات المعتمدة لضمان عدم تصفيرها.\n\n` +
+        `هل تريد تأكيد مسح الطلبات المنتهية الآن؟`,
+      confirmText: `مسح الطلبات المنتهية (${clearableReqs.length})`,
       cancelText: 'إلغاء وتراجع',
       type: 'danger',
-      icon: '🚨'
+      icon: '🧹'
     });
     if (!isConfirmed) return;
 
     const performClearAllRequests = async () => {
+      // 0. حصر واستخراج كافة الطلبات قيد الاعتماد بدقة لحمايتها من أي حذف
+      const preservedPendingRequests = (state.requests || []).filter(isPendingRequest);
+      const preservedPendingLeaves = (state.leaveRequests || []).filter(isPendingRequest);
+      const preservedPendingSwaps = (state.shiftSwaps || []).filter(isPendingRequest);
+      const preservedPendingLoans = (state.loans || []).filter(isPendingRequest);
+      const preservedPendingResignations = (state.resignationRequests || []).filter(isPendingRequest);
+      const preservedPendingPerms = (state.permissionRequests || []).filter(isPendingRequest);
+
+      // مجموعة كافة معرفات الطلبات قيد الاعتماد لحمايتها التامة
+      const pendingIdsSet = new Set();
+      [
+        ...preservedPendingRequests,
+        ...preservedPendingLeaves,
+        ...preservedPendingSwaps,
+        ...preservedPendingLoans,
+        ...preservedPendingResignations,
+        ...preservedPendingPerms,
+        ...pendingReqs
+      ].forEach(r => {
+        if (r && r.id) {
+          const s = String(r.id);
+          const raw = s.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+          pendingIdsSet.add(s);
+          if (raw) {
+            pendingIdsSet.add(raw);
+            pendingIdsSet.add(`req_${raw}`);
+            pendingIdsSet.add(`leave_${raw}`);
+            pendingIdsSet.add(`swap_${raw}`);
+            pendingIdsSet.add(`res_${raw}`);
+            pendingIdsSet.add(`loan_${raw}`);
+          }
+        }
+      });
+
       // 1. استخراج وأرشفة كافة الإجازات المعتمدة في leaveHistory لضمان عدم تصفير رصيد الإجازات المأخوذة
       const existingLeaveHistory = state.leaveHistory || [];
       const leaveMap = new Map();
       existingLeaveHistory.forEach(lh => { if (lh && lh.id) leaveMap.set(String(lh.id), lh); });
 
-      // فحص كافة الطلبات قبل مسحها وحفظ المعتمد منها في الأرشيف الدائم
       const allCandidateLeaves = [...(state.leaveRequests || []), ...(state.requests || []), ...currentReqs];
       allCandidateLeaves.forEach((r) => {
         if (!r) return;
-        const isLeave = r.type === 'leave' || r.type === 'leave_request' || r.leaveType || r.type === 'annual_leave';
+        const isLeave = r.type === 'leave' || r.type === 'leave_request' || r.leaveType || r.type === 'annual_leave' || r.type === 'leave_comp_off';
         const isApproved = r.status === 'approved' || r.adminApproved;
         if (isLeave && isApproved) {
           const leaveId = r.id || `lhist_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -2106,19 +2325,17 @@ export default function RequestsModule({
       const preservedPermIds = new Set(updatedPermissions.map(p => String(p.id)));
 
       // 3. الحفاظ على السلف المالية المعتمدة
-      const reqLoanIds = new Set(currentReqs.filter(r => r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine').map(r => String(r.id)));
       const updatedLoans = state.loans || [];
       const preservedLoanIds = new Set(updatedLoans.map(ln => String(ln.id)));
 
-      // 4. بناء قائمة المعرفات المحذوفة مع حماية الإجازات والاستئذانات والسلف المحفوظة
+      // 4. بناء قائمة المعرفات المحذوفة مع حماية الطلبات قيد الاعتماد والإجازات والاستئذانات والسلف
       const allDeletedKeys = [];
       const allReqIdsSet = new Set();
 
-      currentReqs.forEach((r) => {
+      clearableReqs.forEach((r) => {
         if (r && r.id) {
           const idStr = String(r.id);
-          // إذا كان الطلب معتمداً وتم حفظه في الإجازات أو الاستئذانات أو السلف، لا نضيفه لـ _deletedIds
-          if (preservedLeaveIds.has(idStr) || preservedPermIds.has(idStr) || preservedLoanIds.has(idStr)) {
+          if (pendingIdsSet.has(idStr) || isPendingRequest(r) || preservedLeaveIds.has(idStr) || preservedPermIds.has(idStr) || preservedLoanIds.has(idStr)) {
             return;
           }
           const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
@@ -2152,30 +2369,53 @@ export default function RequestsModule({
         };
       });
 
+      const nowIso = new Date().toISOString();
       const updatedState = {
         ...state,
         employees: updatedEmployees,
-        requests: [],
-        leaveRequests: [],
-        shiftSwaps: [],
+        requests: preservedPendingRequests,
+        leaveRequests: preservedPendingLeaves,
+        shiftSwaps: preservedPendingSwaps,
         loans: updatedLoans,
         leaveHistory: updatedLeaveHistory,
         permissions: updatedPermissions,
-        resignationRequests: [],
-        notifications: (state.notifications || []).filter(n => !n.requestId || (!allReqIdsSet.has(String(n.requestId)) && !allReqIdsSet.has(String(n.id)))),
-        _deletedIds: updatedDeleted
+        permissionRequests: preservedPendingPerms,
+        resignationRequests: preservedPendingResignations,
+        adminHiddenRequestIds: (state.adminHiddenRequestIds || []).filter(id => !pendingIdsSet.has(String(id))),
+        notifications: (state.notifications || []).filter(n => {
+          if (!n) return false;
+          if (n.requestId && pendingIdsSet.has(String(n.requestId))) return true;
+          return !n.requestId || (!allReqIdsSet.has(String(n.requestId)) && !allReqIdsSet.has(String(n.id)));
+        }),
+        _deletedIds: updatedDeleted,
+        _requestsClearedAt: nowIso,
+        _requestsUpdatedAt: nowIso
       };
+
+      // تنفيذ التطهير الجذري السحابي والمحلي من قاعدة البيانات والسيرفر مع الحفاظ التام على الطلبات قيد الاعتماد
+      try {
+        const allPendingToPreserve = [
+          ...preservedPendingRequests,
+          ...preservedPendingLeaves,
+          ...preservedPendingSwaps,
+          ...preservedPendingResignations,
+          ...preservedPendingPerms
+        ];
+        await purgeAllRequestsCloudAndLocal(allPendingToPreserve);
+      } catch (purgeErr) {
+        console.warn('[ClearAllRequests] Purge error:', purgeErr);
+      }
 
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
-      showToast?.('🗑️ تم مسح وتفريغ قائمة الطلبات بنجاح مع الاحتفاظ التام برصيد وسجلات الإجازات والاستئذانات المعتمدة!');
+      showToast?.(`🗑️ تم مسح الطلبات المنتهية بنجاح، وتم استثناء وحفظ (${pendingReqs.length}) طلب قيد الاعتماد!`);
     };
 
     if (executeWithOwnerGuard) {
       executeWithOwnerGuard({
         lockKey: 'lockFactoryReset',
-        actionTitle: 'مسح وحذف سجل الطلبات العام نهائياً',
-        actionDetails: `إجمالي الطلبات المراد حذفها: ${currentReqs.length} طلب`,
+        actionTitle: 'مسح وحذف سجل الطلبات المنتهية',
+        actionDetails: `الطلبات المنتهية المراد حذفها: ${clearableReqs.length} طلب (مع استثناء ${pendingReqs.length} طلب قيد الاعتماد)`,
         onExecute: performClearAllRequests
       });
     } else {
@@ -2286,24 +2526,24 @@ export default function RequestsModule({
             type="button"
             className="btn"
             onClick={handleClearAdminViewOnly}
-            disabled={visibleAdminRequests.length === 0}
+            disabled={clearableAdminRequestsCount === 0}
             style={{
               background: '#2563eb',
               color: '#ffffff',
               border: '1px solid #1d4ed8',
-              opacity: visibleAdminRequests.length === 0 ? 0.75 : 1,
+              opacity: clearableAdminRequestsCount === 0 ? 0.75 : 1,
               padding: '8px 14px',
               fontSize: '12px',
               fontWeight: '800',
               borderRadius: '8px',
-              cursor: visibleAdminRequests.length > 0 ? 'pointer' : 'default',
+              cursor: clearableAdminRequestsCount > 0 ? 'pointer' : 'default',
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
               boxShadow: '0 2px 8px rgba(37, 99, 235, 0.25)',
               transition: 'all 0.2s ease'
             }}
-            title="مسح وتفريغ الطلبات من شاشة الإدارة العليا فقط دون حذفها أو التأثير على شاشة الموظف أو مدير الفرع"
+            title={clearableAdminRequestsCount > 0 ? "مسح وتفريغ الطلبات المنتهية فقط من شاشة الإدارة العليا (مع استثناء وحفظ الطلبات قيد الاعتماد)" : "لا توجد طلبات منتهية لمسحها (الطلبات قيد الاعتماد محمية)"}
           >
             <span>🧹 مسح شاشة الإدارة فقط</span>
             <span style={{
@@ -2312,7 +2552,7 @@ export default function RequestsModule({
               borderRadius: '99px',
               fontSize: '11px'
             }}>
-              {visibleAdminRequests.length}
+              {clearableAdminRequestsCount}
             </span>
           </button>
 
@@ -2321,24 +2561,24 @@ export default function RequestsModule({
             type="button"
             className="btn"
             onClick={handleClearAllRequests}
-            disabled={allRequests.length === 0}
+            disabled={clearableAllRequestsCount === 0}
             style={{
               background: '#ef4444',
               color: '#ffffff',
               border: '1px solid #dc2626',
-              opacity: allRequests.length === 0 ? 0.75 : 1,
+              opacity: clearableAllRequestsCount === 0 ? 0.75 : 1,
               padding: '8px 14px',
               fontSize: '12px',
               fontWeight: '800',
               borderRadius: '8px',
-              cursor: allRequests.length > 0 ? 'pointer' : 'default',
+              cursor: clearableAllRequestsCount > 0 ? 'pointer' : 'default',
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
               boxShadow: '0 2px 8px rgba(239, 68, 68, 0.25)',
               transition: 'all 0.2s ease'
             }}
-            title="مسح وتفريغ السجل العام للطلبات نهائياً من كافة شاشات النظام"
+            title={clearableAllRequestsCount > 0 ? "مسح وتفريغ سجل الطلبات المنتهية نهائياً من كافة شاشات النظام (مع استثناء وحفظ الطلبات قيد الاعتماد)" : "لا توجد طلبات منتهية لمسحها (الطلبات قيد الاعتماد محمية)"}
           >
             <span>🗑️ مسح السجل العام للطلبات</span>
             <span style={{
@@ -2347,7 +2587,7 @@ export default function RequestsModule({
               borderRadius: '99px',
               fontSize: '11px'
             }}>
-              {allRequests.length}
+              {clearableAllRequestsCount}
             </span>
           </button>
 
@@ -2527,6 +2767,8 @@ export default function RequestsModule({
             <option value="swap">🔄 تبديل شفتات</option>
             <option value="penalty_objection">✋ تظلمات الجزاءات واللائحة</option>
             <option value="roster_edit">📅 تعديل جدول شهري</option>
+            <option value="shift_adjustment">🔄 طلبات تعديل الشيفت</option>
+            <option value="comp_off">🛋️ إجازات وبدل راحة</option>
             <option value="complaint">📋 شكاوي وملاحظات</option>
             <option value="penalty">⚠️ جزاءات ومخالفات لائحية</option>
           </select>
@@ -2842,7 +3084,9 @@ export default function RequestsModule({
           return 1;
         };
 
-        const isLeave = ['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave'].includes(previewModalReq.type);
+        const isLeave = ['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave', 'leave_comp_off', 'comp_off'].includes(previewModalReq.type) || previewModalReq.leaveType === 'comp_off';
+        const isShiftAdjustment = previewModalReq.type === 'shift_adjustment';
+        const isCompOffGrant = previewModalReq.type === 'comp_off_grant';
         const isPermission = ['permission', 'permission_request', 'إذن', 'late_permission', 'early_leave'].includes(previewModalReq.type) || Boolean(previewModalReq.permType);
         const isLoan = ['loan', 'advance', 'meds', 'credit_medicine'].includes(previewModalReq.type);
         const isSwap = ['swap', 'shift_swap', 'shift_edit'].includes(previewModalReq.type);
@@ -2854,7 +3098,7 @@ export default function RequestsModule({
           String(previewModalReq.id || '').startsWith('disc_');
         const isPenalty = previewModalReq.type === 'penalty' || isDisciplinaryViolation;
         const isPenaltyObjection = previewModalReq.type === 'penalty_objection' || previewModalReq.type === 'objection' || Boolean(previewModalReq.penaltyId) || Boolean(previewModalReq.objection);
-        const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request'].includes(previewModalReq.type);
+        const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request', 'shift_adjustment'].includes(previewModalReq.type);
         const isComplaint = ['complaint', 'eval_edit_request'].includes(previewModalReq.type);
         const isProfileUpdate = ['profile_update', 'profile_edit', 'profile_update_request'].includes(previewModalReq.type) || String(previewModalReq.type || '').includes('profile');
 
@@ -3737,6 +3981,29 @@ export default function RequestsModule({
                   </div>
                 )}
 
+                {/* ── COMP-OFF GRANT DETAILS ── */}
+                {isCompOffGrant && (
+                  <div style={{ background: '#ecfdf5', padding: '16px', borderRadius: '12px', border: '1.5px solid #10b981' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#065f46', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      🛋️ تفاصيل احتساب يوم بدل راحة (حضور في يوم راحة):
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '13px' }}>
+                      <div style={{ background: '#fff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+                        <span style={{ color: '#047857', fontSize: '11.5px', display: 'block' }}>تاريخ العمل في الراحة:</span>
+                        <strong style={{ color: '#065f46' }}>{previewModalReq.date || '—'} {previewModalReq.date && `(${arabicWeekday(previewModalReq.date)})`}</strong>
+                      </div>
+                      <div style={{ background: '#fff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+                        <span style={{ color: '#047857', fontSize: '11.5px', display: 'block' }}>ساعات العمل الفعلية المسجلة:</span>
+                        <strong style={{ color: '#065f46' }}>{previewModalReq.actualWorkedHours || previewModalReq.hours || '—'} ساعات</strong>
+                      </div>
+                      <div style={{ background: '#d1fae5', padding: '8px 12px', borderRadius: '8px', border: '1px solid #10b981' }}>
+                        <span style={{ color: '#047857', fontSize: '11.5px', display: 'block' }}>الرصيد المكتسب عند الاعتماد:</span>
+                        <strong style={{ color: '#065f46', fontSize: '14px' }}>+{previewModalReq.daysCount || 1} يوم رصيد بدل راحة</strong>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* ── ROSTER EDIT DETAILS & COMPARISON (الجدول السابق مقابل الجديد) ── */}
                 {isRoster && (() => {
                   const existingRoster = (state.rosters || []).find(r => 
@@ -3773,12 +4040,19 @@ export default function RequestsModule({
                     <div style={{ background: 'var(--surface-muted)', padding: '18px', borderRadius: '14px', border: '1px solid var(--border)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
                         <h4 style={{ margin: 0, color: 'var(--text)', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          📅 مقارنة ومعاينة تعديل الجدول الشهري (الجدول السابق مقابل الجديد):
+                          {isShiftAdjustment ? '🔄 مقارنة ومعاينة تعديل مواعيد الشيفت (الجدول المعتمد مقابل المعدل):' : '📅 مقارنة ومعاينة تعديل الجدول الشهري (الجدول السابق مقابل الجديد):'}
                         </h4>
                         <span style={{ fontSize: '12px', background: 'var(--primary-tint)', color: 'var(--primary)', padding: '4px 10px', borderRadius: '6px', fontWeight: 'bold' }}>
                           الشهر: {previewModalReq.month || 'الشهر الحالي'}
                         </span>
                       </div>
+
+                      {isShiftAdjustment && (
+                        <div style={{ background: '#f5f3ff', border: '1px solid #c4b5fd', padding: '10px 14px', borderRadius: '8px', marginBottom: '14px', fontSize: '13px', color: '#6d28d9' }}>
+                          <strong>⚡ إعفاء تلقائي من جزاءات التأخير: </strong>
+                          عند موافقة الإدارة، يتم إلغاء وتصفير أي جزاء تأخير أو خصم مالي على التواريخ المعدلة وتحديث الروستر ومسير الرواتب تلقائياً.
+                        </div>
+                      )}
 
                       {previewModalReq.details && (
                         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '10px 14px', borderRadius: '8px', marginBottom: '14px', fontSize: '13px', color: 'var(--text)' }}>

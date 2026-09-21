@@ -468,8 +468,8 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
       delete stateValue._attachmentsPending;
     }
 
-    if (Array.isArray(stateValue._deletedIds) && stateValue._deletedIds.length > 150) {
-      stateValue._deletedIds = stateValue._deletedIds.slice(-150);
+    if (Array.isArray(stateValue._deletedIds) && stateValue._deletedIds.length > 25000) {
+      stateValue._deletedIds = stateValue._deletedIds.slice(-25000);
     }
 
     // حماية ضد المسح العرضي للكوادر والموظفين (Accidental Wipe Protection)
@@ -921,13 +921,57 @@ app.post(['/api/entity/delete', '/api/entity/hard-delete'], async (req, res) => 
     const settings = await getSettingsFromStorage(key);
     let newVer = 1;
     if (settings && typeof settings === 'object') {
+      const idStr = String(id);
       if (type === 'employee') {
-        const cleanId = String(id).replace(/^emp_/, '');
-        settings.employees = (settings.employees || []).filter(e => e && String(e.id) !== String(id) && String(e.id) !== `emp_${cleanId}` && String(e.id) !== cleanId);
-        await db.query('DELETE FROM public.employee_faces WHERE employee_id = $1 OR employee_id = $2', [id, `emp_${cleanId}`]).catch(() => {});
-      } else if (type === 'request') {
-        settings.requests = (settings.requests || []).filter(r => r && String(r.id) !== String(id));
-        await db.query('DELETE FROM public.requests WHERE id = $1', [id]).catch(() => {});
+        const cleanId = idStr.replace(/^emp_/, '');
+        settings.employees = (settings.employees || []).filter(e => e && String(e.id) !== idStr && String(e.id) !== `emp_${cleanId}` && String(e.id) !== cleanId);
+        await db.query('DELETE FROM public.employee_faces WHERE employee_id = $1 OR employee_id = $2', [idStr, `emp_${cleanId}`]).catch(() => {});
+        settings._deletedIds = Array.from(new Set([...(settings._deletedIds || []), idStr, cleanId, `emp_${cleanId}`, `emp_del_${cleanId}`])).filter(Boolean).slice(-25000);
+      } else if (type === 'request' || type === 'leave' || type === 'loan' || type === 'swap') {
+        const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+        const targetIds = new Set([
+          idStr,
+          rawId,
+          `req_${idStr}`,
+          `req_${rawId}`,
+          `leave_${idStr}`,
+          `leave_${rawId}`,
+          `swap_${idStr}`,
+          `swap_${rawId}`,
+          `loan_${idStr}`,
+          `loan_${rawId}`,
+          `res_${idStr}`,
+          `res_${rawId}`
+        ]);
+
+        const matchesTarget = (r) => {
+          if (!r) return false;
+          const rId = String(r.id || '');
+          const cleanRId = rId.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+          return targetIds.has(rId) || targetIds.has(cleanRId) || (r.requestId && targetIds.has(String(r.requestId)));
+        };
+
+        // حذف الطلب من كافة مصفوفات الطلبات بدون استثناء
+        settings.requests = (settings.requests || []).filter(r => !matchesTarget(r));
+        settings.leaveRequests = (settings.leaveRequests || []).filter(r => !matchesTarget(r));
+        settings.shiftSwaps = (settings.shiftSwaps || []).filter(r => !matchesTarget(r));
+        settings.loans = (settings.loans || []).filter(r => !matchesTarget(r));
+        settings.resignationRequests = (settings.resignationRequests || []).filter(r => !matchesTarget(r));
+        if (Array.isArray(settings.permissionRequests)) {
+          settings.permissionRequests = settings.permissionRequests.filter(r => !matchesTarget(r));
+        }
+
+        // مسح أي إشعار مرتبط بهذا الطلب
+        settings.notifications = (settings.notifications || []).filter(n => !matchesTarget(n) && (!n.requestId || !targetIds.has(String(n.requestId))));
+
+        // تسجيل المعرفات المحذوفة في _deletedIds لمنع ارتدادها
+        settings._deletedIds = Array.from(new Set([...(settings._deletedIds || []), ...Array.from(targetIds)])).filter(Boolean).slice(-25000);
+
+        // حذف مباشر وفوري من جدول public.requests بكافة احتمالات البادئة
+        await db.query(
+          'DELETE FROM public.requests WHERE id = $1 OR id = $2 OR id = $3 OR id = $4 OR id = $5 OR id = $6',
+          [idStr, rawId, `req_${rawId}`, `leave_${rawId}`, `swap_${rawId}`, `loan_${rawId}`]
+        ).catch(() => {});
       }
 
       const saveRes = await saveSettingsToStorage(key, settings, req.ip);
@@ -938,6 +982,115 @@ app.post(['/api/entity/delete', '/api/entity/hard-delete'], async (req, res) => 
     res.json({ success: true, message: `Entity ${id} deleted successfully`, version: newVer });
   } catch (err) {
     console.error('[API /entity/delete Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── 6.3.1 مسح وتطهير سجل الطلبات بالكامل من قاعدة البيانات والسيرفر ──────────
+app.post(['/api/requests/purge-all', '/api/requests/clear-all'], async (req, res) => {
+  try {
+    const { key = STORAGE_KEY, preservedPending = [] } = req.body;
+    const settings = await getSettingsFromStorage(key);
+    let newVer = 1;
+    const nowIso = new Date().toISOString();
+
+    const isPending = (r) => {
+      if (!r) return false;
+      if (r.adminApproved === true) return false;
+      const status = String(r.status || '').toLowerCase().trim();
+      if (status === 'approved' || status === 'paid' || status === 'rejected' || status === 'cancelled') {
+        return false;
+      }
+      return true;
+    };
+
+    // 1. حذف الطلبات المنتهية فقط من جدول public.requests واستثناء الطلبات قيد الاعتماد
+    await db.query(`
+      DELETE FROM public.requests 
+      WHERE status NOT IN ('pending', 'pending_admin', 'pending_target', 'pending_local', 'queued', 'syncing')
+        AND (admin_approved IS NOT TRUE AND status != 'pending');
+    `).catch((dbErr) => {
+      console.warn('[Requests Purge] DB query warning:', dbErr.message);
+    });
+
+    if (settings && typeof settings === 'object') {
+      // جمع كافة الطلبات قبل المسح لأرشفة المعتمد منها في رصيد وسجل الإجازات والاستئذانات الدائم
+      const candidateReqs = [
+        ...(settings.requests || []),
+        ...(settings.leaveRequests || [])
+      ];
+
+      const leaveMap = new Map((settings.leaveHistory || []).map(lh => [String(lh.id), lh]));
+      const permMap = new Map((settings.permissions || []).map(p => [String(p.id), p]));
+
+      candidateReqs.forEach((r) => {
+        if (!r) return;
+        const isApproved = r.status === 'approved' || r.adminApproved;
+        const isLeave = r.type === 'leave' || r.type === 'leave_request' || r.leaveType;
+        if (isLeave && isApproved) {
+          const lId = r.id || `lhist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+          leaveMap.set(String(lId), { ...r, id: lId, status: 'approved', adminApproved: true, archivedAt: nowIso });
+        }
+        const isPerm = r.type === 'permission' || r.type === 'late_permission' || r.type === 'early_leave';
+        if (isPerm && isApproved) {
+          const pId = r.id || `perm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+          permMap.set(String(pId), { ...r, id: pId, status: 'approved', adminApproved: true, archivedAt: nowIso });
+        }
+      });
+
+      settings.leaveHistory = Array.from(leaveMap.values());
+      settings.permissions = Array.from(permMap.values());
+
+      // استثناء وحماية الطلبات قيد الاعتماد
+      const uniquePendingMap = new Map();
+      (settings.requests || []).filter(isPending).forEach(r => { if (r && r.id) uniquePendingMap.set(String(r.id), r); });
+      (Array.isArray(preservedPending) ? preservedPending : []).filter(isPending).forEach(r => { if (r && r.id) uniquePendingMap.set(String(r.id), r); });
+
+      settings.requests = Array.from(uniquePendingMap.values());
+      settings.leaveRequests = (settings.leaveRequests || []).filter(isPending);
+      settings.shiftSwaps = (settings.shiftSwaps || []).filter(isPending);
+      settings.resignationRequests = (settings.resignationRequests || []).filter(isPending);
+      if (Array.isArray(settings.permissionRequests)) {
+        settings.permissionRequests = settings.permissionRequests.filter(isPending);
+      }
+
+      // تنظيف الإشعارات التابعة للطلبات غير قيد الاعتماد
+      settings.notifications = (settings.notifications || []).filter(n => {
+        if (!n) return false;
+        if (n.requestId && uniquePendingMap.has(String(n.requestId))) return true;
+        return !n.requestId && !String(n.id || '').startsWith('req_');
+      });
+
+      // ختم التصفير بطابع زمني دائم لمنع قيامة أي طلبات قديمة
+      settings._requestsClearedAt = nowIso;
+      settings._requestsUpdatedAt = nowIso;
+
+      const saveRes = await saveSettingsToStorage(key, settings, req.ip || 'request-purge');
+      newVer = saveRes.version;
+    }
+
+    // مسح كاش Redis الخاص بالطلبات إن وجد
+    if (isRedisConnected && redis) {
+      try {
+        await redis.del(`hr:requests:${key}`);
+      } catch {}
+    }
+
+    // بث حدث التطهير اللحظي لجميع المتصفحات والشاشات المفتوحة
+    io.emit('requests:purged', {
+      clearedAt: nowIso,
+      version: newVer
+    });
+    io.emit('entity:deleted', { type: 'requests_all', timestamp: nowIso });
+
+    res.json({
+      success: true,
+      message: 'تم مسح وتطهير كافة سجلات الطلبات نهائياً من قاعدة البيانات والسيرفر بنجاح',
+      clearedAt: nowIso,
+      version: newVer
+    });
+  } catch (err) {
+    console.error('[API /requests/purge-all Error]:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

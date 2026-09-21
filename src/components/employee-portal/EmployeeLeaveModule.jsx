@@ -23,7 +23,8 @@ export default function EmployeeLeaveModule({
 
   const isVariableSchedule = Boolean(emp?.noMonthlySchedule);
   const annualQuota = parseAnnualLeaveBalance(emp?.annualLeaveBalance, 21);
-  const [leaveType, setLeaveType] = useState(isVariableSchedule ? 'weekly_rest' : (annualQuota > 0 ? 'annual' : 'unpaid')); // 'weekly_rest' | 'annual' | 'unpaid'
+  const compOffBalance = parseFloat(emp?.compOffBalance || 0) || 0;
+  const [leaveType, setLeaveType] = useState(isVariableSchedule ? 'weekly_rest' : (compOffBalance > 0 ? 'comp_off' : (annualQuota > 0 ? 'annual' : 'unpaid'))); // 'weekly_rest' | 'annual' | 'unpaid' | 'comp_off'
   const [startDate, setStartDate] = useState(() => getRealTodayStr());
   const [endDate, setEndDate] = useState(() => getRealTodayStr());
   const [reason, setReason] = useState('');
@@ -167,6 +168,16 @@ export default function EmployeeLeaveModule({
       return;
     }
 
+    if (leaveType === 'comp_off' && compOffBalance <= 0) {
+      showToast('⚠️ لا يوجد لديك رصيد إجازات بدل راحة متاح لطلب هذه الإجازة');
+      return;
+    }
+
+    if (leaveType === 'comp_off' && currentDaysCount > compOffBalance) {
+      showToast(`⚠️ رصيد إجازات بدل الراحة المتاح (${compOffBalance} يوم) غير كافٍ لطلب ${currentDaysCount} يوم`);
+      return;
+    }
+
     const daysCount = currentDaysCount;
     const reqBranchId = selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId;
     const noBranchMgr = isBranchWithoutManager(reqBranchId, state);
@@ -294,6 +305,17 @@ export default function EmployeeLeaveModule({
             <div className="ep-summary-sub">إجازات سنوية مدفوعة الأجر متبقية</div>
           </div>
         </div>
+
+        <div className="ep-summary-card" style={{ border: '1.5px solid #c084fc', background: 'rgba(192, 132, 252, 0.06)' }}>
+          <div className="ep-summary-icon">🛋️</div>
+          <div className="ep-summary-body">
+            <div className="ep-summary-label" style={{ color: '#7e22ce', fontWeight: 800 }}>رصيد إجازات بدل الراحة</div>
+            <div className="ep-summary-value" style={{ color: compOffBalance > 0 ? '#7e22ce' : 'var(--muted)' }}>
+              {compOffBalance} يوم متاح
+            </div>
+            <div className="ep-summary-sub">مستحقة عن العمل في أيام الراحة بعد موافقة الإدارة</div>
+          </div>
+        </div>
       </div>
 
       {/* ── Form Modal / Inline ── */}
@@ -305,6 +327,9 @@ export default function EmployeeLeaveModule({
             <div className="field" style={{ flex: '1 1 180px' }}>
               <label style={{ fontWeight: '700' }}>نوع الإجازة</label>
               <select value={leaveType} onChange={(e) => setLeaveType(e.target.value)}>
+                {compOffBalance > 0 && (
+                  <option value="comp_off">🛋️ إجازة بدل راحة (مدفوعة الأجر كاملة - الرصيد: {compOffBalance} يوم)</option>
+                )}
                 {isVariableSchedule && (
                   <option value="weekly_rest">🛋️ راحة أسبوعية (مدفوعة الأجر - ضمن الراتب)</option>
                 )}
@@ -396,7 +421,9 @@ export default function EmployeeLeaveModule({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--muted)' }}>#{idx + 1}</span>
-                    {r.leaveType === 'annual' ? (
+                    {r.leaveType === 'comp_off' ? (
+                      <span className="badge" style={{ fontSize: '11.5px', background: '#f3e8ff', color: '#7c3aed', border: '1px solid #d8b4fe' }}>🛋️ بدل راحة (مدفوعة)</span>
+                    ) : r.leaveType === 'annual' ? (
                       <span className="badge success" style={{ fontSize: '11.5px' }}>🌴 سنوي (مدفوعة)</span>
                     ) : (
                       <span className="badge danger" style={{ fontSize: '11.5px' }}>💸 غير مدفوعة الأجر</span>
@@ -476,7 +503,9 @@ export default function EmployeeLeaveModule({
                   <tr key={r.id}>
                     <td>{idx + 1}</td>
                     <td>
-                      {r.leaveType === 'annual' ? (
+                      {r.leaveType === 'comp_off' ? (
+                        <span className="badge" style={{ background: '#f3e8ff', color: '#7c3aed', border: '1px solid #d8b4fe' }}>🛋️ بدل راحة (مدفوعة)</span>
+                      ) : r.leaveType === 'annual' ? (
                         <span className="badge success">🌴 سنوي (مدفوعة)</span>
                       ) : (
                         <span className="badge danger">💸 غير مدفوعة الأجر</span>

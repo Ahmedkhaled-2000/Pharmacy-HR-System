@@ -10,6 +10,7 @@ import EmployeeLoansModule from './EmployeeLoansModule';
 import EmployeePermissionsModule from './EmployeePermissionsModule';
 import EmployeeRosterModule from './EmployeeRosterModule';
 import EmployeeShiftSwapModule from './EmployeeShiftSwapModule';
+import ShiftAdjustmentModule from '../shifts/ShiftAdjustmentModule';
 import EmployeeEvaluationsModule from './EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
 import BylawsModule from '../bylaws/BylawsModule';
@@ -100,6 +101,7 @@ const NAV_ITEMS = [
   { id: 'shifts',      icon: '📋', label: 'سجل البصمات' },
   { id: 'biometric',   icon: '📸', label: 'البصمة الإلكترونية' },
   { id: 'roster',      icon: '🗓️', label: 'الجدول الشهري' },
+  { id: 'shift-adjustment', icon: '🔄', label: 'تعديل الشيفت' },
   { id: 'swaps',       icon: '🔄', label: 'تبديل الشيفتات' },
   { id: 'evaluations', icon: '⭐', label: 'التقييمات والشكاوي' },
   { id: 'bylaws',      icon: '📜', label: 'لائحة العمل والجزاءات' },
@@ -2002,6 +2004,14 @@ export default function EmployeePortalView({
             icon: '🗓️',
             desc: 'استعراض وتصميم جدول الورديات ومناوبات الفرع',
             visible: canViewRoster !== false
+          },
+          {
+            id: 'shift-adjustment',
+            targetTab: 'shift-adjustment',
+            label: 'تعديل الشيفت والجدول الشهري',
+            icon: '🔄',
+            desc: 'طلب تعديل مواعيد العمل، الراحات، ورفع جزاءات التأخير بأثر رجعي',
+            visible: !isAllBranchesMode
           },
           {
             id: 'swaps',
@@ -6515,6 +6525,20 @@ export default function EmployeePortalView({
               setAutoOpenRosterModal={setAutoOpenRosterModal}
               autoOpenPendingRosterModal={autoOpenPendingRosterModal}
               setAutoOpenPendingRosterModal={setAutoOpenPendingRosterModal}
+            />
+          )}
+
+          {/* ── 8.5. Tab: Shift Adjustment (تعديل الشيفت والجدول الشهري) ── */}
+          {activeTab === 'shift-adjustment' && (
+            <ShiftAdjustmentModule
+              mode="employee"
+              emp={emp}
+              state={state}
+              setState={setState}
+              saveState={saveState}
+              showToast={showToast}
+              selectedMonth={selectedMonth}
+              selectedBranchId={selectedBranchId || null}
             />
           )}
 

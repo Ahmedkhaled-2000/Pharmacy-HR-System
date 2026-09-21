@@ -82,23 +82,38 @@ export function useRequestsManager() {
         }
 
         // 1. Leave Requests Integration
-        if (['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave'].includes(target.type)) {
+        if (['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave', 'leave_comp_off', 'comp_off'].includes(target.type) || target.leaveType === 'comp_off') {
+          const leaveTypeResolved = target.leaveType || (target.type === 'annual_leave' ? 'annual' : target.type === 'sick_leave' ? 'sick' : target.type === 'unpaid_leave' ? 'unpaid' : (target.type === 'leave_comp_off' || target.type === 'comp_off' ? 'comp_off' : 'annual'));
+          const daysCountResolved = parseInt(target.daysCount || target.days || 1, 10);
           const approvedLeaveObj = {
             id: target.id || `leave_${Date.now()}`,
             originalRequestId: target.id,
             employeeId: target.employeeId,
             employeeCode: target.employeeCode,
             employeeName: target.employeeName,
-            leaveType: target.leaveType || (target.type === 'annual_leave' ? 'annual' : target.type === 'sick_leave' ? 'sick' : target.type === 'unpaid_leave' ? 'unpaid' : 'annual'),
+            leaveType: leaveTypeResolved,
             startDate: target.startDate || target.date,
             endDate: target.endDate || target.startDate || target.date,
-            daysCount: parseInt(target.daysCount || target.days || 1, 10),
+            daysCount: daysCountResolved,
             status: 'approved',
             adminApproved: true,
             branchApproved: true,
             reason: target.reason || target.details || '',
             approvedAt: new Date().toISOString()
           };
+
+          if (leaveTypeResolved === 'comp_off' || target.type === 'leave_comp_off') {
+            updatedEmps = updatedEmps.map((e) => {
+              if (e && (String(e.id) === String(target.employeeId) || (target.employeeCode && String(e.code) === String(target.employeeCode)))) {
+                const curBal = parseFloat(e.compOffBalance || 0);
+                return {
+                  ...e,
+                  compOffBalance: Math.max(0, curBal - daysCountResolved)
+                };
+              }
+              return e;
+            });
+          }
 
           const lIdx = updatedLeaveRequests.findIndex(
             (lr) => lr.id === target.id || (String(lr.employeeId) === String(target.employeeId) && lr.startDate === target.startDate)
@@ -648,6 +663,90 @@ export function useRequestsManager() {
                 ...(cleanPhones && cleanPhones.length > 0 ? { phones: cleanPhones, phone: cleanPhones[0] } : {}),
                 ...(newAddress !== undefined && newAddress !== '' ? { address: newAddress } : {}),
                 ...(newMaritalStatus ? { maritalStatus: newMaritalStatus } : {})
+              };
+            }
+            return e;
+          });
+        }
+
+        // 11. Shift Adjustment Approval Integration
+        if (target.type === 'shift_adjustment') {
+          const empObj = (state.employees || []).find(e => e && (String(e.id) === String(target.employeeId) || (target.employeeCode && String(e.code) === String(target.employeeCode))));
+          const datesToAdjust = Array.isArray(target.dates) && target.dates.length > 0 
+            ? target.dates 
+            : (target.date ? [target.date] : []);
+
+          if (target.schedule || target.newSchedule) {
+            const normalizedSch = normalizeSchedule(target.schedule || target.newSchedule);
+            const targetMonth = target.month || (datesToAdjust[0] ? datesToAdjust[0].slice(0, 7) : new Date().toISOString().slice(0, 7));
+            const existingRosterIdx = updatedRosters.findIndex(
+              (ros) => (String(ros.employeeId) === String(target.employeeId) || (empObj?.code && String(ros.employeeCode) === String(empObj.code))) &&
+                       (ros.month === targetMonth || !ros.month)
+            );
+
+            if (existingRosterIdx >= 0) {
+              const currentRoster = updatedRosters[existingRosterIdx];
+              updatedRosters[existingRosterIdx] = {
+                ...currentRoster,
+                schedule: {
+                  ...(currentRoster.schedule || {}),
+                  ...normalizedSch
+                },
+                updatedAt: new Date().toISOString()
+              };
+            } else {
+              updatedRosters.unshift({
+                id: `roster_${Date.now()}`,
+                employeeId: target.employeeId || empObj?.id,
+                employeeCode: target.employeeCode || empObj?.code,
+                month: targetMonth,
+                schedule: normalizedSch,
+                status: 'approved',
+                adminApproved: true,
+                approvedAt: new Date().toISOString()
+              });
+            }
+          }
+
+          // إلغاء وتصفير أي جزاءات تأخير أو خصومات على الأيام المعدلة
+          updatedLateIncidents = updatedLateIncidents.map((inc) => {
+            const matchesEmp = String(inc.employeeId) === String(target.employeeId);
+            const matchesDate = datesToAdjust.includes(inc.date);
+            if (matchesEmp && matchesDate) {
+              return {
+                ...inc,
+                status: 'cancelled',
+                actionType: 'grace',
+                actionLabel: 'سماح (تم اعتماد تعديل الشيفت)',
+                penaltyAmount: 0,
+                deductionMinutes: 0,
+                isCancelled: true,
+                cancellationReason: `تم إلغاء الجزاء لاعتماد طلب تعديل الشيفت (${target.id || ''})`
+              };
+            }
+            return inc;
+          });
+
+          // إزالة أي استقطاعات مالية مرتبطة بهذه التواريخ
+          updatedAdjs = updatedAdjs.filter((a) => {
+            const matchesEmp = String(a.employeeId) === String(target.employeeId);
+            const matchesDate = datesToAdjust.includes(a.date);
+            if (matchesEmp && matchesDate && (a.type === 'deduction' || a.subType === 'lateness' || a.subType === 'disciplinary_penalty')) {
+              return false;
+            }
+            return true;
+          });
+        }
+
+        // 12. Comp-Off Grant Integration (اعتماد احتساب بدل راحة)
+        if (target.type === 'comp_off_grant') {
+          const creditDays = parseFloat(target.daysCount || target.compOffDays || 1) || 1;
+          updatedEmps = updatedEmps.map((e) => {
+            if (e && (String(e.id) === String(target.employeeId) || (target.employeeCode && String(e.code) === String(target.employeeCode)))) {
+              const curBal = parseFloat(e.compOffBalance || 0);
+              return {
+                ...e,
+                compOffBalance: curBal + creditDays
               };
             }
             return e;

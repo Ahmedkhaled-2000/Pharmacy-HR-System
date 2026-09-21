@@ -368,6 +368,7 @@ export default function EmployeeFileModal({
   const [terminationReason, setTerminationReason] = useState('');
   const [password, setPassword] = useState('');
   const [annualLeaveBalance, setAnnualLeaveBalance] = useState('21');
+  const [compOffBalance, setCompOffBalance] = useState('0');
   const [noMonthlySchedule, setNoMonthlySchedule] = useState(false);
   const [weeklyRestDays, setWeeklyRestDays] = useState(['الجمعة']);
 
@@ -523,6 +524,7 @@ export default function EmployeeFileModal({
       setPassword(editingEmp.password || '');
 
       setAnnualLeaveBalance(editingEmp.annualLeaveBalance !== undefined && editingEmp.annualLeaveBalance !== null && editingEmp.annualLeaveBalance !== '' ? String(editingEmp.annualLeaveBalance) : '21');
+      setCompOffBalance(editingEmp.compOffBalance !== undefined && editingEmp.compOffBalance !== null && editingEmp.compOffBalance !== '' ? String(editingEmp.compOffBalance) : '0');
       setNoMonthlySchedule(Boolean(editingEmp.noMonthlySchedule));
       setWeeklyRestDays(
         Array.isArray(editingEmp.weeklyRestDays) && editingEmp.weeklyRestDays.length > 0
@@ -586,6 +588,7 @@ export default function EmployeeFileModal({
       setPassword('');
 
       setAnnualLeaveBalance('21');
+      setCompOffBalance('0');
       setNoMonthlySchedule(false);
       setWeeklyRestDays(['الجمعة']);
 
@@ -697,6 +700,7 @@ export default function EmployeeFileModal({
       hireDate,
       status,
       annualLeaveBalance: parseAnnualLeaveBalance(annualLeaveBalance, 21),
+      compOffBalance: parseFloat(compOffBalance) || 0,
       branchesDetails,
       documents,
       driveFolderId,
@@ -975,6 +979,7 @@ export default function EmployeeFileModal({
         ? (Number(editingEmp?.sessionVersion || 0)) + 1
         : (Number(editingEmp?.sessionVersion || 0)),
       annualLeaveBalance: parseAnnualLeaveBalance(annualLeaveBalance, 21),
+      compOffBalance: parseFloat(compOffBalance) || 0,
       noMonthlySchedule: Boolean(noMonthlySchedule),
       weeklyRestDays: Array.isArray(weeklyRestDays) && weeklyRestDays.length > 0 ? weeklyRestDays : ['الجمعة'],
       salaryIncreases: Array.isArray(salaryIncreases) ? salaryIncreases : [],
@@ -1904,6 +1909,19 @@ export default function EmployeeFileModal({
                   value={annualLeaveBalance}
                   onChange={(e) => setAnnualLeaveBalance(e.target.value)}
                   placeholder="21"
+                />
+              </div>
+
+              <div className="field">
+                <label style={{ color: '#7e22ce', fontWeight: 800 }}>🛋️ رصيد إجازات بدل الراحة (يوم)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={compOffBalance}
+                  onChange={(e) => setCompOffBalance(e.target.value)}
+                  placeholder="0"
+                  style={{ borderColor: '#c084fc', background: '#faf5ff' }}
                 />
               </div>
 

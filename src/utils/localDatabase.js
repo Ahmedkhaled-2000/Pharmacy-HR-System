@@ -198,20 +198,74 @@ export async function getAllLocalRequests() {
 
 export async function deleteRequestLocal(id) {
   if (!id) return false;
-  const key = String(id);
+  const idStr = String(id);
+  const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+  const keys = Array.from(new Set([idStr, rawId, `req_${rawId}`, `leave_${rawId}`, `swap_${rawId}`, `loan_${rawId}`])).filter(Boolean);
+
   try {
     const db = await openLocalDB();
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(STORES.REQUESTS, 'readwrite');
       const store = tx.objectStore(STORES.REQUESTS);
-      store.delete(key);
+      keys.forEach((k) => store.delete(k));
       tx.oncomplete = () => resolve(true);
       tx.onerror = () => reject(tx.error);
     });
   } catch {
-    memoryFallback[STORES.REQUESTS].delete(key);
+    keys.forEach((k) => memoryFallback[STORES.REQUESTS].delete(k));
     return true;
   }
+}
+
+export async function clearAllRequestsLocal() {
+  try {
+    const db = await openLocalDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORES.REQUESTS, 'readwrite');
+      const store = tx.objectStore(STORES.REQUESTS);
+      store.clear();
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+  memoryFallback[STORES.REQUESTS].clear();
+  return true;
+}
+
+export async function bulkDeleteRequestsLocal(idsArray = []) {
+  if (!Array.isArray(idsArray) || idsArray.length === 0) return true;
+  const keysToDelete = new Set();
+  for (const id of idsArray) {
+    if (!id) continue;
+    const s = String(id);
+    const raw = s.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+    keysToDelete.add(s);
+    if (raw) {
+      keysToDelete.add(raw);
+      keysToDelete.add(`req_${raw}`);
+      keysToDelete.add(`leave_${raw}`);
+      keysToDelete.add(`swap_${raw}`);
+      keysToDelete.add(`loan_${raw}`);
+    }
+  }
+
+  try {
+    const db = await openLocalDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORES.REQUESTS, 'readwrite');
+      const store = tx.objectStore(STORES.REQUESTS);
+      for (const k of keysToDelete) {
+        store.delete(k);
+      }
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+
+  for (const k of keysToDelete) {
+    memoryFallback[STORES.REQUESTS].delete(k);
+  }
+  return true;
 }
 
 // ── دوال صندوق الإرسال المعاملاتي (Transactional Outbox) ────────────────────────

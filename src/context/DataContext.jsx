@@ -638,13 +638,35 @@ export function DataProvider({ children, showToast = () => {} }) {
         putRequestsBatch(normalized.requests).catch(() => {});
       }
 
-      // دمج أي طلبات محلية تم إنشاؤها أوفلاين في الـ State
+      // دمج أي طلبات محلية تم إنشاؤها أوفلاين في الـ State مع حماية كاملة ضد المحذوفات
       getAllLocalRequests().then((localReqs) => {
         if (localReqs && localReqs.length > 0) {
           setState((prev) => {
-            const map = new Map((prev.requests || []).map((r) => [String(r.id), r]));
+            const rawSnap = localStorage.getItem('app_deleted_ids_snapshot');
+            const snapList = rawSnap ? JSON.parse(rawSnap) : [];
+            const deletedSet = new Set([...(prev._deletedIds || []), ...snapList]);
+            const clearedTime = Math.max(
+              prev._requestsClearedAt ? new Date(prev._requestsClearedAt).getTime() : 0,
+              localStorage.getItem('app_requests_cleared_at') ? new Date(localStorage.getItem('app_requests_cleared_at')).getTime() : 0
+            );
+
+            const isReqDeleted = (r) => {
+              if (!r || !r.id) return true;
+              const idStr = String(r.id);
+              const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+              if (deletedSet.has(idStr) || deletedSet.has(rawId) || deletedSet.has(`req_${rawId}`) || deletedSet.has(`leave_${rawId}`) || deletedSet.has(`swap_${rawId}`) || deletedSet.has(`loan_${rawId}`)) {
+                return true;
+              }
+              if (clearedTime > 0) {
+                const rTime = new Date(r.createdAt || r.date || r.timestamp || 0).getTime();
+                if (rTime > 0 && rTime < clearedTime) return true;
+              }
+              return false;
+            };
+
+            const map = new Map((prev.requests || []).filter((r) => !isReqDeleted(r)).map((r) => [String(r.id), r]));
             localReqs.forEach((lr) => {
-              if (lr && lr.id) {
+              if (lr && lr.id && !isReqDeleted(lr)) {
                 map.set(String(lr.id), { ...(map.get(String(lr.id)) || {}), ...lr });
               }
             });
@@ -707,32 +729,52 @@ export function DataProvider({ children, showToast = () => {} }) {
           )
         }));
       } else if (event.type === 'DELTA_CHANGES_APPLIED') {
-        // تحديث تزايدي فائق الخفة (< 2KB) تم تطبيقه على IndexedDB
+        // تحديث تزايدي فائق الخفة (< 2KB) تم تطبيقه على IndexedDB مع التحقق من المحذوفات
         getAllLocalRequests().then((localReqs) => {
-          if (localReqs && localReqs.length > 0) {
-            setState((prev) => {
-              const map = new Map((prev.requests || []).map((r) => [String(r.id), r]));
-              const TERMINAL_STATUSES = new Set(['approved', 'rejected', 'paid', 'partial', 'cancelled', 'waived', 'completed']);
+          setState((prev) => {
+            const rawSnap = localStorage.getItem('app_deleted_ids_snapshot');
+            const snapList = rawSnap ? JSON.parse(rawSnap) : [];
+            const deletedSet = new Set([...(prev._deletedIds || []), ...snapList]);
+            const clearedTime = Math.max(
+              prev._requestsClearedAt ? new Date(prev._requestsClearedAt).getTime() : 0,
+              localStorage.getItem('app_requests_cleared_at') ? new Date(localStorage.getItem('app_requests_cleared_at')).getTime() : 0
+            );
 
-              localReqs.forEach((lr) => {
-                if (lr && lr.id) {
-                  const idStr = String(lr.id);
-                  const current = map.get(idStr);
-                  if (current) {
-                    const curStatus = String(current.status || '').toLowerCase();
-                    const lrStatus = String(lr.status || '').toLowerCase();
-                    // إذا كان الطلب في الحالة الحالية معتمداً أو مرفوضاً، والوارد معلقاً، لا يتم الرجوع للحالة المعلقة أبداً
-                    if (TERMINAL_STATUSES.has(curStatus) && !TERMINAL_STATUSES.has(lrStatus)) {
-                      map.set(idStr, { ...lr, ...current, status: current.status, adminApproved: current.adminApproved });
-                      return;
-                    }
+            const isReqDeleted = (r) => {
+              if (!r || !r.id) return true;
+              const idStr = String(r.id);
+              const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+              if (deletedSet.has(idStr) || deletedSet.has(rawId) || deletedSet.has(`req_${rawId}`) || deletedSet.has(`leave_${rawId}`) || deletedSet.has(`swap_${rawId}`) || deletedSet.has(`loan_${rawId}`)) {
+                return true;
+              }
+              if (clearedTime > 0) {
+                const rTime = new Date(r.createdAt || r.date || r.timestamp || 0).getTime();
+                if (rTime > 0 && rTime < clearedTime) return true;
+              }
+              return false;
+            };
+
+            const map = new Map((prev.requests || []).filter((r) => !isReqDeleted(r)).map((r) => [String(r.id), r]));
+            const TERMINAL_STATUSES = new Set(['approved', 'rejected', 'paid', 'partial', 'cancelled', 'waived', 'completed']);
+
+            (localReqs || []).forEach((lr) => {
+              if (lr && lr.id && !isReqDeleted(lr)) {
+                const idStr = String(lr.id);
+                const current = map.get(idStr);
+                if (current) {
+                  const curStatus = String(current.status || '').toLowerCase();
+                  const lrStatus = String(lr.status || '').toLowerCase();
+                  // إذا كان الطلب في الحالة الحالية معتمداً أو مرفوضاً، والوارد معلقاً، لا يتم الرجوع للحالة المعلقة أبداً
+                  if (TERMINAL_STATUSES.has(curStatus) && !TERMINAL_STATUSES.has(lrStatus)) {
+                    map.set(idStr, { ...lr, ...current, status: current.status, adminApproved: current.adminApproved });
+                    return;
                   }
-                  map.set(idStr, { ...(current || {}), ...lr });
                 }
-              });
-              return { ...prev, requests: Array.from(map.values()) };
+                map.set(idStr, { ...(current || {}), ...lr });
+              }
             });
-          }
+            return { ...prev, requests: Array.from(map.values()) };
+          });
         }).catch(() => {});
       }
     });
@@ -995,12 +1037,17 @@ export function DataProvider({ children, showToast = () => {} }) {
       });
       if (hasShift) continue;
 
-      const allLeaveRequests = [...(state.leaveRequests || []), ...(state.requests || [])];
-      const hasLeave = allLeaveRequests.some(
-        r => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode || r.employeeId) === empCodeStr)) &&
-        (r.status === 'approved' || r.adminApproved) &&
-        r.startDate <= dateStr && r.endDate >= dateStr
-      );
+      const allLeaveRequests = [...(state.leaveRequests || []), ...(state.requests || []), ...(state.leaveHistory || [])];
+      const hasLeave = allLeaveRequests.some(r => {
+        if (!r) return false;
+        const matchesEmp = String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode || r.employeeId) === empCodeStr);
+        if (!matchesEmp) return false;
+        const isAppr = r.status === 'approved' || r.adminApproved;
+        if (!isAppr) return false;
+        const sDate = r.startDate || r.date;
+        const eDate = r.endDate || r.startDate || r.date;
+        return Boolean(sDate && eDate && sDate <= dateStr && eDate >= dateStr);
+      });
       if (hasLeave) continue;
       count++;
     }
