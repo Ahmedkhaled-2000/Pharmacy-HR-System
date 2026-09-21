@@ -1041,6 +1041,51 @@ app.post(['/api/requests/purge-all', '/api/requests/clear-all'], async (req, res
       settings.leaveHistory = Array.from(leaveMap.values());
       settings.permissions = Array.from(permMap.values());
 
+      // جمع كافة معرفات الطلبات المنتهية لإضافتها إلى settings._deletedIds ومنع ارتدادها
+      const allPurgedKeys = [];
+      const collectPurgedId = (item) => {
+        if (!item || !item.id) return;
+        const idStr = String(item.id);
+        const raw = idStr.replace(/^(req_|leave_|swap_|res_|loan_|medreq_|perm_|lhist_|obj_inc_|obj_adj_|obj_|notif_)/, '');
+        allPurgedKeys.push(
+          idStr,
+          raw,
+          `req_${idStr}`,
+          `req_${raw}`,
+          `loan_${idStr}`,
+          `loan_${raw}`,
+          `medreq_${idStr}`,
+          `medreq_${raw}`,
+          `leave_${idStr}`,
+          `leave_${raw}`,
+          `swap_${idStr}`,
+          `swap_${raw}`
+        );
+      };
+
+      (settings.requests || []).filter(r => !isPending(r)).forEach(collectPurgedId);
+      (settings.leaveRequests || []).filter(r => !isPending(r)).forEach(collectPurgedId);
+      (settings.shiftSwaps || []).filter(r => !isPending(r)).forEach(collectPurgedId);
+      (settings.loans || []).filter(r => !isPending(r)).forEach(collectPurgedId);
+
+      // تنظيف وتطهير السلف: استثناء وحماية قيد الاعتماد، وحذف السلف المسددة/المرفوضة وسلف الموظفين المحذوفين
+      const empIdSet = new Set((settings.employees || []).map(e => String(e.id)));
+      settings.loans = (settings.loans || []).filter(ln => {
+        if (!ln) return false;
+        if (isPending(ln)) return true;
+        if (ln.employeeId && !empIdSet.has(String(ln.employeeId))) return false;
+        if (ln.status === 'paid' || ln.status === 'rejected' || ln.status === 'cancelled') return false;
+        return true;
+      }).map(ln => {
+        if (isPending(ln)) return ln;
+        return { ...ln, clearedFromRequestsInbox: true };
+      });
+
+      settings._deletedIds = Array.from(new Set([
+        ...(settings._deletedIds || []),
+        ...allPurgedKeys
+      ])).filter(Boolean).slice(-5000);
+
       // استثناء وحماية الطلبات قيد الاعتماد
       const uniquePendingMap = new Map();
       (settings.requests || []).filter(isPending).forEach(r => { if (r && r.id) uniquePendingMap.set(String(r.id), r); });

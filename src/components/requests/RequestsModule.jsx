@@ -251,14 +251,17 @@ export default function RequestsModule({
       // الطلبات قيد الاعتماد لا تعتبر محذوفة أبداً ومحمية من الحذف
       if (reqObj && isPendingRequest(reqObj)) return false;
       const s = String(id);
-      const raw = s.replace(/^(req_|leave_|swap_|res_|loan_)/, '');
+      const raw = s.replace(/^(req_|leave_|swap_|res_|loan_|medreq_|perm_|lhist_|obj_inc_|obj_adj_|obj_)/, '');
       return (
         deletedIdsSet.has(s) ||
         deletedIdsSet.has(`req_${s}`) ||
         deletedIdsSet.has(`req_${raw}`) ||
         deletedIdsSet.has(`leave_${raw}`) ||
         deletedIdsSet.has(`swap_${raw}`) ||
-        deletedIdsSet.has(`loan_${raw}`)
+        deletedIdsSet.has(`loan_${raw}`) ||
+        deletedIdsSet.has(`medreq_${raw}`) ||
+        deletedIdsSet.has(`obj_inc_${raw}`) ||
+        deletedIdsSet.has(raw)
       );
     };
 
@@ -639,7 +642,7 @@ export default function RequestsModule({
     return true;
   });
 
-  // Calculate Executive KPI Stats across allRequests
+  // Calculate Executive KPI Stats across visible requests (matching active scope and date cycle)
   const kpis = useMemo(() => {
     let pendingCount = 0;
     let biometricCount = 0;
@@ -654,7 +657,25 @@ export default function RequestsModule({
     const todayStr = new Date().toISOString().slice(0, 10);
     const thisMonthStr = todayStr.slice(0, 7);
 
-    (allRequests || []).forEach((r) => {
+    const passDateScope = (r) => {
+      const isPending = !r.status || r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_target';
+      if (isPending) return true;
+      const rDate = getRequestDate(r);
+      if (filterDate) {
+        return rDate && rDate.startsWith(filterDate);
+      }
+      if ((filterMode === 'custom' || filterMode === 'range') && customFrom && customTo) {
+        const from = customFrom <= customTo ? customFrom : customTo;
+        const to = customFrom <= customTo ? customTo : customFrom;
+        return Boolean(rDate && rDate >= from && rDate <= to);
+      }
+      if (typeof filterFn === 'function' && rDate) {
+        return filterFn(rDate);
+      }
+      return true;
+    };
+
+    (requests || []).forEach((r) => {
       if (!r) return;
       const isPending = !r.status || r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_target' || r.status === 'pending_local' || r.status === 'queued' || r.status === 'syncing';
       const isApproved = r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.adminApproved;
@@ -663,17 +684,20 @@ export default function RequestsModule({
       const isOutbox = r.status === 'pending_local' || r.status === 'queued' || r.status === 'syncing';
       const rDate = getRequestDate(r);
       const isBio = r.type === 'biometric_verification' || r.type === 'biometric_registration' || r.type === 'biometric_reset' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
+      const inScope = passDateScope(r);
 
       if (isPending) pendingCount++;
       if (isBio && isPending) biometricCount++;
       if (isApproved && rDate && rDate.startsWith(thisMonthStr)) approvedMonthCount++;
-      if (isApproved) completedCount++;
-      if (isRejected) rejectedCount++;
+      if (isApproved && inScope) completedCount++;
+      if (isRejected && inScope) rejectedCount++;
       if (isUrgent && isPending) urgentCount++;
       if (isOutbox) outboxCount++;
       if ((r.type === 'leave' || r.type === 'permission' || r.type === 'late_permission') && (r.startDate === todayStr || r.date === todayStr)) todayLeavePermCount++;
       if ((r.type === 'loan' || r.type === 'advance' || r.type === 'meds') && isPending) pendingLoansCount++;
     });
+
+    const scopedTotal = (requests || []).filter(passDateScope).length;
 
     return {
       pendingCount,
@@ -685,9 +709,9 @@ export default function RequestsModule({
       completedCount,
       rejectedCount,
       outboxCount,
-      totalCount: (allRequests || []).length
+      totalCount: scopedTotal
     };
-  }, [allRequests]);
+  }, [requests, filterDate, filterMode, customFrom, customTo, filterFn]);
 
   // Bulk Selection Handlers
   const handleToggleSelectAll = () => {
@@ -1949,7 +1973,7 @@ export default function RequestsModule({
     if (!isConfirmed) return;
     const performDelete = async () => {
       const idStr = String(reqId);
-      const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+      const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|medreq_|perm_|lhist_|obj_inc_|obj_adj_|obj_|notif_)/, '');
       const updatedDeleted = Array.from(new Set([
         ...(state._deletedIds || []),
         idStr,
@@ -1964,6 +1988,10 @@ export default function RequestsModule({
         `res_${rawId}`,
         `loan_${idStr}`,
         `loan_${rawId}`,
+        `medreq_${idStr}`,
+        `medreq_${rawId}`,
+        `obj_inc_${idStr}`,
+        `obj_inc_${rawId}`,
         `notif_${idStr}`,
         `notif_${rawId}`
       ])).filter(Boolean).slice(-5000);
@@ -1971,7 +1999,7 @@ export default function RequestsModule({
       const matchesId = (item) => {
         if (!item) return false;
         const itemIdStr = String(item.id || '');
-        const itemRaw = itemIdStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+        const itemRaw = itemIdStr.replace(/^(req_|leave_|swap_|res_|loan_|medreq_|perm_|lhist_|obj_inc_|obj_adj_|obj_|notif_)/, '');
         return itemIdStr === idStr || itemIdStr === rawId || itemRaw === idStr || (rawId && itemRaw === rawId) || (item.originalRequestId && (String(item.originalRequestId) === idStr || String(item.originalRequestId) === rawId));
       };
 
@@ -2147,14 +2175,31 @@ export default function RequestsModule({
     });
     if (!isConfirmed) return;
 
-    const visibleIds = new Set(clearableRequests.map((r) => String(r.id)));
+    const visibleIds = new Set();
+    clearableRequests.forEach(r => {
+      if (r && r.id) {
+        const s = String(r.id);
+        const raw = s.replace(/^(req_|leave_|swap_|res_|loan_|medreq_|perm_|lhist_|obj_inc_|obj_adj_|obj_|notif_)/, '');
+        visibleIds.add(s);
+        if (raw) {
+          visibleIds.add(raw);
+          visibleIds.add(`loan_${raw}`);
+          visibleIds.add(`medreq_${raw}`);
+          visibleIds.add(`req_${raw}`);
+        }
+      }
+    });
     const nowIso = new Date().toISOString();
 
     const hideItem = (item) => {
       // استثناء الطلبات قيد الاعتماد من الإخفاء دائماً
       if (item && isPendingRequest(item)) return item;
-      if (item && item.id && visibleIds.has(String(item.id))) {
-        return { ...item, hiddenFromAdmin: true, updatedAt: nowIso };
+      if (item && item.id) {
+        const s = String(item.id);
+        const raw = s.replace(/^(req_|leave_|swap_|res_|loan_|medreq_|perm_|lhist_|obj_inc_|obj_adj_|obj_|notif_)/, '');
+        if (visibleIds.has(s) || (raw && visibleIds.has(raw))) {
+          return { ...item, hiddenFromAdmin: true, updatedAt: nowIso };
+        }
       }
       return item;
     };
@@ -2325,21 +2370,34 @@ export default function RequestsModule({
       const updatedPermissions = Array.from(permMap.values());
       const preservedPermIds = new Set(updatedPermissions.map(p => String(p.id)));
 
-      // 3. الحفاظ على السلف المالية المعتمدة
-      const updatedLoans = state.loans || [];
-      const preservedLoanIds = new Set(updatedLoans.map(ln => String(ln.id)));
+      // 3. تنظيف السلف المالية: تطهير السلف المسددة والمرفوضة واليتيمة مع الحفاظ على السلف قيد الاعتماد
+      const empIdSet = new Set((state.employees || []).map(e => String(e.id)));
+      const preservedLoans = (state.loans || []).filter(ln => {
+        if (!ln) return false;
+        // حماية السلف قيد الاعتماد دائماً
+        if (isPendingRequest(ln)) return true;
+        // حذف سلف الموظفين المحذوفين من النظام نهائياً
+        if (ln.employeeId && !empIdSet.has(String(ln.employeeId))) return false;
+        // حذف السلف المسددة بالكامل أو المرفوضة أو الملغاة
+        if (ln.status === 'paid' || ln.status === 'rejected' || ln.status === 'cancelled') return false;
+        // السلف المعتمدة التي ما زالت تحت السداد: يتم الإبقاء عليها في ملف الموظف والراتب مع وسم إخلائها من صندوق الوارد
+        return true;
+      }).map(ln => {
+        if (isPendingRequest(ln)) return ln;
+        return { ...ln, clearedFromRequestsInbox: true };
+      });
 
-      // 4. بناء قائمة المعرفات المحذوفة مع حماية الطلبات قيد الاعتماد والإجازات والاستئذانات والسلف
+      // 4. بناء قائمة المعرفات المحذوفة مع حماية الطلبات قيد الاعتماد فقط
       const allDeletedKeys = [];
       const allReqIdsSet = new Set();
 
       clearableReqs.forEach((r) => {
         if (r && r.id) {
           const idStr = String(r.id);
-          if (pendingIdsSet.has(idStr) || isPendingRequest(r) || preservedLeaveIds.has(idStr) || preservedPermIds.has(idStr) || preservedLoanIds.has(idStr)) {
+          if (pendingIdsSet.has(idStr) || isPendingRequest(r)) {
             return;
           }
-          const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+          const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|medreq_|perm_|lhist_|obj_inc_|obj_adj_|obj_|notif_)/, '');
           allReqIdsSet.add(idStr);
           if (rawId) allReqIdsSet.add(rawId);
           allDeletedKeys.push(
@@ -2347,10 +2405,18 @@ export default function RequestsModule({
             rawId,
             `req_${idStr}`,
             `req_${rawId}`,
+            `leave_${idStr}`,
+            `leave_${rawId}`,
             `swap_${idStr}`,
             `swap_${rawId}`,
+            `loan_${idStr}`,
+            `loan_${rawId}`,
+            `medreq_${idStr}`,
+            `medreq_${rawId}`,
             `res_${idStr}`,
             `res_${rawId}`,
+            `obj_inc_${idStr}`,
+            `obj_inc_${rawId}`,
             `notif_${idStr}`,
             `notif_${rawId}`
           );
@@ -2377,7 +2443,7 @@ export default function RequestsModule({
         requests: preservedPendingRequests,
         leaveRequests: preservedPendingLeaves,
         shiftSwaps: preservedPendingSwaps,
-        loans: updatedLoans,
+        loans: preservedLoans,
         leaveHistory: updatedLeaveHistory,
         permissions: updatedPermissions,
         permissionRequests: preservedPendingPerms,
@@ -2399,6 +2465,7 @@ export default function RequestsModule({
           ...preservedPendingRequests,
           ...preservedPendingLeaves,
           ...preservedPendingSwaps,
+          ...preservedPendingLoans,
           ...preservedPendingResignations,
           ...preservedPendingPerms
         ];

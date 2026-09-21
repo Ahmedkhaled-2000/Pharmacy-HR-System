@@ -130,9 +130,9 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = n
 
 // Normalize schedule to standard Arabic day names and structure
 export function normalizeSchedule(rawSchedule) {
-  if (!rawSchedule || typeof rawSchedule !== 'object') return DEFAULT_SCHEDULE;
+  if (!rawSchedule || typeof rawSchedule !== 'object' || Object.keys(rawSchedule).length === 0) return null;
   
-  const normalized = { ...DEFAULT_SCHEDULE };
+  const normalized = {};
   
   const dayKeyMap = {
     'saturday': 'السبت',
@@ -175,13 +175,13 @@ export function normalizeSchedule(rawSchedule) {
       const isOff = val.type === 'off' || val.isOff === true || val.type === 'راحة';
       normalized[mappedDay] = {
         type: isOff ? 'off' : 'shift',
-        start: isOff ? '' : (val.start || val.checkIn || '08:00'),
-        end: isOff ? '' : (val.end || val.checkOut || '16:00')
+        start: isOff ? '' : (val.start || val.checkIn || ''),
+        end: isOff ? '' : (val.end || val.checkOut || '')
       };
     }
   });
 
-  return normalized;
+  return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
 export { getResolvedEmployeeRoster };
@@ -341,6 +341,11 @@ export default function EmployeeRosterModule({
   const handleSubmitRoster = async (e) => {
     e.preventDefault();
 
+    if (pendingRosterReq) {
+      showToast?.('⚠️ لا يمكن إعادة إرسال الجدول: لديك بالفعل طلب جدول شهري قيد المراجعة والاعتماد حالياً من قِبل مدير الفرع والإدارة العليا.');
+      return;
+    }
+
     const safeInputs = (scheduleInputs && typeof scheduleInputs === 'object') ? scheduleInputs : {};
     // Validation: check for incomplete shifts
     const hasIncompleteShift = Object.entries(safeInputs).some(([day, conf]) => {
@@ -405,6 +410,49 @@ export default function EmployeeRosterModule({
   // Render Roster Builder Modal Component
   const renderRosterModal = () => {
     const targetBranchId = activeFormBranchId || selectedBranchId || emp.branchId;
+
+    if (pendingRosterReq) {
+      return (
+        <div
+          className="card settings-card fade-in"
+          style={{ padding: '24px', background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)', border: '1.5px solid #f59e0b', margin: '16px 0 20px', borderRadius: '14px', boxShadow: '0 4px 14px rgba(245, 158, 11, 0.12)' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+            <span style={{ fontSize: '32px' }}>🔒</span>
+            <div>
+              <h4 style={{ margin: 0, fontSize: '16px', color: '#92400e', fontWeight: 900 }}>
+                الجدول الشهري قيد المراجعة والاعتماد حالياً
+              </h4>
+              <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#b45309' }}>
+                لقد تم إرسال جدولك بنجاح وهو الآن بانتظار استكمال الموافقة المزدوجة من <strong>مدير الفرع والإدارة العليا</strong>. يمنع النظام إرسال جدول جديد لنفس الشهر لحين البت في هذا الطلب.
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-start"
+              style={{ background: '#0284c7', borderColor: '#0284c7', color: '#fff', fontSize: '13px', padding: '8px 18px', fontWeight: 800 }}
+              onClick={() => {
+                setActivePendingReq(pendingRosterReq);
+                setShowPendingPreviewModal(true);
+                setShowRosterModal(false);
+              }}
+            >
+              📋 عرض تفاصيل الجدول المرسل ومراحل الاعتماد 👁️
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ fontSize: '13px', padding: '8px 16px', border: '1px solid #d97706', color: '#92400e' }}
+              onClick={() => setShowRosterModal(false)}
+            >
+              إغلاق
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <form
         onSubmit={handleSubmitRoster}
@@ -931,10 +979,25 @@ export default function EmployeeRosterModule({
 
           <button
             className="btn btn-start"
-            onClick={() => setShowRosterModal(!showRosterModal)}
-            style={{ fontSize: '13px', padding: '6px 14px' }}
+            onClick={() => {
+              if (pendingRosterReq) {
+                setActivePendingReq(pendingRosterReq);
+                setShowPendingPreviewModal(true);
+              } else {
+                setShowRosterModal(!showRosterModal);
+              }
+            }}
+            style={{
+              fontSize: '13px',
+              padding: '6px 14px',
+              ...(pendingRosterReq ? { background: '#f59e0b', borderColor: '#d97706', color: '#fff' } : {})
+            }}
+            title={pendingRosterReq ? 'الجدول مرسل وقيد المراجعة والاعتماد المزدوج' : ''}
           >
-            {showRosterModal ? '✕ إغلاق النموذج' : '✏️ إنشاء / تعديل Roster الشهر'}
+            {pendingRosterReq
+              ? '🔒 ⏳ الجدول قيد الاعتماد (عرض التفاصيل)'
+              : (showRosterModal ? '✕ إغلاق النموذج' : (currentRoster ? '✏️ طلب تعديل على الجدول المعتمد' : '➕ إنشاء وتحديد جدول الشهر'))
+            }
           </button>
         </div>
       </div>
@@ -1034,10 +1097,17 @@ export default function EmployeeRosterModule({
           <button
             type="button"
             className="btn btn-start"
-            style={{ background: '#ea580c', color: '#fff', padding: '8px 16px', fontWeight: 'bold', fontSize: '13px', borderRadius: '8px', border: 'none', cursor: 'pointer' }}
-            onClick={() => setShowRosterModal(true)}
+            style={{ background: pendingRosterReq ? '#0284c7' : '#ea580c', color: '#fff', padding: '8px 16px', fontWeight: 'bold', fontSize: '13px', borderRadius: '8px', border: 'none', cursor: 'pointer' }}
+            onClick={() => {
+              if (pendingRosterReq) {
+                setActivePendingReq(pendingRosterReq);
+                setShowPendingPreviewModal(true);
+              } else {
+                setShowRosterModal(true);
+              }
+            }}
           >
-            ➕ إنشاء وتحديد جدول الشهر الآن
+            {pendingRosterReq ? '🔒 👁️ عرض تفاصيل الجدول المرسل قيد الاعتماد' : '➕ إنشاء وتحديد جدول الشهر الآن'}
           </button>
         </div>
       )}

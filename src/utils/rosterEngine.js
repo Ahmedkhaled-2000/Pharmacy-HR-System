@@ -24,12 +24,11 @@ export const DEFAULT_WEEKLY_SCHEDULE = {
 
 /**
  * دالة استخراج جدول يوم محدد من خريطة الجدول (سواء كانت بالتواريخ أو أيام الأسبوع بالعربي أو الإنجليزي)
+ * تعيد null في حال عدم وجود جدول معتمد لهذا اليوم، منعاً لفرض مواعيد عمل افتراضية تلقائية
  */
 export function getDayScheduleFromMap(schedule, jsDayIndex, dateStr = null) {
-  if (!schedule || typeof schedule !== 'object') {
-    return jsDayIndex === 5 
-      ? { type: 'off', isOff: true, start: '', end: '', hours: 0 }
-      : { type: 'shift', start: '08:00', end: '16:00', hours: 8 };
+  if (!schedule || typeof schedule !== 'object' || Object.keys(schedule).length === 0) {
+    return null;
   }
 
   // 1. فحص التاريخ الدقيق أولاً (للتبديلات أو التعديلات المخصصة ليوم بعينه)
@@ -61,25 +60,21 @@ export function getDayScheduleFromMap(schedule, jsDayIndex, dateStr = null) {
     }
   }
 
-  return jsDayIndex === 5 
-    ? { type: 'off', isOff: true, start: '', end: '', hours: 0 }
-    : { type: 'shift', start: '08:00', end: '16:00', hours: 8 };
+  return null;
 }
 
 function normalizeScheduleItem(item, jsDayIndex) {
   if (!item) {
-    return jsDayIndex === 5 
-      ? { type: 'off', isOff: true, start: '', end: '', hours: 0 }
-      : { type: 'shift', start: '08:00', end: '16:00', hours: 8 };
+    return null;
   }
   const isOff = item.type === 'off' || item.isOff === true;
   return {
     ...item,
     type: isOff ? 'off' : (item.type || 'shift'),
     isOff,
-    start: item.start || (isOff ? '' : '08:00'),
-    end: item.end || (isOff ? '' : '16:00'),
-    hours: item.hours !== undefined ? item.hours : (isOff ? 0 : 8)
+    start: isOff ? '' : (item.start || ''),
+    end: isOff ? '' : (item.end || ''),
+    hours: item.hours !== undefined ? item.hours : (isOff ? 0 : (item.start && item.end ? 8 : 0))
   };
 }
 
@@ -189,8 +184,11 @@ export function getEmployeeBaseDaySchedule(empId, dateStr, state) {
   }
 
   const roster = findEmployeeRoster(empId, dateStr, state);
+  if (!roster || !roster.schedule) {
+    return null;
+  }
   const jsDay = new Date(dateStr + 'T00:00:00').getDay();
-  return getDayScheduleFromMap(roster?.schedule, jsDay, dateStr);
+  return getDayScheduleFromMap(roster.schedule, jsDay, dateStr);
 }
 
 /**
@@ -201,7 +199,7 @@ export function getEmployeeBaseDaySchedule(empId, dateStr, state) {
  */
 export function getEmployeeDaySchedule(empId, dateStr, state) {
   if (!empId || !dateStr) {
-    return { type: 'shift', start: '08:00', end: '16:00', hours: 8, isOff: false };
+    return null;
   }
 
   const empIdStr = String(empId);
@@ -614,8 +612,8 @@ export function checkAndTriggerCycleEndRosterReminder(state, emp) {
 }
 
 export function normalizeSchedule(rawSchedule) {
-  if (!rawSchedule || typeof rawSchedule !== 'object') {
-    return { ...DEFAULT_WEEKLY_SCHEDULE };
+  if (!rawSchedule || typeof rawSchedule !== 'object' || Object.keys(rawSchedule).length === 0) {
+    return null;
   }
   const dayKeyMap = {
     'saturday': 'السبت',
@@ -659,13 +657,13 @@ export function normalizeSchedule(rawSchedule) {
       const isOff = val.type === 'off' || val.isOff === true || val.type === 'راحة';
       normalized[mappedDay] = {
         type: isOff ? 'off' : 'shift',
-        start: isOff ? '' : (val.start || val.checkIn || '08:00'),
-        end: isOff ? '' : (val.end || val.checkOut || '16:00')
+        start: isOff ? '' : (val.start || val.checkIn || ''),
+        end: isOff ? '' : (val.end || val.checkOut || '')
       };
     }
   });
 
-  return Object.keys(normalized).length > 0 ? normalized : { ...DEFAULT_WEEKLY_SCHEDULE };
+  return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
 export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 = null) {
