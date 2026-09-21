@@ -1294,6 +1294,7 @@ export default function BranchManagerView({
       amount,
       reason: adjReason.trim(),
       details: adjReason.trim(),
+      date: todayStr,
       status: 'pending_admin',
       branchApproved: true,
       adminApproved: false,

@@ -79,11 +79,11 @@ export default function BylawsModule({
   // Penalty Record Inspection Modal State
   const [inspectedPenaltyRecord, setInspectedPenaltyRecord] = useState(null);
 
-  // Clear all penalties & disciplinary records to start fresh
+  // Clear all penalties & disciplinary records to start fresh with absolute tombstone synchronization
   const handleClearAllPenaltiesLog = async () => {
     const isConfirmed = await showConfirm({
       title: '⚠️ مسح سجل الجزاءات والمخالفات والبدء من جديد',
-      message: 'هل أنت متأكد من رغبتك في مسح كافة سجلات الجزاءات والمخالفات، وسجل القرارات والاعتمادات، وتصفير التقرير الشهري بالكامل للبدء من جديد؟ سيتم حذف جميع المخالفات والخصومات التأديبية المسجلة نهائياً.',
+      message: 'هل أنت متأكد من رغبتك في مسح كافة سجلات الجزاءات والمخالفات، وسجل القرارات والاعتمادات، وتصفير التقرير الشهري بالكامل للبدء من جديد؟ سيتم حذف جميع المخالفات والخصومات التأديبية والجزاءات نهائياً.',
       confirmText: 'نعم، مسح السجل والبدء من جديد',
       cancelText: 'تراجع وإلغاء',
       type: 'danger',
@@ -91,13 +91,23 @@ export default function BylawsModule({
     });
     if (!isConfirmed) return;
 
+    const allDeletedKeys = new Set((state._deletedIds || []).map(String));
+    const collectKeys = (rawKey) => {
+      if (!rawKey) return;
+      const s = String(rawKey);
+      const raw = s.replace(/^(req_|late_inc_|adj_|adj-inv-shortage-|disc_|obj_inc_|obj_adj_|obj_req_)/, '');
+      [s, raw, `req_${raw}`, `adj_${raw}`, `late_inc_${raw}`, `disc_${raw}`, `obj_inc_${raw}`].forEach((k) => {
+        if (k) allDeletedKeys.add(k);
+      });
+    };
+
     // Filter out penalty, lateness, and objection requests
     const cleanRequests = (state.requests || []).filter((r) => {
       if (!r) return false;
       const t = r.type;
       const st = r.subType;
       const idStr = String(r.id || '');
-      if (
+      const isTarget =
         t === 'disciplinary_penalty' ||
         st === 'disciplinary_penalty' ||
         t === 'penalty' ||
@@ -107,46 +117,130 @@ export default function BylawsModule({
         t === 'penalty_objection' ||
         t === 'early_exit' ||
         st === 'lateness' ||
+        idStr.startsWith('disc_') ||
+        idStr.startsWith('req_adj_') ||
         idStr.startsWith('req_late_inc_') ||
         idStr.startsWith('obj_req_') ||
-        idStr.startsWith('obj_inc_')
-      ) {
+        idStr.startsWith('obj_inc_');
+
+      if (isTarget) {
+        collectKeys(idStr);
+        if (r.penaltyId) collectKeys(r.penaltyId);
         return false;
       }
       return true;
     });
 
-    // Clear late incidents
+    // Clear late incidents & collect keys
+    (state.lateIncidents || []).forEach((inc) => {
+      if (inc && inc.id) collectKeys(inc.id);
+    });
     const cleanLateIncidents = [];
 
-    // Filter out penalty adjustments from financial adjustments
+    // Filter out penalty adjustments from financial adjustments & collect keys
     const cleanAdjustments = (state.adjustments || []).filter((a) => {
       if (!a) return false;
       const idStr = String(a.id || '');
-      if (
+      const isPenaltyAdj =
         a.type === 'penalty' ||
         a.type === 'deduction' ||
         idStr.startsWith('adj_pen_') ||
         idStr.startsWith('adj_disc_') ||
-        (a.reason && (a.reason.includes('جزاء') || a.reason.includes('مخالفة') || a.reason.includes('تأخير') || a.reason.includes('عجز الجرد')))
-      ) {
+        idStr.startsWith('adj-inv-shortage') ||
+        (a.reason && (a.reason.includes('جزاء') || a.reason.includes('مخالفة') || a.reason.includes('تأخير') || a.reason.includes('عجز الجرد')));
+
+      if (isPenaltyAdj) {
+        collectKeys(idStr);
+        if (a.requestId) collectKeys(a.requestId);
         return false;
       }
       return true;
     });
 
+    // Clear disciplinary records & decisions
+    (state.disciplinaryRecords || []).forEach((dr) => {
+      if (dr && dr.id) collectKeys(dr.id);
+    });
+    (state.disciplinaryDecisions || []).forEach((dd) => {
+      if (dd && dd.id) collectKeys(dd.id);
+    });
+
+    const updatedDeleted = Array.from(allDeletedKeys);
     const updatedState = {
       ...state,
       requests: cleanRequests,
       lateIncidents: cleanLateIncidents,
       adjustments: cleanAdjustments,
       disciplinaryRecords: [],
-      disciplinaryDecisions: []
+      disciplinaryDecisions: [],
+      _penaltiesClearedAt: new Date().toISOString(),
+      _deletedIds: updatedDeleted
     };
 
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم مسح سجل الجزاءات والمخالفات والقرارات بنجاح والبدء من جديد');
+    showToast?.('✅ تم مسح سجل الجزاءات والمخالفات والقرارات بنجاح وتصفير السجل');
+  };
+
+  // Delete a single penalty record permanently
+  const handleDeleteSinglePenaltyRecord = async (record) => {
+    if (!record || !record.id) return;
+    const isConfirmed = await showConfirm({
+      title: '🗑️ حذف سجل الجزاء نهائياً',
+      message: `هل أنت متأكد من حذف هذا الجزاء نهائياً للموظف (${record.employeeName || 'الموظف'}) بمبلغ (${record.amount || 0} ج.م)؟ سيتم حذفه من السجلات ومسير الرواتب نهائياً.`,
+      confirmText: 'نعم، حذف نهائياً',
+      cancelText: 'إلغاء',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
+
+    const allDeletedKeys = new Set((state._deletedIds || []).map(String));
+    const collectKeys = (rawKey) => {
+      if (!rawKey) return;
+      const s = String(rawKey);
+      const raw = s.replace(/^(req_|late_inc_|adj_|adj-inv-shortage-|disc_|obj_inc_|obj_adj_|obj_req_)/, '');
+      [s, raw, `req_${raw}`, `adj_${raw}`, `late_inc_${raw}`, `disc_${raw}`, `obj_inc_${raw}`].forEach((k) => {
+        if (k) allDeletedKeys.add(k);
+      });
+    };
+
+    collectKeys(record.id);
+    if (record.requestId) collectKeys(record.requestId);
+
+    const cleanRequests = (state.requests || []).filter((r) => {
+      if (!r) return false;
+      const idStr = String(r.id);
+      if (allDeletedKeys.has(idStr) || (record.id && idStr === String(record.id))) return false;
+      return true;
+    });
+
+    const cleanLateIncidents = (state.lateIncidents || []).filter((inc) => {
+      if (!inc) return false;
+      const idStr = String(inc.id);
+      if (allDeletedKeys.has(idStr) || (record.id && idStr === String(record.id))) return false;
+      return true;
+    });
+
+    const cleanAdjustments = (state.adjustments || []).filter((a) => {
+      if (!a) return false;
+      const idStr = String(a.id);
+      if (allDeletedKeys.has(idStr) || (record.id && idStr === String(record.id))) return false;
+      return true;
+    });
+
+    const updatedDeleted = Array.from(allDeletedKeys);
+    const updatedState = {
+      ...state,
+      requests: cleanRequests,
+      lateIncidents: cleanLateIncidents,
+      adjustments: cleanAdjustments,
+      _deletedIds: updatedDeleted
+    };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('✅ تم حذف سجل الجزاء نهائياً');
   };
 
   // ── Clause / Section Management Handlers ──
@@ -615,6 +709,32 @@ export default function BylawsModule({
     const list = [];
     const seenReqIds = new Set();
     const seenLateKeys = new Set();
+    const deletedIdsSet = new Set((state._deletedIds || []).map(String));
+
+    const isIdDeleted = (rawId, itemDate = null, createdAt = null) => {
+      if (!rawId) return false;
+      const s = String(rawId);
+      const raw = s.replace(/^(req_|late_inc_|adj_|adj-inv-shortage-|disc_|obj_inc_|obj_adj_|obj_req_)/, '');
+      if (
+        deletedIdsSet.has(s) ||
+        deletedIdsSet.has(raw) ||
+        deletedIdsSet.has(`req_${raw}`) ||
+        deletedIdsSet.has(`adj_${raw}`) ||
+        deletedIdsSet.has(`late_inc_${raw}`) ||
+        deletedIdsSet.has(`disc_${raw}`) ||
+        deletedIdsSet.has(`obj_inc_${raw}`)
+      ) {
+        return true;
+      }
+      if (state._penaltiesClearedAt) {
+        const clearTime = new Date(state._penaltiesClearedAt).getTime();
+        const recordTime = new Date(createdAt || itemDate || 0).getTime();
+        if (!isNaN(recordTime) && !isNaN(clearTime) && recordTime <= clearTime) {
+          return true;
+        }
+      }
+      return false;
+    };
 
     (state.requests || []).forEach((r) => {
       if (!r) return;
@@ -625,9 +745,12 @@ export default function BylawsModule({
         (r.type === 'adjustment' && r.subType === 'penalty') ||
         r.type === 'disciplinary_penalty' ||
         r.subType === 'disciplinary_penalty' ||
+        r.type === 'violation' ||
         r.ruleTitle
       ) {
         const idStr = String(r.id);
+        if (isIdDeleted(idStr, r.date, r.createdAt)) return;
+
         const cleanId = idStr.replace(/^req_/, '');
         seenReqIds.add(idStr);
         seenReqIds.add(cleanId);
@@ -647,15 +770,15 @@ export default function BylawsModule({
         const bObj = branches.find((b) => b && String(b.id) === String(r.branchId || emp?.branchId));
         
         let amount = parseFloat(r.amount) || 0;
-        if (!amount && (r.impactType || r.impactVal)) {
-          if (r.impactType === 'deduction_days') {
+        if (!amount && (r.impactType || r.impactVal || r.deductionDays || r.penaltyDays)) {
+          if (r.impactType === 'deduction_days' || r.deductionDays || r.penaltyDays) {
             const salary = emp ? parseFloat(emp.salary) || 0 : 0;
-            const workHours = emp ? parseFloat(emp.workHoursPerDay) || 8 : 8;
-            const workDays = emp ? parseFloat(emp.workDaysPerMonth) || 26 : 26;
-            const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
-            amount = Math.round(dailyRate * (parseFloat(r.impactVal) || 1) * 100) / 100;
+            const workDays = emp ? (parseFloat(emp.workDaysPerMonth) || parseFloat(emp.workDays) || 26) : 26;
+            const dailyRate = r.dailyRate ? parseFloat(r.dailyRate) : (workDays > 0 ? (salary / workDays) : (salary / 30));
+            const days = parseFloat(r.impactVal || r.deductionDays || r.penaltyDays || 1);
+            amount = Math.round(dailyRate * days * 100) / 100;
           } else if (r.impactType === 'fixed_amount') {
-            amount = parseFloat(r.impactVal) || 0;
+            amount = parseFloat(r.impactVal || r.deductionFixedAmount) || 0;
           }
         }
 
@@ -720,6 +843,7 @@ export default function BylawsModule({
 
     (state.lateIncidents || []).forEach((inc) => {
       if (!inc) return;
+      if (isIdDeleted(inc.id, inc.date, inc.createdAt)) return;
       if (
         inc.status === 'cancelled' ||
         inc.isCancelled ||
@@ -786,6 +910,7 @@ export default function BylawsModule({
 
     (state.adjustments || []).forEach((a) => {
       if (!a) return;
+      if (isIdDeleted(a.id, a.date, a.createdAt)) return;
       const isLinkedToReq = Array.from(seenReqIds).some(
         (reqId) => a.id === `adj_pen_${reqId}` || a.id === `adj_disc_${reqId}` || a.id === reqId || a.id === `adj_${reqId}` || a.requestId === reqId
       );
@@ -818,7 +943,7 @@ export default function BylawsModule({
     });
 
     return list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  }, [state.requests, state.adjustments, employees, branches]);
+  }, [state.requests, state.adjustments, state.lateIncidents, state._deletedIds, state._penaltiesClearedAt, employees, branches]);
 
   const filteredPenalties = useMemo(() => {
     const targetBranchStr = currentBranchId ? String(currentBranchId) : null;
@@ -1766,6 +1891,18 @@ export default function BylawsModule({
                               >
                                 🔍 تفاصيل
                               </button>
+
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost"
+                                  style={{ padding: '3px 8px', fontSize: '11.5px', background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '6px' }}
+                                  onClick={() => handleDeleteSinglePenaltyRecord(p)}
+                                  title="حذف هذا السجل نهائياً ومنع عودته"
+                                >
+                                  🗑️ حذف
+                                </button>
+                              )}
 
                               {isAdmin ? (
                                 hasObjection && objStatus === 'pending' ? (

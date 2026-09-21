@@ -141,10 +141,25 @@ export default function DisciplinaryPenaltiesTab({
     const list = [];
     const seenIds = new Set();
     const seenLateKeys = new Set();
+    const deletedIdsSet = new Set((state._deletedIds || []).map(String));
+    const penaltiesClearedAt = state._penaltiesClearedAt ? new Date(state._penaltiesClearedAt).getTime() : 0;
+
+    const isIdDeleted = (id) => {
+      if (!id) return false;
+      const sId = String(id);
+      if (deletedIdsSet.has(sId)) return true;
+      const clean = sId.replace(/^(req_|adj_|late_inc_|medreq_|perm_|lhist_|obj_inc_|obj_adj_|obj_req_|adj_disc_|adj_pen_|pen_)/, '');
+      if (deletedIdsSet.has(clean) || deletedIdsSet.has(`req_${clean}`) || deletedIdsSet.has(`adj_${clean}`) || deletedIdsSet.has(`late_inc_${clean}`)) {
+        return true;
+      }
+      return false;
+    };
 
     // 1. Requests (Disciplinary Penalties, Direct Penalties, Violations, Deductions)
     (state.requests || []).forEach((r) => {
       if (!r) return;
+      if (isIdDeleted(r.id)) return;
+      if (penaltiesClearedAt && r.createdAt && new Date(r.createdAt).getTime() <= penaltiesClearedAt) return;
       if (
         r.type === 'disciplinary_penalty' ||
         r.subType === 'disciplinary_penalty' ||
@@ -245,6 +260,8 @@ export default function DisciplinaryPenaltiesTab({
     // 2. Late Incidents (وقائع التأخير اللائحي التلقائية)
     (state.lateIncidents || []).forEach((inc) => {
       if (!inc) return;
+      if (isIdDeleted(inc.id)) return;
+      if (penaltiesClearedAt && (inc.createdAt || inc.date) && new Date(inc.createdAt || inc.date).getTime() <= penaltiesClearedAt) return;
       if (
         inc.status === 'cancelled' ||
         inc.isCancelled ||
@@ -313,6 +330,8 @@ export default function DisciplinaryPenaltiesTab({
     // 3. Adjustments (الخصومات والجزاءات الإدارية المباشرة - مع استبعاد السلف والأدوية والأقساط)
     (state.adjustments || []).forEach((a) => {
       if (!a) return;
+      if (isIdDeleted(a.id) || isIdDeleted(a.requestId)) return;
+      if (penaltiesClearedAt && (a.createdAt || a.date) && new Date(a.createdAt || a.date).getTime() <= penaltiesClearedAt) return;
       if (a.type !== 'penalty' && a.type !== 'deduction') return;
       
       const reasonLower = (a.reason || a.description || a.details || '').toLowerCase();
@@ -378,7 +397,7 @@ export default function DisciplinaryPenaltiesTab({
     });
 
     return list.sort((a, b) => (b.date || b.createdAt || '').localeCompare(a.date || a.createdAt || ''));
-  }, [state.requests, state.lateIncidents, state.adjustments, state.branches, isEmployee, currentEmpId, isBranch, currentBranchId, scopedEmpIds, allEmployeesList, policy]);
+  }, [state.requests, state.lateIncidents, state.adjustments, state.branches, isEmployee, currentEmpId, isBranch, currentBranchId, scopedEmpIds, allEmployeesList, policy, state._deletedIds, state._penaltiesClearedAt]);
 
   // 3. Filtered penalties for records and reports
   const filteredPenalties = useMemo(() => {
@@ -763,6 +782,16 @@ export default function DisciplinaryPenaltiesTab({
         return r;
       });
 
+      // Collect deleted adjustment IDs into _deletedIds
+      const deletedIds = new Set((state._deletedIds || []).map(String));
+      deletedIds.add(String(penId));
+      deletedIds.add(`adj_disc_${penId}`);
+      (state.adjustments || []).forEach((a) => {
+        if (a.requestId === penId || a.id === `adj_disc_${penId}` || a.id === penId) {
+          deletedIds.add(String(a.id));
+        }
+      });
+
       // Remove any corresponding adjustment entry from adjustments array
       const updatedAdjustments = (state.adjustments || []).filter((a) => {
         if (a.requestId === penId || a.id === `adj_disc_${penId}`) return false;
@@ -803,7 +832,8 @@ export default function DisciplinaryPenaltiesTab({
         ...state,
         requests: updatedRequests,
         adjustments: updatedAdjustments,
-        employees: updatedEmployees
+        employees: updatedEmployees,
+        _deletedIds: Array.from(deletedIds)
       };
 
       if (setState) setState(updatedState);

@@ -141,8 +141,60 @@ export function calculateEmployeeActualSummary({
     return true;
   });
 
-  const totalBonus = empAdjs.filter(a => a.type === 'bonus' || a.type === 'مكافأة').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
-  const manualDeduction = empAdjs.filter(a => a.type === 'deduction' || a.type === 'penalty' || a.type === 'خصم').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+  // Also include any approved penalty requests that might not be mirrored in state.adjustments yet
+  const existingAdjReqIds = new Set(
+    empAdjs.map(a => a.requestId || a.id).filter(Boolean)
+  );
+
+  const unmappedPenaltyRequests = (state?.requests || []).filter(r => {
+    if (!r) return false;
+    if (String(r.employeeId) !== String(emp.id)) return false;
+    const isApproved = (r.status === 'approved' || r.adminApproved === true) && !r.isCancelled && r.status !== 'cancelled' && r.status !== 'rejected';
+    if (!isApproved) return false;
+    if (r.objection?.status === 'approved') return false;
+    const isPen = r.type === 'penalty' || r.type === 'disciplinary_penalty' || r.subType === 'disciplinary_penalty' || r.type === 'violation' || r.type === 'deduction' || String(r.id || '').startsWith('disc_');
+    if (!isPen) return false;
+    if (existingAdjReqIds.has(r.id) || existingAdjReqIds.has(`adj_pen_${r.id}`) || existingAdjReqIds.has(`adj_disc_${r.id}`)) return false;
+    const rDate = r.date || r.startDate || (r.createdAt ? r.createdAt.slice(0, 10) : '');
+    if (!rDate || (dateFilterFn && !dateFilterFn(rDate))) return false;
+    if (isTargetFilterActive) {
+      if (r.branchId) return isBranchMatch(r.branchId, targetBranchObj);
+      return isPrimaryForAdjustments;
+    }
+    return true;
+  });
+
+  const unmappedPenaltyTotal = unmappedPenaltyRequests.reduce((acc, r) => {
+    let amt = parseFloat(r.amount || r.penaltyAmount || r.deductionFixedAmount) || 0;
+    if (!amt && (r.deductionDays || r.penaltyDays || r.impactType === 'deduction_days')) {
+      const days = parseFloat(r.deductionDays || r.penaltyDays || r.impactVal || 1);
+      const workDays = parseFloat(emp.workDaysPerMonth || emp.workDays) || 26;
+      const salary = parseFloat(emp.salary) || 0;
+      const dRate = r.dailyRate ? parseFloat(r.dailyRate) : (workDays > 0 ? salary / workDays : salary / 30);
+      amt = Math.round(dRate * days * 100) / 100;
+    }
+    return acc + amt;
+  }, 0);
+
+  const unmappedBonusRequests = (state?.requests || []).filter(r => {
+    if (!r) return false;
+    if (String(r.employeeId) !== String(emp.id)) return false;
+    const isApproved = (r.status === 'approved' || r.adminApproved === true) && !r.isCancelled && r.status !== 'cancelled';
+    if (!isApproved) return false;
+    if (r.type !== 'bonus') return false;
+    if (existingAdjReqIds.has(r.id) || existingAdjReqIds.has(`adj_bonus_${r.id}`)) return false;
+    const rDate = r.date || r.startDate || (r.createdAt ? r.createdAt.slice(0, 10) : '');
+    if (!rDate || (dateFilterFn && !dateFilterFn(rDate))) return false;
+    if (isTargetFilterActive) {
+      if (r.branchId) return isBranchMatch(r.branchId, targetBranchObj);
+      return isPrimaryForAdjustments;
+    }
+    return true;
+  });
+  const unmappedBonusTotal = unmappedBonusRequests.reduce((acc, r) => acc + (parseFloat(r.amount) || 0), 0);
+
+  const totalBonus = empAdjs.filter(a => a.type === 'bonus' || a.type === 'مكافأة').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0) + unmappedBonusTotal;
+  const manualDeduction = empAdjs.filter(a => a.type === 'deduction' || a.type === 'penalty' || a.type === 'خصم').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0) + unmappedPenaltyTotal;
 
   // الجزاءات والتأخيرات
   const empLateIncidents = (state?.lateIncidents || []).filter(i => {

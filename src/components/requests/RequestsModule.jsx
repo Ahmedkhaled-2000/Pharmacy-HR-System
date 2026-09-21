@@ -916,50 +916,91 @@ export default function RequestsModule({
         });
       }
 
-      if (approvedTargetReq.type === 'penalty' || approvedTargetReq.type === 'early_exit') {
-        const emp = (state.employees || []).find((e) => String(e.id) === String(approvedTargetReq.employeeId));
+      // ── Penalty, Early Exit, Disciplinary Violation, & Branch Adjustment Approval ──
+      const isPenaltyType =
+        approvedTargetReq.type === 'penalty' ||
+        approvedTargetReq.type === 'early_exit' ||
+        approvedTargetReq.type === 'disciplinary_penalty' ||
+        approvedTargetReq.subType === 'disciplinary_penalty' ||
+        approvedTargetReq.type === 'violation' ||
+        approvedTargetReq.type === 'deduction' ||
+        String(approvedTargetReq.id || '').startsWith('disc_') ||
+        String(approvedTargetReq.id || '').startsWith('req_adj_');
+
+      if (isPenaltyType) {
+        const emp = (state.employees || []).find((e) => e && String(e.id) === String(approvedTargetReq.employeeId));
         let amount = 0;
-        if (approvedTargetReq.impactType === 'deduction_days') {
-          const salary = emp ? parseFloat(emp.salary) || 0 : 0;
-          const workHours = emp ? parseFloat(emp.workHoursPerDay) || 8 : 8;
-          const workDays = emp ? parseFloat(emp.workDaysPerMonth) || 26 : 26;
-          const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
-          amount = Math.round(dailyRate * (parseFloat(approvedTargetReq.impactVal) || 1) * 100) / 100;
-        } else if (approvedTargetReq.impactType === 'fixed_amount') {
-          amount = parseFloat(approvedTargetReq.impactVal) || 0;
-        } else if (approvedTargetReq.amount) {
-          amount = parseFloat(approvedTargetReq.amount) || 0;
+        const workDays = emp ? (parseFloat(emp.workDaysPerMonth) || parseFloat(emp.workDays) || 26) : 26;
+        const salary = emp ? (parseFloat(emp.salary) || 0) : 0;
+        const dailyRate = approvedTargetReq.dailyRate ? parseFloat(approvedTargetReq.dailyRate) : (workDays > 0 ? (salary / workDays) : (salary / 30));
+
+        if (approvedTargetReq.impactType === 'deduction_days' || approvedTargetReq.deductionDays || approvedTargetReq.penaltyDays) {
+          const days = parseFloat(approvedTargetReq.impactVal || approvedTargetReq.deductionDays || approvedTargetReq.penaltyDays || 1);
+          amount = Math.round(dailyRate * days * 100) / 100;
+        } else if (approvedTargetReq.impactType === 'fixed_amount' || approvedTargetReq.deductionFixedAmount) {
+          amount = parseFloat(approvedTargetReq.impactVal || approvedTargetReq.deductionFixedAmount) || 0;
+        } else if (approvedTargetReq.amount || approvedTargetReq.penaltyAmount) {
+          amount = parseFloat(approvedTargetReq.amount || approvedTargetReq.penaltyAmount) || 0;
         }
 
         if (amount > 0) {
-          const ruleTitle = approvedTargetReq.ruleTitle || approvedTargetReq.reason || approvedTargetReq.details || 'مخالفة لائحية';
-          const penaltyDesc = `خصم جزاء لائحى: ${ruleTitle} (${approvedTargetReq.impactType === 'deduction_days' ? `خصم ${approvedTargetReq.impactVal} يوم` : `${amount} ج.م`})`;
-          updatedAdjustments.push({
-            id: `adj_pen_${Date.now()}`,
+          const ruleTitle = approvedTargetReq.ruleTitle || approvedTargetReq.violationTitle || approvedTargetReq.reason || approvedTargetReq.details || 'مخالفة لائحية';
+          const actionName = approvedTargetReq.actionTitle || approvedTargetReq.penaltyAction || 'خصم من الراتب';
+          const penaltyDesc = `خصم جزاء تأديبي لائحى: ${ruleTitle} (${actionName} - ${amount} ج.م)`;
+          const reqDate = approvedTargetReq.date || approvedTargetReq.startDate || (approvedTargetReq.createdAt ? approvedTargetReq.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
+
+          // Ensure adjustment exists in updatedAdjustments
+          const existingAdjIdx = updatedAdjustments.findIndex(a => a.requestId === approvedTargetReq.id || a.id === `adj_pen_${approvedTargetReq.id}` || a.id === `adj_disc_${approvedTargetReq.id}`);
+          const newAdj = {
+            id: `adj_pen_${approvedTargetReq.id || Date.now()}`,
+            requestId: approvedTargetReq.id,
             employeeId: approvedTargetReq.employeeId,
+            employeeName: emp?.name || approvedTargetReq.employeeName,
+            employeeCode: emp?.code || approvedTargetReq.employeeCode,
+            branchId: approvedTargetReq.branchId || emp?.branchId || null,
             type: 'deduction',
+            subType: 'disciplinary_penalty',
             amount,
             description: penaltyDesc,
             notes: penaltyDesc,
             reason: penaltyDesc,
-            date: approvedTargetReq.date || approvedTargetReq.startDate || new Date().toISOString().slice(0, 10),
+            date: reqDate,
             createdAt: new Date().toISOString()
-          });
+          };
+
+          if (existingAdjIdx >= 0) {
+            updatedAdjustments[existingAdjIdx] = { ...updatedAdjustments[existingAdjIdx], ...newAdj };
+          } else {
+            updatedAdjustments.unshift(newAdj);
+          }
         }
       }
 
       if (approvedTargetReq.type === 'bonus') {
-        updatedAdjustments.push({
-          id: `adj_${Date.now()}`,
+        const emp = (state.employees || []).find((e) => e && String(e.id) === String(approvedTargetReq.employeeId));
+        const amount = parseFloat(approvedTargetReq.amount) || 0;
+        const reqDate = approvedTargetReq.date || approvedTargetReq.startDate || (approvedTargetReq.createdAt ? approvedTargetReq.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
+        const existingAdjIdx = updatedAdjustments.findIndex(a => a.requestId === approvedTargetReq.id || a.id === `adj_bonus_${approvedTargetReq.id}`);
+        const newBonusAdj = {
+          id: `adj_bonus_${approvedTargetReq.id || Date.now()}`,
+          requestId: approvedTargetReq.id,
           employeeId: approvedTargetReq.employeeId,
+          employeeName: emp?.name || approvedTargetReq.employeeName,
+          employeeCode: emp?.code || approvedTargetReq.employeeCode,
+          branchId: approvedTargetReq.branchId || emp?.branchId || null,
           type: 'bonus',
-          amount: parseFloat(approvedTargetReq.amount) || 0,
+          amount,
           description: approvedTargetReq.details || approvedTargetReq.reason || 'مكافأة معتمدة من الإدارة العليا',
           notes: approvedTargetReq.details || approvedTargetReq.reason || 'مكافأة معتمدة من الإدارة العليا',
           reason: approvedTargetReq.reason || approvedTargetReq.details || 'مكافأة معتمدة من الإدارة العليا',
-          date: approvedTargetReq.date || approvedTargetReq.startDate || new Date().toISOString().slice(0, 10),
+          date: reqDate,
           createdAt: new Date().toISOString()
-        });
+        };
+        if (existingAdjIdx >= 0) {
+          updatedAdjustments[existingAdjIdx] = { ...updatedAdjustments[existingAdjIdx], ...newBonusAdj };
+        } else {
+          updatedAdjustments.unshift(newBonusAdj);
+        }
       }
 
       let updatedLoans = [...(state.loans || [])];

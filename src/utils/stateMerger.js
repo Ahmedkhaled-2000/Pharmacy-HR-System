@@ -133,7 +133,7 @@ export function isItemDeleted(item, key, deletedIds, options = {}) {
   if (item.id !== undefined && item.id !== null && item.id !== '') {
     const idStr = String(item.id).trim();
     const idLower = idStr.toLowerCase();
-    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_|shift_|punch_)/, '');
+    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_|shift_|punch_|adj_|late_inc_|medreq_|disc_|perm_|lhist_|obj_inc_|obj_adj_|obj_req_)/, '');
     if (deletedIds.has(idStr) || deletedIds.has(idLower)) return true;
     if (rawId && (deletedIds.has(rawId) || deletedIds.has(rawId.toLowerCase()))) return true;
     if (prefix && (deletedIds.has(`${prefix}_${idStr}`) || deletedIds.has(`${prefix}_${idLower}`))) return true;
@@ -144,19 +144,25 @@ export function isItemDeleted(item, key, deletedIds, options = {}) {
       deletedIds.has(`swap_${rawId}`) ||
       deletedIds.has(`notif_${rawId}`) ||
       deletedIds.has(`shift_${rawId}`) ||
-      deletedIds.has(`punch_${rawId}`)
+      deletedIds.has(`punch_${rawId}`) ||
+      deletedIds.has(`adj_${rawId}`) ||
+      deletedIds.has(`late_inc_${rawId}`) ||
+      deletedIds.has(`disc_${rawId}`) ||
+      deletedIds.has(`medreq_${rawId}`)
     )) return true;
   }
   if (item._id !== undefined && item._id !== null && item._id !== '') {
     const idStr = String(item._id).trim();
     const idLower = idStr.toLowerCase();
-    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_|shift_|punch_)/, '');
+    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_|shift_|punch_|adj_|late_inc_|medreq_|disc_|perm_|lhist_|obj_inc_|obj_adj_|obj_req_)/, '');
     if (deletedIds.has(idStr) || deletedIds.has(idLower)) return true;
     if (rawId && (deletedIds.has(rawId) || deletedIds.has(rawId.toLowerCase()))) return true;
     if (prefix && (deletedIds.has(`${prefix}_${idStr}`) || deletedIds.has(`${prefix}_${idLower}`))) return true;
     if (rawId && (
       deletedIds.has(`shift_${rawId}`) ||
-      deletedIds.has(`punch_${rawId}`)
+      deletedIds.has(`punch_${rawId}`) ||
+      deletedIds.has(`adj_${rawId}`) ||
+      deletedIds.has(`late_inc_${rawId}`)
     )) return true;
   }
 

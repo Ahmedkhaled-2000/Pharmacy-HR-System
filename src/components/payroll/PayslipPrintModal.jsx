@@ -223,17 +223,55 @@ export default function PayslipPrintModal({
   }
 
   // 2. Adjustments (Bonuses and Penalties)
-  const manualItems = (empAdjs || [])
-    .filter((a) => !String(a.id).startsWith('adj_loan_') && !String(a.description || a.notes || a.reason || '').includes('خصم سلفة'))
-    .map((a) => ({
-      id: a.id,
-      date: a.date || month,
-      typeLabel: a.type === 'bonus' ? '➕ مكافأة / حافز تميز' : '➖ خصم / جزاء إداري',
-      amount: parseFloat(a.amount) || 0,
-      isPositive: a.type === 'bonus',
-      details: a.reason || a.details || a.description || '—',
-      color: a.type === 'bonus' ? '#16a34a' : '#dc2626'
-    }));
+  const existingAdjReqIds = new Set(
+    (empAdjs || []).map(a => a.requestId || a.id).filter(Boolean)
+  );
+
+  const unmappedReqItems = (state?.requests || []).filter(r => {
+    if (!r) return false;
+    if (String(r.employeeId) !== String(emp.id)) return false;
+    const isApproved = (r.status === 'approved' || r.adminApproved === true) && !r.isCancelled && r.status !== 'cancelled' && r.status !== 'rejected';
+    if (!isApproved) return false;
+    if (r.objection?.status === 'approved') return false;
+    const isPen = r.type === 'penalty' || r.type === 'disciplinary_penalty' || r.subType === 'disciplinary_penalty' || r.type === 'violation' || r.type === 'deduction' || String(r.id || '').startsWith('disc_');
+    const isBon = r.type === 'bonus';
+    if (!isPen && !isBon) return false;
+    if (existingAdjReqIds.has(r.id) || existingAdjReqIds.has(`adj_pen_${r.id}`) || existingAdjReqIds.has(`adj_disc_${r.id}`) || existingAdjReqIds.has(`adj_bonus_${r.id}`)) return false;
+    const rDate = r.date || r.startDate || (r.createdAt ? r.createdAt.slice(0, 10) : '');
+    if (!rDate || rDate < startCutoff || rDate > endCutoff) return false;
+    return true;
+  }).map(r => {
+    const isBon = r.type === 'bonus';
+    let amt = parseFloat(r.amount || r.penaltyAmount || r.deductionFixedAmount) || 0;
+    if (!amt && (r.deductionDays || r.penaltyDays || r.impactType === 'deduction_days')) {
+      const days = parseFloat(r.deductionDays || r.penaltyDays || r.impactVal || 1);
+      amt = Math.round(dailyRate * days * 100) / 100;
+    }
+    return {
+      id: r.id,
+      date: r.date || r.startDate || (r.createdAt ? r.createdAt.slice(0, 10) : month),
+      typeLabel: isBon ? '➕ مكافأة / حافز تميز' : '➖ جزاء تأديبي لائحى معتمد',
+      amount: amt,
+      isPositive: isBon,
+      details: r.reason || r.ruleTitle || r.details || '—',
+      color: isBon ? '#16a34a' : '#dc2626'
+    };
+  });
+
+  const manualItems = [
+    ...(empAdjs || [])
+      .filter((a) => !String(a.id).startsWith('adj_loan_') && !String(a.description || a.notes || a.reason || '').includes('خصم سلفة'))
+      .map((a) => ({
+        id: a.id,
+        date: a.date || month,
+        typeLabel: a.type === 'bonus' ? '➕ مكافأة / حافز تميز' : '➖ خصم / جزاء إداري',
+        amount: parseFloat(a.amount) || 0,
+        isPositive: a.type === 'bonus',
+        details: a.reason || a.details || a.description || '—',
+        color: a.type === 'bonus' ? '#16a34a' : '#dc2626'
+      })),
+    ...unmappedReqItems
+  ];
 
   // 3. Late Incidents (التأخيرات)
   const empLateIncidents = (state?.lateIncidents || []).filter(
