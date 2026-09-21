@@ -1117,6 +1117,15 @@ export function smartMergeStates(localState, remoteState) {
       if (!mergedDrive.parentFolderId) mergedDrive.parentFolderId = localDrive.parentFolderId || remoteDrive.parentFolderId || '';
       mergedSettings.driveConfig = mergedDrive;
 
+      // الحفاظ على قائمة راوترات الفروع المعتمدة وتسمياتها
+      const localRouters = Array.isArray(localSettings.approvedRouters) ? localSettings.approvedRouters : [];
+      const remoteRouters = Array.isArray(remoteSettings.approvedRouters) ? remoteSettings.approvedRouters : [];
+      if (localTime >= remoteTime) {
+        mergedSettings.approvedRouters = localRouters.length > 0 ? localRouters : (remoteRouters.length > 0 ? remoteRouters : mergedSettings.approvedRouters);
+      } else {
+        mergedSettings.approvedRouters = remoteRouters.length > 0 ? remoteRouters : (localRouters.length > 0 ? localRouters : mergedSettings.approvedRouters);
+      }
+
       return mergedSettings;
     })(),
     bylaws: {
@@ -1141,10 +1150,75 @@ export function smartMergeStates(localState, remoteState) {
       return remoteState.bylawsText || localState.bylawsText || undefined;
     })(),
     bylawsUpdatedAt: localState.bylawsUpdatedAt || remoteState.bylawsUpdatedAt || undefined,
-    ipRestrictions: {
-      ...(remoteState.ipRestrictions || {}),
-      ...(localState.ipRestrictions || {})
-    },
+    ipRestrictions: (() => {
+      const localIp = effectiveLocal.ipRestrictions || localState.ipRestrictions || {};
+      const remoteIp = effectiveRemote.ipRestrictions || remoteState.ipRestrictions || {};
+      const localTime = new Date(localIp._updatedAt || effectiveLocal._ipRestrictionsUpdatedAt || 0).getTime();
+      const remoteTime = new Date(remoteIp._updatedAt || effectiveRemote._ipRestrictionsUpdatedAt || 0).getTime();
+
+      let base = {};
+      if (localTime >= remoteTime) {
+        base = { ...remoteIp, ...localIp };
+      } else {
+        base = { ...localIp, ...remoteIp };
+      }
+
+      const localList = Array.isArray(localIp.allowedIps) ? localIp.allowedIps : [];
+      const remoteList = Array.isArray(remoteIp.allowedIps) ? remoteIp.allowedIps : [];
+
+      let allowedIps = [];
+      if (localTime > remoteTime) {
+        allowedIps = localList;
+      } else if (remoteTime > localTime) {
+        allowedIps = remoteList;
+      } else {
+        if (localList.length > 0 && remoteList.length === 0) {
+          allowedIps = localList;
+        } else if (remoteList.length > 0 && localList.length === 0) {
+          allowedIps = remoteList;
+        } else if (localList.length > 0) {
+          const map = new Map();
+          remoteList.forEach(item => {
+            const ip = typeof item === 'string' ? item : item?.ip;
+            if (ip) map.set(ip, typeof item === 'string' ? { ip, label: 'راوتر معتمد' } : item);
+          });
+          localList.forEach(item => {
+            const ip = typeof item === 'string' ? item : item?.ip;
+            if (ip) map.set(ip, typeof item === 'string' ? { ip, label: 'راوتر معتمد' } : item);
+          });
+          allowedIps = Array.from(map.values());
+        }
+      }
+
+      if (allowedIps.length === 0) {
+        const orgRouters = effectiveLocal.orgSettings?.approvedRouters || effectiveRemote.orgSettings?.approvedRouters;
+        if (Array.isArray(orgRouters) && orgRouters.length > 0) {
+          allowedIps = orgRouters;
+        } else {
+          const orgIps = effectiveLocal.orgSettings?.approvedIPs || effectiveRemote.orgSettings?.approvedIPs;
+          if (Array.isArray(orgIps) && orgIps.length > 0) {
+            allowedIps = orgIps.map((ip, idx) =>
+              typeof ip === 'string' ? { ip, label: `راوتر ${idx + 1}` } : ip
+            );
+          }
+        }
+      }
+
+      const normalizedList = allowedIps
+        .filter(item => Boolean(item && (typeof item === 'string' ? item.trim() : item.ip?.trim())))
+        .map((item, idx) => {
+          const ip = typeof item === 'string' ? item.trim() : (item.ip || '').trim();
+          const label = (typeof item === 'string' ? `راوتر ${idx + 1}` : (item.label || `راوتر ${idx + 1}`)).trim();
+          return { ip, label };
+        });
+
+      return {
+        ...base,
+        enabled: (localTime >= remoteTime ? localIp.enabled : remoteIp.enabled) ?? (localIp.enabled || remoteIp.enabled || false),
+        allowedIps: normalizedList,
+        ...(base._updatedAt ? { _updatedAt: base._updatedAt } : {})
+      };
+    })(),
 
     // 2. الكيانات والمصفوفات الأساسية
     branches: mergeArrays(effectiveLocal.branches, effectiveRemote.branches, { prefix: 'branch', deletedIds }),

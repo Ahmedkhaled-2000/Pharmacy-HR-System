@@ -935,7 +935,41 @@ export function normalizeState(parsed) {
       activeShifts[targetKey] = v;
     }
   }
-  const ipRestrictions = parsed.ipRestrictions || { enabled: false, allowedIps: [] };
+  // ── Normalize IP Restrictions & Router Configuration ──
+  let rawAllowedIps = parsed.ipRestrictions?.allowedIps;
+  if (!Array.isArray(rawAllowedIps) || rawAllowedIps.length === 0) {
+    if (Array.isArray(parsed.orgSettings?.approvedRouters) && parsed.orgSettings.approvedRouters.length > 0) {
+      rawAllowedIps = parsed.orgSettings.approvedRouters;
+    } else if (Array.isArray(parsed.orgSettings?.approvedIPs) && parsed.orgSettings.approvedIPs.length > 0) {
+      rawAllowedIps = parsed.orgSettings.approvedIPs;
+    } else {
+      rawAllowedIps = [];
+    }
+  }
+
+  const normalizedAllowedIps = (Array.isArray(rawAllowedIps) ? rawAllowedIps : [])
+    .filter(item => Boolean(item && (typeof item === 'string' ? item.trim() : item.ip?.trim())))
+    .map((item, idx) => {
+      const ip = (typeof item === 'string' ? item : item.ip || '').trim();
+      const label = (typeof item === 'string' ? `راوتر ${idx + 1}` : (item.label || `راوتر ${idx + 1}`)).trim();
+      return { ip, label };
+    });
+
+  const ipRestrictions = {
+    enabled: Boolean(parsed.ipRestrictions?.enabled ?? parsed.orgSettings?.ipRestrictionsEnabled ?? false),
+    allowedIps: normalizedAllowedIps,
+    ...(parsed.ipRestrictions?._updatedAt ? { _updatedAt: parsed.ipRestrictions._updatedAt } : {})
+  };
+
+  // Keep orgSettings.approvedRouters and approvedIPs synchronized
+  if (normalizedAllowedIps.length > 0) {
+    if (!Array.isArray(orgSettings.approvedRouters) || orgSettings.approvedRouters.length === 0) {
+      orgSettings.approvedRouters = normalizedAllowedIps;
+    }
+    if (!Array.isArray(orgSettings.approvedIPs) || orgSettings.approvedIPs.length === 0) {
+      orgSettings.approvedIPs = normalizedAllowedIps.map(x => x.ip);
+    }
+  }
   const bylaws = parsed.bylaws || {
     gracePeriodMinutes: 15,
     resetPeriodDays: 30,

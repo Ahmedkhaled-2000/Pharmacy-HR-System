@@ -539,27 +539,40 @@ export default function SettingsModule({
 
   // Router IP Restrictions
   const ipRestrictions = state.ipRestrictions || { enabled: false, allowedIps: [] };
-  const [ipEnabled, setIpEnabled] = useState(ipRestrictions.enabled);
-  const [approvedIPs, setApprovedIPs] = useState(() => {
-    if (ipRestrictions.allowedIps && ipRestrictions.allowedIps.length > 0) {
-      return ipRestrictions.allowedIps.map((ipObj, idx) =>
-        typeof ipObj === 'string'
-          ? { ip: ipObj, label: `راوتر ${idx + 1}` }
-          : { ip: ipObj.ip, label: ipObj.label || `راوتر ${idx + 1}` }
-      );
+  const [ipEnabled, setIpEnabled] = useState(Boolean(ipRestrictions.enabled));
+
+  // Helper: Extract valid approved routers and labels from state (never dummy fallbacks)
+  const extractApprovedRouters = useCallback((srcState) => {
+    const list = srcState?.ipRestrictions?.allowedIps?.length
+      ? srcState.ipRestrictions.allowedIps
+      : (srcState?.orgSettings?.approvedRouters?.length
+          ? srcState.orgSettings.approvedRouters
+          : (srcState?.orgSettings?.approvedIPs || []));
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter(item => Boolean(item && (typeof item === 'string' ? item.trim() : item.ip?.trim())))
+      .map((item, idx) => {
+        const ip = (typeof item === 'string' ? item : item.ip || '').trim();
+        const label = (typeof item === 'string' ? `راوتر ${idx + 1}` : (item.label || `راوتر ${idx + 1}`)).trim();
+        return { ip, label };
+      });
+  }, []);
+
+  const [approvedIPs, setApprovedIPs] = useState(() => extractApprovedRouters(state));
+
+  // Synchronize state into approvedIPs if remote/parent state arrives or updates
+  useEffect(() => {
+    if (state?.ipRestrictions?.enabled !== undefined) {
+      setIpEnabled(Boolean(state.ipRestrictions.enabled));
     }
-    if (orgSettings.approvedIPs && orgSettings.approvedIPs.length > 0) {
-      return orgSettings.approvedIPs.map((ip, idx) =>
-        typeof ip === 'string'
-          ? { ip, label: `راوتر ${idx + 1}` }
-          : { ip: ip.ip, label: ip.label || `راوتر ${idx + 1}` }
-      );
+    const freshRouters = extractApprovedRouters(state);
+    if (freshRouters.length > 0) {
+      setApprovedIPs(prev => {
+        if (!prev || prev.length === 0) return freshRouters;
+        return prev;
+      });
     }
-    return [
-      { ip: '192.168.1.1', label: 'راوتر رئيسي' },
-      { ip: '10.0.0.1', label: 'راوتر فرعي' }
-    ];
-  });
+  }, [state?.ipRestrictions, state?.orgSettings?.approvedRouters, state?.orgSettings?.approvedIPs, extractApprovedRouters]);
   const [newIP, setNewIP] = useState('');
   const [newIPLabel, setNewIPLabel] = useState('');
   const [isFetchingIp, setIsFetchingIp] = useState(false);
@@ -1009,20 +1022,24 @@ export default function SettingsModule({
         loanRequestStartDay: parseInt(loanRequestStartDay, 10) || 1,
         loanRequestEndDay: parseInt(loanRequestEndDay, 10) || 10,
         maxMonthlyLoanSalaryPercent: parseFloat(maxMonthlyLoanSalaryPercent) || 50,
-        approvedIPs: approvedIPs.map(item => (typeof item === 'string' ? item : item.ip)), // keeping this for legacy components
+        approvedIPs: approvedIPs.map(item => (typeof item === 'string' ? item : item.ip)),
+        approvedRouters: approvedIPs.map((item, idx) => ({
+          ip: (typeof item === 'string' ? item : item.ip || '').trim(),
+          label: (typeof item === 'string' ? `راوتر ${idx + 1}` : (item.label || `راوتر ${idx + 1}`)).trim()
+        })),
         updatedAt: nowIso
       };
       const updatedIpRestrictions = {
-        enabled: ipEnabled,
+        enabled: Boolean(ipEnabled),
         allowedIps: approvedIPs
-          .map(item => (
-            typeof item === 'string'
-              ? { label: 'راوتر معتمد', ip: item.trim() }
-              : { label: (item.label || 'راوتر معتمد').trim(), ip: (item.ip || '').trim() }
-          ))
-          .filter(item => Boolean(item.ip))
+          .map((item, idx) => ({
+            ip: (typeof item === 'string' ? item : item.ip || '').trim(),
+            label: (typeof item === 'string' ? `راوتر ${idx + 1}` : (item.label || `راوتر ${idx + 1}`)).trim()
+          }))
+          .filter(item => Boolean(item.ip)),
+        _updatedAt: nowIso
       };
-      const updatedState = { ...state, orgSettings: updatedSettings, ipRestrictions: updatedIpRestrictions, updatedAt: nowIso };
+      const updatedState = { ...state, orgSettings: updatedSettings, ipRestrictions: updatedIpRestrictions, _ipRestrictionsUpdatedAt: nowIso, updatedAt: nowIso };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
       showToast?.(isAdminPassChanged
@@ -1095,7 +1112,59 @@ export default function SettingsModule({
     await performToggle();
   };
 
-  const handleAddIP = () => {
+  // ── Persistent Router IP Restrictions Storage Engine ──
+  const persistIpRestrictions = async (newRouters, newEnabled = ipEnabled) => {
+    const nowIso = new Date().toISOString();
+    const cleanList = (Array.isArray(newRouters) ? newRouters : [])
+      .filter(item => Boolean(item && (typeof item === 'string' ? item.trim() : item.ip?.trim())))
+      .map((item, idx) => {
+        const ip = (typeof item === 'string' ? item : item.ip || '').trim();
+        const label = (typeof item === 'string' ? `راوتر ${idx + 1}` : (item.label || `راوتر ${idx + 1}`)).trim();
+        return { ip, label };
+      });
+
+    const updatedIpRestrictions = {
+      enabled: Boolean(newEnabled),
+      allowedIps: cleanList,
+      _updatedAt: nowIso
+    };
+
+    const updatedOrgSettings = {
+      ...(state.orgSettings || {}),
+      approvedIPs: cleanList.map(item => item.ip),
+      approvedRouters: cleanList,
+      updatedAt: nowIso
+    };
+
+    const updatedState = {
+      ...state,
+      orgSettings: updatedOrgSettings,
+      ipRestrictions: updatedIpRestrictions,
+      _ipRestrictionsUpdatedAt: nowIso
+    };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    // Fast-path slice persistence to cloud server to ensure zero loss
+    try {
+      if (typeof window !== 'undefined' && window.fetch) {
+        window.fetch('/api/settings/slice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            key: 'pharmacy-tracker-data',
+            sliceKey: 'ipRestrictions',
+            sliceValue: updatedIpRestrictions
+          })
+        }).catch(() => {});
+      }
+    } catch {}
+
+    return updatedState;
+  };
+
+  const handleAddIP = async () => {
     const cleanIp = newIP.trim();
     if (!cleanIp) {
       showToast?.('⚠️ يرجى إدخال عنوان الـ IP أولاً');
@@ -1111,7 +1180,8 @@ export default function SettingsModule({
     setApprovedIPs(updated);
     setNewIP('');
     setNewIPLabel('');
-    showToast?.(`✅ تم إضافة الراوتر "${label}" بنجاح!`);
+    await persistIpRestrictions(updated, ipEnabled);
+    showToast?.(`✅ تم إضافة وحفظ الراوتر "${label}" بنجاح!`);
   };
 
   const handleAddCurrentIP = async () => {
@@ -1131,7 +1201,7 @@ export default function SettingsModule({
       // Open modal to name the captured IP
       setCapturedIpModal({
         ip,
-        label: newIPLabel.trim() || `راوتر الصيدلية (${new Date().toLocaleDateString('ar-EG')})`
+        label: newIPLabel.trim() || `راوتر الفرع (${new Date().toLocaleDateString('ar-EG')})`
       });
     } catch {
       showToast?.('❌ حدث خطأ أثناء التقاط عنوان الـ IP');
@@ -1140,7 +1210,7 @@ export default function SettingsModule({
     }
   };
 
-  const handleConfirmAddCapturedIP = () => {
+  const handleConfirmAddCapturedIP = async () => {
     if (!capturedIpModal || !capturedIpModal.ip) return;
     const finalLabel = capturedIpModal.label.trim() || `راوتر ${approvedIPs.length + 1}`;
     const cleanIp = capturedIpModal.ip.trim();
@@ -1149,7 +1219,8 @@ export default function SettingsModule({
     setCapturedIpModal(null);
     setNewIP('');
     setNewIPLabel('');
-    showToast?.(`✅ تم التقاط وإضافة "${finalLabel}" بنجاح! اضغط على حفظ الإعدادات لتطبيق التغيير.`);
+    await persistIpRestrictions(updated, ipEnabled);
+    showToast?.(`✅ تم التقاط وحفظ الراوتر "${finalLabel}" بنجاح!`);
   };
 
   const handleEditIPLabel = (idx) => {
@@ -1163,7 +1234,7 @@ export default function SettingsModule({
     });
   };
 
-  const handleConfirmEditIPLabel = () => {
+  const handleConfirmEditIPLabel = async () => {
     if (!editingIpModal || editingIpModal.idx === undefined) return;
     const finalLabel = editingIpModal.label.trim() || 'راوتر معتمد';
     const updated = [...approvedIPs];
@@ -1172,7 +1243,29 @@ export default function SettingsModule({
     updated[editingIpModal.idx] = { ip: currentIp, label: finalLabel };
     setApprovedIPs(updated);
     setEditingIpModal(null);
-    showToast?.(`✅ تم تحديث تسمية الراوتر إلى "${finalLabel}" بنجاح!`);
+    await persistIpRestrictions(updated, ipEnabled);
+    showToast?.(`✅ تم حفظ وتثبيت تسمية الراوتر "${finalLabel}" بنجاح!`);
+  };
+
+  const handleDeleteIP = async (idx) => {
+    const routerToDelete = approvedIPs[idx];
+    const routerName = typeof routerToDelete === 'string' ? routerToDelete : (routerToDelete?.label || routerToDelete?.ip);
+    const updated = approvedIPs.filter((_, i) => i !== idx);
+    setApprovedIPs(updated);
+    await persistIpRestrictions(updated, ipEnabled);
+    showToast?.(`🗑️ تم حذف الراوتر "${routerName}" بنجاح!`);
+  };
+
+  const handleToggleIpEnabled = async (e) => {
+    const checked = e.target.checked;
+    setIpEnabled(checked);
+    await persistIpRestrictions(approvedIPs, checked);
+    showToast?.(checked ? '🛡️ تم تفعيل قيود الـ IP بنجاح' : '⭕ تم تعطيل قيود الـ IP');
+  };
+
+  const handleSaveIpRestrictions = async () => {
+    await persistIpRestrictions(approvedIPs, ipEnabled);
+    showToast?.(`✅ تم حفظ وتأكيد قيود الشبكة وعناوين راوترات الفروع (${approvedIPs.length}) بنجاح!`);
   };
 
   // ── Complete System Permission Catalog (19 Unified Core Permissions) ──
@@ -2798,7 +2891,7 @@ export default function SettingsModule({
               <input 
                 type="checkbox" 
                 checked={ipEnabled} 
-                onChange={(e) => setIpEnabled(e.target.checked)} 
+                onChange={handleToggleIpEnabled} 
                 style={{ width: '18px', height: '18px' }}
               />
               <span style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>تفعيل قيود الـ IP</span>
@@ -2934,7 +3027,7 @@ export default function SettingsModule({
                         <button
                           type="button"
                           style={{ border: 'none', background: '#fee2e2', color: '#dc2626', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px', fontSize: '12px' }}
-                          onClick={() => setApprovedIPs(approvedIPs.filter((_, i) => i !== idx))}
+                          onClick={() => handleDeleteIP(idx)}
                           title="حذف هذا الراوتر"
                         >
                           🗑️
@@ -2951,7 +3044,7 @@ export default function SettingsModule({
             <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
               ⚠️ تأكد من الضغط على زر الحفظ لتثبيت قيود وعناوين الراوترات المعتمدة في النظام.
             </span>
-            <button className="btn btn-start" onClick={handleSaveGeneral} style={{ padding: '10px 24px', fontSize: '15px' }}>
+            <button className="btn btn-start" onClick={handleSaveIpRestrictions} style={{ padding: '10px 24px', fontSize: '15px' }}>
               💾 حفظ الإعدادات وتطبيق القيود
             </button>
           </div>
