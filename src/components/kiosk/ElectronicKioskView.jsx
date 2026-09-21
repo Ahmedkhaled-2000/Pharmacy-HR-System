@@ -147,16 +147,51 @@ export default function ElectronicKioskView({
   const rawActiveShift = matchedEmp ? (state.activeShifts?.[matchedEmp.id] || state.activeShifts?.[String(matchedEmp.id)]) : null;
   const isStaleActiveShift = Boolean(rawActiveShift && rawActiveShift.date && rawActiveShift.date !== todayStr);
 
+  // دالة فحص صارمة للتأكد من أن الوردية مفتوحة حقاً وليست مغلقة بوقت انصراف
+  const isShiftTrulyOpen = (s) => {
+    if (!s) return false;
+    if (s.status === 'cancelled' || s.isCancelled) return false;
+    const hasValidTimeOut = Boolean(
+      s.timeOut && 
+      s.timeOut !== '—' && 
+      s.timeOut !== '' && 
+      s.timeOut !== 'قيد العمل الآن' && 
+      s.timeOut !== 'undefined' && 
+      s.timeOut !== 'null'
+    );
+    if (hasValidTimeOut) return false;
+    const hasValidTimeIn = Boolean(
+      s.timeIn && 
+      s.timeIn !== '—' && 
+      s.timeIn !== '' && 
+      s.timeIn !== 'undefined' && 
+      s.timeIn !== 'null'
+    );
+    return hasValidTimeIn;
+  };
+
+  // التحقق من الوردية في الذاكرة: يجب ألا تكون مغلقة في سجل الورديات
+  let verifiedActiveShift = null;
+  if (rawActiveShift && !isStaleActiveShift) {
+    const recordedMatch = (state.shifts || []).find(s => String(s.id) === String(rawActiveShift.id));
+    if (recordedMatch) {
+      if (isShiftTrulyOpen(recordedMatch)) {
+        verifiedActiveShift = { ...rawActiveShift, ...recordedMatch };
+      }
+    } else if (isShiftTrulyOpen(rawActiveShift)) {
+      verifiedActiveShift = rawActiveShift;
+    }
+  }
+
   // فحص سجلات اليوم لمعرفة ما إذا كانت هناك وردية مفتوحة حالياً (حضور مسجل بدون انصراف)
   const empOpenShift = matchedEmp ? (state.shifts || []).find(s => 
     (String(s.employeeId) === String(matchedEmp.id) || (matchedEmp.code && String(s.employeeCode) === String(matchedEmp.code))) &&
     s.date === todayStr &&
-    Boolean(s.timeIn && s.timeIn !== '—' && (!s.timeOut || s.timeOut === '—' || s.timeOut === '' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive) && (!s.endTime || s.endTime === '—' || s.endTime === '')) &&
-    s.status !== 'cancelled' && !s.isCancelled
+    isShiftTrulyOpen(s)
   ) : null;
 
-  // تحديد الوردية النشطة: إما من الوردية الحالية بالذاكرة (إذا كانت لليوم) أو من سجل الوردية المفتوحة اليوم
-  const activeShift = (rawActiveShift && !isStaleActiveShift) ? rawActiveShift : (empOpenShift || null);
+  // تحديد الوردية النشطة: فقط إذا كانت الوردية مفتوحة حقاً وبدون تسجيل انصراف
+  const activeShift = verifiedActiveShift || empOpenShift || null;
 
   useEffect(() => {
     // التحميل الاستباقي لمحرك الوجه في الكشك ليعمل فورياً عند وقوف أي موظف
@@ -434,6 +469,24 @@ export default function ElectronicKioskView({
         onClose: () => setKioskAlertModal(null)
       });
       return;
+    }
+    if (action === 'shift_end' && activeShift) {
+      const punchDate = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
+      if (activeShift.date === punchDate && activeShift.startTime) {
+        const elapsedSec = (Date.now() - Number(activeShift.startTime)) / 1000;
+        if (elapsedSec >= 0 && elapsedSec < 60) {
+          setKioskAlertModal({
+            isOpen: true,
+            type: 'warning',
+            title: 'تنبيه منع الانصراف السريع',
+            subtitle: `${matchedEmp?.name || ''}`,
+            note: '⚠️ لقد قمت بتسجيل الحضور للتو! يرجى الانتظار دقيقة واحدة على الأقل قبل تسجيل الانصراف لتجنب التسجيل الخاطئ.',
+            countdown: 5,
+            onClose: () => setKioskAlertModal(null)
+          });
+          return;
+        }
+      }
     }
     if (action === 'break_start' && (!activeShift || activeShift.isPaused)) {
       setKioskAlertModal({
@@ -739,6 +792,9 @@ export default function ElectronicKioskView({
         requestId: requestId,
         statusLabel: 'انصراف بالصورة (بانتظار الاعتماد)',
         note: `تسجيل انصراف بالصورة في تمام ${displayTime} (${punchTime}) - الساعات: ${netHours} س (بانتظار اعتماد الإدارة)`,
+        isLiveActive: false,
+        isPaused: false,
+        status: 'completed',
         updatedAt: now.toISOString()
       };
 

@@ -442,18 +442,45 @@ export function useAttendanceEngine() {
     const punchTime = nowTimeStr().slice(0, 5);
     const effectiveBranchId = branchId || emp?.branchId || (emp?.branchesDetails && emp.branchesDetails[0]?.branchId) || '';
 
+    // دالة قياسية دقيقة للتحقق مما إذا كانت الوردية مفتوحة حقاً وبدون انصراف
+    const isShiftOpenForPunch = (s) => {
+      if (!s || s.status === 'cancelled' || s.isCancelled) return false;
+      const hasCheckout = Boolean(
+        s.timeOut &&
+        s.timeOut !== '—' &&
+        s.timeOut !== '-' &&
+        s.timeOut !== '' &&
+        s.timeOut !== 'قيد العمل الآن' &&
+        s.timeOut !== 'قيد العمل'
+      );
+      if (hasCheckout) return false; // الوردية مكتملة ولها انصراف
+      return Boolean(s.timeIn && s.timeIn !== '—' && s.timeIn !== '');
+    };
+
     // فحص ومعالجة الوردية النشطة السابقة إن وجدت
-    const existingActive = state.activeShifts?.[empId] || state.activeShifts?.[String(empId)];
     let currentActiveShifts = { ...state.activeShifts };
     let currentShifts = [...(state.shifts || [])];
+    let existingActive = currentActiveShifts[empId] || currentActiveShifts[String(empId)];
 
     // فحص إضافي في currentShifts إن وجد سجل مفتوح للموظف لليوم
     const existingOpenShiftInRecords = currentShifts.find(s =>
       (String(s.employeeId) === String(empId) || (emp.code && String(s.employeeCode) === String(emp.code))) &&
       s.date === punchDate &&
-      Boolean(s.timeIn && s.timeIn !== '—' && (!s.timeOut || s.timeOut === '—' || s.timeOut === '' || s.isLiveActive)) &&
-      s.status !== 'cancelled' && !s.isCancelled
+      isShiftOpenForPunch(s)
     );
+
+    // إذا كانت الوردية النشطة بالذاكرة مسجل لها انصراف فعلي في السجلات، يتم تطهيرها فوراً
+    if (existingActive) {
+      const isAlreadyClosedInShifts = currentShifts.some(s =>
+        (s.id === existingActive.shiftId || (String(s.employeeId) === String(empId) && s.date === existingActive.date && s.timeIn === existingActive.timeIn)) &&
+        !isShiftOpenForPunch(s)
+      );
+      if (isAlreadyClosedInShifts) {
+        delete currentActiveShifts[empId];
+        delete currentActiveShifts[String(empId)];
+        existingActive = null;
+      }
+    }
 
     if (existingActive || existingOpenShiftInRecords) {
       const activeDate = existingActive?.date || existingOpenShiftInRecords?.date;
@@ -545,7 +572,7 @@ export function useAttendanceEngine() {
 
     currentShifts = [
       openShiftRecord,
-      ...currentShifts.filter(s => !(String(s.employeeId) === String(empId) && s.date === punchDate && s.isLiveActive))
+      ...currentShifts.filter(s => !(String(s.employeeId) === String(empId) && s.date === punchDate && isShiftOpenForPunch(s)))
     ];
 
     const updatedActive = {
@@ -734,15 +761,46 @@ export function useAttendanceEngine() {
 
   // 8. إنهاء الوردية (Stop Shift)
   const stopShift = async (empId, source = 'admin') => {
-    const active = state.activeShifts?.[empId] || state.activeShifts?.[String(empId)];
+    let active = state.activeShifts?.[empId] || state.activeShifts?.[String(empId)];
+    const emp = getEmp(empId);
+
+    // إذا لم تكن الوردية موجودة في activeShifts (بسبب إعادة تحميل الصفحة أو مزامنة)، نبحث في shifts عن وردية مفتوحة
+    if (!active) {
+      const todayStr = getRealTodayStr();
+      const openShift = (state.shifts || []).find(s =>
+        (String(s.employeeId) === String(empId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
+        (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === 'قيد العمل الآن') &&
+        s.status !== 'cancelled' && !s.isCancelled
+      );
+      if (openShift) {
+        active = {
+          shiftId: openShift.id,
+          branchId: openShift.branchId || emp?.branchId || '',
+          branchName: openShift.branchName || '',
+          date: openShift.date || todayStr,
+          timeIn: openShift.timeIn || '09:00',
+          startEpoch: openShift.startEpoch || (openShift.createdAt ? new Date(openShift.createdAt).getTime() : Date.now() - 3600000),
+          accumulatedPauseMs: openShift.accumulatedPauseMs || 0
+        };
+      }
+    }
+
     if (!active) {
       const reason = '⚠️ لا توجد وردية نشطة مفتوحة لهذا الموظف لتسجيل الانصراف';
       showToast(reason);
       return { success: false, reason };
     }
-    const emp = getEmp(empId);
-    const timeOut = nowTimeStr().slice(0, 5);
+
     const nowMs = Date.now();
+    const elapsedSinceStartMs = active.startEpoch ? (nowMs - Number(active.startEpoch)) : 999999;
+    // حماية منع الانصراف السريع التلقائي (Anti-Bounce Guard): منع تسجيل انصراف في أقل من دقيقة واحدة
+    if (source === 'kiosk' && elapsedSinceStartMs < 60000 && active.date === getRealTodayStr()) {
+      const reason = '⚠️ تم تسجيل الدخول منذ لحظات قليلة (أقل من دقيقة). يرجى الانتظار لتفادي تسجيل انصراف خاطئ.';
+      showToast(reason);
+      return { success: false, reason };
+    }
+
+    const timeOut = nowTimeStr().slice(0, 5);
     let currentPauseMs = active.accumulatedPauseMs || 0;
     if (active.isPaused && active.pauseStartEpoch) {
       currentPauseMs += (nowMs - active.pauseStartEpoch);
@@ -797,7 +855,7 @@ export function useAttendanceEngine() {
     let existingShifts = [...(state.shifts || [])];
     const openShiftIdx = existingShifts.findIndex(
       (s) => (active.shiftId && s.id === active.shiftId) ||
-             (String(s.employeeId) === String(empId) && s.date === active.date && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive))
+             (String(s.employeeId) === String(empId) && s.date === active.date && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === 'قيد العمل الآن'))
     );
     const shiftId = openShiftIdx >= 0 ? existingShifts[openShiftIdx].id : (active.shiftId || uid());
 
