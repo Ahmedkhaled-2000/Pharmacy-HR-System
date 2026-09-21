@@ -5,6 +5,7 @@ import { findEmployeeRoster, getEmployeeDaySchedule } from '../../utils/rosterEn
 import { calculateLatenessMinutes } from '../../utils/latePenaltyEngine';
 import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
+import { getCycleDateRange } from '../../utils/periodEngine';
 
 /**
  * ShiftAdjustmentModule.jsx
@@ -46,31 +47,35 @@ export default function ShiftAdjustmentModule({
   const branchObj = (state?.branches || []).find((b) => b && String(b.id) === String(activeBranchId));
   const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
 
-  // 1. حساب قائمة أيام الشهر وبياناتها
-  const daysInMonth = useMemo(() => {
-    if (!selectedMonth) return [];
-    const [yearStr, monthStr] = selectedMonth.split('-');
-    const year = parseInt(yearStr, 10);
-    const month = parseInt(monthStr, 10);
-    if (isNaN(year) || isNaN(month)) return [];
+  // دورة الشهر المعتمدة للرواتب والتشغيل
+  const cycleRange = useMemo(() => {
+    return getCycleDateRange(selectedMonth, state?.orgSettings);
+  }, [selectedMonth, state?.orgSettings]);
 
-    const totalDays = new Date(year, month, 0).getDate();
+  // 1. حساب قائمة أيام دورة الشهر وبياناتها
+  const daysInMonth = useMemo(() => {
+    if (!selectedMonth || !cycleRange?.startDate || !cycleRange?.endDate) return [];
     const list = [];
     const empIdStr = String(activeEmp?.id || '');
 
-    // جلب روستر الموظف المعتمد
-    const roster = findEmployeeRoster(activeEmp?.id, selectedMonth, state, activeBranchId);
+    // جلب البصمات والورديات وحالات التأخير الواقعة ضمن مجال دورة الشهر
     const shifts = (state?.shifts || []).filter(
-      (s) => String(s.employeeId) === empIdStr && s.date && s.date.startsWith(selectedMonth)
+      (s) => String(s.employeeId) === empIdStr && s.date && s.date >= cycleRange.startDate && s.date <= cycleRange.endDate
     );
     const lateIncidents = (state?.lateIncidents || []).filter(
-      (inc) => String(inc.employeeId) === empIdStr && inc.date && inc.date.startsWith(selectedMonth)
+      (inc) => String(inc.employeeId) === empIdStr && inc.date && inc.date >= cycleRange.startDate && inc.date <= cycleRange.endDate
     );
 
-    for (let day = 1; day <= totalDays; day++) {
-      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const curr = new Date(cycleRange.startDate + 'T00:00:00');
+    const end = new Date(cycleRange.endDate + 'T00:00:00');
+
+    while (curr <= end) {
+      const y = curr.getFullYear();
+      const m = String(curr.getMonth() + 1).padStart(2, '0');
+      const d = String(curr.getDate()).padStart(2, '0');
+      const dateStr = `${y}-${m}-${d}`;
       const dayName = arabicWeekday(dateStr);
-      const jsDay = new Date(dateStr + 'T00:00:00').getDay();
+      const jsDay = curr.getDay();
 
       // الجدول المعتمد لليوم
       const daySchedule = getEmployeeDaySchedule(activeEmp?.id, dateStr, state);
@@ -111,10 +116,12 @@ export default function ShiftAdjustmentModule({
         isWorkedRestDay,
         hasPunches: dayShifts.length > 0
       });
+
+      curr.setDate(curr.getDate() + 1);
     }
 
     return list;
-  }, [selectedMonth, activeEmp, state, activeBranchId]);
+  }, [selectedMonth, cycleRange, activeEmp, state, activeBranchId]);
 
   // تصفية الأيام بناءً على الفلتر
   const filteredDays = useMemo(() => {
@@ -242,9 +249,17 @@ export default function ShiftAdjustmentModule({
         computedHours = 0;
       }
 
-      // بناء خريطة الجداول الجديدة للأيام المختارة
+      // بناء خريطة الجداول الجديدة والسابقة للأيام المختارة
       const newScheduleMap = {};
+      const oldScheduleMap = {};
+
       selectedDates.forEach((dStr) => {
+        // تسجيل الجدول السابق الدقيق لهذا التاريخ
+        const existingDaySched = getEmployeeDaySchedule(activeEmp?.id, dStr, state);
+        if (existingDaySched) {
+          oldScheduleMap[dStr] = existingDaySched;
+        }
+
         if (actionType === 'modify_hours') {
           newScheduleMap[dStr] = {
             type: 'shift',
@@ -319,7 +334,12 @@ export default function ShiftAdjustmentModule({
         replacementRestDate: actionType === 'compensate_worked_rest' ? replacementRestDate : '',
         schedule: newScheduleMap,
         newSchedule: newScheduleMap,
+        oldSchedule: oldScheduleMap,
+        previousSchedule: oldScheduleMap,
         month: selectedMonth,
+        fromDate: cycleRange?.startDate,
+        toDate: cycleRange?.endDate,
+        cycleRangeLabel: cycleRange?.label,
         daysCount: selectedDates.length,
         hasPenaltiesToWaive: selectedDaysPenalties.length > 0,
         penaltiesToWaive: selectedDaysPenalties.map((p) => p.late.id),
@@ -391,7 +411,7 @@ export default function ShiftAdjustmentModule({
                 تعديل الشيفت والجدول الشهري
               </h2>
               <p style={{ margin: '4px 0 0', fontSize: '13px', opacity: 0.9 }}>
-                تعديل مواعيد العمل، تحديد الراحات، وإلغاء جزاءات التأخير بأثر رجعي بموافقة الإدارة
+                تعديل مواعيد العمل، تحديد الراحات، وإلغاء جزاءات التأخير طبقا لدورة الشهر ({cycleRange?.shortLabel || selectedMonth})
               </p>
             </div>
           </div>
@@ -437,7 +457,7 @@ export default function ShiftAdjustmentModule({
           <span>👤 الموظف: <strong>{activeEmp?.name || '—'}</strong> ({activeEmp?.code || '—'})</span>
           <span>💼 المسمى: <strong>{activeEmp?.jobTitle || '—'}</strong></span>
           <span>🏢 الفرع: <strong>{branchName}</strong></span>
-          <span>📅 الشهر المعروض: <strong>{selectedMonth}</strong> ({daysInMonth.length} يوم)</span>
+          <span>📅 دورة الشهر المعروضة: <strong>{cycleRange?.label || selectedMonth}</strong> ({daysInMonth.length} يوم)</span>
         </div>
       </div>
 
@@ -450,7 +470,7 @@ export default function ShiftAdjustmentModule({
             onClick={() => setFilterMode('all')}
             style={{ fontSize: '12px', padding: '5px 12px' }}
           >
-            📋 كافة أيام الشهر ({daysInMonth.length})
+            📋 كافة أيام دورة الشهر ({daysInMonth.length})
           </button>
           <button
             type="button"

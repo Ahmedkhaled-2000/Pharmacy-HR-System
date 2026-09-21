@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, normalizeState, fmt } from '../../utils/formatters';
-import { normalizeSchedule } from '../../utils/rosterEngine';
+import { normalizeSchedule, getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { notifyEmployeeEarlyExitWarning, notifyOnPenaltyApplied } from '../../utils/gmailService';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { shouldRouteDirectToAdmin, isBranchWithoutManager, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from '../../utils/jobsHelper';
@@ -4116,32 +4116,43 @@ export default function RequestsModule({
                 {/* ── ROSTER EDIT DETAILS & COMPARISON (الجدول السابق مقابل الجديد) ── */}
                 {isRoster && (() => {
                   const existingRoster = (state.rosters || []).find(r => 
-                    String(r.employeeId) === String(previewModalReq.employeeId) &&
+                    (String(r.employeeId) === String(previewModalReq.employeeId) || (previewModalReq.employeeCode && String(r.employeeCode) === String(previewModalReq.employeeCode))) &&
                     (!previewModalReq.month || r.month === previewModalReq.month)
                   );
 
-                  const prevSchedule = normalizeSchedule(previewModalReq.oldSchedule || previewModalReq.previousSchedule || existingRoster?.schedule);
-                  const newSchedule = normalizeSchedule(previewModalReq.schedule || previewModalReq.newSchedule);
+                  const rawPrev = previewModalReq.oldSchedule || previewModalReq.previousSchedule || existingRoster?.schedule || {};
+                  const rawNew = previewModalReq.schedule || previewModalReq.newSchedule || {};
+
+                  const normPrev = normalizeSchedule(rawPrev);
+                  const normNew = normalizeSchedule(rawNew);
+
+                  const prevSchedule = normPrev || (typeof rawPrev === 'object' && rawPrev !== null ? rawPrev : {});
+                  const newSchedule = normNew || (typeof rawNew === 'object' && rawNew !== null ? rawNew : {});
 
                   const standardDays = [
-                    { key: 'السبت', label: 'السبت' },
-                    { key: 'الأحد', label: 'الأحد' },
-                    { key: 'الاثنين', label: 'الاثنين' },
-                    { key: 'الثلاثاء', label: 'الثلاثاء' },
-                    { key: 'الأربعاء', label: 'الأربعاء' },
-                    { key: 'الخميس', label: 'الخميس' },
-                    { key: 'الجمعة', label: 'الجمعة' },
+                    { key: 'السبت', label: 'السبت', isStandard: true },
+                    { key: 'الأحد', label: 'الأحد', isStandard: true },
+                    { key: 'الاثنين', label: 'الاثنين', isStandard: true },
+                    { key: 'الثلاثاء', label: 'الثلاثاء', isStandard: true },
+                    { key: 'الأربعاء', label: 'الأربعاء', isStandard: true },
+                    { key: 'الخميس', label: 'الخميس', isStandard: true },
+                    { key: 'الجمعة', label: 'الجمعة', isStandard: true },
                   ];
 
-                  const isIsoDate = (k) => /^\d{4}-\d{2}-\d{2}$/.test(k);
-                  const customDateKeys = Object.keys(previewModalReq.schedule || {}).filter(isIsoDate);
+                  const isIsoDate = (k) => /^\d{4}-\d{2}-\d{2}$/.test(String(k).trim());
+                  const customDateKeys = Array.from(new Set([
+                    ...Object.keys(rawNew || {}).filter(isIsoDate),
+                    ...Object.keys(rawPrev || {}).filter(isIsoDate),
+                    ...((Array.isArray(previewModalReq.dates) ? previewModalReq.dates : []).filter(isIsoDate)),
+                    ...(previewModalReq.date && isIsoDate(previewModalReq.date) ? [previewModalReq.date] : [])
+                  ]));
                   const hasCustomDates = customDateKeys.length > 0;
 
                   const displayList = hasCustomDates 
                     ? customDateKeys.sort().map(dateKey => {
-                        const d = new Date(dateKey);
+                        const d = new Date(dateKey + 'T00:00:00');
                         const arDay = !isNaN(d.getTime()) ? d.toLocaleDateString('ar-EG', { weekday: 'long' }) : '';
-                        return { key: dateKey, label: arDay ? `${dateKey} (${arDay})` : dateKey };
+                        return { key: dateKey, label: arDay ? `${dateKey} (${arDay})` : dateKey, isDate: true };
                       })
                     : standardDays;
 
@@ -4181,8 +4192,15 @@ export default function RequestsModule({
                           </thead>
                           <tbody>
                             {displayList.map((dayItem) => {
-                              const oldDay = prevSchedule[dayItem.key] || { type: dayItem.key === 'الجمعة' ? 'off' : 'shift', start: '08:00', end: '16:00' };
-                              const newDay = newSchedule[dayItem.key] || oldDay;
+                              let oldDay = prevSchedule?.[dayItem.key];
+                              if (!oldDay && dayItem.isDate) {
+                                oldDay = getEmployeeDaySchedule(previewModalReq.employeeId, dayItem.key, state);
+                              }
+                              if (!oldDay) {
+                                oldDay = { type: dayItem.key === 'الجمعة' ? 'off' : 'shift', start: '08:00', end: '16:00' };
+                              }
+
+                              const newDay = newSchedule?.[dayItem.key] || oldDay;
 
                               const isOldOff = oldDay.type === 'off' || oldDay.isOff === true;
                               const isNewOff = newDay.type === 'off' || newDay.isOff === true;

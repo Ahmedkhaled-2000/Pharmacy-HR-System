@@ -484,9 +484,13 @@ export function useAttendanceEngine() {
 
     if (existingActive || existingOpenShiftInRecords) {
       const activeDate = existingActive?.date || existingOpenShiftInRecords?.date;
-      if (activeDate && activeDate !== punchDate) {
-        // إذا كانت الوردية المفتوحة من يوم سابق، يتم إغلاقها تلقائياً لإتاحة بدء وردية اليوم
-        console.warn(`[startShift] Auto-closing stale shift from ${activeDate} for emp ${empId}`);
+      const activeTimeIn = existingActive?.timeIn || existingOpenShiftInRecords?.timeIn || '09:00';
+      const activeStartEpoch = existingActive?.startEpoch || (existingOpenShiftInRecords?.startEpoch) || (activeDate && activeTimeIn ? new Date(`${activeDate}T${activeTimeIn.slice(0, 5)}:00`).getTime() : 0);
+      const isVeryOldAbandoned = activeStartEpoch ? (Date.now() - activeStartEpoch > 30 * 3600 * 1000) : false;
+
+      if (activeDate && activeDate !== punchDate && isVeryOldAbandoned) {
+        // إغلاق الورديات المتروكة المهجورة لأكثر من 30 ساعة فقط
+        console.warn(`[startShift] Auto-closing very old abandoned shift from ${activeDate} for emp ${empId}`);
         const staleShiftId = existingOpenShiftInRecords?.id || uid();
         const bObjOld = (state.branches || []).find((b) => String(b.id) === String(existingActive?.branchId || existingOpenShiftInRecords?.branchId || effectiveBranchId));
         const autoClosedShift = {
@@ -507,7 +511,7 @@ export function useAttendanceEngine() {
           overtimeHours: 0,
           overtimeStatus: 'none',
           breakHours: 0,
-          note: 'إغلاق تلقائي لوردية سابقة لم يتم تسجيل انصرافها',
+          note: 'إغلاق تلقائي لوردية قديمة مهجورة لم يتم تسجيل انصرافها',
           statusLabel: 'حضور حي',
           isLiveActive: false,
           status: 'completed',
@@ -521,7 +525,7 @@ export function useAttendanceEngine() {
         delete currentActiveShifts[empId];
         delete currentActiveShifts[String(empId)];
       } else {
-        const reason = '⚠️ الموظف لديه وردية عمل نشطة بالفعل لليوم';
+        const reason = `⚠️ الموظف لديه وردية عمل نشطة بالفعل (بدأت ${activeDate === punchDate ? 'اليوم' : activeDate} الساعة ${activeTimeIn}). يرجى تسجيل الانصراف أولاً.`;
         showToast(reason);
         return { success: false, reason };
       }

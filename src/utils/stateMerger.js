@@ -672,8 +672,9 @@ export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShi
   const isShiftDateValid = (dateStr, startEpoch) => {
     if (!dateStr) return false;
     if (dateStr === todayStr) return true;
-    // السماح بالورديات الليلية العابرة لمنتصف الليل في غضون 16 ساعة كحد أقصى
-    if (startEpoch && (Date.now() - Number(startEpoch)) < 16 * 3600 * 1000) return true;
+    // السماح بالورديات الليلية العابرة لمنتصف الليل في غضون 36 ساعة كحد أقصى
+    const epoch = startEpoch || (dateStr ? new Date(`${dateStr}T12:00:00`).getTime() : 0);
+    if (epoch && (Date.now() - Number(epoch)) < 36 * 3600 * 1000) return true;
     return false;
   };
 

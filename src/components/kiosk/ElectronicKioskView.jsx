@@ -145,7 +145,10 @@ export default function ElectronicKioskView({
 
   const todayStr = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
   const rawActiveShift = matchedEmp ? (state.activeShifts?.[matchedEmp.id] || state.activeShifts?.[String(matchedEmp.id)]) : null;
-  const isStaleActiveShift = Boolean(rawActiveShift && rawActiveShift.date && rawActiveShift.date !== todayStr);
+  
+  // الوردية النشطة تعتبر تالفة فقط إذا مر عليها أكثر من 36 ساعة بدون إغلاق
+  const rawShiftEpoch = rawActiveShift ? (rawActiveShift.startEpoch || (rawActiveShift.date && rawActiveShift.timeIn ? new Date(`${rawActiveShift.date}T${rawActiveShift.timeIn.slice(0, 5)}:00`).getTime() : 0)) : 0;
+  const isStaleActiveShift = Boolean(rawActiveShift && rawShiftEpoch && (Date.now() - rawShiftEpoch > 36 * 3600 * 1000));
 
   // دالة فحص صارمة للتأكد من أن الوردية مفتوحة حقاً وليست مغلقة بوقت انصراف
   const isShiftTrulyOpen = (s) => {
@@ -154,8 +157,10 @@ export default function ElectronicKioskView({
     const hasValidTimeOut = Boolean(
       s.timeOut && 
       s.timeOut !== '—' && 
+      s.timeOut !== '-' && 
       s.timeOut !== '' && 
       s.timeOut !== 'قيد العمل الآن' && 
+      s.timeOut !== 'قيد العمل' && 
       s.timeOut !== 'undefined' && 
       s.timeOut !== 'null'
     );
@@ -173,7 +178,7 @@ export default function ElectronicKioskView({
   // التحقق من الوردية في الذاكرة: يجب ألا تكون مغلقة في سجل الورديات
   let verifiedActiveShift = null;
   if (rawActiveShift && !isStaleActiveShift) {
-    const recordedMatch = (state.shifts || []).find(s => String(s.id) === String(rawActiveShift.id));
+    const recordedMatch = (state.shifts || []).find(s => String(s.id) === String(rawActiveShift.shiftId || rawActiveShift.id));
     if (recordedMatch) {
       if (isShiftTrulyOpen(recordedMatch)) {
         verifiedActiveShift = { ...rawActiveShift, ...recordedMatch };
@@ -183,12 +188,15 @@ export default function ElectronicKioskView({
     }
   }
 
-  // فحص سجلات اليوم لمعرفة ما إذا كانت هناك وردية مفتوحة حالياً (حضور مسجل بدون انصراف)
-  const empOpenShift = matchedEmp ? (state.shifts || []).find(s => 
-    (String(s.employeeId) === String(matchedEmp.id) || (matchedEmp.code && String(s.employeeCode) === String(matchedEmp.code))) &&
-    s.date === todayStr &&
-    isShiftTrulyOpen(s)
-  ) : null;
+  // فحص سجلات الورديات لمعرفة ما إذا كانت هناك وردية مفتوحة حالياً (حضور مسجل بدون انصراف لليوم أو وردية ليلية بدأت أمس ومستمرة لليوم)
+  const empOpenShift = matchedEmp ? (state.shifts || []).find(s => {
+    const isMatch = (String(s.employeeId) === String(matchedEmp.id) || (matchedEmp.code && String(s.employeeCode) === String(matchedEmp.code)));
+    if (!isMatch || !isShiftTrulyOpen(s)) return false;
+    // استبعاد الورديات الأقدم من 36 ساعة فقط
+    const sEpoch = s.startEpoch || (s.createdAt ? new Date(s.createdAt).getTime() : (s.date && s.timeIn ? new Date(`${s.date}T${s.timeIn.slice(0, 5)}:00`).getTime() : 0));
+    if (sEpoch && (Date.now() - sEpoch > 36 * 3600 * 1000)) return false;
+    return true;
+  }) : null;
 
   // تحديد الوردية النشطة: فقط إذا كانت الوردية مفتوحة حقاً وبدون تسجيل انصراف
   const activeShift = verifiedActiveShift || empOpenShift || null;
@@ -739,12 +747,18 @@ export default function ElectronicKioskView({
       const effectiveShiftDate = active?.date || (openShiftIdx >= 0 ? updatedShifts[openShiftIdx].date : dateStr);
       const targetShiftId = active?.shiftId || (openShiftIdx >= 0 ? updatedShifts[openShiftIdx].id : shiftId);
 
-      // حساب ساعات العمل والبريك والإضافي بدقة
-      const [inH, inM] = effectiveTimeIn.split(':').map(Number);
-      const [outH, outM] = punchTime.split(':').map(Number);
-      let diffMinutes = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
-      if (diffMinutes < 0) diffMinutes += 24 * 60;
-      const totalElapsedHours = Math.round((diffMinutes / 60) * 100) / 100;
+      // حساب ساعات العمل والبريك والإضافي بدقة (مع دعم الورديات العابرة لمنتصف الليل واليوم التالي)
+      let totalElapsedHours = 0;
+      const startMs = active?.startEpoch || (openShiftIdx >= 0 && updatedShifts[openShiftIdx].startEpoch) || (effectiveShiftDate && effectiveTimeIn ? new Date(`${effectiveShiftDate}T${effectiveTimeIn.slice(0, 5)}:00`).getTime() : 0);
+      if (startMs && now.getTime() >= startMs) {
+        totalElapsedHours = Math.round(((now.getTime() - startMs) / 3600000) * 100) / 100;
+      } else {
+        const [inH, inM] = effectiveTimeIn.split(':').map(Number);
+        const [outH, outM] = punchTime.split(':').map(Number);
+        let diffMinutes = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+        if (diffMinutes < 0) diffMinutes += 24 * 60;
+        totalElapsedHours = Math.round((diffMinutes / 60) * 100) / 100;
+      }
 
       let currentPauseMs = active?.accumulatedPauseMs || 0;
       if (active?.isPaused && active?.pauseStartEpoch) {

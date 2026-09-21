@@ -893,16 +893,20 @@ export function normalizeState(parsed) {
   }
 
   // ── الاسترداد الذاتي الوقائي للورديات الحية (Self-Healing from Open Shifts) ──
-  // إذا فُقدت الوردية النشطة من الذاكرة المؤقتة، يتم ترميمها واستعادتها فوراً من أي وردية مفتوحة لليوم
+  // إذا فُقدت الوردية النشطة من الذاكرة المؤقتة، يتم ترميمها واستعادتها فوراً من أي وردية مفتوحة لليوم أو وردية ليلية مستمرة
   const currentTodayStr = typeof getRealTodayStr === 'function' ? getRealTodayStr() : todayStr();
   if (Array.isArray(shifts)) {
     shifts.forEach(s => {
+      const isShiftOpen = (!s.timeOut || s.timeOut === '—' || s.timeOut === '-' || s.timeOut === '' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive);
+      const shiftEpoch = s.startEpoch || (s.createdAt ? new Date(s.createdAt).getTime() : (s.date && s.timeIn ? new Date(`${s.date}T${s.timeIn.slice(0, 5)}:00`).getTime() : 0));
+      const isRecent = shiftEpoch ? (Date.now() - shiftEpoch < 36 * 3600 * 1000) : (s.date === currentTodayStr);
+
       if (
         s &&
-        s.date === currentTodayStr &&
+        (s.date === currentTodayStr || isRecent) &&
         s.timeIn &&
         s.timeIn !== '—' &&
-        (!s.timeOut || s.timeOut === '—' || s.timeOut === '' || s.isLiveActive) &&
+        isShiftOpen &&
         s.status !== 'cancelled' &&
         !s.isCancelled
       ) {

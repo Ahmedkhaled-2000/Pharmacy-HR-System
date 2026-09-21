@@ -13,6 +13,7 @@ import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import BranchResignationModule from '../resignation/BranchResignationModule';
 import { normalizeSchedule } from '../roster/RosterModule';
 import BranchMonthlyRosterModule from '../branches/BranchMonthlyRosterModule';
+import EmployeeRosterEditModal from '../branches/EmployeeRosterEditModal';
 import BranchSalesEntryModal from '../branches/BranchSalesEntryModal';
 import BranchDirectivesModule from '../branches/BranchDirectivesModule';
 import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, isShiftManualPunch, calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, fmt } from '../../utils/formatters';
@@ -224,6 +225,7 @@ export default function BranchManagerView({
   const [showRosterEditModal, setShowRosterEditModal] = useState(false);
   const [rosterEditEmpId, setRosterEditEmpId] = useState('');
   const [rosterEditDetails, setRosterEditDetails] = useState('');
+  const [rosterEditTargetEmp, setRosterEditTargetEmp] = useState(null);
 
   // 4. Branch Manager Evaluation Modal State (Requirement 28)
   const [showEvalModal, setShowEvalModal] = useState(false);
@@ -3054,33 +3056,44 @@ export default function BranchManagerView({
                 {/* ── ROSTER EDIT DETAILS & COMPARISON (الجدول السابق مقابل الجديد) ── */}
                 {isRoster && (() => {
                   const existingRoster = (state.rosters || []).find(r => 
-                    String(r.employeeId) === String(previewModalReq.employeeId) &&
+                    (String(r.employeeId) === String(previewModalReq.employeeId) || (previewModalReq.employeeCode && String(r.employeeCode) === String(previewModalReq.employeeCode))) &&
                     (!previewModalReq.month || r.month === previewModalReq.month) &&
                     (String(r.branchId || '') === String(previewModalReq.branchId || '') || !previewModalReq.branchId)
                   );
 
-                  const prevSchedule = normalizeSchedule(previewModalReq.oldSchedule || previewModalReq.previousSchedule || existingRoster?.schedule);
-                  const newSchedule = normalizeSchedule(previewModalReq.schedule || previewModalReq.newSchedule);
+                  const rawPrev = previewModalReq.oldSchedule || previewModalReq.previousSchedule || existingRoster?.schedule || {};
+                  const rawNew = previewModalReq.schedule || previewModalReq.newSchedule || {};
+
+                  const normPrev = normalizeSchedule(rawPrev);
+                  const normNew = normalizeSchedule(rawNew);
+
+                  const prevSchedule = normPrev || (typeof rawPrev === 'object' && rawPrev !== null ? rawPrev : {});
+                  const newSchedule = normNew || (typeof rawNew === 'object' && rawNew !== null ? rawNew : {});
 
                   const standardDays = [
-                    { key: 'السبت', label: 'السبت' },
-                    { key: 'الأحد', label: 'الأحد' },
-                    { key: 'الاثنين', label: 'الاثنين' },
-                    { key: 'الثلاثاء', label: 'الثلاثاء' },
-                    { key: 'الأربعاء', label: 'الأربعاء' },
-                    { key: 'الخميس', label: 'الخميس' },
-                    { key: 'الجمعة', label: 'الجمعة' },
+                    { key: 'السبت', label: 'السبت', isStandard: true },
+                    { key: 'الأحد', label: 'الأحد', isStandard: true },
+                    { key: 'الاثنين', label: 'الاثنين', isStandard: true },
+                    { key: 'الثلاثاء', label: 'الثلاثاء', isStandard: true },
+                    { key: 'الأربعاء', label: 'الأربعاء', isStandard: true },
+                    { key: 'الخميس', label: 'الخميس', isStandard: true },
+                    { key: 'الجمعة', label: 'الجمعة', isStandard: true },
                   ];
 
-                  const isIsoDate = (k) => /^\d{4}-\d{2}-\d{2}$/.test(k);
-                  const customDateKeys = Object.keys(previewModalReq.schedule || {}).filter(isIsoDate);
+                  const isIsoDate = (k) => /^\d{4}-\d{2}-\d{2}$/.test(String(k).trim());
+                  const customDateKeys = Array.from(new Set([
+                    ...Object.keys(rawNew || {}).filter(isIsoDate),
+                    ...Object.keys(rawPrev || {}).filter(isIsoDate),
+                    ...((Array.isArray(previewModalReq.dates) ? previewModalReq.dates : []).filter(isIsoDate)),
+                    ...(previewModalReq.date && isIsoDate(previewModalReq.date) ? [previewModalReq.date] : [])
+                  ]));
                   const hasCustomDates = customDateKeys.length > 0;
 
                   const displayList = hasCustomDates 
                     ? customDateKeys.sort().map(dateKey => {
-                        const d = new Date(dateKey);
+                        const d = new Date(dateKey + 'T00:00:00');
                         const arDay = !isNaN(d.getTime()) ? d.toLocaleDateString('ar-EG', { weekday: 'long' }) : '';
-                        return { key: dateKey, label: arDay ? `${dateKey} (${arDay})` : dateKey };
+                        return { key: dateKey, label: arDay ? `${dateKey} (${arDay})` : dateKey, isDate: true };
                       })
                     : standardDays;
 
@@ -3113,8 +3126,15 @@ export default function BranchManagerView({
                           </thead>
                           <tbody>
                             {displayList.map((dayItem) => {
-                              const oldDay = prevSchedule[dayItem.key] || { type: dayItem.key === 'الجمعة' ? 'off' : 'shift', start: '08:00', end: '16:00' };
-                              const newDay = newSchedule[dayItem.key] || oldDay;
+                              let oldDay = prevSchedule?.[dayItem.key];
+                              if (!oldDay && dayItem.isDate) {
+                                oldDay = getEmployeeDaySchedule(previewModalReq.employeeId, dayItem.key, state);
+                              }
+                              if (!oldDay) {
+                                oldDay = { type: dayItem.key === 'الجمعة' ? 'off' : 'shift', start: '08:00', end: '16:00' };
+                              }
+
+                              const newDay = newSchedule?.[dayItem.key] || oldDay;
 
                               const isOldOff = oldDay.type === 'off' || oldDay.isOff === true;
                               const isNewOff = newDay.type === 'off' || newDay.isOff === true;
@@ -3342,6 +3362,9 @@ export default function BranchManagerView({
         <div className="fade-in" style={{ width: '100%', marginBottom: '24px' }}>
           <BranchMonthlyRosterModule
             state={state}
+            setState={setState}
+            saveState={saveState}
+            showToast={showToast}
             initialBranchId={currentBranch?.id}
             lockBranchId={currentBranch?.id}
             isBranchManager={true}
@@ -3368,7 +3391,13 @@ export default function BranchManagerView({
                   style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', fontWeight: 'bold' }}
                 />
               </div>
-              <button className="btn btn-start" onClick={() => setShowRosterEditModal(true)}>
+              <button
+                className="btn btn-start"
+                onClick={() => {
+                  setRosterEditTargetEmp(null);
+                  setShowRosterEditModal(true);
+                }}
+              >
                 ✏️ طلب من الإدارة العليا تعديل جدول موظف
               </button>
             </div>
@@ -3458,7 +3487,18 @@ export default function BranchManagerView({
                           style={{ flex: 1, padding: '6px 0', fontSize: '12px', border: '1px solid var(--border)' }}
                           onClick={() => setPreviewRosterEmp(emp)}
                         >
-                          👁️ معاينة الجدول
+                          👁️ معاينة
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ flex: 1, padding: '6px 0', fontSize: '12px', border: '1px solid #93c5fd', background: '#eff6ff', color: '#1e40af', fontWeight: 700 }}
+                          onClick={() => {
+                            setRosterEditTargetEmp(emp);
+                            setShowRosterEditModal(true);
+                          }}
+                        >
+                          ✏️ إعداد/تعديل
                         </button>
                         {hasData && !isBranchApproved && (
                           <button
@@ -3467,7 +3507,7 @@ export default function BranchManagerView({
                             style={{ flex: 1, padding: '6px 0', fontSize: '12px' }}
                             onClick={() => handleApproveRoster(roster?.id || req?.id || emp.id)}
                           >
-                            ✓ توقيع بالموافقة
+                            ✓ موافقة
                           </button>
                         )}
                       </div>
@@ -3558,6 +3598,16 @@ export default function BranchManagerView({
                               >
                                 👁️ معاينة الجدول
                               </button>
+                              <button
+                                className="btn btn-ghost"
+                                style={{ padding: '4px 10px', fontSize: '12px', border: '1px solid #93c5fd', background: '#eff6ff', color: '#1e40af', fontWeight: 700 }}
+                                onClick={() => {
+                                  setRosterEditTargetEmp(emp);
+                                  setShowRosterEditModal(true);
+                                }}
+                              >
+                                ✏️ إعداد/تعديل
+                              </button>
                               {hasData && !isBranchApproved && (
                                 <button className="btn btn-start" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => handleApproveRoster(roster?.id || req?.id || emp.id)}>
                                   ✓ توقيع بالموافقة
@@ -3623,32 +3673,25 @@ export default function BranchManagerView({
             </div>
           )}
 
-          {/* Roster Edit Modal */}
+          {/* Roster Edit Modal - Interactive Weekly Visual Schedule Builder */}
           {showRosterEditModal && (
-            <div className="modal-backdrop">
-              <div className="modal-content card" style={{ maxWidth: '850px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
-                <h3 style={{ margin: '0 0 16px' }}>✏️ طلب تعديل جدول موظف من الإدارة العليا</h3>
-                <form onSubmit={handleSubmitRosterEditRequest}>
-                  <div className="field" style={{ marginBottom: '14px' }}>
-                    <label>اختر الموظف</label>
-                    <select value={rosterEditEmpId} onChange={(e) => setRosterEditEmpId(e.target.value)} required>
-                      <option value="">-- اختر الموظف --</option>
-                      {branchEmployees.map((e) => (
-                        <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field" style={{ marginBottom: '16px' }}>
-                    <label>التعديلات المطلوبة والأسباب</label>
-                    <textarea rows="4" placeholder="اكتب التفاصيل المطلوبة لتعديل الجدول..." value={rosterEditDetails} onChange={(e) => setRosterEditDetails(e.target.value)} required />
-                  </div>
-                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                    <button type="button" className="btn btn-ghost" onClick={() => setShowRosterEditModal(false)}>إلغاء</button>
-                    <button type="submit" className="btn btn-start">إرسال الطلب للإدارة</button>
-                  </div>
-                </form>
-              </div>
-            </div>
+            <EmployeeRosterEditModal
+              isOpen={showRosterEditModal}
+              onClose={() => {
+                setShowRosterEditModal(false);
+                setRosterEditTargetEmp(null);
+              }}
+              employee={rosterEditTargetEmp || (rosterEditEmpId ? branchEmployees.find(e => String(e.id) === String(rosterEditEmpId)) : null) || branchEmployees[0] || null}
+              employees={branchEmployees}
+              branchId={currentBranch?.id}
+              branchName={currentBranch?.name}
+              selectedMonth={selectedMonth}
+              state={state}
+              setState={setState}
+              saveState={saveState}
+              showToast={showToast}
+              isBranchManager={true}
+            />
           )}
         </div>
       )}

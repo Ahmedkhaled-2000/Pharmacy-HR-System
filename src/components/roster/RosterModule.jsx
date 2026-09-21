@@ -54,12 +54,18 @@ export function normalizeSchedule(rawSchedule) {
   };
 
   Object.entries(rawSchedule).forEach(([key, val]) => {
-    const cleanKey = String(key).trim().toLowerCase();
+    const rawKey = String(key).trim();
+    const cleanKey = rawKey.toLowerCase();
     const mappedDay = dayKeyMap[cleanKey] || dayKeyMap[key];
-    if (mappedDay && val && typeof val === 'object') {
+    const isIso = /^\d{4}-\d{2}-\d{2}$/.test(rawKey);
+    const targetKey = mappedDay || (isIso ? rawKey : null);
+
+    if (targetKey && val && typeof val === 'object') {
       const isOff = val.type === 'off' || val.isOff === true || val.type === 'راحة';
-      normalized[mappedDay] = {
+      normalized[targetKey] = {
+        ...val,
         type: isOff ? 'off' : 'shift',
+        isOff,
         start: isOff ? '' : (val.start || val.checkIn || '08:00'),
         end: isOff ? '' : (val.end || val.checkOut || '16:00')
       };

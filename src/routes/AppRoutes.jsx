@@ -1444,6 +1444,9 @@ export default function AppRoutes() {
                   ) : activeSubTab === 'roster' ? (
                     <BranchMonthlyRosterModule
                       state={sanitizedState}
+                      setState={setState}
+                      saveState={saveState}
+                      showToast={showToast}
                       initialBranchId={selectedRosterBranchId}
                       onNavigateTab={setActiveNavTab}
                       onSwitchSubTab={setActiveSubTab}

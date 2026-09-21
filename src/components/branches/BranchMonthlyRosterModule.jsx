@@ -5,6 +5,7 @@ import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/e
 import { getCycleDateRange } from '../../utils/periodEngine';
 import { getJobsList } from '../../utils/jobsHelper';
 import { triggerDirectPrint } from '../../utils/printHelper';
+import EmployeeRosterEditModal from './EmployeeRosterEditModal';
 
 const monthLabel = (monthStr) => {
   return { arabic: arabicMonthLabel(monthStr), raw: monthStr };
@@ -707,6 +708,9 @@ function generateOfficialMatrixHTML({
 
 export default function BranchMonthlyRosterModule({
   state,
+  setState,
+  saveState,
+  showToast,
   initialBranchId = '',
   onNavigateTab,
   onSwitchSubTab,
@@ -735,6 +739,7 @@ export default function BranchMonthlyRosterModule({
   const [searchQuery, setSearchQuery] = useState('');
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [printLayout, setPrintLayout] = useState('board'); // 'board' | 'matrix'
+  const [rosterModalConfig, setRosterModalConfig] = useState({ isOpen: false, employee: null });
 
   // Selected Branch Object
   const currentBranch = useMemo(() => {
@@ -1475,6 +1480,33 @@ export default function BranchMonthlyRosterModule({
             >
               📥 تصدير Excel
             </button>
+
+            {/* Add / Edit Employee Monthly Roster Button */}
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setRosterModalConfig({ isOpen: true, employee: null })}
+              style={{
+                background: isBranchManager
+                  ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)'
+                  : 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+                color: '#fff',
+                border: 'none',
+                padding: '7px 16px',
+                borderRadius: '8px',
+                fontSize: '13px',
+                fontWeight: 800,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)',
+                cursor: 'pointer'
+              }}
+              title={isBranchManager ? 'إعداد وضبط جدول شهري لموظف مع إرسال طلب اعتماد للإدارة العليا' : 'تعيين واعتماد جدول شهري لموظف فورياً'}
+            >
+              <span>{isBranchManager ? '📝' : '⚡'}</span>
+              {isBranchManager ? 'إعداد جدول شهري لموظف (طلب اعتماد)' : 'تعيين جدول شهري لموظف'}
+            </button>
           </div>
         </div>
       </div>
@@ -1588,6 +1620,30 @@ export default function BranchMonthlyRosterModule({
               }}
             >
               <span>📅</span> الانتقال لاعتماد جدول الورديات (Roster)
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRosterModalConfig({ isOpen: true, employee: branchEmployees[0] || null })}
+              style={{
+                background: isBranchManager
+                  ? 'linear-gradient(135deg, #0284c7, #0369a1)'
+                  : 'linear-gradient(135deg, #10b981, #059669)',
+                color: '#fff',
+                border: 'none',
+                padding: '10px 22px',
+                borderRadius: '10px',
+                fontWeight: 800,
+                fontSize: '13.5px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.25)'
+              }}
+            >
+              <span>{isBranchManager ? '📝' : '⚡'}</span>
+              {isBranchManager ? 'إعداد جدول شهري لموظف (طلب اعتماد)' : 'تعيين واعتماد جدول شهري لموظف الآن'}
             </button>
 
             <button
@@ -1908,6 +1964,7 @@ export default function BranchMonthlyRosterModule({
                       </th>
                     ))}
                     <th style={{ textAlign: 'center', minWidth: '110px' }}>إجمالي الأسبوع</th>
+                    <th style={{ textAlign: 'center', minWidth: '120px' }}>الإجراءات</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2005,6 +2062,32 @@ export default function BranchMonthlyRosterModule({
                           <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px' }}>
                             ({workDaysCount} أيام عمل)
                           </div>
+                        </td>
+
+                        {/* Actions / Edit Schedule */}
+                        <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => setRosterModalConfig({ isOpen: true, employee })}
+                            style={{
+                              fontSize: '12px',
+                              padding: '5px 12px',
+                              borderRadius: '8px',
+                              border: '1px solid var(--border)',
+                              background: '#f8fafc',
+                              color: isBranchManager ? '#0284c7' : '#0f766e',
+                              fontWeight: 800,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              cursor: 'pointer'
+                            }}
+                            title={isBranchManager ? 'إعداد وضبط الجدول وإرسال طلب اعتماد للإدارة العليا' : 'تعيين واعتماد الجدول الشهري لهذا الموظف'}
+                          >
+                            <span>{isBranchManager ? '📝' : '⚡'}</span>
+                            {isApproved ? 'تعديل الجدول' : 'تعيين الجدول'}
+                          </button>
                         </td>
                       </tr>
                     );
@@ -2306,6 +2389,24 @@ export default function BranchMonthlyRosterModule({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Employee Roster Edit / Assignment Modal */}
+      {rosterModalConfig.isOpen && (
+        <EmployeeRosterEditModal
+          isOpen={rosterModalConfig.isOpen}
+          onClose={() => setRosterModalConfig({ isOpen: false, employee: null })}
+          employee={rosterModalConfig.employee}
+          employees={branchEmployees}
+          branchId={currentBranch?.id}
+          branchName={currentBranch?.name}
+          selectedMonth={selectedMonth}
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          isBranchManager={isBranchManager}
+        />
       )}
 
     </div>
