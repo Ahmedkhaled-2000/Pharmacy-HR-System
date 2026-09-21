@@ -712,6 +712,46 @@ export default function DesktopLayout({
   // شارة الجرس 🔔 تعكس حصرياً إشعارات وتنبيهات النظام والتوجيهات الإدارية
   const unreadNotificationsCount = effectiveUnreadSystemCount;
 
+  // ── تنبيهات اشتراك المنظومة المخصصة للإدارة العليا والمالك فقط (دون إقلاق الموظفين) ──
+  const [isSubBannerDismissed, setIsSubBannerDismissed] = useState(false);
+  const subscriptionAlert = useMemo(() => {
+    if (currentRole !== 'owner' && currentRole !== 'admin') return null;
+    try {
+      const raw = orgSettings?.subscription || (typeof window !== 'undefined' ? localStorage.getItem('app_company_subscription') : null);
+      if (!raw) return null;
+      const sub = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (!sub?.subscription_end) return null;
+
+      const endDate = new Date(sub.subscription_end);
+      if (isNaN(endDate.getTime())) return null;
+
+      const now = new Date();
+      const diffMs = endDate.getTime() - now.getTime();
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      if (diffDays > 30) return null; // لا داعي لإظهار التنبيه إذا كان متبقياً أكثر من شهر
+
+      const graceDays = parseInt(sub.grace_period_days || 5, 10);
+      const isExpired = diffDays < -graceDays;
+      const isInGrace = diffDays <= 0 && diffDays >= -graceDays;
+      const isExpiringSoon = diffDays > 0 && diffDays <= 7;
+
+      if (!isInGrace && !isExpiringSoon && !isExpired) return null;
+
+      return {
+        diffDays,
+        isInGrace,
+        isExpiringSoon,
+        isExpired,
+        graceDaysLeft: Math.max(0, graceDays + diffDays),
+        endDateStr: endDate.toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' }),
+        companyName: sub.company_name || orgSettings?.orgName || 'الشركة',
+        discountRemaining: parseInt(sub.discount_months_remaining || 0, 10)
+      };
+    } catch {
+      return null;
+    }
+  }, [currentRole, orgSettings]);
+
   // Define Desktop Menu Structure for Super Admin
   const adminMenuItems = [
     {
@@ -1055,6 +1095,22 @@ export default function DesktopLayout({
               label: 'بيانات الصيدلية والمدير العام',
               icon: '🏢',
               desc: 'الاسم، الشعار، المدير العام، وحساب الأدمن'
+            },
+            {
+              id: 'settings:subscription',
+              targetTab: 'settings',
+              targetSubTab: 'subscription',
+              label: 'متابعة الاشتراك والمدفوعات',
+              icon: '💳',
+              desc: 'حالة الاشتراك، الفواتير، رصيد الخصم، والتجديد'
+            },
+            {
+              id: 'settings:support',
+              targetTab: 'settings',
+              targetSubTab: 'support',
+              label: 'تذاكر الدعم الفني',
+              icon: '🎫',
+              desc: 'مراسلة مطور المنظومة وطلب المساعدة المباشرة'
             },
             {
               id: 'settings:dates',
@@ -3394,6 +3450,133 @@ return (
     overflowY: 'auto',
     background: 'var(--background)'
   }}>
+    {/* ── لافتة تحذير وتنبيه اشتراك المنظومة (خاصة بالإدارة العليا والمالك فقط) ── */}
+    {subscriptionAlert && !isSubBannerDismissed && (
+      <div style={{
+        marginBottom: '18px',
+        borderRadius: '14px',
+        padding: '14px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '16px',
+        flexWrap: isMobileScreen ? 'wrap' : 'nowrap',
+        background: subscriptionAlert.isInGrace
+          ? 'linear-gradient(135deg, rgba(220, 38, 38, 0.18), rgba(153, 27, 27, 0.28))'
+          : 'linear-gradient(135deg, rgba(245, 158, 11, 0.16), rgba(217, 119, 6, 0.24))',
+        border: subscriptionAlert.isInGrace
+          ? '1px solid rgba(239, 68, 68, 0.45)'
+          : '1px solid rgba(245, 158, 11, 0.4)',
+        backdropFilter: 'blur(12px)',
+        boxShadow: subscriptionAlert.isInGrace
+          ? '0 8px 24px rgba(220, 38, 38, 0.18)'
+          : '0 8px 24px rgba(245, 158, 11, 0.14)',
+        direction: 'rtl'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1 }}>
+          <div style={{
+            width: '42px',
+            height: '42px',
+            borderRadius: '10px',
+            background: subscriptionAlert.isInGrace ? 'rgba(239, 68, 68, 0.25)' : 'rgba(245, 158, 11, 0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '22px',
+            flexShrink: 0
+          }}>
+            {subscriptionAlert.isInGrace ? '🚨' : '⏳'}
+          </div>
+          <div>
+            <div style={{
+              fontSize: '14px',
+              fontWeight: 800,
+              color: subscriptionAlert.isInGrace ? '#fca5a5' : '#fde68a',
+              marginBottom: '3px'
+            }}>
+              {subscriptionAlert.isInGrace
+                ? 'تنبيه عاجل للإدارة: الاشتراك في فترة السماح النهائية'
+                : 'تنبيه للإدارة العليا: اقتراب موعد تجديد اشتراك المنظومة'}
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted, #cbd5e1)', lineHeight: 1.5 }}>
+              {subscriptionAlert.isInGrace ? (
+                <>انتهى الاشتراك الرسمي لشركتكم، والمنظومة تعمل حالياً ضمن مهلة السماح (متبقي <b>{subscriptionAlert.graceDaysLeft} يوم</b>). لتفادي إيقاف الخدمة عن الفروع والكادر الطبي يرجى سداد فاتورة التجديد.</>
+              ) : (
+                <>ينتهي اشتراك المنظومة خلال <b>{subscriptionAlert.diffDays} أيام</b> (بتاريخ {subscriptionAlert.endDateStr}). يرجى التنسيق مع إدارة النظام لتجديد الاشتراك.</>
+              )}
+              {subscriptionAlert.discountRemaining > 0 && (
+                <span style={{ display: 'inline-block', marginRight: '8px', padding: '2px 8px', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', fontWeight: 700, fontSize: '11px' }}>
+                  🎉 تتمتع شركتكم بخصم سارٍ لـ {subscriptionAlert.discountRemaining} أشهر قادمة!
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('settings');
+              if (setActiveSubTab) setActiveSubTab('subscription');
+            }}
+            style={{
+              padding: '8px 14px',
+              borderRadius: '8px',
+              background: 'rgba(255, 255, 255, 0.18)',
+              border: '1px solid rgba(255, 255, 255, 0.35)',
+              color: '#fff',
+              fontSize: '12px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <span>💳</span>
+            <span>تفاصيل الاشتراك والمدفوعات</span>
+          </button>
+          <a
+            href={`https://wa.me/201000000000?text=${encodeURIComponent(`السلام عليكم، أرغب في تجديد اشتراك منظومة: ${subscriptionAlert.companyName}`)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              padding: '8px 14px',
+              borderRadius: '8px',
+              background: subscriptionAlert.isInGrace ? '#ef4444' : '#f59e0b',
+              color: '#fff',
+              textDecoration: 'none',
+              fontSize: '12px',
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+            }}
+          >
+            <span>💬</span>
+            <span>تجديد سريع</span>
+          </a>
+          <button
+            type="button"
+            onClick={() => setIsSubBannerDismissed(true)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted, #94a3b8)',
+              fontSize: '18px',
+              cursor: 'pointer',
+              padding: '4px',
+              lineHeight: 1
+            }}
+            title="إغلاق التنبيه مؤقتاً"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    )}
+
     {children}
   </main>
 

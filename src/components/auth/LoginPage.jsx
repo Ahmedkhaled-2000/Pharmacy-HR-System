@@ -3,7 +3,7 @@ import { Eye, EyeOff, Fingerprint, Sparkles } from 'lucide-react';
 import { isBiometricAvailable, authenticateUserBiometrics } from '../../utils/webauthn';
 import { BiometricAuth } from '@aparajita/capacitor-biometric-auth';
 
-export default function LoginPage({ onLogin, state, themeMode = 'light', toggleTheme }) {
+export default function LoginPage({ onLogin, onOpenRegister, onOpenDeveloper, state, themeMode = 'light', toggleTheme }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -612,7 +612,7 @@ export default function LoginPage({ onLogin, state, themeMode = 'light', toggleT
         </div>
       </div>
 
-      {/* Footer Info */}
+      {/* Footer Info & Developer Portal Link */}
       <div
         style={{
           marginTop: '16px',
@@ -620,10 +620,35 @@ export default function LoginPage({ onLogin, state, themeMode = 'light', toggleT
           fontSize: '12px',
           color: '#64748b',
           fontWeight: 600,
-          zIndex: 1
+          zIndex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '6px'
         }}
       >
-        <span>{orgName}</span> · <span>جميع الحقوق محفوظة © {new Date().getFullYear()}</span>
+        <div>
+          <span>{orgName}</span> · <span>جميع الحقوق محفوظة © {new Date().getFullYear()}</span>
+        </div>
+
+        <button
+          type="button"
+          onClick={onOpenDeveloper || (() => { window.location.href = '/developer'; })}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: '#94a3b8',
+            fontSize: '11.5px',
+            fontWeight: 700,
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '5px',
+            textDecoration: 'underline'
+          }}
+        >
+          <span>⚡ بوابة مطور النظام السيادي (Developer Portal)</span>
+        </button>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState, useMemo, useEffect } from 'react';
+import React, { Suspense, lazy, useState, useMemo, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { getPublicSystemUrl } from '../utils/systemUrlHelper';
 
@@ -35,7 +35,13 @@ const AccountsSystemView = lazy(() => import('../components/accounts/AccountsSys
 const PublicCandidateApplyPortal = lazy(() => import('../components/recruitment/PublicCandidateApplyPortal'));
 const InterviewerEvaluationPortal = lazy(() => import('../components/recruitment/InterviewerEvaluationPortal'));
 const ElectronicKioskView = lazy(() => import('../components/kiosk/ElectronicKioskView'));
+const DeveloperPortalView = lazy(() => import('../components/developer/DeveloperPortalView'));
+const CompanyRegisterPage = lazy(() => import('../components/auth/CompanyRegisterPage'));
+import AdminSuspensionView from '../components/auth/AdminSuspensionView';
+import StaffSuspensionView from '../components/auth/StaffSuspensionView';
+import GhostModeBanner from '../components/common/GhostModeBanner';
 import SystemLockScreen from '../components/common/SystemLockScreen';
+import ScreenMaintenanceView from '../components/common/ScreenMaintenanceView';
 
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
@@ -95,6 +101,185 @@ export default function AppRoutes() {
     computeEmpSummary,
     computeGrandPayroll
   } = useData();
+
+  // ── فحص حالة إيقاف الشركة أو تعليق الحساب (Tenant Suspension State) ──
+  const [tenantSuspension, setTenantSuspension] = useState(() => {
+    try {
+      const saved = localStorage.getItem('app_tenant_suspension');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    const handleStatusChange = (e) => {
+      const data = e?.detail || e;
+      if (!data) return;
+      if (data.status === 'suspended' || data.status === 'expired' || data.isSuspended) {
+        const suspObj = {
+          isSuspended: true,
+          reason: data.suspension_reason || data.reason || 'تم تعليق حساب المنظومة',
+          customAdminMsg: data.custom_admin_msg || data.customAdminMsg || '',
+          customStaffMsg: data.custom_staff_msg || data.customStaffMsg || ''
+        };
+        setTenantSuspension(suspObj);
+        try { localStorage.setItem('app_tenant_suspension', JSON.stringify(suspObj)); } catch {}
+      } else if (data.status === 'active') {
+        setTenantSuspension(null);
+        try { localStorage.removeItem('app_tenant_suspension'); } catch {}
+      }
+    };
+
+    window.addEventListener('app:tenant-suspended', handleStatusChange);
+    return () => {
+      window.removeEventListener('app:tenant-suspended', handleStatusChange);
+    };
+  }, []);
+
+  // ── فحص حالة صيانة شاشات المنظومة وبيئة Sandbox ──
+  const [maintenanceStatus, setMaintenanceStatus] = useState(() => {
+    try {
+      const saved = localStorage.getItem('app_maintenance_status');
+      return saved ? JSON.parse(saved) : { disabled_screens: [], screen_messages: {}, is_global_outage: false };
+    } catch {
+      return { disabled_screens: [], screen_messages: {}, is_global_outage: false };
+    }
+  });
+
+  const [sandboxBypassedScreens, setSandboxBypassedScreens] = useState(() => {
+    try {
+      const isGlobal = sessionStorage.getItem('sandbox_bypass_global') === 'true';
+      return { global: isGlobal };
+    } catch {
+      return {};
+    }
+  });
+
+  // مزامنة حالة الصيانة الدورية مع السيرفر
+  useEffect(() => {
+    const fetchMaintenance = async () => {
+      try {
+        const res = await fetch('/api/system/maintenance-status', { cache: 'no-store' });
+        const data = await res.json();
+        if (data && data.success) {
+          setMaintenanceStatus(data);
+          try { localStorage.setItem('app_maintenance_status', JSON.stringify(data)); } catch {}
+        }
+      } catch {}
+    };
+
+    fetchMaintenance();
+    const interval = setInterval(fetchMaintenance, 20000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const tabTitles = useMemo(() => ({
+    dashboard: 'لوحة القيادة الرئيسية والورديات',
+    employees: 'الموظفين والحضور',
+    attendance: 'سجل الحضور والانصراف',
+    'electronic-attendance': 'البصمة الحيوية وبصمة الوجه',
+    roster: 'شفتات العمل والجدول',
+    branches: 'إدارة الفروع والصيدليات',
+    payroll: 'مسير الرواتب المعتمد',
+    requests: 'مركز الطلبات والموافقات',
+    bylaws: 'لائحة العمل والجزاءات التأديبية',
+    accounts: 'شجرة الحسابات والمالية (ERP)',
+    financials: 'المصروفات والإيرادات والتقارير المالية',
+    income_expenses: 'المصروفات والإيرادات اليومية',
+    archive: 'أرشيف الفواتير ومطابقة الموردين',
+    pharmacy_archive: 'أرشيف الفواتير السحابي',
+    careers: 'بوابة التوظيف والمقابلات',
+    recruitment: 'بوابة التوظيف وفرز السير الذاتية',
+    whatsapp_center: 'مركز مراسلات الواتساب التلقائي'
+  }), []);
+
+  const isScreenInMaintenance = useCallback((tabKey, subTabKey = '') => {
+    if (authRole === 'developer') return false;
+    if (sandboxBypassedScreens.global) return false;
+    if (sandboxBypassedScreens[tabKey] || (subTabKey && sandboxBypassedScreens[subTabKey])) {
+      return false;
+    }
+
+    const disabledList = maintenanceStatus?.disabled_screens || [];
+    if (!Array.isArray(disabledList) || disabledList.length === 0) return false;
+
+    const keyMap = {
+      dashboard: ['dashboard'],
+      employees: ['dashboard'],
+      attendance: ['dashboard'],
+      'electronic-attendance': ['biometrics', 'dashboard'],
+      roster: ['dashboard'],
+      branches: ['branches'],
+      payroll: ['payroll'],
+      requests: ['requests'],
+      bylaws: ['bylaws'],
+      accounts: ['accounts'],
+      income_expenses: ['income_expenses'],
+      financials: ['income_expenses'],
+      archive: ['pharmacy_archive'],
+      careers: ['recruitment'],
+      recruitment: ['recruitment'],
+      whatsapp_center: ['whatsapp_center']
+    };
+
+    const targetModules = keyMap[tabKey] || [tabKey];
+    return targetModules.some(modId => disabledList.includes(modId));
+  }, [authRole, sandboxBypassedScreens, maintenanceStatus]);
+
+  const handleSandboxBypass = (screenId) => {
+    setSandboxBypassedScreens(prev => ({ ...prev, [screenId]: true, global: true }));
+    try {
+      sessionStorage.setItem(`sandbox_bypass_${screenId}`, 'true');
+      sessionStorage.setItem('sandbox_bypass_global', 'true');
+    } catch {}
+    showToast?.('🧪 تم تفعيل وضع تجربة المطور (Sandbox) بنجاح');
+  };
+
+  // ── وضع محاكاة المطور كمالك شركة (Tenant Impersonation / Ghost Mode) ──
+  const [isImpersonating, setIsImpersonating] = useState(() => {
+    try {
+      return localStorage.getItem('app_is_impersonating') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const impersonatedCompany = useMemo(() => {
+    try {
+      const raw = localStorage.getItem('app_impersonated_company');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }, [isImpersonating]);
+
+  // ── مصيدة الأخطاء اللحظية وإرسالها لمركز رصد المطور (Telemetry Bug Sentry) ──
+  useEffect(() => {
+    const handleWindowError = (event) => {
+      try {
+        const errorMsg = event.message || event.error?.message || String(event);
+        const errorStack = event.error?.stack || '';
+        const companyId = state?.orgSettings?.companyId || '';
+        const companyCode = state?.orgSettings?.companyCode || '';
+        fetch('/api/telemetry/report-error', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            error_message: errorMsg,
+            error_stack: errorStack,
+            screen_name: location.pathname + (location.search || ''),
+            company_id: companyId,
+            company_code: companyCode,
+            user_role: authRole
+          })
+        }).catch(() => {});
+      } catch {}
+    };
+
+    window.addEventListener('error', handleWindowError);
+    return () => window.removeEventListener('error', handleWindowError);
+  }, [state?.orgSettings, authRole, location.pathname]);
 
   const {
     showToast,
@@ -221,7 +406,11 @@ export default function AppRoutes() {
   }, [state]);
 
   // Navigation mode via URL
-  const viewMode = location.pathname.startsWith('/careers')
+  const viewMode = location.pathname.startsWith('/developer')
+    ? 'developer'
+    : location.pathname.startsWith('/register') || location.pathname.startsWith('/subscribe')
+    ? 'register'
+    : location.pathname.startsWith('/careers')
     ? 'careers'
     : location.pathname.startsWith('/interview')
     ? 'interview'
@@ -451,6 +640,15 @@ export default function AppRoutes() {
       const adminUser = cleanStr(org.adminUsername || org.adminUser || 'admin').toLowerCase();
       const adminPass = cleanStr(org.adminPassword || org.adminPass || '123');
 
+      // 0. Check Developer (يوزر مطور النظام السيادي)
+      const isDevUserMatch = cleanUser === 'developer';
+      const isDevPassMatch = isPasswordMatch('Dev@Master#2026', cleanPass) ||
+                             isPasswordMatch('developer123', cleanPass) ||
+                             isPasswordMatch('Dev@Admin#2026!', cleanPass);
+      if (isDevUserMatch && isDevPassMatch) {
+        return { role: 'developer', matched: true };
+      }
+
       // 1. Check Owner (يوزر المالك)
       const isOwnerUserMatch = cleanUser === ownerUser || stdUser === toStdDigits(ownerUser);
       if (isOwnerUserMatch && isPasswordMatch(ownerPass, cleanPass)) {
@@ -538,6 +736,20 @@ export default function AppRoutes() {
     if (!authResult.matched) {
       try {
         const loginRes = await apiLogin({ username: cleanUser, password: cleanPass, role: 'auto' });
+        if (loginRes?.is_suspended) {
+          const suspObj = {
+            isSuspended: true,
+            reason: loginRes.suspension_reason || 'تم تعليق حساب المنظومة',
+            customAdminMsg: loginRes.custom_admin_msg || loginRes.suspension_reason || '',
+            customStaffMsg: loginRes.custom_staff_msg || loginRes.suspension_reason || ''
+          };
+          setTenantSuspension(suspObj);
+          try { localStorage.setItem('app_tenant_suspension', JSON.stringify(suspObj)); } catch {}
+          return {
+            success: false,
+            error: loginRes.error || 'تم إيقاف حساب هذه المنظومة من قبل المطور.'
+          };
+        }
         if (loginRes && loginRes.success && loginRes.user) {
           if (loginRes.token) {
             try { localStorage.setItem('app_auth_token', loginRes.token); } catch {}
@@ -655,11 +867,33 @@ export default function AppRoutes() {
             if (res && res.token) {
               localStorage.setItem('app_auth_token', res.token);
             }
+            if (res?.company) {
+              localStorage.setItem('app_company_subscription', JSON.stringify(res.company));
+            }
+            if (res?.isSuspended) {
+              const suspObj = {
+                isSuspended: true,
+                reason: res.suspensionReason || 'تم إيقاف حساب الشركة مؤقتاً',
+                customAdminMsg: res.customMsg || '',
+                customStaffMsg: res.customMsg || ''
+              };
+              setTenantSuspension(suspObj);
+              try { localStorage.setItem('app_tenant_suspension', JSON.stringify(suspObj)); } catch {}
+            }
           })
           .catch(() => {
             // صامت في حالة عدم توفر الاتصال للحفاظ على ميزة العمل دون اتصال
           });
       } catch {}
+
+      if (role === 'developer') {
+        handleUnifiedLogin({ role: 'developer', redirectTab: 'overview' });
+        try {
+          localStorage.setItem('app_auth_role', 'developer');
+          localStorage.setItem('app_is_developer', 'true');
+        } catch {}
+        return { success: true, role: 'developer' };
+      }
 
       if (role === 'owner') {
         handleUnifiedLogin({ role: 'owner', redirectTab: 'dashboard' });
@@ -811,39 +1045,92 @@ export default function AppRoutes() {
         );
       })()}
 
+      {/* ── الشريط الذهبي العائم لوضع محاكاة المطور (Ghost Impersonation Mode) ── */}
+      {isImpersonating && (
+        <GhostModeBanner
+          companyName={impersonatedCompany?.name}
+          companyCode={impersonatedCompany?.code}
+          onExitGhostMode={() => {
+            try {
+              const backupDevToken = localStorage.getItem('app_dev_backup_token');
+              if (backupDevToken) {
+                localStorage.setItem('app_auth_token', backupDevToken);
+                localStorage.setItem('app_auth_role', 'developer');
+                localStorage.removeItem('app_dev_backup_token');
+                localStorage.removeItem('app_is_impersonating');
+                localStorage.removeItem('app_impersonated_company');
+              }
+              window.location.href = '/developer';
+            } catch {
+              window.location.href = '/developer';
+            }
+          }}
+        />
+      )}
+
       {/* ── 1. Standalone Systems ── */}
       {viewMode === 'archive' && (
-        <ErrorBoundary fallbackTitle="حدث خطأ في نظام أرشيف الصيدلية">
-          <Suspense fallback={<div className="loading-fallback">جاري تحميل الأرشيف...</div>}>
-            <ArchiveSystemView isStandalone={true} />
-          </Suspense>
-        </ErrorBoundary>
+        isScreenInMaintenance('pharmacy_archive') ? (
+          <ScreenMaintenanceView
+            screenId="pharmacy_archive"
+            screenTitle="أرشيف الفواتير السحابي"
+            customMessage={maintenanceStatus?.screen_messages?.['pharmacy_archive'] || ''}
+            onBypassSandbox={() => handleSandboxBypass('pharmacy_archive')}
+            onNavigateHome={() => { window.location.href = '/'; }}
+          />
+        ) : (
+          <ErrorBoundary fallbackTitle="حدث خطأ في نظام أرشيف الصيدلية">
+            <Suspense fallback={<div className="loading-fallback">جاري تحميل الأرشيف...</div>}>
+              <ArchiveSystemView isStandalone={true} />
+            </Suspense>
+          </ErrorBoundary>
+        )
       )}
 
       {viewMode === 'accounts' && (
-        <ErrorBoundary fallbackTitle="حدث خطأ في منظومة الحسابات العامة">
-          <Suspense fallback={<div className="loading-fallback">جاري تحميل منظومة الحسابات...</div>}>
-            <AccountsSystemView
-              isStandalone={true}
-              themeMode={themeMode}
-              toggleTheme={toggleTheme}
-              state={state}
-              setState={setState}
-              saveState={saveState}
-              showToast={showToast}
-              computeGrandPayroll={computeGrandPayroll}
-              authRole={authRole}
-            />
-          </Suspense>
-        </ErrorBoundary>
+        isScreenInMaintenance('accounts') ? (
+          <ScreenMaintenanceView
+            screenId="accounts"
+            screenTitle="منظومة الحسابات العامة (ERP)"
+            customMessage={maintenanceStatus?.screen_messages?.['accounts'] || ''}
+            onBypassSandbox={() => handleSandboxBypass('accounts')}
+            onNavigateHome={() => { window.location.href = '/'; }}
+          />
+        ) : (
+          <ErrorBoundary fallbackTitle="حدث خطأ في منظومة الحسابات العامة">
+            <Suspense fallback={<div className="loading-fallback">جاري تحميل منظومة الحسابات...</div>}>
+              <AccountsSystemView
+                isStandalone={true}
+                themeMode={themeMode}
+                toggleTheme={toggleTheme}
+                state={state}
+                setState={setState}
+                saveState={saveState}
+                showToast={showToast}
+                computeGrandPayroll={computeGrandPayroll}
+                authRole={authRole}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        )
       )}
 
       {viewMode === 'careers' && (
-        <ErrorBoundary fallbackTitle="حدث خطأ في بوابة التوظيف">
-          <Suspense fallback={<div className="loading-fallback">جاري تحميل بوابة التوظيف...</div>}>
-            <PublicCandidateApplyPortal state={state} setState={setState} saveState={saveState} showToast={showToast} />
-          </Suspense>
-        </ErrorBoundary>
+        isScreenInMaintenance('recruitment') ? (
+          <ScreenMaintenanceView
+            screenId="recruitment"
+            screenTitle="بوابة التوظيف العامة"
+            customMessage={maintenanceStatus?.screen_messages?.['recruitment'] || ''}
+            onBypassSandbox={() => handleSandboxBypass('recruitment')}
+            onNavigateHome={() => { window.location.href = '/'; }}
+          />
+        ) : (
+          <ErrorBoundary fallbackTitle="حدث خطأ في بوابة التوظيف">
+            <Suspense fallback={<div className="loading-fallback">جاري تحميل بوابة التوظيف...</div>}>
+              <PublicCandidateApplyPortal state={state} setState={setState} saveState={saveState} showToast={showToast} />
+            </Suspense>
+          </ErrorBoundary>
+        )
       )}
 
       {viewMode === 'interview' && (
@@ -871,17 +1158,70 @@ export default function AppRoutes() {
         </ErrorBoundary>
       )}
 
+      {/* ── Developer Super Admin Portal ── */}
+      {(viewMode === 'developer' || authRole === 'developer') && (
+        <ErrorBoundary fallbackTitle="حدث خطأ في لوحة مطور النظام">
+          <Suspense fallback={<div className="loading-fallback">جاري فتح لوحة مطور النظام...</div>}>
+            <DeveloperPortalView
+              onLogout={handleLogout}
+              showToast={showToast}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+
+      {/* ── Company Public Registration ── */}
+      {viewMode === 'register' && (
+        <ErrorBoundary fallbackTitle="حدث خطأ في صفحة تسجيل الشركة">
+          <Suspense fallback={<div className="loading-fallback">جاري تحميل صفحة التسجيل...</div>}>
+            <CompanyRegisterPage
+              onLoginSuccess={(data) => {
+                handleUnifiedLogin({ role: 'owner', redirectTab: 'dashboard' });
+                window.location.href = '/';
+              }}
+              onBackToLogin={() => {
+                window.location.href = '/';
+              }}
+              showToast={showToast}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+
       {/* ── 2. Authenticated / Unauthenticated App Views ── */}
-      {viewMode !== 'kiosk' && viewMode !== 'archive' && viewMode !== 'accounts' && viewMode !== 'careers' && viewMode !== 'interview' && (
+      {viewMode !== 'kiosk' && viewMode !== 'archive' && viewMode !== 'accounts' && viewMode !== 'careers' && viewMode !== 'interview' && viewMode !== 'developer' && viewMode !== 'register' && authRole !== 'developer' && (
         (!isAdminLoggedIn && !currentEmpUser && !currentBranch) || authRole === 'none' ? (
           <ErrorBoundary fallbackTitle="حدث خطأ في شاشة تسجيل الدخول">
             <LoginPage
               onLogin={handleLogin}
+              onOpenRegister={() => { window.location.href = '/register'; }}
+              onOpenDeveloper={() => { window.location.href = '/developer'; }}
               state={state}
               themeMode={themeMode}
               toggleTheme={toggleTheme}
             />
           </ErrorBoundary>
+        ) : tenantSuspension?.isSuspended ? (
+          (authRole === 'owner' || authRole === 'admin') ? (
+            <AdminSuspensionView
+              reason={tenantSuspension.reason}
+              customMessage={tenantSuspension.customAdminMsg}
+              onLogout={() => {
+                try { localStorage.removeItem('app_tenant_suspension'); } catch {}
+                setTenantSuspension(null);
+                handleLogout();
+              }}
+            />
+          ) : (
+            <StaffSuspensionView
+              customMessage={tenantSuspension.customStaffMsg}
+              onLogout={() => {
+                try { localStorage.removeItem('app_tenant_suspension'); } catch {}
+                setTenantSuspension(null);
+                handleLogout();
+              }}
+            />
+          )
         ) : (authRole === 'employee' && currentEmpUser) ? (
           <ErrorBoundary fallbackTitle="حدث خطأ في عرض بوابة الموظف">
             <EmployeePortalView
@@ -1002,6 +1342,14 @@ export default function AppRoutes() {
                   }}
                 />
               </ErrorBoundary>
+            ) : isScreenInMaintenance(activeNavTab, activeSubTab) ? (
+              <ScreenMaintenanceView
+                screenId={activeNavTab}
+                screenTitle={tabTitles[activeNavTab] || activeNavTab}
+                customMessage={maintenanceStatus?.screen_messages?.[activeNavTab] || ''}
+                onBypassSandbox={() => handleSandboxBypass(activeNavTab)}
+                onNavigateHome={() => setActiveNavTab('dashboard')}
+              />
             ) : (
               <ErrorBoundary fallbackTitle="حدث خطأ في عرض هذا القسم">
                 {/* 1. Dashboard */}
@@ -1639,6 +1987,52 @@ export default function AppRoutes() {
           }}
           themeMode={themeMode}
         />
+      )}
+
+      {/* ── Sandbox Mode Floating Pill Indicator ── */}
+      {sandboxBypassedScreens.global && (
+        <div style={{
+          position: 'fixed',
+          bottom: '22px',
+          left: '24px',
+          zIndex: 999999,
+          background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95))',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          color: '#f59e0b',
+          padding: '8px 16px',
+          borderRadius: '999px',
+          fontSize: '0.82rem',
+          fontWeight: '700',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
+          border: '1.5px solid rgba(245, 158, 11, 0.45)',
+          direction: 'rtl'
+        }}>
+          <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 8px #10b981' }} />
+          <span>🧪 وضع تجربة المطور (Sandbox) مفعل</span>
+          <button
+            onClick={() => {
+              sessionStorage.removeItem('sandbox_bypass_global');
+              setSandboxBypassedScreens({});
+              window.location.reload();
+            }}
+            style={{
+              background: 'rgba(245, 158, 11, 0.2)',
+              border: '1px solid rgba(245, 158, 11, 0.3)',
+              color: '#fef3c7',
+              borderRadius: '6px',
+              padding: '3px 9px',
+              cursor: 'pointer',
+              fontSize: '0.75rem',
+              fontWeight: '700'
+            }}
+          >
+            إنهاء الفحص
+          </button>
+        </div>
       )}
     </div>
   );

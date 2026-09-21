@@ -5,70 +5,80 @@ import { loadFaceDescriptor, loadHandDescriptor } from '../../utils/faceStorage'
 
 export default function FaceVerificationOverlay({ employee, actionType, onVerifySuccess, onVerifyFailed, onCancel, biometricType = 'face' }) {
   const videoRef = useRef(null);
-  const [status, setStatus] = useState('جارِ تهيئة الكاميرا والذكاء الاصطناعي...');
+  const nativeInputRef = useRef(null);
+
+  const [status, setStatus] = useState('جارِ تشغيل الكاميرا...');
   const [errorMsg, setErrorMsg] = useState(null);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [isAiFallbackMode, setIsAiFallbackMode] = useState(false);
+  const [hasCameraStream, setHasCameraStream] = useState(false);
+
   const [livenessStage, setLivenessStage] = useState(0); 
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [isScreenFlashOn, setIsScreenFlashOn] = useState(false);
   const [lightingStatus, setLightingStatus] = useState(null); // 'good' | 'low' | 'dark'
+
+  const [isWaitingRetry, setIsWaitingRetry] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [processTrigger, setProcessTrigger] = useState(0);
 
   const isHand = biometricType === 'hand';
   const [facingMode, setFacingMode] = useState('user'); // 'user' (أمامية) or 'environment' (خلفية)
 
   useEffect(() => {
     let stream = null;
-    let checkInterval = null;
     let isCancelled = false;
 
     const startProcess = async () => {
+      setIsInitializing(true);
+      setErrorMsg(null);
+      setIsAiFallbackMode(false);
+      setHasCameraStream(false);
+      setStatus('جارِ تشغيل الكاميرا...');
+
+      // 1. بدء تشغيل الكاميرا أولاً وبشكل مستقل عن محرك الذكاء الاصطناعي
+      const startCamera = async () => {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          const isSecure = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+          if (!isSecure) {
+            throw new Error('المتصفح على الهواتف يشترط اتصالاً آمناً (HTTPS) لتشغيل الكاميرا. يرجى الدخول برابط https://.');
+          } else {
+            throw new Error('المتصفح أو التطبيق الحالي لا يدعم الوصول المباشر لكاميرا الويب.');
+          }
+        }
+
+        if (videoRef.current?.srcObject) {
+          videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+          videoRef.current.srcObject = null;
+        }
+
+        const constraintTiers = [
+          { video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+          { video: { facingMode: { ideal: facingMode } } },
+          { video: { facingMode: facingMode } },
+          { video: true }
+        ];
+
+        let camStream = null;
+        let lastCamErr = null;
+        for (const tier of constraintTiers) {
+          try {
+            camStream = await navigator.mediaDevices.getUserMedia(tier);
+            if (camStream) break;
+          } catch (cErr) {
+            lastCamErr = cErr;
+            if (cErr.name === 'NotAllowedError' || cErr.name === 'PermissionDeniedError') break;
+          }
+        }
+
+        if (!camStream) throw lastCamErr || new Error('تعذر فتح الكاميرا.');
+        return camStream;
+      };
+
       try {
-        // 1. بدء تشغيل الكاميرا بالطبقات المتعددة فوراً مع التوافق التام للهواتف
-        const startCamera = async () => {
-          if (!navigator.mediaDevices?.getUserMedia) {
-            const isSecure = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-            if (!isSecure) {
-              throw new Error('المتصفح على الهواتف يشترط اتصالاً آمناً (HTTPS) لتشغيل الكاميرا. يرجى الدخول برابط https://.');
-            } else {
-              throw new Error('المتصفح أو التطبيق الحالي لا يدعم الوصول للكاميرا.');
-            }
-          }
-
-          if (videoRef.current?.srcObject) {
-            videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-            videoRef.current.srcObject = null;
-          }
-
-          const constraintTiers = [
-            { video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } } },
-            { video: { facingMode: { ideal: facingMode } } },
-            { video: { facingMode: facingMode } },
-            { video: true }
-          ];
-
-          let camStream = null;
-          let lastCamErr = null;
-          for (const tier of constraintTiers) {
-            try {
-              camStream = await navigator.mediaDevices.getUserMedia(tier);
-              if (camStream) break;
-            } catch (cErr) {
-              lastCamErr = cErr;
-              if (cErr.name === 'NotAllowedError' || cErr.name === 'PermissionDeniedError') break;
-            }
-          }
-
-          if (!camStream) throw lastCamErr || new Error('تعذر فتح الكاميرا.');
-          return camStream;
-        };
-
-        // 2. تشغيل الكاميرا والمحرك بالتوازي التام
-        const camPromise = startCamera();
-        const modelPromise = isHand ? initHandRecognition() : initFaceRecognition();
-
-        const [camStream] = await Promise.all([camPromise, modelPromise]);
+        const camStream = await startCamera();
         if (isCancelled) {
-          camStream.getTracks().forEach(t => t.stop());
+          camStream?.getTracks()?.forEach(t => t.stop());
           return;
         }
 
@@ -86,23 +96,40 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
               await playPromise;
             }
           } catch (pErr) {
-            console.warn('Play video interrupted on mobile/browser:', pErr);
+            console.warn('Play video note:', pErr);
           }
+          setHasCameraStream(true);
         }
+      } catch (camErr) {
+        console.warn('Camera startup note:', camErr);
+        setHasCameraStream(false);
+        if (camErr.name === 'NotAllowedError' || camErr.name === 'PermissionDeniedError') {
+          setErrorMsg('تم حظر إذن الكاميرا. يمكنك السماح بالإذن أو التقاط صورة عبر زر كاميرا الهاتف أدناه.');
+        } else if (camErr.name === 'NotFoundError' || camErr.name === 'DevicesNotFoundError') {
+          setErrorMsg('لم يتم العثور على أي كاميرا متصلة. يمكنك التقاط صورة عبر زر كاميرا الهاتف أدناه.');
+        } else {
+          setErrorMsg('تعذر تشغيل بث الكاميرا: ' + (camErr.message || ''));
+        }
+      }
+
+      // 2. تحميل محرك الذكاء الاصطناعي بشكل مستقل دون إيقاف الكاميرا
+      try {
+        setStatus(isHand ? 'جارِ تجهيز محرك بصمة اليد...' : 'جارِ تجهيز محرك الذكاء الاصطناعي للوجه...');
+        await (isHand ? initHandRecognition() : initFaceRecognition());
+        if (isCancelled) return;
 
         setIsInitializing(false);
-        setStatus(isHand ? 'يرجى وضع يدك وفتح أصابعك أمام الكاميرا...' : 'يرجى النظر مباشرة للكاميرا...');
+        setIsAiFallbackMode(false);
+        setStatus(isHand ? 'يرجى وضع يدك وفتح أصابعك أمام الكاميرا...' : 'يرجى النظر مباشرة للكاميرا والابتسام أو الرمش بعينيك 😉');
         setLivenessStage(1);
-      } catch (err) {
-        console.error('Camera/Model error:', err);
-        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-          setErrorMsg('تم حظر إذن الكاميرا. يرجى الضغط على أيقونة القفل 🔒 بجانب رابط المتصفح وتفعيل الكاميرا.');
-        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-          setErrorMsg('لم يتم العثور على أي كاميرا متصلة بالجهاز.');
-        } else {
-          setErrorMsg('فشل في تشغيل الكاميرا أو تحميل محرك الذكاء الاصطناعي: ' + (err.message || 'تأكد من الصلاحيات والاتصال'));
-        }
+      } catch (modelErr) {
+        console.warn('[FaceVerification] AI model init note, switching to photo fallback mode:', modelErr);
+        if (isCancelled) return;
+
         setIsInitializing(false);
+        setIsAiFallbackMode(true);
+        setErrorMsg('تعذر تشغيل محرك الذكاء الاصطناعي التلقائي: ' + (modelErr.message || ''));
+        setStatus('⚠️ تعذر تشغيل الذكاء الاصطناعي التلقائي. تم تفعيل الإجراء الاحتياطي: يمكنك التقاط صورتك الآن وإرسالها للإدارة للاعتماد.');
       }
     };
 
@@ -113,9 +140,8 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
       if (videoRef.current && videoRef.current.srcObject) {
         videoRef.current.srcObject.getTracks().forEach(track => track.stop());
       }
-      if (checkInterval) clearInterval(checkInterval);
     };
-  }, [isHand, facingMode]);
+  }, [isHand, facingMode, processTrigger]);
 
   const toggleCamera = () => {
     setFacingMode(prev => (prev === 'user' ? 'environment' : 'user'));
@@ -125,8 +151,14 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
     setIsScreenFlashOn(prev => !prev);
   };
 
+  const handleRestartProcess = () => {
+    setIsWaitingRetry(false);
+    setProcessTrigger(prev => prev + 1);
+  };
+
+  // حلقة فحص الحيوية التلقائية ومطابقة البصمة
   useEffect(() => {
-    if (isInitializing || !videoRef.current) return;
+    if (isInitializing || isAiFallbackMode || !videoRef.current) return;
     
     // For hand tracking
     if (isHand) {
@@ -161,7 +193,7 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
     }, 400);
 
     return () => clearInterval(checkInterval);
-  }, [isInitializing, livenessStage, isHand]);
+  }, [isInitializing, isAiFallbackMode, livenessStage, isHand]);
 
   const performMatch = async () => {
     try {
@@ -198,7 +230,6 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
         }
 
         // 🌟 فحص متعدد الإطارات المتتابعة (Multi-Frame Burst Matching):
-        // يتم التقاط 3 عينات متتالية مع معالجة التباين المزدوجة لاختيار أفضل لقطة مطابقة
         let bestMatchResult = null;
         let lastError = null;
 
@@ -221,7 +252,6 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
             }
 
             const liveDescs = result.descriptors || [result.descriptor];
-            // الحفاظ الصارم على نسبة الـ 70% المطلوبة للبصمة
             const matchResult = compareFaces(savedDescriptor, liveDescs, 70);
 
             if (matchResult.isLegacy) {
@@ -233,12 +263,10 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
               bestMatchResult = matchResult;
             }
 
-            // إذا تحققت المطابقة بنجاح (>= 70%) نكتفي فوراً دون الحاجة للقطات إضافية
             if (bestMatchResult && bestMatchResult.isMatch) {
               break;
             }
 
-            // فاصل زمني بسيط بين اللقطات لتجاوز أي رمش أو حركة عابرة
             await new Promise((resolve) => setTimeout(resolve, 90));
           } catch (bErr) {
             console.warn('[FaceMatch] Burst frame attempt note:', bErr);
@@ -256,31 +284,28 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
             onVerifySuccess(actionType);
           }, 250);
         } else {
-          // تفعيل فلاش الشاشة المساعد تلقائياً للمحاولة التالية
           setIsScreenFlashOn(true);
           handleFailure(`البصمة غير متطابقة (${Math.round(bestMatchResult.matchPercentage)}%)`);
         }
       }
     } catch (err) {
-      console.error(err);
-      handleFailure(`حدث خطأ أثناء المعالجة.`);
+      console.error('Matching runtime exception:', err);
+      setIsAiFallbackMode(true);
+      handleFailure(`حدث خطأ أثناء معالجة الذكاء الاصطناعي. يمكنك التقاط صورة واعتمادها كإجراء احتياطي.`);
     }
   };
-
-  const [isWaitingRetry, setIsWaitingRetry] = useState(false);
-  const [isCapturing, setIsCapturing] = useState(false);
 
   const handleFailure = (msg) => {
     const newFails = failedAttempts + 1;
     setFailedAttempts(newFails);
     setErrorMsg(`❌ ${msg}`);
-    setLivenessStage(0); // إيقاف فحص الذكاء الاصطناعي التلقائي فوراً
+    setLivenessStage(0);
     setIsWaitingRetry(true);
 
     if (newFails >= 3) {
       setStatus('تعذر التحقق بعد 3 محاولات متتالية. يرجى الضغط على الزر أدناه لالتقاط صورة حية واعتماد الحضور من الإدارة.');
     } else {
-      setStatus('تعذر التحقق من البصمة. يرجى الوقوف بثبات ثم الضغط على "محاولة مرة أخرى".');
+      setStatus('تعذر مطابقة البصمة. يرجى الوقوف بثبات والتأكد من إضاءة الوجه ثم الضغط على "محاولة مرة أخرى".');
     }
   };
 
@@ -291,8 +316,20 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
     setLivenessStage(1);
   };
 
+  // التقاط الصورة من البث المباشر وإرسالها لمدير الفرع والإدارة للاعتماد
   const captureAndSend = () => {
-    if (!videoRef.current || isCapturing) return;
+    if (isCapturing) return;
+
+    if (!videoRef.current || !videoRef.current.videoWidth) {
+      // إذا لم يكن بث الفيديو يعمل، نفتح كاميرا الهاتف الأصلية
+      if (nativeInputRef.current) {
+        nativeInputRef.current.click();
+      } else {
+        setStatus('الكاميرا غير متاحة حالياً لالتقاط الصورة.');
+      }
+      return;
+    }
+
     setIsCapturing(true);
     setStatus('جاري التقاط الصورة الحية وتجهيز طلب الاعتماد...');
 
@@ -310,13 +347,38 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       const photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
 
-      // إرسال وتأكيد الإجراء فورياً دون أي تأخير زمني
+      // إرسال وتأكيد الإجراء فورياً للإدارة ومدير الفرع
       onVerifyFailed(actionType, photoDataUrl);
     } catch (err) {
       console.error('Error capturing frame:', err);
       setIsCapturing(false);
-      setStatus('فشل التقاط الصورة من الكاميرا. يرجى إعادة المحاولة.');
+      setStatus('فشل التقاط الصورة من البث المباشر. يمكنك استخدام زر فتح كاميرا الهاتف أدناه.');
     }
+  };
+
+  // معالجة اختيار صورة من كاميرا الهاتف الأصلية (Native Mobile Camera Fallback)
+  const handleNativePhotoPicked = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsCapturing(true);
+    setStatus('جاري معالجة الصورة وتجهيز طلب الاعتماد للإدارة...');
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      if (dataUrl) {
+        onVerifyFailed(actionType, dataUrl);
+      } else {
+        setIsCapturing(false);
+        setStatus('فشل في قراءة الصورة، يرجى المحاولة مرة أخرى.');
+      }
+    };
+    reader.onerror = () => {
+      setIsCapturing(false);
+      setStatus('حدث خطأ أثناء قراءة ملف الصورة.');
+    };
+    reader.readAsDataURL(file);
   };
 
   const actionName = {
@@ -346,28 +408,36 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
             <h3 style={{ margin: 0 }}>توثيق الإجراء: {actionName}</h3>
             <small style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>الموظف: {employee.name}</small>
           </div>
-          <button className="close-btn" onClick={onCancel}>×</button>
+          <button className="close-btn" onClick={onCancel} disabled={isCapturing}>×</button>
         </div>
 
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
           
           <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            {/* مؤشر جودة الإضاءة */}
+            {/* مؤشر جودة الإضاءة أو وضع الاحتياط */}
             <div>
-              {lightingStatus === 'dark' && (
-                <span style={{ fontSize: '0.8rem', padding: '4px 8px', borderRadius: '6px', background: '#ffebee', color: '#c62828', fontWeight: 'bold' }}>
-                  🌙 إضاءة معتمة (معالجة نشطة)
+              {isAiFallbackMode ? (
+                <span style={{ fontSize: '0.82rem', padding: '4px 10px', borderRadius: '6px', background: '#fffbeb', color: '#b45309', fontWeight: 'bold', border: '1px solid #fde68a' }}>
+                  🛡️ وضع الاعتماد بالصورة الاحتياطي
                 </span>
-              )}
-              {lightingStatus === 'low' && (
-                <span style={{ fontSize: '0.8rem', padding: '4px 8px', borderRadius: '6px', background: '#fff8e1', color: '#f57f17', fontWeight: 'bold' }}>
-                  ⛅ إضاءة خافتة
-                </span>
-              )}
-              {lightingStatus === 'good' && (
-                <span style={{ fontSize: '0.8rem', padding: '4px 8px', borderRadius: '6px', background: '#e8f5e9', color: '#2e7d32', fontWeight: 'bold' }}>
-                  💡 إضاءة ممتازة
-                </span>
+              ) : (
+                <>
+                  {lightingStatus === 'dark' && (
+                    <span style={{ fontSize: '0.8rem', padding: '4px 8px', borderRadius: '6px', background: '#ffebee', color: '#c62828', fontWeight: 'bold' }}>
+                      🌙 إضاءة معتمة (معالجة نشطة)
+                    </span>
+                  )}
+                  {lightingStatus === 'low' && (
+                    <span style={{ fontSize: '0.8rem', padding: '4px 8px', borderRadius: '6px', background: '#fff8e1', color: '#f57f17', fontWeight: 'bold' }}>
+                      ⛅ إضاءة خافتة
+                    </span>
+                  )}
+                  {lightingStatus === 'good' && (
+                    <span style={{ fontSize: '0.8rem', padding: '4px 8px', borderRadius: '6px', background: '#e8f5e9', color: '#2e7d32', fontWeight: 'bold' }}>
+                      💡 إضاءة ممتازة
+                    </span>
+                  )}
+                </>
               )}
             </div>
 
@@ -400,7 +470,7 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
             borderRadius: '16px',
             overflow: 'hidden',
             backgroundColor: '#000',
-            border: isScreenFlashOn ? '4px solid #ffffff' : '3px solid var(--border)',
+            border: isScreenFlashOn ? '4px solid #ffffff' : (isAiFallbackMode ? '3px solid #f59e0b' : '3px solid var(--border)'),
             boxShadow: isScreenFlashOn ? '0 0 50px 15px rgba(255, 255, 255, 0.95), 0 0 100px 30px rgba(59, 130, 246, 0.4)' : '0 8px 24px rgba(0,0,0,0.15)',
             transition: 'all 0.3s ease'
           }}>
@@ -410,24 +480,66 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
               playsInline
               webkit-playsinline="true"
               muted
-              style={{ width: '100%', height: 'auto', display: 'block', transform: facingMode === 'user' ? 'scaleX(-1)' : 'none', objectFit: 'cover' }}
+              style={{
+                width: '100%',
+                height: 'auto',
+                minHeight: '220px',
+                display: 'block',
+                transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
+                objectFit: 'cover'
+              }}
             />
             {isInitializing && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', backgroundColor: 'rgba(0,0,0,0.7)' }}>
-                جارِ تجهيز الكاميرا ومحرك الذكاء الاصطناعي...
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#fff', backgroundColor: 'rgba(0,0,0,0.7)', gap: '8px', padding: '16px' }}>
+                <span className="spinner-border spinner-border-sm" style={{ width: '28px', height: '28px' }}></span>
+                <span>جارِ تجهيز الكاميرا ومحرك الذكاء الاصطناعي...</span>
+              </div>
+            )}
+            {isAiFallbackMode && (
+              <div style={{
+                position: 'absolute',
+                top: 10,
+                right: 10,
+                background: 'rgba(245, 158, 11, 0.92)',
+                color: '#fff',
+                padding: '4px 10px',
+                borderRadius: '8px',
+                fontSize: '0.8rem',
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                backdropFilter: 'blur(4px)'
+              }}>
+                🛡️ وضع التقاط الصورة الاحتياطي
               </div>
             )}
           </div>
 
-          <div style={{ padding: '14px', background: 'var(--surface)', borderRadius: '10px', width: '100%', border: '1px solid var(--border)' }}>
-            <p style={{ fontWeight: 'bold', color: 'var(--primary)', margin: '0 0 6px 0', fontSize: '1.1rem' }}>{status}</p>
+          <div style={{ padding: '14px', background: isAiFallbackMode ? '#fffbeb' : 'var(--surface)', borderRadius: '10px', width: '100%', border: isAiFallbackMode ? '1px solid #fde68a' : '1px solid var(--border)' }}>
+            <p style={{ fontWeight: 'bold', color: isAiFallbackMode ? '#b45309' : 'var(--primary)', margin: '0 0 6px 0', fontSize: '1.05rem' }}>
+              {status}
+            </p>
             {errorMsg && (
-              <p style={{ color: 'var(--danger)', fontSize: '0.9rem', margin: 0, fontWeight: 'bold' }}>{errorMsg} (المحاولة {failedAttempts}/3)</p>
+              <p style={{ color: 'var(--danger)', fontSize: '0.88rem', margin: 0, fontWeight: 'bold' }}>
+                {errorMsg} {failedAttempts > 0 && `(المحاولة ${failedAttempts}/3)`}
+              </p>
             )}
           </div>
 
         </div>
+
         <div className="modal-footer" style={{ flexDirection: 'column', gap: '10px' }}>
+          {/* إدخال كاميرا الهاتف الأصلي المخفي كاحتياطي شامل لكافة الأجهزة */}
+          <input
+            ref={nativeInputRef}
+            type="file"
+            accept="image/*"
+            capture="user"
+            style={{ display: 'none' }}
+            onChange={handleNativePhotoPicked}
+          />
+
           {errorMsg && typeof window !== 'undefined' && window.location.protocol === 'http:' && !window.location.hostname.includes('localhost') && (
             <button
               type="button"
@@ -455,14 +567,71 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
             </button>
           )}
 
-          {/* بعد 3 محاولات فاشلة: زر التقاط الصورة وإرسال طلب الاعتماد البديل */}
-          {failedAttempts >= 3 ? (
+          {/* في حال تفعيل وضع الاحتياط عند حدوث أي مشكلة في الذكاء الاصطناعي */}
+          {isAiFallbackMode ? (
+            <>
+              {hasCameraStream ? (
+                <button 
+                  type="button"
+                  className="btn btn-primary" 
+                  style={{ 
+                    width: '100%', 
+                    padding: '14px', 
+                    fontSize: '15px', 
+                    fontWeight: 800,
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '10px',
+                    boxShadow: '0 4px 14px rgba(2, 132, 199, 0.4)',
+                    cursor: isCapturing ? 'wait' : 'pointer'
+                  }} 
+                  onClick={captureAndSend}
+                  disabled={isCapturing}
+                >
+                  {isCapturing ? '⏳ جاري التقاط الصورة وتجهيز الطلب...' : '📸 التقاط الصورة وإرسال طلب اعتماد للإدارة (إجراء احتياطي)'}
+                </button>
+              ) : (
+                <button 
+                  type="button"
+                  className="btn btn-primary" 
+                  style={{ 
+                    width: '100%', 
+                    padding: '14px', 
+                    fontSize: '15px', 
+                    fontWeight: 800,
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '10px',
+                    boxShadow: '0 4px 14px rgba(2, 132, 199, 0.4)',
+                    cursor: isCapturing ? 'wait' : 'pointer'
+                  }} 
+                  onClick={() => nativeInputRef.current?.click()}
+                  disabled={isCapturing}
+                >
+                  {isCapturing ? '⏳ جاري معالجة الصورة وإرسال الطلب...' : '📷 فتح كاميرا الهاتف والتقاط صورة للاعتماد (إجراء احتياطي)'}
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ width: '100%', padding: '9px', fontSize: '13px', color: 'var(--primary)' }}
+                onClick={handleRestartProcess}
+                disabled={isCapturing}
+              >
+                🔄 إعادة محاولة تشغيل الذكاء الاصطناعي
+              </button>
+            </>
+          ) : failedAttempts >= 3 ? (
+            /* بعد 3 محاولات فاشلة للمطابقة */
             <button 
               type="button"
               className="btn btn-primary" 
               style={{ 
                 width: '100%', 
-                padding: '13px', 
+                padding: '14px', 
                 fontSize: '15px', 
                 fontWeight: 800,
                 background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
@@ -472,13 +641,13 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
                 boxShadow: '0 4px 14px rgba(2, 132, 199, 0.4)',
                 cursor: isCapturing ? 'wait' : 'pointer'
               }} 
-              onClick={captureAndSend}
+              onClick={hasCameraStream ? captureAndSend : () => nativeInputRef.current?.click()}
               disabled={isCapturing}
             >
-              {isCapturing ? '⏳ جاري التقاط الصورة وتجهيز الطلب...' : '📸 التقاط الصورة وإرسال طلب اعتماد بديل'}
+              {isCapturing ? '⏳ جاري التقاط الصورة وتجهيز الطلب...' : '📸 التقاط الصورة وإرسال طلب اعتماد للإدارة'}
             </button>
           ) : isWaitingRetry ? (
-            /* في المحاولات 1 و 2: زر محاولة مرة أخرى */
+            /* في المحاولات 1 و 2: زر محاولة مرة أخرى فقط */
             <button 
               type="button"
               className="btn btn-start" 
@@ -495,6 +664,7 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
                 cursor: 'pointer'
               }} 
               onClick={handleRetry}
+              disabled={isCapturing}
             >
               🔄 محاولة مرة أخرى (المحاولة {failedAttempts + 1} من 3)
             </button>

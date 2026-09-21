@@ -34,6 +34,8 @@ import AccountingSystemGuideCard from './AccountingSystemGuideCard';
 import KeyboardShortcutsSettingsCard from './KeyboardShortcutsSettingsCard';
 import EnterpriseHeaderSettingsCard from './EnterpriseHeaderSettingsCard';
 import AndroidAppDownloadCard from './AndroidAppDownloadCard';
+import SubscriptionBillingCard from './SubscriptionBillingCard';
+import SupportTicketsCard from './SupportTicketsCard';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 import { DEFAULT_PHARMACY_BYLAWS_SECTIONS } from '../../utils/bylawsDefaults';
 import {
@@ -1909,6 +1911,8 @@ export default function SettingsModule({
         {[
           { id: 'mobile_app', label: '📱 تطبيق الأندرويد (APK)' },
           { id: 'general', label: '🏥 بيانات المؤسسة' },
+          { id: 'subscription', label: '💳 متابعة الاشتراك والمدفوعات' },
+          { id: 'support', label: '🎫 تذاكر الدعم الفني' },
           { id: 'dates', label: '📅 التواريخ وفترات الرواتب' },
           { id: 'permissions', label: '🔒 إدارة الصلاحيات' },
           { id: 'rules', label: '🔐 قواعد الاعتماد' },
@@ -1960,6 +1964,23 @@ export default function SettingsModule({
       {/* Tab: Android Mobile App APK */}
       {activeTab === 'mobile_app' && (
         <AndroidAppDownloadCard showToast={showToast} isCompact={false} />
+      )}
+
+      {/* Tab: Subscription & Invoices Ledger */}
+      {activeTab === 'subscription' && (
+        <SubscriptionBillingCard
+          state={state}
+          showToast={showToast}
+          executeWithOwnerGuard={executeWithOwnerGuard}
+        />
+      )}
+
+      {/* Tab: Support Tickets */}
+      {activeTab === 'support' && (
+        <SupportTicketsCard
+          state={state}
+          showToast={showToast}
+        />
       )}
 
       {/* Tab: Keyboard Shortcuts Management */}

@@ -349,6 +349,9 @@ export async function apiLogin(usernameOrCreds, password = '', role = 'auto') {
         }
         return data;
       }
+      if (res.status === 403 && data?.is_suspended) {
+        return data;
+      }
       lastResponse = data;
     } catch (err) {
       console.warn('[ApiClient] apiLogin network error:', err);

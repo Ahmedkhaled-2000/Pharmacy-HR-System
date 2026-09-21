@@ -30,7 +30,7 @@ export function AuthProvider({ children }) {
   const [authRole, setAuthRole] = useState(() => {
     try {
       const saved = localStorage.getItem('app_auth_role');
-      if (saved && ['owner', 'admin', 'branch', 'employee'].includes(saved)) {
+      if (saved && ['owner', 'admin', 'branch', 'employee', 'developer'].includes(saved)) {
         return saved;
       }
       if (localStorage.getItem('app_current_emp_user')) return 'employee';
@@ -334,6 +334,14 @@ export function AuthProvider({ children }) {
       try {
         localStorage.removeItem('app_owner_authenticated');
         sessionStorage.removeItem('app_owner_authenticated');
+      } catch {}
+    } else if (role === 'developer') {
+      setIsAdminLoggedIn(false);
+      setCurrentBranch(null);
+      setCurrentEmpUser(null);
+      try {
+        localStorage.setItem('app_auth_role', 'developer');
+        localStorage.setItem('app_is_developer', 'true');
       } catch {}
     }
     setActiveNavTab(redirectTab);
