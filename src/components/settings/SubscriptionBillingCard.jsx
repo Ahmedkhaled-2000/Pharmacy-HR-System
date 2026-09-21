@@ -37,6 +37,7 @@ export default function SubscriptionBillingCard({
   const [transactionRef, setTransactionRef] = useState('');
   const [submittingRenewal, setSubmittingRenewal] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState([]);
+  const [invoiceSettings, setInvoiceSettings] = useState(null);
 
   const orgSettings = state.orgSettings || {};
 
@@ -110,12 +111,23 @@ export default function SubscriptionBillingCard({
       if (data?.success && Array.isArray(data.payment_methods) && data.payment_methods.length > 0) {
         setPaymentMethods(data.payment_methods);
       }
-    } catch {}
+    } catch { }
+  };
+
+  const fetchInvoiceSettings = async () => {
+    try {
+      const res = await fetch('/api/system/invoice-settings');
+      const data = await res.json();
+      if (data?.success && data.settings) {
+        setInvoiceSettings(data.settings);
+      }
+    } catch { }
   };
 
   useEffect(() => {
     fetchSubscriptionDetails();
     fetchPaymentMethods();
+    fetchInvoiceSettings();
   }, [orgSettings.companyId]);
 
   const company = subscriptionData?.company || {};
@@ -257,7 +269,7 @@ export default function SubscriptionBillingCard({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '22px', direction: 'rtl', fontFamily: 'inherit' }}>
-      
+
       {/* ── 1. HEADER & LIVE STATUS TITLE ── */}
       <div style={{
         display: 'flex',

@@ -630,25 +630,6 @@ export default function LoginPage({ onLogin, onOpenRegister, onOpenDeveloper, st
         <div>
           <span>{orgName}</span> · <span>جميع الحقوق محفوظة © {new Date().getFullYear()}</span>
         </div>
-
-        <button
-          type="button"
-          onClick={onOpenDeveloper || (() => { window.location.href = '/developer'; })}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: '#94a3b8',
-            fontSize: '11.5px',
-            fontWeight: 700,
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '5px',
-            textDecoration: 'underline'
-          }}
-        >
-          <span>⚡ بوابة مطور النظام السيادي (Developer Portal)</span>
-        </button>
       </div>
     </div>
   );

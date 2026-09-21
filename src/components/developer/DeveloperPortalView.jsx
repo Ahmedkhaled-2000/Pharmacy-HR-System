@@ -43,7 +43,8 @@ import {
   Edit3,
   Link as LinkIcon,
   QrCode,
-  Smartphone
+  Smartphone,
+  ShieldCheck
 } from 'lucide-react';
 import { API_BASE_URL } from '../../utils/apiClient';
 
@@ -102,6 +103,32 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
   const [isEditDiscountModalOpen, setIsEditDiscountModalOpen] = useState(false);
   const [isPaymentMethodModalOpen, setIsPaymentMethodModalOpen] = useState(false);
   const [isEditModuleModalOpen, setIsEditModuleModalOpen] = useState(false);
+  const [isEditInvoiceSettingsModalOpen, setIsEditInvoiceSettingsModalOpen] = useState(false);
+  const [isEditInvoiceModalOpen, setIsEditInvoiceModalOpen] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [invoiceSettings, setInvoiceSettings] = useState({});
+  const [invoiceSettingsForm, setInvoiceSettingsForm] = useState({
+    issuer_name: '',
+    issuer_email: '',
+    tax_number: '',
+    issuer_phone: '',
+    invoice_title: '',
+    invoice_subtitle: '',
+    service_title: '',
+    service_description: '',
+    footer_notice: '',
+    free_license_notice: ''
+  });
+  const [editInvoiceForm, setEditInvoiceForm] = useState({
+    id: '',
+    invoice_number: '',
+    amount: '',
+    discount_amount: '',
+    net_amount: '',
+    payment_method: '',
+    status: 'approved',
+    notes: ''
+  });
   const [isNewExpenseModalOpen, setIsNewExpenseModalOpen] = useState(false);
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
@@ -242,7 +269,7 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
     setIsLoading(true);
     try {
       const headers = getAuthHeaders();
-      const [compRes, modRes, discRes, mainRes, finRes, expRes, annRes, telRes, affRes, tktRes, pmRes] = await Promise.all([
+      const [compRes, modRes, discRes, mainRes, finRes, expRes, annRes, telRes, affRes, tktRes, pmRes, invRes, invSetRes] = await Promise.all([
         fetch(`${API_BASE_URL}/developer/companies`, { headers }).then(r => r.json()).catch(() => ({ companies: [] })),
         fetch(`${API_BASE_URL}/developer/modules`, { headers }).then(r => r.json()).catch(() => ({ modules: [] })),
         fetch(`${API_BASE_URL}/developer/discounts`, { headers }).then(r => r.json()).catch(() => ({ discounts: [] })),
@@ -253,7 +280,9 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
         fetch(`${API_BASE_URL}/developer/telemetry/stats`, { headers }).then(r => r.json()).catch(() => ({ stats: {}, errors: [] })),
         fetch(`${API_BASE_URL}/developer/affiliates`, { headers }).then(r => r.json()).catch(() => ({ affiliates: [] })),
         fetch(`${API_BASE_URL}/developer/tickets`, { headers }).then(r => r.json()).catch(() => ({ tickets: [] })),
-        fetch(`${API_BASE_URL}/developer/payment-methods`, { headers }).then(r => r.json()).catch(() => ({ payment_methods: [] }))
+        fetch(`${API_BASE_URL}/developer/payment-methods`, { headers }).then(r => r.json()).catch(() => ({ payment_methods: [] })),
+        fetch(`${API_BASE_URL}/developer/invoices`, { headers }).then(r => r.json()).catch(() => ({ invoices: [] })),
+        fetch(`${API_BASE_URL}/developer/invoice-settings`, { headers }).then(r => r.json()).catch(() => ({ settings: {} }))
       ]);
 
       if (compRes.companies) setCompanies(compRes.companies);
@@ -268,6 +297,8 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
       if (affRes.affiliates) setAffiliates(affRes.affiliates);
       if (tktRes.tickets) setSupportTickets(tktRes.tickets);
       if (pmRes.payment_methods) setPaymentMethods(pmRes.payment_methods);
+      if (invRes?.invoices) setInvoices(invRes.invoices);
+      if (invSetRes?.settings) setInvoiceSettings(invSetRes.settings);
     } catch (err) {
       console.warn('Developer data fetch warning:', err);
     } finally {
@@ -642,6 +673,80 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
         fetchData();
       }
     } catch {}
+  };
+
+  // ── Invoice Settings & Individual Invoice Handlers ──
+  const handleOpenEditInvoiceSettings = () => {
+    setInvoiceSettingsForm({
+      issuer_name: invoiceSettings.issuer_name || 'PharmaCore SaaS Solutions',
+      issuer_email: invoiceSettings.issuer_email || 'support@pharmacore.site',
+      tax_number: invoiceSettings.tax_number || '849-291-772',
+      issuer_phone: invoiceSettings.issuer_phone || '',
+      invoice_title: invoiceSettings.invoice_title || 'فاتورة اشتراك سحابية رسمية',
+      invoice_subtitle: invoiceSettings.invoice_subtitle || 'منظومة إدارة الصيدليات والموارد البشرية (SaaS Cloud)',
+      service_title: invoiceSettings.service_title || 'اشتراك منظومة إدارة الصيدليات السحابية المتكاملة',
+      service_description: invoiceSettings.service_description || 'تشمل الحضور، مسير الرواتب، البصمة الذكية، والتقارير',
+      footer_notice: invoiceSettings.footer_notice || 'تعتبر هذه الفاتورة سنداً إلكترونياً معتمداً ومسجلاً سحابياً.',
+      free_license_notice: invoiceSettings.free_license_notice || 'تم اعتماد هذا الاشتراك مجاناً وبشكل دائم ورسمي من إدارة المنظومة (ترخيص معتمد غير خاضع لأي مستحقات مالية).'
+    });
+    setIsEditInvoiceSettingsModalOpen(true);
+  };
+
+  const handleSaveInvoiceSettings = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API_BASE_URL}/developer/invoice-settings`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(invoiceSettingsForm)
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.('✅ تم حفظ بيانات وترويسة الفاتورة بنجاح');
+        setInvoiceSettings(invoiceSettingsForm);
+        setIsEditInvoiceSettingsModalOpen(false);
+      } else {
+        showToast?.(`❌ خطأ: ${data.error}`);
+      }
+    } catch {
+      showToast?.('❌ تعذر حفظ بيانات الفاتورة');
+    }
+  };
+
+  const handleOpenEditInvoice = (inv) => {
+    setSelectedInvoice(inv);
+    setEditInvoiceForm({
+      id: inv.id,
+      invoice_number: inv.invoice_number || '',
+      amount: inv.amount || 0,
+      discount_amount: inv.discount_amount || 0,
+      net_amount: inv.net_amount || 0,
+      payment_method: inv.payment_method || 'instapay',
+      status: inv.status || 'approved',
+      notes: inv.notes || ''
+    });
+    setIsEditInvoiceModalOpen(true);
+  };
+
+  const handleSaveInvoice = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API_BASE_URL}/developer/invoices/${editInvoiceForm.id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(editInvoiceForm)
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.('✅ تم تعديل بيانات الفاتورة بنجاح');
+        setIsEditInvoiceModalOpen(false);
+        fetchData();
+      } else {
+        showToast?.(`❌ خطأ: ${data.error}`);
+      }
+    } catch {
+      showToast?.('❌ تعذر تعديل بيانات الفاتورة');
+    }
   };
 
   // WhatsApp Broadcast
@@ -2342,29 +2447,52 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
                 <div>
                   <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 900 }}>الدفتر المالي، المصروفات، وصافي الأرباح</h2>
                   <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#94a3b8' }}>
-                    متابعة اشتراكات الشركات والمصروفات التشغيلية لحساب صافي الأرباح الدقيقة
+                    متابعة اشتراكات الشركات والمصروفات التشغيلية لحساب صافي الأرباح وإدارة بيانات فواتير الشراء الرسمية
                   </p>
                 </div>
 
-                <button
-                  onClick={() => setIsNewExpenseModalOpen(true)}
-                  style={{
-                    background: '#38bdf8',
-                    color: '#090d16',
-                    border: 'none',
-                    padding: '9px 16px',
-                    borderRadius: '10px',
-                    fontSize: '13px',
-                    fontWeight: 900,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  <Plus size={16} />
-                  <span>تسجيل مصروف تشغيلي جديد</span>
-                </button>
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={handleOpenEditInvoiceSettings}
+                    style={{
+                      background: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
+                      color: '#ffffff',
+                      border: 'none',
+                      padding: '9px 16px',
+                      borderRadius: '10px',
+                      fontSize: '13px',
+                      fontWeight: 900,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      boxShadow: '0 4px 14px rgba(14, 165, 233, 0.3)'
+                    }}
+                  >
+                    <Sliders size={16} />
+                    <span>تعديل بيانات وترويسة الفاتورة الرسمية</span>
+                  </button>
+
+                  <button
+                    onClick={() => setIsNewExpenseModalOpen(true)}
+                    style={{
+                      background: '#38bdf8',
+                      color: '#090d16',
+                      border: 'none',
+                      padding: '9px 16px',
+                      borderRadius: '10px',
+                      fontSize: '13px',
+                      fontWeight: 900,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <Plus size={16} />
+                    <span>تسجيل مصروف تشغيلي جديد</span>
+                  </button>
+                </div>
               </div>
 
               {/* Financial KPI Summary */}
@@ -2389,6 +2517,117 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
                     {(financials.net_profit || 0).toLocaleString()} ج.م
                   </div>
                   <span style={{ fontSize: '11px', color: '#10b981' }}>هامش الربح: {financials.profit_margin || 0}%</span>
+                </div>
+              </div>
+
+              {/* Invoices List - Official Invoices Issued to Companies */}
+              <div className="dev-glass-panel" style={{ marginBottom: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>سجل فواتير الاشتراكات الصادرة للشركات</h3>
+                    <p style={{ margin: '2px 0 0', fontSize: '11.5px', color: '#94a3b8' }}>
+                      إدارة وتعديل بيانات ومبالغ أي فاتورة اشتراك صادرة لأي صيدلية أو شركة
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleOpenEditInvoiceSettings}
+                    style={{
+                      background: 'rgba(14, 165, 233, 0.12)',
+                      border: '1px solid rgba(14, 165, 233, 0.3)',
+                      color: '#38bdf8',
+                      padding: '5px 12px',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px'
+                    }}
+                  >
+                    <Edit3 size={13} />
+                    <span>تعديل الترويسة والبيانات المصدرة</span>
+                  </button>
+                </div>
+
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--dev-border)', color: '#94a3b8' }}>
+                        <th style={{ padding: '8px' }}>رقم الفاتورة</th>
+                        <th style={{ padding: '8px' }}>الشركة والمسؤول</th>
+                        <th style={{ padding: '8px' }}>المبلغ الأصلي</th>
+                        <th style={{ padding: '8px' }}>الخصم</th>
+                        <th style={{ padding: '8px' }}>الصافي المحصل</th>
+                        <th style={{ padding: '8px' }}>طريقة الدفع</th>
+                        <th style={{ padding: '8px' }}>الحالة</th>
+                        <th style={{ padding: '8px' }}>التاريخ</th>
+                        <th style={{ padding: '8px' }}>إجراء</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invoices.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} style={{ textAlign: 'center', padding: '24px', color: '#94a3b8' }}>
+                            لا توجد فواتير مسجلة حالياً
+                          </td>
+                        </tr>
+                      ) : (
+                        invoices.map((inv) => (
+                          <tr key={inv.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                            <td style={{ padding: '10px 8px', fontWeight: 800, color: '#38bdf8' }}>{inv.invoice_number}</td>
+                            <td style={{ padding: '10px 8px' }}>
+                              <div style={{ fontWeight: 800, color: '#fff' }}>{inv.company_name || 'شركة معتمدة'}</div>
+                              <div style={{ fontSize: '11px', color: '#94a3b8' }}>{inv.owner_name} {inv.owner_phone ? `(${inv.owner_phone})` : ''}</div>
+                            </td>
+                            <td style={{ padding: '10px 8px' }}>{parseFloat(inv.amount || 0).toLocaleString()} ج.م</td>
+                            <td style={{ padding: '10px 8px', color: '#10b981' }}>
+                              {parseFloat(inv.discount_amount || 0) > 0 ? `-${parseFloat(inv.discount_amount).toLocaleString()} ج.م` : '—'}
+                            </td>
+                            <td style={{ padding: '10px 8px', fontWeight: 800, color: '#38bdf8' }}>
+                              {parseFloat(inv.net_amount || 0).toLocaleString()} ج.م
+                            </td>
+                            <td style={{ padding: '10px 8px' }}>{inv.payment_method}</td>
+                            <td style={{ padding: '10px 8px' }}>
+                              <span style={{
+                                background: inv.status === 'approved' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                                color: inv.status === 'approved' ? '#34d399' : '#fbbf24',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontSize: '11px',
+                                fontWeight: 800
+                              }}>
+                                {inv.status === 'approved' ? 'معتمدة' : 'معلقة'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 8px', fontSize: '11px', color: '#94a3b8' }}>
+                              {new Date(inv.created_at).toLocaleDateString('ar-EG')}
+                            </td>
+                            <td style={{ padding: '10px 8px' }}>
+                              <button
+                                onClick={() => handleOpenEditInvoice(inv)}
+                                style={{
+                                  background: 'rgba(255,255,255,0.06)',
+                                  border: '1px solid var(--dev-border)',
+                                  color: '#fff',
+                                  padding: '4px 10px',
+                                  borderRadius: '6px',
+                                  fontSize: '11.5px',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                <Edit3 size={12} />
+                                <span>تعديل</span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
@@ -4409,6 +4648,252 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
                   حفظ وسيلة الدفع
                 </button>
                 <button type="button" onClick={() => setIsPaymentMethodModalOpen(false)} style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', padding: '10px 16px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 13. Edit Invoice Settings Modal */}
+      {isEditInvoiceSettingsModalOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#0f172a', border: '1px solid var(--dev-border-glow)', borderRadius: '20px', maxWidth: '640px', width: '100%', padding: '28px', maxHeight: '92vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--dev-border)', paddingBottom: '12px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 900, color: '#38bdf8' }}>⚙️ إعدادات وترويسة فاتورة الشراء والسندات الرسمية</h3>
+                <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#94a3b8' }}>تعديل بيانات الجهة المصدرة، الرقم الضريبي، والعناوين التي تظهر على فواتير المشتركين</p>
+              </div>
+              <button onClick={() => setIsEditInvoiceSettingsModalOpen(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            <form onSubmit={handleSaveInvoiceSettings} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>اسم الجهة المصدرة (الشركة/المؤسسة)</label>
+                  <input
+                    type="text"
+                    required
+                    value={invoiceSettingsForm.issuer_name}
+                    onChange={(e) => setInvoiceSettingsForm({ ...invoiceSettingsForm, issuer_name: e.target.value })}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#fff', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>الرقم الضريبي الموحد</label>
+                  <input
+                    type="text"
+                    required
+                    value={invoiceSettingsForm.tax_number}
+                    onChange={(e) => setInvoiceSettingsForm({ ...invoiceSettingsForm, tax_number: e.target.value })}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#fff', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>البريد الإلكتروني الرسمي للدعم</label>
+                  <input
+                    type="email"
+                    required
+                    value={invoiceSettingsForm.issuer_email}
+                    onChange={(e) => setInvoiceSettingsForm({ ...invoiceSettingsForm, issuer_email: e.target.value })}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#fff', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>هاتف خدمة العملاء / الدعم الفني (اختياري)</label>
+                  <input
+                    type="text"
+                    value={invoiceSettingsForm.issuer_phone}
+                    onChange={(e) => setInvoiceSettingsForm({ ...invoiceSettingsForm, issuer_phone: e.target.value })}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#fff', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>عنوان الفاتورة الرسمي</label>
+                  <input
+                    type="text"
+                    required
+                    value={invoiceSettingsForm.invoice_title}
+                    onChange={(e) => setInvoiceSettingsForm({ ...invoiceSettingsForm, invoice_title: e.target.value })}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#fff', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>الوصف الفرعي للفاتورة</label>
+                  <input
+                    type="text"
+                    value={invoiceSettingsForm.invoice_subtitle}
+                    onChange={(e) => setInvoiceSettingsForm({ ...invoiceSettingsForm, invoice_subtitle: e.target.value })}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#fff', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>بند الخدمة الافتراضي في جدول الفاتورة</label>
+                <input
+                  type="text"
+                  required
+                  value={invoiceSettingsForm.service_title}
+                  onChange={(e) => setInvoiceSettingsForm({ ...invoiceSettingsForm, service_title: e.target.value })}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#fff', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>تفاصيل ومكونات البند الافتراضي</label>
+                <input
+                  type="text"
+                  value={invoiceSettingsForm.service_description}
+                  onChange={(e) => setInvoiceSettingsForm({ ...invoiceSettingsForm, service_description: e.target.value })}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#fff', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>ملاحظة تذييل الفاتورة العادية (Footer Note)</label>
+                <textarea
+                  rows={2}
+                  value={invoiceSettingsForm.footer_notice}
+                  onChange={(e) => setInvoiceSettingsForm({ ...invoiceSettingsForm, footer_notice: e.target.value })}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#fff', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', color: '#10b981', fontWeight: 800, display: 'block', marginBottom: '4px' }}>💎 نص شهادة ترخيص الباقة المجانية الدائمة (بدون مبالغ)</label>
+                <textarea
+                  rows={2}
+                  value={invoiceSettingsForm.free_license_notice}
+                  onChange={(e) => setInvoiceSettingsForm({ ...invoiceSettingsForm, free_license_notice: e.target.value })}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#1e293b', border: '1px solid rgba(16, 185, 129, 0.4)', color: '#6ee7b7', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                <button type="submit" style={{ flex: 1, background: '#0ea5e9', color: '#fff', padding: '11px', borderRadius: '10px', fontWeight: 800, border: 'none', cursor: 'pointer' }}>
+                  حفظ إعدادات وترويسة الفاتورة
+                </button>
+                <button type="button" onClick={() => setIsEditInvoiceSettingsModalOpen(false)} style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', padding: '11px 18px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 14. Edit Individual Invoice Modal */}
+      {isEditInvoiceModalOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#0f172a', border: '1px solid var(--dev-border-glow)', borderRadius: '20px', maxWidth: '480px', width: '100%', padding: '24px' }}>
+            <h3 style={{ margin: '0 0 14px', fontSize: '18px', fontWeight: 900, color: '#38bdf8' }}>
+              تعديل بيانات الفاتورة الرسمية ({editInvoiceForm.invoice_number})
+            </h3>
+            <form onSubmit={handleSaveInvoice} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '12px', color: '#94a3b8' }}>رقم الفاتورة المرجعي</label>
+                <input
+                  type="text"
+                  required
+                  value={editInvoiceForm.invoice_number}
+                  onChange={(e) => setEditInvoiceForm({ ...editInvoiceForm, invoice_number: e.target.value })}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#38bdf8', fontWeight: 800, boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>المبلغ الأصلي</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editInvoiceForm.amount}
+                    onChange={(e) => {
+                      const amt = parseFloat(e.target.value) || 0;
+                      const disc = parseFloat(editInvoiceForm.discount_amount) || 0;
+                      setEditInvoiceForm({ ...editInvoiceForm, amount: amt, net_amount: Math.max(0, amt - disc) });
+                    }}
+                    style={{ width: '100%', padding: '8px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#fff', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>الخصم</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editInvoiceForm.discount_amount}
+                    onChange={(e) => {
+                      const disc = parseFloat(e.target.value) || 0;
+                      const amt = parseFloat(editInvoiceForm.amount) || 0;
+                      setEditInvoiceForm({ ...editInvoiceForm, discount_amount: disc, net_amount: Math.max(0, amt - disc) });
+                    }}
+                    style={{ width: '100%', padding: '8px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#10b981', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>الصافي المدفوع</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editInvoiceForm.net_amount}
+                    onChange={(e) => setEditInvoiceForm({ ...editInvoiceForm, net_amount: parseFloat(e.target.value) || 0 })}
+                    style={{ width: '100%', padding: '8px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#38bdf8', fontWeight: 800, boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>طريقة السداد</label>
+                  <input
+                    type="text"
+                    value={editInvoiceForm.payment_method}
+                    onChange={(e) => setEditInvoiceForm({ ...editInvoiceForm, payment_method: e.target.value })}
+                    style={{ width: '100%', padding: '8px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#fff', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', color: '#94a3b8' }}>حالة الفاتورة</label>
+                  <select
+                    value={editInvoiceForm.status}
+                    onChange={(e) => setEditInvoiceForm({ ...editInvoiceForm, status: e.target.value })}
+                    style={{ width: '100%', padding: '8px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#fff', boxSizing: 'border-box' }}
+                  >
+                    <option value="approved">معتمدة ومحصلة (Approved)</option>
+                    <option value="pending">معلقة للمراجعة (Pending)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', color: '#94a3b8' }}>ملاحظات الفاتورة</label>
+                <textarea
+                  rows={2}
+                  value={editInvoiceForm.notes}
+                  onChange={(e) => setEditInvoiceForm({ ...editInvoiceForm, notes: e.target.value })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '8px', background: '#1e293b', border: '1px solid var(--dev-border)', color: '#fff', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                <button type="submit" style={{ flex: 1, background: '#10b981', color: '#fff', padding: '10px', borderRadius: '10px', fontWeight: 800, border: 'none', cursor: 'pointer' }}>
+                  حفظ تعديل الفاتورة
+                </button>
+                <button type="button" onClick={() => setIsEditInvoiceModalOpen(false)} style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', padding: '10px 16px', borderRadius: '10px', border: 'none', cursor: 'pointer' }}>
                   إلغاء
                 </button>
               </div>

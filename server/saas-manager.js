@@ -163,6 +163,22 @@ export async function initSaasTables(db) {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
+      -- جدول إعدادات وترويسة الفاتورة الرسمية وسندات الاشتراك
+      CREATE TABLE IF NOT EXISTS public.system_invoice_settings (
+          id VARCHAR(50) PRIMARY KEY DEFAULT 'global_invoice_config',
+          issuer_name VARCHAR(255) NOT NULL DEFAULT 'PharmaCore SaaS Solutions',
+          issuer_email VARCHAR(150) NOT NULL DEFAULT 'support@pharmacore.site',
+          tax_number VARCHAR(100) NOT NULL DEFAULT '849-291-772',
+          issuer_phone VARCHAR(50) NULL DEFAULT '',
+          invoice_title VARCHAR(150) NOT NULL DEFAULT 'فاتورة اشتراك سحابية رسمية',
+          invoice_subtitle VARCHAR(255) NOT NULL DEFAULT 'منظومة إدارة الصيدليات والموارد البشرية (SaaS Cloud)',
+          service_title VARCHAR(255) NOT NULL DEFAULT 'اشتراك منظومة إدارة الصيدليات السحابية المتكاملة',
+          service_description VARCHAR(255) NOT NULL DEFAULT 'تشمل الحضور، مسير الرواتب، البصمة الذكية، والتقارير',
+          footer_notice TEXT NOT NULL DEFAULT 'تعتبر هذه الفاتورة سنداً إلكترونياً معتمداً ومسجلاً سحابياً.',
+          free_license_notice TEXT NOT NULL DEFAULT 'تم اعتماد هذا الاشتراك مجاناً وبشكل دائم ورسمي من إدارة المنظومة (ترخيص معتمد غير خاضع لأي مستحقات مالية).',
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
       -- جدول تعميمات المطور للإدارة العليا
       CREATE TABLE IF NOT EXISTS public.system_announcements (
           id VARCHAR(50) PRIMARY KEY,
@@ -308,6 +324,20 @@ export async function initSaasTables(db) {
     await db.query(`
       INSERT INTO public.system_maintenance_status (id, is_global_outage, disabled_screens, developer_sandbox_active)
       VALUES ('global_config', false, '[]'::jsonb, true)
+      ON CONFLICT (id) DO NOTHING;
+    `);
+
+    // إعدادات الفاتورة الرسمية الافتراضية
+    await db.query(`
+      INSERT INTO public.system_invoice_settings (id, issuer_name, issuer_email, tax_number, footer_notice, free_license_notice)
+      VALUES (
+        'global_invoice_config',
+        'PharmaCore SaaS Solutions',
+        'support@pharmacore.site',
+        '849-291-772',
+        'تعتبر هذه الفاتورة سنداً إلكترونياً معتمداً ومسجلاً سحابياً.',
+        'تم اعتماد هذا الاشتراك مجاناً وبشكل دائم ورسمي من إدارة المنظومة (ترخيص معتمد غير خاضع لأي مستحقات مالية).'
+      )
       ON CONFLICT (id) DO NOTHING;
     `);
 
@@ -1121,6 +1151,120 @@ export function registerSaasRoutes(app, db, io, JWT_SECRET, getSettingsFromStora
       await db.query('DELETE FROM public.system_payment_methods WHERE id = $1', [id]);
       io.emit('system:payment_methods_updated');
       res.json({ success: true, message: 'تم حذف وسيلة السداد بنجاح' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ── [Invoice Customization] إعدادات وترويسة فاتورة الشراء والسندات ────────────
+  app.get('/api/system/invoice-settings', async (req, res) => {
+    try {
+      let result = await db.query('SELECT * FROM public.system_invoice_settings WHERE id = $1', ['global_invoice_config']);
+      if (result.rows.length === 0) {
+        await db.query(`
+          INSERT INTO public.system_invoice_settings (id, issuer_name, issuer_email, tax_number, footer_notice, free_license_notice)
+          VALUES ('global_invoice_config', 'PharmaCore SaaS Solutions', 'support@pharmacore.site', '849-291-772', 'تعتبر هذه الفاتورة سنداً إلكترونياً معتمداً ومسجلاً سحابياً.', 'تم اعتماد هذا الاشتراك مجاناً وبشكل دائم ورسمي من إدارة المنظومة (ترخيص معتمد غير خاضع لأي مستحقات مالية).')
+          ON CONFLICT (id) DO NOTHING;
+        `);
+        result = await db.query('SELECT * FROM public.system_invoice_settings WHERE id = $1', ['global_invoice_config']);
+      }
+      res.json({ success: true, settings: result.rows[0] });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/developer/invoice-settings', requireDeveloper, async (req, res) => {
+    try {
+      let result = await db.query('SELECT * FROM public.system_invoice_settings WHERE id = $1', ['global_invoice_config']);
+      if (result.rows.length === 0) {
+        await db.query(`
+          INSERT INTO public.system_invoice_settings (id, issuer_name, issuer_email, tax_number, footer_notice, free_license_notice)
+          VALUES ('global_invoice_config', 'PharmaCore SaaS Solutions', 'support@pharmacore.site', '849-291-772', 'تعتبر هذه الفاتورة سنداً إلكترونياً معتمداً ومسجلاً سحابياً.', 'تم اعتماد هذا الاشتراك مجاناً وبشكل دائم ورسمي من إدارة المنظومة (ترخيص معتمد غير خاضع لأي مستحقات مالية).')
+          ON CONFLICT (id) DO NOTHING;
+        `);
+        result = await db.query('SELECT * FROM public.system_invoice_settings WHERE id = $1', ['global_invoice_config']);
+      }
+      res.json({ success: true, settings: result.rows[0] || {} });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.put('/api/developer/invoice-settings', requireDeveloper, async (req, res) => {
+    try {
+      const {
+        issuer_name,
+        issuer_email,
+        tax_number,
+        issuer_phone,
+        invoice_title,
+        invoice_subtitle,
+        service_title,
+        service_description,
+        footer_notice,
+        free_license_notice
+      } = req.body;
+
+      await db.query(`
+        INSERT INTO public.system_invoice_settings (
+          id, issuer_name, issuer_email, tax_number, issuer_phone,
+          invoice_title, invoice_subtitle, service_title, service_description,
+          footer_notice, free_license_notice, updated_at
+        )
+        VALUES ('global_invoice_config', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          issuer_name = EXCLUDED.issuer_name,
+          issuer_email = EXCLUDED.issuer_email,
+          tax_number = EXCLUDED.tax_number,
+          issuer_phone = EXCLUDED.issuer_phone,
+          invoice_title = EXCLUDED.invoice_title,
+          invoice_subtitle = EXCLUDED.invoice_subtitle,
+          service_title = EXCLUDED.service_title,
+          service_description = EXCLUDED.service_description,
+          footer_notice = EXCLUDED.footer_notice,
+          free_license_notice = EXCLUDED.free_license_notice,
+          updated_at = NOW();
+      `, [
+        issuer_name || 'PharmaCore SaaS Solutions',
+        issuer_email || 'support@pharmacore.site',
+        tax_number || '849-291-772',
+        issuer_phone || '',
+        invoice_title || 'فاتورة اشتراك سحابية رسمية',
+        invoice_subtitle || 'منظومة إدارة الصيدليات والموارد البشرية (SaaS Cloud)',
+        service_title || 'اشتراك منظومة إدارة الصيدليات السحابية المتكاملة',
+        service_description || 'تشمل الحضور، مسير الرواتب، البصمة الذكية، والتقارير',
+        footer_notice || 'تعتبر هذه الفاتورة سنداً إلكترونياً معتمداً ومسجلاً سحابياً.',
+        free_license_notice || 'تم اعتماد هذا الاشتراك مجاناً وبشكل دائم ورسمي من إدارة المنظومة (ترخيص معتمد غير خاضع لأي مستحقات مالية).'
+      ]);
+
+      io.emit('system:invoice_settings_updated');
+      res.json({ success: true, message: 'تم حفظ بيانات وترويسة الفاتورة بنجاح' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // تعديل بيانات فاتورة مسجلة
+  app.put('/api/developer/invoices/:id', requireDeveloper, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { invoice_number, amount, discount_amount, net_amount, discount_code, period_months, payment_method, status, notes } = req.body;
+      await db.query(`
+        UPDATE public.system_invoices
+        SET invoice_number = COALESCE($1, invoice_number),
+            amount = COALESCE($2, amount),
+            discount_amount = COALESCE($3, discount_amount),
+            net_amount = COALESCE($4, net_amount),
+            discount_code = COALESCE($5, discount_code),
+            period_months = COALESCE($6, period_months),
+            payment_method = COALESCE($7, payment_method),
+            status = COALESCE($8, status),
+            notes = COALESCE($9, notes)
+        WHERE id = $10
+      `, [invoice_number, amount, discount_amount, net_amount, discount_code, period_months, payment_method, status, notes, id]);
+
+      res.json({ success: true, message: 'تم تعديل بيانات الفاتورة بنجاح' });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
