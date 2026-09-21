@@ -170,7 +170,6 @@ export default function BranchSalesEntryModal({
 
   return (
     <div
-      className="modal-overlay"
       style={{
         position: 'fixed',
         top: 0,
@@ -179,10 +178,11 @@ export default function BranchSalesEntryModal({
         bottom: 0,
         backgroundColor: 'rgba(15, 23, 42, 0.75)',
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'center',
         zIndex: 10000,
-        padding: '16px',
+        padding: '20px 14px',
+        overflowY: 'auto',
         backdropFilter: 'blur(4px)'
       }}
     >
@@ -191,18 +191,22 @@ export default function BranchSalesEntryModal({
         onClick={(e) => e.stopPropagation()}
         style={{
           maxWidth: '650px',
-        width: '100%',
-        maxHeight: '92vh',
-        overflowY: 'auto',
-        borderRadius: '16px',
-        border: '1px solid var(--border)',
-        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-        padding: '24px',
-        background: 'var(--surface, #ffffff)',
-        direction: 'rtl'
-      }}>
+          width: '100%',
+          maxHeight: 'calc(100dvh - 40px)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          borderRadius: '16px',
+          border: '1px solid var(--border)',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+          padding: 0,
+          background: 'var(--surface, #ffffff)',
+          direction: 'rtl',
+          margin: 'auto 0'
+        }}
+      >
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '14px', marginBottom: '18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', padding: '16px 20px', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ fontSize: '24px', background: '#ecfdf5', padding: '8px', borderRadius: '12px' }}>💰</span>
             <div>
@@ -224,29 +228,30 @@ export default function BranchSalesEntryModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* Branch & Date Selection */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', marginBottom: '6px', color: 'var(--text)' }}>
-                🏢 الصيدلية / الفرع <span style={{ color: 'var(--danger)' }}>*</span>
-              </label>
-              <select
-                className="input-field"
-                value={branchId}
-                onChange={(e) => setBranchId(e.target.value)}
-                disabled={isBranchManager}
-                style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1.5px solid var(--border)', fontSize: '13.5px', fontWeight: '600' }}
-                required
-              >
-                <option value="">-- اختر الفرع --</option>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name || b.branchName || `فرع ${b.id}`} {b.branchCode ? `(${b.branchCode})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', margin: 0 }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', WebkitOverflowScrolling: 'touch' }}>
+            {/* Branch & Date Selection */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', marginBottom: '6px', color: 'var(--text)' }}>
+                  🏢 الصيدلية / الفرع <span style={{ color: 'var(--danger)' }}>*</span>
+                </label>
+                <select
+                  className="input-field"
+                  value={branchId}
+                  onChange={(e) => setBranchId(e.target.value)}
+                  disabled={isBranchManager}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1.5px solid var(--border)', fontSize: '13.5px', fontWeight: '600' }}
+                  required
+                >
+                  <option value="">-- اختر الفرع --</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name || b.branchName || `فرع ${b.id}`} {b.branchCode ? `(${b.branchCode})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', marginBottom: '6px', color: 'var(--text)' }}>
@@ -584,9 +589,10 @@ export default function BranchSalesEntryModal({
               )}
             </div>
           </div>
+        </div>
 
-          {/* Action Buttons */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+        {/* Action Buttons Sticky Footer */}
+          <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
             <button
               type="button"
               className="btn btn-ghost"

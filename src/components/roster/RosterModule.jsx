@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import RosterPreviewModal from './RosterPreviewModal';
+import EmployeeRosterEditModal from '../branches/EmployeeRosterEditModal';
 import { getEmpDisplayName, isEmployeeActive, getRealTodayStr } from '../../utils/formatters';
 import { getCycleDateRange } from '../../utils/periodEngine';
 import { getResolvedEmployeeRoster } from '../../utils/rosterEngine';
@@ -84,9 +85,11 @@ export default function RosterModule({
   showToast
 }) {
   const [selectedBranch, setSelectedBranch] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(() => (getRealTodayStr ? getRealTodayStr().slice(0, 7) : new Date().toISOString().slice(0, 7)));
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'approved' | 'pending' | 'none'
   const [selectedRosterEmp, setSelectedRosterEmp] = useState(null);
+  const [rosterModalConfig, setRosterModalConfig] = useState({ isOpen: false, employee: null });
 
   const orgSettings = state.orgSettings || {};
   const employees = state.employees || [];
@@ -114,7 +117,7 @@ export default function RosterModule({
   const [schedBranchFilter, setSchedBranchFilter] = useState('');
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isSendingNotifs, setIsSendingNotifs] = useState(false);
-  const [isSettingsExpanded, setIsSettingsExpanded] = useState(true);
+  const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   // Sync state if orgSettings change externally
@@ -906,8 +909,34 @@ export default function RosterModule({
 
       {/* Filter and Search */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-        <h4 style={{ margin: 0, fontSize: '16px' }}>👥 جميع موظفي الصيدليات (اضغط على الموظف لمعاينة الجدول)</h4>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <h4 style={{ margin: 0, fontSize: '16px' }}>👥 جميع موظفي الصيدليات</h4>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setRosterModalConfig({ isOpen: true, employee: null })}
+            style={{
+              background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+              color: '#fff',
+              border: 'none',
+              padding: '7px 16px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: 800,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 8px rgba(13, 148, 136, 0.25)',
+              cursor: 'pointer'
+            }}
+            title="تعيين وإصدار جدول شهري لموظف فورياً من الإدارة العليا"
+          >
+            <span>⚡</span>
+            <span>تعيين جدول شهري لموظف</span>
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
           <input
             type="text"
             placeholder="🔍 بحث باسم الموظف أو الكود..."
@@ -940,7 +969,7 @@ export default function RosterModule({
               <th>الفرع</th>
               <th>المسمى الوظيفي</th>
               <th>حالة اعتماد الجدول الشهري</th>
-              <th>معاينة الجدول</th>
+              <th>إدارة ومعاينة الجدول</th>
             </tr>
           </thead>
           <tbody>
@@ -959,13 +988,36 @@ export default function RosterModule({
                     <td>{emp.jobTitle}</td>
                     <td>{statusInfo.badge}</td>
                     <td>
-                      <button
-                        className="btn btn-start"
-                        style={{ padding: '4px 12px', fontSize: '12.5px' }}
-                        onClick={() => setSelectedRosterEmp(emp)}
-                      >
-                        👁️ معاينة الجدول الشهري
-                      </button>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <button
+                          className="btn btn-start"
+                          style={{ padding: '4px 10px', fontSize: '12px' }}
+                          onClick={() => setSelectedRosterEmp(emp)}
+                          title="معاينة الجدول الشهري"
+                        >
+                          👁️ معاينة
+                        </button>
+                        <button
+                          type="button"
+                          style={{
+                            padding: '4px 10px',
+                            fontSize: '12px',
+                            background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '6px',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => setRosterModalConfig({ isOpen: true, employee: emp })}
+                          title="تعيين أو تعديل الجدول الشهري لهذا الموظف"
+                        >
+                          ✏️ تعيين / تعديل
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -981,6 +1033,24 @@ export default function RosterModule({
           employee={selectedRosterEmp}
           state={state}
           onClose={() => setSelectedRosterEmp(null)}
+        />
+      )}
+
+      {/* Employee Roster Edit / Assignment Modal */}
+      {rosterModalConfig.isOpen && (
+        <EmployeeRosterEditModal
+          isOpen={rosterModalConfig.isOpen}
+          onClose={() => setRosterModalConfig({ isOpen: false, employee: null })}
+          employee={rosterModalConfig.employee}
+          employees={state.employees || []}
+          branchId={selectedBranch || rosterModalConfig.employee?.branchId}
+          branchName={branches.find(b => String(b.id) === String(selectedBranch || rosterModalConfig.employee?.branchId))?.name}
+          selectedMonth={selectedMonth}
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          isBranchManager={false}
         />
       )}
     </div>

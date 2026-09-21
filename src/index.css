@@ -1373,11 +1373,13 @@ tbody tr:hover {
   animation: modalScaleUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Modals with dedicated internal scrollable bodies */
+/* Modals with dedicated internal scrollable bodies or forms */
 .modal-card:has(.modal-card-body),
 .modal-card:has(.central-modal-body),
 .modal-card:has(.modal-body),
 .modal-card:has(> form),
+.modal-content:has(> form),
+.modal-content:has(.modal-body),
 .central-modal-card {
   overflow-y: hidden !important;
 }
@@ -1387,6 +1389,7 @@ tbody tr:hover {
 .modal-content:not(:has(.modal-card-body)):not(:has(.central-modal-body)):not(:has(.modal-body)):not(:has(> form)) {
   overflow-y: auto !important;
   overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
 }
 
 /* Forms inside modal cards: automatic smooth vertical scroll */
@@ -1398,10 +1401,12 @@ tbody tr:hover {
   flex-direction: column !important;
   flex: 1 1 auto !important;
   min-height: 0 !important;
+  max-height: 100% !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
   overscroll-behavior: contain !important;
   touch-action: pan-y !important;
+  -webkit-overflow-scrolling: touch !important;
   scrollbar-width: thin;
   max-width: 100% !important;
   box-sizing: border-box !important;

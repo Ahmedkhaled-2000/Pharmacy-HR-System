@@ -2405,15 +2405,15 @@ export default function BranchManagerView({
         const isBranchNotReq = !isDual && (previewModalReq.targetApproval === 'admin_only' || previewModalReq.targetApproval === 'admin' || isLoan || previewModalReq.branchNotRequired || previewModalReq.isDirectToAdmin);
 
         return (
-          <div className="modal-overlay" onClick={() => setPreviewModalReq(null)} style={{ zIndex: 1100 }}>
-            <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '750px', width: '92%', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderRadius: '16px', border: '1px solid var(--border)' }}>
+          <div className="modal-overlay" onClick={() => setPreviewModalReq(null)} style={{ zIndex: 1100, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '20px 14px' }}>
+            <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '820px', width: '96%', maxHeight: 'calc(100dvh - 40px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '16px', border: '1px solid var(--border)', margin: 'auto 0' }}>
               
               {/* Modal Top Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', borderBottom: '2px solid var(--border)', paddingBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid var(--border)', padding: '16px 20px', flexShrink: 0, background: 'var(--surface)', flexWrap: 'wrap', gap: '10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{ fontSize: '24px' }}>👁️</span>
                   <div>
-                    <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--primary-dark)', fontWeight: 'bold' }}>
+                    <h3 style={{ margin: 0, fontSize: '17px', color: 'var(--primary-dark)', fontWeight: 'bold' }}>
                       تفاصيل ومعاينة الطلب الكاملة
                     </h3>
                     <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
@@ -2427,7 +2427,8 @@ export default function BranchManagerView({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '13.5px' }}>
+              {/* Scrollable Modal Body */}
+              <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '13.5px', WebkitOverflowScrolling: 'touch' }}>
                 
                 {/* 1. Employee Info Card */}
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
@@ -3626,12 +3627,14 @@ export default function BranchManagerView({
 
           {/* Roster Preview Modal */}
           {previewRosterEmp && (
-            <div className="modal-backdrop">
-              <div className="modal-content card" style={{ maxWidth: '1050px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <div className="modal-backdrop" onClick={() => setPreviewRosterEmp(null)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '20px 14px' }}>
+              <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '1050px', width: '96%', maxHeight: 'calc(100dvh - 40px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '16px', margin: 'auto 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
                   <h3 style={{ margin: 0, fontSize: '16px' }}>📅 معاينة جدول الموظف: {previewRosterEmp.name} ({selectedMonth})</h3>
                   <button className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => setPreviewRosterEmp(null)}>✕ إغلاق</button>
                 </div>
+
+                <div style={{ flex: 1, overflowY: 'auto', padding: '20px', WebkitOverflowScrolling: 'touch' }}>
 
                 {(() => {
                   const roster = (state.rosters || []).find((r) => r && r.employeeId === previewRosterEmp?.id && r.month === selectedMonth);
@@ -3669,6 +3672,7 @@ export default function BranchManagerView({
                     </div>
                   );
                 })()}
+                </div>
               </div>
             </div>
           )}
@@ -5095,17 +5099,18 @@ export default function BranchManagerView({
       {/* ── MODAL 1: MANUAL PUNCH REQUEST MODAL ── */}
       {/* ───────────────────────────────────────────────────────────── */}
       {showManualPunchModal && (
-        <div className="modal-backdrop" onClick={() => setShowManualPunchModal(false)}>
-          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', width: '92%', padding: '24px', borderRadius: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+        <div className="modal-backdrop" onClick={() => setShowManualPunchModal(false)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '20px 14px' }}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '620px', width: '94%', maxHeight: 'calc(100dvh - 40px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '16px', margin: 'auto 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <h3 style={{ margin: 0, fontSize: '17px', color: '#0d9488', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 🖐️ طلب إضافة / تعديل بصمة يدوي لموظف
               </h3>
               <button type="button" className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => setShowManualPunchModal(false)}>✕</button>
             </div>
 
-            <form onSubmit={handleSubmitManualPunchRequest} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div className="field">
+            <form onSubmit={handleSubmitManualPunchRequest} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', margin: 0 }}>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px', WebkitOverflowScrolling: 'touch' }}>
+                <div className="field">
                 <label style={{ fontWeight: 'bold', fontSize: '13px' }}>اختر الموظف:</label>
                 <select
                   value={manualPunchData.employeeId}
@@ -5227,9 +5232,10 @@ export default function BranchManagerView({
                   required
                   style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
                 />
+                </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+              <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowManualPunchModal(false)}>إلغاء</button>
                 <button type="submit" className="btn btn-start" style={{ background: '#0d9488' }}>
                   📤 إرسال طلب البصمة للإدارة العليا للاعتماد
@@ -5244,17 +5250,18 @@ export default function BranchManagerView({
       {/* ── MODAL 2: BONUS REQUEST MODAL ── */}
       {/* ───────────────────────────────────────────────────────────── */}
       {showBonusModal && (
-        <div className="modal-backdrop" onClick={() => setShowBonusModal(false)}>
-          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '540px', width: '92%', padding: '24px', borderRadius: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+        <div className="modal-backdrop" onClick={() => setShowBonusModal(false)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '20px 14px' }}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px', width: '94%', maxHeight: 'calc(100dvh - 40px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '16px', margin: 'auto 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <h3 style={{ margin: 0, fontSize: '17px', color: '#16a34a', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 🎁 طلب مكافأة / حافز لموظف بالفرع
               </h3>
               <button type="button" className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => setShowBonusModal(false)}>✕</button>
             </div>
 
-            <form onSubmit={handleSubmitBonusRequest} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div className="field">
+            <form onSubmit={handleSubmitBonusRequest} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', margin: 0 }}>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px', WebkitOverflowScrolling: 'touch' }}>
+                <div className="field">
                 <label style={{ fontWeight: 'bold', fontSize: '13px' }}>اختر الموظف:</label>
                 <select
                   value={bonusData.employeeId}
@@ -5283,19 +5290,20 @@ export default function BranchManagerView({
                 />
               </div>
 
-              <div className="field">
-                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>سبب استحقاق المكافأة ومبررات مدير الفرع:</label>
-                <textarea
-                  rows="3"
-                  placeholder="اكتب أسباب تميز الموظف، تغطية نوبتجية، تحقيق تارجت مبيعات..."
-                  value={bonusData.reason}
-                  onChange={(e) => setBonusData({ ...bonusData, reason: e.target.value })}
-                  required
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                />
+                <div className="field">
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>سبب استحقاق المكافأة ومبررات مدير الفرع:</label>
+                  <textarea
+                    rows="3"
+                    placeholder="اكتب أسباب تميز الموظف، تغطية نوبتجية، تحقيق تارجت مبيعات..."
+                    value={bonusData.reason}
+                    onChange={(e) => setBonusData({ ...bonusData, reason: e.target.value })}
+                    required
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  />
+                </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+              <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowBonusModal(false)}>إلغاء</button>
                 <button type="submit" className="btn btn-start" style={{ background: '#16a34a' }}>
                   📤 إرسال طلب المكافأة للإدارة العليا للاعتماد
@@ -5310,116 +5318,118 @@ export default function BranchManagerView({
       {/* ── MODAL 3: LEAVE REQUEST ON BEHALF OF EMPLOYEE MODAL ── */}
       {/* ───────────────────────────────────────────────────────────── */}
       {showLeaveModal && (
-        <div className="modal-backdrop" onClick={() => setShowLeaveModal(false)}>
-          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', width: '92%', padding: '24px', borderRadius: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+        <div className="modal-backdrop" onClick={() => setShowLeaveModal(false)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '20px 14px' }}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', width: '94%', maxHeight: 'calc(100dvh - 40px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '16px', margin: 'auto 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <h3 style={{ margin: 0, fontSize: '17px', color: '#0284c7', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 🏖️ طلب إجازة لموظف بالفرع
               </h3>
               <button type="button" className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => setShowLeaveModal(false)}>✕</button>
             </div>
 
-            <form onSubmit={handleSubmitLeaveRequest} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div className="field">
-                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>اختر الموظف:</label>
-                <select
-                  value={leaveData.employeeId}
-                  onChange={(e) => setLeaveData({ ...leaveData, employeeId: e.target.value })}
-                  required
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                >
-                  <option value="">-- اختر موظف من الفرع --</option>
-                  {branchEmployees.map((e) => {
-                    const stats = calculateEmployeeLeaveStats(e, state);
-                    return (
-                      <option key={e.id} value={e.id}>
-                        {e.name} ({e.code}) — [الرصيد المتبقي: {stats.remainingAnnualDays} يوم]
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-
-              {leaveData.employeeId && (() => {
-                const selectedEmp = branchEmployees.find(e => String(e.id) === String(leaveData.employeeId));
-                const stats = calculateEmployeeLeaveStats(selectedEmp, state);
-                return (
-                  <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', padding: '10px 14px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
-                    <span style={{ color: '#0369a1', fontWeight: 'bold' }}>رصيد الإجازات السنوية المتبقي للموظف:</span>
-                    <span style={{ background: stats.remainingAnnualDays > 0 ? '#0284c7' : '#dc2626', color: '#fff', padding: '2px 10px', borderRadius: '12px', fontWeight: '900' }}>
-                      {stats.remainingAnnualDays} يوم متبقي (من إجمالي {stats.annualTotal})
-                    </span>
-                  </div>
-                );
-              })()}
-
-              <div className="field">
-                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>نوع الإجازة:</label>
-                <select
-                  value={leaveData.leaveType}
-                  onChange={(e) => setLeaveData({ ...leaveData, leaveType: e.target.value })}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                >
-                  <option value="annual">إجازة سنوية اعتيادية (تُخصم من الرصيد السنوي)</option>
-                  <option value="sick">إجازة مرضية (بتقرير طبي)</option>
-                  <option value="casual">إجازة عارضة</option>
-                  <option value="unpaid">إجازة بدون أجر</option>
-                  <option value="marriage">إجازة زواج</option>
-                  <option value="maternity">إجازة وضع / رعاية طفل</option>
-                  <option value="bereavement">إجازة وفاة</option>
-                </select>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <form onSubmit={handleSubmitLeaveRequest} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', margin: 0 }}>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px', WebkitOverflowScrolling: 'touch' }}>
                 <div className="field">
-                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>من تاريخ (بداية الإجازة):</label>
-                  <input
-                    type="date"
-                    value={leaveData.startDate}
-                    onChange={(e) => setLeaveData({ ...leaveData, startDate: e.target.value })}
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>اختر الموظف:</label>
+                  <select
+                    value={leaveData.employeeId}
+                    onChange={(e) => setLeaveData({ ...leaveData, employeeId: e.target.value })}
                     required
                     style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                  />
+                  >
+                    <option value="">-- اختر موظف من الفرع --</option>
+                    {branchEmployees.map((e) => {
+                      const stats = calculateEmployeeLeaveStats(e, state);
+                      return (
+                        <option key={e.id} value={e.id}>
+                          {e.name} ({e.code}) — [الرصيد المتبقي: {stats.remainingAnnualDays} يوم]
+                        </option>
+                      );
+                    })}
+                  </select>
                 </div>
-                <div className="field">
-                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>إلى تاريخ (نهاية الإجازة):</label>
-                  <input
-                    type="date"
-                    value={leaveData.endDate}
-                    onChange={(e) => setLeaveData({ ...leaveData, endDate: e.target.value })}
-                    required
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                  />
-                </div>
-              </div>
 
-              {leaveData.startDate && leaveData.endDate && (() => {
-                const s = new Date(leaveData.startDate);
-                const e = new Date(leaveData.endDate);
-                const days = Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1;
-                if (days > 0) {
+                {leaveData.employeeId && (() => {
+                  const selectedEmp = branchEmployees.find(e => String(e.id) === String(leaveData.employeeId));
+                  const stats = calculateEmployeeLeaveStats(selectedEmp, state);
                   return (
-                    <div style={{ background: '#f8fafc', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', fontWeight: 'bold', color: '#0284c7' }}>
-                      ⏱️ إجمالي مدة الإجازة المحسوبة: {days} يوم
+                    <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', padding: '10px 14px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                      <span style={{ color: '#0369a1', fontWeight: 'bold' }}>رصيد الإجازات السنوية المتبقي للموظف:</span>
+                      <span style={{ background: stats.remainingAnnualDays > 0 ? '#0284c7' : '#dc2626', color: '#fff', padding: '2px 10px', borderRadius: '12px', fontWeight: '900' }}>
+                        {stats.remainingAnnualDays} يوم متبقي (من إجمالي {stats.annualTotal})
+                      </span>
                     </div>
                   );
-                }
-                return null;
-              })()}
+                })()}
 
-              <div className="field">
-                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>سبب وسبب طلب الإجازة:</label>
-                <textarea
-                  rows="3"
-                  placeholder="اكتب أسباب الإجازة أو تفاصيل التنسيق مع الفرع..."
-                  value={leaveData.reason}
-                  onChange={(e) => setLeaveData({ ...leaveData, reason: e.target.value })}
-                  required
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                />
+                <div className="field">
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>نوع الإجازة:</label>
+                  <select
+                    value={leaveData.leaveType}
+                    onChange={(e) => setLeaveData({ ...leaveData, leaveType: e.target.value })}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  >
+                    <option value="annual">إجازة سنوية اعتيادية (تُخصم من الرصيد السنوي)</option>
+                    <option value="sick">إجازة مرضية (بتقرير طبي)</option>
+                    <option value="casual">إجازة عارضة</option>
+                    <option value="unpaid">إجازة بدون أجر</option>
+                    <option value="marriage">إجازة زواج</option>
+                    <option value="maternity">إجازة وضع / رعاية طفل</option>
+                    <option value="bereavement">إجازة وفاة</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="field">
+                    <label style={{ fontWeight: 'bold', fontSize: '13px' }}>من تاريخ (بداية الإجازة):</label>
+                    <input
+                      type="date"
+                      value={leaveData.startDate}
+                      onChange={(e) => setLeaveData({ ...leaveData, startDate: e.target.value })}
+                      required
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                    />
+                  </div>
+                  <div className="field">
+                    <label style={{ fontWeight: 'bold', fontSize: '13px' }}>إلى تاريخ (نهاية الإجازة):</label>
+                    <input
+                      type="date"
+                      value={leaveData.endDate}
+                      onChange={(e) => setLeaveData({ ...leaveData, endDate: e.target.value })}
+                      required
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                    />
+                  </div>
+                </div>
+
+                {leaveData.startDate && leaveData.endDate && (() => {
+                  const s = new Date(leaveData.startDate);
+                  const e = new Date(leaveData.endDate);
+                  const days = Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1;
+                  if (days > 0) {
+                    return (
+                      <div style={{ background: '#f8fafc', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', fontWeight: 'bold', color: '#0284c7' }}>
+                        ⏱️ إجمالي مدة الإجازة المحسوبة: {days} يوم
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                <div className="field">
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>سبب وسبب طلب الإجازة:</label>
+                  <textarea
+                    rows="3"
+                    placeholder="اكتب أسباب الإجازة أو تفاصيل التنسيق مع الفرع..."
+                    value={leaveData.reason}
+                    onChange={(e) => setLeaveData({ ...leaveData, reason: e.target.value })}
+                    required
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  />
+                </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+              <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowLeaveModal(false)}>إلغاء</button>
                 <button type="submit" className="btn btn-start" style={{ background: '#0284c7' }}>
                   📤 إرسال طلب الإجازة للإدارة العليا للاعتماد
@@ -5434,11 +5444,11 @@ export default function BranchManagerView({
       {/* ── MODAL 5: BRANCH MANAGER EMPLOYEE EVALUATION MODAL ── */}
       {/* ───────────────────────────────────────────────────────────── */}
       {showEvalModal && (
-        <div className="modal-backdrop" onClick={() => setShowEvalModal(false)}>
-          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '680px', width: '94%', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderRadius: '18px', boxShadow: '0 10px 30px rgba(0,0,0,0.25)' }}>
+        <div className="modal-backdrop" onClick={() => setShowEvalModal(false)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '20px 14px' }}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '680px', width: '94%', maxHeight: 'calc(100dvh - 40px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '18px', margin: 'auto 0', boxShadow: '0 10px 30px rgba(0,0,0,0.25)' }}>
             
             {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1.5px solid #ccfbf1', paddingBottom: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1.5px solid #ccfbf1', flexShrink: 0 }}>
               <h3 style={{ margin: 0, fontSize: '17.5px', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span>⭐</span>
                 <span>رصد تقييم أداء موظف بالفرع</span>
@@ -5446,7 +5456,8 @@ export default function BranchManagerView({
               <button type="button" className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '14px' }} onClick={() => setShowEvalModal(false)}>✕</button>
             </div>
 
-            <form onSubmit={handleSubmitBranchEvaluation} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <form onSubmit={handleSubmitBranchEvaluation} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', margin: 0 }}>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '16px', WebkitOverflowScrolling: 'touch' }}>
               
               {/* Month Switcher System (Requirement 28) */}
               <div style={{
@@ -5685,9 +5696,10 @@ export default function BranchManagerView({
                   style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
                 />
               </div>
+              </div>
 
-              {/* Action Buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
+              {/* Action Buttons Sticky Footer */}
+              <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowEvalModal(false)}>
                   إلغاء
                 </button>

@@ -1481,32 +1481,32 @@ export default function BranchMonthlyRosterModule({
               📥 تصدير Excel
             </button>
 
-            {/* Add / Edit Employee Monthly Roster Button */}
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => setRosterModalConfig({ isOpen: true, employee: null })}
-              style={{
-                background: isBranchManager
-                  ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)'
-                  : 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
-                color: '#fff',
-                border: 'none',
-                padding: '7px 16px',
-                borderRadius: '8px',
-                fontSize: '13px',
-                fontWeight: 800,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)',
-                cursor: 'pointer'
-              }}
-              title={isBranchManager ? 'إعداد وضبط جدول شهري لموظف مع إرسال طلب اعتماد للإدارة العليا' : 'تعيين واعتماد جدول شهري لموظف فورياً'}
-            >
-              <span>{isBranchManager ? '📝' : '⚡'}</span>
-              {isBranchManager ? 'إعداد جدول شهري لموظف (طلب اعتماد)' : 'تعيين جدول شهري لموظف'}
-            </button>
+            {/* Add / Edit Employee Monthly Roster Button (Branch Manager Only - Admin moved to RosterModule) */}
+            {isBranchManager && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setRosterModalConfig({ isOpen: true, employee: null })}
+                style={{
+                  background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '7px 16px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)',
+                  cursor: 'pointer'
+                }}
+                title="إعداد وضبط جدول شهري لموظف مع إرسال طلب اعتماد للإدارة العليا"
+              >
+                <span>📝</span>
+                إعداد جدول شهري لموظف (طلب اعتماد)
+              </button>
+            )}
           </div>
         </div>
       </div>
