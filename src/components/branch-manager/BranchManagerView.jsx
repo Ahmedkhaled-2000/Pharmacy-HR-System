@@ -3676,27 +3676,6 @@ export default function BranchManagerView({
               </div>
             </div>
           )}
-
-          {/* Roster Edit Modal - Interactive Weekly Visual Schedule Builder */}
-          {showRosterEditModal && (
-            <EmployeeRosterEditModal
-              isOpen={showRosterEditModal}
-              onClose={() => {
-                setShowRosterEditModal(false);
-                setRosterEditTargetEmp(null);
-              }}
-              employee={rosterEditTargetEmp || (rosterEditEmpId ? branchEmployees.find(e => String(e.id) === String(rosterEditEmpId)) : null) || branchEmployees[0] || null}
-              employees={branchEmployees}
-              branchId={currentBranch?.id}
-              branchName={currentBranch?.name}
-              selectedMonth={selectedMonth}
-              state={state}
-              setState={setState}
-              saveState={saveState}
-              showToast={showToast}
-              isBranchManager={true}
-            />
-          )}
         </div>
       )}
 
@@ -4794,7 +4773,10 @@ export default function BranchManagerView({
                 type="button"
                 className="btn btn-start"
                 style={{ padding: '7px 12px', fontSize: '12.5px', background: '#d97706', display: 'flex', alignItems: 'center', gap: '5px' }}
-                onClick={() => setShowRosterEditModal(true)}
+                onClick={() => {
+                  setRosterEditTargetEmp(null);
+                  setShowRosterEditModal(true);
+                }}
               >
                 📅 طلب تعديل جدول
               </button>
@@ -5710,6 +5692,29 @@ export default function BranchManagerView({
             </form>
           </div>
         </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* ── MODAL 6: EMPLOYEE ROSTER EDIT MODAL (Global for all tabs) ── */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {showRosterEditModal && (
+        <EmployeeRosterEditModal
+          isOpen={showRosterEditModal}
+          onClose={() => {
+            setShowRosterEditModal(false);
+            setRosterEditTargetEmp(null);
+          }}
+          employee={rosterEditTargetEmp || (rosterEditEmpId ? branchEmployees.find(e => String(e.id) === String(rosterEditEmpId)) : null) || branchEmployees[0] || null}
+          employees={branchEmployees}
+          branchId={currentBranch?.id}
+          branchName={currentBranch?.name}
+          selectedMonth={selectedMonth || (getRealTodayStr ? getRealTodayStr().slice(0, 7) : new Date().toISOString().slice(0, 7))}
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          isBranchManager={true}
+        />
       )}
 
       {/* Branch Sales Entry Modal for Branch Manager */}
