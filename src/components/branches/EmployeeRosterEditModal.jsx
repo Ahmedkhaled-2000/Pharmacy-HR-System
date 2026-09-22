@@ -32,9 +32,12 @@ export default function EmployeeRosterEditModal({
   // ── 1. قائمة الفروع والموظفين النشطين ──
   const allBranches = useMemo(() => state?.branches || [], [state?.branches]);
   const allEmployees = useMemo(() => {
+    if (isBranchManager && employees && employees.length > 0) {
+      return employees.filter(isEmployeeActive);
+    }
     const list = state?.employees || employees || [];
     return list.filter(isEmployeeActive);
-  }, [state?.employees, employees]);
+  }, [state?.employees, employees, isBranchManager]);
 
   // ── 2. حالة الفلاتر: فلتر بالفرع + فلتر بالموظفين الذين ليس لديهم جدول ──
   const [branchFilter, setBranchFilter] = useState(branchId || '');
@@ -64,10 +67,12 @@ export default function EmployeeRosterEditModal({
 
   // ── 3. تصفية الموظفين وفق الفلاتر النشطة ──
   const filteredEmployees = useMemo(() => {
-    let list = allEmployees;
+    let list = (isBranchManager && employees && employees.length > 0)
+      ? employees.filter(isEmployeeActive)
+      : allEmployees;
 
-    // تصفية حسب الفرع (إذا كان محدد)
-    if (branchFilter) {
+    // تصفية حسب الفرع (إذا كان محدد للإدارة العليا)
+    if (!isBranchManager && branchFilter) {
       list = list.filter(e =>
         String(e.branchId || '') === String(branchFilter) ||
         (e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === String(branchFilter)))
@@ -89,12 +94,14 @@ export default function EmployeeRosterEditModal({
     }
 
     return list;
-  }, [allEmployees, branchFilter, onlyWithoutRoster, state?.rosters, selectedMonth]);
+  }, [allEmployees, employees, isBranchManager, branchFilter, onlyWithoutRoster, state?.rosters, selectedMonth]);
 
   // إحصائية عدد الموظفين بدون جدول لهذا النطاق
   const unassignedCount = useMemo(() => {
-    let pool = allEmployees;
-    if (branchFilter) {
+    let pool = (isBranchManager && employees && employees.length > 0)
+      ? employees.filter(isEmployeeActive)
+      : allEmployees;
+    if (!isBranchManager && branchFilter) {
       pool = pool.filter(e =>
         String(e.branchId || '') === String(branchFilter) ||
         (e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === String(branchFilter)))
@@ -110,7 +117,7 @@ export default function EmployeeRosterEditModal({
       );
       return !hasApproved;
     }).length;
-  }, [allEmployees, branchFilter, state?.rosters, selectedMonth]);
+  }, [allEmployees, employees, isBranchManager, branchFilter, state?.rosters, selectedMonth]);
 
   // ── 4. الموظف المستهدف ──
   const [selectedEmpId, setSelectedEmpId] = useState(employee?.id || '');
