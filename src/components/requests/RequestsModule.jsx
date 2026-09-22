@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, normalizeState, fmt } from '../../utils/formatters';
 import { normalizeSchedule, getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { notifyEmployeeEarlyExitWarning, notifyOnPenaltyApplied } from '../../utils/gmailService';
@@ -3231,12 +3232,53 @@ export default function RequestsModule({
               shouldRouteDirectToAdmin(empObj, effectiveReqBranchId, state, previewModalReq)
             );
 
-        return (
-          <div className="modal-overlay" onClick={() => setPreviewModalReq(null)} style={{ zIndex: 1100 }}>
-            <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '750px', width: '92%', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderRadius: '16px', border: '1px solid var(--border)' }}>
+        const modalJSX = (
+          <div
+            className="modal-overlay"
+            onClick={() => setPreviewModalReq(null)}
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: '100vw',
+              height: '100vh',
+              height: '100dvh',
+              zIndex: 999999,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              padding: '14px 10px',
+              background: 'rgba(15, 23, 42, 0.85)',
+              backdropFilter: 'blur(8px)',
+              boxSizing: 'border-box'
+            }}
+          >
+            <div
+              className="modal-card"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: 'min(1000px, 96vw)',
+                width: '96%',
+                height: 'calc(100dvh - 28px)',
+                maxHeight: 'calc(100dvh - 28px)',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                padding: 0,
+                borderRadius: '16px',
+                border: '1px solid var(--border)',
+                margin: 'auto',
+                background: 'var(--surface, #ffffff)',
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+              }}
+            >
               
               {/* Modal Top Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', borderBottom: '2px solid var(--border)', paddingBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid var(--border)', padding: '14px 20px', flexShrink: 0, background: 'var(--surface)', flexWrap: 'wrap', gap: '10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{ fontSize: '24px' }}>👁️</span>
                   <div>
@@ -3254,7 +3296,8 @@ export default function RequestsModule({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '13.5px' }}>
+              {/* Scrollable Modal Body */}
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '13.5px', WebkitOverflowScrolling: 'touch' }}>
                 
                 {/* 1. Employee & Branch Information Card */}
                 <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
@@ -4570,15 +4613,28 @@ export default function RequestsModule({
                 </div>
               </div>
 
-              {/* Modal Actions */}
-              <div style={{ marginTop: '22px', display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border)', paddingTop: '16px', flexWrap: 'wrap' }}>
+              {/* Modal Actions Fixed Sticky Footer */}
+              <div
+                style={{
+                  padding: '12px 20px',
+                  borderTop: '1.5px solid var(--border)',
+                  background: 'var(--surface, #ffffff)',
+                  flexShrink: 0,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                  boxShadow: '0 -4px 12px rgba(0, 0, 0, 0.03)'
+                }}
+              >
                 <button
                   type="button"
                   className="btn btn-ghost"
                   style={{ padding: '8px 18px', fontSize: '13px' }}
                   onClick={() => setPreviewModalReq(null)}
                 >
-                  إغلاق النافذة
+                  ✕ إغلاق النافذة
                 </button>
 
                 {/* ── EARLY EXIT / OVERTIME MODAL ACTIONS ── */}
@@ -4694,7 +4750,7 @@ export default function RequestsModule({
                   }
 
                   return (
-                    <>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       <button
                         type="button"
                         className="del-btn"
@@ -4736,13 +4792,18 @@ export default function RequestsModule({
                           ? `✓ اعتماد السلفة بالمبلغ المعتمد (${loanCustomAmount || previewModalReq.amount} ج.م)`
                           : '✓ اعتماد وموافقة الطلب فوراً'}
                       </button>
-                    </>
+                    </div>
                   );
                 })()}
               </div>
             </div>
           </div>
         );
+
+        if (typeof document !== 'undefined' && document.body) {
+          return createPortal(modalJSX, document.body);
+        }
+        return modalJSX;
       })()}
 
       {/* ── HIGH-FIDELITY IN-APP LIGHTBOX & COMPARISON MODAL (Zero White Windows) ── */}

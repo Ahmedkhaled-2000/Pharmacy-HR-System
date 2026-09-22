@@ -1333,14 +1333,14 @@ tbody tr:hover {
   backdrop-filter: blur(8px) !important;
   -webkit-backdrop-filter: blur(8px) !important;
   display: flex !important;
-  align-items: flex-start !important; /* Safe start: never clips top or pushes content out */
+  align-items: center !important; /* Center vertically so modals never get pushed down */
   justify-content: center !important;
   overflow-y: auto !important; /* VERTICAL SCROLL ONLY */
   overflow-x: hidden !important; /* STRICTLY NO HORIZONTAL SCROLL */
   -webkit-overflow-scrolling: touch !important;
   touch-action: pan-y !important;
-  padding: clamp(10px, 2.5vh, 24px) clamp(8px, 2vw, 18px) !important;
-  z-index: 2500 !important;
+  padding: clamp(10px, 2vh, 20px) clamp(8px, 2vw, 16px) !important;
+  z-index: 999999 !important; /* Always on top of all headers and navigation */
   direction: rtl;
   box-sizing: border-box !important;
   overscroll-behavior: contain !important;
@@ -2863,8 +2863,8 @@ tbody tr:hover {
 
 /* Animation Keyframes */
 @keyframes pageFadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
 }
 
 @keyframes drawerSlideRtl {
@@ -2884,7 +2884,7 @@ tbody tr:hover {
 }
 
 .fade-in-page {
-  animation: pageFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: pageFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Glassmorphism & Smooth Hover Utilities */

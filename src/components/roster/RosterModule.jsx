@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import RosterPreviewModal from './RosterPreviewModal';
 import EmployeeRosterEditModal from '../branches/EmployeeRosterEditModal';
 import { getEmpDisplayName, isEmployeeActive, getRealTodayStr } from '../../utils/formatters';
@@ -752,125 +753,136 @@ export default function RosterModule({
       </div>
 
       {/* Confirmation Modal */}
-      {showConfirmModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.5)',
-          zIndex: 9999,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '16px'
-        }}>
+      {showConfirmModal && (() => {
+        const confirmModalJSX = (
           <div style={{
-            background: 'var(--surface, #ffffff)',
-            borderRadius: '16px',
-            maxWidth: '520px',
-            width: '100%',
-            padding: '24px',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
-            border: '1px solid var(--border, #e2e8f0)',
-            fontFamily: "'Tajawal', sans-serif"
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100dvh',
+            background: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(8px)',
+            zIndex: 999999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            boxSizing: 'border-box'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-              <div style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: '50%',
-                background: '#ecfdf5',
-                color: '#059669',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '22px'
-              }}>
-                ⏰
-              </div>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: 'var(--text, #1e293b)' }}>
-                  تأكيد إرسال تذكير فوري بعمل الجدول الشهري
-                </h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--muted, #64748b)' }}>
-                  سيتم إرسال إشعار تذكير فوراً لبوابة الموظف لحثهم على إعداد وإرسال جدول الشفتات للاعتماد
-                </p>
-              </div>
-            </div>
-
             <div style={{
-              background: 'var(--background, #f8fafc)',
-              padding: '14px',
-              borderRadius: '10px',
+              background: 'var(--surface, #ffffff)',
+              borderRadius: '16px',
+              maxWidth: '520px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
               border: '1px solid var(--border, #e2e8f0)',
-              marginBottom: '16px'
+              fontFamily: "'Tajawal', sans-serif"
             }}>
-              <div style={{ fontSize: '13px', marginBottom: '8px', color: 'var(--muted, #64748b)' }}>
-                👥 عدد الموظفين المستلمين للتذكير: <strong style={{ color: '#059669', fontSize: '15px' }}>{eligibleEmployees.length} موظف</strong>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                <div style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '50%',
+                  background: '#ecfdf5',
+                  color: '#059669',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '22px'
+                }}>
+                  ⏰
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: 'var(--text, #1e293b)' }}>
+                    تأكيد إرسال تذكير فوري بعمل الجدول الشهري
+                  </h3>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--muted, #64748b)' }}>
+                    سيتم إرسال إشعار تذكير فوراً لبوابة الموظف لحثهم على إعداد وإرسال جدول الشفتات للاعتماد
+                  </p>
+                </div>
               </div>
-              <div style={{ fontSize: '13px', marginBottom: '8px', color: 'var(--muted, #64748b)' }}>
-                🏢 نطاق الفروع: <strong style={{ color: 'var(--text, #1e293b)' }}>{schedBranchFilter ? branches.find(b => b.id === schedBranchFilter)?.name || schedBranchFilter : 'كافة فروع الصيدليات'}</strong>
-              </div>
-              <div style={{ fontSize: '13px', color: 'var(--muted, #64748b)' }}>
-                📝 نص رسالة التذكير:
-              </div>
-              <div style={{
-                marginTop: '6px',
-                padding: '10px',
-                background: '#ffffff',
-                borderRadius: '8px',
-                border: '1px solid var(--border, #cbd5e1)',
-                fontSize: '13px',
-                lineHeight: 1.5,
-                color: 'var(--text, #1e293b)',
-                fontWeight: 500
-              }}>
-                {schedMessage}
-              </div>
-            </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button
-                type="button"
-                onClick={() => setShowConfirmModal(false)}
-                disabled={isSendingNotifs}
-                style={{
-                  padding: '8px 18px',
-                  fontSize: '13.5px',
+              <div style={{
+                background: 'var(--background, #f8fafc)',
+                padding: '14px',
+                borderRadius: '10px',
+                border: '1px solid var(--border, #e2e8f0)',
+                marginBottom: '16px'
+              }}>
+                <div style={{ fontSize: '13px', marginBottom: '8px', color: 'var(--muted, #64748b)' }}>
+                  👥 عدد الموظفين المستلمين للتذكير: <strong style={{ color: '#059669', fontSize: '15px' }}>{eligibleEmployees.length} موظف</strong>
+                </div>
+                <div style={{ fontSize: '13px', marginBottom: '8px', color: 'var(--muted, #64748b)' }}>
+                  🏢 نطاق الفروع: <strong style={{ color: 'var(--text, #1e293b)' }}>{schedBranchFilter ? branches.find(b => b.id === schedBranchFilter)?.name || schedBranchFilter : 'كافة فروع الصيدليات'}</strong>
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--muted, #64748b)' }}>
+                  📝 نص رسالة التذكير:
+                </div>
+                <div style={{
+                  marginTop: '6px',
+                  padding: '10px',
+                  background: '#ffffff',
                   borderRadius: '8px',
                   border: '1px solid var(--border, #cbd5e1)',
-                  background: 'transparent',
-                  color: 'var(--text, #475569)',
-                  cursor: 'pointer',
-                  fontWeight: 600
-                }}
-              >
-                إلغاء
-              </button>
-              <button
-                type="button"
-                onClick={() => executeSendNotifications(false)}
-                disabled={isSendingNotifs}
-                style={{
-                  padding: '8px 20px',
-                  fontSize: '13.5px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  background: '#059669',
-                  color: '#ffffff',
-                  cursor: isSendingNotifs ? 'not-allowed' : 'pointer',
-                  fontWeight: 700,
-                  boxShadow: '0 2px 8px rgba(5, 150, 105, 0.3)'
-                }}
-              >
-                {isSendingNotifs ? '⏳ جارِ الإرسال...' : '🚀 نعم، إرسال التذكير الآن'}
-              </button>
+                  fontSize: '13px',
+                  lineHeight: 1.5,
+                  color: 'var(--text, #1e293b)',
+                  fontWeight: 500
+                }}>
+                  {schedMessage}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmModal(false)}
+                  disabled={isSendingNotifs}
+                  style={{
+                    padding: '8px 18px',
+                    fontSize: '13.5px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border, #cbd5e1)',
+                    background: 'transparent',
+                    color: 'var(--text, #475569)',
+                    cursor: 'pointer',
+                    fontWeight: 600
+                  }}
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={() => executeSendNotifications(false)}
+                  disabled={isSendingNotifs}
+                  style={{
+                    padding: '8px 20px',
+                    fontSize: '13.5px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: '#059669',
+                    color: '#ffffff',
+                    cursor: isSendingNotifs ? 'not-allowed' : 'pointer',
+                    fontWeight: 700,
+                    boxShadow: '0 2px 8px rgba(5, 150, 105, 0.3)'
+                  }}
+                >
+                  {isSendingNotifs ? '⏳ جارِ الإرسال...' : '🚀 نعم، إرسال التذكير الآن'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+
+        if (typeof document !== 'undefined' && document.body) {
+          return createPortal(confirmModalJSX, document.body);
+        }
+        return confirmModalJSX;
+      })()}
 
       {/* Status Summary KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '18px' }}>

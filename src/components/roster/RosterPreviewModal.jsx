@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { getResolvedEmployeeRoster } from './RosterModule';
 import { getEmpDisplayName } from '../../utils/formatters';
 
@@ -104,20 +105,45 @@ export default function RosterPreviewModal({
 
   const isMultiBranch = employee.branchesDetails && employee.branchesDetails.length > 1;
 
-  return (
-    <div className="modal-overlay">
+  const modalJSX = (
+    <div
+      className="modal-overlay"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100vw',
+        height: '100dvh',
+        zIndex: 999999,
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        padding: '12px 10px',
+        background: 'rgba(15, 23, 42, 0.85)',
+        backdropFilter: 'blur(8px)',
+        boxSizing: 'border-box'
+      }}
+    >
       <div
         className="modal-card"
         onClick={(e) => e.stopPropagation()}
         style={{
           maxWidth: 'min(1100px, 96vw)',
           width: '95%',
-          maxHeight: 'min(92vh, calc(100dvh - 28px))',
+          height: 'calc(100dvh - 28px)',
+          maxHeight: 'calc(100dvh - 28px)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          borderRadius: '20px',
-          boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.3)'
+          borderRadius: '16px',
+          boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.3)',
+          background: 'var(--surface, #ffffff)',
+          margin: 'auto'
         }}
       >
         {/* Header Pro */}
@@ -436,12 +462,17 @@ export default function RosterPreviewModal({
         </div>
 
         {/* Modal Footer */}
-        <div className="modal-actions-pro" style={{ justifyContent: 'flex-end', padding: '12px 20px' }}>
-          <button type="button" className="btn btn-ghost" onClick={onClose} style={{ padding: '7px 20px', fontSize: '13px' }}>
-            إغلاق
+        <div className="modal-actions-pro" style={{ justifyContent: 'flex-end', padding: '12px 20px', flexShrink: 0, borderTop: '1px solid var(--border)' }}>
+          <button type="button" className="btn btn-ghost" onClick={onClose} style={{ padding: '8px 22px', fontSize: '13px' }}>
+            ✕ إغلاق النافذة
           </button>
         </div>
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(modalJSX, document.body);
+  }
+  return modalJSX;
 }

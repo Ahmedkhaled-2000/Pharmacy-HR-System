@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { arabicWeekday, fmt, isEmployeeActive } from '../../utils/formatters';
 import { DAYS_OF_WEEK, formatTime12H, formatShiftRange12H } from './BranchMonthlyRosterModule';
 import { getCycleDateRange } from '../../utils/periodEngine';
@@ -437,40 +438,49 @@ export default function EmployeeRosterEditModal({
 
   if (!isOpen) return null;
 
-  return (
+  const modalContent = (
     <div
       className="modal-backdrop"
       onClick={onClose}
       style={{
         position: 'fixed',
-        inset: 0,
-        zIndex: 9999,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100vw',
+        height: '100vh',
+        height: '100dvh',
+        zIndex: 999999,
         display: 'flex',
         justifyContent: 'center',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         overflowY: 'auto',
         overflowX: 'hidden',
-        padding: '20px 14px',
-        background: 'rgba(15, 23, 42, 0.78)',
-        backdropFilter: 'blur(6px)',
-        WebkitOverflowScrolling: 'touch'
+        padding: '12px 10px',
+        background: 'rgba(15, 23, 42, 0.85)',
+        backdropFilter: 'blur(8px)',
+        WebkitOverflowScrolling: 'touch',
+        boxSizing: 'border-box'
       }}
     >
       <div
         className="modal-content card fade-in"
         onClick={(e) => e.stopPropagation()}
         style={{
-          maxWidth: '920px',
-          width: '98%',
-          maxHeight: 'calc(100dvh - 40px)',
+          maxWidth: 'min(1360px, 98vw)',
+          width: '98vw',
+          height: 'calc(100dvh - 20px)',
+          maxHeight: 'calc(100dvh - 20px)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
           padding: 0,
-          borderRadius: '18px',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+          borderRadius: '16px',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
           fontFamily: "'Tajawal', sans-serif",
-          margin: 'auto 0'
+          margin: 'auto',
+          background: 'var(--surface, #ffffff)'
         }}
       >
         {/* ── 1. ترويسة المودال المثبتة (Sticky Header) ── */}
@@ -882,4 +892,9 @@ export default function EmployeeRosterEditModal({
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 }

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { shouldRouteDirectToAdmin, isDualApprovalRequest } from '../../utils/jobsHelper';
 import EmployeePermissionsModule from '../employee-portal/EmployeePermissionsModule';
 import EmployeeLoansModule from '../employee-portal/EmployeeLoansModule';
@@ -1717,6 +1718,14 @@ export default function BranchManagerView({
     );
   }
 
+  const renderInPortal = (element) => {
+    if (!element) return null;
+    if (typeof document !== 'undefined' && document.body) {
+      return createPortal(element, document.body);
+    }
+    return element;
+  };
+
   return (
     <div style={{ fontFamily: "'Tajawal', sans-serif" }} className="fade-in-page">
 
@@ -2404,12 +2413,53 @@ export default function BranchManagerView({
         const isDual = isDualApprovalRequest(previewModalReq);
         const isBranchNotReq = !isDual && (previewModalReq.targetApproval === 'admin_only' || previewModalReq.targetApproval === 'admin' || isLoan || previewModalReq.branchNotRequired || previewModalReq.isDirectToAdmin);
 
-        return (
-          <div className="modal-overlay" onClick={() => setPreviewModalReq(null)} style={{ zIndex: 1100, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '20px 14px' }}>
-            <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '820px', width: '96%', maxHeight: 'calc(100dvh - 40px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '16px', border: '1px solid var(--border)', margin: 'auto 0' }}>
+        const modalJSX = (
+          <div
+            className="modal-overlay"
+            onClick={() => setPreviewModalReq(null)}
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: '100vw',
+              height: '100vh',
+              height: '100dvh',
+              zIndex: 999999,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              padding: '14px 10px',
+              background: 'rgba(15, 23, 42, 0.85)',
+              backdropFilter: 'blur(8px)',
+              boxSizing: 'border-box'
+            }}
+          >
+            <div
+              className="modal-card"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: 'min(980px, 96vw)',
+                width: '96%',
+                height: 'calc(100dvh - 28px)',
+                maxHeight: 'calc(100dvh - 28px)',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                padding: 0,
+                borderRadius: '16px',
+                border: '1px solid var(--border)',
+                margin: 'auto',
+                background: 'var(--surface, #ffffff)',
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+              }}
+            >
               
               {/* Modal Top Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid var(--border)', padding: '16px 20px', flexShrink: 0, background: 'var(--surface)', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid var(--border)', padding: '14px 20px', flexShrink: 0, background: 'var(--surface)', flexWrap: 'wrap', gap: '10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{ fontSize: '24px' }}>👁️</span>
                   <div>
@@ -2428,7 +2478,7 @@ export default function BranchManagerView({
               </div>
 
               {/* Scrollable Modal Body */}
-              <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '13.5px', WebkitOverflowScrolling: 'touch' }}>
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '13.5px', WebkitOverflowScrolling: 'touch' }}>
                 
                 {/* 1. Employee Info Card */}
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
@@ -3283,15 +3333,28 @@ export default function BranchManagerView({
                 </div>
               </div>
 
-              {/* Modal Actions */}
-              <div style={{ marginTop: '22px', display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border)', paddingTop: '16px', flexWrap: 'wrap' }}>
+              {/* Modal Actions Fixed Sticky Footer */}
+              <div
+                style={{
+                  padding: '12px 20px',
+                  borderTop: '1.5px solid var(--border)',
+                  background: 'var(--surface, #ffffff)',
+                  flexShrink: 0,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                  boxShadow: '0 -4px 12px rgba(0, 0, 0, 0.03)'
+                }}
+              >
                 <button
                   type="button"
                   className="btn btn-ghost"
                   style={{ padding: '8px 18px', fontSize: '13px' }}
                   onClick={() => setPreviewModalReq(null)}
                 >
-                  إغلاق النافذة
+                  ✕ إغلاق النافذة
                 </button>
 
                 {(() => {
@@ -3354,6 +3417,11 @@ export default function BranchManagerView({
             </div>
           </div>
         );
+
+        if (typeof document !== 'undefined' && document.body) {
+          return createPortal(modalJSX, document.body);
+        }
+        return modalJSX;
       })()}
 
       {/* ───────────────────────────────────────────────────────────── */}
@@ -3626,52 +3694,97 @@ export default function BranchManagerView({
           )}
 
           {/* Roster Preview Modal */}
-          {previewRosterEmp && (
-            <div className="modal-backdrop" onClick={() => setPreviewRosterEmp(null)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '20px 14px' }}>
-              <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '1050px', width: '96%', maxHeight: 'calc(100dvh - 40px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '16px', margin: 'auto 0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-                  <h3 style={{ margin: 0, fontSize: '16px' }}>📅 معاينة جدول الموظف: {previewRosterEmp.name} ({selectedMonth})</h3>
-                  <button className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => setPreviewRosterEmp(null)}>✕ إغلاق</button>
+          {previewRosterEmp && renderInPortal(
+            <div
+              className="modal-backdrop"
+              onClick={() => setPreviewRosterEmp(null)}
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                width: '100vw',
+                height: '100dvh',
+                zIndex: 999999,
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                padding: '12px 10px',
+                background: 'rgba(15, 23, 42, 0.85)',
+                backdropFilter: 'blur(8px)',
+                boxSizing: 'border-box'
+              }}
+            >
+              <div
+                className="modal-content card"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  maxWidth: 'min(1050px, 96vw)',
+                  width: '96%',
+                  height: 'calc(100dvh - 28px)',
+                  maxHeight: 'calc(100dvh - 28px)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                  padding: 0,
+                  borderRadius: '16px',
+                  margin: 'auto',
+                  background: 'var(--surface, #ffffff)',
+                  boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0, background: 'var(--surface)' }}>
+                  <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--primary-dark)', fontWeight: 'bold' }}>📅 معاينة جدول الموظف: {previewRosterEmp.name} ({selectedMonth})</h3>
+                  <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '14px' }} onClick={() => setPreviewRosterEmp(null)}>✕ إغلاق</button>
                 </div>
 
-                <div style={{ flex: 1, overflowY: 'auto', padding: '20px', WebkitOverflowScrolling: 'touch' }}>
-
-                {(() => {
-                  const roster = (state.rosters || []).find((r) => r && r.employeeId === previewRosterEmp?.id && r.month === selectedMonth);
-                  if (!roster || !roster.schedule) {
-                    return <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '20px' }}>لم يتم إدخال جدول شهري لهذا الموظف عن شهر {selectedMonth}.</p>;
-                  }
-                  return (
-                    <div className="table-responsive">
-                      <table className="bylaws-table">
-                        <thead>
-                          <tr>
-                            <th>اليوم</th>
-                            <th>نوع اليوم / الحضور</th>
-                            <th>وقت الحضور</th>
-                            <th>وقت الانصراف</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {Object.entries(roster.schedule).map(([dayName, sch]) => (
-                            <tr key={dayName} style={{ background: sch.type === 'off' ? '#fef2f2' : 'transparent' }}>
-                              <td style={{ fontWeight: '700' }}>{dayName}</td>
-                              <td>
-                                {sch.type === 'off' ? (
-                                  <span style={{ color: '#dc2626', fontWeight: '700' }}>🔴 راحة أسبوعية</span>
-                                ) : (
-                                  <span style={{ color: '#16a34a', fontWeight: '700' }}>🟢 يوم عمل</span>
-                                )}
-                              </td>
-                              <td>{sch.type === 'off' ? '—' : sch.start}</td>
-                              <td>{sch.type === 'off' ? '—' : sch.end}</td>
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px', WebkitOverflowScrolling: 'touch' }}>
+                  {(() => {
+                    const roster = (state.rosters || []).find((r) => r && r.employeeId === previewRosterEmp?.id && r.month === selectedMonth);
+                    if (!roster || !roster.schedule) {
+                      return <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '20px' }}>لم يتم إدخال جدول شهري لهذا الموظف عن شهر {selectedMonth}.</p>;
+                    }
+                    return (
+                      <div className="table-responsive">
+                        <table className="bylaws-table">
+                          <thead>
+                            <tr>
+                              <th>اليوم</th>
+                              <th>نوع اليوم / الحضور</th>
+                              <th>وقت الحضور</th>
+                              <th>وقت الانصراف</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  );
-                })()}
+                          </thead>
+                          <tbody>
+                            {Object.entries(roster.schedule).map(([dayName, sch]) => (
+                              <tr key={dayName} style={{ background: sch.type === 'off' ? '#fef2f2' : 'transparent' }}>
+                                <td style={{ fontWeight: '700' }}>{dayName}</td>
+                                <td>
+                                  {sch.type === 'off' ? (
+                                    <span style={{ color: '#dc2626', fontWeight: '700' }}>🔴 راحة أسبوعية</span>
+                                  ) : (
+                                    <span style={{ color: '#16a34a', fontWeight: '700' }}>🟢 يوم عمل</span>
+                                  )}
+                                </td>
+                                <td>{sch.type === 'off' ? '—' : sch.start}</td>
+                                <td>{sch.type === 'off' ? '—' : sch.end}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Fixed Sticky Footer */}
+                <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', boxShadow: '0 -4px 12px rgba(0,0,0,0.03)' }}>
+                  <button type="button" className="btn btn-ghost" onClick={() => setPreviewRosterEmp(null)} style={{ padding: '8px 20px', fontSize: '13px' }}>
+                    ✕ إغلاق النافذة
+                  </button>
                 </div>
               </div>
             </div>
@@ -5080,9 +5193,48 @@ export default function BranchManagerView({
       {/* ───────────────────────────────────────────────────────────── */}
       {/* ── MODAL 1: MANUAL PUNCH REQUEST MODAL ── */}
       {/* ───────────────────────────────────────────────────────────── */}
-      {showManualPunchModal && (
-        <div className="modal-backdrop" onClick={() => setShowManualPunchModal(false)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '20px 14px' }}>
-          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '620px', width: '94%', maxHeight: 'calc(100dvh - 40px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '16px', margin: 'auto 0' }}>
+      {showManualPunchModal && renderInPortal(
+        <div
+          className="modal-backdrop"
+          onClick={() => setShowManualPunchModal(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100dvh',
+            zIndex: 999999,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            padding: '12px 10px',
+            background: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(8px)',
+            boxSizing: 'border-box'
+          }}
+        >
+          <div
+            className="modal-content card"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: '620px',
+              width: '94%',
+              height: 'calc(100dvh - 28px)',
+              maxHeight: 'calc(100dvh - 28px)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              padding: 0,
+              borderRadius: '16px',
+              margin: 'auto',
+              background: 'var(--surface, #ffffff)',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+            }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <h3 style={{ margin: 0, fontSize: '17px', color: '#0d9488', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 🖐️ طلب إضافة / تعديل بصمة يدوي لموظف
@@ -5217,7 +5369,7 @@ export default function BranchManagerView({
                 </div>
               </div>
 
-              <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px', boxShadow: '0 -4px 12px rgba(0,0,0,0.03)' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowManualPunchModal(false)}>إلغاء</button>
                 <button type="submit" className="btn btn-start" style={{ background: '#0d9488' }}>
                   📤 إرسال طلب البصمة للإدارة العليا للاعتماد
@@ -5231,9 +5383,48 @@ export default function BranchManagerView({
       {/* ───────────────────────────────────────────────────────────── */}
       {/* ── MODAL 2: BONUS REQUEST MODAL ── */}
       {/* ───────────────────────────────────────────────────────────── */}
-      {showBonusModal && (
-        <div className="modal-backdrop" onClick={() => setShowBonusModal(false)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '20px 14px' }}>
-          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px', width: '94%', maxHeight: 'calc(100dvh - 40px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '16px', margin: 'auto 0' }}>
+      {showBonusModal && renderInPortal(
+        <div
+          className="modal-backdrop"
+          onClick={() => setShowBonusModal(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100dvh',
+            zIndex: 999999,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            padding: '12px 10px',
+            background: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(8px)',
+            boxSizing: 'border-box'
+          }}
+        >
+          <div
+            className="modal-content card"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: '560px',
+              width: '94%',
+              height: 'calc(100dvh - 28px)',
+              maxHeight: 'calc(100dvh - 28px)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              padding: 0,
+              borderRadius: '16px',
+              margin: 'auto',
+              background: 'var(--surface, #ffffff)',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+            }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <h3 style={{ margin: 0, fontSize: '17px', color: '#16a34a', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 🎁 طلب مكافأة / حافز لموظف بالفرع
@@ -5285,7 +5476,7 @@ export default function BranchManagerView({
                 </div>
               </div>
 
-              <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px', boxShadow: '0 -4px 12px rgba(0,0,0,0.03)' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowBonusModal(false)}>إلغاء</button>
                 <button type="submit" className="btn btn-start" style={{ background: '#16a34a' }}>
                   📤 إرسال طلب المكافأة للإدارة العليا للاعتماد
@@ -5299,9 +5490,48 @@ export default function BranchManagerView({
       {/* ───────────────────────────────────────────────────────────── */}
       {/* ── MODAL 3: LEAVE REQUEST ON BEHALF OF EMPLOYEE MODAL ── */}
       {/* ───────────────────────────────────────────────────────────── */}
-      {showLeaveModal && (
-        <div className="modal-backdrop" onClick={() => setShowLeaveModal(false)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '20px 14px' }}>
-          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', width: '94%', maxHeight: 'calc(100dvh - 40px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '16px', margin: 'auto 0' }}>
+      {showLeaveModal && renderInPortal(
+        <div
+          className="modal-backdrop"
+          onClick={() => setShowLeaveModal(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100dvh',
+            zIndex: 999999,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            padding: '12px 10px',
+            background: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(8px)',
+            boxSizing: 'border-box'
+          }}
+        >
+          <div
+            className="modal-content card"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: '600px',
+              width: '94%',
+              height: 'calc(100dvh - 28px)',
+              maxHeight: 'calc(100dvh - 28px)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              padding: 0,
+              borderRadius: '16px',
+              margin: 'auto',
+              background: 'var(--surface, #ffffff)',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+            }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <h3 style={{ margin: 0, fontSize: '17px', color: '#0284c7', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 🏖️ طلب إجازة لموظف بالفرع
@@ -5411,7 +5641,7 @@ export default function BranchManagerView({
                 </div>
               </div>
 
-              <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px', boxShadow: '0 -4px 12px rgba(0,0,0,0.03)' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowLeaveModal(false)}>إلغاء</button>
                 <button type="submit" className="btn btn-start" style={{ background: '#0284c7' }}>
                   📤 إرسال طلب الإجازة للإدارة العليا للاعتماد
@@ -5425,9 +5655,48 @@ export default function BranchManagerView({
       {/* ───────────────────────────────────────────────────────────── */}
       {/* ── MODAL 5: BRANCH MANAGER EMPLOYEE EVALUATION MODAL ── */}
       {/* ───────────────────────────────────────────────────────────── */}
-      {showEvalModal && (
-        <div className="modal-backdrop" onClick={() => setShowEvalModal(false)} style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '20px 14px' }}>
-          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '680px', width: '94%', maxHeight: 'calc(100dvh - 40px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '18px', margin: 'auto 0', boxShadow: '0 10px 30px rgba(0,0,0,0.25)' }}>
+      {showEvalModal && renderInPortal(
+        <div
+          className="modal-backdrop"
+          onClick={() => setShowEvalModal(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100dvh',
+            zIndex: 999999,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            padding: '12px 10px',
+            background: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(8px)',
+            boxSizing: 'border-box'
+          }}
+        >
+          <div
+            className="modal-content card"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: '680px',
+              width: '94%',
+              height: 'calc(100dvh - 28px)',
+              maxHeight: 'calc(100dvh - 28px)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              padding: 0,
+              borderRadius: '18px',
+              margin: 'auto',
+              background: 'var(--surface, #ffffff)',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+            }}
+          >
             
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1.5px solid #ccfbf1', flexShrink: 0 }}>
@@ -5681,7 +5950,7 @@ export default function BranchManagerView({
               </div>
 
               {/* Action Buttons Sticky Footer */}
-              <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px', boxShadow: '0 -4px 12px rgba(0,0,0,0.03)' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowEvalModal(false)}>
                   إلغاء
                 </button>
