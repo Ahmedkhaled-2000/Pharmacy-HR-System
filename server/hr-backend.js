@@ -518,12 +518,7 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
             const empActualId = empObj?.id ? String(empObj.id) : sEmpIdStr;
             const empCode = empObj?.code ? String(empObj.code) : '';
 
-            // إذا كان الموظف ضمن قائمة الورديات المنتهية صراحة، لا تتم حمايته أو استعادته إطلاقاً
-            if (endedEmpIdsSet.has(sEmpIdStr) || endedEmpIdsSet.has(empActualId) || (empCode && endedEmpIdsSet.has(empCode))) {
-              continue;
-            }
-
-            // فحص ما إذا كانت مصفوفة shifts تحتوي على سجل وردية مغلق لهذا الموظف
+            // فحص ما إذا كانت مصفوفة shifts تحتوي على سجل وردية مغلق لهذا الموظف يطابق هذه الوردية
             const isEmpShiftMatch = (s) => (
               String(s.employeeId) === sEmpIdStr ||
               String(s.employeeId) === empActualId ||
@@ -535,12 +530,25 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
             );
 
             const hasClosedInIncoming = Array.isArray(stateValue.shifts) && stateValue.shifts.some(s =>
-              isEmpShiftMatch(s) && (s.date === existingShift.date || (existingShift.shiftId && s.id === existingShift.shiftId)) && isShiftTrulyClosed(s)
+              isEmpShiftMatch(s) &&
+              (existingShift.shiftId && s.id === existingShift.shiftId ? true : (s.date === existingShift.date && s.timeIn === existingShift.timeIn)) &&
+              isShiftTrulyClosed(s)
             );
 
             if (hasClosedInIncoming) {
               // تم إنهاء الوردية صراحة من الإدارة ومسجلة في shifts -> لا نسترجعها أبداً
               continue;
+            }
+
+            // إذا كان الموظف ضمن قائمة الورديات المنتهية صراحة، نتحقق هل بدأ وردية جديدة لليوم
+            if (endedEmpIdsSet.has(sEmpIdStr) || endedEmpIdsSet.has(empActualId) || (empCode && endedEmpIdsSet.has(empCode))) {
+              const isTrulyActiveNewShift = existingShift.date === today && Boolean(existingShift.timeIn) && (!existingShift.timeOut || existingShift.timeOut === '');
+              if (!isTrulyActiveNewShift) {
+                continue;
+              }
+              endedEmpIdsSet.delete(sEmpIdStr);
+              endedEmpIdsSet.delete(empActualId);
+              if (empCode) endedEmpIdsSet.delete(empCode);
             }
 
             // الوردية النشطة: لها date اليوم، ولها timeIn، وليس لها timeOut صريح
@@ -813,10 +821,27 @@ app.post('/api/punches/record', async (req, res) => {
     let currentShifts = [...(existing.shifts || [])];
     const empIdStr = String(employeeId);
 
+    const employeesList = Array.isArray(existing.employees) ? existing.employees : [];
+    const empObj = employeesList.find(e =>
+      String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)
+    );
+    const possibleKeys = new Set([
+      employeeId,
+      empIdStr,
+      empObj?.id ? String(empObj.id) : null,
+      empObj?.code ? String(empObj.code) : null
+    ].filter(Boolean));
+
     if (actionType === 'check_in' || actionType === 'start_shift') {
       // ── تسجيل حضور ذري ───────────────────────────────────────────
       // إذا كان الموظف لديه وردية نشطة بالفعل لليوم → نرجع خطأ للكشك
-      const existingActive = currentActiveShifts[employeeId] || currentActiveShifts[empIdStr];
+      let existingActive = null;
+      for (const k of possibleKeys) {
+        if (currentActiveShifts[k]) {
+          existingActive = currentActiveShifts[k];
+          break;
+        }
+      }
       if (existingActive && existingActive.date === date) {
         return res.status(409).json({
           success: false,
@@ -826,7 +851,7 @@ app.post('/api/punches/record', async (req, res) => {
         });
       }
 
-      // إدخال الوردية الجديدة في activeShifts
+      // إدخال الوردية الجديدة في activeShifts بكافة المفاتيح
       const newShiftData = shiftData || {
         shiftId: shiftId || `shift_${employeeId}_${Date.now()}`,
         branchId: branchId || '',
@@ -838,28 +863,24 @@ app.post('/api/punches/record', async (req, res) => {
         updatedAt: Date.now()
       };
 
-      currentActiveShifts[employeeId] = newShiftData;
-      currentActiveShifts[empIdStr] = newShiftData;
+      possibleKeys.forEach(k => {
+        currentActiveShifts[k] = newShiftData;
+      });
+
+      // تنظيف معرفات الموظف من قائمة الورديات المنتهية صراحة فوراً
+      if (Array.isArray(existing._endedShiftEmpIds)) {
+        existing._endedShiftEmpIds = existing._endedShiftEmpIds.filter(id => !possibleKeys.has(String(id)));
+      }
 
       // إضافة سجل الوردية في shifts[]
       if (shiftRecord) {
         currentShifts = [shiftRecord, ...currentShifts.filter(s =>
-          !(String(s.employeeId) === empIdStr && s.date === date && (!s.timeOut || s.timeOut === '' || s.isLiveActive))
+          !(possibleKeys.has(String(s.employeeId)) && s.date === date && (!s.timeOut || s.timeOut === '' || s.isLiveActive))
         )];
       }
 
     } else if (actionType === 'check_out' || actionType === 'stop_shift') {
       // ── تسجيل انصراف ذري فائق الموثوقية (Atomic Check-out) ───────────────────
-      const employeesList = Array.isArray(existing.employees) ? existing.employees : [];
-      const empObj = employeesList.find(e =>
-        String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)
-      );
-      const possibleKeys = new Set([
-        employeeId,
-        empIdStr,
-        empObj?.id ? String(empObj.id) : null,
-        empObj?.code ? String(empObj.code) : null
-      ].filter(Boolean));
 
       let activeShiftKey = null;
       for (const k of possibleKeys) {

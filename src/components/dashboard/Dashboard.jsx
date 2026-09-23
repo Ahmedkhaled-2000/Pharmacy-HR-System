@@ -617,7 +617,18 @@ export default function Dashboard({
                           ) : (
                             branchEmps.map((emp) => {
                               if (!emp || !emp.id) return null;
-                              const rawActive = (targetLiveDate === todayDate) ? (state?.activeShifts?.[emp.id] || state?.activeShifts?.[String(emp.id)]) : null;
+                              const rawActive = (targetLiveDate === todayDate)
+                                ? (state?.activeShifts?.[emp.id] ||
+                                   state?.activeShifts?.[String(emp.id)] ||
+                                   (emp.code && state?.activeShifts?.[emp.code]) ||
+                                   (emp.code && state?.activeShifts?.[String(emp.code)]) ||
+                                   Object.values(state?.activeShifts || {}).find(s =>
+                                     s && (
+                                       String(s.employeeId) === String(emp.id) ||
+                                       (emp.code && (String(s.employeeId) === String(emp.code) || String(s.employeeCode) === String(emp.code)))
+                                     )
+                                   ))
+                                : null;
                               const isShiftTarget = rawActive && (rawActive.date ? String(rawActive.date).slice(0, 10) === targetLiveDate : true);
                               const isActiveInThisBranch = rawActive && isShiftTarget && isEmployeeActive(emp) && (String(rawActive.branchId || emp.branchId) === String(b.id));
                               const isActiveInOtherBranch = rawActive && isShiftTarget && isEmployeeActive(emp) && !isActiveInThisBranch;

@@ -716,17 +716,25 @@ export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShi
 
   const isEmpEndedOrClosed = (empKey, act) => {
     const kStr = String(empKey);
-    if (endedEmpIds.has(kStr) || deletedIds.has(kStr) || deletedIds.has(`emp_${kStr}`)) return true;
+    if (deletedIds.has(kStr) || deletedIds.has(`emp_${kStr}`)) return true;
     if (act) {
       if (act.shiftId && closedShiftIds.has(String(act.shiftId))) return true;
-      if (act.employeeId && endedEmpIds.has(String(act.employeeId))) return true;
-      if (act.employeeCode && endedEmpIds.has(String(act.employeeCode))) return true;
       if (act.date && act.timeIn) {
         if (closedShiftSignatures.has(`${kStr}_${act.date}_${act.timeIn}`)) return true;
         if (act.employeeId && closedShiftSignatures.has(`${String(act.employeeId)}_${act.date}_${act.timeIn}`)) return true;
         if (act.employeeCode && closedShiftSignatures.has(`${String(act.employeeCode)}_${act.date}_${act.timeIn}`)) return true;
       }
+      // إذا كانت الوردية حية ونشطة لليوم بدون وقت انصراف ولم تُغلق تحديداً، فهي وردية جديدة مصرح بها
+      const isLiveOpen = act.timeIn &&
+        (!act.timeOut || act.timeOut === '' || act.timeOut === '—' || act.timeOut === 'قيد العمل الآن' || act.timeOut === 'قيد العمل') &&
+        isShiftDateValid(act.date, act.startEpoch);
+      if (isLiveOpen) {
+        return false;
+      }
     }
+    if (endedEmpIds.has(kStr)) return true;
+    if (act && act.employeeId && endedEmpIds.has(String(act.employeeId))) return true;
+    if (act && act.employeeCode && endedEmpIds.has(String(act.employeeCode))) return true;
     return false;
   };
 
@@ -1341,17 +1349,30 @@ export function smartMergeStates(localState, remoteState) {
       ...(effectiveLocal.branchSalesSettings || {})
     },
     rosters: mergeRosters(effectiveLocal.rosters, effectiveRemote.rosters, { deletedIds }),
-    activeShifts: mergeActiveShifts(effectiveLocal.activeShifts, effectiveRemote.activeShifts, mergedShifts, {
-      deletedIds,
-      endedEmpIds: new Set([
+    ...(() => {
+      const mergedActive = mergeActiveShifts(effectiveLocal.activeShifts, effectiveRemote.activeShifts, mergedShifts, {
+        deletedIds,
+        endedEmpIds: new Set([
+          ...(effectiveLocal._endedShiftEmpIds || []),
+          ...(effectiveRemote._endedShiftEmpIds || [])
+        ].map(String))
+      });
+      const activeKeys = new Set();
+      Object.entries(mergedActive || {}).forEach(([k, s]) => {
+        activeKeys.add(String(k));
+        if (s?.employeeId) activeKeys.add(String(s.employeeId));
+        if (s?.employeeCode) activeKeys.add(String(s.employeeCode));
+      });
+      const cleanedEnded = Array.from(new Set([
         ...(effectiveLocal._endedShiftEmpIds || []),
         ...(effectiveRemote._endedShiftEmpIds || [])
-      ].map(String))
-    }),
-    _endedShiftEmpIds: Array.from(new Set([
-      ...(effectiveLocal._endedShiftEmpIds || []),
-      ...(effectiveRemote._endedShiftEmpIds || [])
-    ].map(String))).slice(-1000),
+      ].map(String))).filter(id => !activeKeys.has(id)).slice(-1000);
+
+      return {
+        activeShifts: mergedActive,
+        _endedShiftEmpIds: cleanedEnded
+      };
+    })(),
     branchDirectives: mergeArrays(effectiveLocal.branchDirectives, effectiveRemote.branchDirectives, { prefix: 'bdir', deletedIds }),
     adminDirectives: mergeArrays(effectiveLocal.adminDirectives, effectiveRemote.adminDirectives, { prefix: 'adir', deletedIds }),
     _notificationsClearedAt: effectiveLocal._notificationsClearedAt || effectiveRemote._notificationsClearedAt || null,

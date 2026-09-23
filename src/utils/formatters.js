@@ -916,7 +916,9 @@ export function normalizeState(parsed) {
         const empIdKey = String(s.employeeId || '');
         const empCodeKey = String(s.employeeCode || '');
         if (endedEmpIdsSet.has(empIdKey) || (empCodeKey && endedEmpIdsSet.has(empCodeKey))) {
-          return;
+          // فك الحظر عن الموظف إذا بدأ وردية حية جديدة بدون انصراف
+          endedEmpIdsSet.delete(empIdKey);
+          if (empCodeKey) endedEmpIdsSet.delete(empCodeKey);
         }
         if (empIdKey && !rawActiveShifts[empIdKey] && (!empCodeKey || !rawActiveShifts[empCodeKey])) {
           rawActiveShifts[empIdKey] = {
@@ -1062,6 +1064,7 @@ export function normalizeState(parsed) {
     branchDirectives: toSafeArray(parsed.branchDirectives),
     adminDirectives: toSafeArray(parsed.adminDirectives),
     _notificationsClearedAt: parsed._notificationsClearedAt || null,
+    _endedShiftEmpIds: Array.from(endedEmpIdsSet).slice(-1000),
     _deletedIds: Array.from(deletedSet).slice(-3000)
   };
 }

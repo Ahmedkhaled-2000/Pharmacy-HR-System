@@ -812,7 +812,28 @@ export function DataProvider({ children, showToast = () => {} }) {
               if (empCode) prevActiveShifts[empCode] = remoteShift;
             }
           }
-          return { ...prev, activeShifts: prevActiveShifts };
+
+          let updatedShifts = [...(prev.shifts || [])];
+          if (shiftRecord && shiftRecord.id) {
+            const sIdx = updatedShifts.findIndex(s => s && s.id === shiftRecord.id);
+            if (sIdx >= 0) {
+              updatedShifts[sIdx] = { ...updatedShifts[sIdx], ...shiftRecord };
+            } else {
+              updatedShifts = [shiftRecord, ...updatedShifts];
+            }
+          }
+
+          const cleanedEnded = (prev._endedShiftEmpIds || []).filter(id => {
+            const idStr = String(id);
+            return idStr !== employeeId && idStr !== empIdStr && idStr !== actualEmpId && idStr !== empCode;
+          });
+
+          return {
+            ...prev,
+            activeShifts: prevActiveShifts,
+            shifts: updatedShifts,
+            _endedShiftEmpIds: cleanedEnded
+          };
         } else if (actionType === 'check_out' || actionType === 'stop_shift') {
           // حذف الوردية من الذاكرة المحلية فوراً بكافة المفاتيح الممكنة
           delete prevActiveShifts[employeeId];

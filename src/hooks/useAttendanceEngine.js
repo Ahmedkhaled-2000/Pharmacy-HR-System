@@ -585,7 +585,11 @@ export function useAttendanceEngine() {
       [empId]: shiftData,
       [String(empId)]: shiftData
     };
-    let updatedState = { ...state, activeShifts: updatedActive, shifts: currentShifts };
+    const cleanedEndedIds = (state._endedShiftEmpIds || []).filter(id => {
+      const idStr = String(id);
+      return idStr !== String(empId) && (!emp || (idStr !== String(emp.id) && idStr !== String(emp.code)));
+    });
+    let updatedState = { ...state, activeShifts: updatedActive, shifts: currentShifts, _endedShiftEmpIds: cleanedEndedIds };
 
     try {
       updatedState = checkAndRecordLateness(empId, punchDate, punchTime, updatedState);
