@@ -1021,6 +1021,231 @@ app.post('/api/punches/record', async (req, res) => {
 });
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ══════════════════════════════════════════════════════════════════════════════
+// 🚀 POST /api/punches/sync-outbox - مزامنة دفعات بصمات الكشك المعلقة أوفلاين
+// تطبق الحركات بالتسلسل الزمني الأصلي، تمنع التكرار (Idempotency)، ولا تمس إعدادات الإدارة
+// ══════════════════════════════════════════════════════════════════════════════
+app.post('/api/punches/sync-outbox', async (req, res) => {
+  try {
+    const { punches, key } = req.body || {};
+    const storageKey = key || STORAGE_KEY;
+
+    if (!Array.isArray(punches) || punches.length === 0) {
+      return res.json({ success: true, syncedIds: [], count: 0, serverTime: new Date().toISOString() });
+    }
+
+    const clientIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'kiosk-outbox';
+    const now = new Date().toISOString();
+
+    const existing = await getSettingsFromStorage(storageKey);
+    if (!existing || typeof existing !== 'object') {
+      return res.status(500).json({ success: false, error: 'System state unavailable' });
+    }
+
+    const currentActiveShifts = { ...(existing.activeShifts || {}) };
+    let currentShifts = [...(existing.shifts || [])];
+    const employeesList = Array.isArray(existing.employees) ? existing.employees : [];
+
+    // فرز البصمات تصاعدياً بحسب وقت الحدوث الفعلي الأصلي (FIFO)
+    const sortedPunches = [...punches].sort((a, b) => {
+      const epochA = a.deviceLocalEpoch || (a.date && a.punchTime ? new Date(`${a.date}T${a.punchTime}:00`).getTime() : 0);
+      const epochB = b.deviceLocalEpoch || (b.date && b.punchTime ? new Date(`${b.date}T${b.punchTime}:00`).getTime() : 0);
+      return epochA - epochB;
+    });
+
+    const syncedIds = [];
+    const todayStr = now.slice(0, 10);
+
+    for (const p of sortedPunches) {
+      if (!p || !p.employeeId) continue;
+      const empIdStr = String(p.employeeId);
+      const empObj = employeesList.find(e => String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr));
+      const possibleKeys = new Set([
+        p.employeeId,
+        empIdStr,
+        p.employeeCode ? String(p.employeeCode) : null,
+        empObj?.id ? String(empObj.id) : null,
+        empObj?.code ? String(empObj.code) : null
+      ].filter(Boolean));
+
+      const actionType = p.actionType || 'check_in';
+      const punchDate = p.punchDate || p.date || todayStr;
+      const punchTime = p.punchTime || p.time || now.slice(11, 16);
+      const shiftId = p.shiftId || `shift_${empIdStr}_${p.deviceLocalEpoch || Date.now()}`;
+      const clientPunchId = p.clientPunchId || `${empIdStr}_${actionType}_${punchDate}_${punchTime}`;
+
+      // فحص هل البصمة معالجة مسبقاً بنفس clientPunchId أو shiftId؟
+      const alreadyProcessed = currentShifts.some(s =>
+        s && (
+          s.clientPunchId === clientPunchId ||
+          (s.id === shiftId && ((actionType === 'check_in' && s.timeIn === punchTime) || (actionType === 'check_out' && s.timeOut === punchTime)))
+        )
+      );
+
+      if (actionType === 'check_in' || actionType === 'start_shift') {
+        // فك الحظر التلقائي عن الموظف
+        if (Array.isArray(existing._endedShiftEmpIds)) {
+          existing._endedShiftEmpIds = existing._endedShiftEmpIds.filter(id => !possibleKeys.has(String(id)));
+        }
+
+        const newShiftData = p.shiftData || {
+          shiftId,
+          branchId: p.branchId || '',
+          branchName: p.branchName || '',
+          date: punchDate,
+          timeIn: punchTime,
+          startEpoch: p.deviceLocalEpoch || Date.now(),
+          isPaused: false,
+          isOnBreak: false,
+          isOfflineSynced: true,
+          syncedAt: now,
+          updatedAt: Date.now()
+        };
+
+        // إذا كانت البصمة لتاريخ اليوم، نعتمدها في activeShifts بكافة المفاتيح
+        if (punchDate === todayStr) {
+          possibleKeys.forEach(k => {
+            currentActiveShifts[k] = newShiftData;
+          });
+        }
+
+        if (!alreadyProcessed) {
+          const newShiftRecord = p.shiftRecord || {
+            id: shiftId,
+            clientPunchId,
+            employeeId: empObj?.id || p.employeeId,
+            employeeCode: empObj?.code || p.employeeCode || '',
+            employeeName: empObj?.name || p.employeeName || '',
+            branchId: p.branchId || '',
+            branchName: p.branchName || '',
+            date: punchDate,
+            timeIn: punchTime,
+            timeOut: '',
+            hours: 0,
+            actualWorkedHours: 0,
+            scheduledHours: 8,
+            regularHours: 0,
+            overtimeHours: 0,
+            overtimeStatus: 'none',
+            breakHours: 0,
+            source: 'kiosk_offline',
+            isLiveActive: punchDate === todayStr,
+            status: punchDate === todayStr ? 'active' : 'completed',
+            statusLabel: punchDate === todayStr ? 'حضور حي (مزامنة أوفلاين)' : 'حضور أوفلاين',
+            note: `بصمة حضور أوفلاين في تمام ${punchTime} (تمت المزامنة ${now.slice(11, 16)})`,
+            isOfflineSynced: true,
+            syncedAt: now,
+            deviceLocalEpoch: p.deviceLocalEpoch || null,
+            createdAt: new Date(p.deviceLocalEpoch || Date.now()).toISOString()
+          };
+
+          currentShifts = [
+            newShiftRecord,
+            ...currentShifts.filter(s => !(possibleKeys.has(String(s.employeeId)) && s.date === punchDate && (!s.timeOut || s.timeOut === '')))
+          ];
+        }
+      } else if (actionType === 'check_out' || actionType === 'stop_shift') {
+        // حذف من activeShifts
+        possibleKeys.forEach(k => delete currentActiveShifts[k]);
+        Object.keys(currentActiveShifts).forEach(k => {
+          const v = currentActiveShifts[k];
+          if (v && (possibleKeys.has(String(v.employeeId)) || possibleKeys.has(String(v.employeeCode)))) {
+            delete currentActiveShifts[k];
+          }
+        });
+
+        // إغلاق سجل الوردية في shifts
+        let targetIdx = currentShifts.findIndex(s => s && (s.id === shiftId || (possibleKeys.has(String(s.employeeId)) && s.date === punchDate && (!s.timeOut || s.timeOut === ''))));
+        if (targetIdx >= 0) {
+          const prevRec = currentShifts[targetIdx];
+          const timeInStr = prevRec.timeIn || '00:00';
+          let workedHrs = 0;
+          try {
+            const [inH, inM] = timeInStr.split(':').map(Number);
+            const [outH, outM] = punchTime.split(':').map(Number);
+            let diffMins = (outH * 60 + outM) - (inH * 60 + inM);
+            if (diffMins < 0) diffMins += 24 * 60;
+            workedHrs = parseFloat((diffMins / 60).toFixed(2));
+          } catch {}
+
+          currentShifts[targetIdx] = {
+            ...prevRec,
+            timeOut: punchTime,
+            hours: workedHrs,
+            actualWorkedHours: workedHrs,
+            regularHours: Math.min(workedHrs, prevRec.scheduledHours || 8),
+            overtimeHours: Math.max(0, parseFloat((workedHrs - (prevRec.scheduledHours || 8)).toFixed(2))),
+            isLiveActive: false,
+            status: 'completed',
+            isOfflineSynced: true,
+            syncedAt: now,
+            note: `${prevRec.note || ''} · انصراف أوفلاين ${punchTime}`.trim(),
+            updatedAt: now
+          };
+        } else if (!alreadyProcessed) {
+          currentShifts = [{
+            id: shiftId,
+            clientPunchId,
+            employeeId: empObj?.id || p.employeeId,
+            employeeCode: empObj?.code || p.employeeCode || '',
+            employeeName: empObj?.name || p.employeeName || '',
+            branchId: p.branchId || '',
+            branchName: p.branchName || '',
+            date: punchDate,
+            timeIn: '00:00',
+            timeOut: punchTime,
+            hours: 0,
+            isLiveActive: false,
+            status: 'completed',
+            source: 'kiosk_offline',
+            isOfflineSynced: true,
+            syncedAt: now,
+            note: `انصراف أوفلاين مسجل ${punchTime}`,
+            createdAt: now
+          }, ...currentShifts];
+        }
+      }
+
+      syncedIds.push(p.clientPunchId || shiftId);
+    }
+
+    // حفظ تزايدي آمن في Redis + PostgreSQL
+    existing._punchSource = 'kiosk_slice';
+    existing.activeShifts = currentActiveShifts;
+    existing.shifts = currentShifts;
+
+    const saveResult = await saveSettingsToStorage(storageKey, existing, clientIp);
+
+    // تسجيل ملخص في sync_logs
+    db.query(
+      'INSERT INTO public.sync_logs (action_type, entity_key, version, client_ip, created_at) VALUES ($1, $2, $3, $4, $5)',
+      ['KIOSK_OUTBOX_SYNC', `batch_${syncedIds.length}`, saveResult?.version || 0, clientIp, now]
+    ).catch(() => {});
+
+    // بث لحظي عبر WebSockets لجميع الأجهزة المفتوحة
+    io.emit('state:updated', {
+      key: storageKey,
+      value: existing,
+      version: saveResult?.version || 0,
+      updated_at: now
+    });
+
+    console.log(`[Kiosk Outbox Sync] ✅ Successfully synced batch of ${syncedIds.length} offline punches.`);
+
+    res.json({
+      success: true,
+      syncedIds,
+      count: syncedIds.length,
+      serverTime: now,
+      version: saveResult?.version || 0
+    });
+  } catch (err) {
+    console.error('[API POST /punches/sync-outbox Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+// ══════════════════════════════════════════════════════════════════════════════
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 🔧 نقطة اتصال الإدارة: تفعيل وردية موظف يدوياً (Admin Activate Shift)

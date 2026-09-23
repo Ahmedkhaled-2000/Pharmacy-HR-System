@@ -24,6 +24,7 @@ import { apiArchiveDeleteEmployee } from '../utils/archiveApiClient';
 import { hardDeleteEntityFast } from '../utils/offlineSync';
 import { isBranchMatch } from '../utils/branchMatcher';
 import { apiRecordPunch } from '../utils/apiClient';
+import { enqueueKioskPunch } from '../utils/kioskOutbox';
 import { useData } from '../context/DataContext';
 import { useUI } from '../context/UIContext';
 
@@ -621,23 +622,42 @@ export function useAttendanceEngine() {
       showToast(msg);
     }
 
-    // ── حفظ ذري فائق السرعة للبصمة (Atomic Punch Save) لكافة الأجهزة والمسارات ──
-    apiRecordPunch({
-      employeeId: emp?.id || empId,
-      branchId: effectiveBranchId,
-      actionType: 'check_in',
-      time: punchTime,
-      date: punchDate,
-      shiftId: openShiftRecord.id,
-      shiftData: shiftData,
-      shiftRecord: openShiftRecord,
-      requestId: `checkin_${empId}_${Date.now()}`
-    }).catch(err => {
-      console.warn('[startShift] Atomic punch call warning:', err.message);
-    });
+    // ── حفظ فوري في صندوق إرسال الكشك (Kiosk Local Outbox) مع محاولة الإرسال الذري ──
+    if (source === 'kiosk') {
+      enqueueKioskPunch({
+        employeeId: emp?.id || empId,
+        employeeCode: emp?.code || '',
+        employeeName: emp?.name || '',
+        branchId: effectiveBranchId,
+        branchName: bObj?.name || '',
+        actionType: 'check_in',
+        time: punchTime,
+        date: punchDate,
+        shiftId: openShiftRecord.id,
+        shiftData: shiftData,
+        shiftRecord: openShiftRecord,
+        source: 'kiosk_biometric'
+      }).catch(err => {
+        console.warn('[startShift] Kiosk outbox enqueue warning:', err);
+      });
+    } else {
+      apiRecordPunch({
+        employeeId: emp?.id || empId,
+        branchId: effectiveBranchId,
+        actionType: 'check_in',
+        time: punchTime,
+        date: punchDate,
+        shiftId: openShiftRecord.id,
+        shiftData: shiftData,
+        shiftRecord: openShiftRecord,
+        requestId: `checkin_${empId}_${Date.now()}`
+      }).catch(err => {
+        console.warn('[startShift] Atomic punch call warning:', err.message);
+      });
 
-    if (saveState) {
-      saveState(updatedState).catch(err => console.error('[startShift] Background save error:', err));
+      if (saveState) {
+        saveState(updatedState).catch(err => console.error('[startShift] Background save error:', err));
+      }
     }
 
     return { success: true, punchTime, punchDate, branchName: bObj?.name || '' };
@@ -1124,27 +1144,45 @@ export function useAttendanceEngine() {
       showToast(msg);
     }
 
-    // ── 1. حفظ ذري فائق السرعة للانصراف عبر apiRecordPunch (لكل من الكشك والإدارة) ──
+    // ── 1. حفظ ذري في صندوق إرسال الكشك (Outbox) أو عبر apiRecordPunch للإدارة ──
     const finalShiftRecord = updatedState.shifts?.find(s => s.id === shiftId ||
       (isEmpShiftMatch(s) && s.date === active.date && s.timeOut === timeOut));
 
-    apiRecordPunch({
-      employeeId: empActualId || empId,
-      branchId: bId || active?.branchId || '',
-      actionType: 'check_out',
-      time: timeOut,
-      date: active.date || getRealTodayStr(),
-      shiftId: shiftId,
-      shiftData: null,
-      shiftRecord: finalShiftRecord || newShift,
-      requestId: `checkout_${empId}_${Date.now()}`
-    }).catch(err => {
-      console.warn('[stopShift] Atomic punch call warning (will rely on state sync):', err.message);
-    });
+    if (source === 'kiosk') {
+      enqueueKioskPunch({
+        employeeId: empActualId || empId,
+        employeeCode: empCode || '',
+        employeeName: emp?.name || '',
+        branchId: bId || active?.branchId || '',
+        branchName: bObj?.name || '',
+        actionType: 'check_out',
+        time: timeOut,
+        date: active.date || getRealTodayStr(),
+        shiftId: shiftId,
+        shiftData: null,
+        shiftRecord: finalShiftRecord || newShift,
+        source: 'kiosk_biometric'
+      }).catch(err => {
+        console.warn('[stopShift] Kiosk outbox enqueue warning:', err);
+      });
+    } else {
+      apiRecordPunch({
+        employeeId: empActualId || empId,
+        branchId: bId || active?.branchId || '',
+        actionType: 'check_out',
+        time: timeOut,
+        date: active.date || getRealTodayStr(),
+        shiftId: shiftId,
+        shiftData: null,
+        shiftRecord: finalShiftRecord || newShift,
+        requestId: `checkout_${empId}_${Date.now()}`
+      }).catch(err => {
+        console.warn('[stopShift] Atomic punch call warning (will rely on state sync):', err.message);
+      });
 
-    // ── 2. حفظ الحالة الشاملة (shifts + activeShifts + requests) بدون تجريد ──
-    if (saveState) {
-      saveState(updatedState).catch(err => console.error('[stopShift] Full state save error:', err));
+      if (saveState) {
+        saveState(updatedState).catch(err => console.error('[stopShift] Full state save error:', err));
+      }
     }
 
     return { success: true, netHours, timeOut, date: active.date };

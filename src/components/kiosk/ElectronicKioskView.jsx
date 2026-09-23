@@ -11,6 +11,13 @@ import { normalizeDigits, getRealTodayStr } from '../../utils/formatters';
 import { getActiveShortcuts, matchesShortcutEvent } from '../../utils/shortcutsConfig';
 import { apiSubmitRequestAtomic, apiRecordPunch } from '../../utils/apiClient';
 import { enqueueNewRequest } from '../../utils/syncEngine';
+import {
+  enqueueKioskPunch,
+  flushKioskOutbox,
+  subscribeToKioskOutbox,
+  getPendingKioskPunches,
+  getPendingKioskCount
+} from '../../utils/kioskOutbox';
 import '../../kiosk-modern.css';
 
 export default function ElectronicKioskView({
@@ -77,6 +84,43 @@ export default function ElectronicKioskView({
 
   const [pendingDirectiveModal, setPendingDirectiveModal] = useState(null);
   const [pendingDirectivesQueue, setPendingDirectivesQueue] = useState([]);
+
+  // ── حالة صندوق الإرسال المحلي الذري (Offline Outbox State) ──
+  const [pendingOutboxCount, setPendingOutboxCount] = useState(0);
+  const [isFlushingOutbox, setIsFlushingOutbox] = useState(false);
+  const [showOutboxModal, setShowOutboxModal] = useState(false);
+  const [outboxPunchesList, setOutboxPunchesList] = useState([]);
+
+  useEffect(() => {
+    // الاشتراك اللحظي في تحديثات عدد البصمات المعلقة
+    const unsubscribe = subscribeToKioskOutbox((count) => {
+      setPendingOutboxCount(count);
+    });
+
+    const handleOnline = () => {
+      setIsFlushingOutbox(true);
+      flushKioskOutbox().finally(() => setIsFlushingOutbox(false));
+    };
+
+    window.addEventListener('online', handleOnline);
+
+    // مسبار خفيف دوري للمزامنة التلقائية عند عودة الاتصال
+    const intervalId = setInterval(() => {
+      if (typeof navigator === 'undefined' || navigator.onLine) {
+        getPendingKioskCount().then((count) => {
+          if (count > 0) {
+            flushKioskOutbox().catch(() => {});
+          }
+        });
+      }
+    }, 15000);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('online', handleOnline);
+      clearInterval(intervalId);
+    };
+  }, []);
   
   const [activeAction, setActiveAction] = useState(null);
   const [selectedBranchId, setSelectedBranchId] = useState(null);
@@ -919,25 +963,29 @@ export default function ElectronicKioskView({
       }
     }
 
-    // ⚡ تسجيل ذري للبصمة في السيرفر مباشرة (< 1KB) لضمان عدم فقدان البصمة عند Race Condition
+    // ⚡ تسجيل ذري في صندوق إرسال الكشك (Kiosk Outbox) لحفظ البصمة فورياً ومزامنتها بأمان
     const photoActionType = (actionType === 'shift_start') ? 'check_in' : (actionType === 'shift_end') ? 'check_out' : null;
     if (photoActionType) {
       const photoShiftData = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];
       const photoShiftRecord = (actionType === 'shift_start')
         ? updatedShifts.find(s => s.id === shiftId)
         : updatedShifts.find(s => String(s.employeeId) === String(currentEmp.id) && s.date === dateStr && s.timeOut && s.timeOut !== '—');
-      apiRecordPunch({
+
+      enqueueKioskPunch({
         employeeId: currentEmp.id,
+        employeeCode: currentEmp.code || '',
+        employeeName: currentEmp.name || '',
         branchId: effectiveBranchId,
+        branchName: effectiveBranchObj?.name || '',
         actionType: photoActionType,
         time: punchTime,
         date: dateStr,
         shiftId: shiftId,
         shiftData: photoShiftData || null,
         shiftRecord: photoShiftRecord || null,
-        requestId: requestId
+        source: 'kiosk_photo'
       }).catch(err => {
-        console.warn('[Kiosk Photo Attendance] Atomic punch record warning (non-critical):', err.message);
+        console.warn('[Kiosk Photo Attendance] Outbox enqueue warning:', err.message);
       });
     }
 
@@ -1134,27 +1182,59 @@ export default function ElectronicKioskView({
             <span style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(15, 23, 42, 0.04)', padding: '4px 14px', borderRadius: '20px' }}>
               {isGeneralKioskLink ? '⚡ كشك البصمة العام' : '🏢 كشك فرع مخصص'}
             </span>
-            <span style={{
-              fontSize: '0.75rem',
-              fontWeight: 700,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '4px 12px',
-              borderRadius: '20px',
-              background: isOffline ? '#fee2e2' : (isLoading || isSyncing ? '#fef3c7' : '#dcfce7'),
-              color: isOffline ? '#b91c1c' : (isLoading || isSyncing ? '#b45309' : '#15803d'),
-              border: `1px solid ${isOffline ? '#fca5a5' : (isLoading || isSyncing ? '#fde68a' : '#86efac')}`
-            }}>
+            <button
+              type="button"
+              onClick={async () => {
+                const list = await getPendingKioskPunches();
+                setOutboxPunchesList(list);
+                setShowOutboxModal(true);
+              }}
+              style={{
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                cursor: 'pointer',
+                fontFamily: 'Cairo',
+                transition: 'all 0.15s ease',
+                background: isFlushingOutbox
+                  ? '#eff6ff'
+                  : (pendingOutboxCount > 0
+                    ? '#fef3c7'
+                    : (isOffline ? '#fee2e2' : (isLoading || isSyncing ? '#fef3c7' : '#dcfce7'))),
+                color: isFlushingOutbox
+                  ? '#1d4ed8'
+                  : (pendingOutboxCount > 0
+                    ? '#b45309'
+                    : (isOffline ? '#b91c1c' : (isLoading || isSyncing ? '#b45309' : '#15803d'))),
+                border: `1px solid ${isFlushingOutbox
+                  ? '#93c5fd'
+                  : (pendingOutboxCount > 0
+                    ? '#fde68a'
+                    : (isOffline ? '#fca5a5' : (isLoading || isSyncing ? '#fde68a' : '#86efac')))}`
+              }}
+              title="انقر لفحص طابور البصمات المعلقة والمزامنة اليدوية"
+            >
               <span style={{
                 width: '7px',
                 height: '7px',
                 borderRadius: '50%',
-                background: isOffline ? '#ef4444' : (isLoading || isSyncing ? '#f59e0b' : '#22c55e'),
-                boxShadow: isOffline ? 'none' : '0 0 6px #22c55e'
+                background: isFlushingOutbox
+                  ? '#3b82f6'
+                  : (pendingOutboxCount > 0
+                    ? '#f59e0b'
+                    : (isOffline ? '#ef4444' : (isLoading || isSyncing ? '#f59e0b' : '#22c55e'))),
+                boxShadow: isOffline && pendingOutboxCount === 0 ? 'none' : '0 0 6px currentColor'
               }}></span>
-              {isOffline ? '📴 غير متصل' : (isLoading || isSyncing ? '⏳ جاري المزامنة...' : '🔒 اتصال آمن بقاعدة البيانات')}
-            </span>
+              {isFlushingOutbox
+                ? `🔄 جارٍ مزامنة ${pendingOutboxCount} بصمة...`
+                : (pendingOutboxCount > 0
+                  ? `🟡 📴 (${pendingOutboxCount} بصمة جاهزة للمزامنة)`
+                  : (isOffline ? '📴 غير متصل' : (isLoading || isSyncing ? '⏳ جاري المزامنة...' : '🔒 اتصال آمن ومزامن')))}
+            </button>
           </div>
 
           {orgSettings?.logoUrl && (
@@ -1941,6 +2021,163 @@ export default function ElectronicKioskView({
             >
               حسناً {kioskAlertModal.countdown !== undefined && `(${kioskAlertModal.countdown} ثانية)`}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── مودال فحص ومزامنة طابور بصمات الكشك أوفلاين (Kiosk Outbox Modal) ── */}
+      {showOutboxModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 99999,
+            background: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px'
+          }}
+          onClick={() => setShowOutboxModal(false)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '24px',
+              padding: '24px',
+              maxWidth: '650px',
+              width: '100%',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              direction: 'rtl',
+              fontFamily: 'Cairo'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '14px', marginBottom: '16px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.25rem', color: '#0f172a', fontWeight: 800 }}>
+                  📋 طابور البصمات المعلقة للمزامنة
+                </h3>
+                <span style={{ fontSize: '0.85rem', color: '#64748b' }}>
+                  يتم حفظ البصمات محلياً بأمان تام ومزامنتها تلقائياً فور توفر الاتصال
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowOutboxModal(false)}
+                style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '36px', height: '36px', cursor: 'pointer', fontSize: '18px', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', marginBottom: '16px' }}>
+              {outboxPunchesList.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 16px', color: '#16a34a' }}>
+                  <div style={{ fontSize: '48px', marginBottom: '12px' }}>✅</div>
+                  <h4 style={{ margin: '0 0 6px', fontSize: '1.1rem', fontWeight: 700 }}>جميع البصمات متزامنة بنجاح</h4>
+                  <p style={{ margin: 0, fontSize: '0.9rem', color: '#64748b' }}>لا توجد أي بصمات معلقة في ذاكرة هذا الجهاز حالياً.</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {outboxPunchesList.map((p, idx) => (
+                    <div
+                      key={p.clientPunchId || idx}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '12px 16px',
+                        background: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '14px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <span style={{
+                          padding: '4px 10px',
+                          borderRadius: '8px',
+                          fontSize: '0.8rem',
+                          fontWeight: 700,
+                          background: p.actionType === 'check_in' ? '#dcfce7' : '#fee2e2',
+                          color: p.actionType === 'check_in' ? '#15803d' : '#b91c1c'
+                        }}>
+                          {p.actionType === 'check_in' ? '🟢 حضور' : '🔴 انصراف'}
+                        </span>
+                        <div>
+                          <strong style={{ fontSize: '0.95rem', color: '#1e293b' }}>
+                            {p.employeeName || `موظف كود: ${p.employeeCode || p.employeeId}`}
+                          </strong>
+                          <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                            كود: {p.employeeCode || p.employeeId} {p.branchName ? `· فرع: ${p.branchName}` : ''}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'left' }}>
+                        <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>
+                          ⏰ {p.punchTime}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                          📅 {p.punchDate}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+              <button
+                type="button"
+                disabled={isFlushingOutbox || outboxPunchesList.length === 0}
+                onClick={async () => {
+                  setIsFlushingOutbox(true);
+                  try {
+                    await flushKioskOutbox();
+                    const updated = await getPendingKioskPunches();
+                    setOutboxPunchesList(updated);
+                  } finally {
+                    setIsFlushingOutbox(false);
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  borderRadius: '12px',
+                  border: 'none',
+                  background: isFlushingOutbox || outboxPunchesList.length === 0 ? '#cbd5e1' : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                  color: '#ffffff',
+                  fontWeight: 800,
+                  fontSize: '0.95rem',
+                  cursor: isFlushingOutbox || outboxPunchesList.length === 0 ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 4px 12px rgba(2, 132, 199, 0.25)',
+                  fontFamily: 'Cairo'
+                }}
+              >
+                {isFlushingOutbox ? '⏳ جاري المزامنة الآن...' : '🚀 مزامنة يدوية فورية الآن'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowOutboxModal(false)}
+                style={{
+                  padding: '12px 20px',
+                  borderRadius: '12px',
+                  border: '1px solid #cbd5e1',
+                  background: '#f8fafc',
+                  color: '#475569',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  fontFamily: 'Cairo'
+                }}
+              >
+                إغلاق
+              </button>
+            </div>
           </div>
         </div>
       )}

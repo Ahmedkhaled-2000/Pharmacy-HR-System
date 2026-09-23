@@ -519,6 +519,27 @@ export async function apiRecordPunch(punchData = {}, options = {}) {
 }
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ══════════════════════════════════════════════════════════════════════════════
+// 🚀 apiSyncPunchOutbox - مزامنة دفعات البصمات المعلقة أوفلاين
+// ترسل مصفوفة البصمات وتضمن تطبيقها بتوقيتها الأصلي وحسم التعارضات
+// ══════════════════════════════════════════════════════════════════════════════
+export async function apiSyncPunchOutbox(punches = [], options = {}) {
+  resetBackendCircuitBreaker();
+  if (!Array.isArray(punches) || punches.length === 0) {
+    return { success: true, syncedIds: [] };
+  }
+
+  return await request('punches/sync-outbox', {
+    method: 'POST',
+    body: JSON.stringify({ punches }),
+    timeout: options.timeout || 35000,
+    retries: options.retries !== undefined ? options.retries : 2,
+    noCache: true,
+    isBackground: false
+  });
+}
+// ══════════════════════════════════════════════════════════════════════════════
+
 
 
 // ── 1.1 الإرسال الذري الخفيف للطلبات (< 2KB) لضمان الوصول الفوري دون إرسال كامل قاعدة البيانات ──

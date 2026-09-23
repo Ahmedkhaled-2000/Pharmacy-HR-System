@@ -646,6 +646,11 @@ export default function AttendancePunchesModal({
                                       🖐️ بصمة يدوية
                                     </span>
                                   )}
+                                  {p.isOfflineSynced && (
+                                    <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }} title="سُجلت في وضع عدم الاتصال وموزامنة لاحقاً">
+                                      📴 مزامنة أوفلاين {p.syncedAt ? `(${p.syncedAt.slice(11, 16)})` : ''}
+                                    </span>
+                                  )}
                                 </td>
                                 <td style={{ fontWeight: '600' }}>{dayName}</td>
                                 <td style={{ textAlign: 'center' }}>
@@ -830,6 +835,11 @@ export default function AttendancePunchesModal({
                           {isShiftManualPunch(p) && (
                             <span style={{ display: 'block', marginTop: '2px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
                               🖐️ بصمة يدوية
+                            </span>
+                          )}
+                          {p.isOfflineSynced && (
+                            <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }} title="سُجلت في وضع عدم الاتصال وموزامنة لاحقاً">
+                              📴 مزامنة أوفلاين {p.syncedAt ? `(${p.syncedAt.slice(11, 16)})` : ''}
                             </span>
                           )}
                         </td>
