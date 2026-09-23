@@ -58,6 +58,25 @@ export default function EmployeeCardsGrid({
   const [isRehiring, setIsRehiring] = useState(false);
   const [previewPhotoEmp, setPreviewPhotoEmp] = useState(null);
   const [showSalaryIncreasesHub, setShowSalaryIncreasesHub] = useState(false);
+  const [stoppingEmpIds, setStoppingEmpIds] = useState(new Set());
+
+  const handleStopShift = async (empId) => {
+    if (stoppingEmpIds.has(empId)) return;
+    setStoppingEmpIds(prev => new Set([...prev, empId]));
+    try {
+      if (typeof stopShift === 'function') {
+        await stopShift(empId);
+      }
+    } catch (e) {
+      console.error('Error stopping shift:', e);
+    } finally {
+      setStoppingEmpIds(prev => {
+        const next = new Set(prev);
+        next.delete(empId);
+        return next;
+      });
+    }
+  };
   // Branch Cards Collapse/Expand state (Default is collapsed as requested by user)
   const [expandedBranches, setExpandedBranches] = useState({});
 
@@ -660,7 +679,17 @@ export default function EmployeeCardsGrid({
               {isExpanded && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 {branchEmps.map((emp) => {
-                  const active = state.activeShifts?.[emp.id];
+                  const active =
+                    state.activeShifts?.[emp.id] ||
+                    state.activeShifts?.[String(emp.id)] ||
+                    (emp.code && state.activeShifts?.[emp.code]) ||
+                    (emp.code && state.activeShifts?.[String(emp.code)]) ||
+                    Object.values(state.activeShifts || {}).find(s =>
+                      s && (
+                        String(s.employeeId) === String(emp.id) ||
+                        (emp.code && (String(s.employeeId) === String(emp.code) || String(s.employeeCode) === String(emp.code)))
+                      )
+                    );
                   const empSum = computeEmpSummary ? computeEmpSummary(emp.id, filterFn) : { hours: 0, netSalary: 0 };
                   
                   const empIdStr = String(emp.id || '').trim();
@@ -862,8 +891,13 @@ export default function EmployeeCardsGrid({
                                   بريك
                                 </button>
                               )}
-                              <button className="btn btn-stop" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => stopShift(emp.id)}>
-                                إنهاء
+                              <button
+                                className="btn btn-stop"
+                                style={{ padding: '6px 12px', fontSize: '12px', opacity: stoppingEmpIds.has(emp.id) ? 0.6 : 1 }}
+                                disabled={stoppingEmpIds.has(emp.id)}
+                                onClick={() => handleStopShift(emp.id)}
+                              >
+                                {stoppingEmpIds.has(emp.id) ? 'جاري الإنهاء...' : 'إنهاء'}
                               </button>
                             </div>
                           )}

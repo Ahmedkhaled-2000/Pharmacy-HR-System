@@ -113,6 +113,7 @@ export default function EmployeesHubModule({
           customFrom={customFrom}
           customTo={customTo}
           executeWithOwnerGuard={executeWithOwnerGuard}
+          stopShift={stopShift}
         />
       )}
 

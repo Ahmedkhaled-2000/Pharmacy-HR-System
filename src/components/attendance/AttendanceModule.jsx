@@ -13,7 +13,8 @@ export default function AttendanceModule({
   filterMode = 'month',
   customFrom = '',
   customTo = '',
-  executeWithOwnerGuard
+  executeWithOwnerGuard,
+  stopShift
 }) {
   const [selectedBranch, setSelectedBranch] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -509,6 +510,7 @@ export default function AttendanceModule({
           filterMode={filterMode}
           customFrom={customFrom}
           customTo={customTo}
+          stopShift={stopShift}
           onClose={() => setSelectedPunchEmp(null)}
         />
       )}

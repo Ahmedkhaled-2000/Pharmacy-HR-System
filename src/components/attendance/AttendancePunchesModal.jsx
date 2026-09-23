@@ -15,9 +15,11 @@ export default function AttendancePunchesModal({
   filterMode = 'month',
   customFrom = '',
   customTo = '',
+  stopShift,
   onClose
 }) {
   const { showConfirm } = useUI();
+  const [isStoppingShift, setIsStoppingShift] = useState(false);
 
   const [editingPunch, setEditingPunch] = useState(null);
   const [editDate, setEditDate] = useState('');
@@ -40,7 +42,17 @@ export default function AttendancePunchesModal({
   const periodLabel = isCustom ? `الفترة المخصصة: من ${customFrom} إلى ${customTo}` : (monthPicker ? `دورة شهر (${monthPicker})` : '');
 
   // فحص بصمة الحضور النشطة الحالية للموظف (Live Active Shift)
-  const activeShift = state.activeShifts?.[employee.id] || state.activeShifts?.[String(employee.id)];
+  const activeShift =
+    state.activeShifts?.[employee.id] ||
+    state.activeShifts?.[String(employee.id)] ||
+    (employee.code && state.activeShifts?.[employee.code]) ||
+    (employee.code && state.activeShifts?.[String(employee.code)]) ||
+    Object.values(state.activeShifts || {}).find(s =>
+      s && (
+        String(s.employeeId) === String(employee.id) ||
+        (employee.code && (String(s.employeeId) === String(employee.code) || String(s.employeeCode) === String(employee.code)))
+      )
+    );
   const hasActiveShift = Boolean(activeShift && activePeriodFilter(activeShift.date));
   const activeElapsedHours = hasActiveShift
     ? Math.max(0, Math.round(((Date.now() - (activeShift.startEpoch || Date.now())) / 3600000) * 10) / 10)
@@ -72,7 +84,16 @@ export default function AttendancePunchesModal({
     if (!isRejectedPhoto && (p.status === 'rejected' || p.rejected || (typeof p.statusLabel === 'string' && (p.statusLabel.includes('ملغي') || p.statusLabel.includes('مرفوض'))))) {
       return false;
     }
-    const isMatch = (String(p.employeeId) === String(employee.id) || String(p.employeeCode) === String(employee.code));
+    const pEmpId = String(p.employeeId || '');
+    const pEmpCode = String(p.employeeCode || '');
+    const eId = String(employee.id || '');
+    const eCode = String(employee.code || '');
+    const isMatch = (
+      pEmpId === eId ||
+      (eCode && pEmpId === eCode) ||
+      (eCode && pEmpCode === eCode) ||
+      (eId && pEmpCode === eId)
+    );
     return isMatch && activePeriodFilter(p.date);
   });
 
@@ -98,6 +119,22 @@ export default function AttendancePunchesModal({
 
   // Group or process punches into rows
   const shiftsCount = monthPunches.length;
+
+  const handleStopLiveShift = async () => {
+    if (isStoppingShift) return;
+    setIsStoppingShift(true);
+    try {
+      if (typeof stopShift === 'function') {
+        await stopShift(employee.id);
+        showToast?.('⏹ تم إنهاء وردية الموظف بنجاح وتسجيل وقت الانصراف');
+      }
+    } catch (err) {
+      console.error('Error ending shift from modal:', err);
+      showToast?.('❌ حدث خطأ أثناء إنهاء الوردية');
+    } finally {
+      setIsStoppingShift(false);
+    }
+  };
   const manualCount = getEmployeeManualPunchesCount(employee.id, state, activePeriodFilter);
 
   const totalBreakHours = monthPunches
@@ -496,9 +533,31 @@ export default function AttendancePunchesModal({
                 </div>
               </div>
             </div>
-            <span style={{ background: '#10b981', color: '#fff', padding: '5px 14px', borderRadius: '20px', fontWeight: '800', fontSize: '12px' }}>
-              {activeShift?.source === 'kiosk' ? 'بصمة كشك الفرع' : 'تسجيل حي'}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ background: '#10b981', color: '#fff', padding: '5px 14px', borderRadius: '20px', fontWeight: '800', fontSize: '12px' }}>
+                {activeShift?.source === 'kiosk' ? 'بصمة كشك الفرع' : 'تسجيل حي'}
+              </span>
+              {stopShift && (
+                <button
+                  className="btn btn-stop"
+                  style={{
+                    padding: '6px 14px',
+                    fontSize: '12px',
+                    fontWeight: 'bold',
+                    background: '#dc2626',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: isStoppingShift ? 'not-allowed' : 'pointer',
+                    opacity: isStoppingShift ? 0.6 : 1
+                  }}
+                  disabled={isStoppingShift}
+                  onClick={handleStopLiveShift}
+                >
+                  {isStoppingShift ? 'جاري الإنهاء...' : '⏹ إنهاء الوردية الآن'}
+                </button>
+              )}
+            </div>
           </div>
         )}
 

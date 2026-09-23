@@ -62,7 +62,7 @@ import {
   getAllLocalRequests,
   putRequestsBatch
 } from '../utils/localDatabase';
-import { emitEntityChange } from '../utils/socketClient';
+import { emitEntityChange, subscribeToPunchRecorded } from '../utils/socketClient';
 import { computeEmployeeLoanDeductionsForPeriod } from '../utils/loansEngine';
 
 /**
@@ -781,6 +781,113 @@ export function DataProvider({ children, showToast = () => {} }) {
 
     return unsubscribe;
   }, [currentBranch]);
+
+  // ══════════════════════════════════════════════════════════════════════
+  // 🚀 استماع أحداث البصمات الذرية الفورية من نقطة الاتصال /api/punches/record
+  // يضمن ظهور بصمة الكشك فوراً (< 30ms) في لوحة الإدارة والكشاكش الأخرى
+  // ══════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    const unsubscribePunch = subscribeToPunchRecorded((punchPayload) => {
+      if (!punchPayload || !punchPayload.employeeId) return;
+      const { employeeId, actionType, activeShifts: remoteActiveShifts, shiftRecord, time } = punchPayload;
+
+      setState((prev) => {
+        const prevActiveShifts = { ...(prev.activeShifts || {}) };
+        const empIdStr = String(employeeId);
+
+        // العثور على الموظف للوصول لكوده ومعرفه الفعلي
+        const emp = (prev.employees || []).find(e =>
+          String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)
+        );
+        const actualEmpId = emp?.id ? String(emp.id) : empIdStr;
+        const empCode = emp?.code ? String(emp.code) : '';
+
+        if (actionType === 'check_in' || actionType === 'start_shift' || actionType === 'check_in_restored') {
+          if (remoteActiveShifts && typeof remoteActiveShifts === 'object') {
+            const remoteShift = remoteActiveShifts[employeeId] || remoteActiveShifts[empIdStr] || (empCode && remoteActiveShifts[empCode]);
+            if (remoteShift) {
+              prevActiveShifts[employeeId] = remoteShift;
+              prevActiveShifts[empIdStr] = remoteShift;
+              if (actualEmpId) prevActiveShifts[actualEmpId] = remoteShift;
+              if (empCode) prevActiveShifts[empCode] = remoteShift;
+            }
+          }
+          return { ...prev, activeShifts: prevActiveShifts };
+        } else if (actionType === 'check_out' || actionType === 'stop_shift') {
+          // حذف الوردية من الذاكرة المحلية فوراً بكافة المفاتيح الممكنة
+          delete prevActiveShifts[employeeId];
+          delete prevActiveShifts[empIdStr];
+          if (actualEmpId) delete prevActiveShifts[actualEmpId];
+          if (empCode) delete prevActiveShifts[empCode];
+
+          Object.keys(prevActiveShifts).forEach(k => {
+            const s = prevActiveShifts[k];
+            if (
+              k === employeeId || k === empIdStr || k === actualEmpId || k === empCode ||
+              (s && (
+                String(s.employeeId) === empIdStr ||
+                String(s.employeeId) === actualEmpId ||
+                (empCode && (String(s.employeeId) === empCode || String(s.employeeCode) === empCode))
+              ))
+            ) {
+              delete prevActiveShifts[k];
+            }
+          });
+
+          // تحديث مصفوفة shifts فوراً لإغلاق الوردية دون انتظار دورة المزامنة الكاملة
+          let updatedShifts = [...(prev.shifts || [])];
+          const isMatch = (s) => {
+            if (!s) return false;
+            const sId = String(s.employeeId || '');
+            const sCode = String(s.employeeCode || '');
+            return sId === empIdStr || sId === actualEmpId || (empCode && (sId === empCode || sCode === empCode));
+          };
+
+          if (shiftRecord && shiftRecord.id) {
+            const idx = updatedShifts.findIndex(s => s.id === shiftRecord.id || (isMatch(s) && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive)));
+            if (idx >= 0) {
+              updatedShifts[idx] = { ...updatedShifts[idx], ...shiftRecord, isLiveActive: false, status: 'completed' };
+            } else {
+              updatedShifts = [{ ...shiftRecord, isLiveActive: false, status: 'completed' }, ...updatedShifts];
+            }
+          } else {
+            // إغلاق أي وردية مفتوحة للموظف في الواجهة فوراً
+            updatedShifts = updatedShifts.map(s => {
+              if (isMatch(s) && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive)) {
+                return {
+                  ...s,
+                  timeOut: time || s.timeOut || new Date().toISOString().slice(11, 16),
+                  isLiveActive: false,
+                  status: 'completed'
+                };
+              }
+              return s;
+            });
+          }
+
+          const endedList = Array.from(new Set([
+            ...(prev._endedShiftEmpIds || []),
+            employeeId,
+            empIdStr,
+            actualEmpId,
+            empCode
+          ].filter(Boolean)));
+
+          return {
+            ...prev,
+            activeShifts: prevActiveShifts,
+            shifts: updatedShifts,
+            _endedShiftEmpIds: endedList
+          };
+        }
+
+        return prev;
+      });
+    });
+
+    return unsubscribePunch;
+  }, []);
+  // ══════════════════════════════════════════════════════════════════════
 
   // Real-Time Push Stream & Adaptive Polling Hook
   useRealtimeSync({

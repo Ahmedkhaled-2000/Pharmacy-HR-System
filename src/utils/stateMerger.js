@@ -664,6 +664,7 @@ export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShi
   const local = toActiveMap(localShifts);
   const remote = toActiveMap(remoteShifts);
   const deletedIds = options.deletedIds instanceof Set ? options.deletedIds : new Set(toSafeArray(options.deletedIds).map(String));
+  const endedEmpIds = options.endedEmpIds instanceof Set ? options.endedEmpIds : new Set(toSafeArray(options.endedEmpIds).map(String));
 
   // تاريخ اليوم بالتقويم المحلي لمنع استعادة ورديات قديمة غير مغلقة من أيام سابقة
   const nowObj = new Date();
@@ -678,9 +679,10 @@ export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShi
     return false;
   };
 
-  // فحص دقيق للوردية المنتهية فعلياً: وجود وقت انصراف صريح يعني أنها مغلقة قطعاً
+  // فحص دقيق للوردية المنتهية فعلياً: وجود وقت انصراف صريح أو حالة مكتملة يعني أنها مغلقة قطعاً
   const isShiftTrulyClosed = (s) => {
     if (!s || typeof s !== 'object') return false;
+    if (s.status === 'completed' || s.status === 'cancelled' || s.isCancelled) return true;
     const hasValidTimeOut = Boolean(
       s.timeOut &&
       s.timeOut !== '—' &&
@@ -690,42 +692,61 @@ export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShi
       s.timeOut !== 'قيد العمل'
     );
     if (hasValidTimeOut) return true;
-    if (s.isLiveActive || s.status === 'active') return false;
+    if (s.isLiveActive === false && s.timeOut) return true;
     return false;
   };
 
-  // بناء مجموعة لتواقيع الشفتات المكتملة والمغلقة
+  // بناء مجموعة لتواقيع ومعرفات الشفتات المكتملة والمغلقة بكافة المعرفات (ID والكود)
   const closedShiftSignatures = new Set();
+  const closedShiftIds = new Set();
   if (Array.isArray(mergedShifts)) {
     for (const s of mergedShifts) {
-      if (s && s.employeeId && s.date && s.timeIn && isShiftTrulyClosed(s)) {
-        closedShiftSignatures.add(`${String(s.employeeId)}_${s.date}_${s.timeIn}`);
+      if (s && isShiftTrulyClosed(s)) {
+        if (s.id) closedShiftIds.add(String(s.id));
+        if (s.shiftId) closedShiftIds.add(String(s.shiftId));
+        if (s.employeeId && s.date && s.timeIn) {
+          closedShiftSignatures.add(`${String(s.employeeId)}_${s.date}_${s.timeIn}`);
+        }
+        if (s.employeeCode && s.date && s.timeIn) {
+          closedShiftSignatures.add(`${String(s.employeeCode)}_${s.date}_${s.timeIn}`);
+        }
       }
     }
   }
+
+  const isEmpEndedOrClosed = (empKey, act) => {
+    const kStr = String(empKey);
+    if (endedEmpIds.has(kStr) || deletedIds.has(kStr) || deletedIds.has(`emp_${kStr}`)) return true;
+    if (act) {
+      if (act.shiftId && closedShiftIds.has(String(act.shiftId))) return true;
+      if (act.employeeId && endedEmpIds.has(String(act.employeeId))) return true;
+      if (act.employeeCode && endedEmpIds.has(String(act.employeeCode))) return true;
+      if (act.date && act.timeIn) {
+        if (closedShiftSignatures.has(`${kStr}_${act.date}_${act.timeIn}`)) return true;
+        if (act.employeeId && closedShiftSignatures.has(`${String(act.employeeId)}_${act.date}_${act.timeIn}`)) return true;
+        if (act.employeeCode && closedShiftSignatures.has(`${String(act.employeeCode)}_${act.date}_${act.timeIn}`)) return true;
+      }
+    }
+    return false;
+  };
 
   const merged = {};
 
   // 1. فحص الشفتات النشطة المحلية أولاً (الأولوية لإجراءات الجهاز المحلي لليوم الحالي فقط)
   for (const empId of Object.keys(local)) {
-    if (deletedIds.has(String(empId)) || deletedIds.has(`emp_${empId}`)) continue;
     const act = local[empId];
+    if (isEmpEndedOrClosed(empId, act)) continue;
     if (!act || !act.date) continue;
     if (!isShiftDateValid(act.date, act.startEpoch)) continue;
-    const sig = `${String(empId)}_${act.date}_${act.timeIn}`;
-    if (!closedShiftSignatures.has(sig)) {
-      merged[String(empId)] = act;
-    }
+    merged[String(empId)] = act;
   }
 
   // 2. دمج الشفتات النشطة من السحابة إذا لم تكن مسجلة كانصراف مكتمل أو محذوفة أو منتهية الصلاحية
   for (const empId of Object.keys(remote)) {
-    if (deletedIds.has(String(empId)) || deletedIds.has(`emp_${empId}`)) continue;
     const act = remote[empId];
+    if (isEmpEndedOrClosed(empId, act)) continue;
     if (!act || !act.date) continue;
     if (!isShiftDateValid(act.date, act.startEpoch)) continue;
-    const sig = `${String(empId)}_${act.date}_${act.timeIn}`;
-    if (closedShiftSignatures.has(sig)) continue;
 
     const sEmpId = String(empId);
     if (!merged[sEmpId]) {
@@ -746,14 +767,16 @@ export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShi
   if (Array.isArray(mergedShifts)) {
     for (const s of mergedShifts) {
       if (!s || !s.employeeId || !s.date || !s.timeIn) continue;
-      if (deletedIds.has(String(s.employeeId)) || deletedIds.has(`emp_${s.employeeId}`)) continue;
-      if (s.status === 'cancelled' || s.isCancelled) continue;
-      if (isShiftTrulyClosed(s)) continue;
+      const empId = String(s.employeeId);
+      const empCode = s.employeeCode ? String(s.employeeCode) : '';
+      if (endedEmpIds.has(empId) || (empCode && endedEmpIds.has(empCode))) continue;
+      if (deletedIds.has(empId) || deletedIds.has(`emp_${empId}`)) continue;
+      if (s.status === 'cancelled' || s.status === 'completed' || s.isCancelled) continue;
+      if (isShiftTrulyClosed(s) || s.isLiveActive === false) continue;
       const sCreatedEpoch = s.createdAt ? new Date(s.createdAt).getTime() : Date.now();
       if (!isShiftDateValid(s.date, sCreatedEpoch)) continue; // لا نسترجع شفتات قديمة من أيام سابقة كشفتات نشطة اليوم
 
-      const empId = String(s.employeeId);
-      if (!merged[empId]) {
+      if (!merged[empId] && (!empCode || !merged[empCode])) {
         merged[empId] = {
           shiftId: s.id,
           branchId: s.branchId || '',
@@ -1318,7 +1341,17 @@ export function smartMergeStates(localState, remoteState) {
       ...(effectiveLocal.branchSalesSettings || {})
     },
     rosters: mergeRosters(effectiveLocal.rosters, effectiveRemote.rosters, { deletedIds }),
-    activeShifts: mergeActiveShifts(effectiveLocal.activeShifts, effectiveRemote.activeShifts, mergedShifts, { deletedIds }),
+    activeShifts: mergeActiveShifts(effectiveLocal.activeShifts, effectiveRemote.activeShifts, mergedShifts, {
+      deletedIds,
+      endedEmpIds: new Set([
+        ...(effectiveLocal._endedShiftEmpIds || []),
+        ...(effectiveRemote._endedShiftEmpIds || [])
+      ].map(String))
+    }),
+    _endedShiftEmpIds: Array.from(new Set([
+      ...(effectiveLocal._endedShiftEmpIds || []),
+      ...(effectiveRemote._endedShiftEmpIds || [])
+    ].map(String))).slice(-1000),
     branchDirectives: mergeArrays(effectiveLocal.branchDirectives, effectiveRemote.branchDirectives, { prefix: 'bdir', deletedIds }),
     adminDirectives: mergeArrays(effectiveLocal.adminDirectives, effectiveRemote.adminDirectives, { prefix: 'adir', deletedIds }),
     _notificationsClearedAt: effectiveLocal._notificationsClearedAt || effectiveRemote._notificationsClearedAt || null,

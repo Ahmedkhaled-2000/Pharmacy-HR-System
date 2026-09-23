@@ -477,6 +477,50 @@ export async function apiSaveSettingsSlice(sliceKey, sliceValue, options = {}) {
   });
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// 🚀 apiRecordPunch - نقطة الاتصال الذرية الفائقة الخفة للبصمات
+// < 1KB طلب - < 20ms استجابة - 3 إعادة محاولة تلقائية مع تأخر تصاعدي
+// هذه هي الطريقة الصحيحة الوحيدة لتسجيل الحضور والانصراف من الكشك!
+// ══════════════════════════════════════════════════════════════════════════════
+export async function apiRecordPunch(punchData = {}, options = {}) {
+  resetBackendCircuitBreaker();
+  const {
+    employeeId,
+    branchId,
+    actionType,      // 'check_in' | 'check_out'
+    time,            // 'HH:MM'
+    date,            // 'YYYY-MM-DD'
+    shiftId,
+    shiftData,       // كائن بيانات الوردية في activeShifts
+    shiftRecord,     // سجل الوردية في shifts[]
+    requestId        // معرف طلب فريد لمنع الازدواجية
+  } = punchData;
+
+  const body = {
+    employeeId,
+    branchId: branchId || '',
+    actionType: actionType || 'check_in',
+    time: time || new Date().toTimeString().slice(0, 5),
+    date: date || new Date().toISOString().slice(0, 10),
+    shiftId,
+    shiftData,
+    shiftRecord,
+    requestId: requestId || `punch_${employeeId}_${Date.now()}`
+  };
+
+  return await request('punches/record', {
+    method: 'POST',
+    body: JSON.stringify(body),
+    timeout: options.timeout || 15000,
+    retries: options.retries !== undefined ? options.retries : 3, // 3 إعادات تلقائية لضمان وصول البصمة
+    noCache: true,
+    isBackground: false // البصمة ليست خلفية - لها أولوية عالية
+  });
+}
+// ══════════════════════════════════════════════════════════════════════════════
+
+
+
 // ── 1.1 الإرسال الذري الخفيف للطلبات (< 2KB) لضمان الوصول الفوري دون إرسال كامل قاعدة البيانات ──
 export async function apiSubmitRequestAtomic(requestObj, notificationObj = null, key = STORAGE_KEY) {
   resetBackendCircuitBreaker();

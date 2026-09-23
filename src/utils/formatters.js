@@ -895,23 +895,30 @@ export function normalizeState(parsed) {
   // ── الاسترداد الذاتي الوقائي للورديات الحية (Self-Healing from Open Shifts) ──
   // إذا فُقدت الوردية النشطة من الذاكرة المؤقتة، يتم ترميمها واستعادتها فوراً من أي وردية مفتوحة لليوم أو وردية ليلية مستمرة
   const currentTodayStr = typeof getRealTodayStr === 'function' ? getRealTodayStr() : todayStr();
+  const endedEmpIdsSet = new Set(Array.isArray(parsed._endedShiftEmpIds) ? parsed._endedShiftEmpIds.map(String) : []);
   if (Array.isArray(shifts)) {
     shifts.forEach(s => {
-      const isShiftOpen = (!s.timeOut || s.timeOut === '—' || s.timeOut === '-' || s.timeOut === '' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive);
+      if (!s) return;
+      const hasTimeOut = Boolean(s.timeOut && s.timeOut !== '—' && s.timeOut !== '-' && s.timeOut !== '' && s.timeOut !== 'قيد العمل الآن');
+      const isShiftOpen = !hasTimeOut && s.isLiveActive !== false && s.status !== 'completed';
       const shiftEpoch = s.startEpoch || (s.createdAt ? new Date(s.createdAt).getTime() : (s.date && s.timeIn ? new Date(`${s.date}T${s.timeIn.slice(0, 5)}:00`).getTime() : 0));
       const isRecent = shiftEpoch ? (Date.now() - shiftEpoch < 36 * 3600 * 1000) : (s.date === currentTodayStr);
 
       if (
-        s &&
         (s.date === currentTodayStr || isRecent) &&
         s.timeIn &&
         s.timeIn !== '—' &&
         isShiftOpen &&
         s.status !== 'cancelled' &&
+        s.status !== 'completed' &&
         !s.isCancelled
       ) {
         const empIdKey = String(s.employeeId || '');
-        if (empIdKey && !rawActiveShifts[empIdKey]) {
+        const empCodeKey = String(s.employeeCode || '');
+        if (endedEmpIdsSet.has(empIdKey) || (empCodeKey && endedEmpIdsSet.has(empCodeKey))) {
+          return;
+        }
+        if (empIdKey && !rawActiveShifts[empIdKey] && (!empCodeKey || !rawActiveShifts[empCodeKey])) {
           rawActiveShifts[empIdKey] = {
             shiftId: s.id,
             branchId: s.branchId || '',

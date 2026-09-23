@@ -290,6 +290,34 @@ export function subscribeToEntityChanges(onEntityChanged) {
   };
 }
 
+/**
+ * 🚀 الاشتراك في أحداث البصمات الذرية الفورية من نقطة الاتصال الخفيفة /api/punches/record
+ * يُمكّن لوحة الإدارة والكشاكش من مزامنة الحضور فوراً (< 30ms) دون إعادة جلب 6MB
+ * @param {Function} onPunchRecorded - دالة تستقبل { employeeId, actionType, activeShifts, date, time }
+ */
+export function subscribeToPunchRecorded(onPunchRecorded) {
+  const s = getSocket();
+  if (!s || typeof onPunchRecorded !== 'function') return () => {};
+
+  const handler = (payload) => {
+    try {
+      // تجاهل البصمات الصادرة من نفس الجهاز لمنع الحلقات
+      if (payload && payload.clientId && payload.clientId === CLIENT_SESSION_ID) return;
+      console.log(`⚡ [Socket.io] punch:recorded - emp ${payload?.employeeId} - ${payload?.actionType} at ${payload?.time}`);
+      onPunchRecorded(payload);
+    } catch (e) {
+      console.warn('[Socket.io] Error handling punch:recorded:', e);
+    }
+  };
+
+  s.on('punch:recorded', handler);
+
+  return () => {
+    s.off('punch:recorded', handler);
+  };
+}
+
+
 // قناة البث المحلي الفوري لإبطال الجلسات بين التبويبات والنوافذ (0ms Cross-Tab Broadcast)
 const authRevocationChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
   ? new BroadcastChannel('pharmacy-auth-revocation-channel')

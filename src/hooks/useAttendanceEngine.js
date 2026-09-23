@@ -23,6 +23,7 @@ import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../utils/jobsH
 import { apiArchiveDeleteEmployee } from '../utils/archiveApiClient';
 import { hardDeleteEntityFast } from '../utils/offlineSync';
 import { isBranchMatch } from '../utils/branchMatcher';
+import { apiRecordPunch } from '../utils/apiClient';
 import { useData } from '../context/DataContext';
 import { useUI } from '../context/UIContext';
 
@@ -616,6 +617,21 @@ export function useAttendanceEngine() {
       showToast(msg);
     }
 
+    // ── حفظ ذري فائق السرعة للبصمة (Atomic Punch Save) لكافة الأجهزة والمسارات ──
+    apiRecordPunch({
+      employeeId: emp?.id || empId,
+      branchId: effectiveBranchId,
+      actionType: 'check_in',
+      time: punchTime,
+      date: punchDate,
+      shiftId: openShiftRecord.id,
+      shiftData: shiftData,
+      shiftRecord: openShiftRecord,
+      requestId: `checkin_${empId}_${Date.now()}`
+    }).catch(err => {
+      console.warn('[startShift] Atomic punch call warning:', err.message);
+    });
+
     if (saveState) {
       saveState(updatedState).catch(err => console.error('[startShift] Background save error:', err));
     }
@@ -686,7 +702,7 @@ export function useAttendanceEngine() {
     }
 
     if (saveState) {
-      saveState(updatedState).catch(err => console.error('[pauseShift] Background save error:', err));
+      saveState(updatedState, { entityType: 'activeShifts' }).catch(err => console.error('[pauseShift] Background save error:', err));
     }
 
     return { success: true, nowTime };
@@ -757,7 +773,7 @@ export function useAttendanceEngine() {
     }
 
     if (saveState) {
-      saveState(updatedState).catch(err => console.error('[resumeShift] Background save error:', err));
+      saveState(updatedState, { entityType: 'activeShifts' }).catch(err => console.error('[resumeShift] Background save error:', err));
     }
 
     return { success: true };
@@ -765,15 +781,49 @@ export function useAttendanceEngine() {
 
   // 8. إنهاء الوردية (Stop Shift)
   const stopShift = async (empId, source = 'admin') => {
-    let active = state.activeShifts?.[empId] || state.activeShifts?.[String(empId)];
     const emp = getEmp(empId);
+    const empActualId = emp?.id ? String(emp.id) : String(empId || '');
+    const empCode = emp?.code ? String(emp.code) : '';
+
+    const isEmpShiftMatch = (s) => {
+      if (!s) return false;
+      const sEmpId = String(s.employeeId || '');
+      const sEmpCode = String(s.employeeCode || '');
+      return (
+        sEmpId === String(empId) ||
+        (empActualId && sEmpId === empActualId) ||
+        (empCode && sEmpId === empCode) ||
+        (empCode && sEmpCode === empCode) ||
+        (empActualId && sEmpCode === empActualId)
+      );
+    };
+
+    const isShiftOpen = (s) => (
+      !s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === '-' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive
+    );
+
+    // البحث الدقيق والشامل عن الوردية النشطة في activeShifts بكافة مفاتيح الموظف
+    let active =
+      state.activeShifts?.[empId] ||
+      state.activeShifts?.[String(empId)] ||
+      (empActualId && state.activeShifts?.[empActualId]) ||
+      (empCode && state.activeShifts?.[empCode]) ||
+      Object.values(state.activeShifts || {}).find(s =>
+        s && (
+          String(s.employeeId) === String(empId) ||
+          (empActualId && String(s.employeeId) === empActualId) ||
+          (empCode && String(s.employeeId) === empCode) ||
+          (empCode && String(s.employeeCode) === empCode) ||
+          (empActualId && String(s.employeeCode) === empActualId)
+        )
+      );
 
     // إذا لم تكن الوردية موجودة في activeShifts (بسبب إعادة تحميل الصفحة أو مزامنة)، نبحث في shifts عن وردية مفتوحة
     if (!active) {
       const todayStr = getRealTodayStr();
       const openShift = (state.shifts || []).find(s =>
-        (String(s.employeeId) === String(empId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
-        (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === 'قيد العمل الآن') &&
+        isEmpShiftMatch(s) &&
+        isShiftOpen(s) &&
         s.status !== 'cancelled' && !s.isCancelled
       );
       if (openShift) {
@@ -859,13 +909,13 @@ export function useAttendanceEngine() {
     let existingShifts = [...(state.shifts || [])];
     const openShiftIdx = existingShifts.findIndex(
       (s) => (active.shiftId && s.id === active.shiftId) ||
-             (String(s.employeeId) === String(empId) && s.date === active.date && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === 'قيد العمل الآن'))
+             (isEmpShiftMatch(s) && (s.date === active.date || isShiftOpen(s)))
     );
     const shiftId = openShiftIdx >= 0 ? existingShifts[openShiftIdx].id : (active.shiftId || uid());
 
     // التحقق مما إذا كان للموظف وردية سابقة في نفس اليوم بفرع آخر لحصر البدل اليومي على أول فرع فقط
     const sameDateShifts = existingShifts.filter(
-      (s) => String(s.employeeId) === String(empId) && s.date === active.date && s.id !== shiftId
+      (s) => isEmpShiftMatch(s) && s.date === active.date && s.id !== shiftId
     );
     const hasEarlierShiftInAnotherBranch = sameDateShifts.some(
       (s) => s.branchId && String(s.branchId) !== String(bId) && ((s.timeIn || '') <= (active.timeIn || ''))
@@ -875,9 +925,9 @@ export function useAttendanceEngine() {
     const newShift = {
       ...baseShift,
       id: shiftId,
-      employeeId: empId,
-      employeeCode: emp?.code || '',
-      employeeName: emp?.name || '',
+      employeeId: empActualId || empId,
+      employeeCode: emp?.code || baseShift.employeeCode || '',
+      employeeName: emp?.name || baseShift.employeeName || '',
       branchId: bId,
       branchName: bObj?.name || '',
       date: active.date,
@@ -899,11 +949,23 @@ export function useAttendanceEngine() {
       updatedAt: new Date().toISOString()
     };
 
-    let updatedShifts = existingShifts;
-    if (openShiftIdx >= 0) {
-      updatedShifts[openShiftIdx] = newShift;
-    } else {
-      updatedShifts = [newShift, ...existingShifts];
+    // إغلاق كافة الورديات المفتوحة للموظف وضمان عدم بقاء أي وردية مفتوحة
+    let updatedShifts = existingShifts.map((s, idx) => {
+      if (idx === openShiftIdx || (isEmpShiftMatch(s) && isShiftOpen(s))) {
+        return {
+          ...s,
+          ...newShift,
+          id: s.id || newShift.id,
+          timeOut,
+          isLiveActive: false,
+          status: 'completed',
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return s;
+    });
+    if (openShiftIdx < 0) {
+      updatedShifts = [newShift, ...updatedShifts];
     }
 
     let updatedRequests = state.requests || [];
@@ -918,7 +980,7 @@ export function useAttendanceEngine() {
       const overtimeReq = {
         id: reqId,
         shiftId: shiftId,
-        employeeId: empId,
+        employeeId: empActualId || empId,
         employeeName: emp?.name || '',
         employeeCode: emp?.code || '',
         jobTitle: emp?.jobTitle || '',
@@ -983,16 +1045,45 @@ export function useAttendanceEngine() {
       }).catch((e) => console.warn('Overtime email alert error:', e));
     }
 
+    // تنظيف شامل لكافة مفاتيح الموظف في activeShifts
     const updatedActive = { ...state.activeShifts };
     delete updatedActive[empId];
     delete updatedActive[String(empId)];
+    if (empActualId) delete updatedActive[empActualId];
+    if (empCode) delete updatedActive[empCode];
+    Object.keys(updatedActive).forEach((k) => {
+      const v = updatedActive[k];
+      if (
+        k === String(empId) ||
+        k === empActualId ||
+        k === empCode ||
+        (v && (
+          String(v.employeeId) === String(empId) ||
+          String(v.employeeId) === empActualId ||
+          (empCode && (String(v.employeeId) === empCode || String(v.employeeCode) === empCode)) ||
+          (empActualId && String(v.employeeCode) === empActualId)
+        ))
+      ) {
+        delete updatedActive[k];
+      }
+    });
+
+    const endedEmpIds = Array.from(new Set([
+      ...(state._endedShiftEmpIds || []),
+      empId,
+      String(empId),
+      empActualId,
+      empCode
+    ].filter(Boolean)));
 
     let updatedState = {
       ...state,
       shifts: updatedShifts,
       activeShifts: updatedActive,
       requests: updatedRequests,
-      notifications: updatedNotifications
+      notifications: updatedNotifications,
+      _endedShiftEmpIds: endedEmpIds,
+      _isShiftEndOperation: true
     };
 
     try {
@@ -1029,8 +1120,27 @@ export function useAttendanceEngine() {
       showToast(msg);
     }
 
+    // ── 1. حفظ ذري فائق السرعة للانصراف عبر apiRecordPunch (لكل من الكشك والإدارة) ──
+    const finalShiftRecord = updatedState.shifts?.find(s => s.id === shiftId ||
+      (isEmpShiftMatch(s) && s.date === active.date && s.timeOut === timeOut));
+
+    apiRecordPunch({
+      employeeId: empActualId || empId,
+      branchId: bId || active?.branchId || '',
+      actionType: 'check_out',
+      time: timeOut,
+      date: active.date || getRealTodayStr(),
+      shiftId: shiftId,
+      shiftData: null,
+      shiftRecord: finalShiftRecord || newShift,
+      requestId: `checkout_${empId}_${Date.now()}`
+    }).catch(err => {
+      console.warn('[stopShift] Atomic punch call warning (will rely on state sync):', err.message);
+    });
+
+    // ── 2. حفظ الحالة الشاملة (shifts + activeShifts + requests) بدون تجريد ──
     if (saveState) {
-      saveState(updatedState).catch(err => console.error('[stopShift] Background save error:', err));
+      saveState(updatedState).catch(err => console.error('[stopShift] Full state save error:', err));
     }
 
     return { success: true, netHours, timeOut, date: active.date };

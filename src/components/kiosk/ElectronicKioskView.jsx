@@ -9,7 +9,7 @@ import { sendBiometricAttendanceEmail, notifyAdminOnEarlyDepartureBeforeClosing,
 import { preWarmFaceModels } from '../../utils/faceApiHelper';
 import { normalizeDigits, getRealTodayStr } from '../../utils/formatters';
 import { getActiveShortcuts, matchesShortcutEvent } from '../../utils/shortcutsConfig';
-import { apiSubmitRequestAtomic } from '../../utils/apiClient';
+import { apiSubmitRequestAtomic, apiRecordPunch } from '../../utils/apiClient';
 import { enqueueNewRequest } from '../../utils/syncEngine';
 import '../../kiosk-modern.css';
 
@@ -911,10 +911,34 @@ export default function ElectronicKioskView({
     }
     if (saveState) {
       try {
-        saveState(finalState).catch(err => console.error('[Kiosk Photo Attendance] Save error:', err));
+        // استخدام deltaHint لإرسال activeShifts فقط (< 20KB) بدلاً من 6MB كاملة
+        // هذا يمنع مسح ورديات موظفين آخرين عند حفظ بصمة موظف جديد
+        saveState(finalState, { entityType: 'activeShifts' }).catch(err => console.error('[Kiosk Photo Attendance] Save error:', err));
       } catch (err) {
         console.error('[Kiosk Photo Attendance] saveState error:', err);
       }
+    }
+
+    // ⚡ تسجيل ذري للبصمة في السيرفر مباشرة (< 1KB) لضمان عدم فقدان البصمة عند Race Condition
+    const photoActionType = (actionType === 'shift_start') ? 'check_in' : (actionType === 'shift_end') ? 'check_out' : null;
+    if (photoActionType) {
+      const photoShiftData = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];
+      const photoShiftRecord = (actionType === 'shift_start')
+        ? updatedShifts.find(s => s.id === shiftId)
+        : updatedShifts.find(s => String(s.employeeId) === String(currentEmp.id) && s.date === dateStr && s.timeOut && s.timeOut !== '—');
+      apiRecordPunch({
+        employeeId: currentEmp.id,
+        branchId: effectiveBranchId,
+        actionType: photoActionType,
+        time: punchTime,
+        date: dateStr,
+        shiftId: shiftId,
+        shiftData: photoShiftData || null,
+        shiftRecord: photoShiftRecord || null,
+        requestId: requestId
+      }).catch(err => {
+        console.warn('[Kiosk Photo Attendance] Atomic punch record warning (non-critical):', err.message);
+      });
     }
 
     // ⚡ بدء أو إنهاء الوردية فورياً بغض النظر عن إرسال الطلب أو حالة الشبكة

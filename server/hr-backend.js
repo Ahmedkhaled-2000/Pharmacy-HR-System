@@ -485,6 +485,96 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
         }
       }
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // 🛡️ ACTIVE SHIFT MERGE GUARD - الحارس الذري لورديات الكشك النشطة
+    // ══════════════════════════════════════════════════════════════════════════
+    // المشكلة الجذرية: عندما تقوم صفحة الإدارة (أو أي جهاز) بحفظ state كاملة
+    // قديمة لا تحتوي على وردية موظف بصم للتو من الكشك، يتم مسح الوردية النشطة.
+    // الحل: قبل الكتابة، نجلب الـ activeShifts الموجودة في DB ونحمي كل وردية
+    // نشطة (لها timeIn وليس لها timeOut صريح) من المسح بواسطة الجهاز الآخر.
+    // المفتاح: _punchSource تشير لعملية كشك وليس admin → نتخطى المدمج
+    const isKioskSliceOnly = stateValue?._punchSource === 'kiosk_slice' || stateValue?._isShiftEndOperation === true;
+    const endedEmpIdsSet = new Set((stateValue?._endedShiftEmpIds || []).map(String));
+
+    if (!isKioskSliceOnly && !isExplicitReset && stateValue && typeof stateValue === 'object') {
+      try {
+        const existingForShifts = await getSettingsFromStorage(key);
+        const existingActiveShifts = existingForShifts?.activeShifts;
+
+        if (existingActiveShifts && typeof existingActiveShifts === 'object') {
+          const incomingActiveShifts = stateValue.activeShifts || {};
+          const today = new Date().toISOString().slice(0, 10);
+          let shiftsProtected = 0;
+
+          // قائمة الموظفين لفحص الأكواد والمعرفات
+          const employeesList = Array.isArray(stateValue.employees) ? stateValue.employees : (Array.isArray(existingForShifts?.employees) ? existingForShifts.employees : []);
+
+          for (const [empId, existingShift] of Object.entries(existingActiveShifts)) {
+            if (!existingShift || typeof existingShift !== 'object') continue;
+
+            const sEmpIdStr = String(empId);
+            const empObj = employeesList.find(e => String(e.id) === sEmpIdStr || (e.code && String(e.code) === sEmpIdStr));
+            const empActualId = empObj?.id ? String(empObj.id) : sEmpIdStr;
+            const empCode = empObj?.code ? String(empObj.code) : '';
+
+            // إذا كان الموظف ضمن قائمة الورديات المنتهية صراحة، لا تتم حمايته أو استعادته إطلاقاً
+            if (endedEmpIdsSet.has(sEmpIdStr) || endedEmpIdsSet.has(empActualId) || (empCode && endedEmpIdsSet.has(empCode))) {
+              continue;
+            }
+
+            // فحص ما إذا كانت مصفوفة shifts تحتوي على سجل وردية مغلق لهذا الموظف
+            const isEmpShiftMatch = (s) => (
+              String(s.employeeId) === sEmpIdStr ||
+              String(s.employeeId) === empActualId ||
+              (empCode && (String(s.employeeId) === empCode || String(s.employeeCode) === empCode)) ||
+              (existingShift.shiftId && s.id === existingShift.shiftId)
+            );
+            const isShiftTrulyClosed = (s) => Boolean(
+              s && s.timeOut && s.timeOut !== '' && s.timeOut !== '—' && s.timeOut !== '-' && s.timeOut !== 'قيد العمل الآن' && !s.isLiveActive
+            );
+
+            const hasClosedInIncoming = Array.isArray(stateValue.shifts) && stateValue.shifts.some(s =>
+              isEmpShiftMatch(s) && (s.date === existingShift.date || (existingShift.shiftId && s.id === existingShift.shiftId)) && isShiftTrulyClosed(s)
+            );
+
+            if (hasClosedInIncoming) {
+              // تم إنهاء الوردية صراحة من الإدارة ومسجلة في shifts -> لا نسترجعها أبداً
+              continue;
+            }
+
+            // الوردية النشطة: لها date اليوم، ولها timeIn، وليس لها timeOut صريح
+            const isActiveToday = existingShift.date === today;
+            const hasCheckIn = Boolean(existingShift.timeIn && existingShift.timeIn !== '');
+            const noCheckOut = !existingShift.timeOut || existingShift.timeOut === '' || existingShift.timeOut === '—' || existingShift.timeOut === '-';
+            const isGenuinelyActive = isActiveToday && hasCheckIn && noCheckOut;
+
+            if (isGenuinelyActive) {
+              const incomingShift = incomingActiveShifts[empId] || incomingActiveShifts[String(empId)] || (empCode && incomingActiveShifts[empCode]);
+              const incomingIsEmpty = !incomingShift;
+              const incomingLacksCheckIn = incomingShift && (!incomingShift.timeIn || incomingShift.timeIn === '');
+
+              if (incomingIsEmpty || incomingLacksCheckIn) {
+                // ✅ الحماية فقط للورديات النشطة فعلياً التي لم يتم تسجيل انصرافها صراحة
+                incomingActiveShifts[empId] = existingShift;
+                incomingActiveShifts[String(empId)] = existingShift;
+                shiftsProtected++;
+                console.log(`[ActiveShift Guard] 🛡️ Protected active shift for emp ${empId} (${existingShift.branchId}) - timeIn: ${existingShift.timeIn}, date: ${existingShift.date}`);
+              }
+            }
+          }
+
+          if (shiftsProtected > 0) {
+            stateValue.activeShifts = incomingActiveShifts;
+            console.log(`[ActiveShift Guard] ✅ Total ${shiftsProtected} active kiosk shift(s) preserved from concurrent overwrite.`);
+          }
+        }
+      } catch (shiftGuardErr) {
+        // خطأ في الحارس لا يوقف الحفظ - نسجل فقط
+        console.warn('[ActiveShift Guard] ⚠️ Non-critical guard error (save continues):', shiftGuardErr.message);
+      }
+    }
+    // ══════════════════════════════════════════════════════════════════════════
   }
 
   let cleanJsonString = typeof stateValue === 'string' ? stateValue : JSON.stringify(stateValue);
@@ -667,13 +757,20 @@ app.post('/api/settings/slice', async (req, res) => {
     // تحديث الجزء المطلوب فقط في الحالة
     existing[sliceKey] = sliceValue;
 
+    // إذا كان التحديث يخص الشفتات النشطة، نضع راية kiosk_slice لمنع الحارس من إعادة المحذوفات
+    if (sliceKey === 'activeShifts') {
+      existing._punchSource = 'kiosk_slice';
+    }
+
     const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const result = await saveSettingsToStorage(key, existing, clientIp);
 
-    // بث التغيير الذري اللحظي لجميع الأجهزة
+    // بث التغيير الذري اللحظي لجميع الأجهزة مع البيانات الكاملة
     io.emit('entity:changed', {
       entityType: sliceKey,
-      action: 'slice_update',
+      entityId: 'all',
+      data: sliceValue,
+      action: 'update',
       timestamp: new Date().toISOString()
     });
 
@@ -689,7 +786,354 @@ app.post('/api/settings/slice', async (req, res) => {
   }
 });
 
-// فحص الإصدار للمزامنة الخفيفة
+// ══════════════════════════════════════════════════════════════════════════════
+// 🚀 نقطة الاتصال الذرية الفائقة الخفة للبصمات (Atomic Punch Record API)
+// < 1KB طلب بدلاً من 6MB - < 20ms استجابة بدلاً من 408/499 Timeouts
+// تحمي من Race Condition تماماً بسبب التحديث الجزئي الذري فقط لـ activeShifts
+// ══════════════════════════════════════════════════════════════════════════════
+app.post('/api/punches/record', async (req, res) => {
+  try {
+    const { employeeId, branchId, actionType, time, date, shiftId, shiftData, shiftRecord, requestId, key } = req.body;
+    const storageKey = key || STORAGE_KEY;
+
+    if (!employeeId || !actionType || !date) {
+      return res.status(400).json({ success: false, error: 'Missing required fields: employeeId, actionType, date' });
+    }
+
+    const clientIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
+    const now = new Date().toISOString();
+
+    // جلب الحالة الحالية من الذاكرة السريعة أو قاعدة البيانات
+    const existing = await getSettingsFromStorage(storageKey);
+    if (!existing || typeof existing !== 'object') {
+      return res.status(500).json({ success: false, error: 'System state unavailable' });
+    }
+
+    const currentActiveShifts = { ...(existing.activeShifts || {}) };
+    let currentShifts = [...(existing.shifts || [])];
+    const empIdStr = String(employeeId);
+
+    if (actionType === 'check_in' || actionType === 'start_shift') {
+      // ── تسجيل حضور ذري ───────────────────────────────────────────
+      // إذا كان الموظف لديه وردية نشطة بالفعل لليوم → نرجع خطأ للكشك
+      const existingActive = currentActiveShifts[employeeId] || currentActiveShifts[empIdStr];
+      if (existingActive && existingActive.date === date) {
+        return res.status(409).json({
+          success: false,
+          alreadyCheckedIn: true,
+          existingShift: existingActive,
+          message: 'الموظف لديه وردية نشطة بالفعل لهذا اليوم'
+        });
+      }
+
+      // إدخال الوردية الجديدة في activeShifts
+      const newShiftData = shiftData || {
+        shiftId: shiftId || `shift_${employeeId}_${Date.now()}`,
+        branchId: branchId || '',
+        date,
+        timeIn: time || now.slice(11, 16),
+        startEpoch: Date.now(),
+        isPaused: false,
+        isOnBreak: false,
+        updatedAt: Date.now()
+      };
+
+      currentActiveShifts[employeeId] = newShiftData;
+      currentActiveShifts[empIdStr] = newShiftData;
+
+      // إضافة سجل الوردية في shifts[]
+      if (shiftRecord) {
+        currentShifts = [shiftRecord, ...currentShifts.filter(s =>
+          !(String(s.employeeId) === empIdStr && s.date === date && (!s.timeOut || s.timeOut === '' || s.isLiveActive))
+        )];
+      }
+
+    } else if (actionType === 'check_out' || actionType === 'stop_shift') {
+      // ── تسجيل انصراف ذري فائق الموثوقية (Atomic Check-out) ───────────────────
+      const employeesList = Array.isArray(existing.employees) ? existing.employees : [];
+      const empObj = employeesList.find(e =>
+        String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)
+      );
+      const possibleKeys = new Set([
+        employeeId,
+        empIdStr,
+        empObj?.id ? String(empObj.id) : null,
+        empObj?.code ? String(empObj.code) : null
+      ].filter(Boolean));
+
+      let activeShiftKey = null;
+      for (const k of possibleKeys) {
+        if (currentActiveShifts[k]) {
+          activeShiftKey = k;
+          break;
+        }
+      }
+      if (!activeShiftKey) {
+        for (const [k, v] of Object.entries(currentActiveShifts)) {
+          if (v && (possibleKeys.has(String(v.employeeId)) || possibleKeys.has(String(v.employeeCode)))) {
+            activeShiftKey = k;
+            break;
+          }
+        }
+      }
+      const activeShift = activeShiftKey ? currentActiveShifts[activeShiftKey] : null;
+
+      // فحص ما إذا كان هناك سجل وردية مفتوح في shifts للموظف
+      const isEmpShiftMatch = (s) => (
+        possibleKeys.has(String(s.employeeId)) || (s.employeeCode && possibleKeys.has(String(s.employeeCode)))
+      );
+      const isShiftOpen = (s) => (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === '-' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive);
+
+      // إذا لم تكن هناك وردية نشطة ولا سجل وردية مفتوح ولا shiftRecord -> فقط عندها نرجع 409
+      if (!activeShift && !shiftRecord && !currentShifts.some(s => isEmpShiftMatch(s) && isShiftOpen(s))) {
+        return res.status(409).json({
+          success: false,
+          notCheckedIn: true,
+          message: 'لا توجد وردية نشطة لهذا الموظف لتسجيل الانصراف'
+        });
+      }
+
+      // حذف كافة مفاتيح الموظف من activeShifts
+      possibleKeys.forEach(k => delete currentActiveShifts[k]);
+      Object.keys(currentActiveShifts).forEach(k => {
+        const v = currentActiveShifts[k];
+        if (v && (possibleKeys.has(String(v.employeeId)) || possibleKeys.has(String(v.employeeCode)))) {
+          delete currentActiveShifts[k];
+        }
+      });
+
+      // إغلاق وتحديث سجل الوردية في shifts[]
+      const targetShiftId = activeShift?.shiftId || shiftId || shiftRecord?.id;
+      let existingIdx = currentShifts.findIndex(s => targetShiftId && s.id === targetShiftId);
+      if (existingIdx < 0) {
+        existingIdx = currentShifts.findIndex(s => isEmpShiftMatch(s) && (s.date === date || isShiftOpen(s)));
+      }
+
+      const closedRecord = {
+        ...(existingIdx >= 0 ? currentShifts[existingIdx] : {}),
+        ...(shiftRecord || {}),
+        employeeId: empObj?.id || employeeId,
+        employeeCode: empObj?.code || shiftRecord?.employeeCode || '',
+        employeeName: empObj?.name || shiftRecord?.employeeName || '',
+        timeOut: time || (existingIdx >= 0 && currentShifts[existingIdx].timeOut) || now.slice(11, 16),
+        isLiveActive: false,
+        status: 'completed',
+        updatedAt: now
+      };
+
+      if (existingIdx >= 0) {
+        currentShifts[existingIdx] = closedRecord;
+      } else {
+        currentShifts = [closedRecord, ...currentShifts];
+      }
+
+      // إغلاق أي ورديات مفتوحة إضافية مكررة لنفس الموظف
+      currentShifts = currentShifts.map((s, idx) => {
+        if (idx !== existingIdx && isEmpShiftMatch(s) && isShiftOpen(s)) {
+          return {
+            ...s,
+            timeOut: time || now.slice(11, 16),
+            isLiveActive: false,
+            status: 'completed',
+            updatedAt: now
+          };
+        }
+        return s;
+      });
+    } else {
+      return res.status(400).json({ success: false, error: `Unknown actionType: ${actionType}` });
+    }
+
+    // نضع راية kiosk_slice لضمان عدم قيام حارس السيرفر باسترجاع الوردية المنتهية
+    existing._punchSource = 'kiosk_slice';
+    existing.activeShifts = currentActiveShifts;
+    existing.shifts = currentShifts;
+
+    // حفظ ذري في Redis + PostgreSQL
+    const saveResult = await saveSettingsToStorage(storageKey, existing, clientIp);
+
+    // تسجيل في جدول sync_logs للتتبع
+    db.query(
+      'INSERT INTO public.sync_logs (action_type, entity_key, version, client_ip, created_at) VALUES ($1, $2, $3, $4, $5)',
+      [`PUNCH_${actionType.toUpperCase()}`, `emp_${employeeId}`, saveResult?.version || 0, clientIp, now]
+    ).catch(() => {});
+
+    // بث لحظي لجميع الأجهزة المتصلة (< 5ms)
+    io.emit('punch:recorded', {
+      employeeId,
+      empIdStr,
+      branchId: branchId || '',
+      actionType,
+      date,
+      time: time || now.slice(11, 16),
+      requestId: requestId || null,
+      activeShifts: currentActiveShifts,
+      shiftRecord: (actionType === 'check_out' || actionType === 'stop_shift') ? (currentShifts.find(s => s.employeeId === employeeId || s.employeeId === empIdStr) || currentShifts[0]) : (shiftRecord || null),
+      timestamp: now
+    });
+
+    io.emit('entity:changed', {
+      entityType: 'activeShifts',
+      action: actionType,
+      employeeId,
+      timestamp: now
+    });
+
+    console.log(`[Atomic Punch] ✅ ${actionType} recorded for emp ${employeeId} (branch: ${branchId}) at ${time} on ${date}`);
+
+    res.json({
+      success: true,
+      actionType,
+      employeeId,
+      branchId,
+      date,
+      time,
+      version: saveResult?.version || 0,
+      updated_at: now,
+      requestId: requestId || null
+    });
+
+  } catch (err) {
+    console.error('[API POST /punches/record Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+// ══════════════════════════════════════════════════════════════════════════════
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 🔧 نقطة اتصال الإدارة: تفعيل وردية موظف يدوياً (Admin Activate Shift)
+// تُستخدم لاسترجاع الورديات التي مُسحت بسبب Race Condition
+// ══════════════════════════════════════════════════════════════════════════════
+app.post('/api/admin/activate-shift', async (req, res) => {
+  try {
+    const { employeeId, branchId, date, timeIn, shiftId, overwrite = false, key } = req.body;
+    const storageKey = key || STORAGE_KEY;
+
+    if (!employeeId || !date || !timeIn) {
+      return res.status(400).json({ success: false, error: 'Missing: employeeId, date, timeIn' });
+    }
+
+    const clientIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'admin-manual';
+    const now = new Date().toISOString();
+    const effectiveShiftId = shiftId || `shift_${employeeId}_${new Date(date + 'T' + timeIn).getTime()}`;
+
+    const existing = await getSettingsFromStorage(storageKey);
+    if (!existing || typeof existing !== 'object') {
+      return res.status(500).json({ success: false, error: 'System state unavailable' });
+    }
+
+    const currentActiveShifts = { ...(existing.activeShifts || {}) };
+    const empIdStr = String(employeeId);
+
+    // فحص إذا كان الموظف لديه وردية نشطة مختلفة
+    const existingActive = currentActiveShifts[employeeId] || currentActiveShifts[empIdStr];
+    if (existingActive && !overwrite) {
+      return res.status(409).json({
+        success: false,
+        alreadyActive: true,
+        existingShift: existingActive,
+        message: `الموظف لديه وردية نشطة بالفعل (${existingActive.date} - ${existingActive.timeIn}). استخدم overwrite:true لاستبدالها.`
+      });
+    }
+
+    const bObj = (existing.branches || []).find(b => String(b.id) === String(branchId));
+    const emp = (existing.employees || []).find(e =>
+      String(e.id) === empIdStr || String(e.code) === empIdStr
+    );
+
+    const restoredShift = {
+      shiftId: effectiveShiftId,
+      branchId: branchId || emp?.branchId || '',
+      branchName: bObj?.name || emp?.branchName || '',
+      date: date,
+      timeIn: timeIn,
+      startEpoch: new Date(`${date}T${timeIn}:00`).getTime(),
+      isPaused: false,
+      isOnBreak: false,
+      breakStartTime: null,
+      pauseStartEpoch: null,
+      accumulatedPauseMs: 0,
+      updatedAt: Date.now(),
+      restoredAt: now,
+      restoredBy: 'admin-manual-fix'
+    };
+
+    currentActiveShifts[employeeId] = restoredShift;
+    currentActiveShifts[empIdStr] = restoredShift;
+    existing.activeShifts = currentActiveShifts;
+
+    // إضافة سجل وردية في shifts[] إذا لم يكن موجوداً
+    const shiftsArr = [...(existing.shifts || [])];
+    const existingRecord = shiftsArr.find(s =>
+      s.id === effectiveShiftId ||
+      (String(s.employeeId) === empIdStr && s.date === date && (!s.timeOut || s.timeOut === '' || s.timeOut === '—'))
+    );
+    if (!existingRecord) {
+      shiftsArr.unshift({
+        id: effectiveShiftId,
+        employeeId: employeeId,
+        employeeCode: emp?.code || '',
+        employeeName: emp?.name || '',
+        branchId: branchId || emp?.branchId || '',
+        branchName: bObj?.name || emp?.branchName || '',
+        date: date,
+        timeIn: timeIn,
+        timeOut: '',
+        hours: 0,
+        actualWorkedHours: 0,
+        scheduledHours: parseFloat(emp?.workHoursPerDay) || 8,
+        regularHours: 0,
+        overtimeHours: 0,
+        overtimeStatus: 'none',
+        breakHours: 0,
+        source: 'kiosk',
+        isLiveActive: true,
+        status: 'active',
+        statusLabel: 'حضور حي (تم الاسترجاع)',
+        note: `تسجيل حضور حي في تمام الساعة ${timeIn} - تم استرجاعه من الإدارة`,
+        createdAt: now,
+        restoredAt: now
+      });
+      existing.shifts = shiftsArr;
+    }
+
+    const saveResult = await saveSettingsToStorage(storageKey, existing, clientIp);
+
+    io.emit('punch:recorded', {
+      employeeId,
+      empIdStr,
+      branchId: branchId || '',
+      actionType: 'check_in_restored',
+      date,
+      time: timeIn,
+      activeShifts: currentActiveShifts,
+      timestamp: now
+    });
+    io.emit('entity:changed', { entityType: 'activeShifts', action: 'shift_restored', employeeId, timestamp: now });
+
+    console.log(`[Admin Activate Shift] ✅ Shift restored for emp ${employeeId} (${emp?.name || '?'}) - branch ${branchId} - date ${date} - timeIn ${timeIn}`);
+
+    res.json({
+      success: true,
+      message: `تم تفعيل وردية الموظف ${emp?.name || employeeId} بنجاح لتاريخ ${date} من الساعة ${timeIn}`,
+      employeeId,
+      employeeName: emp?.name,
+      branchId,
+      branchName: bObj?.name,
+      date,
+      timeIn,
+      shiftId: effectiveShiftId,
+      version: saveResult?.version || 0,
+      restoredAt: now
+    });
+  } catch (err) {
+    console.error('[API POST /admin/activate-shift Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+// ══════════════════════════════════════════════════════════════════════════════
+
 app.get('/api/sync/version', async (req, res) => {
   try {
     const key = req.query.key || STORAGE_KEY;
