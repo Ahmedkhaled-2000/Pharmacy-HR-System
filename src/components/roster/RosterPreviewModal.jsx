@@ -2,8 +2,8 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { getResolvedEmployeeRoster } from './RosterModule';
 import { getEmpDisplayName, arabicWeekday, getRealTodayStr } from '../../utils/formatters';
-import { getCycleDateRange } from '../../utils/periodEngine';
-import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
+import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
+import { getEmployeeDaySchedule, getDayScheduleFromMap } from '../../utils/rosterEngine';
 
 function getDayShiftInfo(schedule, day, fallbackHours = 8) {
   // If no schedule was provided or empty, do NOT invent fake shifts
@@ -94,12 +94,55 @@ export default function RosterPreviewModal({
 
   if (!employee) return null;
 
-  const activeMonth = selectedMonth || (getRealTodayStr ? getRealTodayStr().slice(0, 7) : new Date().toISOString().slice(0, 7));
+  const orgSettings = state?.orgSettings || {};
+  const activeCycleDefault = useMemo(() => {
+    return getActivePayrollMonth(orgSettings);
+  }, [orgSettings.payrollPayoutStartDay, orgSettings.payrollPayoutEndDay, orgSettings.payrollPeriodType]);
+
+  const [currentMonth, setCurrentMonth] = useState(() => (
+    selectedMonth || activeCycleDefault || (getRealTodayStr ? getRealTodayStr().slice(0, 7) : new Date().toISOString().slice(0, 7))
+  ));
+
+  useEffect(() => {
+    if (selectedMonth && selectedMonth !== currentMonth) {
+      setCurrentMonth(selectedMonth);
+    }
+  }, [selectedMonth]);
+
+  const activeMonth = currentMonth;
+
+  // Available cycle options for modal dropdown switcher
+  const availableCycleOptions = useMemo(() => {
+    const baseMonth = activeCycleDefault || getActivePayrollMonth(orgSettings);
+    const [y, m] = baseMonth.split('-').map(Number);
+    const options = [];
+    for (let offset = -3; offset <= 2; offset++) {
+      let targetM = m + offset;
+      let targetY = y;
+      while (targetM < 1) {
+        targetM += 12;
+        targetY -= 1;
+      }
+      while (targetM > 12) {
+        targetM -= 12;
+        targetY += 1;
+      }
+      const mStr = `${targetY}-${String(targetM).padStart(2, '0')}`;
+      const rng = getCycleDateRange(mStr, orgSettings);
+      options.push({
+        month: mStr,
+        label: rng.label || mStr,
+        shortLabel: `${rng.startDate} إلى ${rng.endDate}`,
+        isCurrent: mStr === baseMonth
+      });
+    }
+    return options;
+  }, [activeCycleDefault, orgSettings]);
 
   // ── الدورة النشطة للرواتب والتشغيل ──
   const cycleRange = useMemo(() => {
-    return getCycleDateRange(activeMonth, state?.orgSettings || {});
-  }, [activeMonth, state?.orgSettings]);
+    return getCycleDateRange(activeMonth, orgSettings);
+  }, [activeMonth, orgSettings]);
 
   // ── قائمة كافة تواريخ الدورة الشهرية ──
   const cycleDates = useMemo(() => {
@@ -122,7 +165,7 @@ export default function RosterPreviewModal({
     return list;
   }, [cycleRange]);
 
-  const empRoster = getResolvedEmployeeRoster(employee, null, state);
+  const empRoster = getResolvedEmployeeRoster(employee, null, state, activeMonth);
   const hasApprovedRoster = Boolean(
     empRoster?.status === 'approved' &&
     empRoster?.schedule &&
@@ -133,7 +176,8 @@ export default function RosterPreviewModal({
     req =>
       (String(req.employeeId) === String(employee.id) || (employee.code && String(req.employeeCode) === String(employee.code))) &&
       ['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit'].includes(req.type) &&
-      ['pending', 'pending_admin', 'pending_branch'].includes(req.status)
+      ['pending', 'pending_admin', 'pending_branch'].includes(req.status) &&
+      (!req.month || req.month === activeMonth || (req.fromDate && req.fromDate <= cycleRange.endDate && req.toDate >= cycleRange.startDate))
   );
 
   const hasPendingReq = Boolean(pendingReq);
@@ -337,7 +381,7 @@ export default function RosterPreviewModal({
                 const bId = bd.branchId;
                 const bObj = (state.branches || []).find((b) => String(b.id) === String(bId));
                 const bName = bObj ? bObj.name : `فرع ${bId}`;
-                const bRoster = getResolvedEmployeeRoster(employee, bId, state);
+                const bRoster = getResolvedEmployeeRoster(employee, bId, state, activeMonth);
                 const bHasApproved = Boolean(
                   bRoster?.status === 'approved' &&
                   bRoster?.schedule &&
@@ -349,7 +393,8 @@ export default function RosterPreviewModal({
                     (String(req.employeeId) === String(employee.id) || (employee.code && String(req.employeeCode) === String(employee.code))) &&
                     String(req.branchId || '') === String(bId) &&
                     ['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit'].includes(req.type) &&
-                    ['pending', 'pending_admin', 'pending_branch'].includes(req.status)
+                    ['pending', 'pending_admin', 'pending_branch'].includes(req.status) &&
+                    (!req.month || req.month === activeMonth || (req.fromDate && req.fromDate <= cycleRange.endDate && req.toDate >= cycleRange.startDate))
                 );
 
                 const bSchedule = bHasApproved
@@ -542,11 +587,37 @@ export default function RosterPreviewModal({
                   </button>
                 </div>
 
-                <div style={{ fontSize: '12.5px', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span>نطاق الدورة النشطة:</span>
-                  <strong style={{ color: 'var(--text)', background: 'var(--surface-muted, #f1f5f9)', padding: '3px 8px', borderRadius: '6px' }}>
-                    {cycleRange?.startDate} ⬅️ {cycleRange?.endDate}
-                  </strong>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text)' }}>📅 الدورة:</span>
+                    <select
+                      value={activeMonth}
+                      onChange={(e) => setCurrentMonth(e.target.value)}
+                      style={{
+                        padding: '5px 10px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #0d9488',
+                        background: 'var(--surface, #ffffff)',
+                        fontWeight: 800,
+                        fontSize: '12px',
+                        color: '#0f766e',
+                        cursor: 'pointer'
+                      }}
+                      title="التبديل بين دورات الشهور لمعاينة جدول الموظف"
+                    >
+                      {availableCycleOptions.map((opt) => (
+                        <option key={opt.month} value={opt.month}>
+                          {opt.label} {opt.isCurrent ? '⚡' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ fontSize: '12.5px', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>نطاق الدورة:</span>
+                    <strong style={{ color: 'var(--text)', background: 'var(--surface-muted, #f1f5f9)', padding: '3px 8px', borderRadius: '6px' }}>
+                      {cycleRange?.startDate} ⬅️ {cycleRange?.endDate}
+                    </strong>
+                  </div>
                 </div>
               </div>
 
@@ -567,7 +638,11 @@ export default function RosterPreviewModal({
                     </thead>
                     <tbody>
                       {cycleDates.map((item) => {
-                        const daySched = getEmployeeDaySchedule(employee.id, item.dateStr, state);
+                        let daySched = getEmployeeDaySchedule(employee.id, item.dateStr, state);
+                        if (!daySched && singleSchedule) {
+                          const jsDay = new Date(item.dateStr + 'T00:00:00').getDay();
+                          daySched = getDayScheduleFromMap(singleSchedule, jsDay, item.dateStr);
+                        }
                         const isOff = daySched?.type === 'off' || daySched?.isOff === true;
                         const notScheduled = !daySched || (!isOff && !daySched.start && !daySched.end);
                         const checkIn = daySched?.start || (isOff ? '—' : '—');

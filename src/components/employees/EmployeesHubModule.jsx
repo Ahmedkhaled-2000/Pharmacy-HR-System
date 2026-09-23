@@ -135,6 +135,8 @@ export default function EmployeesHubModule({
           setState={setState}
           saveState={saveState}
           showToast={showToast}
+          monthPicker={monthPicker}
+          setMonthPicker={setMonthPicker}
         />
       )}
 

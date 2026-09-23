@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { getResolvedEmployeeRoster } from '../roster/RosterModule';
 import { getEmpDisplayName, isEmployeeActive, getRealTodayStr, arabicMonthLabel } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
-import { getCycleDateRange } from '../../utils/periodEngine';
+import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
 import { getJobsList } from '../../utils/jobsHelper';
 import { triggerDirectPrint } from '../../utils/printHelper';
 import EmployeeRosterEditModal from './EmployeeRosterEditModal';
@@ -733,7 +733,13 @@ export default function BranchMonthlyRosterModule({
     return branches[0] ? String(branches[0].id) : '';
   });
 
-  const [selectedMonth, setSelectedMonth] = useState(() => getRealTodayStr().slice(0, 7));
+  const activeCycleDefault = useMemo(() => {
+    return getActivePayrollMonth(state?.orgSettings || {});
+  }, [state?.orgSettings?.payrollPayoutStartDay, state?.orgSettings?.payrollPayoutEndDay, state?.orgSettings?.payrollPeriodType]);
+
+  const [selectedMonth, setSelectedMonth] = useState(() => (
+    activeCycleDefault || (getRealTodayStr ? getRealTodayStr().slice(0, 7) : new Date().toISOString().slice(0, 7))
+  ));
   const [viewMode, setViewMode] = useState('board'); // 'board' | 'matrix' | 'calendar'
   const [jobFilter, setJobFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');

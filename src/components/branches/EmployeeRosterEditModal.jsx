@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { arabicWeekday, fmt, isEmployeeActive } from '../../utils/formatters';
 import { DAYS_OF_WEEK, formatTime12H, formatShiftRange12H } from './BranchMonthlyRosterModule';
-import { getCycleDateRange } from '../../utils/periodEngine';
+import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 
@@ -52,12 +52,13 @@ export default function EmployeeRosterEditModal({
   }, [branchId]);
 
   // دورة الشهر المعتمدة للرواتب والتشغيل
+  const effectiveMonth = selectedMonth || getActivePayrollMonth(state?.orgSettings || {});
   const cycleRange = useMemo(() => {
-    return getCycleDateRange(selectedMonth, state?.orgSettings);
-  }, [selectedMonth, state?.orgSettings]);
+    return getCycleDateRange(effectiveMonth, state?.orgSettings);
+  }, [effectiveMonth, state?.orgSettings]);
 
-  const [fromDate, setFromDate] = useState(cycleRange?.startDate || `${selectedMonth}-01`);
-  const [toDate, setToDate] = useState(cycleRange?.endDate || `${selectedMonth}-30`);
+  const [fromDate, setFromDate] = useState(cycleRange?.startDate || `${effectiveMonth}-01`);
+  const [toDate, setToDate] = useState(cycleRange?.endDate || `${effectiveMonth}-30`);
 
   useEffect(() => {
     if (cycleRange?.startDate && cycleRange?.endDate) {

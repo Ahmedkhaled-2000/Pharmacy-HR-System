@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import RosterPreviewModal from './RosterPreviewModal';
 import EmployeeRosterEditModal from '../branches/EmployeeRosterEditModal';
 import { getEmpDisplayName, isEmployeeActive, getRealTodayStr } from '../../utils/formatters';
-import { getCycleDateRange } from '../../utils/periodEngine';
+import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
 import { getResolvedEmployeeRoster } from '../../utils/rosterEngine';
 
 export const DEFAULT_ROSTER_SCHEDULE = {
@@ -83,16 +83,64 @@ export default function RosterModule({
   state,
   setState,
   saveState,
-  showToast
+  showToast,
+  monthPicker,
+  setMonthPicker
 }) {
+  const orgSettings = state.orgSettings || {};
+  const activeCycleDefault = useMemo(() => {
+    return getActivePayrollMonth(orgSettings);
+  }, [orgSettings.payrollPayoutStartDay, orgSettings.payrollPayoutEndDay, orgSettings.payrollPeriodType]);
+
   const [selectedBranch, setSelectedBranch] = useState('');
-  const [selectedMonth, setSelectedMonth] = useState(() => (getRealTodayStr ? getRealTodayStr().slice(0, 7) : new Date().toISOString().slice(0, 7)));
+  const [selectedMonth, setSelectedMonth] = useState(() => (monthPicker || activeCycleDefault || (getRealTodayStr ? getRealTodayStr().slice(0, 7) : new Date().toISOString().slice(0, 7))));
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'approved' | 'pending' | 'none'
   const [selectedRosterEmp, setSelectedRosterEmp] = useState(null);
   const [rosterModalConfig, setRosterModalConfig] = useState({ isOpen: false, employee: null });
 
-  const orgSettings = state.orgSettings || {};
+  // Sync with monthPicker if updated externally
+  useEffect(() => {
+    if (monthPicker && monthPicker !== selectedMonth) {
+      setSelectedMonth(monthPicker);
+    }
+  }, [monthPicker]);
+
+  // Sync with activeCycleDefault when orgSettings are resolved
+  useEffect(() => {
+    if (activeCycleDefault && !monthPicker && selectedMonth !== activeCycleDefault) {
+      setSelectedMonth(activeCycleDefault);
+    }
+  }, [activeCycleDefault]);
+
+  // Generate Available Cycle Options for Dropdown (e.g. 2026-08, 2026-09, 2026-10, 2026-11)
+  const availableCycleOptions = useMemo(() => {
+    const baseMonth = activeCycleDefault || getActivePayrollMonth(orgSettings);
+    const [y, m] = baseMonth.split('-').map(Number);
+    const options = [];
+    for (let offset = -3; offset <= 2; offset++) {
+      let targetM = m + offset;
+      let targetY = y;
+      while (targetM < 1) {
+        targetM += 12;
+        targetY -= 1;
+      }
+      while (targetM > 12) {
+        targetM -= 12;
+        targetY += 1;
+      }
+      const mStr = `${targetY}-${String(targetM).padStart(2, '0')}`;
+      const rng = getCycleDateRange(mStr, orgSettings);
+      options.push({
+        month: mStr,
+        label: rng.label || mStr,
+        shortLabel: `${rng.startDate} إلى ${rng.endDate}`,
+        isCurrent: mStr === baseMonth
+      });
+    }
+    return options;
+  }, [activeCycleDefault, orgSettings]);
+
   const employees = state.employees || [];
   const branches = state.branches || [];
 
@@ -331,19 +379,21 @@ export default function RosterModule({
     }
 
     const bId = targetBranch || emp.branchId || emp.branchesDetails?.[0]?.branchId;
-    const empRoster = getResolvedEmployeeRoster(emp, bId, state);
+    const empRoster = getResolvedEmployeeRoster(emp, bId, state, selectedMonth);
     const hasApproved = Boolean(
       empRoster?.status === 'approved' && 
       empRoster?.schedule && 
       Object.keys(empRoster.schedule).length > 0
     );
 
+    const targetCycleRange = getCycleDateRange(selectedMonth, state?.orgSettings || {});
     const pendingReq = (state.requests || []).find(
       req =>
         (String(req.employeeId) === String(emp.id) || (emp.code && String(req.employeeCode) === String(emp.code))) &&
         ['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit'].includes(req.type) &&
         ['pending', 'pending_admin', 'pending_branch'].includes(req.status) &&
-        (!targetBranch || String(req.branchId || '') === String(targetBranch))
+        (!targetBranch || String(req.branchId || '') === String(targetBranch)) &&
+        (!req.month || req.month === selectedMonth || (req.fromDate && req.fromDate <= targetCycleRange.endDate && req.toDate >= targetCycleRange.startDate))
     );
 
     if (hasApproved) {
@@ -410,7 +460,7 @@ export default function RosterModule({
     });
 
     return { activeTotal, approved, pending, none };
-  }, [employees, selectedBranch, state.rosters, state.requests]);
+  }, [employees, selectedBranch, state.rosters, state.requests, selectedMonth]);
 
   const filteredEmployees = employees.filter((emp) => {
     if (!isEmployeeActive(emp)) return false;
@@ -949,6 +999,35 @@ export default function RosterModule({
         </div>
 
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* محدد دورة الشهر والرواتب */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text)' }}>📅 دورة الشهر:</span>
+            <select
+              value={selectedMonth}
+              onChange={(e) => {
+                setSelectedMonth(e.target.value);
+                setMonthPicker?.(e.target.value);
+              }}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: '2px solid #0d9488',
+                background: 'var(--surface, #ffffff)',
+                fontWeight: 800,
+                color: '#0f766e',
+                cursor: 'pointer',
+                boxShadow: '0 1px 4px rgba(13, 148, 136, 0.15)'
+              }}
+              title="اختيار دورة الشهر لمراجعة جداول شفتات الموظفين"
+            >
+              {availableCycleOptions.map((opt) => (
+                <option key={opt.month} value={opt.month}>
+                  {opt.isCurrent ? '⚡ ' : ''}{opt.label} {opt.isCurrent ? '(الدورة النشطة حالياً)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <input
             type="text"
             placeholder="🔍 بحث باسم الموظف أو الكود..."

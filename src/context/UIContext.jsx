@@ -72,12 +72,34 @@ export function UIProvider({ children }) {
     try { return localStorage.getItem('admin_filter_mode') || 'month'; } catch { return 'month'; }
   });
 
-  const [monthPicker, setMonthPicker] = useState(() => {
+  const [monthPicker, setMonthPickerState] = useState(() => {
     try {
       const activeAutoCycle = getActivePayrollMonth(state?.orgSettings, getRealDate());
+      const isManual = sessionStorage.getItem('admin_month_picker_manual') === 'true';
+      if (isManual) {
+        return localStorage.getItem('admin_month_picker') || activeAutoCycle || getRealTodayStr().slice(0, 7);
+      }
       return activeAutoCycle || localStorage.getItem('admin_month_picker') || getRealTodayStr().slice(0, 7);
     } catch { return getRealTodayStr().slice(0, 7); }
   });
+
+  const setMonthPicker = useCallback((val) => {
+    try { sessionStorage.setItem('admin_month_picker_manual', 'true'); } catch {}
+    setMonthPickerState(val);
+  }, []);
+
+  // Auto-sync monthPicker to active cycle when orgSettings are loaded/updated from server
+  useEffect(() => {
+    if (state?.orgSettings && (state.orgSettings.payrollPayoutStartDay !== undefined || state.orgSettings.payrollPayoutEndDay !== undefined)) {
+      const isManual = sessionStorage.getItem('admin_month_picker_manual') === 'true';
+      if (!isManual) {
+        const activeAutoCycle = getActivePayrollMonth(state.orgSettings, getRealDate());
+        if (activeAutoCycle && activeAutoCycle !== monthPicker) {
+          setMonthPickerState(activeAutoCycle);
+        }
+      }
+    }
+  }, [state?.orgSettings?.payrollPayoutStartDay, state?.orgSettings?.payrollPayoutEndDay, state?.orgSettings?.payrollPeriodType]);
 
   const [adminCustomFrom, setAdminCustomFrom] = useState(() => {
     try { return localStorage.getItem('admin_custom_from') || ''; } catch { return ''; }
