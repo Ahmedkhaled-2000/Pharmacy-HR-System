@@ -4,6 +4,7 @@ import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
 import { useUI } from '../../context/UIContext';
 import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
+import { getActivePayrollMonth, getCycleDateRange, isDateInCycleRange } from '../../utils/periodEngine';
 
 export default function EmployeePermissionsModule({
   emp,
@@ -27,6 +28,11 @@ export default function EmployeePermissionsModule({
   const [endTime, setEndTime] = useState('09:00');
   const [reason, setReason] = useState('');
   const [showForm, setShowForm] = useState(false);
+
+  const activeCycleMonth = getActivePayrollMonth(state?.orgSettings || {});
+  const cycleRange = React.useMemo(() => {
+    return getCycleDateRange(activeCycleMonth, state?.orgSettings || {});
+  }, [activeCycleMonth, state?.orgSettings]);
 
   const empIdStr = String(emp?.id || '').trim();
   const empCodeStr = String(emp?.code || '').trim();
@@ -130,9 +136,8 @@ export default function EmployeePermissionsModule({
   const maxMonthlyCount = parseInt(permPolicy.maxPermissionsPerMonth, 10) || 2;
 
   // Compute used permissions in the active cycle for this employee
-  const currentMonthKey = date.slice(0, 7);
   const usedPermCount = employeePermRequests.filter(
-    (r) => r.status === 'approved' && (r.date || r.createdAt)?.startsWith(currentMonthKey)
+    (r) => r.status === 'approved' && isDateInCycleRange(r.date || r.createdAt, cycleRange)
   ).length;
   const remainingPermCount = Math.max(0, maxMonthlyCount - usedPermCount);
 
@@ -140,6 +145,12 @@ export default function EmployeePermissionsModule({
     e.preventDefault();
     if (!date || !startTime || !endTime) {
       showToast('يرجى تحديد التاريخ والوقت من وإلى');
+      return;
+    }
+
+    // التحقق الصارم من وقوع تاريخ الإذن داخل دورة الشهر السارية
+    if (date < cycleRange.startDate || date > cycleRange.endDate) {
+      showToast(`⚠️ تاريخ الإذن (${date}) يقع خارج نطاق دورة الشهر السارية (${cycleRange.startDate} إلى ${cycleRange.endDate}). يُسمح بطلب الأذونات فقط ضمن دورة الشهر الحالية.`);
       return;
     }
 
@@ -301,6 +312,23 @@ export default function EmployeePermissionsModule({
         <form onSubmit={handleSubmitPermission} className="card settings-card fade-in" style={{ padding: '16px', background: 'var(--surface-muted)', border: '1px solid var(--primary-tint)', marginTop: '16px', marginBottom: '20px' }}>
           <h4 style={{ margin: '0 0 14px', fontSize: '15px', color: 'var(--primary)' }}>⏰ طلب إذن جديد</h4>
 
+          {/* Active Month Cycle Banner */}
+          <div style={{
+            margin: '0 0 14px',
+            padding: '10px 14px',
+            background: 'rgba(13, 148, 136, 0.08)',
+            border: '1px solid rgba(13, 148, 136, 0.25)',
+            borderRadius: '8px',
+            fontSize: '12.5px',
+            color: '#0f766e',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <span>🗓️</span>
+            <span><strong>دورة الشهر السارية للأذونات:</strong> من <strong>{cycleRange.startDate}</strong> إلى <strong>{cycleRange.endDate}</strong> (يُسمح بطلب الأذونات فقط ضمن نطاق هذه الدورة)</span>
+          </div>
+
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px' }}>
             <div className="field" style={{ flex: '1 1 180px' }}>
               <label style={{ fontWeight: '700' }}>نوع الإذن</label>
@@ -312,7 +340,14 @@ export default function EmployeePermissionsModule({
 
             <div className="field" style={{ flex: '1 1 140px' }}>
               <label style={{ fontWeight: '700' }}>التاريخ</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+              <input
+                type="date"
+                value={date}
+                min={cycleRange.startDate}
+                max={cycleRange.endDate}
+                onChange={(e) => setDate(e.target.value)}
+                required
+              />
             </div>
 
             <div className="field" style={{ flex: '1 1 120px' }}>

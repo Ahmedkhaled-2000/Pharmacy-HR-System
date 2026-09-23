@@ -885,6 +885,33 @@ export function getEffectiveShiftHours(shift, state) {
     return Math.round((rawHours + permHours) * 100) / 100;
   }
 
+  // معالجة طلبات عدم الالتزام بالجدول (حضور وانصراف متأخر):
+  // عند الرفض أو أثناء التعليق: لا تُحتسب الساعات بعد نهاية الوردية المحددة بالجدول
+  if (shift.deviationStatus === 'rejected') {
+    if (shift.scheduledEnd && (shift.timeIn || shift.checkIn)) {
+      const tIn = shift.timeIn || shift.checkIn;
+      const [inH, inM] = String(tIn).split(':').map(Number);
+      const [endH, endM] = String(shift.scheduledEnd).split(':').map(Number);
+      if (!isNaN(inH) && !isNaN(endH)) {
+        let sMins = inH * 60 + (inM || 0);
+        let eMins = endH * 60 + (endM || 0);
+        if (eMins < sMins) eMins += 24 * 60;
+        const cappedHours = Math.max(0, Math.round(((eMins - sMins) / 60 - breakHours) * 100) / 100);
+        return cappedHours;
+      }
+    }
+    if (shift.regularHours !== undefined) {
+      return parseFloat(shift.regularHours) || 0;
+    }
+  }
+
+  // إذا كانت الوردية معتمدة بعدم الالتزام بالجدول: نعتمد الساعات الأساسية المقررة، ويصرف الإضافي عبر بند الوقت الإضافي
+  if (shift.deviationStatus === 'approved') {
+    if (shift.regularHours !== undefined) {
+      return parseFloat(shift.regularHours) || 0;
+    }
+  }
+
   // إذا كانت الوردية تحتوي على وقت إضافي، نعتمد الساعات الأساسية المقررة (regularHours)
   // لكي لا يتم صرف الإضافي تلقائياً قبل اعتماد الإدارة، وتجنباً للازدواج المالي عند صرفه في بند الوقت الإضافي
   // باستثناء موظف الساعات المتغيرة حيث تحسب ساعاته الفعلية كاملة بدون تقسيم إضافي

@@ -295,6 +295,7 @@ export function isDualApprovalRequest(reqOrType, state = null) {
     'permission',
     'bonus',
     'overtime',
+    'schedule_deviation',
     'biometric_verification'
   ];
 

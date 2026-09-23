@@ -901,6 +901,13 @@ export default function EmployeePortalView({
       showToast('يرجى تعبئة التاريخ ووقتي الدخول والخروج');
       return;
     }
+
+    const currentCutoff = getPayrollCutoffRange(selectedMonth);
+    if (currentCutoff?.startDate && (empManualDate < currentCutoff.startDate || empManualDate > currentCutoff.endDate)) {
+      showToast(`⚠️ تاريخ الوردية (${empManualDate}) يقع خارج نطاق دورة الشهر السارية (${currentCutoff.startDate} إلى ${currentCutoff.endDate}).`);
+      return;
+    }
+
     const emp = (state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser;
     const parsedBreak = Math.max(0, parseFloat(empManualBreak) || 0);
     const [inH, inM] = empManualIn.split(':').map(Number);
@@ -944,6 +951,14 @@ export default function EmployeePortalView({
       showToast('يرجى إدخال مبلغ صحيح');
       return;
     }
+
+    const currentCutoff = getPayrollCutoffRange(selectedMonth);
+    const targetAdjDate = empAdjDate || getRealTodayStr();
+    if (currentCutoff?.startDate && (targetAdjDate < currentCutoff.startDate || targetAdjDate > currentCutoff.endDate)) {
+      showToast(`⚠️ تاريخ التسوية (${targetAdjDate}) يقع خارج نطاق دورة الشهر السارية (${currentCutoff.startDate} إلى ${currentCutoff.endDate}).`);
+      return;
+    }
+
     const emp = (state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser;
     const targetBranchId = empAdjBranchId || selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId || null;
     const newAdj = {
@@ -951,7 +966,7 @@ export default function EmployeePortalView({
       type: empAdjType,
       employeeId: emp.id,
       branchId: targetBranchId,
-      date: empAdjDate || getRealTodayStr(),
+      date: targetAdjDate,
       amount,
       description: empAdjDesc.trim()
     };
@@ -4896,7 +4911,13 @@ export default function EmployeePortalView({
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-end' }}>
                     <div className="field" style={{ flex: '1 1 130px' }}>
                       <label>التاريخ</label>
-                      <input type="date" value={empManualDate} onChange={(e) => setEmpManualDate(e.target.value)} />
+                      <input
+                        type="date"
+                        value={empManualDate}
+                        min={cutoffInfo?.startDate}
+                        max={cutoffInfo?.endDate}
+                        onChange={(e) => setEmpManualDate(e.target.value)}
+                      />
                     </div>
                     <div className="field" style={{ flex: '1 1 110px' }}>
                       <label>وقت الدخول</label>
@@ -6249,7 +6270,13 @@ export default function EmployeePortalView({
                         </div>
                         <div className="field" style={{ flex: '1 1 130px' }}>
                           <label>التاريخ</label>
-                          <input type="date" value={empAdjDate} onChange={(e) => setEmpAdjDate(e.target.value)} />
+                          <input
+                            type="date"
+                            value={empAdjDate}
+                            min={cutoffInfo?.startDate}
+                            max={cutoffInfo?.endDate}
+                            onChange={(e) => setEmpAdjDate(e.target.value)}
+                          />
                         </div>
                         {isAllBranchesMode && (
                           <div className="field" style={{ flex: '1 1 150px' }}>

@@ -462,6 +462,12 @@ export default function ShiftAdjustmentModule({
 
     // التحقق من الحقول الإلزامية لكل يوم على حدة
     for (const dStr of selectedDates) {
+      // التحقق الصارم من وقوع التواريخ داخل دورة الشهر السارية
+      if (dStr < cycleRange.startDate || dStr > cycleRange.endDate) {
+        showToast?.(`⚠️ تاريخ اليوم المحدد (${dStr}) يقع خارج نطاق دورة الشهر السارية (${cycleRange.startDate} إلى ${cycleRange.endDate}). يُسمح بالتعديل فقط ضمن دورة الشهر الحالية.`);
+        return;
+      }
+
       const cfg = dayCustomConfigs[dStr] || getDefaultConfigForDate(dStr);
       if (cfg.actionType === 'modify_hours') {
         if (!cfg.startTime || !cfg.endTime) {
@@ -471,6 +477,10 @@ export default function ShiftAdjustmentModule({
       } else if (cfg.actionType === 'compensate_worked_rest') {
         if (!cfg.replacementRestDate) {
           showToast?.(`يرجى تحديد تاريخ يوم الراحة البديل ليوم ${dStr}`);
+          return;
+        }
+        if (cfg.replacementRestDate < cycleRange.startDate || cfg.replacementRestDate > cycleRange.endDate) {
+          showToast?.(`⚠️ تاريخ يوم الراحة البديل (${cfg.replacementRestDate}) يقع خارج نطاق دورة الشهر السارية (${cycleRange.startDate} إلى ${cycleRange.endDate}).`);
           return;
         }
         if (!cfg.workedRestStartTime || !cfg.workedRestEndTime) {

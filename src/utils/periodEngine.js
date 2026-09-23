@@ -407,3 +407,88 @@ export function isPayrollPeriodFrozenForDate(dateStr, orgSettings = {}) {
   };
 }
 
+/**
+ * التحقق من أن التواريخ المحددة تقع جميعها ضمن دورة الشهر الحالية السارية
+ * يمنع تقديم أي طلبات خارج نطاق دورة الرواتب والتشغيل الحالية
+ * @param {string|string[]|object} datesInput
+ * @param {object} orgSettings
+ * @param {Date} [refDate]
+ * @returns {object} { isValid: boolean, activeMonth: string, cycleRange: object, invalidDate?: string, errorMsg?: string }
+ */
+export function validateDatesInActiveCycle(datesInput, orgSettings = {}, refDate = getRealDate()) {
+  const activeMonth = getActivePayrollMonth(orgSettings, refDate);
+  const cycleRange = getCycleDateRange(activeMonth, orgSettings);
+
+  let dateList = [];
+  if (Array.isArray(datesInput)) {
+    dateList = datesInput.filter(Boolean);
+  } else if (typeof datesInput === 'string' && datesInput.trim()) {
+    dateList = [datesInput.trim()];
+  } else if (datesInput && typeof datesInput === 'object') {
+    // استخراج كافة حقول التواريخ المحتملة من كائن الطلب
+    const candidates = [
+      datesInput.requesterDate,
+      datesInput.targetDate,
+      datesInput.swapDate,
+      datesInput.targetSwapDate,
+      datesInput.startDate,
+      datesInput.endDate,
+      datesInput.date,
+      datesInput.shiftDate,
+      datesInput.replacementRestDate,
+      datesInput.fromDate,
+      datesInput.toDate
+    ];
+
+    if (Array.isArray(datesInput.dates)) {
+      candidates.push(...datesInput.dates);
+    }
+    if (datesInput.schedule && typeof datesInput.schedule === 'object') {
+      Object.keys(datesInput.schedule).forEach((k) => {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(k)) {
+          candidates.push(k);
+        }
+      });
+    }
+
+    // إذا تم تحديد شهر الدورة صراحة في الطلب (مثل طلب تعديل الجدول الشهري)
+    if (datesInput.month && typeof datesInput.month === 'string' && /^\d{4}-\d{2}$/.test(datesInput.month)) {
+      if (datesInput.month !== activeMonth) {
+        return {
+          isValid: false,
+          activeMonth,
+          cycleRange,
+          invalidDate: datesInput.month,
+          errorMsg: `⚠️ لا يمكن إرسال الطلب: شهر الطلب (${datesInput.month}) لا يطابق دورة الشهر الحالية السارية (${activeMonth}).`
+        };
+      }
+    }
+
+    dateList = candidates.filter(Boolean);
+  }
+
+  // تصفية السلاسل النصية الصالحة كتواريخ بصيغة YYYY-MM-DD
+  const validDateStrings = dateList
+    .map((d) => String(d).slice(0, 10))
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+
+  for (const cleanDate of validDateStrings) {
+    if (cleanDate < cycleRange.startDate || cleanDate > cycleRange.endDate) {
+      return {
+        isValid: false,
+        activeMonth,
+        cycleRange,
+        invalidDate: cleanDate,
+        errorMsg: `⚠️ لا يمكن إرسال الطلب: التاريخ المحدد (${cleanDate}) يقع خارج نطاق دورة الشهر السارية (${cycleRange.startDate} إلى ${cycleRange.endDate}). يُسمح فقط بتقديم الطلبات داخل نطاق دورة الشهر الحالية.`
+      };
+    }
+  }
+
+  return {
+    isValid: true,
+    activeMonth,
+    cycleRange
+  };
+}
+
+

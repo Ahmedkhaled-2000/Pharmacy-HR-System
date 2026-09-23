@@ -369,6 +369,16 @@ export default function EmployeeRosterModule({
       return;
     }
 
+    // التحقق الصارم من وقوع نطاق الجدول ضمن دورة الشهر السارية
+    if (cycleRange?.startDate && (fromDate < cycleRange.startDate || fromDate > cycleRange.endDate)) {
+      showToast?.(`⚠️ تاريخ بداية الجدول (${fromDate}) يقع خارج نطاق دورة الشهر (${cycleRange.startDate} إلى ${cycleRange.endDate}).`);
+      return;
+    }
+    if (cycleRange?.endDate && (toDate < cycleRange.startDate || toDate > cycleRange.endDate)) {
+      showToast?.(`⚠️ تاريخ نهاية الجدول (${toDate}) يقع خارج نطاق دورة الشهر (${cycleRange.startDate} إلى ${cycleRange.endDate}).`);
+      return;
+    }
+
     const targetBranch = activeFormBranchId || selectedBranchId || primaryBranch;
 
     const noBranchMgr = isBranchWithoutManager(targetBranch, state);
@@ -533,11 +543,25 @@ export default function EmployeeRosterModule({
         <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', marginBottom: '16px' }}>
           <div className="field">
             <label>يبدأ من تاريخ</label>
-            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} required />
+            <input
+              type="date"
+              value={fromDate}
+              min={cycleRange?.startDate}
+              max={cycleRange?.endDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              required
+            />
           </div>
           <div className="field">
             <label>ينتهي في تاريخ</label>
-            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} required />
+            <input
+              type="date"
+              value={toDate}
+              min={fromDate || cycleRange?.startDate}
+              max={cycleRange?.endDate}
+              onChange={(e) => setToDate(e.target.value)}
+              required
+            />
           </div>
         </div>
 

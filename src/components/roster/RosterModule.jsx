@@ -1044,6 +1044,10 @@ export default function RosterModule({
         <RosterPreviewModal
           employee={selectedRosterEmp}
           state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          selectedMonth={selectedMonth}
           onClose={() => setSelectedRosterEmp(null)}
         />
       )}

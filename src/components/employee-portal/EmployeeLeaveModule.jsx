@@ -4,6 +4,7 @@ import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
 import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
+import { getActivePayrollMonth, getCycleDateRange } from '../../utils/periodEngine';
 
 export default function EmployeeLeaveModule({
   emp,
@@ -29,6 +30,11 @@ export default function EmployeeLeaveModule({
   const [endDate, setEndDate] = useState(() => getRealTodayStr());
   const [reason, setReason] = useState('');
   const [showForm, setShowForm] = useState(false);
+
+  const activeCycleMonth = getActivePayrollMonth(state?.orgSettings || {});
+  const cycleRange = React.useMemo(() => {
+    return getCycleDateRange(activeCycleMonth, state?.orgSettings || {});
+  }, [activeCycleMonth, state?.orgSettings]);
 
   // Calculate taken annual leaves for the current year
   const currentYear = (selectedMonth || getRealTodayStr()).slice(0, 4);
@@ -155,6 +161,16 @@ export default function EmployeeLeaveModule({
     }
     if (endDate < startDate) {
       showToast('تاريخ النهاية يجب أن يكون مساوياً أو بعد تاريخ البداية');
+      return;
+    }
+
+    // التحقق الصارم من وقوع التواريخ داخل دورة الشهر السارية
+    if (startDate < cycleRange.startDate || startDate > cycleRange.endDate) {
+      showToast(`⚠️ تاريخ بداية الإجازة (${startDate}) يقع خارج نطاق دورة الشهر السارية (${cycleRange.startDate} إلى ${cycleRange.endDate}). يُسمح فقط بتقديم الإجازات ضمن دورة الشهر الحالية.`);
+      return;
+    }
+    if (endDate < cycleRange.startDate || endDate > cycleRange.endDate) {
+      showToast(`⚠️ تاريخ نهاية الإجازة (${endDate}) يقع خارج نطاق دورة الشهر السارية (${cycleRange.startDate} إلى ${cycleRange.endDate}). يُسمح فقط بتقديم الإجازات ضمن دورة الشهر الحالية.`);
       return;
     }
 
@@ -323,6 +339,23 @@ export default function EmployeeLeaveModule({
         <form onSubmit={handleSubmitLeave} className="card settings-card fade-in" style={{ padding: '18px', background: 'var(--surface-muted)', border: '1px solid var(--primary-tint)', marginBottom: '20px' }}>
           <h4 style={{ margin: '0 0 14px', fontSize: '15px', color: 'var(--primary)' }}>📝 طلب إجازة جديد</h4>
 
+          {/* Active Month Cycle Banner */}
+          <div style={{
+            margin: '0 0 14px',
+            padding: '10px 14px',
+            background: 'rgba(13, 148, 136, 0.08)',
+            border: '1px solid rgba(13, 148, 136, 0.25)',
+            borderRadius: '8px',
+            fontSize: '12.5px',
+            color: '#0f766e',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <span>🗓️</span>
+            <span><strong>دورة الشهر السارية للإجازات:</strong> من <strong>{cycleRange.startDate}</strong> إلى <strong>{cycleRange.endDate}</strong> (يُسمح بطلب الإجازات فقط ضمن نطاق هذه الدورة)</span>
+          </div>
+
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px' }}>
             <div className="field" style={{ flex: '1 1 180px' }}>
               <label style={{ fontWeight: '700' }}>نوع الإجازة</label>
@@ -342,12 +375,26 @@ export default function EmployeeLeaveModule({
 
             <div className="field" style={{ flex: '1 1 140px' }}>
               <label style={{ fontWeight: '700' }}>تاريخ البداية</label>
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} required />
+              <input
+                type="date"
+                value={startDate}
+                min={cycleRange.startDate}
+                max={cycleRange.endDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                required
+              />
             </div>
 
             <div className="field" style={{ flex: '1 1 140px' }}>
               <label style={{ fontWeight: '700' }}>تاريخ النهاية</label>
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} required />
+              <input
+                type="date"
+                value={endDate}
+                min={startDate || cycleRange.startDate}
+                max={cycleRange.endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                required
+              />
             </div>
 
             <div className="field" style={{ flex: '1 1 100px' }}>

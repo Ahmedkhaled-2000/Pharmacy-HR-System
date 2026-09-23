@@ -13,7 +13,7 @@ import { apiSubmitRequestAtomic } from './apiClient';
 import { enqueueNewRequest } from './syncEngine';
 import { broadcastStateChange } from './offlineSync';
 import { normalizeState } from './formatters';
-import { isPayrollPeriodFrozenForDate } from './periodEngine';
+import { isPayrollPeriodFrozenForDate, validateDatesInActiveCycle } from './periodEngine';
 
 export async function dispatchEmployeeRequest({
   request,
@@ -26,13 +26,14 @@ export async function dispatchEmployeeRequest({
   showToast = null,
   successMessage = null,
   successToastMessage = null,
-  notifyAdmin = null
+  notifyAdmin = null,
+  bypassCycleCheck = false
 }) {
   if (!request || !request.id) {
     throw new Error('Invalid request payload: missing request or request.id');
   }
 
-  // فحص ما إذا كانت الفترة تقع ضمن دورة رواتب مجمدة رسمياً من الإدارة العليا
+  // 1. فحص ما إذا كانت الفترة تقع ضمن دورة رواتب مجمدة رسمياً من الإدارة العليا
   const targetDate = request.startDate || request.date || request.endDate || request.createdAt?.slice(0, 10) || new Date().toISOString().slice(0, 10);
   const freezeCheck = isPayrollPeriodFrozenForDate(targetDate, state?.orgSettings || {});
 
@@ -42,6 +43,23 @@ export async function dispatchEmployeeRequest({
       showToast(errorMsg);
     }
     return { success: false, error: errorMsg, isFrozen: true };
+  }
+
+  // 2. فحص التحقق من وقوع كافة تواريخ الطلب داخل دورة الشهر السارية للموظف
+  if (!bypassCycleCheck) {
+    const cycleCheck = validateDatesInActiveCycle(request, state?.orgSettings || {});
+    if (!cycleCheck.isValid) {
+      if (typeof showToast === 'function') {
+        showToast(cycleCheck.errorMsg);
+      }
+      return {
+        success: false,
+        error: cycleCheck.errorMsg,
+        isOutsideCycle: true,
+        invalidDate: cycleCheck.invalidDate,
+        cycleRange: cycleCheck.cycleRange
+      };
+    }
   }
 
   const reqBranchId = request.branchId || request.branch_id || null;

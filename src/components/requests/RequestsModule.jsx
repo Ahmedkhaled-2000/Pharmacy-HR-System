@@ -86,6 +86,9 @@ export function getFormattedRequestBadge(type, leaveType, targetAction) {
   if (cleanType === 'overtime' || cleanType === 'overtime_request' || cleanType === 'إضافي') {
     return <span className="badge badge-success">⭐ ساعات إضافية</span>;
   }
+  if (cleanType === 'schedule_deviation' || cleanType === 'deviation' || cleanType === 'عدم الالتزام بالجدول') {
+    return <span className="badge" style={{ background: '#f59e0b', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>⚠️ عدم الالتزام بالجدول</span>;
+  }
   if (cleanType === 'eval_edit_request' || cleanType === 'complaint' || cleanType === 'شكوى') {
     return <span className="badge badge-warning">📋 شكوى / ملاحظة</span>;
   }
@@ -3211,6 +3214,8 @@ export default function RequestsModule({
         const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request', 'shift_adjustment'].includes(previewModalReq.type);
         const isComplaint = ['complaint', 'eval_edit_request'].includes(previewModalReq.type);
         const isProfileUpdate = ['profile_update', 'profile_edit', 'profile_update_request'].includes(previewModalReq.type) || String(previewModalReq.type || '').includes('profile');
+        const isOvertime = previewModalReq.type === 'overtime' || previewModalReq.type === 'overtime_request' || previewModalReq.type === 'إضافي';
+        const isScheduleDeviation = previewModalReq.type === 'schedule_deviation' || previewModalReq.type === 'عدم الالتزام بالجدول';
 
         const totalAmount = parseFloat(previewModalReq.amount) || 0;
         const monthlyDed = parseFloat(previewModalReq.monthlyDeduction || previewModalReq.installmentAmount) || 0;
@@ -4515,6 +4520,150 @@ export default function RequestsModule({
                     </div>
                   );
                 })()}
+
+                {/* ── SCHEDULE DEVIATION DETAILS (عدم الالتزام بالجدول) ── */}
+                {isScheduleDeviation && (
+                  <div style={{ background: '#fffbeb', padding: '18px', borderRadius: '14px', border: '1.5px solid #fde68a', boxShadow: '0 2px 10px rgba(245, 158, 11, 0.08)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                      <h4 style={{ margin: 0, color: '#92400e', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800 }}>
+                        <span>⚠️</span>
+                        <span>تفاصيل طلب عدم الالتزام بالجدول (حضور متأخر وانصراف متأخر):</span>
+                      </h4>
+                      <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #f59e0b', padding: '3px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 800 }}>
+                        تأخير حضور + استكمال بعد الوردية
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px', marginBottom: '14px' }}>
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #fde68a' }}>
+                        <span style={{ fontSize: '12px', color: '#92400e', fontWeight: 600 }}>📅 الوردية المجدولة للموظف:</span>
+                        <div style={{ fontWeight: 800, color: '#78350f', fontSize: '14px', marginTop: '4px' }}>
+                          من <strong>{previewModalReq.scheduledStart || '—'}</strong> إلى <strong>{previewModalReq.scheduledEnd || '—'}</strong>
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#b45309', marginTop: '2px' }}>
+                          ساعات الوردية: {previewModalReq.scheduledHours || 8} ساعات
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #fde68a' }}>
+                        <span style={{ fontSize: '12px', color: '#92400e', fontWeight: 600 }}>⏱️ البصمة الفعلية المسجلة:</span>
+                        <div style={{ fontWeight: 800, color: '#78350f', fontSize: '14px', marginTop: '4px' }}>
+                          دخول: <strong>{previewModalReq.actualIn || previewModalReq.timeIn || '—'}</strong> ⬅️ خروج: <strong>{previewModalReq.actualOut || previewModalReq.timeOut || '—'}</strong>
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#15803d', marginTop: '2px', fontWeight: 700 }}>
+                          صافي الساعات الفعلية: {previewModalReq.actualWorkedHours || previewModalReq.hours || '—'} ساعة
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#fef2f2', padding: '12px 14px', borderRadius: '10px', border: '1px solid #fca5a5' }}>
+                        <span style={{ fontSize: '12px', color: '#991b1b', fontWeight: 700 }}>🏃‍♂️ مدة تأخير الحضور:</span>
+                        <div style={{ fontWeight: 900, color: '#dc2626', fontSize: '16px', marginTop: '4px' }}>
+                          +{previewModalReq.lateArrivalMinutes || previewModalReq.latenessMinutes || 0} دقيقة
+                        </div>
+                        <div style={{ fontSize: '11.5px', color: '#7f1d1d', marginTop: '2px' }}>
+                          بعد بداية الوردية المجدولة
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#f0fdf4', padding: '12px 14px', borderRadius: '10px', border: '1px solid #86efac' }}>
+                        <span style={{ fontSize: '12px', color: '#166534', fontWeight: 700 }}>⏳ الاستمرار بعد نهاية الوردية:</span>
+                        <div style={{ fontWeight: 900, color: '#15803d', fontSize: '16px', marginTop: '4px' }}>
+                          +{previewModalReq.lateDepartureMinutes || 0} دقيقة
+                        </div>
+                        <div style={{ fontSize: '11.5px', color: '#166534', marginTop: '2px' }}>
+                          بعد نهاية الوردية المجدولة
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ background: '#ffffff', padding: '14px', borderRadius: '10px', border: '1px solid #fed7aa' }}>
+                      <div style={{ fontWeight: 800, fontSize: '13px', color: '#9a3412', marginBottom: '8px' }}>
+                        📌 الأثر التشغيلي عند اتخاذ القرار:
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px', fontSize: '12.5px' }}>
+                        <div style={{ background: '#f0fdf4', padding: '10px 12px', borderRadius: '8px', border: '1px solid #bbf7d0', color: '#166534', lineHeight: 1.6 }}>
+                          <strong style={{ display: 'block', marginBottom: '3px' }}>✓ في حالة الموافقة:</strong>
+                          اعتماد صافي ساعات العمل الفعلية للموظف ({previewModalReq.actualWorkedHours || previewModalReq.hours || '—'} ساعة)، واحتساب أي ساعات زائدة عن ساعات العمل الأساسية كساعات إضافية، وإعفاء الموظف من جزاء التأخير لهذا اليوم.
+                        </div>
+                        <div style={{ background: '#fef2f2', padding: '10px 12px', borderRadius: '8px', border: '1px solid #fecaca', color: '#991b1b', lineHeight: 1.6 }}>
+                          <strong style={{ display: 'block', marginBottom: '3px' }}>✕ في حالة الرفض:</strong>
+                          استبعاد الساعات التي عملها الموظف بعد نهاية ورديته الرسمية، واحتساب الساعات الواقعة داخل نطاق الوردية فقط، مع إبقاء تطبيق لائحة جزاء التأخير.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── OVERTIME DETAILS (ساعات إضافية) ── */}
+                {isOvertime && (
+                  <div style={{ background: '#f0fdf4', padding: '18px', borderRadius: '14px', border: '1.5px solid #86efac', boxShadow: '0 2px 10px rgba(22, 101, 52, 0.06)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                      <h4 style={{ margin: 0, color: '#166534', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800 }}>
+                        <span>⭐</span>
+                        <span>تفاصيل ساعات العمل الإضافية:</span>
+                      </h4>
+                      <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '3px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 800 }}>
+                        {previewModalReq.earlyOtHours > 0 && previewModalReq.lateOtHours > 0 ? 'إضافي قبل وبعد الوردية' : 'إضافي وردية'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '14px' }}>
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
+                        <span style={{ fontSize: '12px', color: '#166534', fontWeight: 600 }}>📅 الوردية المجدولة:</span>
+                        <div style={{ fontWeight: 800, color: '#14532d', fontSize: '14px', marginTop: '4px' }}>
+                          من <strong>{previewModalReq.scheduledStart || '—'}</strong> إلى <strong>{previewModalReq.scheduledEnd || '—'}</strong>
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#15803d', marginTop: '2px' }}>
+                          ساعات الوردية: {previewModalReq.scheduledHours || 8} ساعات
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
+                        <span style={{ fontSize: '12px', color: '#166534', fontWeight: 600 }}>⏱️ البصمة الفعلية المسجلة:</span>
+                        <div style={{ fontWeight: 800, color: '#14532d', fontSize: '14px', marginTop: '4px' }}>
+                          دخول: <strong>{previewModalReq.timeIn || previewModalReq.actualIn || '—'}</strong> ⬅️ خروج: <strong>{previewModalReq.timeOut || previewModalReq.actualOut || '—'}</strong>
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#15803d', marginTop: '2px' }}>
+                          إجمالي الحضور الفعلي: {previewModalReq.actualWorkedHours || previewModalReq.netHours || '—'} ساعة
+                        </div>
+                      </div>
+
+                      {(previewModalReq.earlyOtHours > 0 || previewModalReq.earlyArrivalMinutes > 0) && (
+                        <div style={{ background: '#eff6ff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #bfdbfe' }}>
+                          <span style={{ fontSize: '12px', color: '#1e40af', fontWeight: 700 }}>🌅 إضافي الحضور المبكر:</span>
+                          <div style={{ fontWeight: 900, color: '#1d4ed8', fontSize: '16px', marginTop: '4px' }}>
+                            +{previewModalReq.earlyOtHours || ((previewModalReq.earlyArrivalMinutes || 0) / 60).toFixed(2)} ساعة
+                          </div>
+                          <div style={{ fontSize: '11.5px', color: '#1e40af', marginTop: '2px' }}>
+                            تبكير {previewModalReq.earlyArrivalMinutes || 0} دقيقة قبل الوردية
+                          </div>
+                        </div>
+                      )}
+
+                      {(previewModalReq.lateOtHours > 0 || previewModalReq.lateDepartureMinutes > 0) && (
+                        <div style={{ background: '#eff6ff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #bfdbfe' }}>
+                          <span style={{ fontSize: '12px', color: '#1e40af', fontWeight: 700 }}>🌆 إضافي الانصراف المتأخر:</span>
+                          <div style={{ fontWeight: 900, color: '#1d4ed8', fontSize: '16px', marginTop: '4px' }}>
+                            +{previewModalReq.lateOtHours || ((previewModalReq.lateDepartureMinutes || 0) / 60).toFixed(2)} ساعة
+                          </div>
+                          <div style={{ fontSize: '11.5px', color: '#1e40af', marginTop: '2px' }}>
+                            تأخير {previewModalReq.lateDepartureMinutes || 0} دقيقة بعد الوردية
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ background: '#dcfce7', padding: '12px 14px', borderRadius: '10px', border: '1.5px solid #16a34a' }}>
+                        <span style={{ fontSize: '12px', color: '#166534', fontWeight: 800 }}>⭐ إجمالي الساعات الإضافية:</span>
+                        <div style={{ fontWeight: 900, color: '#15803d', fontSize: '18px', marginTop: '4px' }}>
+                          +{previewModalReq.overtimeHours || previewModalReq.hours || 0} ساعة
+                        </div>
+                        <div style={{ fontSize: '11.5px', color: '#166534', marginTop: '2px' }}>
+                          معتمدة على الوردية وملف الموظف
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* 4. Reason, Notes and Description Card */}
                 <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>

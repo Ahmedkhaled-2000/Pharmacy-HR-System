@@ -5,6 +5,7 @@ import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
 import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 import { apiSubmitRequestAtomic } from '../../utils/apiClient';
+import { getActivePayrollMonth, getCycleDateRange, validateDatesInActiveCycle } from '../../utils/periodEngine';
 
 export default function EmployeeShiftSwapModule({
   emp,
@@ -32,6 +33,11 @@ export default function EmployeeShiftSwapModule({
   const employees = state.employees || [];
   const branches = state.branches || [];
   const currentBranchId = selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId;
+
+  const activeCycleMonth = getActivePayrollMonth(state?.orgSettings || {});
+  const cycleRange = React.useMemo(() => {
+    return getCycleDateRange(activeCycleMonth, state?.orgSettings || {});
+  }, [activeCycleMonth, state?.orgSettings]);
 
   const getBranchLabel = (bId) => {
     if (!bId) return '';
@@ -125,6 +131,17 @@ export default function EmployeeShiftSwapModule({
       showToast('يرجى اختيار الزميل المراد تبديل الشيفت معه');
       return;
     }
+
+    // التحقق الصارم من وقوع التواريخ داخل دورة الشهر السارية
+    if (swapDate < cycleRange.startDate || swapDate > cycleRange.endDate) {
+      showToast(`⚠️ تاريخ شيفتك (${swapDate}) يقع خارج نطاق دورة الشهر السارية (${cycleRange.startDate} إلى ${cycleRange.endDate}). يُسمح فقط بتبديل الشيفتات الواقعة داخل هذه الدورة.`);
+      return;
+    }
+    if (targetSwapDate < cycleRange.startDate || targetSwapDate > cycleRange.endDate) {
+      showToast(`⚠️ تاريخ شيفت الزميل (${targetSwapDate}) يقع خارج نطاق دورة الشهر السارية (${cycleRange.startDate} إلى ${cycleRange.endDate}). يُسمح فقط بتبديل الشيفتات الواقعة داخل هذه الدورة.`);
+      return;
+    }
+
     const targetEmpObj = employees.find((e) => String(e.id) === String(targetEmpId));
     const noBranchMgr = isBranchWithoutManager(currentBranchId, state);
     const isDirectAdmin = noBranchMgr || shouldRouteDirectToAdmin(emp, currentBranchId, state) || (targetEmpObj && shouldRouteDirectToAdmin(targetEmpObj, targetEmpObj.branchId || currentBranchId, state));
@@ -171,11 +188,7 @@ export default function EmployeeShiftSwapModule({
       read: false
     };
 
-    setShowSwapModal(false);
-    setSwapNotes('');
-    setTargetEmpId('');
-
-    await dispatchEmployeeRequest({
+    const dispatchRes = await dispatchEmployeeRequest({
       request: newSwapReq,
       state,
       setState,
@@ -186,12 +199,29 @@ export default function EmployeeShiftSwapModule({
       showToast,
       notifyAdmin: (s) => notifyAdminOnNewRequest?.({ state: s, newRequest: newSwapReq, empName: emp?.name })
     });
+
+    if (dispatchRes?.success !== false) {
+      setShowSwapModal(false);
+      setSwapNotes('');
+      setTargetEmpId('');
+    }
   };
 
   // Handle Employee B Action (Accept/Reject incoming swap request)
   const handleTargetSwapAction = async (swapId, action) => {
-    const targetStatus = action === 'accept' ? 'pending_admin' : 'rejected';
     const targetSwapReq = (state.shiftSwaps || []).find(s => s.id === swapId);
+
+    // التحقق الصارم عند قبول الزميل لطلب التبديل
+    if (action === 'accept' && targetSwapReq) {
+      const dates = [targetSwapReq.requesterDate, targetSwapReq.targetDate].filter(Boolean);
+      const cycleCheck = validateDatesInActiveCycle(dates, state?.orgSettings || {});
+      if (!cycleCheck.isValid) {
+        showToast?.(cycleCheck.errorMsg);
+        return;
+      }
+    }
+
+    const targetStatus = action === 'accept' ? 'pending_admin' : 'rejected';
     const effectiveBId = targetSwapReq?.branchId || currentBranchId;
     const noBranchMgr = isBranchWithoutManager(effectiveBId, state);
 
@@ -386,6 +416,23 @@ export default function EmployeeShiftSwapModule({
             </select>
           </div>
 
+          {/* Active Month Cycle Banner */}
+          <div style={{
+            margin: '8px 0 14px',
+            padding: '10px 14px',
+            background: 'rgba(13, 148, 136, 0.08)',
+            border: '1px solid rgba(13, 148, 136, 0.25)',
+            borderRadius: '8px',
+            fontSize: '12.5px',
+            color: '#0f766e',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <span>🗓️</span>
+            <span><strong>دورة الشهر السارية:</strong> من <strong>{cycleRange.startDate}</strong> إلى <strong>{cycleRange.endDate}</strong> (يُسمح فقط بتبديل الشيفتات الواقعة داخل هذه الدورة)</span>
+          </div>
+
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
             <div className="field" style={{ flex: '1 1 280px' }}>
               <label style={{ fontWeight: '700' }}>الزميل المراد التبديل معه (من أي فرع) *</label>
@@ -405,12 +452,26 @@ export default function EmployeeShiftSwapModule({
 
             <div className="field" style={{ flex: '1 1 140px' }}>
               <label style={{ fontWeight: '700' }}>تاريخ شيفتك أنت *</label>
-              <input type="date" value={swapDate} onChange={(e) => setSwapDate(e.target.value)} required />
+              <input
+                type="date"
+                value={swapDate}
+                min={cycleRange.startDate}
+                max={cycleRange.endDate}
+                onChange={(e) => setSwapDate(e.target.value)}
+                required
+              />
             </div>
 
             <div className="field" style={{ flex: '1 1 140px' }}>
               <label style={{ fontWeight: '700' }}>تاريخ شيفت الزميل *</label>
-              <input type="date" value={targetSwapDate} onChange={(e) => setTargetSwapDate(e.target.value)} required />
+              <input
+                type="date"
+                value={targetSwapDate}
+                min={cycleRange.startDate}
+                max={cycleRange.endDate}
+                onChange={(e) => setTargetSwapDate(e.target.value)}
+                required
+              />
             </div>
           </div>
 

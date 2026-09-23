@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { isApprovedPermissionForDate, getEffectiveShiftHours, recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
+import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { getEmployeeManualPunchesCount, isShiftManualPunch, arabicWeekday } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
 
@@ -145,7 +146,17 @@ export default function AttendancePunchesModal({
     .reduce((acc, p) => acc + getEffectiveShiftHours(p, state), 0)
     .toFixed(2);
 
-  const isMultiBranch = employee.branchesDetails && employee.branchesDetails.length > 1;
+  const branches = state?.branches || [];
+  const getBranchName = (bId) => {
+    if (!bId) return '';
+    const b = branches.find(br => String(br.id) === String(bId) || String(br.code) === String(bId));
+    return b ? b.name : `فرع ${bId}`;
+  };
+
+  const isMultiBranch = Boolean(employee.branchesDetails && employee.branchesDetails.length > 1);
+  const employeeBranchName = isMultiBranch
+    ? employee.branchesDetails.map(bd => bd.branchName || getBranchName(bd.branchId)).filter(Boolean).join(' + ')
+    : (getBranchName(employee.branchId || employee.branchesDetails?.[0]?.branchId) || employee.branchName || employee.branch || 'الفرع الرئيسي');
 
   // Helper to calculate hourly rate for employee per branch
   const getBranchRate = (branchId) => {
@@ -195,6 +206,20 @@ export default function AttendancePunchesModal({
       const bH = parseFloat(editBreakHours) || 0;
       const calculatedHours = Math.max(0, Math.round((diff - bH) * 100) / 100);
 
+      const daySched = getEmployeeDaySchedule(employee.id, editDate, state);
+      const profileHours = parseFloat(employee.workHoursPerDay || employee.workHours) || 8;
+      let scheduledShiftHours = profileHours;
+      if (daySched && daySched.start && daySched.end && daySched.type !== 'off') {
+        const [sH, sM] = daySched.start.split(':').map(Number);
+        const [eH, eM] = daySched.end.split(':').map(Number);
+        let sMins = sH * 60 + (sM || 0);
+        let eMins = eH * 60 + (eM || 0);
+        if (eMins <= sMins) eMins += 24 * 60;
+        scheduledShiftHours = Math.round(((eMins - sMins) / 60) * 100) / 100;
+      }
+      const regularHours = Math.min(calculatedHours, scheduledShiftHours);
+      const overtimeHours = Math.max(0, Math.round((calculatedHours - scheduledShiftHours) * 100) / 100);
+
       const updatedShifts = (state.shifts || []).map((s) => {
         if (String(s.id) === String(editingPunch.id)) {
           return {
@@ -203,9 +228,14 @@ export default function AttendancePunchesModal({
             timeIn: editTimeIn,
             timeOut: editTimeOut,
             breakHours: bH,
-            hours: calculatedHours,
-            workHours: calculatedHours,
+            hours: regularHours,
+            workHours: regularHours,
+            regularHours: regularHours,
+            scheduledHours: scheduledShiftHours,
+            actualWorkedHours: calculatedHours,
             netHours: calculatedHours,
+            overtimeHours: overtimeHours,
+            overtimeStatus: overtimeHours > 0 ? (s.overtimeStatus === 'approved' ? 'approved' : 'pending') : 'none',
             branchId: editBranchId || s.branchId || employee.branchId || '',
             note: editNotes.trim() || s.note || 'تم تعديل البصمة بواسطة الإدارة العليا',
             notes: editNotes.trim() || s.notes || 'تم تعديل البصمة بواسطة الإدارة العليا',
@@ -516,7 +546,7 @@ export default function AttendancePunchesModal({
               </span>
             </h3>
             <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
-              {isMultiBranch ? `مسجل في ${employee.branchesDetails.length} فروع` : `الفرع: ${employee.branchName || 'الرئيسي'}`} | المسمى الوظيفي: {employee.jobTitle} {periodLabel ? ` • (${periodLabel})` : ''}
+              {isMultiBranch ? `الفروع: ${employeeBranchName}` : `الفرع: ${employeeBranchName}`} | المسمى الوظيفي: {employee.jobTitle} {periodLabel ? ` • (${periodLabel})` : ''}
             </span>
           </div>
           <button className="btn btn-ghost" onClick={onClose}>✕ إغلاق Window</button>

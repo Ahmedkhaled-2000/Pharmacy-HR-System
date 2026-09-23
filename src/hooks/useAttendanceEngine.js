@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { uid, arabicWeekday, nowTimeStr, parseArabicFloat } from '../utils/formatters';
 import { getRealTodayStr } from '../utils/timeEngine';
+import { getEmployeeDaySchedule } from '../utils/rosterEngine';
 import { playFingerprintChime } from './useAudio';
 import {
   recalculateEmployeeCycleLateness,
@@ -894,40 +895,93 @@ export function useAttendanceEngine() {
     const bId = active.branchId || emp?.branchId || (emp?.branchesDetails && emp.branchesDetails[0]?.branchId) || '';
     const bObj = (state.branches || []).find((b) => String(b.id) === String(bId));
 
-    const monthKey = (active.date || getRealTodayStr()).slice(0, 7);
-    const approvedRosters = (state.rosters || []).filter(
-      (r) => String(r.employeeId) === String(empId) && (r.month === monthKey || !r.month) && r.status === 'approved'
-    );
-    const arDay = arabicWeekday(active.date);
-    let daySchedule = null;
-    for (const ros of approvedRosters) {
-      if (ros.schedule) {
-        const sched = ros.schedule[arDay] || Object.entries(ros.schedule).find(([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === arDay.replace(/[\u0625\u0623\u0622]/g, 'ا'))?.[1];
-        if (sched && sched.type !== 'off' && sched.start && sched.end) {
-          daySchedule = sched;
-          break;
-        }
+    const daySchedule = getEmployeeDaySchedule(empId, active.date, state, bId);
+    const profileHours = parseFloat(emp?.workHoursPerDay || emp?.workHours || (emp?.branchesDetails && emp.branchesDetails[0]?.workHoursPerDay)) || 8;
+    let scheduledHours = profileHours;
+
+    let hasValidScheduledShift = false;
+    let schedStartMins = 0;
+    let schedEndMins = 0;
+
+    if (daySchedule && daySchedule.start && daySchedule.end && daySchedule.type !== 'off' && !emp?.noMonthlySchedule) {
+      const [sH, sM] = daySchedule.start.split(':').map(Number);
+      const [eH, eM] = daySchedule.end.split(':').map(Number);
+      if (!isNaN(sH) && !isNaN(eH)) {
+        hasValidScheduledShift = true;
+        schedStartMins = sH * 60 + (sM || 0);
+        schedEndMins = eH * 60 + (eM || 0);
+        if (schedEndMins <= schedStartMins) schedEndMins += 24 * 60;
+        scheduledHours = Math.round(((schedEndMins - schedStartMins) / 60) * 100) / 100;
       }
     }
 
-    let scheduledHours = parseFloat(emp?.workHoursPerDay) || 8;
-    if (daySchedule && daySchedule.start && daySchedule.end) {
-      const [sH, sM] = daySchedule.start.split(':').map(Number);
-      const [eH, eM] = daySchedule.end.split(':').map(Number);
-      let sMinutes = sH * 60 + sM;
-      let eMinutes = eH * 60 + eM;
-      if (eMinutes < sMinutes) eMinutes += 24 * 60;
-      scheduledHours = Math.round(((eMinutes - sMinutes) / 60) * 100) / 100;
+    // حساب دقائق الحضور والانصراف الفعلي
+    const [inH, inM] = String(active.timeIn || '09:00').split(':').map(Number);
+    const [outH, outM] = String(timeOut).split(':').map(Number);
+    let actInMins = inH * 60 + (inM || 0);
+    let actOutMins = outH * 60 + (outM || 0);
+    if (actOutMins <= actInMins) actOutMins += 24 * 60;
+
+    // حساب الفروقات بدقة بالغة بالدقائق مقارنة بالجدول
+    let earlyArrivalMinutes = 0;
+    let lateArrivalMinutes = 0;
+    let lateDepartureMinutes = 0;
+
+    if (hasValidScheduledShift) {
+      if (actInMins < schedStartMins) {
+        earlyArrivalMinutes = schedStartMins - actInMins;
+      } else if (actInMins > schedStartMins) {
+        lateArrivalMinutes = actInMins - schedStartMins;
+      }
+
+      if (actOutMins > schedEndMins) {
+        lateDepartureMinutes = actOutMins - schedEndMins;
+      }
     }
 
     let regularHours = netHours;
     let overtimeHours = 0;
     let overtimeStatus = 'none';
+    let deviationStatus = 'none';
+    let isScheduleDeviation = false;
+    let earlyOtHours = 0;
+    let lateOtHours = 0;
 
-    if (netHours > scheduledHours) {
+    // ── الحالة 1: عدم الالتزام بالجدول (حضور متأخر وانصراف متأخر) -> البند 4 ──
+    if (hasValidScheduledShift && lateArrivalMinutes > 0 && lateDepartureMinutes > 0) {
+      isScheduleDeviation = true;
+      deviationStatus = 'pending';
+
+      // قبل الاعتماد: تُحتسب الساعات فقط من وقت الدخول حتى موعد نهاية الوردية المجدولة
+      // وتُستبعد الساعات التي بعد موعد الانصراف لحين موافقة الإدارة ومدير الفرع
+      const windowEndMins = Math.min(actOutMins, schedEndMins);
+      const windowHours = Math.max(0, Math.round(((windowEndMins - actInMins) / 60 - breakHours) * 100) / 100);
+      regularHours = windowHours;
+      overtimeHours = 0;
+      overtimeStatus = 'pending';
+    }
+    // ── الحالة 2: حضور مبكر وانصراف متأخر عن الوردية المجدولة -> البند 3 ──
+    else if (hasValidScheduledShift && earlyArrivalMinutes > 0 && lateDepartureMinutes > 0) {
+      earlyOtHours = Math.round((earlyArrivalMinutes / 60) * 100) / 100;
+      lateOtHours = Math.round((lateDepartureMinutes / 60) * 100) / 100;
+      overtimeHours = Math.round((earlyOtHours + lateOtHours) * 100) / 100;
+      regularHours = Math.min(netHours, scheduledHours);
+      overtimeStatus = overtimeHours > 0 ? 'pending' : 'none';
+    }
+    // ── الحالة 3: زيادة ساعات عامة فوق الوردية المجدولة أو ملف الموظف ──
+    else if (netHours > scheduledHours) {
       overtimeHours = Math.round((netHours - scheduledHours) * 100) / 100;
       regularHours = scheduledHours;
       overtimeStatus = 'pending';
+      if (lateDepartureMinutes > 0) {
+        lateOtHours = overtimeHours;
+      } else if (earlyArrivalMinutes > 0) {
+        earlyOtHours = overtimeHours;
+      }
+    } else {
+      regularHours = netHours;
+      overtimeHours = 0;
+      overtimeStatus = 'none';
     }
 
     let existingShifts = [...(state.shifts || [])];
@@ -957,16 +1011,28 @@ export function useAttendanceEngine() {
       date: active.date,
       timeIn: active.timeIn,
       timeOut,
-      hours: overtimeStatus === 'pending' ? regularHours : netHours,
+      hours: overtimeStatus === 'pending' || isScheduleDeviation ? regularHours : netHours,
       actualWorkedHours: netHours,
       scheduledHours,
+      scheduledStart: daySchedule?.start || '',
+      scheduledEnd: daySchedule?.end || '',
       regularHours,
       overtimeHours,
+      earlyOtHours,
+      lateOtHours,
       overtimeStatus,
+      deviationStatus,
+      isScheduleDeviation,
       breakHours,
       excludeDailyAllowance: Boolean(hasEarlierShiftInAnotherBranch),
-      note: overtimeHours > 0 ? `ساعات إضافية (+${overtimeHours} س) بانتظار الاعتماد` : 'تسجيل انصراف بلمسة واحدة',
-      statusLabel: 'حضور حي',
+      note: isScheduleDeviation
+        ? `طلب عدم الالتزام بالجدول (تأخير ${lateArrivalMinutes} د / خروج متأخر ${lateDepartureMinutes} د) بانتظار الاعتماد`
+        : (overtimeHours > 0
+            ? (earlyOtHours > 0 && lateOtHours > 0
+                ? `ساعات إضافية (+${overtimeHours} س: قبل +${earlyOtHours} س / بعد +${lateOtHours} س) بانتظار الاعتماد`
+                : `ساعات إضافية (+${overtimeHours} س) بانتظار الاعتماد`)
+            : 'تسجيل انصراف بلمسة واحدة'),
+      statusLabel: isScheduleDeviation ? 'عدم الالتزام بالجدول' : 'حضور حي',
       isLiveActive: false,
       status: 'completed',
       createdAt: baseShift.createdAt || new Date().toISOString(),
@@ -995,11 +1061,81 @@ export function useAttendanceEngine() {
     let updatedRequests = state.requests || [];
     let updatedNotifications = state.notifications || [];
 
-    if (overtimeHours > 0) {
+    // ── إنشاء طلب عدم الالتزام بالجدول (Schedule Deviation Request) ──
+    if (isScheduleDeviation) {
+      const noBranchMgr = isBranchWithoutManager(bId, state);
+      const isDirectAdmin = noBranchMgr || shouldRouteDirectToAdmin(emp, bId, state);
+      const targetApproval = isDirectAdmin ? 'admin_only' : 'both';
+      const reqId = `req_dev_${empId}_${active.date}_${shiftId}`;
+      const potentialOvertime = Math.max(0, Math.round((netHours - profileHours) * 100) / 100);
+
+      const deviationReq = {
+        id: reqId,
+        shiftId: shiftId,
+        employeeId: empActualId || empId,
+        employeeName: emp?.name || '',
+        employeeCode: emp?.code || '',
+        jobTitle: emp?.jobTitle || '',
+        branchId: bId,
+        branchName: bObj?.name || 'الفرع الرئيسي',
+        type: 'schedule_deviation',
+        date: active.date,
+        scheduledStart: daySchedule.start,
+        scheduledEnd: daySchedule.end,
+        scheduledHours: scheduledHours,
+        profileHours: profileHours,
+        actualIn: active.timeIn,
+        actualOut: timeOut,
+        lateArrivalMinutes: lateArrivalMinutes,
+        lateDepartureMinutes: lateDepartureMinutes,
+        actualWorkedHours: netHours,
+        regularHours: regularHours,
+        extraHoursBeyondProfile: potentialOvertime,
+        reason: `حضور متأخر (${lateArrivalMinutes} د) وانصراف متأخر (${lateDepartureMinutes} د) عن موعد الشفت المجدول (${daySchedule.start} - ${daySchedule.end}).`,
+        details: `الوردية المجدولة: ${daySchedule.start} إلى ${daySchedule.end} (${scheduledHours} س) | الحضور الفعلي: ${active.timeIn} | الانصراف الفعلي: ${timeOut} | الساعات الفعلية: ${netHours} س | الساعات الإضافية فوق ملف الموظف: +${potentialOvertime} س`,
+        targetApproval,
+        isDirectToAdmin: isDirectAdmin,
+        branchNotRequired: isDirectAdmin,
+        managerStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : 'pending'),
+        branchApprovalStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : undefined),
+        branchApproved: false,
+        adminApproved: false,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        source: 'system_schedule_tracker'
+      };
+      updatedRequests = [deviationReq, ...updatedRequests];
+
+      const notifId = `notif_dev_${empId}_${active.date}_${shiftId}`;
+      const newNotif = {
+        id: notifId,
+        type: 'schedule_deviation_alert',
+        title: `⚠️ عدم الالتزام بالجدول: ${emp?.name} (تأخير ${lateArrivalMinutes} د / خروج ${lateDepartureMinutes} د)`,
+        message: `سجل الموظف ${emp?.name} بفرع ${bObj?.name || 'الفرع'} حضوراً متأخراً في ${active.timeIn} وانصرافاً متأخراً في ${timeOut}. يتطلب الطلب موافقة الإدارة والفرع.`,
+        date: active.date,
+        timestamp: new Date().toISOString(),
+        read: false,
+        targetRole: isDirectAdmin ? 'admin' : 'all',
+        branchId: bId,
+        requestId: reqId
+      };
+      updatedNotifications = [newNotif, ...updatedNotifications];
+    }
+
+    // ── إنشاء طلب الساعات الإضافية (Overtime Request) عند عدم وجود مخالفة عدم الالتزام ──
+    if (overtimeHours > 0 && !isScheduleDeviation) {
       const noBranchMgr = isBranchWithoutManager(bId, state);
       const isDirectAdmin = noBranchMgr || shouldRouteDirectToAdmin(emp, bId, state);
       const targetApproval = isDirectAdmin ? 'admin_only' : 'both';
       const reqId = `req_ot_${empId}_${active.date}_${shiftId}`;
+
+      const reasonText = (earlyOtHours > 0 && lateOtHours > 0)
+        ? `حضور مبكر قبل الوردية (+${earlyOtHours} س) وانصراف متأخر بعد الوردية (+${lateOtHours} س) بإجمالي إضافي (+${overtimeHours} س).`
+        : `عمل الموظف ${emp?.name} عدد ${overtimeHours} ساعات إضافية فوق ساعات الوردية بالجدول (${scheduledHours} س).`;
+
+      const detailsText = (earlyOtHours > 0 && lateOtHours > 0)
+        ? `الوردية المقررة: ${daySchedule?.start || '—'} إلى ${daySchedule?.end || '—'} (${scheduledHours} س) | الحضور: ${active.timeIn} (تبكير ${earlyArrivalMinutes} د = +${earlyOtHours} س) | الانصراف: ${timeOut} (تأخير ${lateDepartureMinutes} د = +${lateOtHours} س) | إجمالي الساعات الفعلية: ${netHours} س | الإضافي المطلوب: +${overtimeHours} س`
+        : `الوردية المقررة: ${scheduledHours} س | الساعات الفعلية: ${netHours} س | الساعات الإضافية المطلوب اعتمادها: +${overtimeHours} س`;
 
       const overtimeReq = {
         id: reqId,
@@ -1011,24 +1147,25 @@ export function useAttendanceEngine() {
         branchId: bId,
         branchName: bObj?.name || 'الفرع الرئيسي',
         type: 'overtime',
-        subType: 'extra_hours',
+        subType: (earlyOtHours > 0 && lateOtHours > 0) ? 'early_and_late' : 'extra_hours',
         hours: overtimeHours,
+        earlyOtHours,
+        lateOtHours,
         regularHours: regularHours,
         totalShiftHours: netHours,
-        scheduledStart: daySchedule?.start || '09:00',
-        scheduledEnd: daySchedule?.end || '17:00',
+        scheduledStart: daySchedule?.start || '',
+        scheduledEnd: daySchedule?.end || '',
+        profileHours: profileHours,
         actualIn: active.timeIn,
         actualOut: timeOut,
         date: active.date,
-        reason: `عمل الموظف ${emp?.name} عدد ${overtimeHours} ساعات إضافية فوق ساعات الوردية المحددة بالجدول (${scheduledHours} س).`,
-        details: `الوردية المقررة: ${scheduledHours} س | الساعات الفعلية: ${netHours} س | الساعات الإضافية المطلوب اعتمادها: +${overtimeHours} س`,
+        reason: reasonText,
+        details: detailsText,
         targetApproval,
         isDirectToAdmin: isDirectAdmin,
         branchNotRequired: isDirectAdmin,
         managerStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : 'pending'),
         branchApprovalStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : undefined),
-        managerComment: noBranchMgr ? 'الفرع بدون مدير' : undefined,
-        branchApprovalNote: noBranchMgr ? 'الفرع بدون مدير' : undefined,
         branchApproved: false,
         adminApproved: false,
         status: 'pending',
@@ -1042,8 +1179,8 @@ export function useAttendanceEngine() {
         id: notifId,
         type: 'overtime_alert',
         title: `⏱️ طلب اعتماد ساعات إضافية: ${emp?.name} (+${overtimeHours} س)`,
-        message: isDirectAdmin
-          ? `عمل الموظف ${emp?.name} بفرع ${bObj?.name || 'الفرع'} عدد ${overtimeHours} ساعات إضافية وتم توجيه الطلب للإدارة العليا مباشرة.`
+        message: (earlyOtHours > 0 && lateOtHours > 0)
+          ? `حضور مبكر وانصراف متأخر للموظف ${emp?.name} بفرع ${bObj?.name || 'الفرع'} (+${overtimeHours} س إضافي قبل وبعد موعد الوردية).`
           : `عمل الموظف ${emp?.name} بفرع ${bObj?.name || 'الفرع'} عدد ${overtimeHours} ساعات إضافية بعد انتهاء ورديته المقررة (${scheduledHours} س).`,
         date: active.date,
         timestamp: new Date().toISOString(),

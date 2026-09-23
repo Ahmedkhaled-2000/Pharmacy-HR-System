@@ -81,6 +81,36 @@ export function useRequestsManager() {
           });
         }
 
+        // 0.1 Schedule Deviation Request Approval (عدم الالتزام بالجدول - البند 4)
+        if (target.type === 'schedule_deviation') {
+          const actHours = parseFloat(target.actualWorkedHours) || 0;
+          const profHours = parseFloat(target.profileHours) || 8;
+          const otHours = Math.max(0, Math.round((actHours - profHours) * 100) / 100);
+          const regHours = Math.min(actHours, profHours);
+
+          updatedShifts = updatedShifts.map((s) => {
+            if (s.id === target.shiftId || (String(s.employeeId) === String(target.employeeId) && s.date === target.date)) {
+              return {
+                ...s,
+                hours: regHours,
+                regularHours: regHours,
+                actualWorkedHours: actHours,
+                overtimeHours: otHours,
+                overtimeStatus: otHours > 0 ? 'approved' : 'none',
+                deviationStatus: 'approved',
+                adminApproved: true,
+                note: `معتمد بعدم الالتزام بالجدول (ساعات فعلية: ${actHours} س | أساسي: ${regHours} س | إضافي: ${otHours} س)`
+              };
+            }
+            return s;
+          });
+
+          // إعفاء الموظف من واقعة التأخير الصباحي لهذا اليوم لكون الوردية اعتُمدت بعدم الالتزام بالجدول
+          updatedLateIncidents = updatedLateIncidents.filter(inc =>
+            !(String(inc.employeeId) === String(target.employeeId) && inc.date === target.date)
+          );
+        }
+
         // 1. Leave Requests Integration
         if (['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave', 'leave_comp_off', 'comp_off'].includes(target.type) || target.leaveType === 'comp_off') {
           const leaveTypeResolved = target.leaveType || (target.type === 'annual_leave' ? 'annual' : target.type === 'sick_leave' ? 'sick' : target.type === 'unpaid_leave' ? 'unpaid' : (target.type === 'leave_comp_off' || target.type === 'comp_off' ? 'comp_off' : 'annual'));
@@ -1055,6 +1085,36 @@ export function useRequestsManager() {
               overtimeStatus: 'rejected',
               adminApproved: false,
               note: `ساعات الوردية الأساسية (${regHours} س) — تم استبعاد الإضافي (${targetReq.hours} س) بواسطة الإدارة`
+            };
+          }
+          return s;
+        });
+      }
+
+      if (targetReq && targetReq.type === 'schedule_deviation') {
+        const schedEnd = targetReq.scheduledEnd || '17:00';
+        updatedShifts = updatedShifts.map((s) => {
+          if (s.id === targetReq.shiftId || (String(s.employeeId) === String(targetReq.employeeId) && s.date === targetReq.date)) {
+            let cappedHours = s.regularHours || 0;
+            if (s.timeIn && schedEnd) {
+              const [inH, inM] = String(s.timeIn).split(':').map(Number);
+              const [endH, endM] = String(schedEnd).split(':').map(Number);
+              if (!isNaN(inH) && !isNaN(endH)) {
+                let sMins = inH * 60 + (inM || 0);
+                let eMins = endH * 60 + (endM || 0);
+                if (eMins < sMins) eMins += 24 * 60;
+                cappedHours = Math.max(0, Math.round(((eMins - sMins) / 60 - (parseFloat(s.breakHours) || 0)) * 100) / 100);
+              }
+            }
+            return {
+              ...s,
+              hours: cappedHours,
+              regularHours: cappedHours,
+              overtimeHours: 0,
+              overtimeStatus: 'rejected',
+              deviationStatus: 'rejected',
+              adminApproved: false,
+              note: `تم رفض عدم الالتزام بالجدول — تم استبعاد الساعات بعد موعد الانصراف المجدول (${schedEnd}) واحتساب الساعات حتى نهاية الوردية (${cappedHours} س)`
             };
           }
           return s;
