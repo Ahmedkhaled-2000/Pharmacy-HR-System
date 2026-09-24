@@ -17,6 +17,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { initSaasTables, registerSaasRoutes, DEFAULT_DEV_USER, DEFAULT_DEV_PASS } from './saas-manager.js';
+import { initOutstockTables, registerOutstockRoutes } from './outstock-manager.js';
 
 dotenv.config();
 
@@ -34,6 +35,70 @@ function timingSafeMatch(a, b) {
   if (bufA.length !== bufB.length) return false;
   return crypto.timingSafeEqual(bufA, bufB);
 }
+
+function toStdDigits(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u00A0]/g, '')
+    .trim()
+    .replace(/[٠-٩]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1632 + 48))
+    .replace(/[۰-۹]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1776 + 48));
+}
+
+async function syncBranchesToOutstock(branches, dbInstance) {
+  if (!Array.isArray(branches) || branches.length === 0 || !dbInstance) return;
+  for (const b of branches) {
+    if (!b || !b.id || !b.name) continue;
+    try {
+      const cleanUser = b.username ? String(b.username).trim().toLowerCase() : null;
+      const cleanPass = b.password ? String(b.password).trim() : (b.managerPin ? String(b.managerPin).trim() : null);
+      const bPhone = b.phone || (Array.isArray(b.phones) && b.phones[0]?.number) || null;
+      const bCode = b.branchCode || b.code || b.id;
+
+      await dbInstance.query(`
+        INSERT INTO public.outstock_branches (id, name, code, phone, address, username, password, is_active, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, true, CURRENT_TIMESTAMP)
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          code = EXCLUDED.code,
+          phone = COALESCE(EXCLUDED.phone, public.outstock_branches.phone),
+          address = COALESCE(EXCLUDED.address, public.outstock_branches.address),
+          username = COALESCE(EXCLUDED.username, public.outstock_branches.username),
+          password = COALESCE(EXCLUDED.password, public.outstock_branches.password),
+          updated_at = CURRENT_TIMESTAMP
+      `, [String(b.id), String(b.name), bCode, bPhone, b.address || null, cleanUser, cleanPass]);
+
+      if (cleanUser && cleanPass) {
+        const existingUsers = await dbInstance.query(
+          'SELECT id, username FROM public.outstock_users WHERE id = $1 OR LOWER(username) = $2',
+          [`usr_branch_${b.id}`, cleanUser]
+        );
+        if (existingUsers.rows.length > 0) {
+          const targetUserId = existingUsers.rows[0].id;
+          await dbInstance.query(`
+            UPDATE public.outstock_users SET
+              username = $1,
+              password = $2,
+              full_name = $3,
+              role = 'branch',
+              branch_id = $4,
+              is_active = true,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = $5
+          `, [cleanUser, cleanPass, `فرع: ${b.name}`, String(b.id), targetUserId]);
+        } else {
+          await dbInstance.query(`
+            INSERT INTO public.outstock_users (id, username, password, full_name, role, branch_id, is_active, updated_at)
+            VALUES ($1, $2, $3, $4, 'branch', $5, true, CURRENT_TIMESTAMP)
+          `, [`usr_branch_${b.id}`, cleanUser, cleanPass, `فرع: ${b.name}`, String(b.id)]);
+        }
+      }
+    } catch (err) {
+      console.warn(`[Sync Branch to Outstock Warn] Branch ${b.name}:`, err.message);
+    }
+  }
+}
+
 
 function verifyJwtToken(token) {
   if (!token || typeof token !== 'string') return null;
@@ -351,6 +416,7 @@ async function initDatabaseTables() {
     await db.query(schemaSql);
     console.log('🐘 [PostgreSQL] الجداول الأساسية وجداول الأجهزة والتحديثات مفهرسة ومجهزة بنجاح.');
     await initSaasTables(db);
+    await initOutstockTables(db);
   } catch (err) {
     console.error('❌ [PostgreSQL Init Error]:', err.message);
   }
@@ -647,6 +713,11 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
 
   const payload = typeof value === 'string' ? JSON.parse(value) : value;
 
+  // مزامنة فروع الـ HR تلقائياً مع جداول نظام النواقص (Outstock) لضمان الدخول الموحد
+  if (payload && Array.isArray(payload.branches) && payload.branches.length > 0) {
+    syncBranchesToOutstock(payload.branches, db).catch(() => {});
+  }
+
   // 3. بث التحديث اللحظي لجميع الأجهزة والتبويبات المتصلة عبر WebSockets (< 5ms)
   if (clientIp !== 'batch-worker') {
     io.emit('state:updated', {
@@ -661,6 +732,18 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
 }
 
 // ── 6. مسارات الـ REST API ───────────────────────────────────────────────────
+
+// 🚀 فحص النبض والاتصال فائق السرعة وتوثيق التوقيت المونوتوني (< 5ms)
+app.all(['/api/ping', '/ping'], (req, res) => {
+  res.status(204)
+     .set({
+       'Cache-Control': 'no-store, no-cache, must-revalidate',
+       'Pragma': 'no-cache',
+       'Date': new Date().toUTCString(),
+       'X-Server-Time': new Date().toISOString()
+     })
+     .end();
+});
 
 // فحص الحالة والصحة
 app.get('/api/health', async (req, res) => {
@@ -979,8 +1062,8 @@ app.post('/api/punches/record', async (req, res) => {
       [`PUNCH_${actionType.toUpperCase()}`, `emp_${employeeId}`, saveResult?.version || 0, clientIp, now]
     ).catch(() => {});
 
-    // بث لحظي لجميع الأجهزة المتصلة (< 5ms)
-    io.emit('punch:recorded', {
+    // بث لحظي ذري متعدد الغرف (Targeted Room Multiplexing < 5ms)
+    const punchPayload = {
       employeeId,
       empIdStr,
       branchId: branchId || '',
@@ -990,13 +1073,24 @@ app.post('/api/punches/record', async (req, res) => {
       requestId: requestId || null,
       activeShifts: currentActiveShifts,
       shiftRecord: (actionType === 'check_out' || actionType === 'stop_shift') ? (currentShifts.find(s => s.employeeId === employeeId || s.employeeId === empIdStr) || currentShifts[0]) : (shiftRecord || null),
-      timestamp: now
-    });
+      timestamp: now,
+      hlcTimestamp: req.body?.hlcTimestamp || `${now}_0000_vps`
+    };
+
+    if (branchId) {
+      io.to(`room:branch:${branchId}`).emit('punch:recorded', punchPayload);
+    }
+    if (employeeId) {
+      io.to(`room:employee:${employeeId}`).emit('punch:recorded', punchPayload);
+    }
+    io.to('room:admin:live').emit('punch:recorded', punchPayload);
+    io.emit('punch:recorded', punchPayload);
 
     io.emit('entity:changed', {
       entityType: 'activeShifts',
       action: actionType,
       employeeId,
+      branchId: branchId || '',
       timestamp: now
     });
 
@@ -1009,6 +1103,8 @@ app.post('/api/punches/record', async (req, res) => {
       branchId,
       date,
       time,
+      serverTime: now,
+      hlcTimestamp: punchPayload.hlcTimestamp,
       version: saveResult?.version || 0,
       updated_at: now,
       requestId: requestId || null
@@ -1144,7 +1240,88 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
             ...currentShifts.filter(s => !(possibleKeys.has(String(s.employeeId)) && s.date === punchDate && (!s.timeOut || s.timeOut === '')))
           ];
         }
+      } else if (actionType === 'break_start' || actionType === 'pause_shift') {
+        const punchEpoch = p.deviceLocalEpoch || Date.now();
+        possibleKeys.forEach(k => {
+          if (currentActiveShifts[k]) {
+            currentActiveShifts[k] = {
+              ...currentActiveShifts[k],
+              isPaused: true,
+              isOnBreak: true,
+              breakStartTime: punchTime,
+              pauseStartEpoch: punchEpoch,
+              updatedAt: punchEpoch
+            };
+          }
+        });
+
+        let targetIdx = currentShifts.findIndex(s => s && (s.id === shiftId || (possibleKeys.has(String(s.employeeId)) && s.date === punchDate && (!s.timeOut || s.timeOut === '' || s.isLiveActive))));
+        if (targetIdx >= 0) {
+          currentShifts[targetIdx] = {
+            ...currentShifts[targetIdx],
+            isPaused: true,
+            isOnBreak: true,
+            breakStartTime: punchTime,
+            pauseStartEpoch: punchEpoch,
+            updatedAt: now
+          };
+        }
+      } else if (actionType === 'break_end' || actionType === 'resume_shift') {
+        const punchEpoch = p.deviceLocalEpoch || Date.now();
+        let addedPauseMs = 0;
+        possibleKeys.forEach(k => {
+          const act = currentActiveShifts[k];
+          if (act) {
+            const pauseDuration = act.pauseStartEpoch ? Math.max(0, punchEpoch - act.pauseStartEpoch) : 0;
+            if (pauseDuration > addedPauseMs) addedPauseMs = pauseDuration;
+            currentActiveShifts[k] = {
+              ...act,
+              isPaused: false,
+              isOnBreak: false,
+              breakStartTime: null,
+              pauseStartEpoch: null,
+              accumulatedPauseMs: (act.accumulatedPauseMs || 0) + pauseDuration,
+              updatedAt: punchEpoch
+            };
+          }
+        });
+
+        let targetIdx = currentShifts.findIndex(s => s && (s.id === shiftId || (possibleKeys.has(String(s.employeeId)) && s.date === punchDate && (!s.timeOut || s.timeOut === '' || s.isLiveActive))));
+        if (targetIdx >= 0) {
+          const prev = currentShifts[targetIdx];
+          const pauseDuration = prev.pauseStartEpoch ? Math.max(0, punchEpoch - prev.pauseStartEpoch) : addedPauseMs;
+          const totalPauseMs = (prev.accumulatedPauseMs || 0) + pauseDuration;
+          const trackedBreak = Math.round((totalPauseMs / 3600000) * 100) / 100;
+          currentShifts[targetIdx] = {
+            ...prev,
+            isPaused: false,
+            isOnBreak: false,
+            breakStartTime: null,
+            pauseStartEpoch: null,
+            accumulatedPauseMs: totalPauseMs,
+            breakHours: trackedBreak,
+            updatedAt: now
+          };
+        }
       } else if (actionType === 'check_out' || actionType === 'stop_shift') {
+        // استخراج مدة الاستراحة المتراكمة من الوردية النشطة قبل حذفها
+        let activePauseMs = 0;
+        let activeBreakHours = 0;
+        possibleKeys.forEach(k => {
+          const act = currentActiveShifts[k];
+          if (act) {
+            let pMs = act.accumulatedPauseMs || 0;
+            if (act.isPaused && act.pauseStartEpoch) {
+              const punchEpoch = p.deviceLocalEpoch || Date.now();
+              pMs += Math.max(0, punchEpoch - act.pauseStartEpoch);
+            }
+            if (pMs > activePauseMs) activePauseMs = pMs;
+          }
+        });
+        if (activePauseMs > 0) {
+          activeBreakHours = Math.round((activePauseMs / 3600000) * 100) / 100;
+        }
+
         // حذف من activeShifts
         possibleKeys.forEach(k => delete currentActiveShifts[k]);
         Object.keys(currentActiveShifts).forEach(k => {
@@ -1159,27 +1336,39 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
         if (targetIdx >= 0) {
           const prevRec = currentShifts[targetIdx];
           const timeInStr = prevRec.timeIn || '00:00';
+          let totalElapsedHrs = 0;
           let workedHrs = 0;
           try {
             const [inH, inM] = timeInStr.split(':').map(Number);
             const [outH, outM] = punchTime.split(':').map(Number);
             let diffMins = (outH * 60 + outM) - (inH * 60 + inM);
             if (diffMins < 0) diffMins += 24 * 60;
-            workedHrs = parseFloat((diffMins / 60).toFixed(2));
+            totalElapsedHrs = parseFloat((diffMins / 60).toFixed(2));
           } catch {}
+
+          const effectiveBreak = parseFloat(prevRec.breakHours || activeBreakHours || p.breakHours || 0);
+          workedHrs = Math.max(0, parseFloat((totalElapsedHrs - effectiveBreak).toFixed(2)));
+          const schedHours = parseFloat(prevRec.scheduledHours || empObj?.workHoursPerDay || 8);
+          const regularHours = Math.min(workedHrs, schedHours);
+          const overtimeHours = Math.max(0, parseFloat((workedHrs - schedHours).toFixed(2)));
 
           currentShifts[targetIdx] = {
             ...prevRec,
             timeOut: punchTime,
             hours: workedHrs,
             actualWorkedHours: workedHrs,
-            regularHours: Math.min(workedHrs, prevRec.scheduledHours || 8),
-            overtimeHours: Math.max(0, parseFloat((workedHrs - (prevRec.scheduledHours || 8)).toFixed(2))),
+            breakHours: effectiveBreak,
+            scheduledHours: schedHours,
+            regularHours: regularHours,
+            overtimeHours: overtimeHours,
+            overtimeStatus: overtimeHours > 0 ? 'pending' : 'none',
             isLiveActive: false,
+            isPaused: false,
+            isOnBreak: false,
             status: 'completed',
             isOfflineSynced: true,
             syncedAt: now,
-            note: `${prevRec.note || ''} · انصراف أوفلاين ${punchTime}`.trim(),
+            note: `${prevRec.note || ''} · انصراف أوفلاين ${punchTime}${effectiveBreak > 0 ? ` (بريك: ${effectiveBreak} س)` : ''}`.trim(),
             updatedAt: now
           };
         } else if (!alreadyProcessed) {
@@ -1222,7 +1411,26 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
       ['KIOSK_OUTBOX_SYNC', `batch_${syncedIds.length}`, saveResult?.version || 0, clientIp, now]
     ).catch(() => {});
 
-    // بث لحظي عبر WebSockets لجميع الأجهزة المفتوحة
+    // بث لحظي ذري لدفعات البصمات (Micro-Delta Batch Sync) لتفادي تنزيل كامل قاعدة البيانات
+    const batchPayload = {
+      syncedIds,
+      count: syncedIds.length,
+      activeShifts: currentActiveShifts,
+      punches: sortedPunches,
+      serverTime: now,
+      version: saveResult?.version || 0
+    };
+
+    io.emit('punches:batch_synced', batchPayload);
+
+    // بث موجه لغرف الفروع المعنية وغرفة الإدارة
+    const branchIds = new Set(sortedPunches.map(p => p.branchId).filter(Boolean));
+    branchIds.forEach(bId => {
+      io.to(`room:branch:${bId}`).emit('punches:batch_synced', batchPayload);
+    });
+    io.to('room:admin:live').emit('punches:batch_synced', batchPayload);
+
+    // بث لحظي عبر WebSockets لجميع الأجهزة المفتوحة (للتوافق العكسي مع الشاشات القديمة)
     io.emit('state:updated', {
       key: storageKey,
       value: existing,
@@ -1839,6 +2047,8 @@ app.post('/api/auth/login', async (req, res) => {
 
     const cleanUser = String(username || '').trim().toLowerCase();
     const cleanPass = String(password || '').trim();
+    const stdUser = toStdDigits(cleanUser);
+    const stdPass = toStdDigits(cleanPass);
 
     const storedAdminPass = org.adminPassword || org.adminPass || '123';
     const storedOwnerPass = org.ownerPassword || storedAdminPass || 'owner123';
@@ -1873,8 +2083,8 @@ app.post('/api/auth/login', async (req, res) => {
     let targetUserObj = { username: cleanUser };
 
     // 1. فحص المالك (Owner)
-    const isOwnerUser = cleanUser === storedOwnerUser || cleanUser === 'owner';
-    const isOwnerPassMatch = cleanPass === storedOwnerPass || (!org.ownerPassword && cleanPass === 'owner123');
+    const isOwnerUser = cleanUser === storedOwnerUser || cleanUser === 'owner' || (stdUser && toStdDigits(storedOwnerUser) === stdUser);
+    const isOwnerPassMatch = cleanPass === storedOwnerPass || (stdPass && toStdDigits(storedOwnerPass) === stdPass) || (!org.ownerPassword && (cleanPass === 'owner123' || stdPass === 'owner123'));
     
     if ((role === 'owner' || role === 'auto') && isOwnerUser && isOwnerPassMatch) {
       authenticated = true;
@@ -1884,8 +2094,10 @@ app.post('/api/auth/login', async (req, res) => {
 
     // 2. فحص الأدمن (Admin)
     if (!authenticated && (role === 'admin' || role === 'auto')) {
-      const isAdminUser = cleanUser === storedAdminUser || cleanUser === 'admin';
-      const isAdminPassMatch = cleanPass === storedAdminPass || cleanPass === storedOwnerPass || (!org.adminPassword && (cleanPass === '123' || cleanPass === 'admin123'));
+      const isAdminUser = cleanUser === storedAdminUser || cleanUser === 'admin' || (stdUser && toStdDigits(storedAdminUser) === stdUser);
+      const isAdminPassMatch = cleanPass === storedAdminPass || (stdPass && toStdDigits(storedAdminPass) === stdPass) ||
+        cleanPass === storedOwnerPass || (stdPass && toStdDigits(storedOwnerPass) === stdPass) ||
+        (!org.adminPassword && (cleanPass === '123' || cleanPass === 'admin123' || stdPass === '123'));
       if (isAdminUser && isAdminPassMatch) {
         authenticated = true;
         userRole = 'admin';
@@ -1893,25 +2105,156 @@ app.post('/api/auth/login', async (req, res) => {
       }
     }
 
-    // 3. فحص الفرع (Branch Manager)
+    // 3. فحص الفرع في إعدادات المنظومة (Branch Manager in settings.branches)
     if (!authenticated && (role === 'branch' || role === 'auto')) {
       const branches = Array.isArray(settings?.branches) ? settings.branches : [];
-      const b = branches.find(item => item && (String(item.id).toLowerCase() === cleanUser || String(item.branchCode || '').toLowerCase() === cleanUser || String(item.username || '').toLowerCase() === cleanUser));
-      if (b && (cleanPass === String(b.password || '') || cleanPass === String(b.managerPin || '') || (!b.password && cleanPass === '1234'))) {
-        authenticated = true;
-        userRole = 'branch';
-        targetUserObj = { id: b.id, branchCode: b.branchCode, name: b.name, role: 'branch' };
+      const b = branches.find(item => {
+        if (!item) return false;
+        const bId = String(item.id || '').trim().toLowerCase();
+        const bCode = String(item.code || item.branchCode || '').trim().toLowerCase();
+        const bUser = String(item.username || '').trim().toLowerCase();
+        return (
+          bUser === cleanUser ||
+          bCode === cleanUser ||
+          bId === cleanUser ||
+          (stdUser && (toStdDigits(bUser) === stdUser || toStdDigits(bCode) === stdUser || toStdDigits(bId) === stdUser))
+        );
+      });
+
+      if (b) {
+        const bPass = String(b.password || '').trim();
+        const bPin = String(b.managerPin || '').trim();
+        const isPassOk = (
+          cleanPass === bPass ||
+          (stdPass && toStdDigits(bPass) === stdPass) ||
+          cleanPass === bPin ||
+          (stdPass && toStdDigits(bPin) === stdPass) ||
+          (!bPass && !bPin && (cleanPass === '1234' || cleanPass === '123' || stdPass === '1234' || stdPass === '123'))
+        );
+        if (isPassOk) {
+          authenticated = true;
+          userRole = 'branch';
+          targetUserObj = {
+            ...b,
+            role: 'branch',
+            branchCode: b.branchCode || b.code || b.id
+          };
+        }
+      }
+    }
+
+    // 3.1 فحص جدول فروع ومستخدمي النواقص والمشتريات (Outstock Users / Branches Fallback)
+    if (!authenticated && (role === 'branch' || role === 'auto' || String(role).startsWith('outstock'))) {
+      try {
+        // فحص مستخدمي النواقص أولاً (outstock_users)
+        const outUserRes = await db.query(
+          'SELECT * FROM public.outstock_users WHERE (LOWER(username) = $1 OR username = $2) AND is_active = true',
+          [cleanUser, stdUser]
+        );
+        if (outUserRes.rows.length > 0) {
+          const ou = outUserRes.rows[0];
+          const ouPass = String(ou.password || '').trim();
+          if (cleanPass === ouPass || (stdPass && toStdDigits(ouPass) === stdPass)) {
+            authenticated = true;
+            userRole = ou.role === 'branch' ? 'branch' : `outstock_${ou.role}`;
+            
+            let branchData = null;
+            if (ou.branch_id) {
+              const bInSettings = (Array.isArray(settings?.branches) ? settings.branches : []).find(
+                item => item && (String(item.id) === String(ou.branch_id) || String(item.code || item.branchCode) === String(ou.branch_id))
+              );
+              if (bInSettings) {
+                branchData = { ...bInSettings, role: 'branch' };
+              } else {
+                const bDbRes = await db.query('SELECT * FROM public.outstock_branches WHERE id = $1', [ou.branch_id]);
+                if (bDbRes.rows.length > 0) {
+                  const bRow = bDbRes.rows[0];
+                  branchData = {
+                    id: bRow.id,
+                    name: bRow.name,
+                    code: bRow.code || bRow.id,
+                    branchCode: bRow.code || bRow.id,
+                    username: bRow.username,
+                    phone: bRow.phone,
+                    address: bRow.address,
+                    role: 'branch'
+                  };
+                }
+              }
+            }
+
+            targetUserObj = {
+              id: ou.id,
+              username: ou.username,
+              fullName: ou.full_name,
+              name: ou.full_name,
+              role: userRole,
+              branchId: ou.branch_id,
+              ...(branchData ? branchData : {})
+            };
+          }
+        }
+
+        // فحص جدول فروع النواقص مباشرة (outstock_branches)
+        if (!authenticated) {
+          const outBranchRes = await db.query(
+            'SELECT * FROM public.outstock_branches WHERE (LOWER(username) = $1 OR username = $2 OR LOWER(code) = $1 OR id = $1) AND is_active = true',
+            [cleanUser, stdUser]
+          );
+          if (outBranchRes.rows.length > 0) {
+            const ob = outBranchRes.rows[0];
+            const obPass = String(ob.password || '').trim();
+            if (cleanPass === obPass || (stdPass && toStdDigits(obPass) === stdPass) || (!obPass && (cleanPass === '1234' || cleanPass === '123'))) {
+              authenticated = true;
+              userRole = 'branch';
+
+              const bInSettings = (Array.isArray(settings?.branches) ? settings.branches : []).find(
+                item => item && (String(item.id) === String(ob.id) || String(item.code || item.branchCode) === String(ob.code || ob.id))
+              );
+
+              targetUserObj = bInSettings ? { ...bInSettings, role: 'branch' } : {
+                id: ob.id,
+                name: ob.name,
+                code: ob.code || ob.id,
+                branchCode: ob.code || ob.id,
+                username: ob.username,
+                phone: ob.phone,
+                address: ob.address,
+                role: 'branch'
+              };
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[Outstock Auth Fallback Warn]:', e.message);
       }
     }
 
     // 4. فحص الموظف أو الكشك (Employee / Kiosk)
     if (!authenticated && (role === 'employee' || role === 'kiosk' || role === 'auto')) {
       const emps = Array.isArray(settings?.employees) ? settings.employees : [];
-      const e = emps.find(item => item && (String(item.code || '').toLowerCase() === cleanUser || String(item.id || '').toLowerCase() === cleanUser || String(item.username || '').toLowerCase() === cleanUser || String(item.phone || '').trim() === cleanUser));
-      if (e && (cleanPass === String(e.password || '') || (!e.password && cleanPass === '123'))) {
-        authenticated = true;
-        userRole = role === 'kiosk' ? 'kiosk' : 'employee';
-        targetUserObj = { id: e.id, code: e.code, name: e.name, role: userRole };
+      const e = emps.find(item => {
+        if (!item) return false;
+        const eCode = String(item.code || '').trim().toLowerCase();
+        const eId = String(item.id || '').trim().toLowerCase();
+        const eUser = String(item.username || '').trim().toLowerCase();
+        const ePhone = String(item.phone || '').trim();
+        return (
+          eCode === cleanUser ||
+          eId === cleanUser ||
+          eUser === cleanUser ||
+          ePhone === cleanUser ||
+          (stdUser && (toStdDigits(eCode) === stdUser || toStdDigits(eId) === stdUser || toStdDigits(eUser) === stdUser || toStdDigits(ePhone) === stdUser))
+        );
+      });
+      if (e) {
+        const ePass = String(e.password || '').trim();
+        const isPassOk = cleanPass === ePass || (stdPass && toStdDigits(ePass) === stdPass) || (!ePass && (cleanPass === '123' || stdPass === '123'));
+        if (isPassOk) {
+          authenticated = true;
+          userRole = role === 'kiosk' ? 'kiosk' : 'employee';
+          targetUserObj = { ...e, role: userRole };
+        }
       }
     }
 
@@ -3430,6 +3773,43 @@ io.on('connection', (socket) => {
   const clientIp = socket.handshake.address;
   console.log(`🔌 [Socket.io] جهاز متصل جديد: ${socket.id} (IP: ${clientIp})`);
 
+  // 🚀 الانضمام إلى غرف المزامنة الموزعة (Multiplexed Rooms)
+  socket.on('join_room', (data = {}) => {
+    try {
+      const { role, branchId, employeeId, deviceId } = data;
+      if (role === 'admin' || role === 'owner') {
+        socket.join('room:admin:live');
+        console.log(`🔌 [Socket.io] الجهاز ${socket.id} انضم لغرفة الإدارة (room:admin:live)`);
+      }
+      if (branchId) {
+        socket.join(`room:branch:${branchId}`);
+        console.log(`🔌 [Socket.io] الجهاز ${socket.id} انضم لغرفة الفرع (room:branch:${branchId})`);
+      }
+      if (employeeId) {
+        socket.join(`room:employee:${employeeId}`);
+        console.log(`🔌 [Socket.io] الموظف ${socket.id} انضم لغرفته (room:employee:${employeeId})`);
+      }
+      if (deviceId) {
+        socket.join(`room:device:${deviceId}`);
+      }
+      socket.emit('room:joined', { success: true, rooms: Array.from(socket.rooms) });
+    } catch (e) {
+      console.warn('[Socket.io] error on join_room:', e.message);
+    }
+  });
+
+  // مسبار نبض الـ WebSocket الفائق (< 5ms)
+  socket.on('ping:probe', (clientData, callback) => {
+    if (typeof callback === 'function') {
+      callback({
+        serverTime: Date.now(),
+        isoTime: new Date().toISOString(),
+        clientTimestamp: clientData?.clientTimestamp || null,
+        status: 'ok'
+      });
+    }
+  });
+
   // طلب مزامنة فورية عند فتح التطبيق
   socket.on('sync:request', async (key = STORAGE_KEY) => {
     try {
@@ -3492,6 +3872,9 @@ io.on('connection', (socket) => {
 
 // ── 9.5 تسجيل مسارات منصة الـ SaaS متعددة الشركات وبوابة مطور النظام ──────────
 registerSaasRoutes(app, db, io, JWT_SECRET, getSettingsFromStorage, saveSettingsToStorage);
+
+// ── 9.6 تسجيل مسارات نظام النواقص وطلبات أدوية العملاء والمشتريات (OutStock) ────
+registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromStorage);
 
 // ── 10. بدء تشغيل الخادم والإغلاق الآمن ───────────────────────────────────────
 server.listen(PORT, '0.0.0.0', () => {

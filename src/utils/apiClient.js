@@ -310,18 +310,7 @@ export async function apiLogin(usernameOrCreds, password = '', role = 'auto') {
     targetRole = role || 'auto';
   }
 
-  let rolesToTry = [targetRole];
-  if (targetRole === 'auto') {
-    const lower = targetUser.toLowerCase();
-    if (lower === 'admin') {
-      rolesToTry = ['admin', 'owner'];
-    } else if (lower === 'owner') {
-      rolesToTry = ['owner', 'admin'];
-    } else {
-      // بالنسبة لتطبيق بوابة الموظف، الموظفون هم الأغلبية الساحقة
-      rolesToTry = ['employee', 'branch', 'admin', 'owner'];
-    }
-  }
+  let rolesToTry = targetRole === 'auto' ? ['auto'] : [targetRole, 'auto'];
 
   const cleanUrl = `${API_BASE_URL}/auth/login`;
   let lastResponse = null;
