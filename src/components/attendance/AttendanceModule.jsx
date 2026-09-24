@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
 import { recalculateEmployeeCycleLateness, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
+import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, getRealTodayStr } from '../../utils/formatters';
 
 export default function AttendanceModule({
@@ -90,6 +91,24 @@ export default function AttendanceModule({
     const workHours = Math.max(0, Math.round((elapsedHours - bH) * 100) / 100);
 
     const performAdd = () => {
+      const daySched = getEmployeeDaySchedule(manualEmpId, manualDate, state);
+      const profileHours = parseFloat(empObj?.workHoursPerDay || empObj?.workHours) || 8;
+      let scheduledShiftHours = profileHours;
+      if (daySched && daySched.start && daySched.end && daySched.type !== 'off') {
+        const [sH, sM] = daySched.start.split(':').map(Number);
+        const [eH, eM] = daySched.end.split(':').map(Number);
+        let sMins = sH * 60 + (sM || 0);
+        let eMins = eH * 60 + (eM || 0);
+        if (eMins <= sMins) eMins += 24 * 60;
+        scheduledShiftHours = Math.round(((eMins - sMins) / 60) * 100) / 100;
+      } else if (daySched && daySched.hours && daySched.type !== 'off') {
+        scheduledShiftHours = parseFloat(daySched.hours) || profileHours;
+      }
+
+      const regularHours = Math.min(workHours, scheduledShiftHours);
+      const overtimeHours = Math.max(0, Math.round((workHours - scheduledShiftHours) * 100) / 100);
+      const otStatus = overtimeHours > 0 ? 'approved' : 'none';
+
       const newPunch = {
         id: `punch_manual_${Date.now()}`,
         employeeId: manualEmpId,
@@ -100,16 +119,25 @@ export default function AttendanceModule({
         timeIn: manualInTime,
         timeOut: manualOutTime,
         breakHours: bH,
-        hours: workHours,
+        hours: regularHours,
+        workHours: regularHours,
+        regularHours: regularHours,
+        scheduledHours: scheduledShiftHours,
         actualWorkedHours: workHours,
+        netHours: workHours,
+        overtimeHours: overtimeHours,
+        overtimeStatus: otStatus,
         isManual: true,
         manualPunch: true,
         createdBy: 'admin',
         creatorRole: 'admin',
         isAdminCreated: true,
+        adminApproved: true,
         acknowledgedByAdmin: true,
-        note: manualNotes.trim() || (bH > 0 ? `تسجيل بصمة يدوية من الأدمن (بريك: ${bH} س)` : 'تسجيل بصمة يدوية من الأدمن'),
-        statusLabel: 'تسجيل يدوي',
+        note: (manualNotes.trim() ? manualNotes.trim() + ' | ' : '') + 
+              (bH > 0 ? `تسجيل بصمة يدوية من الأدمن (بريك: ${bH} س)` : 'تسجيل بصمة يدوية من الأدمن') +
+              (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ''),
+        statusLabel: overtimeHours > 0 ? 'تسجيل يدوي (مع إضافي معتمد)' : 'تسجيل يدوي',
         excludeDailyAllowance: !includeDailyAllowance,
         createdAt: new Date().toISOString()
       };
@@ -171,6 +199,8 @@ export default function AttendanceModule({
         showToast?.(`✅ تم تسجيل البصمة وتطبيق لائحة الجزاءات تلقائياً: تأخير (${lateInc.lateMinutes} دقيقة) - ${lateInc.tierName} (${lateInc.actionLabel} - خصم ${lateInc.penaltyAmount} ج.م)`);
       } else if (lateInc && lateInc.lateMinutes > 0) {
         showToast?.(`✅ تم تسجيل البصمة وتطبيق اللائحة: تأخير (${lateInc.lateMinutes} دقيقة) - ${lateInc.actionLabel || 'فترة سماح'}`);
+      } else if (overtimeHours > 0) {
+        showToast?.(`✅ تم تسجيل البصمة اليدوية واحتساب الوقت الإضافي تلقائياً: ${regularHours} س أساسي + ${overtimeHours} س إضافي معتمد`);
       } else {
         showToast?.('✅ تم إضافة البصمة اليدوية للموظف فوراً وحساب الساعات بنجاح (حضور في الموعد)');
       }

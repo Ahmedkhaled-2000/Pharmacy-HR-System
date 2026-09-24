@@ -443,7 +443,10 @@ export function useAttendanceEngine() {
 
     const punchDate = getRealTodayStr();
     const punchTime = nowTimeStr().slice(0, 5);
-    const effectiveBranchId = branchId || emp?.branchId || (emp?.branchesDetails && emp.branchesDetails[0]?.branchId) || '';
+    const rawBranchId = branchId || emp?.branchId || (emp?.branchesDetails && emp.branchesDetails[0]?.branchId) || '';
+    const bObj = (state.branches || []).find((b) => isBranchMatch(rawBranchId, b));
+    const effectiveBranchId = bObj ? bObj.id : rawBranchId;
+    const branchName = bObj ? bObj.name : '';
 
     // دالة قياسية دقيقة للتحقق مما إذا كانت الوردية مفتوحة حقاً وبدون انصراف
     const isShiftOpenForPunch = (s) => {
@@ -535,12 +538,11 @@ export function useAttendanceEngine() {
     }
 
     const newShiftId = 'shift_' + empId + '_' + Date.now();
-    const bObj = (state.branches || []).find((b) => String(b.id) === String(effectiveBranchId));
 
     const shiftData = {
       shiftId: newShiftId,
       branchId: effectiveBranchId,
-      branchName: bObj?.name || '',
+      branchName: branchName,
       date: punchDate,
       timeIn: punchTime,
       startEpoch: Date.now(),
@@ -558,7 +560,7 @@ export function useAttendanceEngine() {
       employeeCode: emp.code || '',
       employeeName: emp.name || '',
       branchId: effectiveBranchId,
-      branchName: bObj?.name || '',
+      branchName: branchName,
       date: punchDate,
       timeIn: punchTime,
       timeOut: '',
@@ -655,10 +657,10 @@ export function useAttendanceEngine() {
       }).catch(err => {
         console.warn('[startShift] Atomic punch call warning:', err.message);
       });
+    }
 
-      if (saveState) {
-        saveState(updatedState).catch(err => console.error('[startShift] Background save error:', err));
-      }
+    if (saveState) {
+      saveState(updatedState).catch(err => console.error('[startShift] Background save error:', err));
     }
 
     return { success: true, punchTime, punchDate, branchName: bObj?.name || '' };
@@ -892,8 +894,9 @@ export function useAttendanceEngine() {
     const breakHours = effectiveBreak;
     const netHours = Math.max(0, Math.round((totalElapsedHours - effectiveBreak) * 100) / 100);
 
-    const bId = active.branchId || emp?.branchId || (emp?.branchesDetails && emp.branchesDetails[0]?.branchId) || '';
-    const bObj = (state.branches || []).find((b) => String(b.id) === String(bId));
+    const rawBId = active.branchId || emp?.branchId || (emp?.branchesDetails && emp.branchesDetails[0]?.branchId) || '';
+    const bObj = (state.branches || []).find((b) => isBranchMatch(rawBId, b));
+    const bId = bObj ? bObj.id : rawBId;
 
     const daySchedule = getEmployeeDaySchedule(empId, active.date, state, bId);
     const profileHours = parseFloat(emp?.workHoursPerDay || emp?.workHours || (emp?.branchesDetails && emp.branchesDetails[0]?.workHoursPerDay)) || 8;
@@ -987,7 +990,7 @@ export function useAttendanceEngine() {
     let existingShifts = [...(state.shifts || [])];
     const openShiftIdx = existingShifts.findIndex(
       (s) => (active.shiftId && s.id === active.shiftId) ||
-             (isEmpShiftMatch(s) && (s.date === active.date || isShiftOpen(s)))
+             (isEmpShiftMatch(s) && isShiftOpen(s))
     );
     const shiftId = openShiftIdx >= 0 ? existingShifts[openShiftIdx].id : (active.shiftId || uid());
 

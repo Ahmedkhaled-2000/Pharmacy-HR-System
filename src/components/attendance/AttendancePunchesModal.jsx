@@ -3,6 +3,7 @@ import { isApprovedPermissionForDate, getEffectiveShiftHours, recalculateEmploye
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { getEmployeeManualPunchesCount, isShiftManualPunch, arabicWeekday } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
+import { isBranchMatch } from '../../utils/branchMatcher';
 
 export default function AttendancePunchesModal({
   employee,
@@ -23,6 +24,7 @@ export default function AttendancePunchesModal({
   const [isStoppingShift, setIsStoppingShift] = useState(false);
 
   const [editingPunch, setEditingPunch] = useState(null);
+  const [isAddingNewPunch, setIsAddingNewPunch] = useState(false);
   const [editDate, setEditDate] = useState('');
   const [editTimeIn, setEditTimeIn] = useState('');
   const [editTimeOut, setEditTimeOut] = useState('');
@@ -118,17 +120,101 @@ export default function AttendancePunchesModal({
   const alreadyHasLivePunch = enrichedMonthPunches.some(p => p.isLiveActive || (activeShift && p.date === activeShift.date && p.timeIn === activeShift.timeIn));
   const monthPunches = (livePunch && !alreadyHasLivePunch) ? [livePunch, ...enrichedMonthPunches] : enrichedMonthPunches;
 
+  // البحث عن أي وردية غير منتهية في قائمة ورديات هذا الشهر
+  const unclosedShift = enrichedMonthPunches.find(p => p.isLiveActive || (!p.timeOut || p.timeOut === '' || p.timeOut === '—' || p.timeOut === 'قيد العمل الآن'));
+  const showLiveBanner = Boolean(livePunch || unclosedShift);
+
   // Group or process punches into rows
   const shiftsCount = monthPunches.length;
 
-  const handleStopLiveShift = async () => {
+  // إنهاء الوردية الحية من البنر الرئيسي أو صف محدد في الجدول
+  const handleStopShiftForRow = async (targetPunch) => {
     if (isStoppingShift) return;
     setIsStoppingShift(true);
     try {
-      if (typeof stopShift === 'function') {
-        await stopShift(employee.id);
-        showToast?.('⏹ تم إنهاء وردية الموظف بنجاح وتسجيل وقت الانصراف');
+      const p = targetPunch || unclosedShift || livePunch;
+      const todayStr = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
+      const isPastDate = p && p.date && p.date < todayStr;
+
+      // 1. إذا كانت الوردية لليوم الحالي ونشطة في activeShifts، نستدعي stopShift الأساسي
+      if (!isPastDate && typeof stopShift === 'function' && state.activeShifts && (state.activeShifts[employee.id] || (employee.code && state.activeShifts[String(employee.code)]))) {
+        const res = await stopShift(employee.id);
+        if (res && res.success) {
+          showToast?.('⏹ تم إنهاء وردية الموظف بنجاح وتسجيل وقت الانصراف');
+          setIsStoppingShift(false);
+          return;
+        }
       }
+
+      // 2. معالجة وإنهاء الوردية المفتوحة مباشرة وتحديث shifts
+      const nowStr = new Date().toTimeString().slice(0, 5);
+      let calculatedTimeOut = nowStr;
+      if (isPastDate && p) {
+        const schedH = p.scheduledHours || employee.workHoursPerDay || 8;
+        const [inH, inM] = String(p.timeIn || '09:00').split(':').map(Number);
+        if (!isNaN(inH)) {
+          let outTotalMins = (inH * 60 + (inM || 0) + schedH * 60) % (24 * 60);
+          const outH = Math.floor(outTotalMins / 60);
+          const outM = outTotalMins % 60;
+          calculatedTimeOut = `${String(outH).padStart(2, '0')}:${String(outM).padStart(2, '0')}`;
+        } else {
+          calculatedTimeOut = '17:00';
+        }
+      }
+
+      const inTime = p?.timeIn || '09:00';
+      const [iH, iM] = String(inTime).split(':').map(Number);
+      const [oH, oM] = String(calculatedTimeOut).split(':').map(Number);
+      let durMins = (oH * 60 + (oM || 0)) - (iH * 60 + (iM || 0));
+      if (durMins <= 0) durMins += 24 * 60;
+      const bHours = parseFloat(p?.breakHours) || 0;
+      const calcHours = Math.max(0, Math.round(((durMins / 60) - bHours) * 100) / 100);
+      const profileHours = parseFloat(employee.workHoursPerDay || employee.workHours || 8);
+      const regHours = Math.min(calcHours, profileHours);
+
+      const targetShiftId = p?.id;
+      const updatedShifts = (state.shifts || []).map(s => {
+        const isMatch = s.id === targetShiftId || (
+          p && (String(s.employeeId) === String(p.employeeId) || (employee.code && String(s.employeeCode) === String(employee.code))) &&
+          s.date === p.date &&
+          (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive)
+        );
+        if (isMatch) {
+          return {
+            ...s,
+            timeOut: calculatedTimeOut,
+            hours: regHours,
+            netHours: calcHours,
+            actualWorkedHours: calcHours,
+            regularHours: regHours,
+            isLiveActive: false,
+            status: 'completed',
+            statusLabel: 'حضور مكتمل (إنهاء الإدارة)',
+            note: 'تم إنهاء الوردية واعتماد ساعات العمل من قِبل الإدارة',
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return s;
+      });
+
+      // تنظيف شامل للموظف من activeShifts
+      const updatedActive = { ...(state.activeShifts || {}) };
+      delete updatedActive[employee.id];
+      delete updatedActive[String(employee.id)];
+      if (employee.code) delete updatedActive[String(employee.code)];
+
+      const nextState = {
+        ...state,
+        shifts: updatedShifts,
+        activeShifts: updatedActive
+      };
+
+      if (typeof saveState === 'function') {
+        await saveState(nextState);
+      } else if (typeof setState === 'function') {
+        setState(nextState);
+      }
+      showToast?.('⏹ تم إنهاء وردية الموظف بنجاح وتسجيل وقت الانصراف');
     } catch (err) {
       console.error('Error ending shift from modal:', err);
       showToast?.('❌ حدث خطأ أثناء إنهاء الوردية');
@@ -136,20 +222,32 @@ export default function AttendancePunchesModal({
       setIsStoppingShift(false);
     }
   };
+
+  const handleStopLiveShift = () => handleStopShiftForRow(unclosedShift || livePunch);
   const manualCount = getEmployeeManualPunchesCount(employee.id, state, activePeriodFilter);
 
   const totalBreakHours = monthPunches
     .reduce((acc, p) => acc + (parseFloat(p.breakHours) || 0), 0)
     .toFixed(2);
 
-  const totalWorkHours = monthPunches
-    .reduce((acc, p) => acc + getEffectiveShiftHours(p, state), 0)
-    .toFixed(2);
+  const getApprovedOtHours = (p) => {
+    if (!p) return 0;
+    const isApproved = p.overtimeStatus === 'approved' || (parseFloat(p.overtimeHours) > 0 && (p.adminApproved || p.isAdminCreated));
+    return isApproved ? (parseFloat(p.overtimeHours) || 0) : 0;
+  };
+
+  const totalRegularHours = monthPunches
+    .reduce((acc, p) => acc + getEffectiveShiftHours(p, state), 0);
+
+  const totalApprovedOtHours = monthPunches
+    .reduce((acc, p) => acc + getApprovedOtHours(p), 0);
+
+  const totalWorkHours = (totalRegularHours + totalApprovedOtHours).toFixed(2);
 
   const branches = state?.branches || [];
   const getBranchName = (bId) => {
     if (!bId) return '';
-    const b = branches.find(br => String(br.id) === String(bId) || String(br.code) === String(bId));
+    const b = branches.find(br => isBranchMatch(bId, br));
     return b ? b.name : `فرع ${bId}`;
   };
 
@@ -161,7 +259,7 @@ export default function AttendancePunchesModal({
   // Helper to calculate hourly rate for employee per branch
   const getBranchRate = (branchId) => {
     const bd =
-      (employee.branchesDetails || []).find((b) => b.branchId === branchId) ||
+      (employee.branchesDetails || []).find((b) => isBranchMatch(branchId, { id: b.branchId, branchId: b.branchId, name: b.branchName })) ||
       (employee.branchesDetails && employee.branchesDetails[0]) || {
         salary: employee.salary || 0,
         workHoursPerDay: employee.workHoursPerDay || 8,
@@ -178,19 +276,39 @@ export default function AttendancePunchesModal({
 
   const totalEarned = monthPunches
     .reduce((acc, p) => {
+      const isRej = p.isRejectedPhoto || p.status === 'rejected_photo' || (typeof p.statusLabel === 'string' && p.statusLabel.includes('رفض الصورة'));
+      if (isRej) return acc;
       const netH = getEffectiveShiftHours(p, state);
+      const otH = getApprovedOtHours(p);
       const rate = getBranchRate(p.branchId || employee.branchId);
-      return acc + (netH * rate);
+      return acc + ((netH + otH) * rate);
     }, 0)
     .toFixed(2);
 
+  const handleOpenAddPunch = () => {
+    setIsAddingNewPunch(true);
+    setEditingPunch({ id: `new_${Date.now()}` });
+    setEditDate(new Date().toISOString().slice(0, 10));
+    setEditTimeIn('09:00');
+    setEditTimeOut('17:00');
+    setEditBreakHours('0');
+    setEditBranchId(employee.branchId || (employee.branchesDetails && employee.branchesDetails[0]?.branchId) || '');
+    setEditNotes('');
+  };
+
   const handleOpenEdit = (punch) => {
+    setIsAddingNewPunch(false);
     setEditingPunch(punch);
     setEditDate(punch.date || new Date().toISOString().slice(0, 10));
-    setEditTimeIn(punch.timeIn || punch.checkIn || punch.inTime || '09:00');
-    setEditTimeOut(punch.timeOut || punch.checkOut || punch.outTime || '17:00');
+    setEditTimeIn(punch.timeIn && punch.timeIn !== '—' ? punch.timeIn.slice(0, 5) : '09:00');
+    const safeTimeOut = (punch.timeOut && punch.timeOut !== '—' && punch.timeOut !== 'قيد العمل الآن' && punch.timeOut !== 'قيد العمل') ? punch.timeOut.slice(0, 5) : '';
+    setEditTimeOut(safeTimeOut);
     setEditBreakHours(String(punch.breakHours || 0));
-    setEditBranchId(punch.branchId || employee.branchId || '');
+    
+    // مطابقة فرع البصمة مع قائمة فروع الموظف بدقة
+    const currentBId = punch.branchId || employee.branchId || '';
+    const matchingDetail = (employee.branchesDetails || []).find(bd => isBranchMatch(currentBId, { id: bd.branchId, branchId: bd.branchId, name: bd.branchName }));
+    setEditBranchId(matchingDetail ? matchingDetail.branchId : currentBId);
     setEditNotes(punch.note || punch.notes || '');
   };
 
@@ -216,41 +334,100 @@ export default function AttendancePunchesModal({
         let eMins = eH * 60 + (eM || 0);
         if (eMins <= sMins) eMins += 24 * 60;
         scheduledShiftHours = Math.round(((eMins - sMins) / 60) * 100) / 100;
+      } else if (daySched && daySched.hours && daySched.type !== 'off') {
+        scheduledShiftHours = parseFloat(daySched.hours) || profileHours;
       }
       const regularHours = Math.min(calculatedHours, scheduledShiftHours);
       const overtimeHours = Math.max(0, Math.round((calculatedHours - scheduledShiftHours) * 100) / 100);
+      const otStatus = overtimeHours > 0 ? 'approved' : 'none';
 
-      const updatedShifts = (state.shifts || []).map((s) => {
-        if (String(s.id) === String(editingPunch.id)) {
-          return {
-            ...s,
-            date: editDate,
-            timeIn: editTimeIn,
-            timeOut: editTimeOut,
-            breakHours: bH,
-            hours: regularHours,
-            workHours: regularHours,
-            regularHours: regularHours,
-            scheduledHours: scheduledShiftHours,
-            actualWorkedHours: calculatedHours,
-            netHours: calculatedHours,
-            overtimeHours: overtimeHours,
-            overtimeStatus: overtimeHours > 0 ? (s.overtimeStatus === 'approved' ? 'approved' : 'pending') : 'none',
-            branchId: editBranchId || s.branchId || employee.branchId || '',
-            note: editNotes.trim() || s.note || 'تم تعديل البصمة بواسطة الإدارة العليا',
-            notes: editNotes.trim() || s.notes || 'تم تعديل البصمة بواسطة الإدارة العليا',
-            statusLabel: 'معدلة من الإدارة',
-            isManual: true,
-            manualPunch: true,
-            editedByAdmin: true,
-            editedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return s;
-      });
+      const editedBObj = (state.branches || []).find(b => isBranchMatch(editBranchId, b));
+      const canonicalBranchId = editedBObj ? editedBObj.id : (editBranchId || employee.branchId || '');
+      const canonicalBranchName = editedBObj ? editedBObj.name : getBranchName(canonicalBranchId);
 
-      let updatedState = { ...state, shifts: updatedShifts };
+      let updatedShifts;
+      if (isAddingNewPunch) {
+        const newShift = {
+          id: `punch_manual_${Date.now()}`,
+          employeeId: employee.id,
+          employeeCode: employee.code || '',
+          employeeName: employee.name || '',
+          branchId: canonicalBranchId,
+          branchName: canonicalBranchName,
+          date: editDate,
+          timeIn: editTimeIn,
+          timeOut: editTimeOut,
+          breakHours: bH,
+          hours: regularHours,
+          workHours: regularHours,
+          regularHours: regularHours,
+          scheduledHours: scheduledShiftHours,
+          actualWorkedHours: calculatedHours,
+          netHours: calculatedHours,
+          overtimeHours: overtimeHours,
+          overtimeStatus: otStatus,
+          isManual: true,
+          manualPunch: true,
+          createdBy: 'admin',
+          creatorRole: 'admin',
+          isAdminCreated: true,
+          adminApproved: true,
+          statusLabel: overtimeHours > 0 ? 'تسجيل يدوي (مع إضافي معتمد)' : 'تسجيل يدوي من الإدارة',
+          note: (editNotes.trim() ? editNotes.trim() + ' | ' : '') + 'تسجيل بصمة يدوية بواسطة الإدارة العليا' + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ''),
+          createdAt: new Date().toISOString()
+        };
+        updatedShifts = [newShift, ...(state.shifts || [])];
+      } else {
+        updatedShifts = (state.shifts || []).map((s) => {
+          if (String(s.id) === String(editingPunch.id)) {
+            return {
+              ...s,
+              date: editDate,
+              timeIn: editTimeIn,
+              timeOut: editTimeOut,
+              breakHours: bH,
+              hours: regularHours,
+              workHours: regularHours,
+              regularHours: regularHours,
+              scheduledHours: scheduledShiftHours,
+              actualWorkedHours: calculatedHours,
+              netHours: calculatedHours,
+              overtimeHours: overtimeHours,
+              overtimeStatus: otStatus,
+              adminApproved: true,
+              branchId: canonicalBranchId,
+              branchName: canonicalBranchName,
+              note: (editNotes.trim() ? editNotes.trim() + ' | ' : '') + (s.note || 'تم تعديل البصمة بواسطة الإدارة العليا') + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ''),
+              notes: (editNotes.trim() ? editNotes.trim() + ' | ' : '') + (s.notes || 'تم تعديل البصمة بواسطة الإدارة العليا') + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ''),
+              statusLabel: overtimeHours > 0 ? 'معدلة من الإدارة (مع إضافي معتمد)' : 'معدلة من الإدارة',
+              isManual: true,
+              manualPunch: true,
+              editedByAdmin: true,
+              editedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return s;
+        });
+      }
+
+      // إذا كانت البصمة المعدلة هي الوردية الحية النشطة، نقوم بتحديث فرعها وتوقيتها في activeShifts أيضاً
+      let updatedActiveShifts = { ...(state.activeShifts || {}) };
+      const curActive = updatedActiveShifts[employee.id] || updatedActiveShifts[String(employee.id)] || (employee.code && updatedActiveShifts[employee.code]);
+      if (curActive && (editingPunch.isLiveActive || String(curActive.shiftId) === String(editingPunch.id) || curActive.date === editingPunch.date)) {
+        const updatedActiveItem = {
+          ...curActive,
+          branchId: canonicalBranchId,
+          branchName: canonicalBranchName,
+          timeIn: editTimeIn || curActive.timeIn,
+          date: editDate || curActive.date
+        };
+        updatedActiveShifts[employee.id] = updatedActiveItem;
+        updatedActiveShifts[String(employee.id)] = updatedActiveItem;
+        if (employee.code) updatedActiveShifts[String(employee.code)] = updatedActiveItem;
+      }
+
+      let updatedState = { ...state, shifts: updatedShifts, activeShifts: updatedActiveShifts };
 
       // Auto recalculate late incidents
       const recRes = recalculateEmployeeCycleLateness({
@@ -267,12 +444,22 @@ export default function AttendancePunchesModal({
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
 
+      const wasAdding = isAddingNewPunch;
       setEditingPunch(null);
+      setIsAddingNewPunch(false);
+
+      if (wasAdding) {
+        showToast?.(`✅ تم تسجيل البصمة اليدوية بنجاح: ${regularHours} س أساسي${overtimeHours > 0 ? ` + ${overtimeHours} س إضافي معتمد تلقائياً` : ''}`);
+        return;
+      }
+
       const lateInc = (recRes.incidents || []).find((inc) => (String(inc.shiftId) === String(editingPunch.id) || inc.date === editDate) && inc.lateMinutes > 0);
       if (lateInc && lateInc.deductionMinutes > 0) {
         showToast?.(`✅ تم حفظ التعديل وتطبيق لائحة الجزاءات تلقائياً: تأخير (${lateInc.lateMinutes} دقيقة) - ${lateInc.tierName} (${lateInc.actionLabel} - خصم ${lateInc.penaltyAmount} ج.م)`);
       } else if (lateInc && lateInc.lateMinutes > 0) {
         showToast?.(`✅ تم حفظ التعديل: تأخير (${lateInc.lateMinutes} دقيقة) - ${lateInc.actionLabel || 'فترة سماح'}`);
+      } else if (overtimeHours > 0) {
+        showToast?.(`✅ تم حفظ تعديل البصمة واحتساب الإضافي تلقائياً: ${regularHours} س أساسي + ${overtimeHours} س إضافي معتمد`);
       } else {
         showToast?.('✅ تم حفظ وتعديل بيانات البصمة وإعادة احتساب الجزاءات بنجاح!');
       }
@@ -435,9 +622,26 @@ export default function AttendancePunchesModal({
       const totalElapsed = diffMinutes / 60;
       const bH = Math.max(0, parseFloat(punch.breakHours) || 0);
       const netHours = Math.max(0, Math.round((totalElapsed - bH) * 100) / 100);
-      const schedHours = parseFloat(punch.scheduledHours || employee.workHoursPerDay) || 8;
+
+      const daySched = getEmployeeDaySchedule(employee.id, punchDate, state);
+      const profileHours = parseFloat(employee.workHoursPerDay || employee.workHours) || 8;
+      let schedHours = profileHours;
+      if (daySched && daySched.start && daySched.end && daySched.type !== 'off') {
+        const [sH, sM] = daySched.start.split(':').map(Number);
+        const [eH, eM] = daySched.end.split(':').map(Number);
+        let sMins = sH * 60 + (sM || 0);
+        let eMins = eH * 60 + (eM || 0);
+        if (eMins <= sMins) eMins += 24 * 60;
+        schedHours = Math.round(((eMins - sMins) / 60) * 100) / 100;
+      } else if (daySched && daySched.hours && daySched.type !== 'off') {
+        schedHours = parseFloat(daySched.hours) || profileHours;
+      } else if (punch.scheduledHours) {
+        schedHours = parseFloat(punch.scheduledHours);
+      }
+
       const regularHours = Math.min(netHours, schedHours);
       const overtimeHours = Math.max(0, Math.round((netHours - schedHours) * 100) / 100);
+      const otStatus = overtimeHours > 0 ? 'approved' : 'none';
 
       const updatedShifts = (state.shifts || []).map((s) => {
         const isMatch = (punchIdStr && String(s.id) === punchIdStr) ||
@@ -454,19 +658,20 @@ export default function AttendancePunchesModal({
             rejected: false,
             timeIn: inTime,
             timeOut: outTime,
-            hours: netHours,
+            hours: regularHours,
+            workHours: regularHours,
+            regularHours: regularHours,
+            scheduledHours: schedHours,
             actualWorkedHours: netHours,
             netHours: netHours,
-            workHours: netHours,
-            regularHours: regularHours,
             overtimeHours: overtimeHours,
-            overtimeStatus: overtimeHours > 0 ? 'approved' : 'none',
-            statusLabel: 'حضور معتمد (تم احتساب البصمة يدوياً بواسطة الإدارة)',
+            overtimeStatus: otStatus,
+            statusLabel: overtimeHours > 0 ? 'حضور معتمد (مع إضافي معتمد)' : 'حضور معتمد (تم احتساب البصمة يدوياً بواسطة الإدارة)',
             adminApproved: true,
             approvedBy: 'الإدارة العليا',
             approvedAt: new Date().toISOString(),
-            note: (s.note ? s.note + ' | ' : '') + '✅ تم احتساب البصمة واعتماد الوردية في نظام الأجور بواسطة الإدارة العليا',
-            notes: (s.notes ? s.notes + ' | ' : '') + '✅ تم احتساب البصمة واعتماد الوردية في نظام الأجور بواسطة الإدارة العليا',
+            note: (s.note ? s.note + ' | ' : '') + '✅ تم احتساب البصمة واعتماد الوردية بواسطة الإدارة العليا' + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ''),
+            notes: (s.notes ? s.notes + ' | ' : '') + '✅ تم احتساب البصمة واعتماد الوردية بواسطة الإدارة العليا' + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ''),
             updatedAt: new Date().toISOString()
           };
         }
@@ -549,44 +754,69 @@ export default function AttendancePunchesModal({
               {isMultiBranch ? `الفروع: ${employeeBranchName}` : `الفرع: ${employeeBranchName}`} | المسمى الوظيفي: {employee.jobTitle} {periodLabel ? ` • (${periodLabel})` : ''}
             </span>
           </div>
-          <button className="btn btn-ghost" onClick={onClose}>✕ إغلاق Window</button>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              className="btn btn-start"
+              onClick={handleOpenAddPunch}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '12.5px',
+                padding: '6px 14px',
+                background: '#0d9488',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: 800,
+                cursor: 'pointer'
+              }}
+            >
+              ➕ تسجيل بصمة يدوية للموظف
+            </button>
+            <button className="btn btn-ghost" onClick={onClose}>✕ إغلاق Window</button>
+          </div>
         </div>
 
-        {livePunch && (
-          <div style={{ background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: '12px', padding: '14px 18px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+        {showLiveBanner && (
+          <div style={{ background: '#ecfdf5', border: '1.5px solid #10b981', borderRadius: '12px', padding: '14px 18px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', boxShadow: '0 4px 12px rgba(16, 185, 129, 0.08)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <span style={{ fontSize: '26px' }}>🟢</span>
               <div>
-                <strong style={{ color: '#065f46', fontSize: '15px' }}>الموظف على رأس العمل حالياً (حضور حي نشط)</strong>
+                <strong style={{ color: '#065f46', fontSize: '15px' }}>
+                  {livePunch ? 'الموظف على رأس العمل حالياً (حضور حي نشط)' : 'توجد وردية مفتوحة للموظف بانتظار إنهاء الانصراف'}
+                </strong>
                 <div style={{ fontSize: '13px', color: '#047857', marginTop: '3px' }}>
-                  تاريخ اليوم: {livePunch.date} | وقت تسجيل الحضور: <strong>{livePunch.timeIn}</strong> | المنقضي حتى الآن: <strong>{activeElapsedHours} ساعة</strong>
+                  تاريخ الوردية: <strong>{(livePunch || unclosedShift)?.date}</strong> | وقت الدخول: <strong>{(livePunch || unclosedShift)?.timeIn}</strong>
+                  {livePunch ? ` | المنقضي حتى الآن: ${activeElapsedHours} ساعة` : ' | الحالة: غير منتهية (قيد العمل)'}
                 </div>
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <span style={{ background: '#10b981', color: '#fff', padding: '5px 14px', borderRadius: '20px', fontWeight: '800', fontSize: '12px' }}>
-                {activeShift?.source === 'kiosk' ? 'بصمة كشك الفرع' : 'تسجيل حي'}
+                {(livePunch || unclosedShift)?.source === 'kiosk' ? 'بصمة كشك الفرع' : 'تسجيل حي'}
               </span>
-              {stopShift && (
-                <button
-                  className="btn btn-stop"
-                  style={{
-                    padding: '6px 14px',
-                    fontSize: '12px',
-                    fontWeight: 'bold',
-                    background: '#dc2626',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: isStoppingShift ? 'not-allowed' : 'pointer',
-                    opacity: isStoppingShift ? 0.6 : 1
-                  }}
-                  disabled={isStoppingShift}
-                  onClick={handleStopLiveShift}
-                >
-                  {isStoppingShift ? 'جاري الإنهاء...' : '⏹ إنهاء الوردية الآن'}
-                </button>
-              )}
+              <button
+                className="btn btn-stop"
+                style={{
+                  padding: '7px 16px',
+                  fontSize: '12.5px',
+                  fontWeight: 'bold',
+                  background: '#dc2626',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: isStoppingShift ? 'not-allowed' : 'pointer',
+                  opacity: isStoppingShift ? 0.6 : 1,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+                disabled={isStoppingShift}
+                onClick={handleStopLiveShift}
+              >
+                {isStoppingShift ? 'جاري الإنهاء...' : '⏹ إنهاء الوردية الآن'}
+              </button>
             </div>
           </div>
         )}
@@ -595,15 +825,27 @@ export default function AttendancePunchesModal({
           <div>
             {employee.branchesDetails.map((bd) => {
               const bId = bd.branchId;
-              const bObj = (state.branches || []).find((b) => b.id === bId);
-              const bName = bObj ? bObj.name : `فرع ${bId}`;
-              const bPunches = monthPunches.filter((p) => p.branchId === bId || (!p.branchId && employee.branchesDetails[0].branchId === bId));
+              const bObj = (state.branches || []).find((b) => isBranchMatch(bId, b));
+              const bName = bObj ? bObj.name : (bd.branchName || `فرع ${bId}`);
+              const targetB = bObj || { id: bId, branchId: bId, name: bd.branchName };
+              const bPunches = monthPunches.filter((p) => {
+                const isMatch = isBranchMatch(p.branchId, targetB) || (p.branchName && bObj?.name && p.branchName.trim() === bObj.name.trim());
+                if (isMatch) return true;
+                if (!p.branchId && !p.branchName) {
+                  return isBranchMatch(employee.branchesDetails[0]?.branchId, targetB);
+                }
+                return false;
+              });
 
               const bShiftsCount = bPunches.length;
               const bTotalBreak = bPunches.reduce((acc, p) => acc + (parseFloat(p.breakHours) || 0), 0).toFixed(2);
-              const bTotalWork = bPunches.reduce((acc, p) => acc + (getEffectiveShiftHours(p, state) || 0), 0).toFixed(2);
+              const bTotalWork = bPunches.reduce((acc, p) => acc + (getEffectiveShiftHours(p, state) || 0) + getApprovedOtHours(p), 0).toFixed(2);
               const bRate = getBranchRate(bId);
-              const bTotalEarned = bPunches.reduce((acc, p) => acc + (getEffectiveShiftHours(p, state) || 0) * bRate, 0).toFixed(2);
+              const bTotalEarned = bPunches.reduce((acc, p) => {
+                const isRej = p.isRejectedPhoto || p.status === 'rejected_photo' || (typeof p.statusLabel === 'string' && p.statusLabel.includes('رفض الصورة'));
+                if (isRej) return acc;
+                return acc + ((getEffectiveShiftHours(p, state) || 0) + getApprovedOtHours(p)) * bRate;
+              }, 0).toFixed(2);
 
               return (
                 <div key={bId} style={{ marginBottom: '24px', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
@@ -648,9 +890,11 @@ export default function AttendancePunchesModal({
                             const dayName = pDate.toLocaleDateString('ar-EG', { weekday: 'long' });
                             const dateStr = p.date || pDate.toISOString().slice(0, 10);
                             const isRejectedPhoto = p.isRejectedPhoto || p.status === 'rejected_photo' || (typeof p.statusLabel === 'string' && p.statusLabel.includes('رفض الصورة'));
-                            const netH = getEffectiveShiftHours(p, state).toFixed(2);
+                            const regH = getEffectiveShiftHours(p, state);
+                            const otH = getApprovedOtHours(p);
+                            const totalH = (regH + otH).toFixed(2);
                             const breakH = p.breakHours ? parseFloat(p.breakHours).toFixed(2) : null;
-                            const shiftEarned = isRejectedPhoto ? '0.00' : (parseFloat(netH) * bRate).toFixed(2);
+                            const shiftEarned = isRejectedPhoto ? '0.00' : ((regH + otH) * bRate).toFixed(2);
 
                             const perm = isApprovedPermissionForDate(employee?.id, dateStr, state);
                             const hasPerm = p.hasApprovedPermission || !!perm;
@@ -710,10 +954,36 @@ export default function AttendancePunchesModal({
                                     </div>
                                   ) : (
                                     <>
-                                      {netH} ساعة
+                                      {totalH} ساعة
+                                      {otH > 0 && (
+                                        <div style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: 700, marginTop: '2px' }}>
+                                          (أساسي: {regH.toFixed(2)} س + إضافي: {otH.toFixed(2)} س)
+                                        </div>
+                                      )}
                                       {hasPerm && permHours > 0 && (
                                         <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
-                                          (فعلي: {(Math.max(0, parseFloat(netH) - permHours)).toFixed(2)} س + إذن: {permHours} س)
+                                          (فعلي: {(Math.max(0, regH - permHours)).toFixed(2)} س + إذن: {permHours} س)
+                                        </div>
+                                      )}
+                                      {p.overtimeStatus === 'approved' && parseFloat(p.overtimeHours) > 0 && (
+                                        <div style={{ marginTop: '3px' }}>
+                                          <span style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
+                                            ✅ إضافي معتمد (+{parseFloat(p.overtimeHours).toFixed(2)} س)
+                                          </span>
+                                        </div>
+                                      )}
+                                      {p.overtimeStatus === 'rejected' && (
+                                        <div style={{ marginTop: '3px' }}>
+                                          <span style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
+                                            ❌ إضافي مرفوض {parseFloat(p.overtimeHours || p.rejectedOvertimeHours || 0) > 0 ? `(${parseFloat(p.overtimeHours || p.rejectedOvertimeHours).toFixed(2)} س)` : ''}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {p.overtimeStatus === 'pending' && parseFloat(p.overtimeHours) > 0 && (
+                                        <div style={{ marginTop: '3px' }}>
+                                          <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
+                                            ⏳ إضافي قيد الاعتماد (+{parseFloat(p.overtimeHours).toFixed(2)} س)
+                                          </span>
                                         </div>
                                       )}
                                     </>
@@ -740,45 +1010,84 @@ export default function AttendancePunchesModal({
                                       <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
                                       {p.notes && !p.notes.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{p.notes}</div>}
                                     </div>
+                                  ) : p.overtimeStatus === 'rejected' ? (
+                                    <div>
+                                      <strong style={{ color: '#dc2626', display: 'block' }}>❌ تم رفض الساعات الإضافية من قِبل الإدارة</strong>
+                                      <span style={{ fontSize: '11px', color: '#7f1d1d' }}>{p.notes || p.note || `احتساب ساعات الوردية الأساسية فقط (${p.regularHours || p.hours} س)`}</span>
+                                    </div>
+                                  ) : p.overtimeStatus === 'approved' && parseFloat(p.overtimeHours) > 0 ? (
+                                    <div>
+                                      <strong style={{ color: '#16a34a', display: 'block' }}>✅ ساعات إضافية معتمدة (+{parseFloat(p.overtimeHours).toFixed(2)} س)</strong>
+                                      <span style={{ fontSize: '11px', color: '#047857' }}>{p.notes || p.note || 'تمت إضافة الساعات لصافي الاستحقاق'}</span>
+                                    </div>
                                   ) : (
                                     p.notes || p.note || p.statusLabel || 'تسجيل بصمة عادية'
                                   )}
                                 </td>
                                 <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                                  {p.isLiveActive ? (
-                                    <span style={{ color: '#059669', fontSize: '12px', fontWeight: '800', background: '#ecfdf5', padding: '4px 10px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
-                                      🟢 جاري الآن
-                                    </span>
-                                  ) : (
-                                    <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
-                                      {isRejectedPhoto && (
+                                  <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
+                                    {p.isLiveActive ? (
+                                      <>
+                                        <span style={{ color: '#059669', fontSize: '11px', fontWeight: '800', background: '#ecfdf5', padding: '3px 8px', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
+                                          🟢 جاري الآن
+                                        </span>
                                         <button
-                                          className="btn btn-success"
-                                          style={{ padding: '3px 8px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}
-                                          title="احتساب وتفعيل البصمة في نظام الأجور"
-                                          onClick={() => handleApproveAndCalculateShift(p)}
+                                          className="btn btn-stop"
+                                          style={{ padding: '3px 8px', fontSize: '11px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 800, cursor: isStoppingShift ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}
+                                          title="إنهاء الوردية وتسجيل وقت الانصراف"
+                                          disabled={isStoppingShift}
+                                          onClick={() => handleStopShiftForRow(p)}
                                         >
-                                          ✅ احتساب البصمة
+                                          ⏹ إنهاء
                                         </button>
-                                      )}
-                                      <button
-                                        className="btn btn-ghost"
-                                        style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
-                                        title="تعديل البصمة"
-                                        onClick={() => handleOpenEdit(p)}
-                                      >
-                                        ✏️ تعديل
-                                      </button>
-                                      <button
-                                        className="del-btn"
-                                        style={{ padding: '3px 6px', fontSize: '11px' }}
-                                        title="حذف البصمة"
-                                        onClick={() => handleDeletePunch(p)}
-                                      >
-                                        🗑️
-                                      </button>
-                                    </div>
-                                  )}
+                                        <button
+                                          className="btn btn-ghost"
+                                          style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
+                                          title="تعديل البصمة"
+                                          onClick={() => handleOpenEdit(p)}
+                                        >
+                                          ✏️
+                                        </button>
+                                        <button
+                                          className="del-btn"
+                                          style={{ padding: '3px 6px', fontSize: '11px' }}
+                                          title="حذف البصمة"
+                                          onClick={() => handleDeletePunch(p)}
+                                        >
+                                          🗑️
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        {isRejectedPhoto && (
+                                          <button
+                                            className="btn btn-success"
+                                            style={{ padding: '3px 8px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                            title="احتساب وتفعيل البصمة في نظام الأجور"
+                                            onClick={() => handleApproveAndCalculateShift(p)}
+                                          >
+                                            ✅ احتساب البصمة
+                                          </button>
+                                        )}
+                                        <button
+                                          className="btn btn-ghost"
+                                          style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
+                                          title="تعديل البصمة"
+                                          onClick={() => handleOpenEdit(p)}
+                                        >
+                                          ✏️ تعديل
+                                        </button>
+                                        <button
+                                          className="del-btn"
+                                          style={{ padding: '3px 6px', fontSize: '11px' }}
+                                          title="حذف البصمة"
+                                          onClick={() => handleDeletePunch(p)}
+                                        >
+                                          🗑️
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -838,10 +1147,12 @@ export default function AttendancePunchesModal({
                     const dayName = pDate.toLocaleDateString('ar-EG', { weekday: 'long' });
                     const dateStr = p.date || pDate.toISOString().slice(0, 10);
                     const isRejectedPhoto = p.isRejectedPhoto || p.status === 'rejected_photo' || (typeof p.statusLabel === 'string' && p.statusLabel.includes('رفض الصورة'));
-                    const netH = getEffectiveShiftHours(p, state).toFixed(2);
+                    const regH = getEffectiveShiftHours(p, state);
+                    const otH = getApprovedOtHours(p);
+                    const totalH = (regH + otH).toFixed(2);
                     const breakH = p.breakHours ? parseFloat(p.breakHours).toFixed(2) : null;
                     const shiftRate = getBranchRate(p.branchId || employee.branchId);
-                    const shiftEarned = isRejectedPhoto ? '0.00' : (parseFloat(netH) * shiftRate).toFixed(2);
+                    const shiftEarned = isRejectedPhoto ? '0.00' : ((regH + otH) * shiftRate).toFixed(2);
 
                     const perm = isApprovedPermissionForDate(employee?.id, dateStr, state);
                     const hasPerm = p.hasApprovedPermission || !!perm;
@@ -938,10 +1249,36 @@ export default function AttendancePunchesModal({
                             </div>
                           ) : (
                             <>
-                              {netH} ساعة
+                              {totalH} ساعة
+                              {otH > 0 && (
+                                <div style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: 700, marginTop: '2px' }}>
+                                  (أساسي: {regH.toFixed(2)} س + إضافي: {otH.toFixed(2)} س)
+                                </div>
+                              )}
                               {hasPerm && permHours > 0 && (
                                 <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
-                                  (فعلي: {(Math.max(0, parseFloat(netH) - permHours)).toFixed(2)} س + إذن: {permHours} س)
+                                  (فعلي: {(Math.max(0, regH - permHours)).toFixed(2)} س + إذن: {permHours} س)
+                                </div>
+                              )}
+                              {p.overtimeStatus === 'approved' && parseFloat(p.overtimeHours) > 0 && (
+                                <div style={{ marginTop: '3px' }}>
+                                  <span style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
+                                    ✅ إضافي معتمد (+{parseFloat(p.overtimeHours).toFixed(2)} س)
+                                  </span>
+                                </div>
+                              )}
+                              {p.overtimeStatus === 'rejected' && (
+                                <div style={{ marginTop: '3px' }}>
+                                  <span style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
+                                    ❌ إضافي مرفوض {parseFloat(p.overtimeHours || p.rejectedOvertimeHours || 0) > 0 ? `(${parseFloat(p.overtimeHours || p.rejectedOvertimeHours).toFixed(2)} س)` : ''}
+                                  </span>
+                                </div>
+                              )}
+                              {p.overtimeStatus === 'pending' && parseFloat(p.overtimeHours) > 0 && (
+                                <div style={{ marginTop: '3px' }}>
+                                  <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
+                                    ⏳ إضافي قيد الاعتماد (+{parseFloat(p.overtimeHours).toFixed(2)} س)
+                                  </span>
                                 </div>
                               )}
                             </>
@@ -972,6 +1309,16 @@ export default function AttendancePunchesModal({
                               <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
                               {p.notes && !p.notes.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{p.notes}</div>}
                             </div>
+                          ) : p.overtimeStatus === 'rejected' ? (
+                            <div>
+                              <strong style={{ color: '#dc2626', display: 'block' }}>❌ تم رفض الساعات الإضافية من قِبل الإدارة</strong>
+                              <span style={{ fontSize: '11px', color: '#7f1d1d' }}>{p.notes || p.note || `احتساب ساعات الوردية الأساسية فقط (${p.regularHours || p.hours} س)`}</span>
+                            </div>
+                          ) : p.overtimeStatus === 'approved' && parseFloat(p.overtimeHours) > 0 ? (
+                            <div>
+                              <strong style={{ color: '#16a34a', display: 'block' }}>✅ ساعات إضافية معتمدة (+{parseFloat(p.overtimeHours).toFixed(2)} س)</strong>
+                              <span style={{ fontSize: '11px', color: '#047857' }}>{p.notes || p.note || 'تمت إضافة الساعات لصافي الاستحقاق'}</span>
+                            </div>
                           ) : (
                             p.notes || p.note || p.statusLabel || 'تسجيل بصمة عادية'
                           )}
@@ -979,40 +1326,69 @@ export default function AttendancePunchesModal({
 
                         {/* Actions */}
                         <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                          {p.isLiveActive ? (
-                            <span style={{ color: '#059669', fontSize: '12px', fontWeight: '800', background: '#ecfdf5', padding: '4px 10px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
-                              🟢 جاري الآن
-                            </span>
-                          ) : (
-                            <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
-                              {isRejectedPhoto && (
+                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
+                            {p.isLiveActive ? (
+                              <>
+                                <span style={{ color: '#059669', fontSize: '11px', fontWeight: '800', background: '#ecfdf5', padding: '3px 8px', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
+                                  🟢 جاري الآن
+                                </span>
                                 <button
-                                  className="btn btn-success"
-                                  style={{ padding: '3px 8px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}
-                                  title="احتساب وتفعيل البصمة في نظام الأجور"
-                                  onClick={() => handleApproveAndCalculateShift(p)}
+                                  className="btn btn-stop"
+                                  style={{ padding: '3px 8px', fontSize: '11px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 800, cursor: isStoppingShift ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}
+                                  title="إنهاء الوردية وتسجيل وقت الانصراف"
+                                  disabled={isStoppingShift}
+                                  onClick={() => handleStopShiftForRow(p)}
                                 >
-                                  ✅ احتساب البصمة
+                                  ⏹ إنهاء
                                 </button>
-                              )}
-                              <button
-                                className="btn btn-ghost"
-                                style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
-                                title="تعديل البصمة"
-                                onClick={() => handleOpenEdit(p)}
-                              >
-                                ✏️ تعديل
-                              </button>
-                              <button
-                                className="del-btn"
-                                style={{ padding: '3px 6px', fontSize: '11px' }}
-                                title="حذف البصمة"
-                                onClick={() => handleDeletePunch(p)}
-                              >
-                                🗑️
-                              </button>
-                            </div>
-                          )}
+                                <button
+                                  className="btn btn-ghost"
+                                  style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
+                                  title="تعديل البصمة"
+                                  onClick={() => handleOpenEdit(p)}
+                                >
+                                  ✏️
+                                </button>
+                                <button
+                                  className="del-btn"
+                                  style={{ padding: '3px 6px', fontSize: '11px' }}
+                                  title="حذف البصمة"
+                                  onClick={() => handleDeletePunch(p)}
+                                >
+                                  🗑️
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                {isRejectedPhoto && (
+                                  <button
+                                    className="btn btn-success"
+                                    style={{ padding: '3px 8px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                    title="احتساب وتفعيل البصمة في نظام الأجور"
+                                    onClick={() => handleApproveAndCalculateShift(p)}
+                                  >
+                                    ✅ احتساب البصمة
+                                  </button>
+                                )}
+                                <button
+                                  className="btn btn-ghost"
+                                  style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
+                                  title="تعديل البصمة"
+                                  onClick={() => handleOpenEdit(p)}
+                                >
+                                  ✏️ تعديل
+                                </button>
+                                <button
+                                  className="del-btn"
+                                  style={{ padding: '3px 6px', fontSize: '11px' }}
+                                  title="حذف البصمة"
+                                  onClick={() => handleDeletePunch(p)}
+                                >
+                                  🗑️
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1055,7 +1431,7 @@ export default function AttendancePunchesModal({
             <div className="modal-content card" style={{ maxWidth: '520px', width: '90%', padding: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h4 style={{ margin: 0, color: '#0284c7', fontSize: '16px' }}>
-                  ✏️ تعديل بصمة ووردية — {employee.name}
+                  {isAddingNewPunch ? '➕ تسجيل بصمة يدوية جديدة للموظف' : '✏️ تعديل بصمة ووردية'} — {employee.name}
                 </h4>
                 <button className="btn btn-ghost" onClick={() => setEditingPunch(null)}>✕</button>
               </div>
@@ -1113,10 +1489,10 @@ export default function AttendancePunchesModal({
                         onChange={(e) => setEditBranchId(e.target.value)}
                       >
                         {employee.branchesDetails.map((bd) => {
-                          const br = (state.branches || []).find((b) => b.id === bd.branchId);
+                          const br = (state.branches || []).find((b) => isBranchMatch(bd.branchId, b));
                           return (
                             <option key={bd.branchId} value={bd.branchId}>
-                              {br?.name || `فرع ${bd.branchId}`}
+                              {br?.name || bd.branchName || `فرع ${bd.branchId}`}
                             </option>
                           );
                         })}
@@ -1140,7 +1516,7 @@ export default function AttendancePunchesModal({
                     إلغاء
                   </button>
                   <button type="submit" className="btn btn-start">
-                    💾 حفظ التعديلات
+                    {isAddingNewPunch ? '💾 تسجيل واحتساب البصمة' : '💾 حفظ التعديلات'}
                   </button>
                 </div>
               </form>

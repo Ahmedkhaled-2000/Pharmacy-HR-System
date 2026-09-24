@@ -1,6 +1,23 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { CheckCircle2, XCircle, RefreshCw, Send, Search, Building2, Package, Check, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
+  Send,
+  Search,
+  Building2,
+  Package,
+  Check,
+  AlertCircle,
+  FileSpreadsheet,
+  Download,
+  Loader2,
+  Sparkles
+} from 'lucide-react';
 import { outstockGetProcurementAggregated, outstockProcurementItemAction } from '../../../utils/outstockApiClient';
+import { exportProcurementOrdersExcel } from '../../../utils/outstockExcelExporter';
+import OutstockConfirmModal from '../common/OutstockConfirmModal';
+import { getSocket } from '../../../utils/socketClient';
 
 /**
  * ProcurementOrdersTab.jsx
@@ -8,10 +25,14 @@ import { outstockGetProcurementAggregated, outstockProcurementItemAction } from 
  * - استلام أصناف مجمعة لكل فرع على حدة (Aggregated Item Model)
  * - تحديد ما تم توفيره بالفرع وما هو غير متوفر بالسوق
  * - شحن الأصناف المتوفرة لرصيد الفرع، أو شطب غير المتوفر وتحويله لنواقص الصيدلية
+ * - تصدير شيت إكسل فاخر بتصميم احترافي (Dual-Sheet Executive Excel)
+ * - نافذة تأكيد منبثقة احترافية بدلاً من window.confirm
+ * - مزامنة لحظية فورية عبر WebSockets عند تسجيل أي طلب بالفرع
  */
 export default function ProcurementOrdersTab({ showToast }) {
   const [aggregatedData, setAggregatedData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
   const [selectedBranchId, setSelectedBranchId] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -20,8 +41,22 @@ export default function ProcurementOrdersTab({ showToast }) {
   // Map of `${branchId}_${medicationName}_${unitType}` -> 'available' | 'unavailable'
   const [decisions, setDecisions] = useState({});
 
-  const fetchAggregatedOrders = async () => {
-    setIsLoading(true);
+  // حالة نافذة التأكيد المنبثقة الاحترافية
+  const [confirmConfig, setConfirmConfig] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    iconType: 'warning',
+    confirmText: 'تأكيد',
+    cancelText: 'إلغاء',
+    confirmBtnStyle: 'primary',
+    badge: null,
+    details: null,
+    onConfirmAction: null
+  });
+
+  const fetchAggregatedOrders = useCallback(async (isSilent = false) => {
+    if (!isSilent) setIsLoading(true);
     try {
       const res = await outstockGetProcurementAggregated();
       if (res?.success && Array.isArray(res.aggregated)) {
@@ -30,13 +65,30 @@ export default function ProcurementOrdersTab({ showToast }) {
     } catch (e) {
       console.warn('Fetch aggregated orders error:', e);
     } finally {
-      setIsLoading(false);
+      if (!isSilent) setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchAggregatedOrders();
-  }, []);
+
+    // ── الاستماع اللحظي لأحداث Socket.io للمزامنة الفورية مع الفروع ──
+    const socket = getSocket();
+    if (socket) {
+      const handleLiveOrder = () => {
+        fetchAggregatedOrders(true);
+      };
+      socket.on('outstock:order_created', handleLiveOrder);
+      socket.on('outstock:items_status_updated', handleLiveOrder);
+      socket.on('outstock:item_restocked', handleLiveOrder);
+
+      return () => {
+        socket.off('outstock:order_created', handleLiveOrder);
+        socket.off('outstock:items_status_updated', handleLiveOrder);
+        socket.off('outstock:item_restocked', handleLiveOrder);
+      };
+    }
+  }, [fetchAggregatedOrders]);
 
   // استخراج قائمة الفروع الفريدة
   const branchesList = useMemo(() => {
@@ -57,73 +109,127 @@ export default function ProcurementOrdersTab({ showToast }) {
     }));
   };
 
-  // إرسال قرار فردي فوري
-  const handleQuickAction = async (item, action) => {
-    const actionLabel = action === 'available' ? 'توفير الصنف وشحنه لرصيد الفرع' : 'تحديد الصنف كغير متوفر وشطبه من الفواتير';
-    if (!window.confirm(`هل أنت متأكد من ${actionLabel} (${item.medication_name}) لفرع (${item.branch_name})؟`)) {
-      return;
-    }
+  // إرسال قرار فردي فوري بنافذة تأكيد منبثقة
+  const handleQuickAction = (item, action) => {
+    const isAvailable = action === 'available';
+    const actionLabel = isAvailable ? 'توفير الصنف وشحنه لرصيد الفرع' : 'تحديد الصنف كغير متوفر وشطبه من الفواتير';
+    const unitLabel = item.unit_type === 'strip' ? 'شريط' : 'علبة';
 
-    setIsProcessing(true);
-    try {
-      const res = await outstockProcurementItemAction({
-        branchId: item.branch_id,
-        medicationName: item.medication_name,
-        unitType: item.unit_type,
-        action,
-        itemIds: (item.item_details || []).map(d => d.itemId)
-      });
-
-      if (res?.success) {
-        showToast?.(`✅ ${res.message || 'تم تحديث حالة الصنف بنجاح'}`);
-        fetchAggregatedOrders();
-      } else {
-        showToast?.(`⚠️ ${res?.error || 'تعذر تطبيق القرار'}`);
-      }
-    } catch (err) {
-      showToast?.('حدث خطأ أثناء إرسال التحديث');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // إرسال دفعة القرارات المحددة معاً للفرع
-  const handleBatchSubmit = async () => {
-    const keys = Object.keys(decisions).filter(k => decisions[k]);
-    if (keys.length === 0) {
-      showToast?.('يرجى تحديد قرار (متوفر أو غير متوفر) لصنف واحد على الأقل أولاً');
-      return;
-    }
-
-    if (!window.confirm(`هل تريد إرسال (${keys.length}) قرار دفعة واحدة للفروع المعنية والمزامنة اللحظية؟`)) {
-      return;
-    }
-
-    setIsProcessing(true);
-    try {
-      let successCount = 0;
-      for (const item of filteredItems) {
-        const key = `${item.branch_id}_${item.medication_name}_${item.unit_type}`;
-        const action = decisions[key];
-        if (action) {
-          await outstockProcurementItemAction({
+    setConfirmConfig({
+      isOpen: true,
+      title: isAvailable ? 'تأكيد توفير الصنف بالفرع' : 'تأكيد عدم توفر الصنف بالسوق',
+      message: `هل أنت متأكد من ${actionLabel}؟ سيتم تحديث رصيد الفرع وفواتير العملاء ومزامنتها لحظياً.`,
+      iconType: isAvailable ? 'success' : 'danger',
+      confirmText: isAvailable ? 'نعم، تم التوفير والشحن' : 'نعم، غير متوفر (شطب)',
+      cancelText: 'تراجع',
+      confirmBtnStyle: isAvailable ? 'success' : 'danger',
+      badge: `${item.total_requested_qty} ${unitLabel}`,
+      details: [
+        { label: 'الصنف', value: item.medication_name },
+        { label: 'الفرع المستلم', value: item.branch_name || item.branch_id },
+        { label: 'عدد طلبات العملاء', value: `${item.orders_count} عميل` }
+      ],
+      onConfirmAction: async () => {
+        setIsProcessing(true);
+        try {
+          const res = await outstockProcurementItemAction({
             branchId: item.branch_id,
             medicationName: item.medication_name,
             unitType: item.unit_type,
             action,
             itemIds: (item.item_details || []).map(d => d.itemId)
           });
-          successCount++;
+
+          if (res?.success) {
+            showToast?.(`✅ ${res.message || 'تم تحديث حالة الصنف بنجاح'}`);
+            fetchAggregatedOrders();
+          } else {
+            showToast?.(`⚠️ ${res?.error || 'تعذر تطبيق القرار'}`);
+          }
+        } catch (err) {
+          showToast?.('حدث خطأ أثناء إرسال التحديث');
+        } finally {
+          setIsProcessing(false);
+          setConfirmConfig(prev => ({ ...prev, isOpen: false }));
         }
       }
+    });
+  };
 
-      showToast?.(`✅ تم إرسال وتطبيق (${successCount}) تحديث بنجاح ومزامنتها مع الفروع فورياً`);
-      setDecisions({});
-      fetchAggregatedOrders();
+  // إرسال دفعة القرارات المحددة معاً للفروع بنافذة تأكيد منبثقة
+  const handleBatchSubmit = () => {
+    const keys = Object.keys(decisions).filter(k => decisions[k]);
+    if (keys.length === 0) {
+      showToast?.('يرجى تحديد قرار (متوفر أو غير متوفر) لصنف واحد على الأقل أولاً');
+      return;
+    }
+
+    setConfirmConfig({
+      isOpen: true,
+      title: 'إرسال وتطبيق قرارات المشتريات دفعة واحدة',
+      message: `هل تريد اعتماد وإرسال (${keys.length}) قرار دفعة واحدة للفروع المعنية وتحديث حسابات وفواتير المرضى والمزامنة اللحظية؟`,
+      iconType: 'send',
+      confirmText: `اعتماد وإرسال (${keys.length}) قرار الآن`,
+      cancelText: 'مراجعة القرارات',
+      confirmBtnStyle: 'primary',
+      badge: `${keys.length} صنف محدد`,
+      details: [
+        { label: 'إجمالي القرارات المحددة', value: `${keys.length} صنف` },
+        { label: 'المزامنة', value: 'تحديث فوري لرصيد الفروع وإشعارات الصيدليات' }
+      ],
+      onConfirmAction: async () => {
+        setIsProcessing(true);
+        try {
+          let successCount = 0;
+          for (const item of filteredItems) {
+            const key = `${item.branch_id}_${item.medication_name}_${item.unit_type}`;
+            const action = decisions[key];
+            if (action) {
+              await outstockProcurementItemAction({
+                branchId: item.branch_id,
+                medicationName: item.medication_name,
+                unitType: item.unit_type,
+                action,
+                itemIds: (item.item_details || []).map(d => d.itemId)
+              });
+              successCount++;
+            }
+          }
+
+          showToast?.(`✅ تم إرسال وتطبيق (${successCount}) تحديث بنجاح ومزامنتها مع الفروع فورياً`);
+          setDecisions({});
+          fetchAggregatedOrders();
+        } catch (err) {
+          showToast?.('حدث خطأ أثناء إرسال الدفعة');
+        } finally {
+          setIsProcessing(false);
+          setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
+  };
+
+  // تصدير شيت إكسل فاخر لطلبات الفروع
+  const handleExportExcel = async () => {
+    if (filteredItems.length === 0) {
+      showToast?.('لا توجد بيانات متاحة للتصدير حالياً');
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const selectedBranchObj = branchesList.find(b => b.id === selectedBranchId);
+      const branchNameStr = selectedBranchObj ? selectedBranchObj.name : 'كافة الفروع';
+
+      await exportProcurementOrdersExcel(filteredItems, {
+        selectedBranchName: branchNameStr
+      });
+      showToast?.('📊 تم استخراج وتنزيل شيت إكسل طلبات المشتريات بنجاح بتصميم احترافي');
     } catch (err) {
-      showToast?.('حدث خطأ أثناء إرسال الدفعة');
+      console.error('[Export Excel Error]:', err);
+      showToast?.('حدث خطأ أثناء إنشاء شيت الإكسل');
     } finally {
-      setIsProcessing(false);
+      setIsExporting(false);
     }
   };
 
@@ -145,11 +251,27 @@ export default function ProcurementOrdersTab({ showToast }) {
 
   return (
     <div>
+      {/* ── نافذة التأكيد المنبثقة الاحترافية ── */}
+      <OutstockConfirmModal
+        isOpen={confirmConfig.isOpen}
+        title={confirmConfig.title}
+        message={confirmConfig.message}
+        iconType={confirmConfig.iconType}
+        confirmText={confirmConfig.confirmText}
+        cancelText={confirmConfig.cancelText}
+        confirmBtnStyle={confirmConfig.confirmBtnStyle}
+        badge={confirmConfig.badge}
+        details={confirmConfig.details}
+        isProcessing={isProcessing}
+        onConfirm={() => confirmConfig.onConfirmAction?.()}
+        onClose={() => setConfirmConfig(prev => ({ ...prev, isOpen: false }))}
+      />
+
       {/* ── شريط الفلاتر واختيار الفرع ── */}
-      <div className="outstock-card" style={{ padding: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '280px' }}>
-            <div className="outstock-search-bar" style={{ flex: 1 }}>
+      <div className="outstock-card" style={{ padding: '16px', marginBottom: '16px' }}>
+        <div className="outstock-filters-bar">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, flexWrap: 'wrap', minWidth: '240px' }}>
+            <div className="outstock-search-bar" style={{ flex: 1, minWidth: '180px' }}>
               <Search size={18} className="outstock-search-icon" />
               <input
                 type="text"
@@ -161,12 +283,12 @@ export default function ProcurementOrdersTab({ showToast }) {
             </div>
 
             {/* قائمة اختيار الفرع المحدد */}
-            <div style={{ minWidth: '180px' }}>
+            <div style={{ minWidth: '170px', flexShrink: 0 }}>
               <select
                 value={selectedBranchId}
                 onChange={(e) => setSelectedBranchId(e.target.value)}
                 className="outstock-form-select"
-                style={{ height: '42px' }}
+                style={{ height: '42px', fontWeight: 'bold' }}
               >
                 <option value="all">🏢 جميع الفروع ({branchesList.length})</option>
                 {branchesList.map(b => (
@@ -176,12 +298,39 @@ export default function ProcurementOrdersTab({ showToast }) {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            {/* زر تصدير شيت إكسل فاخر */}
             <button
               type="button"
               className="outstock-btn outstock-btn-secondary"
-              onClick={fetchAggregatedOrders}
-              title="تحديث البيانات"
+              onClick={handleExportExcel}
+              disabled={isExporting || filteredItems.length === 0}
+              style={{
+                background: '#f0fdf4',
+                borderColor: '#86efac',
+                color: '#15803d',
+                fontWeight: '800'
+              }}
+              title="تصدير شيت إكسل رسمي وشامل لكافة الأصناف والكميات وتفاصيل العملاء"
+            >
+              {isExporting ? (
+                <>
+                  <Loader2 size={16} className="spinner" />
+                  <span>جاري التصدير...</span>
+                </>
+              ) : (
+                <>
+                  <FileSpreadsheet size={16} style={{ color: '#16a34a' }} />
+                  <span>تصدير شيت إكسل (Excel)</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              className="outstock-btn outstock-btn-secondary"
+              onClick={() => fetchAggregatedOrders()}
+              title="تحديث البيانات لحظياً"
             >
               <RefreshCw size={15} />
               <span>تحديث</span>
@@ -193,9 +342,10 @@ export default function ProcurementOrdersTab({ showToast }) {
                 disabled={isProcessing}
                 className="outstock-btn outstock-btn-primary"
                 onClick={handleBatchSubmit}
+                style={{ fontWeight: '800' }}
               >
                 <Send size={15} />
-                <span>إرسال القرارات المحددة ({Object.keys(decisions).filter(k => decisions[k]).length})</span>
+                <span>إرسال القرارات ({Object.keys(decisions).filter(k => decisions[k]).length})</span>
               </button>
             )}
           </div>
@@ -211,11 +361,17 @@ export default function ProcurementOrdersTab({ showToast }) {
               ({filteredItems.length} صنف مطلوب للشراء)
             </span>
           </h3>
+          {filteredItems.length > 0 && (
+            <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '700' }}>
+              ⚡ المزامنة اللحظية نشطة
+            </div>
+          )}
         </div>
 
         {isLoading ? (
           <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
-            جاري تجميع طلبات الفروع...
+            <Loader2 size={32} className="spinner" style={{ margin: '0 auto 10px', color: '#0d9488' }} />
+            <div>جاري تجميع طلبات الفروع...</div>
           </div>
         ) : filteredItems.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '48px 20px', color: '#64748b' }}>
@@ -248,102 +404,137 @@ export default function ProcurementOrdersTab({ showToast }) {
                   return (
                     <tr
                       key={idx}
-                      style={{
-                        background: decision === 'available' ? '#f0fdf4' : decision === 'unavailable' ? '#fef2f2' : 'inherit'
-                      }}
+                      className={
+                        decision === 'available'
+                          ? 'table-row-selected'
+                          : decision === 'unavailable'
+                          ? 'table-row-danger'
+                          : ''
+                      }
                     >
-                      <td>
-                        <span style={{
-                          background: '#f1f5f9',
-                          padding: '4px 8px',
-                          borderRadius: '6px',
-                          fontWeight: '800',
-                          fontSize: '12.5px',
-                          color: '#0f766e'
-                        }}>
-                          <Building2 size={12} style={{ display: 'inline' }} /> {item.branch_name || item.branch_id}
-                        </span>
-                      </td>
-
-                      <td>
-                        <strong style={{ fontSize: '14.5px', color: '#0f172a' }}>
-                          {item.medication_name}
-                        </strong>
-                      </td>
-
-                      <td>
-                        {item.unit_type === 'strip' ? (
-                          <span style={{ color: '#0284c7', fontWeight: 'bold' }}>شريط 💊</span>
-                        ) : (
-                          <span style={{ color: '#059669', fontWeight: 'bold' }}>علبة كاملة 📦</span>
-                        )}
-                      </td>
-
-                      <td>
-                        <strong style={{ fontSize: '15px', color: '#0f172a' }}>
-                          {item.total_requested_qty}
-                        </strong>
-                      </td>
-
-                      <td>
-                        <span className="outstock-badge partial">
-                          {item.orders_count} عملاء
-                        </span>
-                      </td>
-
+                      {/* الفرع */}
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {/* زر التوفير */}
+                          <div style={{
+                            width: '32px',
+                            height: '32px',
+                            borderRadius: '8px',
+                            background: '#f0fdfa',
+                            border: '1px solid #ccfbf1',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#0d9488'
+                          }}>
+                            <Building2 size={16} />
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: '800', color: 'var(--text, #0f172a)' }}>
+                              {item.branch_name || item.branch_id}
+                            </div>
+                            <small style={{ color: 'var(--muted, #64748b)', fontSize: '11px' }}>
+                              فرع صيدلية معتمد
+                            </small>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* صنف الدواء */}
+                      <td>
+                        <div style={{ fontWeight: '900', fontSize: '14.5px', color: '#0d9488' }}>
+                          {item.medication_name}
+                        </div>
+                        <small style={{ color: 'var(--muted, #64748b)', fontSize: '11px' }}>
+                          مسجل كحجز مسبق للعملاء
+                        </small>
+                      </td>
+
+                      {/* الوحدة */}
+                      <td>
+                        <span className="outstock-badge" style={{ background: '#f1f5f9', color: '#334155' }}>
+                          {item.unit_type === 'strip' ? 'شريط' : 'علبة'}
+                        </span>
+                      </td>
+
+                      {/* إجمالي الكمية المطلوبة */}
+                      <td>
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '4px 10px',
+                          borderRadius: '8px',
+                          background: '#ecfeff',
+                          color: '#0e7490',
+                          fontWeight: '900',
+                          fontSize: '14.5px',
+                          border: '1px solid #cffafe'
+                        }}>
+                          <Package size={14} />
+                          {item.total_requested_qty}
+                        </span>
+                      </td>
+
+                      {/* عدد طلبات العملاء */}
+                      <td>
+                        <span className="outstock-badge partial">
+                          {item.orders_count} عميل بانتظار التوفير
+                        </span>
+                      </td>
+
+                      {/* أزرار اتخاذ القرار المباشرة */}
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          {/* 1. متوفر بالفرع */}
                           <button
                             type="button"
-                            disabled={isProcessing}
                             className={`outstock-btn ${decision === 'available' ? 'outstock-btn-success' : 'outstock-btn-secondary'}`}
-                            style={{
-                              padding: '6px 12px',
-                              fontSize: '12.5px',
-                              borderColor: '#10b981'
-                            }}
                             onClick={() => handleSetDecision(key, 'available')}
-                            title="تحديد لتوفيره وإضافته لرصيد الفرع"
-                          >
-                            <CheckCircle2 size={14} color={decision === 'available' ? '#ffffff' : '#16a34a'} />
-                            <span>متوفر بالفرع</span>
-                          </button>
-
-                          {/* زر عدم التوفر */}
-                          <button
-                            type="button"
-                            disabled={isProcessing}
-                            className={`outstock-btn ${decision === 'unavailable' ? 'outstock-btn-danger' : 'outstock-btn-secondary'}`}
                             style={{
                               padding: '6px 12px',
-                              fontSize: '12.5px',
-                              borderColor: '#ef4444'
+                              fontSize: '12px',
+                              borderColor: decision === 'available' ? '#059669' : '#a7f3d0',
+                              color: decision === 'available' ? '#ffffff' : '#047857',
+                              background: decision === 'available' ? '#059669' : '#f0fdf4'
                             }}
-                            onClick={() => handleSetDecision(key, 'unavailable')}
-                            title="تحديد كصنف ناقص بالسوق وشطبه من الفاتورة"
+                            title="تحديد الصنف كمتوفر وإضافته لدفعة الإرسال"
                           >
-                            <XCircle size={14} color={decision === 'unavailable' ? '#ffffff' : '#dc2626'} />
-                            <span>غير متوفر بالسوق</span>
+                            <CheckCircle2 size={14} />
+                            <span>متوفر</span>
                           </button>
 
-                          {/* خيار الإرسال الفوري المباشر لهذا الصنف */}
+                          {/* 2. غير متوفر بالسوق */}
                           <button
                             type="button"
-                            disabled={isProcessing || !decision}
-                            className="outstock-btn outstock-btn-primary"
+                            className={`outstock-btn ${decision === 'unavailable' ? 'outstock-btn-danger' : 'outstock-btn-secondary'}`}
+                            onClick={() => handleSetDecision(key, 'unavailable')}
                             style={{
-                              padding: '6px 10px',
-                              fontSize: '11.5px',
-                              opacity: decision ? 1 : 0.4,
-                              cursor: decision ? 'pointer' : 'not-allowed'
+                              padding: '6px 12px',
+                              fontSize: '12px',
+                              borderColor: decision === 'unavailable' ? '#dc2626' : '#fecdd3',
+                              color: decision === 'unavailable' ? '#ffffff' : '#be123c',
+                              background: decision === 'unavailable' ? '#dc2626' : '#fff1f2'
                             }}
-                            onClick={() => handleQuickAction(item, decision)}
-                            title="إرسال القرار فوراً للفرع الآن"
+                            title="تحديد الصنف كغير متوفر بالسوق وشطبه"
                           >
-                            <Send size={12} />
-                            <span>إرسال للفرع</span>
+                            <XCircle size={14} />
+                            <span>غير متوفر</span>
                           </button>
+
+                          {/* زر الإرسال السريع الفردي في حال رغبة الصيدلي في إنهاء بند واحد فوراً */}
+                          {decision && (
+                            <button
+                              type="button"
+                              className="outstock-btn outstock-btn-primary"
+                              onClick={() => handleQuickAction(item, decision)}
+                              disabled={isProcessing}
+                              style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: '800' }}
+                              title="إرسال القرار لهذا الصنف فوراً ومزامنة الفرع"
+                            >
+                              <Send size={12} />
+                              <span>إرسال الآن</span>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

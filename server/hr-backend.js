@@ -50,49 +50,20 @@ async function syncBranchesToOutstock(branches, dbInstance) {
   for (const b of branches) {
     if (!b || !b.id || !b.name) continue;
     try {
-      const cleanUser = b.username ? String(b.username).trim().toLowerCase() : null;
-      const cleanPass = b.password ? String(b.password).trim() : (b.managerPin ? String(b.managerPin).trim() : null);
       const bPhone = b.phone || (Array.isArray(b.phones) && b.phones[0]?.number) || null;
       const bCode = b.branchCode || b.code || b.id;
 
+      // مزامنة الدليل فقط (الاسم، الكود، الهاتف، العنوان) دون المساس ببيانات تسجيل الدخول المستقلة للنواقص
       await dbInstance.query(`
-        INSERT INTO public.outstock_branches (id, name, code, phone, address, username, password, is_active, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, true, CURRENT_TIMESTAMP)
+        INSERT INTO public.outstock_branches (id, name, code, phone, address, is_active, updated_at)
+        VALUES ($1, $2, $3, $4, $5, true, CURRENT_TIMESTAMP)
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           code = EXCLUDED.code,
           phone = COALESCE(EXCLUDED.phone, public.outstock_branches.phone),
           address = COALESCE(EXCLUDED.address, public.outstock_branches.address),
-          username = COALESCE(EXCLUDED.username, public.outstock_branches.username),
-          password = COALESCE(EXCLUDED.password, public.outstock_branches.password),
           updated_at = CURRENT_TIMESTAMP
-      `, [String(b.id), String(b.name), bCode, bPhone, b.address || null, cleanUser, cleanPass]);
-
-      if (cleanUser && cleanPass) {
-        const existingUsers = await dbInstance.query(
-          'SELECT id, username FROM public.outstock_users WHERE id = $1 OR LOWER(username) = $2',
-          [`usr_branch_${b.id}`, cleanUser]
-        );
-        if (existingUsers.rows.length > 0) {
-          const targetUserId = existingUsers.rows[0].id;
-          await dbInstance.query(`
-            UPDATE public.outstock_users SET
-              username = $1,
-              password = $2,
-              full_name = $3,
-              role = 'branch',
-              branch_id = $4,
-              is_active = true,
-              updated_at = CURRENT_TIMESTAMP
-            WHERE id = $5
-          `, [cleanUser, cleanPass, `فرع: ${b.name}`, String(b.id), targetUserId]);
-        } else {
-          await dbInstance.query(`
-            INSERT INTO public.outstock_users (id, username, password, full_name, role, branch_id, is_active, updated_at)
-            VALUES ($1, $2, $3, $4, 'branch', $5, true, CURRENT_TIMESTAMP)
-          `, [`usr_branch_${b.id}`, cleanUser, cleanPass, `فرع: ${b.name}`, String(b.id)]);
-        }
-      }
+      `, [String(b.id), String(b.name), bCode, bPhone, b.address || null]);
     } catch (err) {
       console.warn(`[Sync Branch to Outstock Warn] Branch ${b.name}:`, err.message);
     }
@@ -2303,10 +2274,20 @@ app.post('/api/auth/login', async (req, res) => {
       ? Number(org.ownerSessionVersion || 1)
       : (userRole === 'admin' ? Number(org.adminSessionVersion || 1) : 1);
 
+    const targetUserId = targetUserObj?.id || (userRole === 'owner' ? 'owner_master' : (userRole === 'admin' ? 'admin_master' : cleanUser));
+    const targetBranchId = targetUserObj?.branchId || targetUserObj?.branch_id || (userRole === 'branch' || userRole === 'outstock_branch' ? targetUserObj?.id : null);
+    const targetFullName = targetUserObj?.fullName || targetUserObj?.name || targetUserObj?.full_name || cleanUser;
+
     const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
     const payload = Buffer.from(JSON.stringify({
+      id: targetUserId,
+      userId: targetUserId,
       username: cleanUser,
+      fullName: targetFullName,
+      name: targetFullName,
       role: userRole,
+      branchId: targetBranchId,
+      branchData: targetUserObj?.branchData || (userRole === 'outstock_branch' ? targetUserObj : null),
       sessionVersion: currentSessionVer,
       exp: Math.floor(Date.now() / 1000) + (86400 * 30)
     })).toString('base64url');

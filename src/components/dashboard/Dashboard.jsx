@@ -684,17 +684,38 @@ export default function Dashboard({
                                 badgeColor = '#16a34a';
                                 badgeBorder = '#bbf7d0';
                               } else if (isOffToday) {
-                                statusText = isSwapped
-                                  ? `🔄 💤 راحة متبدلة`
-                                  : '💤 راحة أسبوعية (OFF)';
-                                badgeBg = '#f8fafc';
-                                badgeColor = '#64748b';
-                                badgeBorder = '#e2e8f0';
-                              } else if (isSwapped && daySched?.start && daySched?.end) {
-                                statusText = `🔄 وردية متبدلة (${daySched.start})`;
-                                badgeBg = '#fffbeb';
-                                badgeColor = '#d97706';
-                                badgeBorder = '#fde68a';
+                                if (isSwapped) {
+                                  statusText = (
+                                    <div style={{ textAlign: 'center' }}>
+                                      <div>🔄 💤 راحة متبدلة</div>
+                                      <div style={{ fontSize: '9.5px', color: '#64748b', fontWeight: 600, marginTop: '1px' }}>
+                                        {daySched.swappedWithName ? `بديل عن ${daySched.swappedWithName}` : ''}
+                                        {daySched.prevType === 'shift' && daySched.prevStart ? ` (كانت وردية ${daySched.prevStart})` : ''}
+                                      </div>
+                                    </div>
+                                  );
+                                  badgeBg = '#fffbeb';
+                                  badgeColor = '#b45309';
+                                  badgeBorder = '#fde68a';
+                                } else {
+                                  statusText = '💤 راحة أسبوعية (OFF)';
+                                  badgeBg = '#f8fafc';
+                                  badgeColor = '#64748b';
+                                  badgeBorder = '#e2e8f0';
+                                }
+                              } else if (isSwapped && daySched?.start) {
+                                statusText = (
+                                  <div style={{ textAlign: 'center' }}>
+                                    <div>🔄 وردية متبدلة ({daySched.start} – {daySched.end || ''})</div>
+                                    <div style={{ fontSize: '9.5px', color: '#92400e', fontWeight: 600, marginTop: '1px' }}>
+                                      {daySched.swappedWithName ? `بديل عن ${daySched.swappedWithName}` : ''}
+                                      {daySched.prevType === 'off' ? ' (كانت راحة)' : (daySched.prevStart ? ` (سابقاً: ${daySched.prevStart})` : '')}
+                                    </div>
+                                  </div>
+                                );
+                                badgeBg = '#fef3c7';
+                                badgeColor = '#b45309';
+                                badgeBorder = '#fcd34d';
                               }
 
                               return (

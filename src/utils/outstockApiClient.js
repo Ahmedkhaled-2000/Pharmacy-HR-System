@@ -5,6 +5,15 @@
  */
 
 import { API_BASE_URL } from './apiClient';
+import {
+  enqueueOfflineOrder,
+  cacheOrders,
+  getCachedOrders,
+  cacheCustomers,
+  getCachedCustomers,
+  cacheDeficiencies,
+  getCachedDeficiencies
+} from './outstockOfflineStorage';
 
 export function getOutstockToken() {
   try {
@@ -105,7 +114,31 @@ export async function outstockGetCustomers(params = {}) {
   const qs = new URLSearchParams();
   if (params.search) qs.append('search', params.search);
   if (params.branchId) qs.append('branchId', params.branchId);
-  return await outstockRequest(`customers?${qs.toString()}`, { method: 'GET' });
+
+  const res = await outstockRequest(`customers?${qs.toString()}`, { method: 'GET' });
+  if (res?.success && Array.isArray(res.customers)) {
+    cacheCustomers(res.customers);
+    return res;
+  }
+
+  // دعم الأوفلاين: استرجاع من الكاش المحلي
+  if (res?.networkError || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+    const cached = getCachedCustomers();
+    if (cached && cached.length > 0) {
+      let filtered = cached;
+      if (params.search) {
+        const s = String(params.search).toLowerCase().trim();
+        filtered = filtered.filter(c =>
+          (c.full_name && c.full_name.toLowerCase().includes(s)) ||
+          (c.whatsapp_phone && c.whatsapp_phone.includes(s)) ||
+          (c.customer_code && c.customer_code.toLowerCase().includes(s))
+        );
+      }
+      return { success: true, customers: filtered, isFromCache: true };
+    }
+  }
+
+  return res;
 }
 
 export async function outstockGetCustomerHistory(customerId) {
@@ -126,14 +159,80 @@ export async function outstockGetOrders(params = {}) {
   if (params.status) qs.append('status', params.status);
   if (params.search) qs.append('search', params.search);
   if (params.limit) qs.append('limit', String(params.limit));
-  return await outstockRequest(`orders?${qs.toString()}`, { method: 'GET' });
+
+  const res = await outstockRequest(`orders?${qs.toString()}`, { method: 'GET' });
+  if (res?.success && Array.isArray(res.orders)) {
+    if (params.branchId) {
+      cacheOrders(params.branchId, res.orders);
+      return { success: true, orders: getCachedOrders(params.branchId) };
+    }
+    return res;
+  }
+
+  // استرجاع الكاش المحلي فورا عند انقطاع الشبكة مع دمج طلبات الأوفلاين
+  if (params.branchId && (res?.networkError || (typeof navigator !== 'undefined' && !navigator.onLine))) {
+    const cached = getCachedOrders(params.branchId);
+    if (cached && cached.length > 0) {
+      let filtered = cached;
+      if (params.status === 'active') {
+        filtered = filtered.filter(o => {
+          const st = o.order_status || o.orderStatus;
+          return st !== 'delivered' && st !== 'cancelled';
+        });
+      }
+      if (params.search) {
+        const s = String(params.search).toLowerCase().trim();
+        filtered = filtered.filter(o =>
+          (o.order_number && o.order_number.toLowerCase().includes(s)) ||
+          (o.customer_name && o.customer_name.toLowerCase().includes(s)) ||
+          (o.customer_phone && o.customer_phone.includes(s)) ||
+          (o.barcode_data && o.barcode_data.includes(s))
+        );
+      }
+      return { success: true, orders: filtered, isFromCache: true };
+    }
+  }
+
+  return res;
 }
 
 export async function outstockCreateOrder(orderData) {
-  return await outstockRequest('orders', {
+  // إذا كان الجهاز في وضع عدم الاتصال حالياً، يتم الحفظ في طابور الأوفلاين مباشرة
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    try {
+      const offlineOrder = enqueueOfflineOrder(orderData);
+      return {
+        success: true,
+        order: offlineOrder,
+        isOffline: true,
+        message: 'تم حفظ الطلب محلياً بنجاح (وضع عدم الاتصال)، وسيتم مزامنته تلقائياً فور عودة الاتصال'
+      };
+    } catch (e) {
+      return { success: false, error: 'تعذر الحفظ محلياً: ' + e.message };
+    }
+  }
+
+  const res = await outstockRequest('orders', {
     method: 'POST',
     body: JSON.stringify(orderData)
   });
+
+  // إذا فشل الطلب بسبب انقطاع مفاجئ في الشبكة، نحفظه كأوفلاين بدون خسارة بيانات العميل
+  if (res?.networkError) {
+    try {
+      const offlineOrder = enqueueOfflineOrder(orderData);
+      return {
+        success: true,
+        order: offlineOrder,
+        isOffline: true,
+        message: 'تعذر الوصول للخادم - تم حفظ الطلب محلياً بنجاح وسيتم إرساله تلقائياً فور توفر الشبكة'
+      };
+    } catch (e) {
+      return res;
+    }
+  }
+
+  return res;
 }
 
 export async function outstockDeliverOrder(orderId) {
@@ -180,7 +279,29 @@ export async function outstockGetDeficiencies(params = {}) {
   const qs = new URLSearchParams();
   if (params.branchId) qs.append('branchId', params.branchId);
   if (params.search) qs.append('search', params.search);
-  return await outstockRequest(`deficiencies?${qs.toString()}`, { method: 'GET' });
+
+  const res = await outstockRequest(`deficiencies?${qs.toString()}`, { method: 'GET' });
+  if (res?.success && Array.isArray(res.deficiencies)) {
+    if (params.branchId) cacheDeficiencies(params.branchId, res.deficiencies);
+    return res;
+  }
+
+  // دعم الأوفلاين للنواقص
+  if (params.branchId && (res?.networkError || (typeof navigator !== 'undefined' && !navigator.onLine))) {
+    const cached = getCachedDeficiencies(params.branchId);
+    if (cached && cached.length > 0) {
+      let filtered = cached;
+      if (params.search) {
+        const s = String(params.search).toLowerCase().trim();
+        filtered = filtered.filter(d =>
+          (d.medication_name && d.medication_name.toLowerCase().includes(s))
+        );
+      }
+      return { success: true, deficiencies: filtered, isFromCache: true };
+    }
+  }
+
+  return res;
 }
 
 export async function outstockReorderDeficiency(deficiencyId, responsiblePharmacist) {

@@ -5,6 +5,7 @@ import { getNotificationTarget, getNotificationTargetTab, isRequestNotification 
 import { triggerAndroidApkDownload } from '../../utils/nativeAppUpdater';
 import { getPublicSystemUrl } from '../../utils/systemUrlHelper';
 import AndroidSettingsModal from '../modals/AndroidSettingsModal';
+import OwnerOverrideModal from '../common/OwnerOverrideModal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🌟 ADAPTIVE DROPDOWN ITEM WITH SMART BIDIRECTIONAL FLYOUT (Anti-Clipping Engine)
@@ -663,6 +664,7 @@ export default function DesktopLayout({
   });
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [drawerExpandedGroup, setDrawerExpandedGroup] = useState(null);
+  const [ownerAuthModalForOutstock, setOwnerAuthModalForOutstock] = useState(false);
 
   useEffect(() => {
     const handleResize = () => {
@@ -1050,13 +1052,27 @@ export default function DesktopLayout({
       ]
     },
     {
-      id: 'accounts',
-      label: 'الحسابات (ERP)',
+      id: 'pharma-system-group',
+      label: 'PharmaSystem',
       icon: '🏛️',
-      isSingle: true,
-      targetTab: 'accounts',
-      navigateToAccounts: true,
-      openInNewTab: true
+      children: [
+        {
+          id: 'accounts',
+          targetTab: 'accounts',
+          label: 'الحسابات (ERP)',
+          icon: '🏛️',
+          desc: 'منظومة الحسابات العامة وشجرة الحسابات (ERP)',
+          navigateToAccounts: true,
+          openInNewTab: true
+        },
+        {
+          id: 'outstock',
+          targetTab: 'outstock',
+          label: 'نواقص الأدوية والطلبات',
+          icon: '💊',
+          desc: 'نظام إدارة ومتابعة نواقص الأدوية وطلبات الشراء والعملاء'
+        }
+      ]
     },
     {
       id: 'settings-group',
@@ -1360,6 +1376,29 @@ export default function DesktopLayout({
       ]
     },
     {
+      id: 'pharma-system-group',
+      label: 'PharmaSystem',
+      icon: '🏛️',
+      children: [
+        {
+          id: 'accounts',
+          targetTab: 'accounts',
+          label: 'الحسابات (ERP)',
+          icon: '🏛️',
+          desc: 'منظومة الحسابات العامة وشجرة الحسابات (ERP)',
+          navigateToAccounts: true,
+          openInNewTab: true
+        },
+        {
+          id: 'outstock',
+          targetTab: 'outstock',
+          label: 'نواقص الأدوية والطلبات',
+          icon: '💊',
+          desc: 'نظام إدارة ومتابعة نواقص الأدوية وطلبات الشراء والعملاء'
+        }
+      ]
+    },
+    {
       id: 'bylaws',
       label: 'لائحة العمل والجزاءات',
       icon: '📜',
@@ -1596,6 +1635,25 @@ const handleMenuClick = (menu) => {
     return;
   }
 if (menu.isSingle) {
+  if (menu.targetTab === 'outstock' || menu.id === 'outstock') {
+    const isOwnerSession = (currentRole === 'owner' || userProfile?.isOwner) || (() => {
+      try {
+        return localStorage.getItem('app_auth_role') === 'owner' ||
+               localStorage.getItem('app_owner_authenticated') === 'true' ||
+               sessionStorage.getItem('app_owner_authenticated') === 'true' ||
+               sessionStorage.getItem('app_outstock_owner_unlocked') === 'true';
+      } catch {
+        return false;
+      }
+    })();
+
+    if (currentRole === 'admin' && !isOwnerSession) {
+      setOpenDropdown(null);
+      setHoveredFlyoutId(null);
+      setOwnerAuthModalForOutstock(true);
+      return;
+    }
+  }
   if (menu.targetTab === 'accounts' || menu.navigateToAccounts || menu.id === 'accounts') {
     window.open(getPublicSystemUrl('/accounts'), '_blank');
   } else if (menu.openInNewTab || menu.targetTab === 'pharmacy-archive') {
@@ -1625,6 +1683,25 @@ const handleSubItemClick = (subItem) => {
     setOpenDropdown(null);
     setHoveredFlyoutId(null);
     return;
+  }
+  if (subItem.targetTab === 'outstock' || subItem.id === 'outstock') {
+    const isOwnerSession = (currentRole === 'owner' || userProfile?.isOwner) || (() => {
+      try {
+        return localStorage.getItem('app_auth_role') === 'owner' ||
+               localStorage.getItem('app_owner_authenticated') === 'true' ||
+               sessionStorage.getItem('app_owner_authenticated') === 'true' ||
+               sessionStorage.getItem('app_outstock_owner_unlocked') === 'true';
+      } catch {
+        return false;
+      }
+    })();
+
+    if (currentRole === 'admin' && !isOwnerSession) {
+      setOpenDropdown(null);
+      setHoveredFlyoutId(null);
+      setOwnerAuthModalForOutstock(true);
+      return;
+    }
   }
 if (subItem.targetTab === 'accounts' || subItem.navigateToAccounts || subItem.id === 'accounts') {
   window.open(getPublicSystemUrl('/accounts'), '_blank');
@@ -3585,6 +3662,24 @@ return (
     isOpen={isAndroidSettingsOpen}
     onClose={() => setIsAndroidSettingsOpen(false)}
   />
+
+  {/* نافذة التحقق من هوية المالك لفتح نظام النواقص والطلبات */}
+  {ownerAuthModalForOutstock && (
+    <OwnerOverrideModal
+      isOpen={ownerAuthModalForOutstock}
+      onClose={() => setOwnerAuthModalForOutstock(false)}
+      actionTitle="🔒 تصريح المالك لفتح نظام النواقص والطلبات"
+      actionDetails="الدخول إلى منظومة نواقص الأدوية والطلبات محمي ويتطلب حصرًا اعتماد هوية المالك (اسم مستخدم وكلمة مرور المالك)."
+      onSuccess={() => {
+        try {
+          sessionStorage.setItem('app_outstock_owner_unlocked', 'true');
+        } catch {}
+        setActiveTab('outstock');
+        setOwnerAuthModalForOutstock(false);
+      }}
+      state={{ orgSettings }}
+    />
+  )}
 </div>
 );
 }

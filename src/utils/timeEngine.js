@@ -11,6 +11,18 @@ let isSyncedWithServer = false;
 let lastSyncTimestamp = 0;
 let syncPromise = null;
 
+// مرساة التوقيت المونوتوني الفائق (Monotonic Performance Anchor)
+let anchorPerfNow = typeof performance !== 'undefined' ? performance.now() : 0;
+let anchorServerUtc = null;
+let anchorLocalEpoch = Date.now();
+
+// إعداد الساعة المنطقية الهجينة (Hybrid Logical Clock - HLC)
+let hlcLastPhysical = 0;
+let hlcCounter = 0;
+const DEVICE_ID = typeof crypto !== 'undefined' && crypto.randomUUID
+  ? crypto.randomUUID().slice(0, 8)
+  : `dev_${Math.random().toString(36).slice(2, 8)}`;
+
 // استرجاع آخر إزاحة محفوظة في الجلسة إن وُجدت
 try {
   const savedOffset = sessionStorage.getItem('hr_server_time_offset');
@@ -22,7 +34,7 @@ try {
 }
 
 /**
- * مزامنة التوقيت مع الخادم وحساب فرق التوقيت الدقيق
+ * مزامنة التوقيت مع الخادم وحساب فرق التوقيت الدقيق وتثبيت المرساة المونوتونية
  */
 export async function syncRealTime(force = false) {
   const now = Date.now();
@@ -37,24 +49,32 @@ export async function syncRealTime(force = false) {
       const startTime = performance.now();
       let serverUtcMs = null;
 
-      // 1. محاولة الاتصال بالخادم الرئيسي والحصول على هيدر Date أو timestamp
-      try {
-        const response = await fetch(`${API_BASE_URL}/health?_t=${Date.now()}`, {
-          method: 'GET',
-          cache: 'no-store'
-        });
-        const endTime = performance.now();
-        const roundTrip = (endTime - startTime) / 2;
+      // 1. محاولة الاتصال بالخادم الرئيسي (مسار ping السريع أو health)
+      const endpointsToTry = [
+        `${API_BASE_URL}/ping`,
+        `${API_BASE_URL}/health?_t=${Date.now()}`
+      ];
 
-        const dateHeader = response.headers.get('Date') || response.headers.get('date');
-        if (dateHeader) {
-          const parsed = Date.parse(dateHeader);
-          if (!isNaN(parsed)) {
-            serverUtcMs = parsed + roundTrip;
+      for (const endpoint of endpointsToTry) {
+        try {
+          const response = await fetch(endpoint, {
+            method: 'GET',
+            cache: 'no-store'
+          });
+          const endTime = performance.now();
+          const roundTrip = (endTime - startTime) / 2;
+
+          const dateHeader = response.headers.get('Date') || response.headers.get('date');
+          if (dateHeader) {
+            const parsed = Date.parse(dateHeader);
+            if (!isNaN(parsed)) {
+              serverUtcMs = parsed + roundTrip;
+              break;
+            }
           }
+        } catch {
+          // جرب المسار التالي
         }
-      } catch (err) {
-        // Fallback to secondary source
       }
 
       // 2. إذا لم يتوفر هيدر التاريخ من الخادم الرئيسي، استخدام خادم توقيت بديل
@@ -80,11 +100,16 @@ export async function syncRealTime(force = false) {
         isSyncedWithServer = true;
         lastSyncTimestamp = Date.now();
 
+        // تثبيت المرساة المونوتونية (Monotonic Anchor Point)
+        anchorPerfNow = typeof performance !== 'undefined' ? performance.now() : 0;
+        anchorServerUtc = serverUtcMs;
+        anchorLocalEpoch = localNow;
+
         try {
           sessionStorage.setItem('hr_server_time_offset', String(serverTimeOffsetMs));
         } catch {}
 
-        console.info(`[TimeEngine] 🌐 تم توثيق التوقيت مع الخادم بنجاح. فرق التوقيت: ${serverTimeOffsetMs}ms`);
+        console.info(`[TimeEngine] 🌐 تم توثيق التوقيت المونوتوني مع الخادم. إزاحة: ${serverTimeOffsetMs}ms (Anchor calibrated)`);
       }
     } catch (e) {
       console.warn('[TimeEngine] فشل التحقق من توقيت الخادم، سيتم استخدام التوقيت المخزن/المحلي مؤقتاً:', e);
@@ -109,10 +134,122 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * إرجاع كائن Date الموثق الفعلي (مع تطبيق إزاحة الخادم)
+ * إرجاع الوقت المونوتوني الموثق بالمللي ثانية (محمي من تغيير ساعة النظام اليدوي)
+ */
+export function getMonotonicServerEpoch() {
+  if (anchorServerUtc && typeof performance !== 'undefined') {
+    const elapsedPerfMs = performance.now() - anchorPerfNow;
+    return Math.round(anchorServerUtc + elapsedPerfMs);
+  }
+  return Date.now() + serverTimeOffsetMs;
+}
+
+/**
+ * فحص ما إذا كان هناك تلاعب أو قفزة مفاجئة في ساعة الجهاز الفيزيائية
+ */
+export function checkClockTampering() {
+  if (!anchorServerUtc || typeof performance === 'undefined') {
+    return { tampered: false, driftMs: 0 };
+  }
+  const expectedLocalDelta = performance.now() - anchorPerfNow;
+  const actualLocalDelta = Date.now() - anchorLocalEpoch;
+  const driftMs = Math.abs(actualLocalDelta - expectedLocalDelta);
+  return {
+    tampered: driftMs > 60000, // فارق أكثر من دقيقة يدل على تغيير يدوي لساعة الجهاز
+    driftMs: Math.round(driftMs)
+  };
+}
+
+/**
+ * 🚀 توليد طابع زمني منطقي هجين (Hybrid Logical Clock - HLC)
+ * يضمن الترتيب السببي المطلق للعمليات عبر الأجهزة الموزعة حتى في نفس المللي ثانية أو عند انقطاع النت
+ */
+export function generateHlcTimestamp(customEpoch = null) {
+  const physicalMs = customEpoch !== null ? Number(customEpoch) : getMonotonicServerEpoch();
+
+  if (physicalMs > hlcLastPhysical) {
+    hlcLastPhysical = physicalMs;
+    hlcCounter = 0;
+  } else {
+    // حدث في نفس المللي ثانية أو ساعة الجهاز تأخرت -> زيادة العداد المنطقي
+    hlcCounter++;
+  }
+
+  const paddedCounter = String(hlcCounter).padStart(4, '0');
+  const isoTime = new Date(hlcLastPhysical).toISOString();
+  // صيغة الـ HLC: YYYY-MM-DDTHH:mm:ss.sssZ_COUNTER_DEVICEID
+  return `${isoTime}_${paddedCounter}_${DEVICE_ID}`;
+}
+
+/**
+ * معايرة الساعة المنطقية المحلية مع طابع زمني مستلم من جهاز آخر أو الخادم (Lamport Causality)
+ */
+export function calibrateHlcWithRemote(remoteHlcString) {
+  if (!remoteHlcString || typeof remoteHlcString !== 'string') return;
+  const parsed = parseHlc(remoteHlcString);
+  if (!parsed) return;
+
+  const currentLocal = getMonotonicServerEpoch();
+  const maxPhysical = Math.max(currentLocal, hlcLastPhysical, parsed.physicalMs);
+
+  if (maxPhysical === hlcLastPhysical && maxPhysical === parsed.physicalMs) {
+    hlcCounter = Math.max(hlcCounter, parsed.counter) + 1;
+  } else if (maxPhysical === parsed.physicalMs) {
+    hlcLastPhysical = maxPhysical;
+    hlcCounter = parsed.counter + 1;
+  } else {
+    hlcLastPhysical = maxPhysical;
+    hlcCounter = 0;
+  }
+}
+
+/**
+ * تفكيك طابع الـ HLC لمكوناته الفيزيائية والمنطقية
+ */
+export function parseHlc(hlcString) {
+  if (!hlcString || typeof hlcString !== 'string') return null;
+  const parts = hlcString.split('_');
+  if (parts.length < 3) return null;
+  const iso = parts[0];
+  const counter = parseInt(parts[1], 10) || 0;
+  const deviceId = parts[2] || '';
+  const physicalMs = new Date(iso).getTime();
+  return {
+    iso,
+    physicalMs,
+    counter,
+    deviceId
+  };
+}
+
+/**
+ * مقارنة طابعين HLC لحسم النزاعات التلقائية والترتيب الدقيق (Deterministic Tie-breaking)
+ * returns -1 if a < b, 1 if a > b, 0 if equal
+ */
+export function compareHlc(hlcA, hlcB) {
+  if (!hlcA && !hlcB) return 0;
+  if (!hlcA) return -1;
+  if (!hlcB) return 1;
+
+  const pA = parseHlc(hlcA);
+  const pB = parseHlc(hlcB);
+
+  if (!pA || !pB) return String(hlcA).localeCompare(String(hlcB));
+
+  if (pA.physicalMs !== pB.physicalMs) {
+    return pA.physicalMs < pB.physicalMs ? -1 : 1;
+  }
+  if (pA.counter !== pB.counter) {
+    return pA.counter < pB.counter ? -1 : 1;
+  }
+  return pA.deviceId.localeCompare(pB.deviceId);
+}
+
+/**
+ * إرجاع كائن Date الموثق الفعلي (مع تطبيق المرساة المونوتونية المقاومة للتلاعب)
  */
 export function getRealDate() {
-  return new Date(Date.now() + serverTimeOffsetMs);
+  return new Date(getMonotonicServerEpoch());
 }
 
 /**
@@ -201,3 +338,4 @@ export function todayStr() {
 export function nowTimeStr() {
   return getRealNowTimeStr();
 }
+

@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { fetchCurrentIP, checkDeviceAuthorization } from '../../utils/deviceAuth';
 import FaceVerificationOverlay from '../attendance/FaceVerificationOverlay';
+import { isBranchMatch } from '../../utils/branchMatcher';
 
 import { useData } from '../../context/DataContext';
 import { useOptionalUI } from '../../context/UIContext';
@@ -36,7 +37,7 @@ export default function ElectronicKioskView({
   const [now, setNow] = useState(Date.now());
   const [currentIp, setCurrentIp] = useState('');
   const [authStatus, setAuthStatus] = useState({ isAuthorized: true });
-  
+
   const [inputCode, setInputCode] = useState('');
   const [matchedEmp, setMatchedEmp] = useState(null);
   const [blockedStatusModal, setBlockedStatusModal] = useState(null);
@@ -109,7 +110,7 @@ export default function ElectronicKioskView({
       if (typeof navigator === 'undefined' || navigator.onLine) {
         getPendingKioskCount().then((count) => {
           if (count > 0) {
-            flushKioskOutbox().catch(() => {});
+            flushKioskOutbox().catch(() => { });
           }
         });
       }
@@ -121,17 +122,74 @@ export default function ElectronicKioskView({
       clearInterval(intervalId);
     };
   }, []);
-  
+
   const [activeAction, setActiveAction] = useState(null);
   const [selectedBranchId, setSelectedBranchId] = useState(null);
-  
+
   const urlBranchParam = typeof window !== 'undefined'
     ? (new URLSearchParams(window.location.search).get('branchId') || new URLSearchParams(window.location.search).get('branch'))
     : null;
   const cleanKioskBranchId = (kioskBranchId && String(kioskBranchId).trim()) || null;
   const cleanUrlParam = (urlBranchParam && String(urlBranchParam).trim()) || null;
   const effectiveKioskBranchId = cleanKioskBranchId || cleanUrlParam || null;
-  const isGeneralKioskLink = !effectiveKioskBranchId;
+
+  // البحث عن كائن الفرع المخصص للكشك ومطابقته بأمان وحسم
+  const kioskBranchObj = useMemo(() => {
+    if (!effectiveKioskBranchId) return null;
+    return (state?.branches || []).find(b => isBranchMatch(effectiveKioskBranchId, b)) || null;
+  }, [effectiveKioskBranchId, state?.branches]);
+
+  const resolvedKioskBranchId = kioskBranchObj ? String(kioskBranchObj.id) : (effectiveKioskBranchId ? String(effectiveKioskBranchId) : null);
+  const resolvedKioskBranchName = kioskBranchObj?.name || '';
+  const isGeneralKioskLink = !resolvedKioskBranchId;
+
+  // دالة موحدة ومعتمدة لحسم الفرع المستهدف للبصمة بأعلى دقة وحوكمة
+  const resolveTargetBranch = (emp, chosenBranchId) => {
+    // 1. الأولوية القصوى: إذا كان الكشك مخصصاً لفرع محدد (Dedicated Branch Link)، فالبصمة تخص هذا الفرع حصراً
+    if (kioskBranchObj) {
+      return {
+        id: kioskBranchObj.id,
+        name: kioskBranchObj.name,
+        code: kioskBranchObj.branchCode || kioskBranchObj.code || '',
+        obj: kioskBranchObj
+      };
+    }
+    // 2. إذا تم اختيار فرع في الكشك العام بواسطة الموظف
+    const candidateId = chosenBranchId || selectedBranchId;
+    if (candidateId) {
+      const found = (state?.branches || []).find(b => isBranchMatch(candidateId, b));
+      if (found) {
+        return {
+          id: found.id,
+          name: found.name,
+          code: found.branchCode || found.code || '',
+          obj: found
+        };
+      }
+      return { id: candidateId, name: `فرع ${candidateId}`, code: '', obj: null };
+    }
+    // 3. وردية الموظف النشطة حالياً إن وجدت
+    const empActive = emp ? (state?.activeShifts?.[emp.id] || state?.activeShifts?.[String(emp.id)]) : null;
+    if (empActive?.branchId) {
+      const found = (state?.branches || []).find(b => isBranchMatch(empActive.branchId, b));
+      if (found) return { id: found.id, name: found.name, code: found.branchCode || found.code || '', obj: found };
+    }
+    // 4. فرع الموظف الأساسي
+    const primaryId = emp?.branchId || (emp?.branchesDetails && emp.branchesDetails[0]?.branchId);
+    if (primaryId) {
+      const found = (state?.branches || []).find(b => isBranchMatch(primaryId, b));
+      if (found) return { id: found.id, name: found.name, code: found.branchCode || found.code || '', obj: found };
+      return { id: primaryId, name: emp?.branchName || `فرع ${primaryId}`, code: '', obj: null };
+    }
+    // 5. الملاذ الافتراضي
+    const defaultBranch = state?.branches?.[0];
+    return {
+      id: defaultBranch?.id || '',
+      name: defaultBranch?.name || 'الفرع الرئيسي',
+      code: defaultBranch?.branchCode || defaultBranch?.code || '',
+      obj: defaultBranch || null
+    };
+  };
 
   // Extract all unique assigned branches for an employee (primary + multi-branch assignments)
   const getEmployeeAssignedBranches = (emp) => {
@@ -142,11 +200,7 @@ export default function ElectronicKioskView({
       if (!bId) return;
       const strId = String(bId).trim();
       if (!strId) return;
-      const foundBranch = (state?.branches || []).find((b) =>
-        String(b.id).trim() === strId ||
-        String(b.branchCode || '').trim() === strId ||
-        String(b.id).replace(/^branch_/, '') === strId.replace(/^branch_/, '')
-      );
+      const foundBranch = (state?.branches || []).find((b) => isBranchMatch(strId, b));
       const resolvedId = foundBranch ? String(foundBranch.id) : strId;
       if (!branchMap.has(resolvedId)) {
         branchMap.set(resolvedId, {
@@ -189,7 +243,7 @@ export default function ElectronicKioskView({
 
   const todayStr = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
   const rawActiveShift = matchedEmp ? (state.activeShifts?.[matchedEmp.id] || state.activeShifts?.[String(matchedEmp.id)]) : null;
-  
+
   // الوردية النشطة تعتبر تالفة فقط إذا مر عليها أكثر من 36 ساعة بدون إغلاق
   const rawShiftEpoch = rawActiveShift ? (rawActiveShift.startEpoch || (rawActiveShift.date && rawActiveShift.timeIn ? new Date(`${rawActiveShift.date}T${rawActiveShift.timeIn.slice(0, 5)}:00`).getTime() : 0)) : 0;
   const isStaleActiveShift = Boolean(rawActiveShift && rawShiftEpoch && (Date.now() - rawShiftEpoch > 36 * 3600 * 1000));
@@ -199,21 +253,21 @@ export default function ElectronicKioskView({
     if (!s) return false;
     if (s.status === 'cancelled' || s.isCancelled) return false;
     const hasValidTimeOut = Boolean(
-      s.timeOut && 
-      s.timeOut !== '—' && 
-      s.timeOut !== '-' && 
-      s.timeOut !== '' && 
-      s.timeOut !== 'قيد العمل الآن' && 
-      s.timeOut !== 'قيد العمل' && 
-      s.timeOut !== 'undefined' && 
+      s.timeOut &&
+      s.timeOut !== '—' &&
+      s.timeOut !== '-' &&
+      s.timeOut !== '' &&
+      s.timeOut !== 'قيد العمل الآن' &&
+      s.timeOut !== 'قيد العمل' &&
+      s.timeOut !== 'undefined' &&
       s.timeOut !== 'null'
     );
     if (hasValidTimeOut) return false;
     const hasValidTimeIn = Boolean(
-      s.timeIn && 
-      s.timeIn !== '—' && 
-      s.timeIn !== '' && 
-      s.timeIn !== 'undefined' && 
+      s.timeIn &&
+      s.timeIn !== '—' &&
+      s.timeIn !== '' &&
+      s.timeIn !== 'undefined' &&
       s.timeIn !== 'null'
     );
     return hasValidTimeIn;
@@ -252,19 +306,38 @@ export default function ElectronicKioskView({
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    async function initDeviceCheck() {
-      const ip = await fetchCurrentIP();
-      setCurrentIp(ip);
-
-      const auth = checkDeviceAuthorization(
-        ipRestrictions || { enabled: false },
-        ip
-      );
-      setAuthStatus(auth);
+  const [bypassedAuth, setBypassedAuth] = useState(() => {
+    try {
+      return sessionStorage.getItem('kiosk_emergency_bypass_ip') === 'true';
+    } catch {
+      return false;
     }
-    initDeviceCheck();
-  }, [ipRestrictions]);
+  });
+  const [showEmergencyPinModal, setShowEmergencyPinModal] = useState(false);
+  const [emergencyPinInput, setEmergencyPinInput] = useState('');
+  const [emergencyPinError, setEmergencyPinError] = useState('');
+
+  const performDeviceCheck = async () => {
+    const ip = await fetchCurrentIP();
+    setCurrentIp(ip);
+
+    if (bypassedAuth) {
+      setAuthStatus({ isAuthorized: true, reason: 'emergency_bypassed', message: 'تم التجاوز بتصريح طوارئ' });
+      return;
+    }
+
+    const auth = checkDeviceAuthorization(
+      ipRestrictions || { enabled: false },
+      ip,
+      kioskBranchObj,
+      state?.branches || []
+    );
+    setAuthStatus(auth);
+  };
+
+  useEffect(() => {
+    performDeviceCheck();
+  }, [ipRestrictions, kioskBranchObj, state?.branches, bypassedAuth]);
 
   const handleCodeSubmit = (e) => {
     e.preventDefault();
@@ -284,9 +357,9 @@ export default function ElectronicKioskView({
       return;
     }
 
-    const emp = (employees || []).find(e => 
-      String(e.code || '').trim() === cleanCode || 
-      normalizeDigits(e.code) === cleanCode || 
+    const emp = (employees || []).find(e =>
+      String(e.code || '').trim() === cleanCode ||
+      normalizeDigits(e.code) === cleanCode ||
       String(e.id || '').trim() === cleanCode
     );
 
@@ -317,23 +390,19 @@ export default function ElectronicKioskView({
         return;
       }
 
-      if (kioskBranchId) {
+      if (kioskBranchObj) {
         const isAdministrative = Boolean(emp.isAdministrative || emp.canPunchAnyBranch);
         // يتم كسر قيد الفرع الجغرافي في كشك البصمة حصرياً على الموظفين الإداريين فقط
         if (!isAdministrative) {
-          const cleanKioskBranch = String(kioskBranchId).trim().replace(/^branch_/, '');
-          const empBranchClean = String(emp.branchId || '').trim().replace(/^branch_/, '');
-          const hasSecondaryBranch = Array.isArray(emp.branchesDetails) && emp.branchesDetails.some(b => 
-            String(b?.branchId || '').trim().replace(/^branch_/, '') === cleanKioskBranch
-          );
-          const belongsToBranch = empBranchClean === cleanKioskBranch || hasSecondaryBranch;
+          const belongsToBranch = isBranchMatch(emp.branchId, kioskBranchObj) ||
+            (Array.isArray(emp.branchesDetails) && emp.branchesDetails.some(bd => isBranchMatch(bd?.branchId || bd?.id || bd?.code, kioskBranchObj)));
           if (!belongsToBranch) {
             setKioskAlertModal({
               isOpen: true,
               type: 'error',
               title: 'غير مصرح بالدخول',
               subtitle: emp.name,
-              note: 'هذا الموظف غير مسجل أو غير مسموح له بتسجيل البصمة في هذا الفرع.',
+              note: `هذا الموظف غير مسجل أو غير مسموح له بتسجيل البصمة في فرع "${kioskBranchObj.name}".`,
               countdown: 5,
               onClose: () => setKioskAlertModal(null)
             });
@@ -374,14 +443,15 @@ export default function ElectronicKioskView({
           return;
         }
       }
-      
+
       const assigned = getEmployeeAssignedBranches(emp);
       const activeS = (state?.activeShifts?.[emp.id] || state?.activeShifts?.[String(emp.id)]);
       let defaultBranchId = '';
-      if (activeS && activeS.branchId) {
+      // في حالة الرابط المخصص للفرع، يكون الفرع الافتراضي والوحيد هو فرع الكشك
+      if (resolvedKioskBranchId) {
+        defaultBranchId = String(resolvedKioskBranchId);
+      } else if (activeS && activeS.branchId) {
         defaultBranchId = String(activeS.branchId);
-      } else if (effectiveKioskBranchId) {
-        defaultBranchId = String(effectiveKioskBranchId);
       } else if (assigned.length > 0) {
         defaultBranchId = String(assigned[0].id);
       } else {
@@ -411,7 +481,7 @@ export default function ElectronicKioskView({
             String(emp.jobTitle || '').trim().toLowerCase().includes(String(d.targetJobTitle || '').trim().toLowerCase())
           ));
         if (!matchesScope) return false;
-        const alreadyConfirmed = (d.readConfirmations || []).some(c => 
+        const alreadyConfirmed = (d.readConfirmations || []).some(c =>
           String(c.employeeId) === String(emp.id) || (emp.code && String(c.employeeCode) === String(emp.code))
         );
         return !alreadyConfirmed;
@@ -423,27 +493,27 @@ export default function ElectronicKioskView({
         // A. Employee-specific target
         if (d.scope === 'employee') {
           const isTargetEmp = (d.targetEmployeeId && String(d.targetEmployeeId) === String(emp.id)) ||
-                              (d.targetEmployeeCode && String(d.targetEmployeeCode) === String(emp.code)) ||
-                              (d.targetEmployeeId && String(d.targetEmployeeId) === String(emp.code));
+            (d.targetEmployeeCode && String(d.targetEmployeeCode) === String(emp.code)) ||
+            (d.targetEmployeeId && String(d.targetEmployeeId) === String(emp.code));
           if (!isTargetEmp) return false;
         } else {
           // B. Branch check (Matches employee's main branch, kiosk branch, default branch, or any secondary branch)
           const dBranchStr = String(d.branchId || '').trim();
           const cleanDBranch = dBranchStr.replace(/^branch_/, '');
-          
+
           const empMainBranchStr = String(emp.branchId || '').trim();
           const cleanEmpMain = empMainBranchStr.replace(/^branch_/, '');
-          
+
           const kioskBranchStr = String(kioskBranchId || '').trim();
           const cleanKiosk = kioskBranchStr.replace(/^branch_/, '');
-          
+
           const defaultBranchStr = String(defaultBranchId || '').trim();
           const cleanDefault = defaultBranchStr.replace(/^branch_/, '');
 
           const isMainBranch = cleanDBranch && cleanEmpMain && cleanDBranch === cleanEmpMain;
           const isKioskBranch = cleanDBranch && cleanKiosk && cleanDBranch === cleanKiosk;
           const isDefaultBranch = cleanDBranch && cleanDefault && cleanDBranch === cleanDefault;
-          
+
           const isSecondaryBranch = Array.isArray(emp.branchesDetails) && emp.branchesDetails.some(bd => {
             const bIdStr = String(bd?.branchId || '').trim().replace(/^branch_/, '');
             return bIdStr && bIdStr === cleanDBranch;
@@ -462,7 +532,7 @@ export default function ElectronicKioskView({
         }
 
         // D. Has employee already confirmed reading this directive?
-        const alreadyConfirmed = (d.readConfirmations || []).some(c => 
+        const alreadyConfirmed = (d.readConfirmations || []).some(c =>
           String(c.employeeId) === String(emp.id) || (emp.code && String(c.employeeCode) === String(emp.code))
         );
         return !alreadyConfirmed;
@@ -607,9 +677,9 @@ export default function ElectronicKioskView({
     const modalTitle = actionTitles[actionType] || `تم توثيق ${actionBadge} بنجاح!`;
     const modalNote = actionNotes[actionType] || '✅ تم تسجيل الإجراء فورياً من لحظة التقاط الصورة. تم إرسال الصورة للإدارة للتأكيد والمطابقة.';
 
-    const effectiveBranchId = selectedBranchId || currentEmp?.branchId || kioskBranchId;
-    const branchObj = (state?.branches || []).find(b => String(b.id) === String(effectiveBranchId)) || state?.branches?.[0];
-    const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
+    const targetBranch = resolveTargetBranch(currentEmp, selectedBranchId);
+    const effectiveBranchId = targetBranch.id;
+    const branchName = targetBranch.name;
 
     const now = new Date();
     const dateStr = getRealTodayStr ? getRealTodayStr() : now.toISOString().slice(0, 10);
@@ -780,7 +850,7 @@ export default function ElectronicKioskView({
 
     } else if (actionType === 'shift_end') {
       const active = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];
-      
+
       const openShiftIdx = updatedShifts.findIndex(s =>
         (String(s.employeeId) === String(currentEmp.id) || (currentEmp.code && String(s.employeeCode) === String(currentEmp.code))) &&
         s.date === (active?.date || dateStr) &&
@@ -827,6 +897,10 @@ export default function ElectronicKioskView({
       // حذف الوردية من الورديات النشطة
       delete updatedActiveShifts[currentEmp.id];
       delete updatedActiveShifts[String(currentEmp.id)];
+      if (currentEmp.code) {
+        delete updatedActiveShifts[currentEmp.code];
+        delete updatedActiveShifts[String(currentEmp.code)];
+      }
 
       const closedShiftData = {
         id: targetShiftId,
@@ -917,21 +991,61 @@ export default function ElectronicKioskView({
         updatedActiveShifts[currentEmp.id] = pausedShift;
         updatedActiveShifts[String(currentEmp.id)] = pausedShift;
       }
+
+      // تحديث سجل الوردية المفتوح في مصفوفة shifts فورياً لضمان عدم ضياع البريك
+      const openIdx = updatedShifts.findIndex(s =>
+        (String(s.employeeId) === String(currentEmp.id) || (currentEmp.code && String(s.employeeCode) === String(currentEmp.code))) &&
+        s.date === (active?.date || dateStr) &&
+        (!s.timeOut || s.timeOut === '—' || s.timeOut === '' || s.isLiveActive)
+      );
+      if (openIdx >= 0) {
+        updatedShifts[openIdx] = {
+          ...updatedShifts[openIdx],
+          isPaused: true,
+          isOnBreak: true,
+          breakStartTime: punchTime,
+          pauseStartEpoch: now.getTime(),
+          updatedAt: now.toISOString()
+        };
+      }
     } else if (actionType === 'break_end') {
       const active = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];
+      let addedPauseMs = 0;
       if (active) {
-        const pauseDuration = now.getTime() - (active.pauseStartEpoch || now.getTime());
+        addedPauseMs = now.getTime() - (active.pauseStartEpoch || now.getTime());
         const resumedShift = {
           ...active,
           isPaused: false,
           isOnBreak: false,
           breakStartTime: null,
           pauseStartEpoch: null,
-          accumulatedPauseMs: (active.accumulatedPauseMs || 0) + pauseDuration,
+          accumulatedPauseMs: (active.accumulatedPauseMs || 0) + addedPauseMs,
           updatedAt: now.getTime()
         };
         updatedActiveShifts[currentEmp.id] = resumedShift;
         updatedActiveShifts[String(currentEmp.id)] = resumedShift;
+      }
+
+      // تحديث سجل الوردية المفتوح واحتساب ساعات البريك في مصفوفة shifts فورياً
+      const openIdx = updatedShifts.findIndex(s =>
+        (String(s.employeeId) === String(currentEmp.id) || (currentEmp.code && String(s.employeeCode) === String(currentEmp.code))) &&
+        s.date === (active?.date || dateStr) &&
+        (!s.timeOut || s.timeOut === '—' || s.timeOut === '' || s.isLiveActive)
+      );
+      if (openIdx >= 0) {
+        const curPause = updatedShifts[openIdx].accumulatedPauseMs || 0;
+        const totalPause = curPause + addedPauseMs;
+        const trackedBreak = Math.round((totalPause / 3600000) * 100) / 100;
+        updatedShifts[openIdx] = {
+          ...updatedShifts[openIdx],
+          isPaused: false,
+          isOnBreak: false,
+          breakStartTime: null,
+          pauseStartEpoch: null,
+          accumulatedPauseMs: totalPause,
+          breakHours: trackedBreak,
+          updatedAt: now.toISOString()
+        };
       }
     }
 
@@ -955,21 +1069,28 @@ export default function ElectronicKioskView({
     }
     if (saveState) {
       try {
-        // استخدام deltaHint لإرسال activeShifts فقط (< 20KB) بدلاً من 6MB كاملة
-        // هذا يمنع مسح ورديات موظفين آخرين عند حفظ بصمة موظف جديد
-        saveState(finalState, { entityType: 'activeShifts' }).catch(err => console.error('[Kiosk Photo Attendance] Save error:', err));
+        saveState(finalState).catch(err => console.error('[Kiosk Photo Attendance] Save error:', err));
       } catch (err) {
         console.error('[Kiosk Photo Attendance] saveState error:', err);
       }
     }
 
-    // ⚡ تسجيل ذري في صندوق إرسال الكشك (Kiosk Outbox) لحفظ البصمة فورياً ومزامنتها بأمان
-    const photoActionType = (actionType === 'shift_start') ? 'check_in' : (actionType === 'shift_end') ? 'check_out' : null;
+    // ⚡ تسجيل ذري في صندوق إرسال الكشك (Kiosk Outbox) لحفظ البصمة فورياً ومزامنتها بأمان حتى بدون إنترنت
+    const photoActionType = (actionType === 'shift_start')
+      ? 'check_in'
+      : (actionType === 'shift_end')
+        ? 'check_out'
+        : (actionType === 'break_start')
+          ? 'break_start'
+          : (actionType === 'break_end')
+            ? 'break_end'
+            : null;
+
     if (photoActionType) {
       const photoShiftData = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];
       const photoShiftRecord = (actionType === 'shift_start')
         ? updatedShifts.find(s => s.id === shiftId)
-        : updatedShifts.find(s => String(s.employeeId) === String(currentEmp.id) && s.date === dateStr && s.timeOut && s.timeOut !== '—');
+        : updatedShifts.find(s => String(s.employeeId) === String(currentEmp.id) && s.date === dateStr);
 
       enqueueKioskPunch({
         employeeId: currentEmp.id,
@@ -1061,9 +1182,10 @@ export default function ElectronicKioskView({
     if (!matchedEmp) return;
     const empId = matchedEmp.id;
     const empName = matchedEmp.name;
-    const effectiveBranchId = selectedBranchId || matchedEmp.branchId || kioskBranchId;
-    const branchObj = (state?.branches || []).find(b => String(b.id) === String(effectiveBranchId)) || state?.branches?.[0];
-    const branchName = branchObj ? branchObj.name : 'الفرع';
+    const empCode = matchedEmp.code || '';
+    const targetBranch = resolveTargetBranch(matchedEmp, selectedBranchId);
+    const effectiveBranchId = targetBranch.id;
+    const branchName = targetBranch.name;
 
     // إعادة تهيئة المتغيرات فورياً حتى يكون الكشك جاهزاً للعملية التالية مباشرة
     setMatchedEmp(null);
@@ -1076,8 +1198,30 @@ export default function ElectronicKioskView({
         if (startShift) res = await startShift(empId, 'kiosk', effectiveBranchId);
       } else if (actionType === 'break_start') {
         if (pauseShift) res = await pauseShift(empId, 'kiosk');
+        enqueueKioskPunch({
+          employeeId: empId,
+          employeeCode: empCode,
+          employeeName: empName,
+          branchId: effectiveBranchId,
+          branchName: branchName,
+          actionType: 'break_start',
+          time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+          date: getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10),
+          source: 'kiosk'
+        }).catch(() => { });
       } else if (actionType === 'break_end') {
         if (resumeShift) res = await resumeShift(empId, 'kiosk');
+        enqueueKioskPunch({
+          employeeId: empId,
+          employeeCode: empCode,
+          employeeName: empName,
+          branchId: effectiveBranchId,
+          branchName: branchName,
+          actionType: 'break_end',
+          time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+          date: getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10),
+          source: 'kiosk'
+        }).catch(() => { });
       } else if (actionType === 'shift_end') {
         if (stopShift) res = await stopShift(empId, 'kiosk');
       }
@@ -1109,28 +1253,204 @@ export default function ElectronicKioskView({
   };
 
   if (!authStatus.isAuthorized) {
+    const isCrossBranch = authStatus.reason === 'wrong_branch_ip';
+
+    const handleVerifyEmergencyPin = (e) => {
+      e.preventDefault();
+      setEmergencyPinError('');
+      const cleanInput = (emergencyPinInput || '').trim();
+      if (!cleanInput) {
+        setEmergencyPinError('يرجى إدخال الرقم السري للتجاوز');
+        return;
+      }
+
+      let savedOwnerPass = '';
+      try {
+        savedOwnerPass = localStorage.getItem('pharmacy_owner_password') || '';
+      } catch {}
+
+      const validBranchPin = (kioskBranchObj?.emergencyPin || '').trim();
+      const validOwnerPass = String(orgSettings?.ownerPassword || savedOwnerPass || 'owner123').trim();
+
+      const isPinMatch = (validBranchPin && cleanInput === validBranchPin) || cleanInput === validOwnerPass;
+
+      if (isPinMatch) {
+        try {
+          sessionStorage.setItem('kiosk_emergency_bypass_ip', 'true');
+        } catch {}
+        setBypassedAuth(true);
+        setShowEmergencyPinModal(false);
+        setEmergencyPinInput('');
+        setEmergencyPinError('');
+      } else {
+        setEmergencyPinError('❌ الرقم السري غير صحيح. يرجى مراجعة إدارة الصيدلية.');
+      }
+    };
+
     return (
-      <div className="kiosk-modern-container fade-in" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div className="kiosk-glass-panel" style={{ textAlign: 'center', border: '2px solid #ef4444' }}>
-          <div style={{ fontSize: '3.5rem', marginBottom: '16px' }}>🚫</div>
-          <h2 style={{ margin: '0 0 12px 0', color: '#991b1b' }}>غير مصرح بالدخول من الشبكة الحالية</h2>
-          <p style={{ color: '#64748b', fontSize: '0.95rem', lineHeight: '1.6', marginBottom: '24px' }}>
-            {authStatus.message}
-          </p>
-          <div className="ip-box" style={{ padding: '16px', borderRadius: '12px', textAlign: 'right', fontSize: '0.85rem', marginBottom: '24px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-            <div>عنوان الـ IP الحالي لجهازك: <strong style={{ color: '#059669' }}>{currentIp}</strong></div>
+      <div className="kiosk-modern-container fade-in" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: '16px', background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)', fontFamily: "'Cairo', 'Tajawal', sans-serif" }}>
+        <div className="kiosk-glass-panel" style={{ maxWidth: '520px', width: '100%', textAlign: 'center', border: '2px solid #ef4444', borderRadius: '24px', background: 'rgba(255, 255, 255, 0.98)', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4)', padding: '28px 24px' }}>
+          <div style={{ fontSize: '3.8rem', marginBottom: '12px' }}>🚫</div>
+          
+          <h2 style={{ margin: '0 0 10px 0', color: '#991b1b', fontSize: '21px', fontWeight: 900 }}>
+            {isCrossBranch ? 'محاولة بصمة من خارج الفرع المعتمد!' : 'غير مصرح بالدخول من الشبكة الحالية'}
+          </h2>
+
+          {isCrossBranch && (
+            <div style={{ background: '#fef2f2', border: '1.5px solid #fecdd3', borderRadius: '14px', padding: '14px', marginBottom: '16px', textAlign: 'right' }}>
+              <div style={{ fontSize: '13.5px', color: '#b91c1c', fontWeight: 800, marginBottom: '6px' }}>
+                ⚠️ تنبيه أمني جغرافي (IP Mismatch):
+              </div>
+              <div style={{ fontSize: '13px', color: '#7f1d1d', lineHeight: 1.6 }}>
+                أنت متصل حالياً من شبكة راوتر: <strong style={{ color: '#0f766e', background: '#ccfbf1', padding: '2px 8px', borderRadius: '6px' }}>{authStatus.detectedBranchName}</strong>
+                <br />
+                بينما رابط الكشك المفتوح يخص: <strong style={{ color: '#b91c1c', background: '#fee2e2', padding: '2px 8px', borderRadius: '6px' }}>{authStatus.targetBranchName}</strong>
+              </div>
+              <div style={{ fontSize: '12px', color: '#991b1b', marginTop: '8px' }}>
+                لا يمكن فتح كشك فرع أثناء التواجد في فرع آخر لمنع تزوير الحضور والانصراف.
+              </div>
+            </div>
+          )}
+
+          {!isCrossBranch && (
+            <p style={{ color: '#475569', fontSize: '0.95rem', lineHeight: '1.6', marginBottom: '20px', whiteSpace: 'pre-line' }}>
+              {authStatus.message}
+            </p>
+          )}
+
+          <div style={{ padding: '14px 16px', borderRadius: '12px', textAlign: 'right', fontSize: '0.85rem', marginBottom: '22px', background: '#f8fafc', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: '#64748b' }}>عنوان الـ IP الحالي لجهازك:</span>
+              <strong style={{ color: '#0d9488', direction: 'ltr' }}>{currentIp}</strong>
+            </div>
+            {kioskBranchObj && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>الفرع المطلوب:</span>
+                <strong style={{ color: '#0f172a' }}>{kioskBranchObj.name}</strong>
+              </div>
+            )}
           </div>
-          <button className="kiosk-glass-submit" onClick={() => window.location.reload()}>
-            🔄 تحديث الصفحة
-          </button>
+
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="kiosk-glass-submit"
+              onClick={() => performDeviceCheck()}
+              style={{ flex: 1, minWidth: '150px', background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)', color: '#fff', border: 'none', padding: '12px 18px', borderRadius: '12px', fontWeight: 800, cursor: 'pointer' }}
+            >
+              🔄 إعادة فحص الشبكة
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowEmergencyPinModal(true)}
+              style={{ padding: '12px 18px', borderRadius: '12px', background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}
+              title="تصريح طوارئ برقم سري"
+            >
+              🔑 تصريح طوارئ
+            </button>
+          </div>
+
+          {/* Emergency PIN Modal */}
+          {showEmergencyPinModal && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0, 0, 0, 0.65)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              padding: '16px'
+            }}>
+              <div style={{
+                background: '#ffffff',
+                borderRadius: '20px',
+                padding: '24px',
+                maxWidth: '400px',
+                width: '100%',
+                boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
+                textAlign: 'right'
+              }}>
+                <h3 style={{ margin: '0 0 8px', fontSize: '17px', fontWeight: 800, color: '#0f172a' }}>
+                  🔑 تصريح طوارئ لتجاوز الـ IP
+                </h3>
+                <p style={{ margin: '0 0 16px', fontSize: '12.5px', color: '#64748b', lineHeight: 1.5 }}>
+                  في حال تعطل راوتر الفرع واستخدام باقة هاتفية مؤقتة، يرجى إدخال كود طوارئ الفرع أو كلمة مرور المالك لتفعيل الكشك:
+                </p>
+
+                {emergencyPinError && (
+                  <div style={{ padding: '10px 12px', background: '#fef2f2', border: '1px solid #fecdd3', color: '#b91c1c', borderRadius: '8px', fontSize: '12px', marginBottom: '12px' }}>
+                    {emergencyPinError}
+                  </div>
+                )}
+
+                <form onSubmit={handleVerifyEmergencyPin} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <input
+                    type="password"
+                    autoFocus
+                    placeholder="أدخل كود الطوارئ أو باسوورد المالك..."
+                    value={emergencyPinInput}
+                    onChange={(e) => setEmergencyPinInput(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '11px 14px',
+                      borderRadius: '10px',
+                      border: '1.5px solid #cbd5e1',
+                      fontSize: '14px',
+                      outline: 'none',
+                      direction: 'ltr',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="submit"
+                      style={{
+                        flex: 1,
+                        padding: '10px',
+                        background: '#0d9488',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontWeight: 800,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      تأكيد التجاوز
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowEmergencyPinModal(false)}
+                      style={{
+                        padding: '10px 14px',
+                        background: '#f1f5f9',
+                        color: '#475569',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '8px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
   return (
-    <div 
-      className="kiosk-modern-container" 
+    <div
+      className="kiosk-modern-container"
       style={{
         minHeight: '100vh',
         width: '100vw',
@@ -1147,7 +1467,7 @@ export default function ElectronicKioskView({
         position: 'relative'
       }}
     >
-      <div 
+      <div
         className="kiosk-content-wrapper"
         style={{
           zIndex: 10,
@@ -1160,7 +1480,7 @@ export default function ElectronicKioskView({
         }}
       >
         {/* Modern Glass Header with Clock */}
-        <div 
+        <div
           className="kiosk-glass-header"
           style={{
             background: 'rgba(255, 255, 255, 0.95)',
@@ -1255,7 +1575,7 @@ export default function ElectronicKioskView({
             </div>
           )}
           <div>
-            <h1 
+            <h1
               className="kiosk-clock-main"
               style={{
                 fontFamily: 'Cairo, sans-serif',
@@ -1273,7 +1593,7 @@ export default function ElectronicKioskView({
             >
               {new Date(now).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </h1>
-            <div 
+            <div
               className="kiosk-date-sub"
               style={{
                 fontSize: 'clamp(1rem, 3.5vw, 1.25rem)',
@@ -1285,13 +1605,19 @@ export default function ElectronicKioskView({
               {new Date(now).toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
             </div>
           </div>
-          <div style={{ color: '#64748B', fontSize: '0.9rem', fontWeight: 600 }}>
-            {orgSettings?.orgName || 'منصة الحضور الإلكترونية'} | IP: {currentIp}
+          <div style={{ color: '#64748B', fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span>{orgSettings?.orgName || 'منصة الحضور الإلكترونية'}</span>
+            {resolvedKioskBranchName && (
+              <span style={{ background: '#dcfce7', color: '#15803d', padding: '2px 10px', borderRadius: '12px', fontWeight: 800 }}>
+                🏢 كشك فرع: {resolvedKioskBranchName}
+              </span>
+            )}
+            <span>| IP: {currentIp}</span>
           </div>
         </div>
 
         {/* Dynamic Panel */}
-        <div 
+        <div
           className="kiosk-glass-panel"
           style={{
             background: 'rgba(255, 255, 255, 0.96)',
@@ -1315,11 +1641,11 @@ export default function ElectronicKioskView({
               </div>
               <h2 style={{ textAlign: 'center', margin: 0, fontSize: '1.8rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#0f172a' }}>تسجيل الحضور والانصراف</h2>
               <p style={{ textAlign: 'center', color: '#64748B', marginTop: '-10px', fontSize: '1.05rem' }}>يرجى إدخال كود الموظف الخاص بك للبدء</p>
-              
+
               <form onSubmit={handleCodeSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
-                <input 
-                  type="password" 
-                  placeholder="أدخل كود الموظف..." 
+                <input
+                  type="password"
+                  placeholder="أدخل كود الموظف..."
                   className="kiosk-glass-input"
                   value={inputCode}
                   onChange={(e) => setInputCode(e.target.value)}
@@ -1341,8 +1667,8 @@ export default function ElectronicKioskView({
                     boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.03)'
                   }}
                 />
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="kiosk-glass-submit"
                   style={{
                     width: '100%',
@@ -1384,8 +1710,8 @@ export default function ElectronicKioskView({
                     </div>
                   )}
                 </div>
-                <button 
-                  className="kiosk-logout-btn" 
+                <button
+                  className="kiosk-logout-btn"
                   onClick={() => { setMatchedEmp(null); setInputCode(''); setSelectedBranchId(null); }}
                   style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', color: '#475569', padding: '0.7rem 1.2rem', borderRadius: '12px', fontSize: '0.95rem', fontWeight: 700, cursor: 'pointer' }}
                 >
@@ -1448,7 +1774,7 @@ export default function ElectronicKioskView({
                   }}>
                     مطلوب قراءة القرار والموافقة عليه قبل إتاحة تسجيل البصمة
                   </div>
-                  
+
                   <div style={{
                     background: '#ffffff',
                     border: pendingDirectiveModal.priority === 'urgent' ? '1.5px solid #fecdd3' : '1.5px solid #fde68a',
@@ -1727,55 +2053,55 @@ export default function ElectronicKioskView({
 
                   {/* Actions Grid */}
                   <div className="kiosk-action-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.2rem', width: '100%' }}>
-                  <div 
-                    className={`kiosk-action-card start ${activeShift ? 'disabled' : ''}`} 
-                    onClick={() => handleActionClick('shift_start')} 
-                    style={{ opacity: activeShift ? 0.5 : 1, pointerEvents: activeShift ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
-                  >
-                    <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>🟢</div>
-                    <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>تسجيل حضور</div>
-                    <div className="kiosk-action-sub" style={{ fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>بدء وردية جديدة</div>
-                  </div>
-                  
-                  <div 
-                    className={`kiosk-action-card end ${!activeShift ? 'disabled' : ''}`} 
-                    onClick={() => handleActionClick('shift_end')} 
-                    style={{ opacity: !activeShift ? 0.5 : 1, pointerEvents: !activeShift ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
-                  >
-                    <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>🔴</div>
-                    <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>تسجيل انصراف</div>
-                    <div className="kiosk-action-sub" style={{ fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>إنهاء الوردية الحالية</div>
-                  </div>
+                    <div
+                      className={`kiosk-action-card start ${activeShift ? 'disabled' : ''}`}
+                      onClick={() => handleActionClick('shift_start')}
+                      style={{ opacity: activeShift ? 0.5 : 1, pointerEvents: activeShift ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
+                    >
+                      <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>🟢</div>
+                      <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>تسجيل حضور</div>
+                      <div className="kiosk-action-sub" style={{ fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>بدء وردية جديدة</div>
+                    </div>
 
-                  <div 
-                    className={`kiosk-action-card break-out ${(!activeShift || activeShift.isPaused) ? 'disabled' : ''}`} 
-                    onClick={() => handleActionClick('break_start')} 
-                    style={{ opacity: (!activeShift || activeShift.isPaused) ? 0.5 : 1, pointerEvents: (!activeShift || activeShift.isPaused) ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
-                  >
-                    <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>☕</div>
-                    <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>بدء بريك</div>
-                    <div className="kiosk-action-sub" style={{ fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>فترة استراحة</div>
-                  </div>
+                    <div
+                      className={`kiosk-action-card end ${!activeShift ? 'disabled' : ''}`}
+                      onClick={() => handleActionClick('shift_end')}
+                      style={{ opacity: !activeShift ? 0.5 : 1, pointerEvents: !activeShift ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
+                    >
+                      <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>🔴</div>
+                      <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>تسجيل انصراف</div>
+                      <div className="kiosk-action-sub" style={{ fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>إنهاء الوردية الحالية</div>
+                    </div>
 
-                  <div 
-                    className={`kiosk-action-card break-in ${(!activeShift || !activeShift.isPaused) ? 'disabled' : ''}`} 
-                    onClick={() => handleActionClick('break_end')} 
-                    style={{ opacity: (!activeShift || !activeShift.isPaused) ? 0.5 : 1, pointerEvents: (!activeShift || !activeShift.isPaused) ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
-                  >
-                    <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>▶️</div>
-                    <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>عودة من البريك</div>
-                    <div className="kiosk-action-sub" style={{ fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>استكمال الوردية</div>
+                    <div
+                      className={`kiosk-action-card break-out ${(!activeShift || activeShift.isPaused) ? 'disabled' : ''}`}
+                      onClick={() => handleActionClick('break_start')}
+                      style={{ opacity: (!activeShift || activeShift.isPaused) ? 0.5 : 1, pointerEvents: (!activeShift || activeShift.isPaused) ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
+                    >
+                      <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>☕</div>
+                      <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>بدء بريك</div>
+                      <div className="kiosk-action-sub" style={{ fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>فترة استراحة</div>
+                    </div>
+
+                    <div
+                      className={`kiosk-action-card break-in ${(!activeShift || !activeShift.isPaused) ? 'disabled' : ''}`}
+                      onClick={() => handleActionClick('break_end')}
+                      style={{ opacity: (!activeShift || !activeShift.isPaused) ? 0.5 : 1, pointerEvents: (!activeShift || !activeShift.isPaused) ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
+                    >
+                      <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>▶️</div>
+                      <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>عودة من البريك</div>
+                      <div className="kiosk-action-sub" style={{ fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>استكمال الوردية</div>
+                    </div>
                   </div>
-                </div>
-              </>
-            )}
+                </>
+              )}
             </div>
           )}
         </div>
       </div>
 
       {activeAction && (
-        <FaceVerificationOverlay 
+        <FaceVerificationOverlay
           employee={matchedEmp}
           actionType={activeAction}
           onVerifySuccess={onVerifySuccess}
@@ -2011,8 +2337,8 @@ export default function ElectronicKioskView({
                 background: kioskAlertModal.type === 'error'
                   ? 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)'
                   : kioskAlertModal.type === 'warning'
-                  ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
-                  : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                    : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                 color: '#ffffff',
                 cursor: 'pointer',
                 boxShadow: '0 4px 14px rgba(0, 0, 0, 0.3)',

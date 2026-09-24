@@ -1,71 +1,85 @@
 /**
  * outstock.css
- * التنسيق الجمالي الشامل لنظام النواقص والمشتريات (OutStock Handling System)
- * يتوافق تماماً مع الوضعين الفاتح والداكن وهوية منظومة الصيدليات الفاخرة
+ * التنسيق الجمالي الشامل والمتجاوب بالكامل لنظام النواقص والمشتريات (OutStock Handling System)
+ * صُمم بأعلى معايير هندسة الواجهات:
+ * - تجاوب فائق مع شاشات الهواتف المحمولة والتابلت والشاشات الكبيرة
+ * - تحويل النوافذ المنبثقة (Modals) على الهاتف إلى Bottom-Sheets ذكية وسلسة
+ * - تصميم بطاقات أدوية النواقص بنظام Grid متجاوب مخصص للمس السريع
+ * - دعم كامل ومتطور للوضعين الفاتح والداكن (Light & Dark Themes)
  */
 
+/* ── 1. الحاوية المركزية والخطوط ── */
 .outstock-root-shell {
   display: flex;
   flex-direction: column;
-  height: 100%;
   min-height: 100vh;
+  min-height: 100dvh;
   width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   background: var(--bg, #f8fafc);
   color: var(--text, #0f172a);
-  font-family: 'Cairo', 'Tajawal', sans-serif;
+  font-family: 'Cairo', 'Tajawal', system-ui, -apple-system, sans-serif;
   direction: rtl;
   box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* ── الشريط العلوي الفاخر (Top Nav Ribbon) ── */
+/* ── 2. الشريط العلوي الفاخر (Top Navigation Header) ── */
 .outstock-top-header {
   position: sticky;
   top: 0;
   z-index: 900;
-  background: var(--surface, #ffffff);
-  border-bottom: 1.5px solid var(--border, #e2e8f0);
-  box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.06);
-  padding: 8px 18px;
+  background: var(--surface-glass, rgba(255, 255, 255, 0.94));
+  border-bottom: 1.5px solid var(--border-subtle, #e2e8f0);
+  box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.05);
+  padding: 10px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .outstock-brand-badge {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .outstock-brand-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
   background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 22px;
   color: #ffffff;
-  box-shadow: 0 6px 16px rgba(13, 148, 136, 0.28);
+  box-shadow: 0 6px 18px rgba(13, 148, 136, 0.28);
+  flex-shrink: 0;
 }
 
 .outstock-brand-info h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 16.5px;
   font-weight: 900;
   color: var(--text, #0f172a);
   line-height: 1.25;
+  letter-spacing: -0.2px;
 }
 
 .outstock-brand-info p {
-  margin: 2px 0 0;
+  margin: 3px 0 0;
   font-size: 11.5px;
   color: var(--muted, #64748b);
-  font-weight: 600;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 /* تبويبات الشريط العلوي */
@@ -73,40 +87,43 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  background: var(--hover, #f1f5f9);
+  background: var(--hover, rgba(13, 148, 136, 0.06));
   padding: 4px;
-  border-radius: 12px;
-  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle, #e2e8f0);
 }
 
 .outstock-nav-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   padding: 8px 16px;
-  border-radius: 9px;
+  border-radius: 10px;
   border: none;
   background: transparent;
   color: var(--muted, #64748b);
   font-size: 13.5px;
-  font-weight: 700;
+  font-weight: 800;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
   white-space: nowrap;
+  touch-action: manipulation;
+  user-select: none;
 }
 
 .outstock-nav-btn:hover {
   color: var(--text, #0f172a);
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.65);
 }
 
 .outstock-nav-btn.is-active {
   background: var(--surface, #ffffff);
   color: #0d9488;
   font-weight: 900;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .outstock-tab-badge {
@@ -127,7 +144,8 @@
 .outstock-user-controls {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .outstock-role-pill {
@@ -141,9 +159,10 @@
   color: #0f766e;
   font-size: 12px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
-/* ── جسم الصفحة ومحتوى التبويب (Tab Body) ── */
+/* ── 3. جسم الصفحة ومحتوى التبويبات ── */
 .outstock-content-body {
   flex: 1;
   padding: 20px 24px;
@@ -153,19 +172,20 @@
   box-sizing: border-box;
 }
 
-/* ── البطاقات والجداول ── */
+/* ── 4. البطاقات والحاويات ── */
 .outstock-card {
   background: var(--surface, #ffffff);
-  border: 1px solid var(--border, #e2e8f0);
-  border-radius: 16px;
+  border: 1.5px solid var(--border-subtle, #e2e8f0);
+  border-radius: 18px;
   padding: 20px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.035);
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.035);
   margin-bottom: 20px;
-  transition: box-shadow 0.2s ease;
+  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+  box-sizing: border-box;
 }
 
 .outstock-card:hover {
-  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 8px 26px rgba(15, 23, 42, 0.065);
 }
 
 .outstock-card-header {
@@ -185,9 +205,10 @@
   font-weight: 900;
   color: var(--text, #0f172a);
   margin: 0;
+  flex-wrap: wrap;
 }
 
-/* شريط البحث المتقدم والأدوات */
+/* ── 5. شريط البحث والأدوات ── */
 .outstock-search-bar {
   display: flex;
   align-items: center;
@@ -195,52 +216,62 @@
   flex: 1;
   max-width: 480px;
   position: relative;
+  width: 100%;
 }
 
 .outstock-search-input {
   width: 100%;
-  height: 42px;
-  padding: 0 40px 0 14px;
-  border-radius: 10px;
+  height: 44px;
+  padding: 0 42px 0 14px;
+  border-radius: 12px;
   border: 1.5px solid var(--border, #cbd5e1);
   background: var(--surface, #ffffff);
   color: var(--text, #0f172a);
-  font-size: 13.5px;
+  font-size: 14px;
   font-family: inherit;
   outline: none;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
   direction: rtl;
+  box-sizing: border-box;
 }
 
 .outstock-search-input:focus {
   border-color: #0d9488;
-  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+  box-shadow: 0 0 0 3.5px rgba(13, 148, 136, 0.15);
 }
 
 .outstock-search-icon {
   position: absolute;
-  right: 12px;
+  right: 14px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--muted, #94a3b8);
   pointer-events: none;
 }
 
-/* الأزرار القياسية */
+/* ── 6. الأزرار القياسية ── */
 .outstock-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 9px 18px;
-  border-radius: 10px;
+  padding: 10px 18px;
+  border-radius: 12px;
   border: none;
   font-size: 13.5px;
   font-weight: 800;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.16s ease;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   text-decoration: none;
+  white-space: nowrap;
+  touch-action: manipulation;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.outstock-btn:active {
+  transform: scale(0.97);
 }
 
 .outstock-btn-primary {
@@ -250,30 +281,33 @@
 }
 
 .outstock-btn-primary:hover {
-  box-shadow: 0 6px 20px rgba(13, 148, 136, 0.38);
+  box-shadow: 0 6px 22px rgba(13, 148, 136, 0.38);
   transform: translateY(-1px);
 }
 
 .outstock-btn-secondary {
-  background: var(--hover, #e2e8f0);
+  background: var(--hover, #f1f5f9);
   color: var(--text, #334155);
+  border: 1px solid var(--border-subtle, #e2e8f0);
 }
 
 .outstock-btn-secondary:hover {
-  background: #cbd5e1;
+  background: var(--border-subtle, #e2e8f0);
 }
 
 .outstock-btn-success {
-  background: #10b981;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   color: #ffffff;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.28);
 }
 
 .outstock-btn-success:hover {
-  background: #059669;
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.38);
+  transform: translateY(-1px);
 }
 
 .outstock-btn-danger {
-  background: #ef4444;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
   color: #ffffff;
 }
 
@@ -282,21 +316,25 @@
 }
 
 .outstock-btn-whatsapp {
-  background: #25d366;
+  background: linear-gradient(135deg, #25d366 0%, #128c7e 100%);
   color: #ffffff;
   font-weight: 900;
+  box-shadow: 0 4px 14px rgba(37, 211, 102, 0.28);
 }
 
 .outstock-btn-whatsapp:hover {
-  background: #1eb956;
+  box-shadow: 0 6px 20px rgba(37, 211, 102, 0.38);
+  transform: translateY(-1px);
 }
 
-/* الجداول الحديثة */
+/* ── 7. الجداول المتجاوبة ── */
 .outstock-table-wrap {
   width: 100%;
   overflow-x: auto;
-  border-radius: 12px;
-  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  -webkit-overflow-scrolling: touch;
+  background: var(--surface, #ffffff);
 }
 
 .outstock-table {
@@ -305,29 +343,30 @@
   text-align: right;
   font-size: 13px;
   font-family: inherit;
+  min-width: 600px;
 }
 
 .outstock-table thead {
-  background: var(--hover, #f8fafc);
-  border-bottom: 1.5px solid var(--border, #e2e8f0);
+  background: var(--surface-muted, #f8fafc);
+  border-bottom: 1.5px solid var(--border-subtle, #e2e8f0);
 }
 
 .outstock-table th {
-  padding: 12px 14px;
+  padding: 13px 16px;
   font-weight: 800;
   color: var(--muted, #475569);
   white-space: nowrap;
 }
 
 .outstock-table td {
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border, #f1f5f9);
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border-subtle, #f1f5f9);
   color: var(--text, #1e293b);
   vertical-align: middle;
 }
 
 .outstock-table tbody tr:hover {
-  background: rgba(13, 148, 136, 0.03);
+  background: rgba(13, 148, 136, 0.035);
 }
 
 .outstock-table tbody tr.is-pruned {
@@ -335,85 +374,108 @@
   background: #fef2f2;
 }
 
-/* شارات الحالة (Status Badges) */
+/* ── 8. شارات الحالة (Status Badges) ── */
 .outstock-badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 10px;
+  padding: 4px 11px;
   border-radius: 99px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
+  letter-spacing: -0.1px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .outstock-badge.pending {
   background: #fef3c7;
-  color: #b45309;
-  border: 1px solid #fde68a;
+  color: #92400e;
+  border: 1px solid #fcd34d;
 }
 
-.outstock-badge.ready {
+.outstock-badge.ready,
+.outstock-badge.available {
   background: #dcfce7;
-  color: #15803d;
-  border: 1px solid #bbf7d0;
+  color: #14532d;
+  border: 1px solid #86efac;
 }
 
 .outstock-badge.partial {
   background: #e0f2fe;
-  color: #0369a1;
-  border: 1px solid #bae6fd;
+  color: #075985;
+  border: 1px solid #7dd3fc;
 }
 
 .outstock-badge.delivered {
-  background: #f1f5f9;
-  color: #475569;
-  border: 1px solid #e2e8f0;
+  background: #ede9fe;
+  color: #5b21b6;
+  border: 1px solid #c4b5fd;
 }
 
 .outstock-badge.unavailable {
-  background: #fee2e2;
-  color: #b91c1c;
-  border: 1px solid #fecaca;
+  background: #ffe4e6;
+  color: #9f1239;
+  border: 1px solid #fda4af;
 }
 
-/* ── النوافذ المنبثقة (Modals) ── */
+/* ── 9. النوافذ المنبثقة الذكية (Modals & Mobile Bottom-Sheets) ── */
 .outstock-modal-backdrop {
   position: fixed;
   inset: 0;
   z-index: 10000;
-  background: rgba(15, 23, 42, 0.65);
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
+  background: rgba(15, 23, 42, 0.68);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 16px;
   box-sizing: border-box;
-  animation: fadeIn 0.2s ease-out;
+  animation: outstockFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .outstock-modal-panel {
   background: var(--surface, #ffffff);
-  border-radius: 20px;
+  border-radius: 22px;
   width: 100%;
   max-width: 680px;
   max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.25);
-  border: 1px solid var(--border, #e2e8f0);
+  max-height: 90dvh;
+  overflow: hidden;
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.3), 0 0 1px rgba(0, 0, 0, 0.1);
+  border: 1.5px solid var(--border-subtle, #e2e8f0);
   box-sizing: border-box;
-  animation: slideUp 0.25s ease-out;
+  animation: outstockSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+.outstock-modal-panel.modal-sm { max-width: 480px; }
+.outstock-modal-panel.modal-md { max-width: 580px; }
+.outstock-modal-panel.modal-lg { max-width: 760px; }
+.outstock-modal-panel.modal-xl { max-width: 860px; }
+
+/* مؤشر السحب اليدوي للموبايل */
+.outstock-modal-drag-handle {
+  display: none;
+  width: 44px;
+  height: 5px;
+  background: #cbd5e1;
+  border-radius: 99px;
+  margin: 10px auto 2px;
+  flex-shrink: 0;
 }
 
 .outstock-modal-header {
-  padding: 18px 22px;
-  border-bottom: 1.5px solid var(--border, #e2e8f0);
+  padding: 16px 22px;
+  border-bottom: 1.5px solid var(--border-subtle, #e2e8f0);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
+  background: var(--surface, #ffffff);
 }
 
 .outstock-modal-header h3 {
@@ -421,49 +483,59 @@
   font-size: 17px;
   font-weight: 900;
   color: var(--text, #0f172a);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .outstock-modal-close {
-  background: none;
+  background: var(--hover, #f1f5f9);
   border: none;
-  color: var(--muted, #94a3b8);
-  font-size: 20px;
+  color: var(--muted, #64748b);
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  padding: 4px;
-  border-radius: 8px;
+  transition: all 0.15s ease;
+  touch-action: manipulation;
 }
 
 .outstock-modal-close:hover {
-  color: var(--danger, #ef4444);
+  color: #ef4444;
   background: #fef2f2;
 }
 
 .outstock-modal-body {
-  padding: 22px;
+  padding: 20px 22px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  flex: 1;
 }
 
 .outstock-modal-footer {
-  padding: 16px 22px;
-  border-top: 1.5px solid var(--border, #e2e8f0);
+  padding: 14px 22px;
+  border-top: 1.5px solid var(--border-subtle, #e2e8f0);
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  background: var(--hover, #f8fafc);
-  border-bottom-left-radius: 20px;
-  border-bottom-right-radius: 20px;
+  background: var(--surface-muted, #f8fafc);
+  flex-shrink: 0;
 }
 
-/* ── الحقول والنماذج داخل المودال ── */
+/* ── 10. الحقول والنماذج داخل المودال ── */
 .outstock-form-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
   text-align: right;
+  width: 100%;
 }
 
 .outstock-form-group label {
@@ -476,16 +548,17 @@
 .outstock-form-select,
 .outstock-form-textarea {
   width: 100%;
-  border-radius: 10px;
+  min-height: 42px;
+  border-radius: 11px;
   border: 1.5px solid var(--border, #cbd5e1);
   background: var(--surface, #ffffff);
   color: var(--text, #0f172a);
   font-size: 14px;
   font-family: inherit;
-  padding: 10px 14px;
+  padding: 9px 13px;
   outline: none;
   box-sizing: border-box;
-  transition: all 0.15s ease;
+  transition: all 0.18s ease;
   direction: rtl;
 }
 
@@ -498,11 +571,101 @@
 
 .outstock-form-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
 }
 
-/* ── بطاقات الإحصائيات (KPI Cards) ── */
+/* ── 11. بطاقة صنف الدواء في طلب العميل (Responsive Item Card) ── */
+.outstock-med-item-card {
+  background: var(--surface, #ffffff);
+  border: 1.5px solid var(--border-subtle, #e2e8f0);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+
+.outstock-med-item-card:focus-within {
+  border-color: #0d9488;
+  box-shadow: 0 4px 16px rgba(13, 148, 136, 0.12);
+}
+
+.outstock-med-top-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.outstock-med-sub-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.9fr 1.1fr;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+
+@media (min-width: 769px) {
+  .outstock-med-item-card {
+    flex-direction: row;
+    align-items: center;
+    padding: 10px 14px;
+  }
+  .outstock-med-top-line {
+    flex: 3;
+  }
+  .outstock-med-sub-grid {
+    flex: 3.5;
+    grid-template-columns: 130px 90px 110px;
+    gap: 8px;
+  }
+}
+
+/* ── 12. شبكة ملخص الحسابات المالية (KPI Financial Summary) ── */
+.outstock-financial-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1.5px dashed var(--border-subtle, #cbd5e1);
+}
+
+.outstock-summary-kpi {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: 12px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+  justify-content: center;
+}
+
+.outstock-summary-kpi .kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted, #64748b);
+  margin-bottom: 3px;
+}
+
+.outstock-summary-kpi .kpi-val {
+  font-size: 13.5px;
+  font-weight: 900;
+  color: var(--text, #0f172a);
+}
+
+.outstock-summary-kpi.green .kpi-val { color: #059669; }
+.outstock-summary-kpi.red .kpi-val { color: #dc2626; font-size: 14.5px; }
+.outstock-summary-kpi.highlight-red {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+/* ── 13. بطاقات الإحصائيات (KPI Cards) ── */
 .outstock-stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -512,7 +675,7 @@
 
 .outstock-stat-card {
   background: var(--surface, #ffffff);
-  border: 1px solid var(--border, #e2e8f0);
+  border: 1.5px solid var(--border-subtle, #e2e8f0);
   border-radius: 16px;
   padding: 18px 20px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
@@ -545,11 +708,294 @@
   font-size: 22px;
 }
 
+/* ── 14. بطاقات الطلبات وقوائم الفروع (Mobile-Friendly Order Cards) ── */
+.outstock-order-card {
+  background: var(--surface, #ffffff);
+  border: 1.5px solid var(--border-subtle, #e2e8f0);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  transition: all 0.2s ease;
+}
+
+.outstock-order-card.ready-state {
+  border-color: #86efac;
+  box-shadow: 0 4px 16px rgba(34, 197, 94, 0.08);
+}
+
+.outstock-order-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.outstock-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 20px;
+}
+
+.outstock-subnav-bar {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  white-space: nowrap;
+  padding: 2px;
+}
+
+.outstock-subnav-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.outstock-filters-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   📱 تكييف الواجهة التام مع شاشات الهواتف المحمولة (Mobile Screen Adaptations)
+   ══════════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .outstock-top-header {
+    display: grid !important;
+    grid-template-columns: 1fr auto !important;
+    grid-template-areas:
+      "brand controls"
+      "tabs tabs" !important;
+    row-gap: 10px !important;
+    column-gap: 8px !important;
+    padding: 10px 12px !important;
+    align-items: center !important;
+  }
+
+  .outstock-brand-badge {
+    grid-area: brand;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .outstock-brand-info {
+    min-width: 0;
+  }
+
+  .outstock-brand-info h2 {
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .outstock-brand-info p {
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .outstock-user-controls {
+    grid-area: controls;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  .outstock-nav-tabs {
+    grid-area: tabs;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    display: flex;
+    white-space: nowrap;
+    padding: 4px;
+    gap: 6px;
+  }
+
+  .outstock-nav-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .outstock-nav-btn {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+
+  .outstock-content-body {
+    padding: 12px 10px 24px 10px;
+  }
+
+  .outstock-card {
+    padding: 14px;
+    border-radius: 16px;
+    margin-bottom: 14px;
+  }
+}
+
+@media (max-width: 640px) {
+  .outstock-brand-info h2 {
+    font-size: 13.5px !important;
+    max-width: 155px;
+  }
+  .outstock-brand-info p {
+    font-size: 10px !important;
+    max-width: 155px;
+  }
+  .outstock-brand-icon {
+    width: 36px !important;
+    height: 36px !important;
+    font-size: 17px !important;
+    border-radius: 10px !important;
+  }
+
+  .outstock-user-controls .outstock-btn-text-desktop {
+    display: none !important;
+  }
+
+  .outstock-user-controls {
+    gap: 4px !important;
+  }
+
+  .outstock-role-pill {
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+  }
+
+  .outstock-search-bar {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* النوافذ المنبثقة تتحول إلى Bottom-Sheet كاملة وسلسة */
+  .outstock-modal-backdrop {
+    padding: 0 !important;
+    align-items: flex-end !important;
+  }
+
+  .outstock-modal-panel {
+    border-radius: 24px 24px 0 0 !important;
+    max-height: 94vh !important;
+    max-height: 94dvh !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    border-bottom: none !important;
+    animation: outstockMobileSheet 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+
+  .outstock-modal-drag-handle {
+    display: block !important;
+  }
+
+  .outstock-modal-header {
+    padding: 12px 16px !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 30 !important;
+    background: var(--surface, #ffffff) !important;
+    border-radius: 24px 24px 0 0 !important;
+  }
+
+  .outstock-modal-header h3 {
+    font-size: 15.5px !important;
+  }
+
+  .outstock-modal-body {
+    padding: 14px 14px 24px 14px !important;
+    gap: 14px !important;
+  }
+
+  .outstock-modal-footer {
+    position: sticky !important;
+    bottom: 0 !important;
+    z-index: 30 !important;
+    background: var(--surface, #ffffff) !important;
+    padding: 12px 14px !important;
+    padding-bottom: max(14px, env(safe-area-inset-bottom)) !important;
+    box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.08) !important;
+    flex-direction: row-reverse !important;
+    gap: 8px !important;
+  }
+
+  .outstock-modal-footer .outstock-btn {
+    flex: 1;
+    min-height: 46px;
+    font-size: 13.5px;
+    justify-content: center;
+  }
+
+  .outstock-modal-footer .outstock-btn-primary {
+    flex: 2;
+  }
+
+  /* الحقول تتحول لعمود واحد لتسهيل الكتابة بالهاتف */
+  .outstock-form-row {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .outstock-financial-summary-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .outstock-stats-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px !important;
+  }
+
+  .outstock-stat-card {
+    padding: 12px 14px !important;
+  }
+  .outstock-stat-info h3 {
+    font-size: 18px !important;
+  }
+  .outstock-stat-icon {
+    width: 40px !important;
+    height: 40px !important;
+    font-size: 18px !important;
+  }
+
+  /* أزرار البطاقات على الموبايل */
+  .outstock-order-actions-bar {
+    width: 100%;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .outstock-order-actions-bar > button {
+    width: 100%;
+    min-height: 42px;
+  }
+
+  .outstock-order-sub-actions {
+    display: flex;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .outstock-order-sub-actions > button {
+    flex: 1;
+    min-height: 40px;
+    justify-content: center;
+  }
+}
+
 /* ══════════════════════════════════════════════════════════════════════════════
    🖨️ طباعة الفاتورة الحرارية المزدوجة (POS Dual Cashier Receipt Print Styling)
    ══════════════════════════════════════════════════════════════════════════════ */
 .thermal-receipt-container {
   width: 80mm;
+  max-width: 100%;
   margin: 0 auto;
   background: #ffffff;
   color: #000000;
@@ -634,31 +1080,182 @@
 }
 
 @media print {
-  body * {
-    visibility: hidden;
+  @page {
+    size: 80mm auto;
+    margin: 0mm !important;
   }
-  .thermal-receipt-container, .thermal-receipt-container * {
-    visibility: visible;
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-family: 'Courier New', Courier, 'Cairo', monospace !important;
+  }
+  .outstock-root-shell,
+  .outstock-top-header,
+  .outstock-content-body,
+  .outstock-modal-backdrop {
+    background: transparent !important;
+    backdrop-filter: none !important;
+  }
+  .outstock-modal-header,
+  .outstock-modal-footer,
+  .outstock-modal-close,
+  .outstock-modal-drag-handle {
+    display: none !important;
+  }
+  .outstock-modal-panel {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .outstock-modal-body {
+    background: #ffffff !important;
+    padding: 0 !important;
   }
   .thermal-receipt-container {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 80mm;
-    margin: 0;
-    padding: 0;
+    width: 80mm !important;
+    max-width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 4px 2px !important;
+    margin: 0 auto !important;
   }
   .receipt-page-cut-line {
-    page-break-after: always;
+    page-break-after: always !important;
+    break-after: page !important;
   }
 }
 
-@keyframes fadeIn {
+/* ── 15. الوضع الداكن الكامل (Dark Mode Support) ── */
+.outstock-root-shell.dark-mode {
+  --bg: #090e17;
+  --surface: #111a28;
+  --surface-muted: #162234;
+  --text: #f8fafc;
+  --muted: #94a3b8;
+  --border: #334155;
+  --border-subtle: #1e293b;
+  --hover: rgba(20, 184, 166, 0.12);
+}
+
+.outstock-root-shell.dark-mode .outstock-top-header {
+  background: rgba(17, 26, 40, 0.94);
+  border-color: #1e293b;
+}
+
+.outstock-root-shell.dark-mode .outstock-card,
+.outstock-root-shell.dark-mode .outstock-modal-panel,
+.outstock-root-shell.dark-mode .outstock-med-item-card,
+.outstock-root-shell.dark-mode .outstock-order-card,
+.outstock-root-shell.dark-mode .outstock-stat-card {
+  background: #111a28;
+  border-color: #1e293b;
+  color: #f8fafc;
+}
+
+.outstock-root-shell.dark-mode .outstock-modal-header,
+.outstock-root-shell.dark-mode .outstock-modal-footer {
+  background: #111a28 !important;
+  border-color: #1e293b !important;
+}
+
+.outstock-root-shell.dark-mode .outstock-nav-btn.is-active {
+  background: #1e293b;
+  color: #14b8a6;
+}
+
+.outstock-root-shell.dark-mode .outstock-form-input,
+.outstock-root-shell.dark-mode .outstock-form-select,
+.outstock-root-shell.dark-mode .outstock-form-textarea,
+.outstock-root-shell.dark-mode .outstock-search-input {
+  background: #162234;
+  border-color: #334155;
+  color: #f8fafc;
+}
+
+.outstock-root-shell.dark-mode .outstock-summary-kpi {
+  background: #162234;
+  border-color: #1e293b;
+}
+
+.outstock-root-shell.dark-mode .outstock-summary-kpi.highlight-red {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.outstock-root-shell.dark-mode .outstock-role-pill {
+  background: rgba(20, 184, 166, 0.15);
+  border-color: rgba(20, 184, 166, 0.3);
+  color: #2dd4bf;
+}
+
+.outstock-root-shell.dark-mode .outstock-table thead {
+  background: #162234;
+}
+
+.outstock-root-shell.dark-mode .outstock-table td {
+  border-color: #1e293b;
+  color: #e2e8f0;
+}
+
+/* ── 16. تأثيرات الحركة السلسة (Animations) ── */
+@keyframes outstockFadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes outstockSlideUp {
+  from { opacity: 0; transform: translateY(16px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes outstockMobileSheet {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes outstockSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.outstock-spin {
+  animation: outstockSpin 1.2s linear infinite;
+}
+
+/* ── 17. شارات مفاتيح الاختصارات (Keyboard Badges) ── */
+.outstock-kbd-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 1px 0 #94a3b8;
+  color: #1e293b;
+  letter-spacing: 0.5px;
+  direction: ltr;
+}
+
+.outstock-kbd-badge.fallback {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #64748b;
+  box-shadow: none;
+}
+
+.outstock-root-shell.dark-mode .outstock-kbd-badge {
+  background: #1e293b;
+  border-color: #334155;
+  box-shadow: 0 1px 0 #0f172a;
+  color: #f1f5f9;
 }

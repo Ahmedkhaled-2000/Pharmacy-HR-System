@@ -73,8 +73,8 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
   return (
     <div>
       <div className="outstock-card" style={{ padding: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', flexWrap: 'wrap' }}>
-          <div className="outstock-search-bar" style={{ maxWidth: '440px' }}>
+        <div className="outstock-filters-bar">
+          <div className="outstock-search-bar" style={{ flex: 1, minWidth: '220px' }}>
             <Search size={18} className="outstock-search-icon" />
             <input
               type="text"
@@ -85,8 +85,8 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
             />
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ display: 'flex', background: 'var(--hover)', padding: '3px', borderRadius: '8px', gap: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%', maxWidth: 'max-content' }}>
+            <div style={{ display: 'flex', background: 'var(--hover)', padding: '3px', borderRadius: '10px', gap: '4px', overflowX: 'auto', maxWidth: '100%', WebkitOverflowScrolling: 'touch' }}>
               <button
                 type="button"
                 className={`outstock-nav-btn ${filterStatus === 'all' ? 'is-active' : ''}`}
@@ -126,6 +126,7 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
               className="outstock-btn outstock-btn-secondary"
               onClick={fetchTracking}
               title="تحديث"
+              style={{ flexShrink: 0 }}
             >
               <RefreshCw size={14} />
             </button>

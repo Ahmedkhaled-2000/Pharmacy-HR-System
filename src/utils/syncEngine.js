@@ -29,6 +29,7 @@ import {
 
 import { apiPushSyncBatch, apiFetchDeltaSync } from './apiClient';
 import { subscribeToSyncHints, emitSyncHint } from './socketClient';
+import { generateHlcTimestamp, compareHlc, calibrateHlcWithRemote } from './timeEngine';
 
 // ── قناة البث للمزامنة الفورية بين التبويبات المتعددة في نفس المتصفح ─────────────
 const deltaSyncChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
@@ -81,6 +82,7 @@ export async function enqueueNewRequest(requestData, branchId = null) {
     idempotency_key: idempotencyKey,
     branch_id: branchId || requestData.branchId || requestData.branch_id || null,
     status: requestData.status || REQUEST_STATES.PENDING_LOCAL,
+    hlc_timestamp: requestData.hlc_timestamp || generateHlcTimestamp(),
     created_at: requestData.created_at || requestData.createdAt || now,
     updated_at: now,
     sent_at: null,
@@ -147,11 +149,14 @@ export async function enqueueRequestDecision({
   const existing = await getRequestById(requestId);
   const targetStatus = newStatus || (decision === 'approve' ? REQUEST_STATES.COMPLETED : REQUEST_STATES.REJECTED);
 
+  const hlcTimestamp = generateHlcTimestamp();
+
   const updatedRequest = {
     ...(existing || {}),
     ...additionalData,
     id: String(requestId),
     status: targetStatus,
+    hlc_timestamp: hlcTimestamp,
     updated_at: now,
     decision_reason: reason || existing?.decision_reason || '',
     decided_by: reviewer.name || reviewer.id || 'Admin',
@@ -182,6 +187,7 @@ export async function enqueueRequestDecision({
       actor_role: reviewer.role || 'admin',
       actor_name: reviewer.name || reviewer.id || 'Admin',
       additional_data: additionalData,
+      hlc_timestamp: hlcTimestamp,
       updated_at: now
     }
   });
@@ -329,11 +335,23 @@ export async function pullDeltaSync(branchId = null) {
             if (!alreadyDone) {
               const existingLocal = await getRequestById(payload.id);
               let finalPayload = payload;
+
+              // معايرة الساعة المنطقية المحلية مع الطابع الزمني للعملية الواردة
+              if (payload.hlc_timestamp) {
+                calibrateHlcWithRemote(payload.hlc_timestamp);
+              }
+
               if (existingLocal) {
                 const curStatus = String(existingLocal.status || '').toLowerCase();
                 const incStatus = String(payload.status || '').toLowerCase();
                 const TERMINAL_STATUSES = ['approved', 'rejected', 'paid', 'partial', 'cancelled', 'waived', 'completed'];
-                if (TERMINAL_STATUSES.includes(curStatus) && !TERMINAL_STATUSES.includes(incStatus)) {
+
+                // حسم الصلاحيات ومصفوفة فض النزاعات:
+                // 1. قرار الإدارة العليا (Admin) يسود حتماً على قرار مدير الفرع المعلق
+                const localIsAdmin = Boolean(existingLocal.adminApproved || existingLocal.decided_by === 'Admin' || existingLocal.actor_role === 'admin');
+                const incIsAdmin = Boolean(payload.adminApproved || payload.decided_by === 'Admin' || payload.actor_role === 'admin');
+
+                if (TERMINAL_STATUSES.includes(curStatus) && !TERMINAL_STATUSES.includes(incStatus) && (!incIsAdmin || localIsAdmin)) {
                   // حماية الحالة المعتمدة أو المرفوضة محلياً من الارتداد لمعلقة
                   finalPayload = {
                     ...payload,
@@ -346,6 +364,9 @@ export async function pullDeltaSync(branchId = null) {
                     rejectedAt: existingLocal.rejectedAt || payload.rejectedAt,
                     rejectedBy: existingLocal.rejectedBy || payload.rejectedBy
                   };
+                } else if (existingLocal.hlc_timestamp && payload.hlc_timestamp && compareHlc(existingLocal.hlc_timestamp, payload.hlc_timestamp) > 0 && !incIsAdmin) {
+                  // التعديل المحلي أحدث زمنياً بحسب الساعة المنطقية الهجينة ولم يُلغَ بقرار إداري أعلى
+                  finalPayload = existingLocal;
                 }
               }
               await putRequest(finalPayload);

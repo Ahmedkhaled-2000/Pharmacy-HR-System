@@ -670,7 +670,16 @@ export default function RosterPreviewModal({
                               </div>
                             </td>
                             <td style={{ padding: '10px 12px' }}>
-                              {notScheduled ? (
+                              {daySched?.isSwapped ? (
+                                <div>
+                                  <span className={`badge ${isOff ? 'badge-danger' : 'badge-success'}`}>
+                                    {isOff ? '🔴 راحة (بعد التبديل)' : '🟢 وردية (بعد التبديل)'}
+                                  </span>
+                                  <div style={{ fontSize: '10px', color: '#64748b', marginTop: '3px', fontWeight: 600 }}>
+                                    قبل التبديل: {daySched.prevType === 'off' ? '🔴 راحة' : `🟢 وردية (${daySched.prevStart || ''} - ${daySched.prevEnd || ''})`}
+                                  </div>
+                                </div>
+                              ) : notScheduled ? (
                                 <span className="badge" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5' }}>
                                   ⚠️ غير محدد
                                 </span>
@@ -682,12 +691,27 @@ export default function RosterPreviewModal({
                             </td>
                             <td style={{ padding: '10px 12px', fontWeight: '700', color: notScheduled ? 'var(--muted)' : (isOff ? 'var(--muted)' : '#15803d') }}>
                               {isOff || notScheduled ? '—' : checkIn}
+                              {daySched?.isSwapped && (
+                                <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 500, marginTop: '2px' }}>
+                                  قبل: {daySched.prevType === 'off' ? 'راحة' : (daySched.prevStart || '—')}
+                                </div>
+                              )}
                             </td>
                             <td style={{ padding: '10px 12px', fontWeight: '700', color: notScheduled ? 'var(--muted)' : (isOff ? 'var(--muted)' : '#b91c1c') }}>
                               {isOff || notScheduled ? '—' : checkOut}
+                              {daySched?.isSwapped && (
+                                <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 500, marginTop: '2px' }}>
+                                  قبل: {daySched.prevType === 'off' ? 'راحة' : (daySched.prevEnd || '—')}
+                                </div>
+                              )}
                             </td>
                             <td style={{ padding: '10px 12px', fontWeight: '700' }}>
                               {notScheduled || isOff ? '0 ساعة' : `${hours} ساعات`}
+                              {daySched?.isSwapped && (
+                                <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 500, marginTop: '2px' }}>
+                                  قبل: {daySched.prevHours || 0} س
+                                </div>
+                              )}
                             </td>
                             <td style={{ padding: '10px 12px' }}>
                               {daySched?.isAdjusted ? (
@@ -695,9 +719,14 @@ export default function RosterPreviewModal({
                                   {daySched.adjustmentLabel || '🔄 معدل بطلب رسمي'}
                                 </span>
                               ) : daySched?.isSwapped ? (
-                                <span style={{ background: '#e0e7ff', color: '#3730a3', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, border: '1px solid #c7d2fe' }}>
-                                  🔄 تبديل وردية ({daySched.swappedWithName || 'زميل'})
-                                </span>
+                                <div>
+                                  <span style={{ background: '#e0e7ff', color: '#3730a3', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, border: '1px solid #c7d2fe', display: 'inline-block' }}>
+                                    🔄 تبديل وردية ({daySched.swappedWithName || 'زميل'})
+                                  </span>
+                                  <div style={{ fontSize: '10px', color: '#4338ca', marginTop: '2px', fontWeight: 600 }}>
+                                    {daySched.prevType === 'off' ? 'كانت راحة ⬅️ أصبحت وردية' : (isOff ? 'كانت وردية ⬅️ أصبحت راحة' : `من (${daySched.prevStart}-${daySched.prevEnd}) إلى (${checkIn}-${checkOut})`)}
+                                  </div>
+                                </div>
                               ) : daySched?.editedByAdmin ? (
                                 <span style={{ background: '#fef3c7', color: '#92400e', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, border: '1px solid #fcd34d' }}>
                                   ✏️ معدل من الإدارة

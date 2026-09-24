@@ -62,7 +62,8 @@ import {
   getAllLocalRequests,
   putRequestsBatch
 } from '../utils/localDatabase';
-import { emitEntityChange, subscribeToPunchRecorded } from '../utils/socketClient';
+import { emitEntityChange, subscribeToPunchRecorded, subscribeToBatchPunches, joinSyncRoom } from '../utils/socketClient';
+import { listenToLocalKioskPunches } from '../utils/kioskOutbox';
 import { computeEmployeeLoanDeductionsForPeriod } from '../utils/loansEngine';
 
 /**
@@ -573,8 +574,10 @@ export function DataProvider({ children, showToast = () => {} }) {
         const myOwnerVer = Number(localStorage.getItem('app_owner_session_version') || 0);
         const srvOwnerPass = normalized?.orgSettings?.ownerPassword;
         const srvOwnerVer = Number(normalized?.orgSettings?.ownerSessionVersion || 0);
-        if ((myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
-            (srvOwnerVer > 0 && srvOwnerVer > myOwnerVer)) {
+        if (myOwnerVer === 0 && srvOwnerVer > 0) {
+          try { localStorage.setItem('app_owner_session_version', String(srvOwnerVer)); } catch {}
+        } else if ((myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
+            (myOwnerVer > 0 && srvOwnerVer > 0 && srvOwnerVer > myOwnerVer)) {
           if (handleLogout) handleLogout();
           else {
             localStorage.removeItem('app_auth_role');
@@ -588,8 +591,10 @@ export function DataProvider({ children, showToast = () => {} }) {
         const myAdminVer = Number(localStorage.getItem('app_admin_session_version') || 0);
         const srvAdminPass = normalized?.orgSettings?.adminPassword || normalized?.orgSettings?.adminPass;
         const srvAdminVer = Number(normalized?.orgSettings?.adminSessionVersion || 0);
-        if ((myAdminPass && srvAdminPass && myAdminPass !== srvAdminPass) ||
-            (srvAdminVer > 0 && srvAdminVer > myAdminVer)) {
+        if (myAdminVer === 0 && srvAdminVer > 0) {
+          try { localStorage.setItem('app_admin_session_version', String(srvAdminVer)); } catch {}
+        } else if ((myAdminPass && srvAdminPass && myAdminPass !== srvAdminPass) ||
+            (myAdminVer > 0 && srvAdminVer > 0 && srvAdminVer > myAdminVer)) {
           if (handleLogout) handleLogout();
           else {
             localStorage.removeItem('app_auth_role');
@@ -907,6 +912,36 @@ export function DataProvider({ children, showToast = () => {} }) {
     });
 
     return unsubscribePunch;
+  }, []);
+
+  // 🚀 الانضمام التلقائي لغرف المزامنة الموزعة بحسب الفرع والدور والموظف
+  useEffect(() => {
+    joinSyncRoom({
+      role: authRole,
+      branchId: currentBranch?.id || null,
+      employeeId: currentEmpUser?.id || null
+    });
+  }, [authRole, currentBranch?.id, currentEmpUser?.id]);
+
+  // 🚀 الاستماع لدفعات البصمات المزامنة والبث المحلي الفوري (0ms Cross-Tab Mesh)
+  useEffect(() => {
+    const unsubBatch = subscribeToBatchPunches((batchPayload) => {
+      if (!batchPayload || !batchPayload.activeShifts) return;
+      setState((prev) => ({
+        ...prev,
+        activeShifts: { ...(prev.activeShifts || {}), ...batchPayload.activeShifts }
+      }));
+    });
+
+    const unsubLocal = listenToLocalKioskPunches((localPunch) => {
+      if (!localPunch || !localPunch.employeeId) return;
+      console.log('⚡ [Local Mesh] 0ms punch received across tabs:', localPunch.employeeId, localPunch.actionType);
+    });
+
+    return () => {
+      unsubBatch();
+      unsubLocal();
+    };
   }, []);
   // ══════════════════════════════════════════════════════════════════════
 
@@ -1298,11 +1333,11 @@ export function DataProvider({ children, showToast = () => {} }) {
       const isFlexibleSchedule = Boolean(emp?.noMonthlySchedule);
 
       const approvedOtHours = isFlexibleSchedule ? 0 : bShifts
-        .filter(s => s.overtimeStatus === 'approved' || (parseFloat(s.overtimeHours) > 0 && s.adminApproved))
+        .filter(s => s.overtimeStatus === 'approved' || (parseFloat(s.overtimeHours) > 0 && (s.adminApproved || s.isAdminCreated)))
         .reduce((acc, s) => acc + (parseFloat(s.overtimeHours) || 0), 0);
 
       const pendingOtHours = isFlexibleSchedule ? 0 : bShifts
-        .filter(s => s.overtimeStatus === 'pending' || (parseFloat(s.overtimeHours) > 0 && !s.overtimeStatus && !s.adminApproved))
+        .filter(s => s.overtimeStatus === 'pending' || (parseFloat(s.overtimeHours) > 0 && !s.overtimeStatus && !s.adminApproved && !s.isAdminCreated))
         .reduce((acc, s) => acc + (parseFloat(s.overtimeHours) || 0), 0);
 
       const otEarnings = Math.round(approvedOtHours * rate * 100) / 100;

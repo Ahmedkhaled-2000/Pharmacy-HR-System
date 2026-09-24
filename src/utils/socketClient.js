@@ -49,6 +49,9 @@ export function getSocket() {
 
     socket.on('connect', () => {
       console.log(`⚡ [Socket.io] متصل بخادم المزامنة اللحظية: ${SOCKET_SERVER_URL} (ID: ${socket.id})`);
+      if (currentRoomSubscription) {
+        socket.emit('join_room', currentRoomSubscription);
+      }
     });
 
     socket.on('disconnect', (reason) => {
@@ -60,6 +63,61 @@ export function getSocket() {
     });
   }
   return socket;
+}
+
+let currentRoomSubscription = null;
+
+/**
+ * 🚀 الانضمام الفوري لغرفة المزامنة المخصصة حسب الدور والفرع والموظف
+ * مع إعادة الانضمام التلقائي في حال انقطاع السوكت وعودته
+ */
+export function joinSyncRoom({ role = 'none', branchId = null, employeeId = null, deviceId = null }) {
+  currentRoomSubscription = { role, branchId, employeeId, deviceId };
+  const s = getSocket();
+  if (s && s.connected) {
+    s.emit('join_room', currentRoomSubscription);
+    console.log(`📡 [Socket.io] Joined room for role: ${role}, branch: ${branchId}, emp: ${employeeId}`);
+  }
+}
+
+/**
+ * 🚀 الاشتراك في أحداث مزامنة دفعات البصمات (Punches Batch Synced)
+ * يُمكن الواجهات من تحديث الحركات فوراً عند تفريغ طابور الأوفلاين دون تنزيل 5MB
+ */
+export function subscribeToBatchPunches(onBatchPunches) {
+  const s = getSocket();
+  if (!s || typeof onBatchPunches !== 'function') return () => {};
+
+  const handler = (payload) => {
+    try {
+      console.log(`⚡ [Socket.io] punches:batch_synced received (${payload?.count || 0} punches)`);
+      onBatchPunches(payload);
+    } catch (e) {
+      console.warn('[Socket.io] Error in batch punches handler:', e);
+    }
+  };
+
+  s.on('punches:batch_synced', handler);
+  return () => s.off('punches:batch_synced', handler);
+}
+
+/**
+ * فحص زمن استجابة الـ WebSocket السريع (Fast Ping Probe)
+ */
+export function probeSocketLatency(timeoutMs = 2000) {
+  const s = getSocket();
+  if (!s || !s.connected) return Promise.reject(new Error('Socket disconnected'));
+
+  return new Promise((resolve, reject) => {
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const timer = setTimeout(() => reject(new Error('Socket ping timeout')), timeoutMs);
+
+    s.emit('ping:probe', { clientTimestamp: Date.now() }, (res) => {
+      clearTimeout(timer);
+      const rtt = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0);
+      resolve({ rtt, serverTime: res?.serverTime });
+    });
+  });
 }
 
 /**

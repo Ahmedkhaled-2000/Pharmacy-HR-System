@@ -889,18 +889,28 @@ export default function EmployeeRosterModule({
                             <span className="badge secondary" style={{ fontSize: '11.5px', color: '#64748b' }}>💤 — لم يُحدد شيفت بعد</span>
                           ) : isOff ? (
                             isSwapped ? (
-                              <span className="badge warning" style={{ fontSize: '11.5px' }}>🔄 💤 راحة متبدلة</span>
+                              <div style={{ textAlign: 'left' }}>
+                                <span className="badge warning" style={{ fontSize: '11.5px', marginBottom: '2px', display: 'inline-block' }}>🔄 💤 راحة متبدلة</span>
+                                <div style={{ fontSize: '10.5px', color: '#64748b' }}>
+                                  قبل: {daySchedule.prevType === 'off' ? 'راحة' : `وردية (${daySchedule.prevStart}-${daySchedule.prevEnd})`}
+                                </div>
+                              </div>
                             ) : (
                               <span className="badge secondary" style={{ fontSize: '11.5px' }}>💤 راحة (OFF)</span>
                             )
                           ) : (
-                            <div>
+                            <div style={{ textAlign: 'left' }}>
                               <span className={`badge ${isSwapped ? 'warning' : 'success'}`} style={{ fontSize: '11px', display: 'inline-block', marginBottom: '3px' }}>
                                 {isSwapped ? '🔄 وردية متبدلة' : '⏰ وردية عمل'}
                               </span>
                               <div style={{ fontSize: '12.5px', fontWeight: 800, color: isSwapped ? '#b45309' : 'var(--primary-dark)' }}>
                                 {daySchedule?.start} – {daySchedule?.end}
                               </div>
+                              {isSwapped && (
+                                <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                                  قبل: {daySchedule.prevType === 'off' ? '🔴 راحة' : `(${daySchedule.prevStart}-${daySchedule.prevEnd})`}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -942,7 +952,30 @@ export default function EmployeeRosterModule({
                               )}
                             </td>
                             <td style={{ color: isSwapped ? '#b45309' : ((isOff || isUnset) ? 'var(--muted)' : 'var(--primary)'), fontWeight: (isOff || isUnset) && !isSwapped ? 400 : 600 }}>
-                              {isUnset ? '—' : isOff ? (isSwapped ? (daySchedule.swapNote || 'راحة متبدلة') : '—') : `${daySchedule?.start} – ${daySchedule?.end}${isSwapped && daySchedule.swappedWithName ? ` (مع ${daySchedule.swappedWithName})` : ''}`}
+                              {isUnset ? (
+                                '—'
+                              ) : isOff ? (
+                                isSwapped ? (
+                                  <div>
+                                    <div style={{ fontWeight: 700, color: '#b45309' }}>{daySchedule.swapNote || 'راحة متبدلة'}</div>
+                                    <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                                      قبل التبديل: {daySchedule.prevType === 'off' ? '🔴 راحة' : `🟢 وردية (${daySchedule.prevStart} - ${daySchedule.prevEnd})`}
+                                    </div>
+                                  </div>
+                                ) : '—'
+                              ) : (
+                                <div>
+                                  <div style={{ fontWeight: 800, color: isSwapped ? '#b45309' : 'inherit' }}>
+                                    {daySchedule?.start} – {daySchedule?.end}
+                                    {isSwapped && daySchedule.swappedWithName ? ` (بديل عن ${daySchedule.swappedWithName})` : ''}
+                                  </div>
+                                  {isSwapped && (
+                                    <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                                      قبل التبديل: {daySchedule.prevType === 'off' ? '🔴 راحة أسبوعية' : `🟢 وردية (${daySchedule.prevStart} - ${daySchedule.prevEnd})`}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );
@@ -1249,18 +1282,28 @@ export default function EmployeeRosterModule({
                         <span className="badge secondary" style={{ fontSize: '11.5px', color: '#64748b' }}>💤 — لم يُحدد شيفت بعد</span>
                       ) : isOff ? (
                         isSwapped ? (
-                          <span className="badge warning" style={{ fontSize: '11.5px' }}>🔄 💤 راحة متبدلة</span>
+                          <div style={{ textAlign: 'left' }}>
+                            <span className="badge warning" style={{ fontSize: '11.5px', marginBottom: '2px', display: 'inline-block' }}>🔄 💤 راحة متبدلة</span>
+                            <div style={{ fontSize: '10.5px', color: '#64748b' }}>
+                              قبل: {daySchedule.prevType === 'off' ? 'راحة' : `وردية (${daySchedule.prevStart}-${daySchedule.prevEnd})`}
+                            </div>
+                          </div>
                         ) : (
                           <span className="badge secondary" style={{ fontSize: '11.5px' }}>💤 راحة (OFF)</span>
                         )
                       ) : (
-                        <div>
+                        <div style={{ textAlign: 'left' }}>
                           <span className={`badge ${isSwapped ? 'warning' : 'success'}`} style={{ fontSize: '11px', display: 'inline-block', marginBottom: '3px' }}>
                             {isSwapped ? '🔄 وردية متبدلة' : '⏰ وردية عمل'}
                           </span>
                           <div style={{ fontSize: '12.5px', fontWeight: 800, color: isSwapped ? '#b45309' : 'var(--primary-dark)' }}>
                             {daySchedule?.start} – {daySchedule?.end}
                           </div>
+                          {isSwapped && (
+                            <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                              قبل: {daySchedule.prevType === 'off' ? '🔴 راحة' : `(${daySchedule.prevStart}-${daySchedule.prevEnd})`}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1315,7 +1358,30 @@ export default function EmployeeRosterModule({
                           )}
                         </td>
                         <td style={{ color: isSwapped ? '#b45309' : ((isOff || isUnset) ? 'var(--muted)' : 'var(--primary)'), fontWeight: (isOff || isUnset) && !isSwapped ? 400 : 600 }}>
-                          {isUnset ? '—' : isOff ? (isSwapped ? (daySchedule.swapNote || 'راحة متبدلة') : '—') : `${daySchedule?.start} – ${daySchedule?.end}${isSwapped && daySchedule.swappedWithName ? ` (مع ${daySchedule.swappedWithName})` : ''}`}
+                          {isUnset ? (
+                            '—'
+                          ) : isOff ? (
+                            isSwapped ? (
+                              <div>
+                                <div style={{ fontWeight: 700, color: '#b45309' }}>{daySchedule.swapNote || 'راحة متبدلة'}</div>
+                                <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                                  قبل التبديل: {daySchedule.prevType === 'off' ? '🔴 راحة' : `🟢 وردية (${daySchedule.prevStart} - ${daySchedule.prevEnd})`}
+                                </div>
+                              </div>
+                            ) : '—'
+                          ) : (
+                            <div>
+                              <div style={{ fontWeight: 800, color: isSwapped ? '#b45309' : 'inherit' }}>
+                                {daySchedule?.start} – {daySchedule?.end}
+                                {isSwapped && daySchedule.swappedWithName ? ` (بديل عن ${daySchedule.swappedWithName})` : ''}
+                              </div>
+                              {isSwapped && (
+                                <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                                  قبل التبديل: {daySchedule.prevType === 'off' ? '🔴 راحة أسبوعية' : `🟢 وردية (${daySchedule.prevStart} - ${daySchedule.prevEnd})`}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );

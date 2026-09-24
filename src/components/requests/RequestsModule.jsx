@@ -842,7 +842,27 @@ export default function RequestsModule({
         let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
         if (diff < 0) diff += 24 * 60;
         const grossHrs = Math.round((diff / 60) * 100) / 100;
-        const hrs = Math.max(0, Math.round((grossHrs - bH) * 100) / 100);
+        const netTotalHrs = Math.max(0, Math.round((grossHrs - bH) * 100) / 100);
+
+        const daySched = getEmployeeDaySchedule(approvedTargetReq.employeeId, punchDate, state);
+        const profileHours = parseFloat(emp?.workHoursPerDay || emp?.workHours) || 8;
+        let schedHours = profileHours;
+        if (daySched && daySched.start && daySched.end && daySched.type !== 'off') {
+          const [sH, sM] = daySched.start.split(':').map(Number);
+          const [eH, eM] = daySched.end.split(':').map(Number);
+          let sMins = sH * 60 + (sM || 0);
+          let eMins = eH * 60 + (eM || 0);
+          if (eMins <= sMins) eMins += 24 * 60;
+          schedHours = Math.round(((eMins - sMins) / 60) * 100) / 100;
+        } else if (daySched && daySched.hours && daySched.type !== 'off') {
+          schedHours = parseFloat(daySched.hours) || profileHours;
+        } else if (approvedTargetReq.scheduledHours) {
+          schedHours = parseFloat(approvedTargetReq.scheduledHours);
+        }
+
+        const regularHours = Math.min(netTotalHrs, schedHours);
+        const overtimeHours = Math.max(0, Math.round((netTotalHrs - schedHours) * 100) / 100);
+        const overtimeStatus = overtimeHours > 0 ? 'approved' : 'none';
 
         const existingShiftIndex = updatedShifts.findIndex(s => 
           (String(s.employeeId) === String(approvedTargetReq.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
@@ -855,16 +875,22 @@ export default function RequestsModule({
             timeIn,
             timeOut,
             breakHours: bH,
-            hours: hrs,
-            workHours: hrs,
-            netHours: hrs,
-            actualWorkedHours: hrs,
+            hours: regularHours,
+            workHours: regularHours,
+            netHours: regularHours,
+            regularHours: regularHours,
+            actualWorkedHours: netTotalHrs,
             grossHours: grossHrs,
+            scheduledHours: schedHours,
+            overtimeHours: overtimeHours,
+            overtimeStatus: overtimeStatus,
             isManual: true,
             manualPunch: true,
             source: 'manual_admin',
             adminApproved: true,
-            note: `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
+            note: overtimeHours > 0
+              ? `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)`
+              : `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
             updatedAt: new Date().toISOString()
           };
         } else {
@@ -878,17 +904,23 @@ export default function RequestsModule({
             timeIn,
             timeOut,
             breakHours: bH,
-            hours: hrs,
-            workHours: hrs,
-            netHours: hrs,
-            actualWorkedHours: hrs,
+            hours: regularHours,
+            workHours: regularHours,
+            netHours: regularHours,
+            regularHours: regularHours,
+            actualWorkedHours: netTotalHrs,
             grossHours: grossHrs,
+            scheduledHours: schedHours,
+            overtimeHours: overtimeHours,
+            overtimeStatus: overtimeStatus,
             isManual: true,
             manualPunch: true,
             source: 'manual_admin',
             adminApproved: true,
             statusLabel: 'بصمة يدوية معتمدة',
-            note: `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
+            note: overtimeHours > 0
+              ? `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)`
+              : `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
             createdAt: new Date().toISOString()
           });
         }

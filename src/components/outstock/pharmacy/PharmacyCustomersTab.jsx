@@ -152,8 +152,8 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
     <div>
       {/* ── شريط الأدوات ── */}
       <div className="outstock-card" style={{ padding: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', flexWrap: 'wrap' }}>
-          <div className="outstock-search-bar" style={{ maxWidth: '480px' }}>
+        <div className="outstock-filters-bar">
+          <div className="outstock-search-bar" style={{ flex: 1, minWidth: '240px' }}>
             <Search size={18} className="outstock-search-icon" />
             <input
               type="text"
@@ -271,7 +271,8 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
       {/* ── نافذة إضافة / تعديل عميل ── */}
       {isEditModalOpen && (
         <div className="outstock-modal-backdrop" onClick={() => setIsEditModalOpen(false)}>
-          <div className="outstock-modal-panel" style={{ maxWidth: '580px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="outstock-modal-panel modal-md" onClick={(e) => e.stopPropagation()}>
+            <div className="outstock-modal-drag-handle" />
             <div className="outstock-modal-header">
               <h3>{editingCustomer ? '✏️ تعديل بيانات العميل' : '👤 إضافة عميل جديد'}</h3>
               <button className="outstock-modal-close" onClick={() => setIsEditModalOpen(false)}>
@@ -367,7 +368,8 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
       {/* ── نافذة استعراض سجل طلبات العميل ── */}
       {historyCustomer && (
         <div className="outstock-modal-backdrop" onClick={() => setHistoryCustomer(null)}>
-          <div className="outstock-modal-panel" style={{ maxWidth: '720px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="outstock-modal-panel modal-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="outstock-modal-drag-handle" />
             <div className="outstock-modal-header">
               <h3>
                 📜 سجل طلبات العميل: <strong>{historyCustomer.full_name}</strong>

@@ -4,7 +4,7 @@ import {
 } from '../utils/notificationEngine';
 import { notifyOnPenaltyApplied } from '../utils/gmailService';
 import { applyApprovedPermissionsToShifts } from '../utils/latePenaltyEngine';
-import { applyShiftSwapToRosters } from '../utils/rosterEngine';
+import { applyShiftSwapToRosters, getEmployeeDaySchedule } from '../utils/rosterEngine';
 import { normalizeSchedule } from '../components/roster/RosterModule';
 import { saveFaceDescriptor, saveHandDescriptor, deleteFaceDescriptor, deleteHandDescriptor } from '../utils/faceStorage';
 import { enqueueRequestDecision } from '../utils/syncEngine';
@@ -109,6 +109,104 @@ export function useRequestsManager() {
           updatedLateIncidents = updatedLateIncidents.filter(inc =>
             !(String(inc.employeeId) === String(target.employeeId) && inc.date === target.date)
           );
+        }
+
+        // 0.2 Manual Punch / Punch Correction Request Approval
+        if (target.type === 'punch_correction' || target.type === 'attendance_punch' || target.type === 'manual_punch') {
+          const emp = (state.employees || []).find(e => String(e.id) === String(target.employeeId));
+          const punchDate = target.date || target.punchDate || new Date().toISOString().slice(0, 10);
+          const timeIn = target.timeIn || '09:00';
+          const timeOut = target.timeOut || '17:00';
+          const empBreak = emp?.breakHours || emp?.defaultBreakHours || (emp?.branchesDetails && emp.branchesDetails[0]?.breakHours) || 0;
+          const bH = Math.max(0, parseFloat(target.breakHours !== undefined && target.breakHours !== null ? target.breakHours : empBreak) || 0);
+
+          const [inH, inM] = timeIn.split(':').map(Number);
+          const [outH, outM] = timeOut.split(':').map(Number);
+          let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+          if (diff < 0) diff += 24 * 60;
+          const grossHrs = Math.round((diff / 60) * 100) / 100;
+          const netTotalHrs = Math.max(0, Math.round((grossHrs - bH) * 100) / 100);
+
+          const daySched = getEmployeeDaySchedule(target.employeeId, punchDate, state);
+          const profileHours = parseFloat(emp?.workHoursPerDay || emp?.workHours) || 8;
+          let schedHours = profileHours;
+          if (daySched && daySched.start && daySched.end && daySched.type !== 'off') {
+            const [sH, sM] = daySched.start.split(':').map(Number);
+            const [eH, eM] = daySched.end.split(':').map(Number);
+            let sMins = sH * 60 + (sM || 0);
+            let eMins = eH * 60 + (eM || 0);
+            if (eMins <= sMins) eMins += 24 * 60;
+            schedHours = Math.round(((eMins - sMins) / 60) * 100) / 100;
+          } else if (daySched && daySched.hours && daySched.type !== 'off') {
+            schedHours = parseFloat(daySched.hours) || profileHours;
+          } else if (target.scheduledHours) {
+            schedHours = parseFloat(target.scheduledHours);
+          }
+
+          const regularHours = Math.min(netTotalHrs, schedHours);
+          const overtimeHours = Math.max(0, Math.round((netTotalHrs - schedHours) * 100) / 100);
+          const overtimeStatus = overtimeHours > 0 ? 'approved' : 'none';
+
+          const existingShiftIndex = updatedShifts.findIndex(s => 
+            (String(s.employeeId) === String(target.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
+            s.date === punchDate
+          );
+
+          if (existingShiftIndex >= 0) {
+            updatedShifts[existingShiftIndex] = {
+              ...updatedShifts[existingShiftIndex],
+              timeIn,
+              timeOut,
+              breakHours: bH,
+              hours: regularHours,
+              workHours: regularHours,
+              netHours: regularHours,
+              regularHours: regularHours,
+              actualWorkedHours: netTotalHrs,
+              grossHours: grossHrs,
+              scheduledHours: schedHours,
+              overtimeHours: overtimeHours,
+              overtimeStatus: overtimeStatus,
+              isManual: true,
+              manualPunch: true,
+              source: 'manual_admin',
+              adminApproved: true,
+              note: overtimeHours > 0
+                ? `بصمة يدوية معتمدة من الإدارة العليا (${target.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)`
+                : `بصمة يدوية معتمدة من الإدارة العليا (${target.reason || 'بناءً على طلب مدير الفرع'})`,
+              updatedAt: new Date().toISOString()
+            };
+          } else {
+            updatedShifts.unshift({
+              id: `shift_manual_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+              employeeId: target.employeeId,
+              employeeCode: emp?.code || target.employeeCode || '',
+              employeeName: emp?.name || target.employeeName || 'موظف',
+              branchId: target.branchId || emp?.branchId || '',
+              date: punchDate,
+              timeIn,
+              timeOut,
+              breakHours: bH,
+              hours: regularHours,
+              workHours: regularHours,
+              netHours: regularHours,
+              regularHours: regularHours,
+              actualWorkedHours: netTotalHrs,
+              grossHours: grossHrs,
+              scheduledHours: schedHours,
+              overtimeHours: overtimeHours,
+              overtimeStatus: overtimeStatus,
+              isManual: true,
+              manualPunch: true,
+              source: 'manual_admin',
+              adminApproved: true,
+              statusLabel: 'بصمة يدوية معتمدة',
+              note: overtimeHours > 0
+                ? `بصمة يدوية معتمدة من الإدارة العليا (${target.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)`
+                : `بصمة يدوية معتمدة من الإدارة العليا (${target.reason || 'بناءً على طلب مدير الفرع'})`,
+              createdAt: new Date().toISOString()
+            });
+          }
         }
 
         // 1. Leave Requests Integration

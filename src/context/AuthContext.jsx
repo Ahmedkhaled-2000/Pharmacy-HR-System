@@ -30,7 +30,7 @@ export function AuthProvider({ children }) {
   const [authRole, setAuthRole] = useState(() => {
     try {
       const saved = localStorage.getItem('app_auth_role');
-      if (saved && ['owner', 'admin', 'branch', 'employee', 'developer'].includes(saved)) {
+      if (saved && (['owner', 'admin', 'branch', 'employee', 'developer'].includes(saved) || saved.startsWith('outstock_'))) {
         return saved;
       }
       if (localStorage.getItem('app_current_emp_user')) return 'employee';
@@ -44,14 +44,14 @@ export function AuthProvider({ children }) {
 
   const [currentBranch, setCurrentBranch] = useState(() => {
     try {
-      const saved = localStorage.getItem('app_current_branch');
+      const saved = localStorage.getItem('app_current_branch') || localStorage.getItem('outstock_branch');
       return saved ? JSON.parse(saved) : null;
     } catch { return null; }
   });
 
   const [currentEmpUser, setCurrentEmpUser] = useState(() => {
     try {
-      const saved = localStorage.getItem('app_current_emp_user');
+      const saved = localStorage.getItem('app_current_emp_user') || localStorage.getItem('outstock_user');
       return saved ? JSON.parse(saved) : null;
     } catch { return null; }
   });
@@ -94,7 +94,12 @@ export function AuthProvider({ children }) {
     try {
       const savedRole = localStorage.getItem('app_auth_role');
       const savedIsAdmin = localStorage.getItem('app_is_admin');
-      return savedRole === 'admin' || savedRole === 'owner' || savedIsAdmin === 'true';
+      return (
+        savedRole === 'admin' ||
+        savedRole === 'owner' ||
+        savedIsAdmin === 'true' ||
+        (typeof savedRole === 'string' && savedRole.startsWith('outstock_'))
+      );
     } catch {
       return false;
     }
@@ -112,7 +117,12 @@ export function AuthProvider({ children }) {
 
       localStorage.setItem('app_active_nav_tab', activeNavTab);
       localStorage.setItem('app_active_sub_tab', activeSubTab);
-      localStorage.setItem('app_is_admin', (authRole === 'admin' || authRole === 'owner' || isAdminLoggedIn) ? 'true' : 'false');
+      localStorage.setItem(
+        'app_is_admin',
+        (authRole === 'admin' || authRole === 'owner' || isAdminLoggedIn || (typeof authRole === 'string' && authRole.startsWith('outstock_')))
+          ? 'true'
+          : 'false'
+      );
     } catch {}
   }, [authRole, currentBranch, currentEmpUser, activeNavTab, activeSubTab, isAdminLoggedIn]);
 
@@ -221,9 +231,10 @@ export function AuthProvider({ children }) {
     // 0. فحص تغيير كلمة مرور المالك أو تقدم رقم الجلسة
     const isOwnerSession =
       savedRole === 'owner' ||
-      localStorage.getItem('app_owner_authenticated') === 'true' ||
-      sessionStorage.getItem('app_owner_authenticated') === 'true' ||
-      sessionStorage.getItem('app_settings_owner_tab_unlocked') === 'true';
+      ((localStorage.getItem('app_owner_authenticated') === 'true' ||
+        sessionStorage.getItem('app_owner_authenticated') === 'true' ||
+        sessionStorage.getItem('app_settings_owner_tab_unlocked') === 'true') &&
+       !savedRole.startsWith('outstock_'));
 
     if (isOwnerSession) {
       const myOwnerPass = localStorage.getItem('app_owner_password_snapshot');
@@ -231,8 +242,11 @@ export function AuthProvider({ children }) {
       const srvOwnerPass = latestState?.orgSettings?.ownerPassword;
       const srvOwnerVer = Number(latestState?.orgSettings?.ownerSessionVersion || 0);
 
-      if ((myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
-          (srvOwnerVer > 0 && srvOwnerVer > myOwnerVer)) {
+      // إذا كانت نسخة الجلسة غير مسجلة محلياً، نسجلها تلقائياً بدلاً من الطرد الخاطئ
+      if (myOwnerVer === 0 && srvOwnerVer > 0) {
+        try { localStorage.setItem('app_owner_session_version', String(srvOwnerVer)); } catch {}
+      } else if ((myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
+          (myOwnerVer > 0 && srvOwnerVer > 0 && srvOwnerVer > myOwnerVer)) {
         console.warn('🔒 [AuthContext] انتهاء جلسة المالك بسبب تقدم رقم الجلسة بالسيرفر');
         handleLogout();
         return;
@@ -241,9 +255,10 @@ export function AuthProvider({ children }) {
 
     // 0.5 فحص تغيير كلمة مرور الأدمن أو تقدم رقم الجلسة
     const isAdminSession =
-      savedRole === 'admin' ||
-      localStorage.getItem('app_is_admin') === 'true' ||
-      isAdminLoggedIn;
+      (savedRole === 'admin' ||
+       localStorage.getItem('app_is_admin') === 'true' ||
+       isAdminLoggedIn) &&
+      !savedRole.startsWith('outstock_');
 
     if (isAdminSession) {
       const myAdminPass = localStorage.getItem('app_admin_password_snapshot');
@@ -251,8 +266,10 @@ export function AuthProvider({ children }) {
       const srvAdminPass = latestState?.orgSettings?.adminPassword || latestState?.orgSettings?.adminPass;
       const srvAdminVer = Number(latestState?.orgSettings?.adminSessionVersion || 0);
 
-      if ((myAdminPass && srvAdminPass && myAdminPass !== srvAdminPass) ||
-          (srvAdminVer > 0 && srvAdminVer > myAdminVer)) {
+      if (myAdminVer === 0 && srvAdminVer > 0) {
+        try { localStorage.setItem('app_admin_session_version', String(srvAdminVer)); } catch {}
+      } else if ((myAdminPass && srvAdminPass && myAdminPass !== srvAdminPass) ||
+          (myAdminVer > 0 && srvAdminVer > 0 && srvAdminVer > myAdminVer)) {
         console.warn('🔒 [AuthContext] انتهاء جلسة الأدمن بسبب تقدم رقم الجلسة بالسيرفر');
         handleLogout();
         return;
@@ -343,6 +360,16 @@ export function AuthProvider({ children }) {
         localStorage.setItem('app_auth_role', 'developer');
         localStorage.setItem('app_is_developer', 'true');
       } catch {}
+    } else if (typeof role === 'string' && role.startsWith('outstock_')) {
+      setIsAdminLoggedIn(true);
+      const effectiveBranch = branch || user?.branch || user?.branchData || null;
+      setCurrentBranch(effectiveBranch);
+      setCurrentEmpUser(user || null);
+      try {
+        localStorage.setItem('app_auth_role', role);
+        if (user) localStorage.setItem('outstock_user', JSON.stringify(user));
+        if (effectiveBranch) localStorage.setItem('outstock_branch', JSON.stringify(effectiveBranch));
+      } catch {}
     }
     setActiveNavTab(redirectTab);
   };
@@ -425,6 +452,8 @@ export function AuthProvider({ children }) {
       localStorage.removeItem('app_auth_token');
       localStorage.removeItem('pharmacy_owner_password');
       localStorage.removeItem('pharmacy_owner_username');
+      localStorage.removeItem('outstock_token');
+      localStorage.removeItem('outstock_user');
       sessionStorage.removeItem('app_owner_authenticated');
       sessionStorage.removeItem('app_settings_owner_tab_unlocked');
     } catch {}

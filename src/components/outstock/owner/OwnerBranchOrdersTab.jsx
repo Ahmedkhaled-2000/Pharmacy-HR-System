@@ -208,7 +208,8 @@ export default function OwnerBranchOrdersTab({ showToast }) {
       {/* ── نافذة استعراض رصيد أصناف الفرع ── */}
       {selectedBranchStock && (
         <div className="outstock-modal-backdrop" onClick={() => setSelectedBranchStock(null)}>
-          <div className="outstock-modal-panel" style={{ maxWidth: '640px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="outstock-modal-panel modal-md" onClick={(e) => e.stopPropagation()}>
+            <div className="outstock-modal-drag-handle" />
             <div className="outstock-modal-header">
               <h3>
                 📦 رصيد أصناف النواقص في: <strong>{selectedBranchStock.name}</strong>

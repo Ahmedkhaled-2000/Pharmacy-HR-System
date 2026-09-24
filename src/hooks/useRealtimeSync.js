@@ -109,15 +109,21 @@ export function useRealtimeSync(props = {}) {
 
     // ── فحص إبطال الجلسات اللحظي عند تغيير كلمات المرور أو ترقية رقم الجلسة ──
     const currentActiveRole = localStorage.getItem('app_auth_role') || authRole;
+    const isOutstockRole = typeof currentActiveRole === 'string' && currentActiveRole.startsWith('outstock_');
+
     const isOwnerActive =
-      currentActiveRole === 'owner' ||
-      localStorage.getItem('app_owner_authenticated') === 'true' ||
-      sessionStorage.getItem('app_owner_authenticated') === 'true' ||
-      sessionStorage.getItem('app_settings_owner_tab_unlocked') === 'true';
+      !isOutstockRole && (
+        currentActiveRole === 'owner' ||
+        localStorage.getItem('app_owner_authenticated') === 'true' ||
+        sessionStorage.getItem('app_owner_authenticated') === 'true' ||
+        sessionStorage.getItem('app_settings_owner_tab_unlocked') === 'true'
+      );
 
     const isAdminActive =
-      currentActiveRole === 'admin' ||
-      localStorage.getItem('app_is_admin') === 'true';
+      !isOutstockRole && (
+        currentActiveRole === 'admin' ||
+        localStorage.getItem('app_is_admin') === 'true'
+      );
 
     if (isOwnerActive) {
       const myOwnerPass = localStorage.getItem('app_owner_password_snapshot');
@@ -125,25 +131,29 @@ export function useRealtimeSync(props = {}) {
       const srvOwnerPass = normalized?.orgSettings?.ownerPassword;
       const srvOwnerVer = Number(normalized?.orgSettings?.ownerSessionVersion || 0);
 
-      const isRevoked = (myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
-                        (srvOwnerVer > 0 && srvOwnerVer > myOwnerVer);
+      if (myOwnerVer === 0 && srvOwnerVer > 0) {
+        try { localStorage.setItem('app_owner_session_version', String(srvOwnerVer)); } catch {}
+      } else {
+        const isRevoked = (myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
+                          (myOwnerVer > 0 && srvOwnerVer > 0 && srvOwnerVer > myOwnerVer);
 
-      if (isRevoked) {
-        if (handleLogout) {
-          handleLogout();
-        } else {
-          localStorage.removeItem('app_auth_role');
-          localStorage.removeItem('app_owner_authenticated');
-          localStorage.removeItem('app_owner_password_snapshot');
-          localStorage.removeItem('app_owner_session_version');
-          localStorage.removeItem('pharmacy_owner_password');
-          localStorage.removeItem('app_is_admin');
-          sessionStorage.clear();
-          setAuthRole('none');
-          setIsAdminLoggedIn(false);
+        if (isRevoked) {
+          if (handleLogout) {
+            handleLogout();
+          } else {
+            localStorage.removeItem('app_auth_role');
+            localStorage.removeItem('app_owner_authenticated');
+            localStorage.removeItem('app_owner_password_snapshot');
+            localStorage.removeItem('app_owner_session_version');
+            localStorage.removeItem('pharmacy_owner_password');
+            localStorage.removeItem('app_is_admin');
+            sessionStorage.clear();
+            setAuthRole('none');
+            setIsAdminLoggedIn(false);
+          }
+          showToast('🔒 تم إنهاء جلسات المالك أو تغيير كلمة المرور. تم تسجيل الخروج تلقائياً لضمان الأمان.');
+          return;
         }
-        showToast('🔒 تم إنهاء جلسات المالك أو تغيير كلمة المرور. تم تسجيل الخروج تلقائياً لضمان الأمان.');
-        return;
       }
     } else if (isAdminActive) {
       const myAdminPass = localStorage.getItem('app_admin_password_snapshot');
@@ -151,23 +161,27 @@ export function useRealtimeSync(props = {}) {
       const srvAdminPass = normalized?.orgSettings?.adminPassword || normalized?.orgSettings?.adminPass;
       const srvAdminVer = Number(normalized?.orgSettings?.adminSessionVersion || 0);
 
-      const isRevoked = (myAdminPass && srvAdminPass && myAdminPass !== srvAdminPass) ||
-                        (srvAdminVer > 0 && srvAdminVer > myAdminVer);
+      if (myAdminVer === 0 && srvAdminVer > 0) {
+        try { localStorage.setItem('app_admin_session_version', String(srvAdminVer)); } catch {}
+      } else {
+        const isRevoked = (myAdminPass && srvAdminPass && myAdminPass !== srvAdminPass) ||
+                          (myAdminVer > 0 && srvAdminVer > 0 && srvAdminVer > myAdminVer);
 
-      if (isRevoked) {
-        if (handleLogout) {
-          handleLogout();
-        } else {
-          localStorage.removeItem('app_auth_role');
-          localStorage.removeItem('app_is_admin');
-          localStorage.removeItem('app_admin_password_snapshot');
-          localStorage.removeItem('app_admin_session_version');
-          sessionStorage.clear();
-          setAuthRole('none');
-          setIsAdminLoggedIn(false);
+        if (isRevoked) {
+          if (handleLogout) {
+            handleLogout();
+          } else {
+            localStorage.removeItem('app_auth_role');
+            localStorage.removeItem('app_is_admin');
+            localStorage.removeItem('app_admin_password_snapshot');
+            localStorage.removeItem('app_admin_session_version');
+            sessionStorage.clear();
+            setAuthRole('none');
+            setIsAdminLoggedIn(false);
+          }
+          showToast('🔒 تم إنهاء جلسات الإدارة من جهاز آخر. تم تسجيل الخروج تلقائياً لضمان الأمان.');
+          return;
         }
-        showToast('🔒 تم إنهاء جلسات الإدارة من جهاز آخر. تم تسجيل الخروج تلقائياً لضمان الأمان.');
-        return;
       }
     } else if (currentActiveRole === 'branch' && currentBranch) {
       const myBranchPass = localStorage.getItem('app_branch_password_snapshot');

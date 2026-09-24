@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AlertTriangle, RefreshCw, Send, Users, Building2, Search, CheckCircle, Phone, X } from 'lucide-react';
 import { outstockGetUnavailableItems, outstockNotifyRestocked } from '../../../utils/outstockApiClient';
+import OutstockConfirmModal from '../common/OutstockConfirmModal';
 
 /**
  * ProcurementUnavailableTab.jsx
@@ -36,12 +37,17 @@ export default function ProcurementUnavailableTab({ showToast }) {
     fetchUnavailable();
   }, []);
 
-  // إشعار الفرع بتوفر الصنف واسترجاع بيانات العملاء
-  const handleNotifyRestocked = async (item) => {
-    if (!window.confirm(`هل الصنف (${item.medication_name}) أصبح متوفراً الآن بالسوق وتريد إشعار فرع (${item.branch_name}) واسترجاع بيانات العملاء؟`)) {
-      return;
-    }
+  // حالة نافذة التأكيد المنبثقة
+  const [confirmItem, setConfirmItem] = useState(null);
 
+  // إشعار الفرع بتوفر الصنف واسترجاع بيانات العملاء
+  const handleNotifyRestocked = (item) => {
+    setConfirmItem(item);
+  };
+
+  const executeNotifyRestocked = async () => {
+    if (!confirmItem) return;
+    const item = confirmItem;
     const key = `${item.branch_id}_${item.medication_name}`;
     setIsNotifyingKey(key);
     try {
@@ -66,6 +72,7 @@ export default function ProcurementUnavailableTab({ showToast }) {
       showToast?.('حدث خطأ أثناء إشعار الفرع');
     } finally {
       setIsNotifyingKey(null);
+      setConfirmItem(null);
     }
   };
 
@@ -84,8 +91,8 @@ export default function ProcurementUnavailableTab({ showToast }) {
   return (
     <div>
       <div className="outstock-card" style={{ padding: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', flexWrap: 'wrap' }}>
-          <div className="outstock-search-bar" style={{ maxWidth: '480px' }}>
+        <div className="outstock-filters-bar">
+          <div className="outstock-search-bar" style={{ flex: 1, minWidth: '220px' }}>
             <Search size={18} className="outstock-search-icon" />
             <input
               type="text"
@@ -209,7 +216,8 @@ export default function ProcurementUnavailableTab({ showToast }) {
       {/* ── نافذة استرجاع بيانات العملاء بعد إشعار التوفر ── */}
       {restockedResult && (
         <div className="outstock-modal-backdrop" onClick={() => setRestockedResult(null)}>
-          <div className="outstock-modal-panel" style={{ maxWidth: '640px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="outstock-modal-panel modal-md" onClick={(e) => e.stopPropagation()}>
+            <div className="outstock-modal-drag-handle" />
             <div className="outstock-modal-header">
               <h3>
                 🎉 تم إشعار الفرع بتوفر الصنف: <strong>{restockedResult.medicationName}</strong>
@@ -290,6 +298,26 @@ export default function ProcurementUnavailableTab({ showToast }) {
           </div>
         </div>
       )}
+
+      {/* ── نافذة التأكيد المنبثقة الاحترافية ── */}
+      <OutstockConfirmModal
+        isOpen={Boolean(confirmItem)}
+        title="تأكيد توفر الصنف وإشعار الفرع"
+        message={`هل الصنف (${confirmItem?.medication_name}) أصبح متوفراً الآن بالسوق وتريد إشعار فرع (${confirmItem?.branch_name}) واسترجاع بيانات العملاء للتواصل معهم؟`}
+        iconType="success"
+        confirmText="نعم، أصبح متوفراً (إشعار الفرع)"
+        cancelText="تراجع"
+        confirmBtnStyle="success"
+        badge={confirmItem?.branch_name}
+        details={confirmItem ? [
+          { label: 'اسم الدواء', value: confirmItem.medication_name },
+          { label: 'الفرع الطالب', value: confirmItem.branch_name },
+          { label: 'العملاء بانتظار الصنف', value: `${confirmItem.waiting_customers?.length || 0} عميل` }
+        ] : null}
+        isProcessing={Boolean(isNotifyingKey)}
+        onConfirm={executeNotifyRestocked}
+        onClose={() => setConfirmItem(null)}
+      />
     </div>
   );
 }

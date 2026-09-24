@@ -1395,6 +1395,23 @@ export default function BranchManagerView({
       calcNetHours = Math.max(0, Math.round((calcGrossHours - bH) * 100) / 100);
     }
 
+    const daySched = getEmployeeDaySchedule(emp.id, manualPunchData.date, state);
+    const profileHours = parseFloat(emp.workHoursPerDay || emp.workHours) || 8;
+    let schedHours = profileHours;
+    if (daySched && daySched.start && daySched.end && daySched.type !== 'off') {
+      const [sH, sM] = daySched.start.split(':').map(Number);
+      const [eH, eM] = daySched.end.split(':').map(Number);
+      let sMins = sH * 60 + (sM || 0);
+      let eMins = eH * 60 + (eM || 0);
+      if (eMins <= sMins) eMins += 24 * 60;
+      schedHours = Math.round(((eMins - sMins) / 60) * 100) / 100;
+    } else if (daySched && daySched.hours && daySched.type !== 'off') {
+      schedHours = parseFloat(daySched.hours) || profileHours;
+    }
+
+    const regularHours = Math.min(calcNetHours, schedHours);
+    const overtimeHours = Math.max(0, Math.round((calcNetHours - schedHours) * 100) / 100);
+
     const reqId = `req_punch_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     const newReq = {
       id: reqId,
@@ -1409,12 +1426,16 @@ export default function BranchManagerView({
       date: manualPunchData.date,
       timeIn: manualPunchData.timeIn || '',
       timeOut: manualPunchData.timeOut || '',
-      hours: calcNetHours,
+      hours: regularHours,
+      regularHours: regularHours,
+      scheduledHours: schedHours,
+      overtimeHours: overtimeHours,
+      overtimeStatus: overtimeHours > 0 ? 'approved' : 'none',
       grossHours: calcGrossHours,
       breakHours: bH,
       punchType: manualPunchData.punchType,
       reason: manualPunchData.reason.trim(),
-      details: `طلب تسجيل بصمة يدوي من مدير الفرع (${manualPunchData.punchType === 'full' ? 'وردية كاملة' : manualPunchData.punchType === 'in' ? 'حضور فقط' : manualPunchData.punchType === 'out' ? 'انصراف فقط' : 'تعديل بصمة'}) | التاريخ: ${manualPunchData.date} | من ${manualPunchData.timeIn || '—'} إلى ${manualPunchData.timeOut || '—'} (صافي: ${calcNetHours} س - بريك: ${bH} س) | السبب: ${manualPunchData.reason.trim()}`,
+      details: `طلب تسجيل بصمة يدوي من مدير الفرع (${manualPunchData.punchType === 'full' ? 'وردية كاملة' : manualPunchData.punchType === 'in' ? 'حضور فقط' : manualPunchData.punchType === 'out' ? 'انصراف فقط' : 'تعديل بصمة'}) | التاريخ: ${manualPunchData.date} | من ${manualPunchData.timeIn || '—'} إلى ${manualPunchData.timeOut || '—'} (صافي: ${calcNetHours} س: أساسي ${regularHours} س + إضافي ${overtimeHours} س - بريك: ${bH} س) | السبب: ${manualPunchData.reason.trim()}`,
       status: 'pending_admin',
       branchApproved: true,
       adminApproved: false,
@@ -1428,7 +1449,7 @@ export default function BranchManagerView({
       requestId: reqId,
       type: 'punch_correction',
       title: `🖐️ طلب تسجيل بصمة يدوي: ${emp.name}`,
-      message: `طلب مدير فرع ${currentBranch?.name || ''} اعتماد بصمة يدوي للموظف ${emp.name} بتاريخ ${manualPunchData.date} (${manualPunchData.timeIn} ➔ ${manualPunchData.timeOut} | صافي: ${calcNetHours} س) - السبب: ${manualPunchData.reason.trim()}`,
+      message: `طلب مدير فرع ${currentBranch?.name || ''} اعتماد بصمة يدوي للموظف ${emp.name} بتاريخ ${manualPunchData.date} (${manualPunchData.timeIn} ➔ ${manualPunchData.timeOut} | صافي: ${calcNetHours} س${overtimeHours > 0 ? ` [إضافي: ${overtimeHours} س]` : ''}) - السبب: ${manualPunchData.reason.trim()}`,
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
@@ -3932,20 +3953,55 @@ export default function BranchManagerView({
                             </tr>
                           </thead>
                           <tbody>
-                            {Object.entries(roster.schedule).map(([dayName, sch]) => (
-                              <tr key={dayName} style={{ background: sch.type === 'off' ? '#fef2f2' : 'transparent' }}>
-                                <td style={{ fontWeight: '700' }}>{dayName}</td>
-                                <td>
-                                  {sch.type === 'off' ? (
-                                    <span style={{ color: '#dc2626', fontWeight: '700' }}>🔴 راحة أسبوعية</span>
-                                  ) : (
-                                    <span style={{ color: '#16a34a', fontWeight: '700' }}>🟢 يوم عمل</span>
-                                  )}
-                                </td>
-                                <td>{sch.type === 'off' ? '—' : sch.start}</td>
-                                <td>{sch.type === 'off' ? '—' : sch.end}</td>
-                              </tr>
-                            ))}
+                            {Object.entries(roster.schedule).map(([dayName, sch]) => {
+                              const isOff = sch.type === 'off' || sch.isOff === true;
+                              const isSwapped = Boolean(sch.isSwapped);
+
+                              return (
+                                <tr key={dayName} style={{ background: isSwapped ? 'rgba(245, 158, 11, 0.08)' : (isOff ? '#fef2f2' : 'transparent') }}>
+                                  <td style={{ fontWeight: '700' }}>
+                                    {dayName}
+                                    {isSwapped && (
+                                      <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
+                                        🔄 تبديل مع {sch.swappedWithName || 'الزميل'}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td>
+                                    {isSwapped ? (
+                                      <div>
+                                        <span style={{ color: isOff ? '#dc2626' : '#16a34a', fontWeight: '700' }}>
+                                          {isOff ? '🔴 راحة (بعد التبديل)' : '🟢 يوم عمل (بعد التبديل)'}
+                                        </span>
+                                        <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                                          قبل التبديل: {sch.prevType === 'off' ? '🔴 راحة' : `🟢 وردية (${sch.prevStart || ''} - ${sch.prevEnd || ''})`}
+                                        </div>
+                                      </div>
+                                    ) : isOff ? (
+                                      <span style={{ color: '#dc2626', fontWeight: '700' }}>🔴 راحة أسبوعية</span>
+                                    ) : (
+                                      <span style={{ color: '#16a34a', fontWeight: '700' }}>🟢 يوم عمل</span>
+                                    )}
+                                  </td>
+                                  <td>
+                                    {isOff ? '—' : sch.start}
+                                    {isSwapped && (
+                                      <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
+                                        قبل: {sch.prevType === 'off' ? 'راحة' : (sch.prevStart || '—')}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td>
+                                    {isOff ? '—' : sch.end}
+                                    {isSwapped && (
+                                      <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
+                                        قبل: {sch.prevType === 'off' ? 'راحة' : (sch.prevEnd || '—')}
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

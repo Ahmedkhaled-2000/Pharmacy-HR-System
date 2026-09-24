@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, AlertTriangle, Users, RotateCcw, Package, X, Phone, CheckCircle, RefreshCw } from 'lucide-react';
 import { outstockGetDeficiencies, outstockReorderDeficiency, outstockGetBranchStock } from '../../../utils/outstockApiClient';
+import OutstockConfirmModal from '../common/OutstockConfirmModal';
 
 /**
  * PharmacyDeficienciesTab.jsx
@@ -42,17 +43,27 @@ export default function PharmacyDeficienciesTab({ branchId, currentPharmacist = 
     if (branchId) fetchDeficienciesData();
   }, [branchId]);
 
-  // إعادة طلب الصنف لصالح عميل
-  const handleReorder = async (deficiencyId, customerName) => {
-    if (!window.confirm(`هل تريد إعادة طلب الصنف لصالح العميل (${customerName}) وإرساله لإدارة المشتريات من جديد؟`)) {
-      return;
-    }
+  // حالة نافذة تأكيد إعادة طلب الصنف
+  const [reorderConfirmData, setReorderConfirmData] = useState(null);
 
+  // إعادة طلب الصنف لصالح عميل
+  const handleReorder = (deficiencyId, customerName, medName = '') => {
+    setReorderConfirmData({
+      deficiencyId,
+      customerName,
+      medName: medName || selectedMedForCustomers?.medication_name || 'الدواء'
+    });
+  };
+
+  const executeReorder = async () => {
+    if (!reorderConfirmData) return;
+    const { deficiencyId, customerName } = reorderConfirmData;
     setIsReorderingId(deficiencyId);
+
     try {
       const res = await outstockReorderDeficiency(deficiencyId, currentPharmacist);
       if (res?.success) {
-        showToast?.('✅ تم إعادة طلب الصنف وإرساله للمشتريات وظهوره في صفحة طلبات العملاء');
+        showToast?.(`✅ تم إعادة طلب الصنف للعميل (${customerName}) وإرساله للمشتريات بنجاح`);
         fetchDeficienciesData();
         setSelectedMedForCustomers(null);
       } else {
@@ -62,6 +73,7 @@ export default function PharmacyDeficienciesTab({ branchId, currentPharmacist = 
       showToast?.('حدث خطأ أثناء إعادة طلب الصنف');
     } finally {
       setIsReorderingId(null);
+      setReorderConfirmData(null);
     }
   };
 
@@ -226,7 +238,8 @@ export default function PharmacyDeficienciesTab({ branchId, currentPharmacist = 
       {/* ── نافذة استعراض العملاء الذين طلبوا هذا الصنف مع إمكانية إعادة الطلب ── */}
       {selectedMedForCustomers && (
         <div className="outstock-modal-backdrop" onClick={() => setSelectedMedForCustomers(null)}>
-          <div className="outstock-modal-panel" style={{ maxWidth: '680px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="outstock-modal-panel modal-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="outstock-modal-drag-handle" />
             <div className="outstock-modal-header">
               <h3>
                 📋 العملاء الذين طلبوا صنف: <strong>{selectedMedForCustomers.medication_name}</strong>
@@ -295,6 +308,26 @@ export default function PharmacyDeficienciesTab({ branchId, currentPharmacist = 
           </div>
         </div>
       )}
+
+      {/* ── نافذة تأكيد إعادة طلب الصنف للعميل ── */}
+      <OutstockConfirmModal
+        isOpen={Boolean(reorderConfirmData)}
+        title="تأكيد إعادة طلب الصنف للعميل"
+        message={`هل تريد إعادة طلب الصنف (${reorderConfirmData?.medName}) لصالح العميل (${reorderConfirmData?.customerName}) وإرساله لإدارة المشتريات من جديد؟`}
+        iconType="send"
+        confirmText="نعم، إعادة الطلب الآن"
+        cancelText="تراجع"
+        confirmBtnStyle="primary"
+        badge={reorderConfirmData?.medName}
+        details={reorderConfirmData ? [
+          { label: 'اسم العميل', value: reorderConfirmData.customerName },
+          { label: 'الصنف المطلوب', value: reorderConfirmData.medName },
+          { label: 'الإجراء', value: 'إعادة إدراج الصنف في قائمة طلبات العملاء النشطة للمشتريات' }
+        ] : null}
+        isProcessing={Boolean(isReorderingId)}
+        onConfirm={executeReorder}
+        onClose={() => setReorderConfirmData(null)}
+      />
     </div>
   );
 }

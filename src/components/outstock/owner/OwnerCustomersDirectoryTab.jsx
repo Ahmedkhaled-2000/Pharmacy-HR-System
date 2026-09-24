@@ -220,7 +220,8 @@ export default function OwnerCustomersDirectoryTab() {
       {/* ── نافذة منبثقة تفاعلية تعرض جميع طلبات العميل والتواريخ ── */}
       {selectedCustomer && (
         <div className="outstock-modal-backdrop" onClick={() => setSelectedCustomer(null)}>
-          <div className="outstock-modal-panel" style={{ maxWidth: '750px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="outstock-modal-panel modal-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="outstock-modal-drag-handle" />
             <div className="outstock-modal-header">
               <h3>
                 📋 سجل طلبات العميل: <strong>{selectedCustomer.full_name}</strong> ({selectedCustomer.customer_code})

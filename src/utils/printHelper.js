@@ -672,12 +672,16 @@ export function generateOfficialPayslipHTML({
   }] : [];
 
   // 6. Leaves and Rest Days (سجل أيام الإجازات والراحات المأخوذة بالشهر) - تجريد دقيق يمنع التكرار
-  const empApprovedLeaves = getEmployeeApprovedLeaves(emp, state, (d) => {
+  const cycleFilterFn = (d) => {
+    if (!d) return false;
+    const dStr = String(d).slice(0, 10);
     if (startCutoff && endCutoff) {
-      return d >= startCutoff && d <= endCutoff;
+      return dStr >= startCutoff && dStr <= endCutoff;
     }
-    return d.startsWith(month);
-  });
+    return dStr.startsWith(month);
+  };
+
+  const empApprovedLeaves = getEmployeeApprovedLeaves(emp, state, cycleFilterFn);
 
   // Generate date list for cycle
   const cycleDates = [];
@@ -830,8 +834,32 @@ export function generateOfficialPayslipHTML({
     if (isRejectedPhoto) {
       badge = '<span style="background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px; display: inline-block;">❌ تم رفض بصمة هذا اليوم بسبب رفض الصورة</span>';
     } else if (isSwapped) {
-      badge = `<span style="background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🔄 وردية متبدلة ${daySched.swappedWithName ? `(بديل عن ${daySched.swappedWithName})` : ''}</span>`;
+      badge = `<span style="background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px; display: inline-block;">🔄 وردية متبدلة ${daySched.swappedWithName ? `(بديل عن ${daySched.swappedWithName})` : ''}</span>`;
     }
+
+    const otReq = (state?.requests || []).find((r) => 
+      r && r.type === 'overtime' && String(r.employeeId) === String(emp.id) && (r.date === s.date || r.shiftId === s.id)
+    );
+    const otStatus = s.overtimeStatus || (otReq ? otReq.status : null);
+    const otHours = parseFloat(s.overtimeHours || (otReq ? otReq.hours : 0)) || 0;
+    const rejOtHours = parseFloat(s.rejectedOvertimeHours || (otReq && otReq.status === 'rejected' ? otReq.hours : 0)) || 0;
+
+    let otBadgeHtml = '';
+    if (otStatus === 'approved' && otHours > 0) {
+      otBadgeHtml = `<span style="background: #f0fdf4; color: #16a34a; border: 1px solid #86efac; padding: 1px 5px; border-radius: 4px; font-weight: bold; font-size: 8px; display: inline-block; margin-top: 2px;">✅ إضافي معتمد (+${otHours.toFixed(2)} س)</span>`;
+    } else if (otStatus === 'rejected') {
+      otBadgeHtml = `<span style="background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; padding: 1px 5px; border-radius: 4px; font-weight: bold; font-size: 8px; display: inline-block; margin-top: 2px;">❌ إضافي مرفوض ${rejOtHours > 0 ? `(${rejOtHours.toFixed(2)} س)` : ''}</span>`;
+    } else if (otStatus === 'pending' && otHours > 0) {
+      otBadgeHtml = `<span style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; padding: 1px 5px; border-radius: 4px; font-weight: bold; font-size: 8px; display: inline-block; margin-top: 2px;">⏳ إضافي قيد الاعتماد (+${otHours.toFixed(2)} س)</span>`;
+    }
+
+    if (otBadgeHtml) {
+      badge = badge ? `${badge}<br/>${otBadgeHtml}` : otBadgeHtml;
+    }
+
+    const isOtApproved = otStatus === 'approved' && otHours > 0;
+    const totalShiftHours = effHours + (isOtApproved ? otHours : 0);
+    const shiftEarnings = totalShiftHours * shiftRate;
 
     unifiedTableRows.push({
       id: `shift_${s.id || s.date}`,
@@ -844,7 +872,10 @@ export function generateOfficialPayslipHTML({
       timeOut: s.timeOut || '—',
       breakHours: parseFloat(s.breakHours) || 0,
       effHours: effHours,
-      earnings: effHours * shiftRate,
+      totalShiftHours: totalShiftHours,
+      otHours: otHours,
+      isOtApproved: isOtApproved,
+      earnings: isRejectedPhoto ? 0 : shiftEarnings,
       isSwapped,
       badge
     });
@@ -925,7 +956,7 @@ export function generateOfficialPayslipHTML({
         const cm = cur.getMonth() + 1;
         const cd = cur.getDate();
         const curDateStr = `${cy}-${String(cm).padStart(2, '0')}-${String(cd).padStart(2, '0')}`;
-        if (cyclePredicate(curDateStr)) {
+        if (cycleFilterFn(curDateStr)) {
           const singleDayDeduction = isUnpaid ? Math.round(dailyRate * 100) / 100 : 0;
           unifiedTableRows.push({
             id: `leave_${l.id}_${curDateStr}`,
@@ -1195,10 +1226,21 @@ export function generateOfficialPayslipHTML({
               if (!bShifts || bShifts.length === 0) return '';
               const bName = getBranchName(bId);
               const bSum = summary.perBranch?.[bId] || {};
-              const bRate = bSum.rate || bSum.hourlyRate || (hourlyRate || (parseFloat(emp?.salary) || 0));
-              const bTotalHours = bShifts.reduce((acc, s) => acc + (parseFloat(s.hours || s.regularHours) || 0), 0);
+              const bTotalHours = bShifts.reduce((acc, s) => {
+                const isRej = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
+                if (isRej) return acc;
+                const regH = parseFloat(s.hours || s.regularHours) || 0;
+                const otH = (s.overtimeStatus === 'approved' || (parseFloat(s.overtimeHours) > 0 && (s.adminApproved || s.isAdminCreated))) ? (parseFloat(s.overtimeHours) || 0) : 0;
+                return acc + regH + otH;
+              }, 0);
               const bTotalBreak = bShifts.reduce((acc, s) => acc + (parseFloat(s.breakHours) || 0), 0);
-              const bTotalEarn = bShifts.reduce((acc, s) => acc + ((parseFloat(s.hours || s.regularHours) || 0) * bRate), 0);
+              const bTotalEarn = bShifts.reduce((acc, s) => {
+                const isRej = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
+                if (isRej) return acc;
+                const regH = parseFloat(s.hours || s.regularHours) || 0;
+                const otH = (s.overtimeStatus === 'approved' || (parseFloat(s.overtimeHours) > 0 && (s.adminApproved || s.isAdminCreated))) ? (parseFloat(s.overtimeHours) || 0) : 0;
+                return acc + ((regH + otH) * bRate);
+              }, 0);
 
               return `
                 <div style="margin-bottom: 6px; page-break-inside: avoid; break-inside: avoid; border: 1.5px solid #0f766e; border-radius: 6px; overflow: hidden; background: #fff;">
@@ -1227,18 +1269,38 @@ export function generateOfficialPayslipHTML({
                         const isRej = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
                         const effHours = isRej ? 0 : (parseFloat(s.hours || s.regularHours) || 0);
                         const hasPerm = s.hasPermission || false;
+
+                        const otReq = (state?.requests || []).find((r) => 
+                          r && r.type === 'overtime' && String(r.employeeId) === String(emp.id) && (r.date === s.date || r.shiftId === s.id)
+                        );
+                        const otStatus = s.overtimeStatus || (otReq ? otReq.status : null);
+                        const otHours = parseFloat(s.overtimeHours || (otReq ? otReq.hours : 0)) || 0;
+                        const rejOtHours = parseFloat(s.rejectedOvertimeHours || (otReq && otReq.status === 'rejected' ? otReq.hours : 0)) || 0;
+
+                        let otBadgeHtml = '';
+                        if (otStatus === 'approved' && otHours > 0) {
+                          otBadgeHtml = `<span style="background: #f0fdf4; color: #16a34a; border: 1px solid #86efac; padding: 1px 4px; border-radius: 4px; font-weight: bold; font-size: 7.5px; display: inline-block; margin-top: 1px;">✅ إضافي معتمد (+${otHours.toFixed(2)} س)</span>`;
+                        } else if (otStatus === 'rejected') {
+                          otBadgeHtml = `<span style="background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; padding: 1px 4px; border-radius: 4px; font-weight: bold; font-size: 7.5px; display: inline-block; margin-top: 1px;">❌ إضافي مرفوض ${rejOtHours > 0 ? `(${rejOtHours.toFixed(2)} س)` : ''}</span>`;
+                        } else if (otStatus === 'pending' && otHours > 0) {
+                          otBadgeHtml = `<span style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; padding: 1px 4px; border-radius: 4px; font-weight: bold; font-size: 7.5px; display: inline-block; margin-top: 1px;">⏳ إضافي قيد الاعتماد (+${otHours.toFixed(2)} س)</span>`;
+                        }
+
                         return `
                           <tr style="background: ${isRej ? '#fef2f2' : (hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc'))};">
                             <td style="padding: 2px;">${idx + 1}</td>
                             <td style="padding: 2px; font-weight: bold;">
                               ${s.dayName || ''} ${s.date}
                               ${isRej ? '<span style="display: block; color: #dc2626; font-size: 8px; font-weight: 800; margin-top: 2px;">❌ تم رفض بصمة هذا اليوم بسبب رفض الصورة</span>' : ''}
+                              ${otBadgeHtml ? `<div style="margin-top: 1px;">${otBadgeHtml}</div>` : ''}
                             </td>
                             <td style="padding: 2px; color: ${isRej ? '#94a3b8; text-decoration: line-through;' : '#16a34a;'}">${s.timeIn || '—'}</td>
                             <td style="padding: 2px; color: ${isRej ? '#94a3b8; text-decoration: line-through;' : '#dc2626;'}">${s.timeOut || '—'}</td>
                             <td style="padding: 2px;">${fmt(s.breakHours)} س</td>
-                            <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : 'inherit;'}">${isRej ? '0 س (غير محتسبة)' : `${fmt(effHours)} س`}</td>
-                            <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : '#0d9488;'}">${isRej ? '0.00 ج.م' : `${fmt(effHours * bRate)} ج.م`}</td>
+                            <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : 'inherit;'}">${isRej ? '0 س (غير محتسبة)' : (
+                              (otStatus === 'approved' && otHours > 0) ? `${fmt(effHours + otHours)} س<div style="font-size: 7.5px; color: #16a34a;">(أساسي: ${fmt(effHours)} + إضافي: ${fmt(otHours)})</div>` : `${fmt(effHours)} س`
+                            )}</td>
+                            <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : '#0d9488;'}">${isRej ? '0.00 ج.م' : `${fmt((effHours + (otStatus === 'approved' ? otHours : 0)) * bRate)} ج.م`}</td>
                           </tr>
                         `;
                       }).join('')}
@@ -1297,7 +1359,9 @@ export function generateOfficialPayslipHTML({
                       <td style="padding: 2px; color: ${isRej ? '#94a3b8; text-decoration: line-through;' : '#16a34a;'}">${item.timeIn || '—'}</td>
                       <td style="padding: 2px; color: ${isRej ? '#94a3b8; text-decoration: line-through;' : '#dc2626;'}">${item.timeOut || '—'}</td>
                       <td style="padding: 2px;">${fmt(item.breakHours)} س</td>
-                      <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : 'inherit;'}">${isRej ? '0 س (غير محتسبة)' : `${fmt(item.effHours)} س`}</td>
+                      <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : 'inherit;'}">${isRej ? '0 س (غير محتسبة)' : (
+                        item.isOtApproved ? `${fmt(item.totalShiftHours)} س<div style="font-size: 7.5px; color: #16a34a;">(أساسي: ${fmt(item.effHours)} + إضافي: ${fmt(item.otHours)})</div>` : `${fmt(item.effHours)} س`
+                      )}</td>
                       <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : '#0d9488;'}">${isRej ? '0.00 ج.م' : `${fmt(item.earnings)} ج.م`}</td>
                     </tr>
                   `;

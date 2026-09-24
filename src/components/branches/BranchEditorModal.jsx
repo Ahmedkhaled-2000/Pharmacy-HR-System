@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { isEmployeeActive, getEmpDisplayName } from '../../utils/formatters';
 import { emitRevokeSession } from '../../utils/socketClient';
 import { outstockGetBranches } from '../../utils/outstockApiClient';
+import { fetchCurrentIP } from '../../utils/deviceAuth';
 
 export default function BranchEditorModal({
   isOpen = false,
@@ -37,6 +38,13 @@ export default function BranchEditorModal({
   const [gpsAccuracy, setGpsAccuracy] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [outstockBranches, setOutstockBranches] = useState([]);
+
+  // Network & Router IP Restrictions States
+  const [ipRestrictionEnabled, setIpRestrictionEnabled] = useState(true);
+  const [allowedIps, setAllowedIps] = useState([]);
+  const [emergencyPin, setEmergencyPin] = useState('');
+  const [currentDeviceIp, setCurrentDeviceIp] = useState('');
+  const [isDetectingIp, setIsDetectingIp] = useState(false);
 
   // Fetch OutStock branches for collision checking
   useEffect(() => {
@@ -90,6 +98,20 @@ export default function BranchEditorModal({
       setManagerId(editingBranch.managerId || '');
       setUsername(editingBranch.username || '');
       setPassword(editingBranch.password || '');
+
+      // Network & IP Initialization
+      setIpRestrictionEnabled(editingBranch.ipRestrictionEnabled !== false);
+      const rawBranchIps = editingBranch.allowedIps || editingBranch.routerIPs || [];
+      setAllowedIps(
+        Array.isArray(rawBranchIps)
+          ? rawBranchIps.map((p, idx) => ({
+              id: p.id || String(idx + 1),
+              label: typeof p === 'string' ? `راوتر ${idx + 1}` : (p.label || `راوتر ${idx + 1}`),
+              ip: typeof p === 'string' ? p : (p.ip || '')
+            }))
+          : []
+      );
+      setEmergencyPin(editingBranch.emergencyPin || '');
     } else {
       // New Branch auto-defaults
       setBranchCode(`BR-${(branches || []).length + 101}`);
@@ -105,6 +127,9 @@ export default function BranchEditorModal({
       setBranchLogo('');
       setPhones([{ id: Date.now().toString(), number: '', type: 'landline' }]);
       setManagerId('');
+      setIpRestrictionEnabled(true);
+      setAllowedIps([]);
+      setEmergencyPin('');
 
       // Auto-generate unique username
       let bIndex = (branches || []).length + 1;
@@ -247,6 +272,47 @@ export default function BranchEditorModal({
   };
 
   // Phones management
+  const handleCaptureCurrentIp = async () => {
+    setIsDetectingIp(true);
+    try {
+      const ip = await fetchCurrentIP();
+      setCurrentDeviceIp(ip);
+      if (ip && ip !== '127.0.0.1 (شبكة محلية)' && ip !== 'localhost') {
+        const exists = allowedIps.some((e) => (e.ip || '').trim() === ip.trim());
+        if (!exists) {
+          setAllowedIps((prev) => [
+            ...prev,
+            { id: Date.now().toString(), label: prev.length === 0 ? 'راوتر الفرع الرئيسي (تم الالتقاط)' : `راوتر إضافي (${ip})`, ip }
+          ]);
+          showToast?.(`✅ تم التقاط IP الراوتر الحالي بنجاح: ${ip}`);
+        } else {
+          showToast?.(`ℹ️ الـ IP الحالي (${ip}) مسجل بالفعل في قائمة الراوترات المعتمدة`);
+        }
+      } else {
+        showToast?.('ℹ️ تم الكشف عن عنوان محلي (Local Network)');
+      }
+    } catch (err) {
+      alert('تعذر جلب الـ IP تلقائياً. يمكنك إدخاله يدوياً.');
+    } finally {
+      setIsDetectingIp(false);
+    }
+  };
+
+  const handleAddRouter = () => {
+    setAllowedIps((prev) => [
+      ...prev,
+      { id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 4), label: `راوتر ${prev.length + 1}`, ip: '' }
+    ]);
+  };
+
+  const handleRouterChange = (id, field, value) => {
+    setAllowedIps((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
+  };
+
+  const handleRemoveRouter = (id) => {
+    setAllowedIps((prev) => prev.filter((r) => r.id !== id));
+  };
+
   const handleAddPhone = () => {
     setPhones([
       ...phones,
@@ -333,6 +399,15 @@ export default function BranchEditorModal({
       ? (Number(editingBranch?.sessionVersion || 0)) + 1
       : (Number(editingBranch?.sessionVersion || 0));
 
+    // Clean valid router IPs
+    const validBranchIps = allowedIps
+      .filter((r) => r.ip && r.ip.trim())
+      .map((r) => ({
+        id: r.id || Date.now().toString(),
+        label: (r.label || '').trim() || 'راوتر الفرع',
+        ip: (r.ip || '').trim()
+      }));
+
     const branchData = {
       id: editingBranch ? editingBranch.id : `branch_${Date.now()}`,
       branchCode: branchCode.trim(),
@@ -355,6 +430,9 @@ export default function BranchEditorModal({
       password,
       passwordChangedAt: isPasswordChanged ? new Date().toISOString() : (editingBranch?.passwordChangedAt || null),
       sessionVersion: nextBranchSessionVer,
+      ipRestrictionEnabled: Boolean(ipRestrictionEnabled),
+      allowedIps: validBranchIps,
+      emergencyPin: (emergencyPin || '').trim(),
       createdAt: editingBranch ? editingBranch.createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -501,7 +579,8 @@ export default function BranchEditorModal({
             { id: 'general', label: 'البيانات الأساسية والهوية', icon: '🏢' },
             { id: 'location', label: 'العنوان والموقع (GPS)', icon: '📍', badge: branchLatitude ? 'معتمد' : null },
             { id: 'phones', label: 'أرقام التواصل', icon: '📞', count: phones.filter((p) => p.number).length },
-            { id: 'security', label: 'حساب الدخول لصفحة الفرع', icon: '🔐' }
+            { id: 'security', label: 'حساب الدخول لصفحة الفرع', icon: '🔐' },
+            { id: 'network', label: 'تقييد الـ IP وراوتر البصمة', icon: '🌐', count: allowedIps.filter((i) => i.ip).length }
           ].map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -1366,6 +1445,253 @@ export default function BranchEditorModal({
               </div>
             </div>
           )}
+
+          {/* ═════════ Tab 5: Branch Network & Router IP Restrictions ═════════ */}
+          {activeTab === 'network' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%)',
+                  border: '1px solid #99f6e4',
+                  borderRadius: '14px',
+                  padding: '16px 18px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '12px'
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '22px' }}>🌐</span>
+                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#0f766e' }}>
+                      ربط كشك بصمة الفرع براوتر الصيدلية (IP Restriction)
+                    </h4>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '12px', color: '#115e59', lineHeight: 1.5 }}>
+                    يضمن عدم إمكانية فتح رابط كشك هذا الفرع أو تسجيل الحضور فيه إلا أثناء الاتصال بشبكة الإنترنت (الراوتر) المعتمدة لهذا الفرع حصراً.
+                  </p>
+                </div>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', userSelect: 'none', background: '#ffffff', padding: '6px 14px', borderRadius: '10px', border: '1px solid #99f6e4', fontWeight: 800, fontSize: '13px' }}>
+                  <input
+                    type="checkbox"
+                    checked={ipRestrictionEnabled}
+                    onChange={(e) => setIpRestrictionEnabled(e.target.checked)}
+                    style={{ width: '18px', height: '18px', accentColor: '#0d9488', cursor: 'pointer' }}
+                  />
+                  <span style={{ color: ipRestrictionEnabled ? '#0f766e' : '#64748b' }}>
+                    {ipRestrictionEnabled ? '✅ الحماية مفعلة للفرع' : '⭕ الحماية معطلة'}
+                  </span>
+                </label>
+              </div>
+
+              {/* 1-Click Auto Capture Card */}
+              <div style={{
+                background: 'var(--surface)',
+                border: '1.5px dashed var(--primary, #0d9488)',
+                borderRadius: '12px',
+                padding: '14px 18px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '12px'
+              }}>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text)', marginBottom: '3px' }}>
+                    📍 التقاط IP الشبكة الحالية تلقائياً (بنقرة واحدة):
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                    إذا كنت متواجداً الآن داخل الفرع أو متصلاً براوتر الفرع، اضغط للالتقاط التلقائي دون الحاجة لكتابة الأرقام يدوياً.
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleCaptureCurrentIp}
+                  disabled={isDetectingIp}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '9px 16px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontWeight: 800,
+                    fontSize: '12.5px',
+                    cursor: isDetectingIp ? 'wait' : 'pointer',
+                    boxShadow: '0 2px 8px rgba(13, 148, 136, 0.25)'
+                  }}
+                >
+                  <span>{isDetectingIp ? '⏳ جاري الفحص...' : '📍 التقاط الـ IP الحالي فوراً'}</span>
+                </button>
+              </div>
+
+              {/* Routers List */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>
+                    قائمة الراوترات والشبكات المعتمدة للفرع ({allowedIps.length}):
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleAddRouter}
+                    style={{
+                      background: 'none',
+                      border: '1px solid var(--border)',
+                      padding: '4px 12px',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      color: 'var(--primary)',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    + إضافة راوتر آخر
+                  </button>
+                </div>
+
+                {allowedIps.length === 0 ? (
+                  <div style={{
+                    padding: '24px',
+                    textAlign: 'center',
+                    background: 'var(--surface-muted, #f8fafc)',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border)',
+                    color: 'var(--muted)',
+                    fontSize: '12.5px'
+                  }}>
+                    لم يتم تسجيل أي راوتر لهذا الفرع بعد. اضغط على "التقاط الـ IP الحالي" أو "إضافة راوتر" لتحديد شبكة الفرع.
+                  </div>
+                ) : (
+                  allowedIps.map((router, idx) => (
+                    <div
+                      key={router.id}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr auto',
+                        gap: '12px',
+                        alignItems: 'center',
+                        background: 'var(--surface)',
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        border: '1px solid var(--border)'
+                      }}
+                    >
+                      <div>
+                        <label style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginBottom: '3px' }}>
+                          اسم / تسمية الراوتر (مثال: راوتر وي الأساسي، راوتر 4G):
+                        </label>
+                        <input
+                          type="text"
+                          value={router.label}
+                          placeholder={`راوتر ${idx + 1}`}
+                          onChange={(e) => handleRouterChange(router.id, 'label', e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border)',
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            boxSizing: 'border-box'
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginBottom: '3px' }}>
+                          عنوان الـ IP (Public IP):
+                        </label>
+                        <input
+                          type="text"
+                          value={router.ip}
+                          placeholder="مثال: 197.35.40.12 أو 197.35.*"
+                          onChange={(e) => handleRouterChange(router.id, 'ip', e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border)',
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            direction: 'ltr',
+                            boxSizing: 'border-box'
+                          }}
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRouter(router.id)}
+                        style={{
+                          background: '#fee2e2',
+                          color: '#dc2626',
+                          border: 'none',
+                          borderRadius: '8px',
+                          width: '34px',
+                          height: '34px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '15px',
+                          marginTop: '16px'
+                        }}
+                        title="حذف هذا الراوتر"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Emergency PIN Input */}
+              <div style={{
+                background: 'var(--surface-muted, #f8fafc)',
+                border: '1px solid var(--border)',
+                borderRadius: '12px',
+                padding: '14px 18px',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                gap: '14px',
+                alignItems: 'center'
+              }}>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text)', marginBottom: '3px' }}>
+                    🔑 كود الطوارئ لتجاوز الـ IP (Emergency PIN):
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--muted)', lineHeight: 1.4 }}>
+                    في حال انقطاع إنترنت الراوتر واضطرار الفرع للبصمة عبر باقة هاتفية مؤقتة، يمكن إدخال هذا الرقم السري في الكشك للبصمة الاستثنائية.
+                  </div>
+                </div>
+
+                <div>
+                  <input
+                    type="password"
+                    value={emergencyPin}
+                    placeholder="رقم سري اختياري (أو يُستخدم باسوورد المالك تلقائياً)"
+                    onChange={(e) => setEmergencyPin(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border)',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      direction: 'ltr',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Modal Footer Pro ── */}
@@ -1391,7 +1717,7 @@ export default function BranchEditorModal({
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => {
-                  const tabs = ['general', 'location', 'phones', 'security'];
+                  const tabs = ['general', 'location', 'phones', 'security', 'network'];
                   const idx = tabs.indexOf(activeTab);
                   if (idx > 0) setActiveTab(tabs[idx - 1]);
                 }}
@@ -1401,12 +1727,12 @@ export default function BranchEditorModal({
               </button>
             )}
 
-            {activeTab !== 'security' && (
+            {activeTab !== 'network' && (
               <button
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => {
-                  const tabs = ['general', 'location', 'phones', 'security'];
+                  const tabs = ['general', 'location', 'phones', 'security', 'network'];
                   const idx = tabs.indexOf(activeTab);
                   if (idx < tabs.length - 1) setActiveTab(tabs[idx + 1]);
                 }}

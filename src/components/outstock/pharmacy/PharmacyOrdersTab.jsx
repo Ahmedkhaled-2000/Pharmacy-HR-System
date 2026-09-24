@@ -3,6 +3,7 @@ import { Plus, Search, Printer, CheckCircle, MessageSquare, AlertCircle, Clock, 
 import { outstockGetOrders, outstockDeliverOrder, outstockMarkWhatsappNotified } from '../../../utils/outstockApiClient';
 import NewCustomerOrderModal from './NewCustomerOrderModal';
 import DualCashierReceiptModal from './DualCashierReceiptModal';
+import OutstockConfirmModal from '../common/OutstockConfirmModal';
 
 /**
  * PharmacyOrdersTab.jsx
@@ -37,45 +38,87 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     if (branchId) fetchOrders();
   }, [branchId]);
 
-  // الاستماع المباشر لتحديثات المزامنة اللحظية
+  // الاستماع المباشر لتحديثات المزامنة اللحظية والأوفلاين
   useEffect(() => {
-    const handleOrderCreated = (e) => {
+    const handleSyncEvent = (e) => {
       const data = e?.detail || e;
-      if (data?.branchId === branchId) {
+      if (!data?.branchId || data.branchId === branchId) {
         fetchOrders();
       }
     };
 
-    const handleItemUpdated = (e) => {
-      const data = e?.detail || e;
-      if (data?.branchId === branchId) {
-        fetchOrders();
-      }
-    };
-
-    window.addEventListener('outstock:order_created', handleOrderCreated);
-    window.addEventListener('outstock:item_status_updated', handleItemUpdated);
+    window.addEventListener('outstock:order_created', handleSyncEvent);
+    window.addEventListener('outstock:item_status_updated', handleSyncEvent);
+    window.addEventListener('outstock:items_status_updated', handleSyncEvent);
+    window.addEventListener('outstock:order_synced', handleSyncEvent);
+    window.addEventListener('outstock:order_delivered', handleSyncEvent);
+    window.addEventListener('outstock:realtime_event', handleSyncEvent);
 
     return () => {
-      window.removeEventListener('outstock:order_created', handleOrderCreated);
-      window.removeEventListener('outstock:item_status_updated', handleItemUpdated);
+      window.removeEventListener('outstock:order_created', handleSyncEvent);
+      window.removeEventListener('outstock:item_status_updated', handleSyncEvent);
+      window.removeEventListener('outstock:items_status_updated', handleSyncEvent);
+      window.removeEventListener('outstock:order_synced', handleSyncEvent);
+      window.removeEventListener('outstock:order_delivered', handleSyncEvent);
+      window.removeEventListener('outstock:realtime_event', handleSyncEvent);
     };
   }, [branchId]);
 
+  // الاستماع لاختصارات لوحة المفاتيح التفاعلية (F2, F3, F8)
+  useEffect(() => {
+    const handleShortcutNewOrder = () => setIsNewOrderModalOpen(true);
+    const handleShortcutSearch = () => {
+      const el = document.querySelector('.outstock-search-input');
+      if (el) {
+        el.focus();
+        el.select?.();
+      }
+    };
+    const handleShortcutPrint = () => {
+      if (orders.length > 0) {
+        setPrintingOrder(orders[0]);
+      }
+    };
+
+    window.addEventListener('outstock:shortcut_new_order', handleShortcutNewOrder);
+    window.addEventListener('outstock:shortcut_focus_search', handleShortcutSearch);
+    window.addEventListener('outstock:shortcut_quick_print', handleShortcutPrint);
+
+    return () => {
+      window.removeEventListener('outstock:shortcut_new_order', handleShortcutNewOrder);
+      window.removeEventListener('outstock:shortcut_focus_search', handleShortcutSearch);
+      window.removeEventListener('outstock:shortcut_quick_print', handleShortcutPrint);
+    };
+  }, [orders]);
+
+  // حالة نافذة تأكيد تسليم الدواء
+  const [deliveryConfirmOrder, setDeliveryConfirmOrder] = useState(null);
+  const [isDelivering, setIsDelivering] = useState(false);
+
   // تسليم الطلب للعميل
-  const handleDeliver = async (orderId) => {
-    if (!window.confirm('هل حضر العميل وتم استلام الدواء وتحصيل المبلغ المتبقي؟')) return;
+  const handleDeliver = (orderOrId) => {
+    const targetOrder = typeof orderOrId === 'object' ? orderOrId : orders.find(o => o.id === orderOrId);
+    setDeliveryConfirmOrder(targetOrder || { id: orderOrId });
+  };
+
+  const executeDeliver = async () => {
+    if (!deliveryConfirmOrder) return;
+    const orderId = deliveryConfirmOrder.id;
+    setIsDelivering(true);
 
     try {
       const res = await outstockDeliverOrder(orderId);
       if (res?.success) {
-        showToast?.('✅ تم تسليم الطلب للعميل بنجاح واختفاؤه من قائمة الانتظار');
+        showToast?.('✅ تم تسليم الطلب للعميل بنجاح وتحصيل المبلغ المتبقي');
         setOrders(prev => prev.filter(o => o.id !== orderId));
       } else {
         showToast?.(`⚠️ ${res?.error || 'تعذر تسليم الطلب'}`);
       }
     } catch (err) {
       showToast?.('حدث خطأ أثناء التسليم');
+    } finally {
+      setIsDelivering(false);
+      setDeliveryConfirmOrder(null);
     }
   };
 
@@ -121,12 +164,12 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     <div>
       {/* ── شريط الأدوات العلوي والبحث بالباركود ── */}
       <div className="outstock-card" style={{ padding: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', flexWrap: 'wrap' }}>
-          <div className="outstock-search-bar" style={{ maxWidth: '520px' }}>
+        <div className="outstock-filters-bar">
+          <div className="outstock-search-bar" style={{ flex: 1, minWidth: '240px' }}>
             <Search size={18} className="outstock-search-icon" />
             <input
               type="text"
-              placeholder="🔍 ابحث برقم العميل، الاسم، كود الطلب، أو امسح الباركود بالماسح الضوئي..."
+              placeholder="🔍 ابحث برقم العميل، الاسم، كود الطلب، أو امسح الباركود..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="outstock-search-input"
@@ -134,7 +177,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
             />
           </div>
 
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button
               type="button"
               className="outstock-btn outstock-btn-secondary"
@@ -195,17 +238,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
               return (
                 <div
                   key={order.id}
-                  style={{
-                    background: '#ffffff',
-                    border: '1.5px solid',
-                    borderColor: allAvailable ? '#86efac' : '#e2e8f0',
-                    borderRadius: '14px',
-                    padding: '16px',
-                    boxShadow: allAvailable ? '0 4px 16px rgba(34, 197, 94, 0.08)' : '0 2px 8px rgba(0,0,0,0.02)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '12px'
-                  }}
+                  className={`outstock-order-card ${allAvailable ? 'ready-state' : ''}`}
                 >
                   {/* رأس بطاقة الطلب */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
@@ -232,7 +265,12 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      {allAvailable ? (
+                      {order.is_offline_pending || order.isOffline ? (
+                        <span className="outstock-badge pending" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' }}>
+                          <Clock size={13} />
+                          <span>محفوظ محلياً (أوفلاين) ⏳</span>
+                        </span>
+                      ) : allAvailable ? (
                         <span className="outstock-badge ready">
                           <CheckCircle size={13} />
                           <span>متوفر بالكامل - جاهز للتسليم 🟢</span>
@@ -320,25 +358,25 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                   {/* تفاصيل المبالغ وموعد الاستلام وأزرار الإجراءات */}
                   <div style={{
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    flexWrap: 'wrap',
-                    gap: '12px',
-                    borderTop: '1px solid #f1f5f9',
+                    flexDirection: 'column',
+                    gap: '10px',
+                    borderTop: '1px solid var(--border-subtle, #f1f5f9)',
                     paddingTop: '10px'
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px' }}>
-                      <div>
-                        الإجمالي: <strong>{parseFloat(order.total_amount || order.totalAmount || 0).toFixed(2)} ج.م</strong>
-                      </div>
-                      <div>
-                        المدفوع: <strong style={{ color: '#059669' }}>{parseFloat(order.paid_amount || order.paidAmount || 0).toFixed(2)} ج.م</strong>
-                      </div>
-                      <div style={{ fontSize: '14.5px' }}>
-                        المتبقي: <strong style={{ color: '#dc2626' }}>{parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2)} ج.م</strong>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', fontSize: '13px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                        <div>
+                          الإجمالي: <strong>{parseFloat(order.total_amount || order.totalAmount || 0).toFixed(2)} ج.م</strong>
+                        </div>
+                        <div>
+                          المدفوع: <strong style={{ color: '#059669' }}>{parseFloat(order.paid_amount || order.paidAmount || 0).toFixed(2)} ج.م</strong>
+                        </div>
+                        <div style={{ fontSize: '14px' }}>
+                          المتبقي: <strong style={{ color: '#dc2626' }}>{parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2)} ج.م</strong>
+                        </div>
                       </div>
                       {order.expected_pickup_date && (
-                        <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
                           <Calendar size={13} />
                           <span>الاستلام: {order.expected_pickup_date || order.expectedPickupDate}</span>
                         </div>
@@ -346,38 +384,40 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                     </div>
 
                     {/* أزرار الإجراءات */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleSendWhatsapp(order)}
-                        className="outstock-btn outstock-btn-whatsapp"
-                        style={{ padding: '6px 12px', fontSize: '12.5px' }}
-                        title="إرسال رسالة واتساب للعميل بإشعار التوفر"
-                      >
-                        <MessageSquare size={14} />
-                        <span>إرسال واتساب</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setPrintingOrder(order)}
-                        className="outstock-btn outstock-btn-secondary"
-                        style={{ padding: '6px 12px', fontSize: '12.5px' }}
-                        title="طباعة إيصال الكاشير نسختين"
-                      >
-                        <Printer size={14} />
-                        <span>طباعة الإيصال</span>
-                      </button>
-
+                    <div className="outstock-order-actions-bar">
                       <button
                         type="button"
                         onClick={() => handleDeliver(order.id)}
                         className="outstock-btn outstock-btn-success"
-                        style={{ padding: '6px 16px', fontSize: '13px' }}
+                        style={{ padding: '8px 16px', fontSize: '13px' }}
                       >
-                        <Check size={15} />
+                        <Check size={16} />
                         <span>تسليم للعميل</span>
                       </button>
+
+                      <div className="outstock-order-sub-actions">
+                        <button
+                          type="button"
+                          onClick={() => handleSendWhatsapp(order)}
+                          className="outstock-btn outstock-btn-whatsapp"
+                          style={{ padding: '7px 12px', fontSize: '12.5px' }}
+                          title="إرسال رسالة واتساب للعميل بإشعار التوفر"
+                        >
+                          <MessageSquare size={14} />
+                          <span>إرسال واتساب</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setPrintingOrder(order)}
+                          className="outstock-btn outstock-btn-secondary"
+                          style={{ padding: '7px 12px', fontSize: '12.5px' }}
+                          title="طباعة إيصال الكاشير نسختين"
+                        >
+                          <Printer size={14} />
+                          <span>طباعة الإيصال</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -411,6 +451,26 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
           onClose={() => setPrintingOrder(null)}
         />
       )}
+
+      {/* ── نافذة تأكيد تسليم الدواء للعميل وتحصيل المبلغ ── */}
+      <OutstockConfirmModal
+        isOpen={Boolean(deliveryConfirmOrder)}
+        title="تأكيد تسليم الطلب وتحصيل المبلغ"
+        message="هل حضر العميل واستلم كافة أصناف الأدوية المحجوزة وتم تحصيل المبلغ المتبقي بالدرج؟"
+        iconType="success"
+        confirmText="نعم، تم التسليم والتحصيل"
+        cancelText="تراجع"
+        confirmBtnStyle="success"
+        badge={deliveryConfirmOrder ? `إيصال #${deliveryConfirmOrder.order_number || deliveryConfirmOrder.orderNumber}` : null}
+        details={deliveryConfirmOrder ? [
+          { label: 'العميل', value: deliveryConfirmOrder.customer_name || deliveryConfirmOrder.customerName },
+          { label: 'الهاتف', value: deliveryConfirmOrder.customer_phone || deliveryConfirmOrder.customerPhone || '-' },
+          { label: 'المبلغ المتبقي', value: `${parseFloat(deliveryConfirmOrder.remaining_amount || deliveryConfirmOrder.remainingAmount || 0).toFixed(2)} ج.م` }
+        ] : null}
+        isProcessing={isDelivering}
+        onConfirm={executeDeliver}
+        onClose={() => setDeliveryConfirmOrder(null)}
+      />
     </div>
   );
 }

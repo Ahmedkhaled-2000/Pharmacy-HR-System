@@ -5,6 +5,7 @@
  */
 
 import {
+  API_BASE_URL,
   STORAGE_KEY,
   apiFetchSettings,
   apiSaveSettings,
@@ -56,38 +57,130 @@ export function listenToLiveBroadcasts(callback) {
   return () => syncChannel.removeEventListener('message', handler);
 }
 
-// ── حالة الاتصال الحقيقية ومسبار النبض النشط (Active Reachability Engine) ───
+// ── حالة الاتصال الحقيقية ومسبار النبض النشط ثلاثي المستويات (Tri-Tier Active Reachability Engine) ───
+export const NETWORK_QUALITY = {
+  OPTIMAL: 'OPTIMAL',             // اتصال ممتاز (< 800ms)
+  DEGRADED_SLOW: 'DEGRADED_SLOW', // اتصال بطيء أو عالي التذبذب (> 1800ms)
+  ROUTER_ONLY: 'ROUTER_ONLY',     // متصل بالراوتر ولكن النت مقطوع أو السيرفر غير متاح
+  OFFLINE: 'OFFLINE'              // غير متصل بأي شبكة
+};
+
 let isNetworkOffline = typeof navigator !== 'undefined' ? !navigator.onLine : false;
 let activeSyncPromise = null;
 let heartbeatTimerId = null;
+let currentNetworkQuality = isNetworkOffline ? NETWORK_QUALITY.OFFLINE : NETWORK_QUALITY.OPTIMAL;
+let currentRttMs = 0;
+const networkTelemetrySubscribers = new Set();
 
 export function isOnline() {
-  // لا نعتمد بشكل أعمى على navigator.onLine وحده في ويندوز كروميوم
   if (typeof navigator !== 'undefined' && navigator.onLine === false && isNetworkOffline) {
     return false;
   }
-  return true;
+  return !isNetworkOffline;
 }
 
 export function setConnectionStatus(online) {
   isNetworkOffline = !online;
+  currentNetworkQuality = online ? NETWORK_QUALITY.OPTIMAL : NETWORK_QUALITY.OFFLINE;
+  notifyTelemetry();
+}
+
+export function getNetworkTelemetry() {
+  return {
+    isOnline: !isNetworkOffline,
+    quality: currentNetworkQuality,
+    rttMs: currentRttMs,
+    isSlowNetwork: currentNetworkQuality === NETWORK_QUALITY.DEGRADED_SLOW,
+    isRouterOnly: currentNetworkQuality === NETWORK_QUALITY.ROUTER_ONLY
+  };
+}
+
+export function subscribeToNetworkTelemetry(callback) {
+  if (typeof callback !== 'function') return () => {};
+  networkTelemetrySubscribers.add(callback);
+  try {
+    callback(getNetworkTelemetry());
+  } catch {}
+  return () => networkTelemetrySubscribers.delete(callback);
+}
+
+function notifyTelemetry() {
+  const telemetry = getNetworkTelemetry();
+  networkTelemetrySubscribers.forEach(cb => {
+    try { cb(telemetry); } catch {}
+  });
 }
 
 /**
- * فحص الاتصال الفعلي الخفيف جداً (Fast Ping Probe < 50ms)
- * يضمن التأكد من وصول الحزم للإنترنت وليس فقط الاتصال بالراوتر المحلي
+ * 🚀 فحص الاتصال الفعلي ثلاثي المستويات (Tri-Tier Active Reachability Probe)
+ * يضمن التمييز الدقيق بين:
+ * 1. وصول كامل لخادم VPS
+ * 2. اتصال بالراوتر المحلي فقط دون إنترنت
+ * 3. اتصال ضعيف/بطيء جداً لتفعيل درع الحماية (Slow Network Shield)
  */
-export async function verifyRealConnection(timeoutMs = 3000) {
+export async function verifyRealConnection(timeoutMs = 2500) {
+  const startTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+  // المستوى 1: فحص الخادم السحابي VPS عبر نقطة /api/ping فائقة الخفة (< 30ms)
   try {
-    const vRes = await apiFetchVersion(STORAGE_KEY, { timeout: timeoutMs, isBackground: true });
-    if (vRes !== undefined && vRes !== null) {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    const res = await fetch(`${API_BASE_URL}/ping`, {
+      method: 'GET',
+      cache: 'no-store',
+      signal: controller?.signal
+    });
+    if (timer) clearTimeout(timer);
+
+    if (res.ok || res.status === 204 || res.status === 200) {
+      const rtt = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startTime);
+      currentRttMs = rtt;
       isNetworkOffline = false;
+      currentNetworkQuality = rtt > 1800 ? NETWORK_QUALITY.DEGRADED_SLOW : NETWORK_QUALITY.OPTIMAL;
+      notifyTelemetry();
       return true;
     }
-  } catch (e) {
-    // محاولة إضافية سريعة
+  } catch {}
+
+  // المستوى 1.5 الاحتياطي: فحص إصدار البيانات apiFetchVersion
+  try {
+    const vRes = await apiFetchVersion(STORAGE_KEY, { timeout: Math.min(timeoutMs, 2000), isBackground: true });
+    if (vRes !== undefined && vRes !== null) {
+      const rtt = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startTime);
+      currentRttMs = rtt;
+      isNetworkOffline = false;
+      currentNetworkQuality = rtt > 1800 ? NETWORK_QUALITY.DEGRADED_SLOW : NETWORK_QUALITY.OPTIMAL;
+      notifyTelemetry();
+      return true;
+    }
+  } catch {}
+
+  // المستوى 2: فحص وصول الإنترنت العام للتحقق من الاتصال بالراوتر فقط vs انقطاع النت
+  try {
+    const pubController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const pubTimer = pubController ? setTimeout(() => pubController.abort(), 1800) : null;
+    await fetch('https://connectivitycheck.gstatic.com/generate_204', {
+      method: 'HEAD',
+      mode: 'no-cors',
+      cache: 'no-store',
+      signal: pubController?.signal
+    });
+    if (pubTimer) clearTimeout(pubTimer);
+
+    // الإنترنت العام يعمل ولكن خادم الـ VPS لا يستجيب
+    isNetworkOffline = true;
+    currentNetworkQuality = NETWORK_QUALITY.ROUTER_ONLY;
+    notifyTelemetry();
+    return false;
+  } catch {
+    // انقطاع تام أو اتصال بالراوتر دون أي إنترنت
+    isNetworkOffline = true;
+    currentNetworkQuality = (typeof navigator !== 'undefined' && navigator.onLine)
+      ? NETWORK_QUALITY.ROUTER_ONLY
+      : NETWORK_QUALITY.OFFLINE;
+    notifyTelemetry();
+    return false;
   }
-  return false;
 }
 
 // ── جلب أحدث نسخة سحابية من MariaDB عبر PHP API ──────────────────────────

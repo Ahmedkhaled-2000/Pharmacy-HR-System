@@ -322,6 +322,17 @@ export async function checkUsernameCollisionWithHr(username, db, getSettingsFrom
 
 // ── 2. تسجيل مسارات الـ API وخادم المزامنة ────────────────────────────────────
 export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromStorage) {
+  // دالة بث موحدة وآمنة عبر Socket.io
+  const broadcastOutstock = (event, data) => {
+    try {
+      if (io && typeof io.emit === 'function') {
+        io.emit(event, data);
+      }
+    } catch (err) {
+      console.warn(`[Outstock Socket Warning ${event}]:`, err.message);
+    }
+  };
+
   // فحص صحة جلسة التوكن
   const authMiddleware = async (req, res, next) => {
     try {
@@ -331,9 +342,40 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       }
       const token = authHeader.substring(7).trim();
       const payload = verifyToken(token, JWT_SECRET);
-      if (!payload || !payload.id) {
+      if (!payload || (!payload.id && !payload.username && !payload.userId)) {
         return res.status(401).json({ success: false, error: 'انتهت صلاحية الجلسة' });
       }
+
+      // توحيد المعرف id إذا كان قادماً من أي نوع توكن صادرة عن المنظومة
+      if (!payload.id) {
+        payload.id = payload.userId || payload.username;
+      }
+
+      // توحيد الأدوار العليا (المالك، الأدمن، المطور) لتعمل بصلاحيات المالك كاملة في النواقص
+      if (['owner', 'admin', 'developer'].includes(payload.role)) {
+        payload.role = 'owner';
+      }
+
+      // في حال كان المستخدم فرعاً ولم يتم تعيين branchId في التوكن
+      if (!payload.branchId && (payload.role === 'outstock_branch' || payload.role === 'branch')) {
+        try {
+          const bCheck = await db.query(
+            'SELECT * FROM public.outstock_branches WHERE LOWER(username) = $1 OR username = $2 OR id = $3 LIMIT 1',
+            [String(payload.username || '').toLowerCase(), toStdDigits(payload.username), payload.id]
+          );
+          if (bCheck.rows.length > 0) {
+            payload.branchId = bCheck.rows[0].id;
+            payload.branchData = bCheck.rows[0];
+            payload.role = 'outstock_branch';
+          } else {
+            payload.branchId = payload.id;
+          }
+        } catch (bErr) {
+          console.warn('[Outstock authMiddleware Branch Enrich Err]:', bErr.message);
+          payload.branchId = payload.id;
+        }
+      }
+
       req.outstockUser = payload;
       next();
     } catch (err) {
@@ -796,6 +838,9 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         RETURNING *
       `, [targetId, custCode, fullName, cleanPhone, landlinePhone || null, address || null, branchId || 'main', notes || null]);
 
+      // ⚡ بث فوري لتحديث بيانات العملاء
+      broadcastOutstock('outstock:customer_updated', { customer: insertRes.rows[0], branchId });
+
       res.json({ success: true, customer: insertRes.rows[0], message: 'تم حفظ بيانات العميل بنجاح' });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
@@ -864,7 +909,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   app.post('/api/outstock/orders', authMiddleware, async (req, res) => {
     try {
       const {
-        branchId,
+        branchId: bodyBranchId,
         customer, // { id, fullName, whatsappPhone, landlinePhone, address }
         items,    // [ { medicationName, unitType, quantity, unitPrice } ]
         paidAmount,
@@ -875,6 +920,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         responsiblePharmacist,
         customerNotes
       } = req.body || {};
+
+      let branchId = bodyBranchId;
+      if (!branchId || branchId === 'main') {
+        branchId = req.outstockUser?.branchId || req.outstockUser?.branchData?.id || req.outstockUser?.id || bodyBranchId;
+      }
 
       if (!branchId || !customer || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ success: false, error: 'البيانات غير مكتملة: مطلوب تحديد الفرع والعميل والأصناف' });
@@ -991,8 +1041,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         createdAt: new Date().toISOString()
       };
 
-      // ⚡ بث فوري عبر الـ Socket.io لإدارة المشتريات والمالك
-      io.emit('outstock:order_created', { order: fullOrder, branchId });
+      // ⚡ بث فوري عبر الـ Socket.io لإدارة المشتريات والمالك والفروع
+      broadcastOutstock('outstock:order_created', { order: fullOrder, branchId });
 
       res.json({
         success: true,
@@ -1043,7 +1093,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       }
 
       // ⚡ بث فوري
-      io.emit('outstock:order_delivered', { orderId, branchId: order.branch_id });
+      broadcastOutstock('outstock:order_delivered', { orderId, branchId: order.branch_id });
 
       res.json({ success: true, message: 'تم تسليم الطلب للعميل واكتمال المعاملة بنجاح' });
     } catch (err) {
@@ -1202,14 +1252,16 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         `, [stockId, branchId, medicationName, unitType || 'pack', totalProcuredQty]);
       }
 
-      // ⚡ بث فوري عبر Socket.io للفرع والمالك
-      io.emit('outstock:item_status_updated', {
+      // ⚡ بث فوري عبر Socket.io للفرع والمالك والمشتريات
+      const itemUpdatePayload = {
         branchId,
         medicationName,
         unitType,
         action,
         count: itemsToUpdate.length
-      });
+      };
+      broadcastOutstock('outstock:item_status_updated', itemUpdatePayload);
+      broadcastOutstock('outstock:items_status_updated', itemUpdatePayload);
 
       res.json({
         success: true,
@@ -1306,13 +1358,15 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const waitingCustomers = defRes.rows;
 
       // ⚡ بث فوري للفرع مع بيانات العملاء كاملة
-      io.emit('outstock:restocked_alert', {
+      const restockPayload = {
         branchId,
         medicationName,
         unitType,
         waitingCustomers,
         message: `الصنف (${medicationName}) أصبح متوفراً الآن! يمكنك التواصل مع العملاء لحجزه.`
-      });
+      };
+      broadcastOutstock('outstock:restocked_alert', restockPayload);
+      broadcastOutstock('outstock:item_restocked', restockPayload);
 
       res.json({
         success: true,
@@ -1413,7 +1467,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       await db.query("UPDATE public.outstock_deficiencies SET status = 'reordered_by_branch', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [deficiencyId]);
 
       // ⚡ بث فوري
-      io.emit('outstock:order_created', {
+      const reorderPayload = {
         order: {
           id: newOrderId,
           orderNumber,
@@ -1424,7 +1478,9 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           items: [{ medicationName: def.medication_name, quantity: def.requested_quantity, unitType: def.unit_type }]
         },
         branchId: def.branch_id
-      });
+      };
+      broadcastOutstock('outstock:order_created', reorderPayload);
+      broadcastOutstock('outstock:deficiency_reordered', { deficiencyId, branchId: def.branch_id });
 
       res.json({ success: true, message: 'تم إعادة طلب الصنف وظهوره في صفحة طلبات العملاء وإرساله للمشتريات بنجاح' });
     } catch (err) {

@@ -178,30 +178,36 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
   return (
     <div className="outstock-modal-backdrop" onClick={onClose}>
       <div
-        className="outstock-modal-panel"
-        style={{ maxWidth: '760px' }}
+        className="outstock-modal-panel modal-lg"
         onClick={(e) => e.stopPropagation()}
       >
+        <div className="outstock-modal-drag-handle" />
+
         <div className="outstock-modal-header">
-          <h3>📦 تسجيل طلب عميل جديد (نواقص أدوية)</h3>
-          <button className="outstock-modal-close" onClick={onClose}>
+          <h3>
+            <span>📦 تسجيل طلب عميل جديد (نواقص أدوية)</span>
+          </h3>
+          <button className="outstock-modal-close" onClick={onClose} title="إغلاق">
             <X size={19} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
           <div className="outstock-modal-body">
             {errorMsg && (
               <div style={{
                 background: '#fef2f2',
                 border: '1px solid #fecaca',
-                borderRadius: '10px',
-                padding: '10px 14px',
+                borderRadius: '12px',
+                padding: '12px 16px',
                 color: '#b91c1c',
                 fontSize: '13px',
-                fontWeight: '700'
+                fontWeight: '800',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
               }}>
-                ⚠️ {errorMsg}
+                <span>⚠️ {errorMsg}</span>
               </div>
             )}
 
@@ -209,27 +215,27 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
             <div style={{
               background: '#f0fdfa',
               border: '1.5px solid #ccfbf1',
-              borderRadius: '14px',
-              padding: '16px'
+              borderRadius: '16px',
+              padding: '14px 16px'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                <span style={{ fontSize: '14px', fontWeight: '900', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                <span style={{ fontSize: '13.5px', fontWeight: '900', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Search size={16} />
-                  <span>بيانات العميل (بحث ذكي برقم الهاتف أو الاسم)</span>
+                  <span>بيانات العميل (بحث ذكي بالهاتف أو الاسم)</span>
                 </span>
                 {selectedCustomer ? (
-                  <span style={{ fontSize: '12px', color: '#059669', fontWeight: '800', background: '#dcfce7', padding: '3px 8px', borderRadius: '6px' }}>
-                    <UserCheck size={14} style={{ display: 'inline' }} /> عميل مسجل مسبقاً ({selectedCustomer.customer_code})
+                  <span style={{ fontSize: '12px', color: '#059669', fontWeight: '800', background: '#dcfce7', padding: '3px 9px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+                    <UserCheck size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> عميل مسجل ({selectedCustomer.customer_code})
                   </span>
                 ) : (
-                  <span style={{ fontSize: '12px', color: '#0284c7', fontWeight: '800', background: '#e0f2fe', padding: '3px 8px', borderRadius: '6px' }}>
-                    <UserPlus size={14} style={{ display: 'inline' }} /> تسجيل عميل جديد
+                  <span style={{ fontSize: '12px', color: '#0284c7', fontWeight: '800', background: '#e0f2fe', padding: '3px 9px', borderRadius: '8px', border: '1px solid #bae6fd' }}>
+                    <UserPlus size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> تسجيل عميل جديد
                   </span>
                 )}
               </div>
 
               {/* مربع البحث السريع */}
-              <div style={{ display: 'flex', gap: '10px', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                 <input
                   type="text"
                   placeholder="ابحث برقم هاتف الواتساب أو اسم العميل..."
@@ -245,10 +251,10 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                   type="button"
                   onClick={() => handleSearchCustomer(searchPhone)}
                   className="outstock-btn outstock-btn-primary"
-                  style={{ padding: '0 16px' }}
+                  style={{ padding: '0 16px', flexShrink: 0 }}
                 >
                   <Search size={16} />
-                  <span>{isSearchingCustomer ? 'جاري البحث...' : 'بحث'}</span>
+                  <span style={{ display: 'inline' }}>{isSearchingCustomer ? '...' : 'بحث'}</span>
                 </button>
               </div>
 
@@ -308,104 +314,95 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
               </div>
             </div>
 
-            {/* ── 2. قسم بنود الأدوية (Multi-Item Grid) ── */}
+            {/* ── 2. قسم بنود الأدوية (Responsive Medicine Cards) ── */}
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
                 <label style={{ fontSize: '14px', fontWeight: '900', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Pill size={16} color="#0d9488" />
-                  <span>الأدوية المطلوبة في هذا الطلب</span>
+                  <span>الأدوية المطلوبة في هذا الطلب ({items.length})</span>
                 </label>
                 <button
                   type="button"
                   onClick={handleAddItem}
                   className="outstock-btn outstock-btn-secondary"
-                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                  style={{ fontSize: '12.5px', padding: '6px 14px' }}
                 >
-                  <Plus size={14} />
+                  <Plus size={15} />
                   <span>إضافة دواء آخر</span>
                 </button>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {items.map((it, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'minmax(180px, 3fr) 110px 90px 100px 40px',
-                      gap: '8px',
-                      alignItems: 'center',
-                      background: '#ffffff',
-                      border: '1px solid #e2e8f0',
-                      padding: '10px',
-                      borderRadius: '10px'
-                    }}
-                  >
-                    <div>
+                  <div key={idx} className="outstock-med-item-card">
+                    <div className="outstock-med-top-line">
+                      <span style={{ color: '#0d9488', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                        <Pill size={16} />
+                      </span>
                       <input
                         type="text"
                         required
-                        placeholder="اسم الدواء والتركيز (مثل: أوجمنتين 1 جم)"
+                        placeholder="اسم الدواء والتركيز (مثل: أوجمنتين 1 جم)..."
                         value={it.medicationName}
                         onChange={(e) => handleItemChange(idx, 'medicationName', e.target.value)}
                         className="outstock-form-input"
-                        style={{ height: '38px', padding: '6px 10px' }}
+                        style={{ flex: 1, minHeight: '40px' }}
                       />
-                    </div>
-
-                    <div>
-                      <select
-                        value={it.unitType}
-                        onChange={(e) => handleItemChange(idx, 'unitType', e.target.value)}
-                        className="outstock-form-select"
-                        style={{ height: '38px', padding: '6px 8px', fontSize: '12.5px' }}
-                      >
-                        <option value="pack">علبة كاملة 📦</option>
-                        <option value="strip">شريط 💊</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <input
-                        type="number"
-                        min="1"
-                        required
-                        placeholder="الكمية"
-                        value={it.quantity}
-                        onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
-                        className="outstock-form-input"
-                        style={{ height: '38px', padding: '6px 10px', textAlign: 'center' }}
-                      />
-                    </div>
-
-                    <div>
-                      <input
-                        type="number"
-                        step="0.5"
-                        placeholder="السعر (ج.م)"
-                        value={it.unitPrice}
-                        onChange={(e) => handleItemChange(idx, 'unitPrice', e.target.value)}
-                        className="outstock-form-input"
-                        style={{ height: '38px', padding: '6px 10px', textAlign: 'center' }}
-                      />
-                    </div>
-
-                    <div>
                       <button
                         type="button"
                         onClick={() => handleRemoveItem(idx)}
                         disabled={items.length === 1}
+                        className="outstock-modal-close"
                         style={{
-                          background: 'none',
-                          border: 'none',
-                          color: items.length === 1 ? '#cbd5e1' : '#ef4444',
+                          width: '36px',
+                          height: '36px',
+                          opacity: items.length === 1 ? 0.35 : 1,
                           cursor: items.length === 1 ? 'not-allowed' : 'pointer',
-                          padding: '6px'
+                          flexShrink: 0
                         }}
                         title="حذف هذا الصنف"
                       >
-                        <Trash2 size={17} />
+                        <Trash2 size={16} color={items.length === 1 ? '#94a3b8' : '#ef4444'} />
                       </button>
+                    </div>
+
+                    <div className="outstock-med-sub-grid">
+                      <div>
+                        <select
+                          value={it.unitType}
+                          onChange={(e) => handleItemChange(idx, 'unitType', e.target.value)}
+                          className="outstock-form-select"
+                          style={{ minHeight: '40px', fontSize: '13px' }}
+                        >
+                          <option value="pack">علبة كاملة 📦</option>
+                          <option value="strip">شريط 💊</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <input
+                          type="number"
+                          min="1"
+                          required
+                          placeholder="الكمية"
+                          value={it.quantity}
+                          onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
+                          className="outstock-form-input"
+                          style={{ minHeight: '40px', textAlign: 'center', fontWeight: 'bold' }}
+                        />
+                      </div>
+
+                      <div>
+                        <input
+                          type="number"
+                          step="0.5"
+                          placeholder="السعر (ج.م)"
+                          value={it.unitPrice}
+                          onChange={(e) => handleItemChange(idx, 'unitPrice', e.target.value)}
+                          className="outstock-form-input"
+                          style={{ minHeight: '40px', textAlign: 'center', fontWeight: 'bold' }}
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -415,9 +412,9 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
             {/* ── 3. الحسابات المالية (العربون والمتبقي والخصم) ── */}
             <div style={{
               background: '#f8fafc',
-              border: '1px solid #e2e8f0',
-              borderRadius: '12px',
-              padding: '14px'
+              border: '1.5px solid #e2e8f0',
+              borderRadius: '16px',
+              padding: '14px 16px'
             }}>
               <div style={{ fontSize: '13.5px', fontWeight: '900', color: '#334155', marginBottom: '10px' }}>
                 💰 الحساب المالي والعربون
@@ -433,7 +430,7 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                     value={paidAmount}
                     onChange={(e) => setPaidAmount(e.target.value)}
                     className="outstock-form-input"
-                    style={{ fontWeight: 'bold', color: '#059669' }}
+                    style={{ fontWeight: 'bold', color: '#059669', fontSize: '15px' }}
                   />
                 </div>
 
@@ -465,20 +462,24 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                 )}
               </div>
 
-              {/* ملخص المبالغ الفوري */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginTop: '12px',
-                paddingTop: '10px',
-                borderTop: '1px dashed #cbd5e1',
-                fontSize: '13.5px'
-              }}>
-                <div>إجمالي الأصناف: <strong>{totalAmount.toFixed(2)} ج.م</strong></div>
-                <div>الصافي بعد الخصم: <strong>{netAmount.toFixed(2)} ج.م</strong></div>
-                <div>المدفوع: <strong style={{ color: '#059669' }}>{paid.toFixed(2)} ج.م</strong></div>
-                <div style={{ fontSize: '15px' }}>المتبقي: <strong style={{ color: '#dc2626' }}>{remainingAmount.toFixed(2)} ج.م</strong></div>
+              {/* ملخص المبالغ الفوري - بطاقات متجاوبة */}
+              <div className="outstock-financial-summary-grid">
+                <div className="outstock-summary-kpi">
+                  <span className="kpi-label">إجمالي الأصناف</span>
+                  <span className="kpi-val">{totalAmount.toFixed(2)} ج.م</span>
+                </div>
+                <div className="outstock-summary-kpi">
+                  <span className="kpi-label">الصافي بعد الخصم</span>
+                  <span className="kpi-val">{netAmount.toFixed(2)} ج.م</span>
+                </div>
+                <div className="outstock-summary-kpi green">
+                  <span className="kpi-label">المدفوع (عربون)</span>
+                  <span className="kpi-val">{paid.toFixed(2)} ج.م</span>
+                </div>
+                <div className="outstock-summary-kpi red highlight-red">
+                  <span className="kpi-label">المتبقي عند الاستلام</span>
+                  <span className="kpi-val">{remainingAmount.toFixed(2)} ج.م</span>
+                </div>
               </div>
             </div>
 

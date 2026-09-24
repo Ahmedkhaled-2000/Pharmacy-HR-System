@@ -117,7 +117,7 @@ export function calculateEmployeeActualSummary({
     const baseEarnings = hours * rate;
 
     const approvedOtHours = bShifts
-      .filter(s => s.overtimeStatus === 'approved' || (parseFloat(s.overtimeHours) > 0 && s.adminApproved))
+      .filter(s => s.overtimeStatus === 'approved' || (parseFloat(s.overtimeHours) > 0 && (s.adminApproved || s.isAdminCreated)))
       .reduce((acc, s) => acc + (parseFloat(s.overtimeHours) || 0), 0);
 
     const otEarnings = Math.round(approvedOtHours * rate * 100) / 100;

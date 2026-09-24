@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, UserPlus, Users, Key, Save, Edit2, Shield, Check, Plus, RefreshCw } from 'lucide-react';
+import { Building2, UserPlus, Users, Key, Save, Edit2, Shield, Check, Keyboard, RotateCcw } from 'lucide-react';
 import {
   outstockGetBranches,
   outstockSaveBranch,
@@ -7,6 +7,12 @@ import {
   outstockSaveUser,
   outstockChangePassword
 } from '../../../utils/outstockApiClient';
+import {
+  getActiveShortcuts,
+  STORAGE_SHORTCUTS_KEY,
+  formatShortcutDisplay,
+  formatShortcutFallback
+} from '../../../utils/shortcutsConfig';
 
 /**
  * OwnerSettingsTab.jsx
@@ -15,14 +21,20 @@ import {
  * 2. إنشاء وتعديل يوزرات إدارة المشتريات
  * 3. تخصيص صلاحيات فروع محددة لمسؤولي المشتريات المساعدين (Sub-Purchasing Scope)
  * 4. تعديل كلمة مرور المالك وتأمين الحساب
+ * 5. تخصيص وإدارة اختصارات لوحة المفاتيح
  */
 export default function OwnerSettingsTab({ showToast }) {
-  const [activeSubSection, setActiveSubSection] = useState('branches'); // 'branches', 'procurement_users', 'security'
+  const [activeSubSection, setActiveSubSection] = useState('branches'); // 'branches', 'procurement_users', 'security', 'shortcuts'
+
+  const [shortcutsList, setShortcutsList] = useState(() => getActiveShortcuts());
+  const [editingShortcutId, setEditingShortcutId] = useState(null);
+  const [shortcutFormKey, setShortcutFormKey] = useState('');
+  const [shortcutFormModifiers, setShortcutFormModifiers] = useState([]);
 
   const [branches, setBranches] = useState([]);
   const [hrBranches, setHrBranches] = useState([]);
   const [users, setUsers] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [_isLoading, setIsLoading] = useState(true);
 
   // فورم إضافة / تعديل فرع
   const [editingBranch, setEditingBranch] = useState(null);
@@ -234,7 +246,7 @@ export default function OwnerSettingsTab({ showToast }) {
     <div>
       {/* ── شريط التبويبات الفرعية للإعدادات ── */}
       <div className="outstock-card" style={{ padding: '12px' }}>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <div className="outstock-subnav-bar">
           <button
             type="button"
             className={`outstock-nav-btn ${activeSubSection === 'branches' ? 'is-active' : ''}`}
@@ -261,12 +273,21 @@ export default function OwnerSettingsTab({ showToast }) {
             <Key size={16} />
             <span>تأمين حساب المالك وكلمة المرور</span>
           </button>
+
+          <button
+            type="button"
+            className={`outstock-nav-btn ${activeSubSection === 'shortcuts' ? 'is-active' : ''}`}
+            onClick={() => setActiveSubSection('shortcuts')}
+          >
+            <Keyboard size={16} />
+            <span>تخصيص اختصارات لوحة المفاتيح</span>
+          </button>
         </div>
       </div>
 
       {/* ── 1. قسم إدارة الفروع وتكاملها مع نظام الرواتب ── */}
       {activeSubSection === 'branches' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
+        <div className="outstock-settings-grid">
           {/* نموذج إضافة وتعديل الفرع */}
           <div className="outstock-card">
             <h3 className="outstock-card-title" style={{ marginBottom: '14px' }}>
@@ -463,7 +484,7 @@ export default function OwnerSettingsTab({ showToast }) {
 
       {/* ── 2. قسم يوزرات المشتريات وتحديد الصلاحيات المخصصة ── */}
       {activeSubSection === 'procurement_users' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
+        <div className="outstock-settings-grid">
           {/* نموذج إضافة وتعديل مستخدم مشتريات */}
           <div className="outstock-card">
             <h3 className="outstock-card-title" style={{ marginBottom: '14px' }}>
@@ -704,6 +725,163 @@ export default function OwnerSettingsTab({ showToast }) {
               <span>{isSavingPassword ? 'جاري التحديث...' : 'تحديث كلمة المرور وتأمين الحساب'}</span>
             </button>
           </form>
+        </div>
+      )}
+
+      {/* ── 4. قسم تخصيص وإدارة اختصارات لوحة المفاتيح ── */}
+      {activeSubSection === 'shortcuts' && (
+        <div className="outstock-card" style={{ maxWidth: '980px', margin: '0 auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <h3 className="outstock-card-title" style={{ marginBottom: '4px' }}>
+                <Keyboard size={18} color="#0d9488" />
+                <span>إدارة وتخصيص اختصارات لوحة المفاتيح السريعة</span>
+              </h3>
+              <p style={{ fontSize: '12.5px', color: '#64748b', margin: 0 }}>
+                تسهيل وتسريع عمليات الكاشير وإدارة المشتريات بمفاتيح مختصرة قابلة للتخصيص دون التأثير على اختصارات المتصفح
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="outstock-btn outstock-btn-secondary"
+              onClick={() => {
+                localStorage.removeItem(STORAGE_SHORTCUTS_KEY);
+                setShortcutsList(getActiveShortcuts());
+                showToast?.('✅ تم استعادة الاختصارات الافتراضية بنجاح');
+              }}
+              title="استعادة الإعدادات الافتراضية"
+              style={{ fontSize: '12px', padding: '7px 12px' }}
+            >
+              <RotateCcw size={14} />
+              <span>استعادة الافتراضيات</span>
+            </button>
+          </div>
+
+          <div className="outstock-table-responsive">
+            <table className="outstock-table">
+              <thead>
+                <tr>
+                  <th style={{ width: '24%' }}>الإجراء / الوظيفة</th>
+                  <th style={{ width: '36%' }}>الوصف</th>
+                  <th style={{ width: '20%' }}>الاختصار المخصص</th>
+                  <th style={{ width: '12%' }}>البديل السريع</th>
+                  <th style={{ width: '8%', textAlign: 'center' }}>تعديل</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shortcutsList.map((sc) => {
+                  const isOutstock = sc.category === 'outstock';
+                  const isEditing = editingShortcutId === sc.id;
+
+                  return (
+                    <tr key={sc.id} style={{ background: isOutstock ? 'rgba(13, 148, 136, 0.04)' : undefined }}>
+                      <td>
+                        <div style={{ fontWeight: 'bold', color: isOutstock ? '#0f766e' : '#1e293b' }}>
+                          {sc.name}
+                        </div>
+                        {isOutstock && (
+                          <span style={{ fontSize: '10px', background: '#ccfbf1', color: '#0f766e', padding: '1px 6px', borderRadius: '4px', fontWeight: 'bold', display: 'inline-block', marginTop: '2px' }}>
+                            نظام النواقص
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ fontSize: '12px', color: '#64748b' }}>
+                        {sc.desc}
+                      </td>
+                      <td>
+                        {isEditing ? (
+                          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                            <select
+                              value={shortcutFormModifiers[0] || 'None'}
+                              onChange={(e) => setShortcutFormModifiers(e.target.value === 'None' ? [] : [e.target.value])}
+                              className="outstock-form-select"
+                              style={{ padding: '2px 4px', fontSize: '11px', height: '28px' }}
+                            >
+                              <option value="None">مباشر (بدون Alt)</option>
+                              <option value="Alt">Alt +</option>
+                              <option value="Ctrl">Ctrl +</option>
+                              <option value="Shift">Shift +</option>
+                            </select>
+                            <input
+                              type="text"
+                              value={shortcutFormKey}
+                              onChange={(e) => setShortcutFormKey(e.target.value.toUpperCase())}
+                              className="outstock-form-input"
+                              style={{ width: '55px', height: '28px', padding: '2px 6px', textAlign: 'center', fontWeight: 'bold' }}
+                              placeholder="F2"
+                            />
+                          </div>
+                        ) : (
+                          <span className="outstock-kbd-badge">
+                            {formatShortcutDisplay(sc)}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ fontSize: '11.5px', color: '#64748b' }}>
+                        {sc.fallbackKey ? (
+                          <span className="outstock-kbd-badge fallback">
+                            {formatShortcutFallback(sc)}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#94a3b8' }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        {isEditing ? (
+                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                            <button
+                              type="button"
+                              className="outstock-btn outstock-btn-primary"
+                              style={{ padding: '3px 8px', fontSize: '11px' }}
+                              onClick={() => {
+                                if (!shortcutFormKey) return;
+                                const updated = shortcutsList.map(item =>
+                                  item.id === sc.id
+                                    ? { ...item, key: shortcutFormKey, modifiers: shortcutFormModifiers }
+                                    : item
+                                );
+                                setShortcutsList(updated);
+                                localStorage.setItem(STORAGE_SHORTCUTS_KEY, JSON.stringify(updated));
+                                setEditingShortcutId(null);
+                                showToast?.('✅ تم حفظ الاختصار الجديد بنجاح');
+                              }}
+                              title="حفظ"
+                            >
+                              <Check size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              className="outstock-btn outstock-btn-secondary"
+                              style={{ padding: '3px 8px', fontSize: '11px' }}
+                              onClick={() => setEditingShortcutId(null)}
+                              title="إلغاء"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="outstock-btn outstock-btn-secondary"
+                            style={{ padding: '3px 8px', fontSize: '11px' }}
+                            onClick={() => {
+                              setEditingShortcutId(sc.id);
+                              setShortcutFormKey(sc.key || '');
+                              setShortcutFormModifiers(sc.modifiers || []);
+                            }}
+                            title="تعديل المفتاح"
+                          >
+                            <Edit2 size={12} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

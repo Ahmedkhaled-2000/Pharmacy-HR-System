@@ -38,6 +38,7 @@ const ElectronicKioskView = lazy(() => import('../components/kiosk/ElectronicKio
 const DeveloperPortalView = lazy(() => import('../components/developer/DeveloperPortalView'));
 const CompanyRegisterPage = lazy(() => import('../components/auth/CompanyRegisterPage'));
 const OutstockSystemView = lazy(() => import('../components/outstock/OutstockSystemView'));
+import OutstockOwnerGate from '../components/outstock/OutstockOwnerGate';
 import AdminSuspensionView from '../components/auth/AdminSuspensionView';
 import StaffSuspensionView from '../components/auth/StaffSuspensionView';
 import GhostModeBanner from '../components/common/GhostModeBanner';
@@ -429,7 +430,20 @@ export default function AppRoutes() {
     ? 'employee'
     : 'admin';
 
-  const kioskBranchId = location.pathname.startsWith('/kiosk/') ? location.pathname.split('/')[2] : null;
+  const kioskBranchId = (() => {
+    if (location.pathname.startsWith('/kiosk/')) {
+      const seg = location.pathname.split('/')[2];
+      if (seg) return decodeURIComponent(seg.split('?')[0].split('#')[0].trim());
+    }
+    try {
+      const q = new URLSearchParams(location.search);
+      const bParam = q.get('branchId') || q.get('branch');
+      if (bParam) return decodeURIComponent(bParam.trim());
+    } catch {}
+    return null;
+  })();
+
+  const [outstockUnlockedEpoch, setOutstockUnlockedEpoch] = useState(0);
 
   // Domain Handlers
   const handleSaveBranch = async (branchData) => {
@@ -652,10 +666,19 @@ export default function AppRoutes() {
         if (outRes?.success && outRes?.user) {
           const oUser = outRes.user;
           const targetRole = 'outstock_' + (oUser.role || 'owner');
+          if (outRes.token) {
+            try {
+              localStorage.setItem('outstock_token', outRes.token);
+              localStorage.setItem('app_auth_token', outRes.token);
+            } catch {}
+          }
           handleUnifiedLogin({
             role: targetRole,
             user: oUser,
-            branch: oUser.branch_id ? { id: oUser.branch_id, name: oUser.branch_name || oUser.full_name } : null,
+            branch: oUser.branch_id || oUser.branchData?.id || oUser.id ? {
+              id: oUser.branch_id || oUser.branchData?.id || oUser.id,
+              name: oUser.branch_name || oUser.branchData?.name || oUser.full_name || oUser.name
+            } : null,
             redirectTab: 'outstock'
           });
           return { success: true, role: targetRole };
@@ -797,7 +820,10 @@ export default function AppRoutes() {
         }
         if (loginRes && loginRes.success && loginRes.user) {
           if (loginRes.token) {
-            try { localStorage.setItem('app_auth_token', loginRes.token); } catch {}
+            try {
+              localStorage.setItem('app_auth_token', loginRes.token);
+              localStorage.setItem('outstock_token', loginRes.token);
+            } catch {}
           }
           const sRole = loginRes.role || 'employee';
           const sUser = loginRes.user;
@@ -834,10 +860,19 @@ export default function AppRoutes() {
             });
           } else if (sRole.startsWith('outstock_')) {
             const targetRole = sRole;
+            if (loginRes.token) {
+              try {
+                localStorage.setItem('outstock_token', loginRes.token);
+                localStorage.setItem('app_auth_token', loginRes.token);
+              } catch {}
+            }
             handleUnifiedLogin({
               role: targetRole,
               user: sUser,
-              branch: sUser.branch_id || sUser.id ? { id: sUser.branch_id || sUser.id, name: sUser.name || sUser.fullName || sUser.full_name } : null,
+              branch: sUser.branch_id || sUser.branchId || sUser.id ? {
+                id: sUser.branch_id || sUser.branchId || sUser.id,
+                name: sUser.name || sUser.fullName || sUser.full_name
+              } : null,
               redirectTab: 'outstock'
             });
             return { success: true, role: targetRole };
@@ -886,6 +921,13 @@ export default function AppRoutes() {
             if (outRes?.success && outRes?.user) {
               const oUser = outRes.user;
               const targetRole = (oUser.role === 'branch' || oUser.role === 'outstock_branch') ? 'outstock_branch' : ('outstock_' + (oUser.role || 'owner'));
+              if (outRes.token) {
+                try {
+                  localStorage.setItem('outstock_token', outRes.token);
+                  localStorage.setItem('app_auth_token', outRes.token);
+                  localStorage.setItem('outstock_user', JSON.stringify(oUser));
+                } catch {}
+              }
               handleUnifiedLogin({
                 role: targetRole,
                 user: oUser,
@@ -1027,6 +1069,13 @@ export default function AppRoutes() {
       if (outRes?.success && outRes?.user) {
         const oUser = outRes.user;
         const targetRole = (oUser.role === 'branch' || oUser.role === 'outstock_branch') ? 'outstock_branch' : ('outstock_' + (oUser.role || 'pharmacy'));
+        if (outRes.token) {
+          try {
+            localStorage.setItem('outstock_token', outRes.token);
+            localStorage.setItem('app_auth_token', outRes.token);
+            localStorage.setItem('outstock_user', JSON.stringify(oUser));
+          } catch {}
+        }
         handleUnifiedLogin({
           role: targetRole,
           user: oUser,
@@ -2024,15 +2073,38 @@ export default function AppRoutes() {
                 {activeNavTab === 'outstock' && (
                   <ErrorBoundary fallbackTitle="حدث خطأ في نظام نواقص الأدوية والطلبات">
                     <Suspense fallback={<div className="loading-fallback">جاري تحميل نظام النواقص والمشتريات...</div>}>
-                      <OutstockSystemView
-                        initialRole={authRole === 'owner' ? 'outstock_owner' : authRole === 'branch' ? 'outstock_pharmacy' : 'outstock_owner'}
-                        currentBranch={currentBranch}
-                        currentUser={currentEmpUser}
-                        onLogout={handleLogout}
-                        themeMode={themeMode}
-                        toggleTheme={toggleTheme}
-                        showToast={showToast}
-                      />
+                      {authRole === 'admin' && !((() => {
+                        try {
+                          return localStorage.getItem('app_auth_role') === 'owner' ||
+                                 localStorage.getItem('app_owner_authenticated') === 'true' ||
+                                 sessionStorage.getItem('app_owner_authenticated') === 'true' ||
+                                 sessionStorage.getItem('app_outstock_owner_unlocked') === 'true';
+                        } catch {
+                          return false;
+                        }
+                      })()) ? (
+                        <OutstockOwnerGate
+                          orgSettings={state?.orgSettings}
+                          onUnlocked={() => {
+                            setOutstockUnlockedEpoch(Date.now());
+                          }}
+                          onCancel={() => {
+                            setActiveNavTab('dashboard');
+                          }}
+                          showToast={showToast}
+                        />
+                      ) : (
+                        <OutstockSystemView
+                          key={outstockUnlockedEpoch}
+                          initialRole={authRole === 'owner' ? 'outstock_owner' : authRole === 'branch' ? 'outstock_pharmacy' : 'outstock_owner'}
+                          currentBranch={currentBranch}
+                          currentUser={currentEmpUser}
+                          onLogout={handleLogout}
+                          themeMode={themeMode}
+                          toggleTheme={toggleTheme}
+                          showToast={showToast}
+                        />
+                      )}
                     </Suspense>
                   </ErrorBoundary>
                 )}

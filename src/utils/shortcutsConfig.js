@@ -266,6 +266,80 @@ export const DEFAULT_SHORTCUTS = [
     modifiers: ['Alt', 'Shift'],
     fallbackKey: 'k',
     fallbackModifiers: ['Ctrl', 'Alt']
+  },
+
+  // ── 5. نظام إدارة النواقص والمشتريات (Outstock Handling System) ─────────
+  {
+    id: 'outstockNewOrder',
+    name: 'تسجيل طلب عميل جديد',
+    desc: 'فتح نافذة إضافة طلب دواء جديد للعميل بالصيدلية فوراً',
+    category: 'outstock',
+    key: 'F2',
+    modifiers: [],
+    fallbackKey: 'n',
+    fallbackModifiers: ['Alt']
+  },
+  {
+    id: 'outstockSearchCustomer',
+    name: 'بحث سريع عن عميل / رقم هاتف',
+    desc: 'التركيز على خانة البحث السريع بالاسم أو رقم الهاتف أو الباركود',
+    category: 'outstock',
+    key: 'F3',
+    modifiers: [],
+    fallbackKey: 'f',
+    fallbackModifiers: ['Alt']
+  },
+  {
+    id: 'outstockQuickPrint',
+    name: 'طباعة فاتورة العميل',
+    desc: 'فتح نافذة طباعة إيصال الكاشير الحراري 80mm أو A4 للطلب المختار',
+    category: 'outstock',
+    key: 'F8',
+    modifiers: [],
+    fallbackKey: 'p',
+    fallbackModifiers: ['Alt']
+  },
+  {
+    id: 'outstockSyncNow',
+    name: 'مزامنة طلبات الأوفلاين فوراً',
+    desc: 'إجبار المنظومة على ترحيل ومزامنة كافة الطلبات المعلقة محلياً مع السيرفر',
+    category: 'outstock',
+    key: 'F9',
+    modifiers: [],
+    fallbackKey: 'u',
+    fallbackModifiers: ['Alt']
+  },
+  {
+    id: 'outstockTab1',
+    name: 'الانتقال إلى التبويب الأول',
+    desc: 'الانتقال إلى التبويب 1 حسب البوابة (طلبات العملاء / طلبات الفروع)',
+    category: 'outstock',
+    key: '1',
+    modifiers: ['Alt']
+  },
+  {
+    id: 'outstockTab2',
+    name: 'الانتقال إلى التبويب الثاني',
+    desc: 'الانتقال إلى التبويب 2 حسب البوابة (العملاء / متابعة التسليم)',
+    category: 'outstock',
+    key: '2',
+    modifiers: ['Alt']
+  },
+  {
+    id: 'outstockTab3',
+    name: 'الانتقال إلى التبويب الثالث',
+    desc: 'الانتقال إلى التبويب 3 حسب البوابة (متابعة المشتريات / أصناف غير متوفرة)',
+    category: 'outstock',
+    key: '3',
+    modifiers: ['Alt']
+  },
+  {
+    id: 'outstockTab4',
+    name: 'الانتقال إلى التبويب الرابع',
+    desc: 'الانتقال إلى التبويب 4 حسب البوابة (أدوية النواقص / الإعدادات)',
+    category: 'outstock',
+    key: '4',
+    modifiers: ['Alt']
   }
 ];
 
