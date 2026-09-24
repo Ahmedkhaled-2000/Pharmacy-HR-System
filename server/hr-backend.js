@@ -2143,8 +2143,8 @@ app.post('/api/auth/login', async (req, res) => {
       }
     }
 
-    // 3.1 فحص جدول فروع ومستخدمي النواقص والمشتريات (Outstock Users / Branches Fallback)
-    if (!authenticated && (role === 'branch' || role === 'auto' || String(role).startsWith('outstock'))) {
+    // 3.1 فحص جدول فروع ومستخدمي النواقص والمشتريات (Outstock Users / Branches - دور منفصل تماماً)
+    if (!authenticated && (role === 'auto' || String(role).startsWith('outstock'))) {
       try {
         // فحص مستخدمي النواقص أولاً (outstock_users)
         const outUserRes = await db.query(
@@ -2156,7 +2156,7 @@ app.post('/api/auth/login', async (req, res) => {
           const ouPass = String(ou.password || '').trim();
           if (cleanPass === ouPass || (stdPass && toStdDigits(ouPass) === stdPass)) {
             authenticated = true;
-            userRole = ou.role === 'branch' ? 'branch' : `outstock_${ou.role}`;
+            userRole = ou.role === 'branch' ? 'outstock_branch' : (String(ou.role).startsWith('outstock_') ? ou.role : `outstock_${ou.role}`);
             
             let branchData = null;
             if (ou.branch_id) {
@@ -2164,7 +2164,7 @@ app.post('/api/auth/login', async (req, res) => {
                 item => item && (String(item.id) === String(ou.branch_id) || String(item.code || item.branchCode) === String(ou.branch_id))
               );
               if (bInSettings) {
-                branchData = { ...bInSettings, role: 'branch' };
+                branchData = { ...bInSettings, role: 'outstock_branch' };
               } else {
                 const bDbRes = await db.query('SELECT * FROM public.outstock_branches WHERE id = $1', [ou.branch_id]);
                 if (bDbRes.rows.length > 0) {
@@ -2177,7 +2177,7 @@ app.post('/api/auth/login', async (req, res) => {
                     username: bRow.username,
                     phone: bRow.phone,
                     address: bRow.address,
-                    role: 'branch'
+                    role: 'outstock_branch'
                   };
                 }
               }
@@ -2198,21 +2198,17 @@ app.post('/api/auth/login', async (req, res) => {
         // فحص جدول فروع النواقص مباشرة (outstock_branches)
         if (!authenticated) {
           const outBranchRes = await db.query(
-            'SELECT * FROM public.outstock_branches WHERE (LOWER(username) = $1 OR username = $2 OR LOWER(code) = $1 OR id = $1) AND is_active = true',
+            'SELECT * FROM public.outstock_branches WHERE (LOWER(username) = $1 OR username = $2) AND is_active = true',
             [cleanUser, stdUser]
           );
           if (outBranchRes.rows.length > 0) {
             const ob = outBranchRes.rows[0];
             const obPass = String(ob.password || '').trim();
-            if (cleanPass === obPass || (stdPass && toStdDigits(obPass) === stdPass) || (!obPass && (cleanPass === '1234' || cleanPass === '123'))) {
+            if (cleanPass === obPass || (stdPass && toStdDigits(obPass) === stdPass)) {
               authenticated = true;
-              userRole = 'branch';
+              userRole = 'outstock_branch';
 
-              const bInSettings = (Array.isArray(settings?.branches) ? settings.branches : []).find(
-                item => item && (String(item.id) === String(ob.id) || String(item.code || item.branchCode) === String(ob.code || ob.id))
-              );
-
-              targetUserObj = bInSettings ? { ...bInSettings, role: 'branch' } : {
+              targetUserObj = {
                 id: ob.id,
                 name: ob.name,
                 code: ob.code || ob.id,
@@ -2220,7 +2216,8 @@ app.post('/api/auth/login', async (req, res) => {
                 username: ob.username,
                 phone: ob.phone,
                 address: ob.address,
-                role: 'branch'
+                role: 'outstock_branch',
+                branchId: ob.id
               };
             }
           }

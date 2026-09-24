@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { isEmployeeActive, getEmpDisplayName } from '../../utils/formatters';
 import { emitRevokeSession } from '../../utils/socketClient';
+import { outstockGetBranches } from '../../utils/outstockApiClient';
 
 export default function BranchEditorModal({
   isOpen = false,
@@ -30,12 +31,24 @@ export default function BranchEditorModal({
   const [noShowGraceMinutes, setNoShowGraceMinutes] = useState('');
   const [earlyDepartureBeforeClosingGraceMinutes, setEarlyDepartureBeforeClosingGraceMinutes] = useState('');
 
-  // UI / Validation States
   const [usernameError, setUsernameError] = useState('');
   const [isGpsLoading, setIsGpsLoading] = useState(false);
   const [gpsError, setGpsError] = useState('');
   const [gpsAccuracy, setGpsAccuracy] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [outstockBranches, setOutstockBranches] = useState([]);
+
+  // Fetch OutStock branches for collision checking
+  useEffect(() => {
+    if (!isOpen) return;
+    outstockGetBranches()
+      .then((res) => {
+        if (res?.success && Array.isArray(res.branches)) {
+          setOutstockBranches(res.branches);
+        }
+      })
+      .catch(() => {});
+  }, [isOpen]);
 
   // Initialize or reset form when modal opens or editingBranch changes
   useEffect(() => {
@@ -104,7 +117,10 @@ export default function BranchEditorModal({
             (e.code && String(e.code).trim().toLowerCase() === u) ||
             (e.username && String(e.username).trim().toLowerCase() === u)
         );
-        return bTaken || eTaken;
+        const oTaken = outstockBranches.some(
+          (ob) => ob && ob.username && String(ob.username).trim().toLowerCase() === u
+        );
+        return bTaken || eTaken || oTaken;
       };
       while (isUserTaken(candidateUser)) {
         bIndex++;
@@ -139,11 +155,16 @@ export default function BranchEditorModal({
         (e.code && String(e.code).trim().toLowerCase() === cleanVal) ||
         (e.username && String(e.username).trim().toLowerCase() === cleanVal)
     );
+    const duplicateOutstock = outstockBranches.find(
+      (ob) => ob && ob.username && String(ob.username).trim().toLowerCase() === cleanVal
+    );
 
     if (duplicateBranch) {
       setUsernameError(`⚠️ اسم المستخدم مستخدم بالفعل لفرع "${duplicateBranch.name}"`);
     } else if (duplicateEmp) {
       setUsernameError(`⚠️ اسم المستخدم مستخدم بالفعل ككود للموظف "${duplicateEmp.name}" (كود: ${duplicateEmp.code})`);
+    } else if (duplicateOutstock) {
+      setUsernameError(`⛔ اسم المستخدم محجوز ومستخدم في نظام النواقص (OutStock) لفرع "${duplicateOutstock.name}"`);
     } else {
       setUsernameError('');
     }
@@ -291,6 +312,15 @@ export default function BranchEditorModal({
     if (duplicateEmp) {
       setActiveTab('security');
       alert(`⚠️ لا يمكن استخدام اسم المستخدم هذا لأنه مستخدم بالفعل ككود للموظف "${duplicateEmp.name}" (كود: ${duplicateEmp.code})`);
+      return;
+    }
+
+    const duplicateOutstock = outstockBranches.find(
+      (ob) => ob && ob.username && String(ob.username).trim().toLowerCase() === cleanUsername
+    );
+    if (duplicateOutstock) {
+      setActiveTab('security');
+      alert(`⛔ لا يمكن استخدام اسم المستخدم "${username}" لأنه محجوز ومستخدم في نظام النواقص (OutStock) لفرع "${duplicateOutstock.name}". يرجى اختيار اسم مستخدم مخصص للـ HR.`);
       return;
     }
 

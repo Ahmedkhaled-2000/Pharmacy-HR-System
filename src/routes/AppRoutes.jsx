@@ -56,7 +56,7 @@ import { arabicMonthLabel, fmt, getEmpWhatsAppPhone, normalizeState } from '../u
 import { fetchRemoteState, saveStateLocally } from '../utils/offlineSync';
 import { smartMergeStates } from '../utils/stateMerger';
 import { apiLogin } from '../utils/apiClient';
-import { outstockLogin } from '../utils/outstockApiClient';
+import { outstockLogin, outstockGetBranches } from '../utils/outstockApiClient';
 
 export default function AppRoutes() {
   const location = useLocation();
@@ -453,6 +453,20 @@ export default function AppRoutes() {
         showToast(`⚠️ خطأ: اسم المستخدم (${branchData.username}) مستخدم بالفعل ككود للموظف "${duplicateEmp.name}" (كود: ${duplicateEmp.code})!`);
         return;
       }
+
+      // التحقق من عدم استخدام هذا الاسم في نظام النواقص والمشتريات (OutStock)
+      try {
+        const outRes = await outstockGetBranches();
+        if (outRes?.success && Array.isArray(outRes.branches)) {
+          const outDuplicate = outRes.branches.find(
+            (ob) => ob && ob.username && String(ob.username).trim().toLowerCase() === cleanUsername
+          );
+          if (outDuplicate) {
+            showToast(`⛔ لا يمكن استخدام اسم المستخدم (${branchData.username}) لأنه مستخدم بالفعل في نظام النواقص (OutStock) لفرع "${outDuplicate.name}". يرجى اختيار اسم مستخدم مخصص للـ HR.`);
+            return;
+          }
+        }
+      } catch (e) {}
     }
 
     const performSaveBranch = async () => {
@@ -866,39 +880,19 @@ export default function AppRoutes() {
             };
           }
         } else if (loginRes && loginRes.error) {
-          // جرب outstockLogin كإجراء بديل قبل إظهار الخطأ
+          // جرب outstockLogin كإجراء بديل قبل إظهار الخطأ (للدخول المباشر لنظام النواقص)
           try {
             const outRes = await outstockLogin(cleanUser, cleanPass);
             if (outRes?.success && outRes?.user) {
               const oUser = outRes.user;
-              const targetRole = oUser.role === 'branch' ? 'branch' : ('outstock_' + (oUser.role || 'owner'));
-              if (targetRole === 'branch') {
-                const branchObj = oUser.branchData || {
-                  id: oUser.branchId || oUser.id,
-                  name: oUser.fullName,
-                  username: oUser.username
-                };
-                authResult = {
-                  role: 'branch',
-                  matched: true,
-                  branch: branchObj
-                };
-                setState((prev) => {
-                  const branches = Array.isArray(prev?.branches) ? [...prev.branches] : [];
-                  const idx = branches.findIndex((b) => String(b.id) === String(branchObj.id));
-                  if (idx >= 0) branches[idx] = { ...branches[idx], ...branchObj };
-                  else branches.push(branchObj);
-                  return { ...prev, branches };
-                });
-              } else {
-                handleUnifiedLogin({
-                  role: targetRole,
-                  user: oUser,
-                  branch: oUser.branch_id ? { id: oUser.branch_id, name: oUser.branch_name || oUser.full_name } : null,
-                  redirectTab: 'outstock'
-                });
-                return { success: true, role: targetRole };
-              }
+              const targetRole = (oUser.role === 'branch' || oUser.role === 'outstock_branch') ? 'outstock_branch' : ('outstock_' + (oUser.role || 'owner'));
+              handleUnifiedLogin({
+                role: targetRole,
+                user: oUser,
+                branch: oUser.branchData || (oUser.branch_id ? { id: oUser.branch_id, name: oUser.branch_name || oUser.full_name } : null),
+                redirectTab: 'outstock'
+              });
+              return { success: true, role: targetRole };
             } else {
               return {
                 success: false,
@@ -1032,11 +1026,11 @@ export default function AppRoutes() {
       const outRes = await outstockLogin(cleanUser, cleanPass);
       if (outRes?.success && outRes?.user) {
         const oUser = outRes.user;
-        const targetRole = 'outstock_' + (oUser.role || 'pharmacy');
+        const targetRole = (oUser.role === 'branch' || oUser.role === 'outstock_branch') ? 'outstock_branch' : ('outstock_' + (oUser.role || 'pharmacy'));
         handleUnifiedLogin({
           role: targetRole,
           user: oUser,
-          branch: oUser.branch_id ? { id: oUser.branch_id, name: oUser.branch_name || oUser.full_name } : null,
+          branch: oUser.branchData || (oUser.branch_id ? { id: oUser.branch_id, name: oUser.branch_name || oUser.full_name } : null),
           redirectTab: 'outstock'
         });
         return { success: true, role: targetRole };

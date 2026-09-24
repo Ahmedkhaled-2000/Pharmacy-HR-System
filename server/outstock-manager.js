@@ -212,58 +212,29 @@ export async function initOutstockTables(db) {
       console.log('👑 [OutStock Engine] تم إنشاء حساب المالك المبدئي بنجاح (المستخدم: out / كلمة المرور: 123)');
     }
 
-    // مزامنة فروع الـ HR المسجلة في app_settings تلقائياً
+    // مزامنة فروع الـ HR المسجلة في app_settings تلقائياً (دليل الفروع فقط دون لمس بيانات الدخول)
     try {
       const settingsRes = await db.query("SELECT value_data FROM public.app_settings WHERE key_name = 'pharmacy-tracker-data'");
       const settingsData = settingsRes.rows[0]?.value_data;
       if (settingsData && Array.isArray(settingsData.branches)) {
         for (const b of settingsData.branches) {
           if (!b || !b.id || !b.name) continue;
-          const cleanUser = b.username ? String(b.username).trim().toLowerCase() : null;
-          const cleanPass = b.password ? String(b.password).trim() : (b.managerPin ? String(b.managerPin).trim() : null);
           const bCode = b.branchCode || b.code || b.id;
           const bPhone = b.phone || (Array.isArray(b.phones) && b.phones[0]?.number) || null;
 
+          // مزامنة معلومات الفرع الأساسية فقط دون لمس أو نسخ يوزر وباسورد الـ HR إطلاقاً
           await db.query(`
-            INSERT INTO public.outstock_branches (id, name, code, phone, address, username, password, is_active, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, true, CURRENT_TIMESTAMP)
+            INSERT INTO public.outstock_branches (id, name, code, phone, address, is_active, updated_at)
+            VALUES ($1, $2, $3, $4, $5, true, CURRENT_TIMESTAMP)
             ON CONFLICT (id) DO UPDATE SET
               name = EXCLUDED.name,
               code = EXCLUDED.code,
               phone = COALESCE(EXCLUDED.phone, public.outstock_branches.phone),
               address = COALESCE(EXCLUDED.address, public.outstock_branches.address),
-              username = COALESCE(EXCLUDED.username, public.outstock_branches.username),
-              password = COALESCE(EXCLUDED.password, public.outstock_branches.password),
               updated_at = CURRENT_TIMESTAMP
-          `, [String(b.id), String(b.name), bCode, bPhone, b.address || null, cleanUser, cleanPass]);
-
-          if (cleanUser && cleanPass) {
-            const existingUsers = await db.query(
-              'SELECT id, username FROM public.outstock_users WHERE id = $1 OR LOWER(username) = $2',
-              [`usr_branch_${b.id}`, cleanUser]
-            );
-            if (existingUsers.rows.length > 0) {
-              const targetUserId = existingUsers.rows[0].id;
-              await db.query(`
-                UPDATE public.outstock_users SET
-                  username = $1,
-                  password = $2,
-                  full_name = $3,
-                  role = 'branch',
-                  branch_id = $4,
-                  is_active = true,
-                  updated_at = CURRENT_TIMESTAMP
-                WHERE id = $5
-              `, [cleanUser, cleanPass, `فرع: ${b.name}`, String(b.id), targetUserId]);
-            } else {
-              await db.query(`
-                INSERT INTO public.outstock_users (id, username, password, full_name, role, branch_id, is_active, updated_at)
-                VALUES ($1, $2, $3, $4, 'branch', $5, true, CURRENT_TIMESTAMP)
-              `, [`usr_branch_${b.id}`, cleanUser, cleanPass, `فرع: ${b.name}`, String(b.id)]);
-            }
-          }
+          `, [String(b.id), String(b.name), bCode, bPhone, b.address || null]);
         }
-        console.log(`🏢 [OutStock Engine] تمت مزامنة ${settingsData.branches.length} فروع من منظومة الرواتب بنجاح.`);
+        console.log(`🏢 [OutStock Engine] تمت مزامنة دليل ${settingsData.branches.length} فروع من منظومة الرواتب بنجاح (مع عزل بيانات الدخول).`);
       }
     } catch (syncErr) {
       console.warn('⚠️ [OutStock Sync Startup Warn]:', syncErr.message);
@@ -271,6 +242,82 @@ export async function initOutstockTables(db) {
   } catch (err) {
     console.error('❌ [OutStock Engine] خطأ في تهيئة جداول النواقص:', err.message);
   }
+}
+
+// ── فحص تعارض اسم المستخدم مع منظومة الـ HR ──────────────────────────────
+export async function checkUsernameCollisionWithHr(username, db, getSettingsFromStorage) {
+  if (!username) return null;
+  const cleanUser = String(username).trim().toLowerCase();
+  const stdUser = toStdDigits(cleanUser);
+
+  // 1. فحص أسماء الحسابات الأساسية في HR
+  if (['admin', 'owner', 'developer', 'superadmin', 'root'].includes(cleanUser)) {
+    return `اسم المستخدم "${username}" محجوز لإدارة المنظومة الرئيسية (HR).`;
+  }
+
+  // 2. فحص إعدادات المنظومة (فروع وموظفي الـ HR)
+  try {
+    let settings = null;
+    if (typeof getSettingsFromStorage === 'function') {
+      settings = await getSettingsFromStorage('pharmacy-tracker-data');
+    }
+    if (!settings && db) {
+      const res = await db.query("SELECT value_data FROM public.app_settings WHERE key_name = 'pharmacy-tracker-data'");
+      settings = res.rows[0]?.value_data;
+    }
+
+    if (settings) {
+      const org = settings.orgSettings || {};
+      const ownerUser = String(org.ownerUsername || 'owner').toLowerCase();
+      const adminUser = String(org.adminUsername || org.adminUser || 'admin').toLowerCase();
+      if (cleanUser === ownerUser || (stdUser && toStdDigits(ownerUser) === stdUser)) {
+        return `اسم المستخدم "${username}" محجوز لحساب مالك المنظومة (Owner).`;
+      }
+      if (cleanUser === adminUser || (stdUser && toStdDigits(adminUser) === stdUser)) {
+        return `اسم المستخدم "${username}" محجوز لحساب أدمن المنظومة (Admin).`;
+      }
+
+      // فحص فروع الـ HR
+      if (Array.isArray(settings.branches)) {
+        const foundHrBranch = settings.branches.find(b => {
+          if (!b) return false;
+          const bUser = String(b.username || '').trim().toLowerCase();
+          const bCode = String(b.branchCode || b.code || '').trim().toLowerCase();
+          const bId = String(b.id || '').trim().toLowerCase();
+          return (
+            bUser === cleanUser ||
+            bCode === cleanUser ||
+            bId === cleanUser ||
+            (stdUser && (toStdDigits(bUser) === stdUser || toStdDigits(bCode) === stdUser || toStdDigits(bId) === stdUser))
+          );
+        });
+        if (foundHrBranch) {
+          return `⛔ لا يمكن استخدام اسم المستخدم "${username}" لأنه مستخدم بالفعل لفرع (${foundHrBranch.name}) في نظام الـ HR. يرجى تخصيص اسم مستخدم مستقل لنظام النواقص والمشتريات (OutStock) مثل: out_${cleanUser}`;
+        }
+      }
+
+      // فحص موظفي الـ HR
+      if (Array.isArray(settings.employees)) {
+        const foundEmp = settings.employees.find(e => {
+          if (!e) return false;
+          const eCode = String(e.code || e.employeeCode || '').trim().toLowerCase();
+          const eUser = String(e.username || '').trim().toLowerCase();
+          return (
+            eCode === cleanUser ||
+            eUser === cleanUser ||
+            (stdUser && (toStdDigits(eCode) === stdUser || toStdDigits(eUser) === stdUser))
+          );
+        });
+        if (foundEmp) {
+          return `⛔ لا يمكن استخدام اسم المستخدم "${username}" لأنه كود/اسم مستخدم لموظف (${foundEmp.name || foundEmp.fullName}) في نظام الـ HR.`;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[checkUsernameCollisionWithHr Warn]:', err.message);
+  }
+
+  return null; // لا يوجد تعارض
 }
 
 // ── 2. تسجيل مسارات الـ API وخادم المزامنة ────────────────────────────────────
@@ -336,11 +383,13 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
             }
           }
 
+          const targetRole = user.role === 'branch' ? 'outstock_branch' : user.role;
+
           const token = generateToken({
             id: user.id,
             username: user.username,
             fullName: user.full_name,
-            role: user.role,
+            role: targetRole,
             branchId: user.branch_id,
             allowedBranches,
             branchData
@@ -354,7 +403,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
               username: user.username,
               fullName: user.full_name,
               name: user.full_name,
-              role: user.role,
+              role: targetRole,
               branchId: user.branch_id,
               allowedBranches,
               branchData
@@ -365,19 +414,19 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       // 2. البحث في فروع النواقص المسجلة مباشرة (outstock_branches)
       const branchRes = await db.query(
-        'SELECT * FROM public.outstock_branches WHERE (LOWER(username) = $1 OR username = $2 OR LOWER(code) = $1 OR id = $1) AND is_active = true',
+        'SELECT * FROM public.outstock_branches WHERE (LOWER(username) = $1 OR username = $2) AND is_active = true',
         [cleanUser, stdUser]
       );
 
       if (branchRes.rows.length > 0) {
         const branch = branchRes.rows[0];
         const bPass = String(branch.password || '').trim();
-        if (cleanPass === bPass || (stdPass && toStdDigits(bPass) === stdPass) || (!bPass && (cleanPass === '1234' || cleanPass === '123'))) {
+        if (cleanPass === bPass || (stdPass && toStdDigits(bPass) === stdPass)) {
           const token = generateToken({
             id: `branch_user_${branch.id}`,
             username: branch.username || branch.code || branch.id,
             fullName: branch.name,
-            role: 'branch',
+            role: 'outstock_branch',
             branchId: branch.id,
             branchData: branch
           }, JWT_SECRET);
@@ -390,7 +439,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
               username: branch.username || branch.code || branch.id,
               fullName: branch.name,
               name: branch.name,
-              role: 'branch',
+              role: 'outstock_branch',
               branchId: branch.id,
               branchData: branch
             }
@@ -398,121 +447,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         }
       }
 
-      // 3. Fallback: البحث في فروع منظومة الـ HR (settings.branches) والمزامنة الفورية
-      try {
-        let hrBranches = [];
-        if (typeof getSettingsFromStorage === 'function') {
-          const mainState = await getSettingsFromStorage('pharmacy-tracker-data');
-          if (mainState && Array.isArray(mainState.branches)) {
-            hrBranches = mainState.branches;
-          }
-        } else {
-          const hrRes = await db.query("SELECT value_data->'branches' as branches FROM public.app_settings WHERE key_name = 'pharmacy-tracker-data'");
-          hrBranches = hrRes.rows[0]?.branches || [];
-        }
-
-        const matchedHrBranch = hrBranches.find(b => {
-          if (!b) return false;
-          const bId = String(b.id || '').trim().toLowerCase();
-          const bCode = String(b.code || b.branchCode || '').trim().toLowerCase();
-          const bUser = String(b.username || '').trim().toLowerCase();
-          return (
-            bUser === cleanUser ||
-            bCode === cleanUser ||
-            bId === cleanUser ||
-            (stdUser && (toStdDigits(bUser) === stdUser || toStdDigits(bCode) === stdUser || toStdDigits(bId) === stdUser))
-          );
-        });
-
-        if (matchedHrBranch) {
-          const bPass = String(matchedHrBranch.password || '').trim();
-          const bPin = String(matchedHrBranch.managerPin || '').trim();
-          const isPassOk = (
-            cleanPass === bPass ||
-            (stdPass && toStdDigits(bPass) === stdPass) ||
-            cleanPass === bPin ||
-            (stdPass && toStdDigits(bPin) === stdPass) ||
-            (!bPass && !bPin && (cleanPass === '1234' || cleanPass === '123' || stdPass === '1234' || stdPass === '123'))
-          );
-
-          if (isPassOk) {
-            // مزامنة فورية إلى جدول outstock_branches و outstock_users
-            const bCleanUser = matchedHrBranch.username ? String(matchedHrBranch.username).trim().toLowerCase() : cleanUser;
-            const bCleanPass = bPass || bPin || cleanPass;
-            const bCode = matchedHrBranch.branchCode || matchedHrBranch.code || matchedHrBranch.id;
-            const bPhone = matchedHrBranch.phone || (Array.isArray(matchedHrBranch.phones) && matchedHrBranch.phones[0]?.number) || null;
-
-            await db.query(`
-              INSERT INTO public.outstock_branches (id, name, code, phone, address, username, password, is_active, updated_at)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, true, CURRENT_TIMESTAMP)
-              ON CONFLICT (id) DO UPDATE SET
-                name = EXCLUDED.name,
-                code = EXCLUDED.code,
-                phone = COALESCE(EXCLUDED.phone, public.outstock_branches.phone),
-                address = COALESCE(EXCLUDED.address, public.outstock_branches.address),
-                username = COALESCE(EXCLUDED.username, public.outstock_branches.username),
-                password = COALESCE(EXCLUDED.password, public.outstock_branches.password),
-                updated_at = CURRENT_TIMESTAMP
-            `, [String(matchedHrBranch.id), String(matchedHrBranch.name), bCode, bPhone, matchedHrBranch.address || null, bCleanUser, bCleanPass]);
-
-            if (bCleanUser && bCleanPass) {
-              const existingUsers = await db.query(
-                'SELECT id, username FROM public.outstock_users WHERE id = $1 OR LOWER(username) = $2',
-                [`usr_branch_${matchedHrBranch.id}`, bCleanUser]
-              );
-              if (existingUsers.rows.length > 0) {
-                const targetUserId = existingUsers.rows[0].id;
-                await db.query(`
-                  UPDATE public.outstock_users SET
-                    username = $1,
-                    password = $2,
-                    full_name = $3,
-                    role = 'branch',
-                    branch_id = $4,
-                    is_active = true,
-                    updated_at = CURRENT_TIMESTAMP
-                  WHERE id = $5
-                `, [bCleanUser, bCleanPass, `فرع: ${matchedHrBranch.name}`, String(matchedHrBranch.id), targetUserId]);
-              } else {
-                await db.query(`
-                  INSERT INTO public.outstock_users (id, username, password, full_name, role, branch_id, is_active, updated_at)
-                  VALUES ($1, $2, $3, $4, 'branch', $5, true, CURRENT_TIMESTAMP)
-                `, [`usr_branch_${matchedHrBranch.id}`, bCleanUser, bCleanPass, `فرع: ${matchedHrBranch.name}`, String(matchedHrBranch.id)]);
-              }
-            }
-
-            const token = generateToken({
-              id: `branch_user_${matchedHrBranch.id}`,
-              username: bCleanUser,
-              fullName: matchedHrBranch.name,
-              role: 'branch',
-              branchId: matchedHrBranch.id,
-              branchData: matchedHrBranch
-            }, JWT_SECRET);
-
-            return res.json({
-              success: true,
-              token,
-              user: {
-                id: `branch_user_${matchedHrBranch.id}`,
-                username: bCleanUser,
-                fullName: matchedHrBranch.name,
-                name: matchedHrBranch.name,
-                role: 'branch',
-                branchId: matchedHrBranch.id,
-                branchData: matchedHrBranch
-              }
-            });
-          }
-        }
-      } catch (hrCheckErr) {
-        console.warn('[Outstock Login HR Fallback Warn]:', hrCheckErr.message);
-      }
-
-      return res.status(401).json({ success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+      // ⚠️ لا يوجد Fallback لفروع الـ HR! كل نظام له بيانات دخول منفصلة تماماً
+      return res.status(401).json({ success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة في نظام النواقص' });
     } catch (err) {
       console.error('[OutStock Login Error]:', err);
-      res.status(500).json({ success: false, error: err.message });
+      res.status(500).json({ success: false, error: 'حدث خطأ في الخادم أثناء تسجيل الدخول لنظام النواقص' });
     }
   });
 
@@ -582,7 +521,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     }
   });
 
-  // حفظ أو تعديل فرع
+  // حفظ أو تعديل فرع في نظام النواقص (مع الفصل التام عن يوزرات الـ HR)
   app.post('/api/outstock/branches', authMiddleware, async (req, res) => {
     try {
       const { id, name, code, phone, address, username, password, isActive } = req.body || {};
@@ -593,14 +532,29 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const cleanUser = username ? String(username).trim().toLowerCase() : null;
       const cleanPass = password ? String(password).trim() : null;
 
-      // التحقق من عدم تكرار اسم المستخدم
       if (cleanUser) {
-        const dupRes = await db.query(
+        // 1. التحقق الصارم من عدم التعارض مع أي حساب في نظام الـ HR (فروع وموظفين وإدارة)
+        const hrCollision = await checkUsernameCollisionWithHr(cleanUser, db, getSettingsFromStorage);
+        if (hrCollision) {
+          return res.status(400).json({ success: false, error: hrCollision });
+        }
+
+        // 2. التحقق من عدم تكرار اسم المستخدم في فروع النواقص الأخرى
+        const dupBranchRes = await db.query(
           'SELECT id FROM public.outstock_branches WHERE LOWER(username) = $1 AND id <> $2',
           [cleanUser, id]
         );
-        if (dupRes.rows.length > 0) {
-          return res.status(400).json({ success: false, error: 'اسم المستخدم هذا مستخدم بالفعل لفرع آخر' });
+        if (dupBranchRes.rows.length > 0) {
+          return res.status(400).json({ success: false, error: 'اسم المستخدم هذا مستخدم بالفعل لفرع آخر في نظام النواقص' });
+        }
+
+        // 3. التحقق من عدم تكرار اسم المستخدم في جدول مستخدمي النواقص
+        const dupUserRes = await db.query(
+          'SELECT id FROM public.outstock_users WHERE LOWER(username) = $1 AND id <> $2 AND (branch_id IS NULL OR branch_id <> $3)',
+          [cleanUser, `usr_branch_${id}`, id]
+        );
+        if (dupUserRes.rows.length > 0) {
+          return res.status(400).json({ success: false, error: 'اسم المستخدم هذا مستخدم بالفعل لمستخدم آخر في نظام النواقص' });
         }
       }
 
@@ -612,26 +566,29 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           code = EXCLUDED.code,
           phone = EXCLUDED.phone,
           address = EXCLUDED.address,
-          username = COALESCE(EXCLUDED.username, public.outstock_branches.username),
-          password = COALESCE(EXCLUDED.password, public.outstock_branches.password),
+          username = EXCLUDED.username,
+          password = CASE WHEN $7 IS NOT NULL AND $7 <> '' THEN $7 ELSE public.outstock_branches.password END,
           is_active = EXCLUDED.is_active,
           updated_at = CURRENT_TIMESTAMP
       `, [id, name, code || null, phone || null, address || null, cleanUser, cleanPass, isActive !== false]);
 
-      // أيضاً إضافة/تحديث حساب الفرع في outstock_users لتسجيل الدخول السلس
+      // أيضاً إضافة/تحديث حساب الفرع في outstock_users برتبة 'branch' لتسجيل الدخول السلس
       if (cleanUser && cleanPass) {
         await db.query(`
           INSERT INTO public.outstock_users (id, username, password, full_name, role, branch_id, is_active, updated_at)
           VALUES ($1, $2, $3, $4, 'branch', $5, true, CURRENT_TIMESTAMP)
-          ON CONFLICT (username) DO UPDATE SET
+          ON CONFLICT (id) DO UPDATE SET
+            username = EXCLUDED.username,
             password = EXCLUDED.password,
             full_name = EXCLUDED.full_name,
+            role = 'branch',
             branch_id = EXCLUDED.branch_id,
+            is_active = true,
             updated_at = CURRENT_TIMESTAMP
         `, [`usr_branch_${id}`, cleanUser, cleanPass, `فرع: ${name}`, id]);
       }
 
-      res.json({ success: true, message: 'تم حفظ بيانات الفرع بنجاح' });
+      res.json({ success: true, message: 'تم حفظ بيانات وحساب الفرع في نظام النواقص بنجاح' });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -666,6 +623,30 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const cleanUser = String(username).trim().toLowerCase();
       const cleanPass = password ? String(password).trim() : '123';
       const targetId = id || `usr_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+      // 1. التحقق الصارم من عدم التعارض مع أي حساب في نظام الـ HR
+      const hrCollision = await checkUsernameCollisionWithHr(cleanUser, db, getSettingsFromStorage);
+      if (hrCollision) {
+        return res.status(400).json({ success: false, error: hrCollision });
+      }
+
+      // 2. التحقق من عدم التكرار في جدول مستخدمي النواقص
+      const dupUser = await db.query(
+        'SELECT id FROM public.outstock_users WHERE LOWER(username) = $1 AND id <> $2',
+        [cleanUser, targetId]
+      );
+      if (dupUser.rows.length > 0) {
+        return res.status(400).json({ success: false, error: 'اسم المستخدم مستخدم بالفعل في نظام النواقص' });
+      }
+
+      // 3. التحقق من عدم التكرار كاسم مستخدم لفرع في جدول فروع النواقص
+      const dupBranch = await db.query(
+        'SELECT id FROM public.outstock_branches WHERE LOWER(username) = $1 AND id <> $2',
+        [cleanUser, branchId || '']
+      );
+      if (dupBranch.rows.length > 0) {
+        return res.status(400).json({ success: false, error: 'اسم المستخدم مستخدم كاسم مستخدم لفرع في نظام النواقص' });
+      }
 
       await db.query(`
         INSERT INTO public.outstock_users (id, username, password, full_name, role, branch_id, phone, is_active, updated_at)

@@ -1,0 +1,664 @@
+/**
+ * outstock.css
+ * التنسيق الجمالي الشامل لنظام النواقص والمشتريات (OutStock Handling System)
+ * يتوافق تماماً مع الوضعين الفاتح والداكن وهوية منظومة الصيدليات الفاخرة
+ */
+
+.outstock-root-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100vh;
+  width: 100%;
+  background: var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: 'Cairo', 'Tajawal', sans-serif;
+  direction: rtl;
+  box-sizing: border-box;
+}
+
+/* ── الشريط العلوي الفاخر (Top Nav Ribbon) ── */
+.outstock-top-header {
+  position: sticky;
+  top: 0;
+  z-index: 900;
+  background: var(--surface, #ffffff);
+  border-bottom: 1.5px solid var(--border, #e2e8f0);
+  box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.06);
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.outstock-brand-badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.outstock-brand-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: #ffffff;
+  box-shadow: 0 6px 16px rgba(13, 148, 136, 0.28);
+}
+
+.outstock-brand-info h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--text, #0f172a);
+  line-height: 1.25;
+}
+
+.outstock-brand-info p {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--muted, #64748b);
+  font-weight: 600;
+}
+
+/* تبويبات الشريط العلوي */
+.outstock-nav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--hover, #f1f5f9);
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid var(--border, #e2e8f0);
+}
+
+.outstock-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 9px;
+  border: none;
+  background: transparent;
+  color: var(--muted, #64748b);
+  font-size: 13.5px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  position: relative;
+  white-space: nowrap;
+}
+
+.outstock-nav-btn:hover {
+  color: var(--text, #0f172a);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.outstock-nav-btn.is-active {
+  background: var(--surface, #ffffff);
+  color: #0d9488;
+  font-weight: 900;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.outstock-tab-badge {
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 900;
+  padding: 1px 6px;
+  border-radius: 99px;
+  line-height: 1.3;
+}
+
+.outstock-tab-badge.green {
+  background: #10b981;
+}
+
+/* أدوات التحكم اليمين واليسار */
+.outstock-user-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.outstock-role-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 99px;
+  background: #f0fdfa;
+  border: 1px solid #ccfbf1;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+/* ── جسم الصفحة ومحتوى التبويب (Tab Body) ── */
+.outstock-content-body {
+  flex: 1;
+  padding: 20px 24px;
+  max-width: 1440px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+/* ── البطاقات والجداول ── */
+.outstock-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.035);
+  margin-bottom: 20px;
+  transition: box-shadow 0.2s ease;
+}
+
+.outstock-card:hover {
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.06);
+}
+
+.outstock-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.outstock-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16.5px;
+  font-weight: 900;
+  color: var(--text, #0f172a);
+  margin: 0;
+}
+
+/* شريط البحث المتقدم والأدوات */
+.outstock-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  max-width: 480px;
+  position: relative;
+}
+
+.outstock-search-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 40px 0 14px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border, #cbd5e1);
+  background: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+  transition: all 0.15s ease;
+  direction: rtl;
+}
+
+.outstock-search-input:focus {
+  border-color: #0d9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+}
+
+.outstock-search-icon {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted, #94a3b8);
+  pointer-events: none;
+}
+
+/* الأزرار القياسية */
+.outstock-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: 10px;
+  border: none;
+  font-size: 13.5px;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  text-decoration: none;
+}
+
+.outstock-btn-primary {
+  background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(13, 148, 136, 0.28);
+}
+
+.outstock-btn-primary:hover {
+  box-shadow: 0 6px 20px rgba(13, 148, 136, 0.38);
+  transform: translateY(-1px);
+}
+
+.outstock-btn-secondary {
+  background: var(--hover, #e2e8f0);
+  color: var(--text, #334155);
+}
+
+.outstock-btn-secondary:hover {
+  background: #cbd5e1;
+}
+
+.outstock-btn-success {
+  background: #10b981;
+  color: #ffffff;
+}
+
+.outstock-btn-success:hover {
+  background: #059669;
+}
+
+.outstock-btn-danger {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+.outstock-btn-danger:hover {
+  background: #dc2626;
+}
+
+.outstock-btn-whatsapp {
+  background: #25d366;
+  color: #ffffff;
+  font-weight: 900;
+}
+
+.outstock-btn-whatsapp:hover {
+  background: #1eb956;
+}
+
+/* الجداول الحديثة */
+.outstock-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 1px solid var(--border, #e2e8f0);
+}
+
+.outstock-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: right;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.outstock-table thead {
+  background: var(--hover, #f8fafc);
+  border-bottom: 1.5px solid var(--border, #e2e8f0);
+}
+
+.outstock-table th {
+  padding: 12px 14px;
+  font-weight: 800;
+  color: var(--muted, #475569);
+  white-space: nowrap;
+}
+
+.outstock-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border, #f1f5f9);
+  color: var(--text, #1e293b);
+  vertical-align: middle;
+}
+
+.outstock-table tbody tr:hover {
+  background: rgba(13, 148, 136, 0.03);
+}
+
+.outstock-table tbody tr.is-pruned {
+  opacity: 0.65;
+  background: #fef2f2;
+}
+
+/* شارات الحالة (Status Badges) */
+.outstock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-size: 11.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.outstock-badge.pending {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.outstock-badge.ready {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.outstock-badge.partial {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+}
+
+.outstock-badge.delivered {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+.outstock-badge.unavailable {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+/* ── النوافذ المنبثقة (Modals) ── */
+.outstock-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.outstock-modal-panel {
+  background: var(--surface, #ffffff);
+  border-radius: 20px;
+  width: 100%;
+  max-width: 680px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border, #e2e8f0);
+  box-sizing: border-box;
+  animation: slideUp 0.25s ease-out;
+  display: flex;
+  flex-direction: column;
+}
+
+.outstock-modal-header {
+  padding: 18px 22px;
+  border-bottom: 1.5px solid var(--border, #e2e8f0);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.outstock-modal-header h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 900;
+  color: var(--text, #0f172a);
+}
+
+.outstock-modal-close {
+  background: none;
+  border: none;
+  color: var(--muted, #94a3b8);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.outstock-modal-close:hover {
+  color: var(--danger, #ef4444);
+  background: #fef2f2;
+}
+
+.outstock-modal-body {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.outstock-modal-footer {
+  padding: 16px 22px;
+  border-top: 1.5px solid var(--border, #e2e8f0);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  background: var(--hover, #f8fafc);
+  border-bottom-left-radius: 20px;
+  border-bottom-right-radius: 20px;
+}
+
+/* ── الحقول والنماذج داخل المودال ── */
+.outstock-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: right;
+}
+
+.outstock-form-group label {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text, #334155);
+}
+
+.outstock-form-input,
+.outstock-form-select,
+.outstock-form-textarea {
+  width: 100%;
+  border-radius: 10px;
+  border: 1.5px solid var(--border, #cbd5e1);
+  background: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
+  font-size: 14px;
+  font-family: inherit;
+  padding: 10px 14px;
+  outline: none;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
+  direction: rtl;
+}
+
+.outstock-form-input:focus,
+.outstock-form-select:focus,
+.outstock-form-textarea:focus {
+  border-color: #0d9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+}
+
+.outstock-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+/* ── بطاقات الإحصائيات (KPI Cards) ── */
+.outstock-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.outstock-stat-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 16px;
+  padding: 18px 20px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.outstock-stat-info p {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted, #64748b);
+}
+
+.outstock-stat-info h3 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 900;
+  color: var(--text, #0f172a);
+}
+
+.outstock-stat-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   🖨️ طباعة الفاتورة الحرارية المزدوجة (POS Dual Cashier Receipt Print Styling)
+   ══════════════════════════════════════════════════════════════════════════════ */
+.thermal-receipt-container {
+  width: 80mm;
+  margin: 0 auto;
+  background: #ffffff;
+  color: #000000;
+  font-family: 'Courier New', Courier, monospace, 'Cairo';
+  font-size: 12px;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.receipt-copy {
+  padding-bottom: 12px;
+}
+
+.receipt-header {
+  text-align: center;
+  margin-bottom: 8px;
+  border-bottom: 1px dashed #000;
+  padding-bottom: 6px;
+}
+
+.receipt-header h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.receipt-header p {
+  margin: 2px 0;
+  font-size: 11px;
+}
+
+.receipt-meta {
+  margin-bottom: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  border-bottom: 1px dashed #000;
+  padding-bottom: 6px;
+}
+
+.receipt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+
+.receipt-table th, .receipt-table td {
+  padding: 3px 2px;
+  text-align: right;
+}
+
+.receipt-table th {
+  border-bottom: 1px solid #000;
+}
+
+.receipt-totals {
+  border-top: 1px dashed #000;
+  padding-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.receipt-barcode {
+  text-align: center;
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px dashed #000;
+}
+
+.receipt-barcode svg {
+  max-width: 100%;
+  height: 48px;
+}
+
+.receipt-page-cut-line {
+  text-align: center;
+  margin: 18px 0;
+  border-top: 1.5px dashed #666;
+  font-size: 10px;
+  color: #666;
+  padding-top: 4px;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .thermal-receipt-container, .thermal-receipt-container * {
+    visibility: visible;
+  }
+  .thermal-receipt-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    margin: 0;
+    padding: 0;
+  }
+  .receipt-page-cut-line {
+    page-break-after: always;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
