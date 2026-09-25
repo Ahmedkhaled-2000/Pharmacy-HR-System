@@ -23,7 +23,8 @@ export default function LoginPage({ onLogin, onOpenRegister, onOpenDeveloper, st
   });
 
   const orgRaw = state?.orgSettings?.orgName?.trim();
-  const orgName = (orgRaw && !orgRaw.includes('الموارد البشرية')) ? orgRaw : 'نظام إدارة الصيدليات';
+  const isCorrupted = !orgRaw || orgRaw.includes('?') || orgRaw.includes('الموارد البشرية');
+  const orgName = isCorrupted ? 'نظام إدارة الصيدليات' : orgRaw;
   const orgLogo = state?.orgSettings?.logoUrl;
   const generalManager = state?.orgSettings?.generalManagerName;
 

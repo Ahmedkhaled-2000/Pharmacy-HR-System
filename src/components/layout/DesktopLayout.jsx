@@ -1891,7 +1891,7 @@ return (
         )}
 
         <span style={{ fontWeight: 800, fontSize: '13.5px', color: 'var(--text)', whiteSpace: 'nowrap' }}>
-          {currentRole === 'branch' ? `إدارة ${currentBranch?.name || 'الفرع'}` : ((orgSettings?.orgName && !orgSettings.orgName.includes('الموارد البشرية')) ? orgSettings.orgName : 'نظام إدارة الصيدليات')}
+          {currentRole === 'branch' ? `إدارة ${currentBranch?.name || 'الفرع'}` : ((orgSettings?.orgName && !orgSettings.orgName.includes('الموارد البشرية') && !orgSettings.orgName.includes('?')) ? orgSettings.orgName : 'نظام إدارة الصيدليات')}
         </span>
       </div>
 
@@ -2167,7 +2167,7 @@ return (
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontWeight: 800, fontSize: '14px', color: 'var(--text)' }}>
-            {currentRole === 'branch' ? `إدارة ${currentBranch?.name || 'الفرع'}` : ((orgSettings?.orgName && !orgSettings.orgName.includes('الموارد البشرية')) ? orgSettings.orgName : 'نظام إدارة الصيدليات')}
+            {currentRole === 'branch' ? `إدارة ${currentBranch?.name || 'الفرع'}` : ((orgSettings?.orgName && !orgSettings.orgName.includes('الموارد البشرية') && !orgSettings.orgName.includes('?')) ? orgSettings.orgName : 'نظام إدارة الصيدليات')}
           </span>
 
           <span style={{ color: 'var(--border)', fontSize: '16px' }}>/</span>

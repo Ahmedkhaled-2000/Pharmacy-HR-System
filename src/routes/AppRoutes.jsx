@@ -1130,7 +1130,8 @@ export default function AppRoutes() {
             } catch {}
             return 'نظام إدارة الصيدليات';
           })();
-        const effectiveOrgName = (rawOrg && !rawOrg.includes('الموارد البشرية')) ? rawOrg : 'نظام إدارة الصيدليات';
+        const isCorruptedOrg = !rawOrg || rawOrg.includes('?') || rawOrg.includes('الموارد البشرية');
+        const effectiveOrgName = isCorruptedOrg ? 'نظام إدارة الصيدليات' : rawOrg;
 
         return (
           <div style={{
