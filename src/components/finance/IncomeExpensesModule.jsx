@@ -222,25 +222,60 @@ export default function IncomeExpensesModule({
       createdAt: new Date().toISOString()
     };
 
-    // إشعار للإدارة العليا بمراجعة واعتماد الفاتورة
+    // إشعار للإدارة العليا بمراجعة واعتماد الفاتورة ومزامنتها كطلب معتمد
     let updatedNotifs = state.notifications || [];
+    let updatedRequests = state.requests || [];
     if (isBranchRole) {
       const newNotif = {
         id: `notif_fin_${Date.now()}`,
+        requestId: newTransaction.id,
+        transactionId: newTransaction.id,
         type: 'financial_alert',
+        category: 'request',
+        isRequestNotification: true,
         title: `📑 فاتورة جديدة بانتظار الاعتماد: فرع ${branchName}`,
         message: `قام مدير فرع ${branchName} بإدراج ${type === 'expense' ? 'مصروف' : 'إيراد'} بقيمة ${parsedAmount} ج.م (${category.trim()}) ${attachmentData ? 'مع مرفق فاتورة' : ''}، بانتظار مراجعة واعتماد الإدارة العليا لرفعها إلى Google Drive.`,
         date,
         timestamp: new Date().toISOString(),
         read: false,
         targetRole: 'admin',
-        branchId: targetBranchId
+        branchId: targetBranchId,
+        targetTab: 'requests',
+        filterType: 'expense'
       };
       updatedNotifs = [newNotif, ...updatedNotifs];
+
+      const newRequest = {
+        id: newTransaction.id,
+        transactionId: newTransaction.id,
+        type: 'expense',
+        subType: 'invoice',
+        typeLabel: 'فاتورة مصروف فرع',
+        employeeName: `مدير فرع ${branchName}`,
+        employeeId: state.currentUser?.id || targetBranchId,
+        branchId: targetBranchId,
+        branchName,
+        category: category.trim(),
+        amount: parsedAmount,
+        totalAmount: parsedAmount,
+        date,
+        createdAt: new Date().toISOString(),
+        reason: notes.trim() || category.trim(),
+        details: `قام مدير فرع ${branchName} بإدراج مصروف بقيمة ${parsedAmount} ج.م (${category.trim()})`,
+        notes: notes.trim(),
+        status: shouldDirectApprove ? 'approved' : 'pending',
+        adminApproved: shouldDirectApprove,
+        attachmentData: attachmentData || null,
+        attachmentName: rawFileName || null,
+        attachmentType: fileType,
+        targetRole: 'admin',
+        isDirectToAdmin: true
+      };
+      updatedRequests = [newRequest, ...updatedRequests];
     }
 
     const updated = [newTransaction, ...transactions];
-    const updatedState = { ...state, finances: updated, transactions: updated, notifications: updatedNotifs };
+    const updatedState = { ...state, finances: updated, transactions: updated, requests: updatedRequests, notifications: updatedNotifs };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
 
@@ -322,7 +357,18 @@ export default function IncomeExpensesModule({
     };
 
     const updatedNotifs = [branchNotif, ...(state.notifications || [])];
-    const updatedState = { ...state, finances: updated, transactions: updated, notifications: updatedNotifs };
+    const updatedRequests = (state.requests || []).map((r) => {
+      if (String(r.id) === String(tx.id) || String(r.transactionId) === String(tx.id)) {
+        return {
+          ...r,
+          status: 'approved',
+          adminApproved: true,
+          approvedAt: new Date().toISOString()
+        };
+      }
+      return r;
+    });
+    const updatedState = { ...state, finances: updated, transactions: updated, requests: updatedRequests, notifications: updatedNotifs };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
 
@@ -378,7 +424,18 @@ export default function IncomeExpensesModule({
     };
 
     const updatedNotifs = [branchNotif, ...(state.notifications || [])];
-    const updatedState = { ...state, finances: updated, transactions: updated, notifications: updatedNotifs };
+    const updatedRequests = (state.requests || []).map((r) => {
+      if (String(r.id) === String(tx.id) || String(r.transactionId) === String(tx.id)) {
+        return {
+          ...r,
+          status: 'rejected',
+          adminApproved: false,
+          rejectedAt: new Date().toISOString()
+        };
+      }
+      return r;
+    });
+    const updatedState = { ...state, finances: updated, transactions: updated, requests: updatedRequests, notifications: updatedNotifs };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
 
@@ -403,8 +460,9 @@ export default function IncomeExpensesModule({
     });
     if (!isConfirmed) return;
     const updated = transactions.filter((t) => t.id !== id);
+    const updatedRequests = (state.requests || []).filter((r) => String(r.id) !== String(id) && String(r.transactionId) !== String(id));
     const updatedDeleted = [...(state._deletedIds || []), String(id)];
-    const updatedState = { ...state, finances: updated, transactions: updated, _deletedIds: updatedDeleted };
+    const updatedState = { ...state, finances: updated, transactions: updated, requests: updatedRequests, _deletedIds: updatedDeleted };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.('🗑️ تم حذف البند المالي بنجاح');

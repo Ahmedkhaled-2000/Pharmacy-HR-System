@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Search, Printer, CheckCircle, MessageSquare, AlertCircle, Clock, Check, Barcode, Phone, Calendar, RefreshCw } from 'lucide-react';
+import { Plus, Search, Printer, CheckCircle, MessageSquare, AlertCircle, Clock, Check, Barcode, Phone, Calendar, RefreshCw, FileText, Scissors } from 'lucide-react';
 import { outstockGetOrders, outstockDeliverOrder, outstockMarkWhatsappNotified } from '../../../utils/outstockApiClient';
 import NewCustomerOrderModal from './NewCustomerOrderModal';
 import DualCashierReceiptModal from './DualCashierReceiptModal';
@@ -398,24 +398,35 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                       <div className="outstock-order-sub-actions">
                         <button
                           type="button"
-                          onClick={() => handleSendWhatsapp(order)}
+                          onClick={() => setPrintingOrder(order)}
                           className="outstock-btn outstock-btn-whatsapp"
-                          style={{ padding: '7px 12px', fontSize: '12.5px' }}
-                          title="إرسال رسالة واتساب للعميل بإشعار التوفر"
+                          style={{ padding: '7px 11px', fontSize: '12px' }}
+                          title="إرسال الفاتورة الرسمية PDF للعميل عبر الواتساب"
+                        >
+                          <FileText size={14} />
+                          <span>فاتورة PDF</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleSendWhatsapp(order)}
+                          className="outstock-btn outstock-btn-secondary"
+                          style={{ padding: '7px 11px', fontSize: '12px' }}
+                          title="إرسال رسالة واتساب للعميل بإشعار التوفر والاستلام"
                         >
                           <MessageSquare size={14} />
-                          <span>إرسال واتساب</span>
+                          <span>إشعار واتساب</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => setPrintingOrder(order)}
                           className="outstock-btn outstock-btn-secondary"
-                          style={{ padding: '7px 12px', fontSize: '12.5px' }}
-                          title="طباعة إيصال الكاشير نسختين"
+                          style={{ padding: '7px 11px', fontSize: '12px' }}
+                          title="طباعة إيصال الكاشير نسختين مع قص كل نسخة تلقائياً"
                         >
                           <Printer size={14} />
-                          <span>طباعة الإيصال</span>
+                          <span>طباعة وقص</span>
                         </button>
                       </div>
                     </div>

@@ -6,6 +6,7 @@ import { triggerAndroidApkDownload } from '../../utils/nativeAppUpdater';
 import { getPublicSystemUrl } from '../../utils/systemUrlHelper';
 import AndroidSettingsModal from '../modals/AndroidSettingsModal';
 import OwnerOverrideModal from '../common/OwnerOverrideModal';
+import { useData } from '../../context/DataContext';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🌟 ADAPTIVE DROPDOWN ITEM WITH SMART BIDIRECTIONAL FLYOUT (Anti-Clipping Engine)
@@ -643,6 +644,11 @@ export default function DesktopLayout({
   children
 }) {
   const liveTime = useLiveRealTime(1000);
+  const { state } = useData();
+
+  const pendingFinancesCount = useMemo(() => {
+    return (state?.finances || state?.transactions || []).filter(t => t && t.approvalStatus === 'pending').length;
+  }, [state?.finances, state?.transactions]);
   const currentCycleRange = useMemo(() => {
     return getCycleDateRange(monthPicker, orgSettings);
   }, [monthPicker, orgSettings]);
@@ -899,6 +905,7 @@ export default function DesktopLayout({
       id: 'payroll-group',
       label: 'الرواتب والمالية',
       icon: '💰',
+      badge: pendingFinancesCount > 0 ? pendingFinancesCount : 0,
       children: [
         {
           id: 'payroll',
@@ -926,6 +933,7 @@ export default function DesktopLayout({
           targetTab: 'income-expenses',
           label: 'المصروفات والإيرادات',
           icon: '📈',
+          badge: pendingFinancesCount > 0 ? pendingFinancesCount : 0,
           desc: 'سجل الإيرادات والمصروفات النقدية اليومية'
         },
         {
@@ -1376,29 +1384,6 @@ export default function DesktopLayout({
       ]
     },
     {
-      id: 'pharma-system-group',
-      label: 'PharmaSystem',
-      icon: '🏛️',
-      children: [
-        {
-          id: 'accounts',
-          targetTab: 'accounts',
-          label: 'الحسابات (ERP)',
-          icon: '🏛️',
-          desc: 'منظومة الحسابات العامة وشجرة الحسابات (ERP)',
-          navigateToAccounts: true,
-          openInNewTab: true
-        },
-        {
-          id: 'outstock',
-          targetTab: 'outstock',
-          label: 'نواقص الأدوية والطلبات',
-          icon: '💊',
-          desc: 'نظام إدارة ومتابعة نواقص الأدوية وطلبات الشراء والعملاء'
-        }
-      ]
-    },
-    {
       id: 'bylaws',
       label: 'لائحة العمل والجزاءات',
       icon: '📜',
@@ -1621,7 +1606,7 @@ export default function DesktopLayout({
     window.open('https://github.com/Ahmedkhaled-2000/Pharmacy-HR-System/releases/latest', '_blank');
   }, []);
 
-const handleMenuClick = (menu) => {
+function handleMenuClick(menu) {
   if (menu.downloadAction === 'android-app' || menu.id === 'download-android-app-branch') {
     triggerAndroidApkDownload();
     setOpenDropdown(null);
@@ -2004,12 +1989,19 @@ return (
                           }));
                         }, 50);
                       }
-                      if (target.filterType) {
+                      if (target.tab === 'requests' || target.filterType) {
+                        const targetReqId = target.requestId || n.requestId || n.transactionId || n.id;
                         setTimeout(() => {
                           window.dispatchEvent(new CustomEvent('requests:set-filter-type', {
-                            detail: { filterType: target.filterType }
+                            detail: {
+                              filterType: target.filterType || 'all',
+                              inboxTab: 'pending',
+                              requestId: targetReqId,
+                              branchId: n.branchId,
+                              branchName: n.branchName
+                            }
                           }));
-                        }, 50);
+                        }, 70);
                       }
                     };
 
@@ -2676,12 +2668,19 @@ return (
                           }));
                         }, 50);
                       }
-                      if (target.filterType) {
+                      if (target.tab === 'requests' || target.filterType) {
+                        const targetReqId = target.requestId || n.requestId || n.transactionId || n.id;
                         setTimeout(() => {
                           window.dispatchEvent(new CustomEvent('requests:set-filter-type', {
-                            detail: { filterType: target.filterType }
+                            detail: {
+                              filterType: target.filterType || 'all',
+                              inboxTab: 'pending',
+                              requestId: targetReqId,
+                              branchId: n.branchId,
+                              branchName: n.branchName
+                            }
                           }));
-                        }, 50);
+                        }, 70);
                       }
                     };
 

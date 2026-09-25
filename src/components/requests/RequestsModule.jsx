@@ -23,20 +23,53 @@ export function isPendingRequest(r) {
   return true;
 }
 
-export function getFormattedRequestBadge(type, leaveType, targetAction) {
+export function getFormattedRequestBadge(type, leaveType, targetAction, fullReq = null) {
+  let reqObj = null;
   let resolvedType = type;
   let resolvedLeaveType = leaveType;
   let resolvedAction = targetAction;
 
   if (type && typeof type === 'object') {
+    reqObj = type;
     resolvedType = type.type || type.requestType;
     resolvedLeaveType = type.leaveType;
     resolvedAction = type.targetAction || type.actionType || targetAction;
+  } else if (fullReq && typeof fullReq === 'object') {
+    reqObj = fullReq;
   }
 
   const cleanType = String(resolvedType || '').trim().toLowerCase();
   const cleanLeaveType = String(resolvedLeaveType || '').trim().toLowerCase();
   const cleanAction = String(resolvedAction || '').trim().toLowerCase();
+
+  // فحص ما إذا كان الطلب تعديل بصمة موظف أو تسجيل بصمة يدوي من مدير الفرع أو الإدارة
+  const isBranchPunch = Boolean(
+    reqObj?.submittedByBranchManager ||
+    reqObj?.subType === 'punch_correction' ||
+    reqObj?.subType === 'manual_punch_request' ||
+    String(reqObj?.id || '').startsWith('req_punch_') ||
+    cleanType === 'branch_punch_edit' ||
+    cleanType === 'manual_punch' ||
+    (cleanType === 'punch_correction' && !reqObj?.photoUrl && !reqObj?.drivePhotoUrl && cleanType !== 'biometric_verification')
+  );
+
+  if (isBranchPunch) {
+    const punchAction = String(reqObj?.punchType || cleanAction || '').toLowerCase();
+    const isCheckIn = punchAction === 'in' || punchAction === 'shift_start' || punchAction === 'دخول' || punchAction === 'حضور' || String(reqObj?.details || '').includes('حضور فقط') || String(reqObj?.typeLabel || '').includes('حضور');
+    const isCheckOut = punchAction === 'out' || punchAction === 'shift_end' || punchAction === 'خروج' || punchAction === 'انصراف' || String(reqObj?.details || '').includes('انصراف فقط') || String(reqObj?.typeLabel || '').includes('انصراف');
+    const isEdit = Boolean(reqObj?.shiftId || reqObj?.subType === 'punch_correction' || String(reqObj?.details || '').includes('طلب تعديل بصمة') || String(reqObj?.typeLabel || '').includes('تعديل بصمة'));
+
+    if (isCheckIn) {
+      return <span className="badge" style={{ background: '#059669', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🟢 تعديل بصمة حضور (مدير الفرع)</span>;
+    }
+    if (isCheckOut) {
+      return <span className="badge" style={{ background: '#dc2626', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🔴 تعديل بصمة انصراف (مدير الفرع)</span>;
+    }
+    if (isEdit) {
+      return <span className="badge" style={{ background: '#0d9488', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🖐️ طلب تعديل بصمة مسجلة</span>;
+    }
+    return <span className="badge" style={{ background: '#0d9488', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🖐️ طلب تسجيل بصمة يدوي</span>;
+  }
 
   if (cleanType === 'leave' || cleanType === 'leave_request' || cleanType === 'annual_leave' || cleanType === 'sick_leave' || cleanType === 'unpaid_leave' || cleanType === 'weekly_rest') {
     if (cleanLeaveType === 'weekly_rest' || cleanType === 'weekly_rest') return <span className="badge badge-info" style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd' }}>🛋️ راحة أسبوعية</span>;
@@ -50,6 +83,12 @@ export function getFormattedRequestBadge(type, leaveType, targetAction) {
     return <span className="badge badge-success">🏖️ طلب إجازة</span>;
   }
 
+  if (cleanType === 'expense' || cleanType === 'financial_expense' || cleanType === 'invoice' || cleanType === 'financial' || cleanType === 'financial_alert') {
+    return <span className="badge" style={{ background: '#e11d48', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>📑 اعتماد فاتورة / مصروف</span>;
+  }
+  if (cleanType === 'income' || cleanType === 'financial_income') {
+    return <span className="badge" style={{ background: '#059669', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>💵 اعتماد إيراد مالي</span>;
+  }
   if (cleanType === 'advance' || cleanType === 'loan' || cleanType === 'سلفة') {
     return <span className="badge badge-warning">💰 طلب سلفة</span>;
   }
@@ -98,7 +137,16 @@ export function getFormattedRequestBadge(type, leaveType, targetAction) {
   if (cleanType === 'withdraw' || cleanType === 'resignation_withdraw' || cleanType === 'تراجع') {
     return <span className="badge badge-primary">↩️ تراجع عن استقالة</span>;
   }
-  if (cleanType === 'punch_correction' || cleanType === 'attendance_punch' || cleanType === 'تأكيد بصمة الوجه' || cleanType === 'تأكيد بصمة اليد' || cleanType === 'biometric_verification') {
+  if (cleanType === 'punch_correction') {
+    if (cleanAction === 'shift_start' || cleanAction === 'دخول' || cleanAction === 'حضور') {
+      return <span className="badge" style={{ background: '#059669', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🟢 تعديل بصمة دخول</span>;
+    }
+    if (cleanAction === 'shift_end' || cleanAction === 'خروج' || cleanAction === 'انصراف') {
+      return <span className="badge" style={{ background: '#dc2626', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🔴 تعديل بصمة انصراف</span>;
+    }
+    return <span className="badge" style={{ background: '#0d9488', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🖐️ طلب تعديل بصمة</span>;
+  }
+  if (cleanType === 'attendance_punch' || cleanType === 'تأكيد بصمة الوجه' || cleanType === 'تأكيد بصمة اليد' || cleanType === 'biometric_verification') {
     if (cleanAction === 'shift_start' || cleanAction === 'دخول' || cleanAction === 'حضور') {
       return <span className="badge" style={{ background: '#059669', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🟢 بصمة دخول (بالصورة)</span>;
     }
@@ -189,10 +237,39 @@ export default function RequestsModule({
       if (e?.detail?.inboxTab) {
         setInboxTab(e.detail.inboxTab);
       }
+      if (e?.detail?.requestId || e?.detail?.filterType === 'expense') {
+        const rId = e?.detail?.requestId ? String(e.detail.requestId) : '';
+        const bName = e?.detail?.branchName ? String(e.detail.branchName) : '';
+        setTimeout(() => {
+          let match = null;
+          if (rId) {
+            match = allRequests.find(r => 
+              String(r.id) === rId || 
+              String(r.transactionId) === rId || 
+              String(r.requestId) === rId ||
+              rId.includes(String(r.id)) ||
+              String(r.id).includes(rId)
+            );
+          }
+          if (!match && (e?.detail?.filterType === 'expense' || rId.includes('notif_fin_') || rId.includes('trx_'))) {
+            match = allRequests.find(r => 
+              (r.type === 'expense' || r.type === 'financial_expense' || r.type === 'invoice') &&
+              (r.status === 'pending' || !r.adminApproved) &&
+              (!bName || String(r.branchName || '').includes(bName) || bName.includes(String(r.branchName || '')))
+            ) || allRequests.find(r => 
+              (r.type === 'expense' || r.type === 'financial_expense' || r.type === 'invoice') &&
+              (r.status === 'pending' || !r.adminApproved)
+            );
+          }
+          if (match) {
+            handleOpenPreview(match);
+          }
+        }, 120);
+      }
     };
     window.addEventListener('requests:set-filter-type', handleSetFilter);
     return () => window.removeEventListener('requests:set-filter-type', handleSetFilter);
-  }, []);
+  }, [allRequests]);
 
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
@@ -376,6 +453,50 @@ export default function RequestsModule({
       }
     });
 
+    // Aggregate any branch invoices / expenses from finances and transactions
+    const allFinances = [
+      ...(Array.isArray(state.finances) ? state.finances : []),
+      ...(Array.isArray(state.transactions) ? state.transactions : [])
+    ];
+    allFinances.forEach((tx) => {
+      if (!tx || !tx.id) return;
+      const txId = String(tx.id);
+      if (tx.approvalStatus || tx.createdByRole === 'branch' || tx.attachmentData || tx.attachmentName || tx.subType === 'invoice' || tx.type === 'expense' || tx.type === 'financial_expense') {
+        const isExpense = tx.type === 'expense' || !tx.type;
+        const bName = tx.branchName || 'الفرع';
+        addIfUnique({
+          id: txId,
+          transactionId: txId,
+          type: isExpense ? 'expense' : 'income',
+          subType: 'invoice',
+          typeLabel: isExpense ? 'فاتورة مصروف فرع' : 'حركة إيراد للفرع',
+          employeeName: tx.createdByName || `مدير فرع ${bName}`,
+          employeeId: tx.createdBy || tx.branchId,
+          branchId: tx.branchId,
+          branchName: bName,
+          category: tx.category,
+          amount: tx.amount,
+          totalAmount: tx.amount,
+          date: tx.date || (tx.createdAt ? tx.createdAt.slice(0, 10) : ''),
+          createdAt: tx.createdAt,
+          reason: tx.notes || tx.category || 'فاتورة مصروف',
+          details: `${tx.category || 'مصروف'} — بمبلغ ${tx.amount} ج.م ${tx.notes ? `(${tx.notes})` : ''}`,
+          notes: tx.notes,
+          status: tx.approvalStatus === 'approved' ? 'approved' : (tx.approvalStatus === 'rejected' ? 'rejected' : 'pending'),
+          adminApproved: tx.approvalStatus === 'approved',
+          attachmentData: tx.attachmentData,
+          attachmentName: tx.attachmentName,
+          attachmentType: tx.attachmentType,
+          driveFileId: tx.driveFileId,
+          driveFileUrl: tx.driveFileUrl,
+          driveWebViewLink: tx.driveWebViewLink,
+          driveMonthFolderUrl: tx.driveMonthFolderUrl,
+          submittedByBranchManager: true,
+          isDirectToAdmin: true
+        }, isExpense ? 'expense' : 'income');
+      }
+    });
+
     const loansList = state.loans || [];
 
     return list.map((r) => {
@@ -444,7 +565,7 @@ export default function RequestsModule({
       }
       return true;
     });
-  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.resignationRequests, state.lateIncidents, state.adjustments, state.employees, state.approvalRules, isBranch, cIdStr, branchEmpIdSet, deletedIdsSet]);
+  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.resignationRequests, state.lateIncidents, state.adjustments, state.employees, state.approvalRules, state.finances, state.transactions, isBranch, cIdStr, branchEmpIdSet, deletedIdsSet]);
 
   const adminHiddenSet = useMemo(() => {
     return new Set((state.adminHiddenRequestIds || []).map(String));
@@ -595,6 +716,9 @@ export default function RequestsModule({
         if (r.type !== 'shift_adjustment') return false;
       } else if (filterType === 'comp_off') {
         if (r.type !== 'comp_off_grant' && r.type !== 'leave_comp_off' && r.leaveType !== 'comp_off') return false;
+      } else if (filterType === 'expense' || filterType === 'financial' || filterType === 'invoice') {
+        const isExp = r.type === 'expense' || r.type === 'financial_expense' || r.type === 'invoice' || r.type === 'financial_alert' || r.subType === 'invoice';
+        if (!isExp) return false;
       } else if (r.type !== filterType) {
         return false;
       }
@@ -809,6 +933,7 @@ export default function RequestsModule({
       let updatedAdjustments = [...(state.adjustments || [])];
       let updatedShifts = [...(state.shifts || [])];
       let updatedEmployees = [...(state.employees || [])];
+      let updatedActiveShifts = { ...(state.activeShifts || {}) };
 
       // 0. Overtime Request Approval
       if (approvedTargetReq.type === 'overtime') {
@@ -832,17 +957,28 @@ export default function RequestsModule({
       if (approvedTargetReq.type === 'punch_correction' || approvedTargetReq.type === 'attendance_punch' || approvedTargetReq.type === 'manual_punch') {
         const emp = (state.employees || []).find(e => String(e.id) === String(approvedTargetReq.employeeId));
         const punchDate = approvedTargetReq.date || approvedTargetReq.punchDate || new Date().toISOString().slice(0, 10);
+        
+        const isCheckInOnly = approvedTargetReq.punchType === 'in' || 
+                              approvedTargetReq.targetAction === 'shift_start' || 
+                              (!approvedTargetReq.timeOut && Boolean(approvedTargetReq.timeIn)) ||
+                              (String(approvedTargetReq.details || '').includes('حضور فقط') && !approvedTargetReq.timeOut);
+        
+        const isCheckOutOnly = approvedTargetReq.punchType === 'out' || approvedTargetReq.targetAction === 'shift_end';
         const timeIn = approvedTargetReq.timeIn || '09:00';
-        const timeOut = approvedTargetReq.timeOut || '17:00';
+        const timeOut = isCheckInOnly ? '' : (approvedTargetReq.timeOut || (isCheckOutOnly ? '17:00' : '17:00'));
         const empBreak = emp?.breakHours || emp?.defaultBreakHours || (emp?.branchesDetails && emp.branchesDetails[0]?.breakHours) || 0;
         const bH = Math.max(0, parseFloat(approvedTargetReq.breakHours !== undefined && approvedTargetReq.breakHours !== null ? approvedTargetReq.breakHours : empBreak) || 0);
 
-        const [inH, inM] = timeIn.split(':').map(Number);
-        const [outH, outM] = timeOut.split(':').map(Number);
-        let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
-        if (diff < 0) diff += 24 * 60;
-        const grossHrs = Math.round((diff / 60) * 100) / 100;
-        const netTotalHrs = Math.max(0, Math.round((grossHrs - bH) * 100) / 100);
+        let calcGrossHrs = 0;
+        let calcNetTotalHrs = 0;
+        if (!isCheckInOnly && timeIn && timeOut) {
+          const [inH, inM] = timeIn.split(':').map(Number);
+          const [outH, outM] = timeOut.split(':').map(Number);
+          let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+          if (diff < 0) diff += 24 * 60;
+          calcGrossHrs = Math.round((diff / 60) * 100) / 100;
+          calcNetTotalHrs = Math.max(0, Math.round((calcGrossHrs - bH) * 100) / 100);
+        }
 
         const daySched = getEmployeeDaySchedule(approvedTargetReq.employeeId, punchDate, state);
         const profileHours = parseFloat(emp?.workHoursPerDay || emp?.workHours) || 8;
@@ -860,39 +996,75 @@ export default function RequestsModule({
           schedHours = parseFloat(approvedTargetReq.scheduledHours);
         }
 
-        const regularHours = Math.min(netTotalHrs, schedHours);
-        const overtimeHours = Math.max(0, Math.round((netTotalHrs - schedHours) * 100) / 100);
+        const regularHours = isCheckInOnly ? 0 : Math.min(calcNetTotalHrs, schedHours);
+        const overtimeHours = isCheckInOnly ? 0 : Math.max(0, Math.round((calcNetTotalHrs - schedHours) * 100) / 100);
         const overtimeStatus = overtimeHours > 0 ? 'approved' : 'none';
 
         const existingShiftIndex = updatedShifts.findIndex(s => 
-          (String(s.employeeId) === String(approvedTargetReq.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
-          s.date === punchDate
+          (approvedTargetReq.shiftId && s.id === approvedTargetReq.shiftId) ||
+          ((String(s.employeeId) === String(approvedTargetReq.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
+          s.date === punchDate && (!s.timeOut || s.timeOut === '—' || approvedTargetReq.shiftId))
         );
 
         if (existingShiftIndex >= 0) {
-          updatedShifts[existingShiftIndex] = {
-            ...updatedShifts[existingShiftIndex],
-            timeIn,
-            timeOut,
-            breakHours: bH,
-            hours: regularHours,
-            workHours: regularHours,
-            netHours: regularHours,
-            regularHours: regularHours,
-            actualWorkedHours: netTotalHrs,
-            grossHours: grossHrs,
-            scheduledHours: schedHours,
-            overtimeHours: overtimeHours,
-            overtimeStatus: overtimeStatus,
-            isManual: true,
-            manualPunch: true,
-            source: 'manual_admin',
-            adminApproved: true,
-            note: overtimeHours > 0
-              ? `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)`
-              : `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
-            updatedAt: new Date().toISOString()
-          };
+          const existingShift = updatedShifts[existingShiftIndex];
+          const hasExistingTimeOut = existingShift.timeOut && existingShift.timeOut !== '—';
+
+          if (isCheckInOnly && !hasExistingTimeOut) {
+            // الموظف حالياً في شيفت ولم ينتهِ: تعديل وقت الدخول فقط دون تسجيل خروج ودون إنهاء الوردية
+            updatedShifts[existingShiftIndex] = {
+              ...existingShift,
+              timeIn,
+              timeOut: '',
+              isManual: true,
+              manualPunch: true,
+              source: 'manual_admin',
+              adminApproved: true,
+              statusLabel: 'وردية نشطة (بصمة حضور معدلة)',
+              note: `بصمة حضور معدلة ومعتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'}) — الوردية مستمرة`,
+              updatedAt: new Date().toISOString()
+            };
+          } else {
+            const effectiveTimeOut = isCheckInOnly ? existingShift.timeOut : timeOut;
+            const effectiveTimeIn = isCheckOutOnly ? (existingShift.timeIn || timeIn) : timeIn;
+
+            let finalGross = calcGrossHrs;
+            let finalNet = calcNetTotalHrs;
+            if (effectiveTimeIn && effectiveTimeOut) {
+              const [inH, inM] = effectiveTimeIn.split(':').map(Number);
+              const [outH, outM] = effectiveTimeOut.split(':').map(Number);
+              let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+              if (diff < 0) diff += 24 * 60;
+              finalGross = Math.round((diff / 60) * 100) / 100;
+              finalNet = Math.max(0, Math.round((finalGross - bH) * 100) / 100);
+            }
+            const finalReg = Math.min(finalNet, schedHours);
+            const finalOt = Math.max(0, Math.round((finalNet - schedHours) * 100) / 100);
+
+            updatedShifts[existingShiftIndex] = {
+              ...existingShift,
+              timeIn: effectiveTimeIn,
+              timeOut: effectiveTimeOut,
+              breakHours: bH,
+              hours: finalReg,
+              workHours: finalReg,
+              netHours: finalReg,
+              regularHours: finalReg,
+              actualWorkedHours: finalNet,
+              grossHours: finalGross,
+              scheduledHours: schedHours,
+              overtimeHours: finalOt,
+              overtimeStatus: finalOt > 0 ? 'approved' : 'none',
+              isManual: true,
+              manualPunch: true,
+              source: 'manual_admin',
+              adminApproved: true,
+              note: finalOt > 0
+                ? `بصمة معدلة ومعتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${finalReg} س + إضافي معتمد: ${finalOt} س)`
+                : `بصمة معدلة ومعتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
+              updatedAt: new Date().toISOString()
+            };
+          }
         } else {
           updatedShifts.unshift({
             id: `shift_manual_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
@@ -902,14 +1074,14 @@ export default function RequestsModule({
             branchId: approvedTargetReq.branchId || emp?.branchId || '',
             date: punchDate,
             timeIn,
-            timeOut,
+            timeOut: isCheckInOnly ? '' : timeOut,
             breakHours: bH,
             hours: regularHours,
             workHours: regularHours,
             netHours: regularHours,
             regularHours: regularHours,
-            actualWorkedHours: netTotalHrs,
-            grossHours: grossHrs,
+            actualWorkedHours: calcNetTotalHrs,
+            grossHours: calcGrossHrs,
             scheduledHours: schedHours,
             overtimeHours: overtimeHours,
             overtimeStatus: overtimeStatus,
@@ -917,12 +1089,40 @@ export default function RequestsModule({
             manualPunch: true,
             source: 'manual_admin',
             adminApproved: true,
-            statusLabel: 'بصمة يدوية معتمدة',
+            statusLabel: isCheckInOnly ? 'وردية نشطة (بصمة حضور معدلة)' : 'بصمة يدوية معتمدة',
             note: overtimeHours > 0
               ? `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)`
               : `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
             createdAt: new Date().toISOString()
           });
+        }
+
+        // تحديث أو إنهاء الشفت في activeShifts
+        if (isCheckInOnly) {
+          // الموظف حالياً في شيفت: نعدل توقيت الدخول في الشفت النشط دون حذفه لتبقى الوردية جارية
+          if (updatedActiveShifts) {
+            const empIdStr = String(approvedTargetReq.employeeId);
+            const empCodeStr = emp?.code ? String(emp.code) : '';
+            const activeKey = updatedActiveShifts[empIdStr] 
+              ? empIdStr 
+              : (empCodeStr && updatedActiveShifts[empCodeStr] ? empCodeStr : empIdStr);
+            if (updatedActiveShifts[activeKey]) {
+              updatedActiveShifts[activeKey] = {
+                ...updatedActiveShifts[activeKey],
+                timeIn: timeIn,
+                startTime: `${punchDate}T${timeIn}:00`,
+                date: punchDate,
+                isModified: true
+              };
+            }
+          }
+        } else if (timeOut && approvedTargetReq.employeeId && updatedActiveShifts) {
+          delete updatedActiveShifts[approvedTargetReq.employeeId];
+          delete updatedActiveShifts[String(approvedTargetReq.employeeId)];
+          if (emp?.code) {
+            delete updatedActiveShifts[emp.code];
+            delete updatedActiveShifts[String(emp.code)];
+          }
         }
       }
 
@@ -1531,6 +1731,66 @@ export default function RequestsModule({
         details: approvedTargetReq.details || approvedTargetReq.reason || (approvedTargetReq.amount ? `${approvedTargetReq.amount} ج.م` : '')
       });
 
+      // Financial / Expense / Branch Invoice approval sync
+      const isExpenseReq = Boolean(
+        approvedTargetReq.type === 'expense' ||
+        approvedTargetReq.type === 'financial_expense' ||
+        approvedTargetReq.type === 'financial_alert' ||
+        approvedTargetReq.type === 'invoice' ||
+        approvedTargetReq.subType === 'invoice' ||
+        approvedTargetReq.transactionId ||
+        String(approvedTargetReq.id || '').startsWith('req_fin_') ||
+        String(approvedTargetReq.id || '').startsWith('req_tx_')
+      );
+
+      let updatedFinances = [...(state.finances || [])];
+      let updatedTransactions = [...(state.transactions || [])];
+
+      if (isExpenseReq) {
+        const targetTxId = approvedTargetReq.transactionId || approvedTargetReq.id;
+        const cleanTxId = String(targetTxId).replace(/^req_(fin|tx)_/, '');
+
+        updatedFinances = updatedFinances.map(f => {
+          if (String(f.id) === String(targetTxId) || String(f.id) === String(cleanTxId) || String(f.requestId) === String(reqId)) {
+            return {
+              ...f,
+              approvalStatus: 'approved',
+              adminApproved: true,
+              status: 'approved',
+              approvedAt: new Date().toISOString()
+            };
+          }
+          return f;
+        });
+
+        updatedTransactions = updatedTransactions.map(tx => {
+          if (String(tx.id) === String(targetTxId) || String(tx.id) === String(cleanTxId) || String(tx.requestId) === String(reqId)) {
+            return {
+              ...tx,
+              approvalStatus: 'approved',
+              adminApproved: true,
+              status: 'approved',
+              approvedAt: new Date().toISOString()
+            };
+          }
+          return tx;
+        });
+
+        const branchName = approvedTargetReq.branchName || approvedTargetReq.branch || 'الفرع';
+        const expNotif = {
+          id: `notif_exp_app_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          title: '✅ اعتماد فاتورة / مصروف',
+          message: `تم اعتماد الفاتورة / المصروف بقيمة ${approvedTargetReq.amount || 0} ج.م لفرع (${branchName}) بنجاح`,
+          type: 'financial_approved',
+          branchName: branchName,
+          branchId: approvedTargetReq.branchId || approvedTargetReq.branch_id,
+          timestamp: new Date().toISOString(),
+          read: false,
+          targetTab: 'income-expenses'
+        };
+        updatedNotifications.unshift(expNotif);
+      }
+
       const updatedNotifications = [
         decisionNotif,
         ...(state.notifications || []).map(n => String(n.requestId) === String(reqId) ? { ...n, read: true } : n)
@@ -1544,12 +1804,15 @@ export default function RequestsModule({
         rosters: updatedRosters,
         adjustments: updatedAdjustments,
         shifts: updatedShifts,
+        activeShifts: updatedActiveShifts,
         leaveRequests: updatedLeaveRequests,
         permissionRequests: updatedPermRequests,
         leaveHistory: updatedLeaveHistory,
         shiftSwaps,
         resignationRequests: updatedResignations,
         lateIncidents: updatedLateIncidents,
+        finances: updatedFinances,
+        transactions: updatedTransactions,
         notifications: updatedNotifications
       };
       if (setState) setState(updatedState);
@@ -1952,6 +2215,68 @@ export default function RequestsModule({
       details: rejectedTargetReq?.reason || rejectedTargetReq?.details || ''
     });
 
+    // Financial / Expense / Branch Invoice rejection sync
+    const isExpenseReq = Boolean(
+      rejectedTargetReq && (
+        rejectedTargetReq.type === 'expense' ||
+        rejectedTargetReq.type === 'financial_expense' ||
+        rejectedTargetReq.type === 'financial_alert' ||
+        rejectedTargetReq.type === 'invoice' ||
+        rejectedTargetReq.subType === 'invoice' ||
+        rejectedTargetReq.transactionId ||
+        String(rejectedTargetReq.id || '').startsWith('req_fin_') ||
+        String(rejectedTargetReq.id || '').startsWith('req_tx_')
+      )
+    );
+
+    let updatedFinances = [...(state.finances || [])];
+    let updatedTransactions = [...(state.transactions || [])];
+
+    if (isExpenseReq) {
+      const targetTxId = rejectedTargetReq.transactionId || rejectedTargetReq.id;
+      const cleanTxId = String(targetTxId).replace(/^req_(fin|tx)_/, '');
+
+      updatedFinances = updatedFinances.map(f => {
+        if (String(f.id) === String(targetTxId) || String(f.id) === String(cleanTxId) || String(f.requestId) === String(reqId)) {
+          return {
+            ...f,
+            approvalStatus: 'rejected',
+            adminApproved: false,
+            status: 'rejected',
+            rejectedAt: new Date().toISOString()
+          };
+        }
+        return f;
+      });
+
+      updatedTransactions = updatedTransactions.map(tx => {
+        if (String(tx.id) === String(targetTxId) || String(tx.id) === String(cleanTxId) || String(tx.requestId) === String(reqId)) {
+          return {
+            ...tx,
+            approvalStatus: 'rejected',
+            adminApproved: false,
+            status: 'rejected',
+            rejectedAt: new Date().toISOString()
+          };
+        }
+        return tx;
+      });
+
+      const branchName = rejectedTargetReq.branchName || rejectedTargetReq.branch || 'الفرع';
+      const expNotif = {
+        id: `notif_exp_rej_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        title: '❌ رفض اعتماد فاتورة / مصروف',
+        message: `تم رفض اعتماد الفاتورة / المصروف بقيمة ${rejectedTargetReq.amount || 0} ج.م لفرع (${branchName})`,
+        type: 'financial_rejected',
+        branchName: branchName,
+        branchId: rejectedTargetReq.branchId || rejectedTargetReq.branch_id,
+        timestamp: new Date().toISOString(),
+        read: false,
+        targetTab: 'income-expenses'
+      };
+      updatedNotifications.unshift(expNotif);
+    }
+
     const updatedNotifications = [
       decisionNotif,
       ...(state.notifications || []).map((n) =>
@@ -1971,6 +2296,8 @@ export default function RequestsModule({
       loans: updatedLoans,
       shiftSwaps: updatedShiftSwaps,
       resignationRequests: updatedResignations,
+      finances: updatedFinances,
+      transactions: updatedTransactions,
       notifications: updatedNotifications
     };
 
@@ -2903,6 +3230,7 @@ export default function RequestsModule({
           <label style={{ fontSize: '13px', fontWeight: 'bold' }}>نوع الطلب:</label>
           <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ padding: '7px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}>
             <option value="all">-- جميع أنواع الطلبات --</option>
+            <option value="expense">📑 فواتير ومصروفات الفروع</option>
             <option value="biometric">📸 اعتمادات البصمة والكشك</option>
             <option value="leave">🏖️ إجازات (&lt;= 3 أيام)</option>
             <option value="long_leave">🏖️ إجازات أكثر من 3 أيام</option>
@@ -3047,7 +3375,7 @@ export default function RequestsModule({
                     </td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        {getFormattedRequestBadge(req.type, req.leaveType)}
+                        {getFormattedRequestBadge(req)}
                         {(req.photoUrl || req.drivePhotoUrl || req.type === 'biometric_verification' || req.type === 'biometric_registration' || req.type === 'تأكيد بصمة الوجه' || req.type === 'تأكيد بصمة اليد') && (
                           <button
                             type="button"
@@ -3248,6 +3576,11 @@ export default function RequestsModule({
         const isProfileUpdate = ['profile_update', 'profile_edit', 'profile_update_request'].includes(previewModalReq.type) || String(previewModalReq.type || '').includes('profile');
         const isOvertime = previewModalReq.type === 'overtime' || previewModalReq.type === 'overtime_request' || previewModalReq.type === 'إضافي';
         const isScheduleDeviation = previewModalReq.type === 'schedule_deviation' || previewModalReq.type === 'عدم الالتزام بالجدول';
+        const isExpense = ['expense', 'financial_expense', 'financial_alert', 'invoice'].includes(previewModalReq.type) ||
+          previewModalReq.subType === 'invoice' ||
+          Boolean(previewModalReq.transactionId) ||
+          String(previewModalReq.id || '').startsWith('req_fin_') ||
+          String(previewModalReq.id || '').startsWith('req_tx_');
 
         const totalAmount = parseFloat(previewModalReq.amount) || 0;
         const monthlyDed = parseFloat(previewModalReq.monthlyDeduction || previewModalReq.installmentAmount) || 0;
@@ -3261,6 +3594,7 @@ export default function RequestsModule({
               previewModalReq.targetApproval === 'admin_only' ||
               previewModalReq.targetApproval === 'admin' ||
               isLoan ||
+              isExpense ||
               isComplaint ||
               isPenaltyObjection ||
               isProfileUpdate ||
@@ -3328,7 +3662,7 @@ export default function RequestsModule({
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {getFormattedRequestBadge(previewModalReq.type, previewModalReq.leaveType)}
+                  {getFormattedRequestBadge(previewModalReq)}
                   <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '14px' }} onClick={() => setPreviewModalReq(null)}>✕ إغلاق</button>
                 </div>
               </div>
@@ -3339,13 +3673,13 @@ export default function RequestsModule({
                 {/* 1. Employee & Branch Information Card */}
                 <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
                   <h4 style={{ margin: '0 0 12px', color: 'var(--text)', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    👤 بيانات الموظف ومقدم الطلب:
+                    {isExpense ? '🏢 بيانات الفرع ومقدم الفاتورة / المصروف:' : '👤 بيانات الموظف ومقدم الطلب:'}
                   </h4>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
                     <div>
-                      <span style={{ color: 'var(--muted)', fontSize: '12px' }}>اسم الموظف:</span>
+                      <span style={{ color: 'var(--muted)', fontSize: '12px' }}>{isExpense ? 'مقدم الفاتورة / المسؤول:' : 'اسم الموظف:'}</span>
                       <div style={{ fontWeight: 'bold', color: 'var(--text)', fontSize: '14px' }}>
-                        {empObj ? getEmpDisplayName(empObj) : (previewModalReq.employeeName || 'غير معروف')}
+                        {previewModalReq.submittedBy || (empObj ? getEmpDisplayName(empObj) : (previewModalReq.employeeName || (isExpense ? 'مدير الفرع' : 'غير معروف')))}
                       </div>
                     </div>
                     <div>
@@ -3363,7 +3697,7 @@ export default function RequestsModule({
                     <div>
                       <span style={{ color: 'var(--muted)', fontSize: '12px' }}>المسمى الوظيفي:</span>
                       <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
-                        💼 {empObj?.jobTitle || 'كادر وظيفي'}
+                        💼 {isExpense ? (empObj?.jobTitle || 'مدير فرع') : (empObj?.jobTitle || 'كادر وظيفي')}
                       </div>
                     </div>
                     <div>
@@ -4697,6 +5031,86 @@ export default function RequestsModule({
                   </div>
                 )}
 
+                {/* ── EXPENSE / INVOICE DETAILS (فواتير ومصروفات الفروع) ── */}
+                {isExpense && (
+                  <div style={{ background: '#fefce8', padding: '18px', borderRadius: '14px', border: '1.5px solid #fde047', boxShadow: '0 2px 10px rgba(161, 98, 7, 0.06)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                      <h4 style={{ margin: 0, color: '#854d0e', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800 }}>
+                        <span>📑</span>
+                        <span>بيانات الفاتورة والمصروف المالي المطلوب اعتماده:</span>
+                      </h4>
+                      <span style={{
+                        background: previewModalReq.status === 'approved' ? '#dcfce7' : previewModalReq.status === 'rejected' ? '#fee2e2' : '#fef3c7',
+                        color: previewModalReq.status === 'approved' ? '#15803d' : previewModalReq.status === 'rejected' ? '#b91c1c' : '#b45309',
+                        border: '1px solid currentColor',
+                        padding: '3px 12px',
+                        borderRadius: '8px',
+                        fontSize: '12.5px',
+                        fontWeight: 800
+                      }}>
+                        {previewModalReq.status === 'approved' ? '🟢 معتمد ومسجل بالدفاتر' : previewModalReq.status === 'rejected' ? '🔴 تم رفض المصروف' : '⏳ بانتظار موافقة الإدارة العليا'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #fef08a' }}>
+                        <span style={{ fontSize: '12px', color: '#854d0e', fontWeight: 600 }}>💰 قيمة المبلغ:</span>
+                        <div style={{ fontWeight: 900, color: '#dc2626', fontSize: '19px', marginTop: '3px' }}>
+                          {parseFloat(previewModalReq.amount || 0).toLocaleString()} ج.م
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #fef08a' }}>
+                        <span style={{ fontSize: '12px', color: '#854d0e', fontWeight: 600 }}>🏷️ بند الصرف / التصنيف:</span>
+                        <div style={{ fontWeight: 800, color: '#1e293b', fontSize: '14.5px', marginTop: '3px' }}>
+                          {previewModalReq.category || previewModalReq.typeLabel || 'cash order'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #fef08a' }}>
+                        <span style={{ fontSize: '12px', color: '#854d0e', fontWeight: 600 }}>🏢 الفرع التابع له:</span>
+                        <div style={{ fontWeight: 800, color: '#0f766e', fontSize: '14px', marginTop: '3px' }}>
+                          {previewModalReq.branchName || previewModalReq.branch || branchObj?.name || '—'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #fef08a' }}>
+                        <span style={{ fontSize: '12px', color: '#854d0e', fontWeight: 600 }}>📅 تاريخ الفاتورة / القيد:</span>
+                        <div style={{ fontWeight: 800, color: '#334155', fontSize: '14px', marginTop: '3px' }}>
+                          {previewModalReq.date || (previewModalReq.createdAt ? previewModalReq.createdAt.slice(0, 10) : '—')}
+                        </div>
+                      </div>
+                    </div>
+
+                    {(previewModalReq.driveWebViewLink || previewModalReq.driveFileUrl || previewModalReq.driveLink || previewModalReq.googleDriveUrl) && (
+                      <div style={{ marginTop: '10px', background: '#eff6ff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                        <span style={{ fontSize: '13px', color: '#1e40af', fontWeight: 700 }}>
+                          ☁️ ملف الفاتورة مرفوع على Google Drive:
+                        </span>
+                        <a
+                          href={previewModalReq.driveWebViewLink || previewModalReq.driveFileUrl || previewModalReq.driveLink || previewModalReq.googleDriveUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            background: '#2563eb',
+                            color: '#ffffff',
+                            padding: '5px 12px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            textDecoration: 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px'
+                          }}
+                        >
+                          📂 فتح الملف على Google Drive ↗
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* 4. Reason, Notes and Description Card */}
                 <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
                   <h4 style={{ margin: '0 0 8px', color: 'var(--primary-dark)', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -4971,6 +5385,8 @@ export default function RequestsModule({
                       >
                         {isLoan && (isEditingLoan || (loanCustomAmount && parseFloat(loanCustomAmount) !== parseFloat(previewModalReq.amount)))
                           ? `✓ اعتماد السلفة بالمبلغ المعتمد (${loanCustomAmount || previewModalReq.amount} ج.م)`
+                          : isExpense
+                          ? '✓ موافقة واعتماد الفاتورة / المصروف'
                           : '✓ اعتماد وموافقة الطلب فوراً'}
                       </button>
                     </div>

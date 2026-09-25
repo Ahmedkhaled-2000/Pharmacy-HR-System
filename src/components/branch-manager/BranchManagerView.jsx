@@ -184,7 +184,7 @@ export default function BranchManagerView({
   const [branchReqEmpFilter, setBranchReqEmpFilter] = useState('all');
   const [branchReqDateFilter, setBranchReqDateFilter] = useState('');
 
-  // 1. Manual Punch Request State
+  // 1. Manual Punch / Punch Correction Request State
   const [showManualPunchModal, setShowManualPunchModal] = useState(false);
   const [manualPunchData, setManualPunchData] = useState({
     employeeId: '',
@@ -193,8 +193,14 @@ export default function BranchManagerView({
     timeIn: '09:00',
     timeOut: '17:00',
     breakHours: '0',
-    reason: ''
+    reason: '',
+    shiftId: null
   });
+
+  // Punches Tab View Mode & Employee Preview Modal
+  const [punchesViewMode, setPunchesViewMode] = useState('employees'); // 'employees' | 'all_punches'
+  const [previewPunchesEmp, setPreviewPunchesEmp] = useState(null);
+  const [punchesSearchQuery, setPunchesSearchQuery] = useState('');
 
   // 2. Bonus Request State
   const [showBonusModal, setShowBonusModal] = useState(false);
@@ -1366,7 +1372,41 @@ export default function BranchManagerView({
     showToast?.('📤 تم رفع طلب المكافأة/الخصم للإدارة العليا (لن يُطبق على أجر الموظف إلا بعد موافقة الإدارة العليا)');
   };
 
-  // Handle Manual Punch Request Submission
+  // Open Punch Request / Correction Modal with prefilled data
+  const handleOpenPunchEditModal = (empId = '', date = '', existingPunch = null) => {
+    const targetDate = date || getRealTodayStr();
+    const emp = (state.employees || []).find((e) => String(e.id) === String(empId));
+    const defaultBreak = emp?.breakHours || emp?.defaultBreakHours || emp?.branchesDetails?.[0]?.breakHours || '0';
+    
+    const empActive = empId ? (state.activeShifts?.[empId] || state.activeShifts?.[String(empId)] || (emp?.code && state.activeShifts?.[emp.code])) : null;
+    const isShiftOpen = existingPunch 
+      ? (!existingPunch.timeOut || existingPunch.timeOut === '—') 
+      : Boolean(empActive && empActive.date === targetDate);
+
+    const initialPunchType = isShiftOpen ? 'in' : (existingPunch ? 'correction' : 'full');
+    const initialTimeIn = existingPunch?.timeIn && existingPunch.timeIn !== '—'
+      ? existingPunch.timeIn
+      : (empActive?.timeIn || '09:00');
+    const initialTimeOut = isShiftOpen
+      ? ''
+      : (existingPunch?.timeOut && existingPunch.timeOut !== '—' ? existingPunch.timeOut : '17:00');
+
+    setManualPunchData({
+      employeeId: empId || '',
+      date: targetDate,
+      punchType: initialPunchType,
+      timeIn: initialTimeIn,
+      timeOut: initialTimeOut,
+      breakHours: existingPunch?.breakHours !== undefined ? String(existingPunch.breakHours) : String(defaultBreak),
+      reason: isShiftOpen 
+        ? `طلب تعديل بصمة حضور (الوردية الحالية مستمرة)`
+        : (existingPunch ? `طلب تعديل بصمة يوم ${targetDate}` : ''),
+      shiftId: existingPunch?.id || empActive?.shiftId || null
+    });
+    setShowManualPunchModal(true);
+  };
+
+  // Handle Manual Punch / Punch Correction Request Submission
   const handleSubmitManualPunchRequest = async (e) => {
     e.preventDefault();
     if (!manualPunchData.employeeId || !manualPunchData.date || !manualPunchData.reason.trim()) {
@@ -1383,12 +1423,17 @@ export default function BranchManagerView({
     const emp = (state.employees || []).find((e) => String(e.id) === String(manualPunchData.employeeId));
     if (!emp) return;
 
+    const isCheckInOnly = manualPunchData.punchType === 'in' || (!manualPunchData.timeOut && Boolean(manualPunchData.timeIn));
+    const isCheckOutOnly = manualPunchData.punchType === 'out';
+    const finalTimeIn = manualPunchData.timeIn || '09:00';
+    const finalTimeOut = isCheckInOnly ? '' : (manualPunchData.timeOut || '');
+
     let calcGrossHours = 0;
     let calcNetHours = 0;
     const bH = Math.max(0, parseFloat(manualPunchData.breakHours) || 0);
-    if (manualPunchData.timeIn && manualPunchData.timeOut) {
-      const [inH, inM] = manualPunchData.timeIn.split(':').map(Number);
-      const [outH, outM] = manualPunchData.timeOut.split(':').map(Number);
+    if (!isCheckInOnly && finalTimeIn && finalTimeOut) {
+      const [inH, inM] = finalTimeIn.split(':').map(Number);
+      const [outH, outM] = finalTimeOut.split(':').map(Number);
       let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
       if (diff < 0) diff += 24 * 60;
       calcGrossHours = Math.round((diff / 60) * 100) / 100;
@@ -1409,23 +1454,29 @@ export default function BranchManagerView({
       schedHours = parseFloat(daySched.hours) || profileHours;
     }
 
-    const regularHours = Math.min(calcNetHours, schedHours);
-    const overtimeHours = Math.max(0, Math.round((calcNetHours - schedHours) * 100) / 100);
+    const regularHours = isCheckInOnly ? 0 : Math.min(calcNetHours, schedHours);
+    const overtimeHours = isCheckInOnly ? 0 : Math.max(0, Math.round((calcNetHours - schedHours) * 100) / 100);
 
+    const isEdit = Boolean(manualPunchData.shiftId || manualPunchData.punchType === 'correction' || isCheckInOnly);
     const reqId = `req_punch_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     const newReq = {
       id: reqId,
+      shiftId: manualPunchData.shiftId || null,
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
       branchId: currentBranch?.id || emp.branchId,
       branchName: currentBranch?.name || 'الفرع',
       type: 'punch_correction',
-      subType: 'manual_punch_request',
-      typeLabel: 'طلب إضافة/تعديل بصمة يدوي',
+      subType: isEdit ? 'punch_correction' : 'manual_punch_request',
+      punchType: manualPunchData.punchType,
+      targetAction: isCheckInOnly ? 'shift_start' : (isCheckOutOnly ? 'shift_end' : 'shift_full'),
+      typeLabel: isCheckInOnly 
+        ? 'طلب تعديل بصمة حضور' 
+        : (isCheckOutOnly ? 'طلب تعديل بصمة انصراف' : (isEdit ? 'طلب تعديل بصمة مسجلة' : 'طلب تسجيل بصمة يدوي')),
       date: manualPunchData.date,
-      timeIn: manualPunchData.timeIn || '',
-      timeOut: manualPunchData.timeOut || '',
+      timeIn: finalTimeIn,
+      timeOut: finalTimeOut,
       hours: regularHours,
       regularHours: regularHours,
       scheduledHours: schedHours,
@@ -1433,9 +1484,10 @@ export default function BranchManagerView({
       overtimeStatus: overtimeHours > 0 ? 'approved' : 'none',
       grossHours: calcGrossHours,
       breakHours: bH,
-      punchType: manualPunchData.punchType,
       reason: manualPunchData.reason.trim(),
-      details: `طلب تسجيل بصمة يدوي من مدير الفرع (${manualPunchData.punchType === 'full' ? 'وردية كاملة' : manualPunchData.punchType === 'in' ? 'حضور فقط' : manualPunchData.punchType === 'out' ? 'انصراف فقط' : 'تعديل بصمة'}) | التاريخ: ${manualPunchData.date} | من ${manualPunchData.timeIn || '—'} إلى ${manualPunchData.timeOut || '—'} (صافي: ${calcNetHours} س: أساسي ${regularHours} س + إضافي ${overtimeHours} س - بريك: ${bH} س) | السبب: ${manualPunchData.reason.trim()}`,
+      details: isCheckInOnly
+        ? `طلب تعديل بصمة حضور فقط من مدير الفرع (الوردية مستمرة دون تسجيل خروج) | التاريخ: ${manualPunchData.date} | وقت الحضور الجديد: ${finalTimeIn} | السبب: ${manualPunchData.reason.trim()}`
+        : `${isEdit ? 'طلب تعديل بصمة مسجلة لموظف' : 'طلب تسجيل بصمة يدوي'} من مدير الفرع (${manualPunchData.punchType === 'full' ? 'وردية كاملة' : manualPunchData.punchType === 'out' ? 'انصراف فقط' : 'تعديل بصمة'}) | التاريخ: ${manualPunchData.date} | من ${finalTimeIn || '—'} إلى ${finalTimeOut || '—'} (صافي: ${calcNetHours} س: أساسي ${regularHours} س + إضافي ${overtimeHours} س - بريك: ${bH} س) | السبب: ${manualPunchData.reason.trim()}`,
       status: 'pending_admin',
       branchApproved: true,
       adminApproved: false,
@@ -1448,8 +1500,10 @@ export default function BranchManagerView({
       id: `notif_${reqId}`,
       requestId: reqId,
       type: 'punch_correction',
-      title: `🖐️ طلب تسجيل بصمة يدوي: ${emp.name}`,
-      message: `طلب مدير فرع ${currentBranch?.name || ''} اعتماد بصمة يدوي للموظف ${emp.name} بتاريخ ${manualPunchData.date} (${manualPunchData.timeIn} ➔ ${manualPunchData.timeOut} | صافي: ${calcNetHours} س${overtimeHours > 0 ? ` [إضافي: ${overtimeHours} س]` : ''}) - السبب: ${manualPunchData.reason.trim()}`,
+      title: `🖐️ ${isCheckInOnly ? 'طلب تعديل بصمة حضور' : (isEdit ? 'طلب تعديل بصمة' : 'طلب تسجيل بصمة يدوي')}: ${emp.name}`,
+      message: isCheckInOnly
+        ? `طلب مدير فرع ${currentBranch?.name || ''} تعديل بصمة حضور الموظف ${emp.name} بتاريخ ${manualPunchData.date} إلى (${finalTimeIn}) دون إنهاء الوردية - السبب: ${manualPunchData.reason.trim()}`
+        : `طلب مدير فرع ${currentBranch?.name || ''} اعتماد ${isEdit ? 'تعديل بصمة' : 'بصمة يدوي'} للموظف ${emp.name} بتاريخ ${manualPunchData.date} (${finalTimeIn} ➔ ${finalTimeOut} | صافي: ${calcNetHours} س${overtimeHours > 0 ? ` [إضافي: ${overtimeHours} س]` : ''}) - السبب: ${manualPunchData.reason.trim()}`,
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
@@ -1473,9 +1527,83 @@ export default function BranchManagerView({
     notifyAdminOnNewRequest({ state: updatedState, newRequest: newReq, empName: emp.name, branchName: currentBranch?.name });
 
     setShowManualPunchModal(false);
-    setManualPunchData({ employeeId: '', date: getRealTodayStr(), punchType: 'full', timeIn: '09:00', timeOut: '17:00', breakHours: '0', reason: '' });
-    showToast?.('📤 تم إرسال طلب البصمة اليدوية إلى الإدارة العليا للاعتماد بنجاح');
-    showToast?.('📤 تم إرسال طلب البصمة اليدوية إلى الإدارة العليا للاعتماد بنجاح');
+    setManualPunchData({ employeeId: '', date: getRealTodayStr(), punchType: 'full', timeIn: '09:00', timeOut: '17:00', breakHours: '0', reason: '', shiftId: null });
+    showToast?.('📤 تم إرسال طلب تعديل/إضافة البصمة إلى الإدارة العليا للاعتماد بنجاح');
+  };
+
+  // Helper to print employee punches report directly
+  const handlePrintEmployeePunches = (emp, shifts = []) => {
+    if (!emp) return;
+    const branchName = currentBranch?.name || 'الفرع';
+    const totalHours = shifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
+    const totalBreaks = shifts.reduce((acc, s) => acc + (s.breakHours || 0), 0);
+    const manualCount = shifts.filter(isShiftManualPunch).length;
+
+    const rowsHtml = shifts.map((s, idx) => {
+      const perm = isApprovedPermissionForDate(emp.id, s.date, state);
+      const effHours = getEffectiveShiftHours(s, state);
+      const isManual = isShiftManualPunch(s);
+      return `
+        <tr style="border-bottom: 1px solid #e2e8f0; ${idx % 2 === 1 ? 'background-color: #f8fafc;' : ''}">
+          <td style="padding: 6px 8px; text-align: center; font-weight: bold;">${idx + 1}</td>
+          <td style="padding: 6px 8px; text-align: center; font-weight: bold;">${s.date}</td>
+          <td style="padding: 6px 8px; text-align: center;">${getArabicWeekday(s.date)}</td>
+          <td style="padding: 6px 8px; text-align: center; font-weight: bold; color: #166534;">${s.timeIn || '—'}</td>
+          <td style="padding: 6px 8px; text-align: center; font-weight: bold; color: #991b1b;">${s.timeOut || '—'}</td>
+          <td style="padding: 6px 8px; text-align: center;">${(s.breakHours || 0) > 0 ? (s.breakHours + ' س') : '—'}</td>
+          <td style="padding: 6px 8px; text-align: center; font-weight: bold; color: #0f766e;">${formatMoney(effHours)} س</td>
+          <td style="padding: 6px 8px; font-size: 11px;">
+            ${isManual ? '<span style="background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-left: 4px;">بصمة يدوية</span>' : ''}
+            ${perm ? '<span style="background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-left: 4px;">إذن معتمد</span>' : ''}
+            ${s.note ? `<span>${s.note}</span>` : ''}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    const html = `
+      <div style="direction: rtl; font-family: 'Cairo', Tajawal, sans-serif; padding: 15px; color: #0f172a;">
+        <div style="border-bottom: 2px solid #0d9488; padding-bottom: 10px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <h2 style="margin: 0; font-size: 18px; color: #0d9488;">📋 كشف سجل البصمات والورديات للموظف</h2>
+            <p style="margin: 4px 0 0; font-size: 13px; color: #64748b;">
+              الموظف: <strong>${emp.name}</strong> (كود: ${emp.code}) — ${emp.jobTitle || 'موظف'}
+            </p>
+          </div>
+          <div style="text-align: left;">
+            <div style="font-size: 13px; font-weight: bold;">${branchName}</div>
+            <div style="font-size: 12px; color: #64748b;">دورة شهر: ${selectedMonth}</div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 15px; text-align: center; background: #f0fdf4; border: 1px solid #a7f3d0; padding: 10px; border-radius: 8px;">
+          <div><span style="font-size: 11px; color: #065f46; display: block;">الورديات المنفذة</span><strong style="font-size: 15px; color: #065f46;">${shifts.length} وردية</strong></div>
+          <div><span style="font-size: 11px; color: #065f46; display: block;">صافي الساعات</span><strong style="font-size: 15px; color: #0f766e;">${formatMoney(totalHours)} س</strong></div>
+          <div><span style="font-size: 11px; color: #065f46; display: block;">إجمالي البريك</span><strong style="font-size: 15px; color: #b45309;">${formatMoney(totalBreaks)} س</strong></div>
+          <div><span style="font-size: 11px; color: #065f46; display: block;">بصمات يدوية</span><strong style="font-size: 15px; color: #b45309;">${manualCount} بصمة</strong></div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px; border: 1px solid #cbd5e1;">
+          <thead>
+            <tr style="background: #0d9488; color: #ffffff;">
+              <th style="padding: 8px; border: 1px solid #0d9488;">#</th>
+              <th style="padding: 8px; border: 1px solid #0d9488;">التاريخ</th>
+              <th style="padding: 8px; border: 1px solid #0d9488;">اليوم</th>
+              <th style="padding: 8px; border: 1px solid #0d9488;">وقت الحضور</th>
+              <th style="padding: 8px; border: 1px solid #0d9488;">وقت الانصراف</th>
+              <th style="padding: 8px; border: 1px solid #0d9488;">البريك</th>
+              <th style="padding: 8px; border: 1px solid #0d9488;">صافي الساعات</th>
+              <th style="padding: 8px; border: 1px solid #0d9488;">الملاحظات والاعتماد</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #64748b;">لا توجد بصمات مسجلة</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    triggerDirectPrint(html, `سجل_بصمات_${emp.name}_${selectedMonth}`);
   };
 
   // Handle Bonus Request Submission
@@ -4207,40 +4335,107 @@ export default function BranchManagerView({
       {/* ───────────────────────────────────────────────────────────── */}
       {activeTab === 'emp-punches' && (
         <div className="card settings-card fade-in" style={{ padding: isMobileScreen ? '14px' : '20px' }}>
+          {/* Header & Controls */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-            <h3 style={{ margin: 0, fontSize: isMobileScreen ? '15.5px' : '17px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              📋 سجل البصمات والورديات — موظفي الفرع ({selectedMonth})
-            </h3>
+            <div>
+              <h3 style={{ margin: 0, fontSize: isMobileScreen ? '15.5px' : '17px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                📋 سجل البصمات والورديات — موظفي الفرع ({selectedMonth})
+              </h3>
+              <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
+                {punchesViewMode === 'employees' 
+                  ? 'كشف موظفي الفرع: معاينة سجل بصمات كل موظف وتقديم طلبات تعديل البصمات للإدارة العليا' 
+                  : 'الكشف المجمع لكافة بصمات وورديات الفرع المسجلة بالتاريخ'}
+              </p>
+            </div>
+
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', width: isMobileScreen ? '100%' : 'auto' }}>
+              {/* Primary Action Button: Request Punch Edit / Add */}
               <button
                 className="btn btn-start"
-                style={{ padding: isMobileScreen ? '6px 10px' : '6px 14px', fontSize: isMobileScreen ? '12px' : '13px', display: 'flex', alignItems: 'center', gap: '5px', flex: isMobileScreen ? 1 : 'none', justifyContent: 'center' }}
-                onClick={() => setShowManualPunchModal(true)}
+                style={{
+                  padding: isMobileScreen ? '7px 12px' : '8px 16px',
+                  fontSize: isMobileScreen ? '12px' : '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  flex: isMobileScreen ? 1 : 'none',
+                  justifyContent: 'center',
+                  background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+                  color: '#ffffff',
+                  boxShadow: '0 2px 8px rgba(13, 148, 136, 0.25)',
+                  fontWeight: 800
+                }}
+                onClick={() => handleOpenPunchEditModal()}
               >
-                🖐️ طلب بصمة يدوي
+                <span>📝</span>
+                <span>طلب تعديل / إضافة بصمة</span>
               </button>
-              <div style={{ maxWidth: isMobileScreen ? '100%' : '240px', flex: isMobileScreen ? 1 : 'none' }}>
-                <select value={selectedPunchEmpId} onChange={(e) => setSelectedPunchEmpId(e.target.value)} style={{ width: '100%', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '12.5px' }}>
-                  <option value="">-- جميع موظفي الفرع --</option>
-                  {branchEmployees.map((e) => (
-                    <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
-                  ))}
-                </select>
+
+              {/* View Switcher Button */}
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{
+                  padding: isMobileScreen ? '6px 10px' : '7px 14px',
+                  fontSize: isMobileScreen ? '12px' : '12.5px',
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface)',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+                onClick={() => setPunchesViewMode(punchesViewMode === 'employees' ? 'all_punches' : 'employees')}
+              >
+                {punchesViewMode === 'employees' ? (
+                  <><span>📋</span><span>عرض الكشف المجمع للبصمات</span></>
+                ) : (
+                  <><span>👥</span><span>عرض موظفي الفرع</span></>
+                )}
+              </button>
+
+              {/* Quick Search */}
+              <div style={{ width: isMobileScreen ? '100%' : '200px' }}>
+                <input
+                  type="text"
+                  placeholder="🔍 بحث بالاسم أو الكود..."
+                  value={punchesSearchQuery}
+                  onChange={(e) => setPunchesSearchQuery(e.target.value)}
+                  style={{ width: '100%', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '12.5px' }}
+                />
               </div>
+
+              {/* Employee Filter (Shown in All Punches Mode) */}
+              {punchesViewMode === 'all_punches' && (
+                <div style={{ maxWidth: isMobileScreen ? '100%' : '200px', flex: isMobileScreen ? 1 : 'none' }}>
+                  <select 
+                    value={selectedPunchEmpId} 
+                    onChange={(e) => setSelectedPunchEmpId(e.target.value)} 
+                    style={{ width: '100%', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '12.5px' }}
+                  >
+                    <option value="">-- جميع موظفي الفرع --</option>
+                    {branchEmployees.map((e) => (
+                      <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
           {(() => {
             const allEmps = state.employees || [];
             const cIdStr = String(liveBranch?.id || currentBranch?.id || '');
+            const todayStrNow = typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
+
+            // Filter shifts strictly belonging to branch employees for the selected month
             const filteredShifts = (state.shifts || []).filter((s) => {
               if (!s || !s.date) return false;
-              const empObj = allEmps.find((e) => String(e.id) === String(s.employeeId)) || branchEmployees.find((e) => String(e.id) === String(s.employeeId));
+              if (s.status === 'cancelled' || s.isCancelled) return false;
+              const empObj = allEmps.find((e) => String(e.id) === String(s.employeeId) || (s.employeeCode && String(e.code) === String(s.employeeCode))) || branchEmployees.find((e) => String(e.id) === String(s.employeeId));
               if (!empObj) return false;
-              // Strictly exclude branch manager from employee punches list
               if (isBranchManagerEmp(empObj)) return false;
               if (selectedPunchEmpId && String(s.employeeId) !== String(selectedPunchEmpId)) return false;
-              // Check if shift strictly belongs to branch staff in this branch
               const isStaffInBranch = branchEmployees.some((e) => String(e.id) === String(s.employeeId));
               if (!isStaffInBranch) return false;
               const isThisBranchShift = String(s.branchId) === cIdStr || (!s.branchId && String(empObj.branchId) === cIdStr);
@@ -4251,47 +4446,369 @@ export default function BranchManagerView({
             const totalBreak = filteredShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0);
             const totalHours = filteredShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
 
-            if (isMobileScreen) {
+            // Filter branch employees by search query
+            const displayedEmployees = branchEmployees.filter(emp => {
+              if (!punchesSearchQuery) return true;
+              const q = punchesSearchQuery.toLowerCase();
+              return (emp.name && emp.name.toLowerCase().includes(q)) || (emp.code && String(emp.code).toLowerCase().includes(q)) || (emp.jobTitle && emp.jobTitle.toLowerCase().includes(q));
+            });
+
+            // ─────────────────────────────────────────────────────────────
+            // MODE A: EMPLOYEES ROSTER VIEW WITH DEDICATED PREVIEW BUTTONS
+            // ─────────────────────────────────────────────────────────────
+            if (punchesViewMode === 'employees') {
               return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {/* Mobile Summary Stats Pill */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {/* Summary Stats Bar */}
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: '8px',
-                    background: 'linear-gradient(135deg, #f0fdf4, #e6f7f5)',
-                    padding: '12px',
+                    gridTemplateColumns: isMobileScreen ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+                    gap: '10px',
+                    background: 'linear-gradient(135deg, #f0fdf4 0%, #e6f7f5 100%)',
+                    padding: '12px 16px',
                     borderRadius: '12px',
                     border: '1px solid #99f6e4',
                     textAlign: 'center'
                   }}>
                     <div>
-                      <span style={{ fontSize: '11px', color: '#0f766e', display: 'block' }}>الورديات</span>
-                      <strong style={{ fontSize: '14px', color: '#115e59' }}>{filteredShifts.length}</strong>
+                      <span style={{ fontSize: '11px', color: '#0f766e', display: 'block', fontWeight: 600 }}>موظفو الفرع</span>
+                      <strong style={{ fontSize: '15px', color: '#115e59' }}>{displayedEmployees.length} موظف</strong>
                     </div>
                     <div>
-                      <span style={{ fontSize: '11px', color: '#0f766e', display: 'block' }}>إجمالي الساعات</span>
-                      <strong style={{ fontSize: '14px', color: '#0d9488' }}>{formatMoney(totalHours)} س</strong>
+                      <span style={{ fontSize: '11px', color: '#0f766e', display: 'block', fontWeight: 600 }}>إجمالي الورديات بالفرع</span>
+                      <strong style={{ fontSize: '15px', color: '#115e59' }}>{filteredShifts.length} وردية</strong>
                     </div>
                     <div>
-                      <span style={{ fontSize: '11px', color: '#0f766e', display: 'block' }}>البريك</span>
-                      <strong style={{ fontSize: '14px', color: '#b45309' }}>{formatMoney(totalBreak)} س</strong>
+                      <span style={{ fontSize: '11px', color: '#0f766e', display: 'block', fontWeight: 600 }}>إجمالي الساعات الفعلية</span>
+                      <strong style={{ fontSize: '15px', color: '#0d9488' }}>{formatMoney(totalHours)} س</strong>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '11px', color: '#0f766e', display: 'block', fontWeight: 600 }}>إجمالي البريك المخصوم</span>
+                      <strong style={{ fontSize: '15px', color: '#b45309' }}>{formatMoney(totalBreak)} س</strong>
                     </div>
                   </div>
 
-                  {/* Shifts Cards List */}
+                  {displayedEmployees.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '36px 20px', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px dashed var(--border)' }}>
+                      <p style={{ margin: 0, color: 'var(--muted)', fontSize: '14px', fontWeight: 600 }}>
+                        لا يوجد موظفون يطابقون خيارات البحث في هذا الفرع.
+                      </p>
+                    </div>
+                  ) : isMobileScreen ? (
+                    /* Mobile Employee Cards */
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {displayedEmployees.map((emp) => {
+                        const empShifts = filteredShifts.filter(s => String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code)));
+                        const empHours = empShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
+                        const empBreak = empShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0);
+                        const manualCount = getEmployeeManualPunchesCount(emp.id, state, matchesDateRange);
+
+                        const activeShift = state.activeShifts?.[emp.id] || state.activeShifts?.[String(emp.id)] || (emp.code && state.activeShifts?.[emp.code]);
+                        const isLiveActive = Boolean(activeShift && activeShift.date === todayStrNow);
+                        const todayCompleted = empShifts.find(s => s.date === todayStrNow && s.timeOut && s.timeOut !== '—');
+
+                        return (
+                          <div key={emp.id} className="card" style={{
+                            padding: '14px',
+                            borderRadius: '14px',
+                            border: isLiveActive ? '1.5px solid #86efac' : '1px solid var(--border)',
+                            background: isLiveActive ? 'rgba(240, 253, 244, 0.6)' : 'var(--surface)',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <div style={{
+                                  width: '38px',
+                                  height: '38px',
+                                  borderRadius: '50%',
+                                  background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+                                  color: '#fff',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontWeight: 'bold',
+                                  fontSize: '15px'
+                                }}>
+                                  {emp.name ? emp.name.charAt(0) : 'م'}
+                                </div>
+                                <div>
+                                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 800 }}>{emp.name}</h4>
+                                  <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
+                                    كود: {emp.code} | {emp.jobTitle || 'موظف'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {isLiveActive ? (
+                                <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 800 }}>
+                                  🟢 متواجد الآن ({activeShift.timeIn})
+                                </span>
+                              ) : todayCompleted ? (
+                                <span style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 700 }}>
+                                  ✔️ أنهى ورديته
+                                </span>
+                              ) : (
+                                <span style={{ background: '#f1f5f9', color: '#64748b', padding: '2px 8px', borderRadius: '12px', fontSize: '11px' }}>
+                                  ⚪ لم يسجل اليوم
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Stats 4-Grid */}
+                            <div style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(4, 1fr)',
+                              gap: '6px',
+                              background: 'var(--surface-muted)',
+                              padding: '8px',
+                              borderRadius: '10px',
+                              textAlign: 'center',
+                              marginBottom: '12px'
+                            }}>
+                              <div>
+                                <span style={{ fontSize: '10px', color: 'var(--muted)', display: 'block' }}>الورديات</span>
+                                <strong style={{ fontSize: '12px', color: '#0f172a' }}>{empShifts.length}</strong>
+                              </div>
+                              <div>
+                                <span style={{ fontSize: '10px', color: 'var(--muted)', display: 'block' }}>الساعات</span>
+                                <strong style={{ fontSize: '12px', color: '#0d9488' }}>{formatMoney(empHours)} س</strong>
+                              </div>
+                              <div>
+                                <span style={{ fontSize: '10px', color: 'var(--muted)', display: 'block' }}>البريك</span>
+                                <strong style={{ fontSize: '12px', color: '#b45309' }}>{formatMoney(empBreak)} س</strong>
+                              </div>
+                              <div>
+                                <span style={{ fontSize: '10px', color: 'var(--muted)', display: 'block' }}>يدوي</span>
+                                <strong style={{ fontSize: '12px', color: manualCount > 0 ? '#b45309' : 'var(--muted)' }}>
+                                  {manualCount}
+                                </strong>
+                              </div>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                              <button
+                                type="button"
+                                className="btn btn-outline"
+                                style={{
+                                  padding: '7px 10px',
+                                  fontSize: '12px',
+                                  fontWeight: 800,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '5px',
+                                  borderColor: '#0d9488',
+                                  color: '#0d9488',
+                                  background: 'rgba(13, 148, 136, 0.05)'
+                                }}
+                                onClick={() => setPreviewPunchesEmp(emp)}
+                              >
+                                <span>👁️</span>
+                                <span>معاينة سجل البصمات</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                style={{
+                                  padding: '7px 10px',
+                                  fontSize: '12px',
+                                  fontWeight: 700,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '5px',
+                                  border: '1px solid #cbd5e1',
+                                  background: 'var(--surface)'
+                                }}
+                                onClick={() => handleOpenPunchEditModal(emp.id)}
+                              >
+                                <span>✏️</span>
+                                <span>طلب تعديل بصمة</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    /* Desktop Employee Roster Table */
+                    <div className="table-responsive">
+                      <table className="bylaws-table" style={{ fontSize: '13px' }}>
+                        <thead>
+                          <tr style={{ background: '#f0fdf4', color: '#166534' }}>
+                            <th style={{ width: '45px' }}>#</th>
+                            <th>الموظف</th>
+                            <th>حالة الحضور اليوم</th>
+                            <th style={{ textAlign: 'center' }}>الورديات المنفذة</th>
+                            <th style={{ textAlign: 'center' }}>ساعات العمل المعتمدة</th>
+                            <th style={{ textAlign: 'center' }}>ساعات البريك</th>
+                            <th style={{ textAlign: 'center' }}>بصمات يدوية هذا الشهر</th>
+                            <th style={{ textAlign: 'center', width: '250px' }}>الإجراءات والمعاينة</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {displayedEmployees.map((emp, idx) => {
+                            const empShifts = filteredShifts.filter(s => String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code)));
+                            const empHours = empShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
+                            const empBreak = empShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0);
+                            const manualCount = getEmployeeManualPunchesCount(emp.id, state, matchesDateRange);
+
+                            const activeShift = state.activeShifts?.[emp.id] || state.activeShifts?.[String(emp.id)] || (emp.code && state.activeShifts?.[emp.code]);
+                            const isLiveActive = Boolean(activeShift && activeShift.date === todayStrNow);
+                            const todayCompleted = empShifts.find(s => s.date === todayStrNow && s.timeOut && s.timeOut !== '—');
+
+                            return (
+                              <tr key={emp.id} style={{ background: isLiveActive ? 'rgba(236, 253, 245, 0.4)' : 'transparent' }}>
+                                <td style={{ color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
+                                <td>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <div style={{
+                                      width: '34px',
+                                      height: '34px',
+                                      borderRadius: '50%',
+                                      background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+                                      color: '#fff',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      fontWeight: 'bold',
+                                      fontSize: '13px',
+                                      flexShrink: 0
+                                    }}>
+                                      {emp.name ? emp.name.charAt(0) : 'م'}
+                                    </div>
+                                    <div>
+                                      <strong style={{ fontSize: '13.5px', color: '#0f172a', display: 'block' }}>{emp.name}</strong>
+                                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                                        كود: <strong>{emp.code}</strong> {emp.jobTitle ? `— ${emp.jobTitle}` : ''}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td>
+                                  {isLiveActive ? (
+                                    <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '3px 10px', borderRadius: '12px', fontSize: '11.5px', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                      🟢 متواجد بالفرع الآن ({activeShift.timeIn})
+                                    </span>
+                                  ) : todayCompleted ? (
+                                    <span style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '3px 10px', borderRadius: '12px', fontSize: '11.5px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                      ✔️ أنهى ورديته ({todayCompleted.timeIn} ➔ {todayCompleted.timeOut})
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: 'var(--muted)', fontSize: '12px' }}>⚪ لم يسجل حضور اليوم</span>
+                                  )}
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <span style={{ background: '#f1f5f9', color: '#0f172a', padding: '3px 10px', borderRadius: '8px', fontWeight: 800, fontSize: '12.5px' }}>
+                                    {empShifts.length} وردية
+                                  </span>
+                                </td>
+                                <td style={{ textAlign: 'center', fontWeight: '800', color: '#0d9488', fontSize: '13.5px' }}>
+                                  {formatMoney(empHours)} ساعة
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  {empBreak > 0 ? (
+                                    <span style={{ background: '#fef3c7', color: '#b45309', padding: '2px 8px', borderRadius: '6px', fontWeight: 700, fontSize: '12px' }}>
+                                      {formatMoney(empBreak)} س
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: 'var(--muted)', fontSize: '12px' }}>0</span>
+                                  )}
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  {manualCount > 0 ? (
+                                    <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '3px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 800 }}>
+                                      🖐️ {manualCount} بصمة
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: 'var(--muted)', fontSize: '12px' }}>0</span>
+                                  )}
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline"
+                                      style={{
+                                        padding: '5px 12px',
+                                        fontSize: '12px',
+                                        fontWeight: 800,
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '5px',
+                                        borderColor: '#0d9488',
+                                        color: '#0d9488',
+                                        background: 'rgba(13, 148, 136, 0.06)',
+                                        borderRadius: '8px'
+                                      }}
+                                      onClick={() => setPreviewPunchesEmp(emp)}
+                                    >
+                                      <span>👁️</span>
+                                      <span>معاينة جدول البصمات</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost"
+                                      style={{
+                                        padding: '5px 10px',
+                                        fontSize: '11.5px',
+                                        fontWeight: 700,
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        border: '1px solid #cbd5e1',
+                                        background: 'var(--surface)',
+                                        borderRadius: '8px'
+                                      }}
+                                      onClick={() => handleOpenPunchEditModal(emp.id)}
+                                    >
+                                      <span>✏️</span>
+                                      <span>طلب تعديل</span>
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ fontWeight: '800', background: '#f8fafc' }}>
+                            <td colSpan="3" style={{ textAlign: 'right', paddingRight: '14px' }}>
+                              الإجمالي العام لفرع {currentBranch?.name || ''} ({displayedEmployees.length} موظف — {filteredShifts.length} وردية)
+                            </td>
+                            <td style={{ textAlign: 'center' }}>{filteredShifts.length} وردية</td>
+                            <td style={{ textAlign: 'center', color: '#0d9488' }}>{formatMoney(totalHours)} ساعة</td>
+                            <td style={{ textAlign: 'center', color: '#b45309' }}>{formatMoney(totalBreak)} س</td>
+                            <td colSpan="2"></td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            // ─────────────────────────────────────────────────────────────
+            // MODE B: ALL PUNCHES COMBINED TABLE (HISTORICAL LOG)
+            // ─────────────────────────────────────────────────────────────
+            if (isMobileScreen) {
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {filteredShifts.length === 0 ? (
                     <p style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)', fontSize: '13px' }}>
                       لا توجد بصمات مسجلة لهؤلاء الموظفين بهذا الفرع لهذه الفترة.
                     </p>
                   ) : (
-                    filteredShifts.map((s, idx) => {
-                      const empObj = allEmps.find((e) => String(e.id) === String(s.employeeId)) || branchEmployees.find((e) => String(e.id) === String(s.employeeId));
+                    filteredShifts.map((s) => {
+                      const empObj = allEmps.find((e) => String(e.id) === String(s.employeeId) || (s.employeeCode && String(e.code) === String(s.employeeCode))) || branchEmployees.find((e) => String(e.id) === String(s.employeeId));
                       const perm = isApprovedPermissionForDate(s.employeeId, s.date, state);
                       const hasPerm = s.hasApprovedPermission || !!perm;
                       const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
                       const effHours = getEffectiveShiftHours(s, state);
-                      const manualPunchesMonthCount = getEmployeeManualPunchesCount(s.employeeId, state, matchesDateRange);
                       const isManualShift = isShiftManualPunch(s);
 
                       return (
@@ -4302,20 +4819,14 @@ export default function BranchManagerView({
                           background: hasPerm ? 'rgba(254, 243, 199, 0.15)' : 'var(--surface)',
                           boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
                         }}>
-                          {/* Card Top: Employee Name, Code & Date */}
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#e6f7f5', color: '#0d9488', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '13px' }}>
-                                {empObj?.name ? empObj.name.charAt(0) : 'م'}
-                              </div>
-                              <div>
-                                <h4 style={{ margin: 0, fontSize: '13.5px', fontWeight: '800' }}>
-                                  {empObj ? empObj.name : (s.employeeName || 'موظف')}
-                                </h4>
-                                <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
-                                  كود: {empObj?.code || '—'}
-                                </span>
-                              </div>
+                            <div>
+                              <h4 style={{ margin: 0, fontSize: '13.5px', fontWeight: '800' }}>
+                                {empObj ? empObj.name : (s.employeeName || 'موظف')}
+                              </h4>
+                              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                                كود: {empObj?.code || s.employeeCode || '—'}
+                              </span>
                             </div>
                             <div style={{ textAlign: 'left' }}>
                               <strong style={{ fontSize: '12px', color: 'var(--text)', display: 'block' }}>{s.date}</strong>
@@ -4323,7 +4834,6 @@ export default function BranchManagerView({
                             </div>
                           </div>
 
-                          {/* Time & Hours Stats Grid */}
                           <div style={{
                             display: 'grid',
                             gridTemplateColumns: 'repeat(4, 1fr)',
@@ -4332,7 +4842,7 @@ export default function BranchManagerView({
                             padding: '8px',
                             borderRadius: '10px',
                             textAlign: 'center',
-                            marginBottom: (hasPerm || isManualShift || s.note) ? '8px' : '0'
+                            marginBottom: '8px'
                           }}>
                             <div>
                               <span style={{ fontSize: '10px', color: 'var(--muted)', display: 'block' }}>الدخول</span>
@@ -4360,31 +4870,20 @@ export default function BranchManagerView({
                             </div>
                           </div>
 
-                          {/* Badges & Notes */}
-                          {(hasPerm || isManualShift || manualPunchesMonthCount > 0 || s.note) && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
-                              {hasPerm && (
-                                <div style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700 }}>
-                                  ⏰ معدلة بإذن (+{permHours} س) {perm?.startTime && `(${perm.startTime} إلى ${perm.endTime})`}
-                                </div>
-                              )}
-                              {isManualShift && (
-                                <div style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700 }}>
-                                  🖐️ بصمة يدوية
-                                </div>
-                              )}
-                              {manualPunchesMonthCount > 0 && !isManualShift && (
-                                <div style={{ fontSize: '10.5px', color: '#b45309' }}>
-                                  🖐️ للموظف {manualPunchesMonthCount} بصمة يدوية هذا الشهر
-                                </div>
-                              )}
-                              {s.note && !s.note.includes('⏰ تم تعديل البصمة') && (
-                                <div style={{ fontSize: '11px', color: 'var(--muted)', fontStyle: 'italic' }}>
-                                  📝 {s.note}
-                                </div>
-                              )}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
+                            <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                              {isManualShift && <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, marginLeft: '4px' }}>بصمة يدوية</span>}
+                              {s.note}
                             </div>
-                          )}
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ padding: '4px 8px', fontSize: '11.5px', color: '#0d9488', fontWeight: 800, border: '1px solid #cbd5e1' }}
+                              onClick={() => handleOpenPunchEditModal(empObj?.id || s.employeeId, s.date, s)}
+                            >
+                              ✏️ تعديل
+                            </button>
+                          </div>
                         </div>
                       );
                     })
@@ -4400,14 +4899,14 @@ export default function BranchManagerView({
                     <tr style={{ background: '#f0fdf4', color: '#166534' }}>
                       <th>#</th>
                       <th>اسم الموظف</th>
-                      <th>بصمات يدوية هذا الشهر</th>
                       <th>التاريخ</th>
                       <th>اليوم</th>
                       <th>وقت الدخول</th>
                       <th>وقت الخروج</th>
                       <th>ساعات البريك</th>
                       <th>صافي ساعات العمل</th>
-                      <th>الملاحظات</th>
+                      <th>الملاحظات والحالة</th>
+                      <th style={{ textAlign: 'center' }}>إجراء</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -4415,12 +4914,11 @@ export default function BranchManagerView({
                       <tr><td colSpan="10" style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)' }}>لا توجد بصمات مسجلة لهؤلاء الموظفين بهذا الفرع لهذه الفترة.</td></tr>
                     ) : (
                       filteredShifts.map((s, idx) => {
-                        const empObj = allEmps.find((e) => String(e.id) === String(s.employeeId)) || branchEmployees.find((e) => String(e.id) === String(s.employeeId));
+                        const empObj = allEmps.find((e) => String(e.id) === String(s.employeeId) || (s.employeeCode && String(e.code) === String(s.employeeCode))) || branchEmployees.find((e) => String(e.id) === String(s.employeeId));
                         const perm = isApprovedPermissionForDate(s.employeeId, s.date, state);
                         const hasPerm = s.hasApprovedPermission || !!perm;
                         const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
                         const effHours = getEffectiveShiftHours(s, state);
-                        const manualPunchesMonthCount = getEmployeeManualPunchesCount(s.employeeId, state, matchesDateRange);
                         const isManualShift = isShiftManualPunch(s);
 
                         return (
@@ -4429,28 +4927,7 @@ export default function BranchManagerView({
                             <td style={{ fontWeight: '800', color: 'var(--primary-dark)' }}>
                               {empObj ? `${empObj.name} (${empObj.code})` : (s.employeeName || 'موظف')}
                             </td>
-                            <td>
-                              {manualPunchesMonthCount > 0 ? (
-                                <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 800 }}>
-                                  🖐️ {manualPunchesMonthCount} يدوي
-                                </span>
-                              ) : (
-                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>0</span>
-                              )}
-                            </td>
-                            <td style={{ fontWeight: '700' }}>
-                              {s.date}
-                              {hasPerm && (
-                                <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
-                                  ⏰ معدلة بإذن (+{permHours} س)
-                                </span>
-                              )}
-                              {isManualShift && (
-                                <span style={{ display: 'block', marginTop: '2px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
-                                  🖐️ بصمة يدوية
-                                </span>
-                              )}
-                            </td>
+                            <td style={{ fontWeight: '700' }}>{s.date}</td>
                             <td>{getArabicWeekday(s.date)}</td>
                             <td>
                               <span style={{ background: '#dcfce7', color: '#15803d', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
@@ -4486,8 +4963,29 @@ export default function BranchManagerView({
                                   {s.note && !s.note.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{s.note}</div>}
                                 </div>
                               ) : (
-                                s.note || (isManualShift ? 'بصمة يدوية مسجلة' : 'تسجيل بصمة عادية')
+                                <div>
+                                  {isManualShift && <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, marginLeft: '4px' }}>🖐️ يدوي</span>}
+                                  {s.note || (isManualShift ? 'بصمة يدوية مسجلة' : 'تسجيل بصمة عادية')}
+                                </div>
                               )}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                style={{
+                                  padding: '4px 10px',
+                                  fontSize: '12px',
+                                  color: '#0d9488',
+                                  fontWeight: 800,
+                                  border: '1px solid #cbd5e1',
+                                  borderRadius: '6px',
+                                  background: 'var(--surface)'
+                                }}
+                                onClick={() => handleOpenPunchEditModal(empObj?.id || s.employeeId, s.date, s)}
+                              >
+                                ✏️ تعديل
+                              </button>
                             </td>
                           </tr>
                         );
@@ -4497,8 +4995,8 @@ export default function BranchManagerView({
                   {filteredShifts.length > 0 && (
                     <tfoot>
                       <tr style={{ fontWeight: '800', background: '#f8fafc' }}>
-                        <td colSpan="7" style={{ textAlign: 'right', paddingRight: '12px' }}>
-                          الإجمالي ({filteredShifts.length} وردية)
+                        <td colSpan="6" style={{ textAlign: 'right', paddingRight: '12px' }}>
+                          الإجمالي العام ({filteredShifts.length} وردية)
                         </td>
                         <td>
                           <span style={{ background: '#fef3c7', color: '#b45309', padding: '4px 10px', borderRadius: '6px' }}>
@@ -4506,7 +5004,7 @@ export default function BranchManagerView({
                           </span>
                         </td>
                         <td style={{ color: '#0d9488', fontWeight: '800' }}>{formatMoney(totalHours)} ساعة</td>
-                        <td></td>
+                        <td colSpan="2"></td>
                       </tr>
                     </tfoot>
                   )}
@@ -5466,13 +5964,20 @@ export default function BranchManagerView({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <h3 style={{ margin: 0, fontSize: '17px', color: '#0d9488', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                🖐️ طلب إضافة / تعديل بصمة يدوي لموظف
+                🖐️ {manualPunchData.shiftId ? 'طلب تعديل بصمة مسجلة لموظف' : 'طلب إضافة / تسجيل بصمة يدوي لموظف'}
               </h3>
               <button type="button" className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => setShowManualPunchModal(false)}>✕</button>
             </div>
 
             <form onSubmit={handleSubmitManualPunchRequest} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', margin: 0 }}>
               <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px', WebkitOverflowScrolling: 'touch' }}>
+                {manualPunchData.shiftId && (
+                  <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', padding: '10px 14px', borderRadius: '10px', fontSize: '12.5px', color: '#92400e', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>⚠️</span>
+                    <span><strong>طلب تعديل بصمة رسمية:</strong> سيتم رفع هذا الطلب للإدارة العليا للاعتماد، وبمجرد الموافقة يتم تعديل بصمة الموظف فوراً في صفحة متابعة الحضور والانصراف.</span>
+                  </div>
+                )}
+
                 <div className="field">
                 <label style={{ fontWeight: 'bold', fontSize: '13px' }}>اختر الموظف:</label>
                 <select
@@ -5525,11 +6030,18 @@ export default function BranchManagerView({
                   <label style={{ fontWeight: 'bold', fontSize: '13px' }}>نوع التسجيل:</label>
                   <select
                     value={manualPunchData.punchType}
-                    onChange={(e) => setManualPunchData({ ...manualPunchData, punchType: e.target.value })}
+                    onChange={(e) => {
+                      const newType = e.target.value;
+                      setManualPunchData((prev) => ({
+                        ...prev,
+                        punchType: newType,
+                        ...(newType === 'in' ? { timeOut: '' } : {})
+                      }));
+                    }}
                     style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
                   >
                     <option value="full">حضور وانصراف (وردية كاملة)</option>
-                    <option value="in">تسجيل حضور فقط</option>
+                    <option value="in">تسجيل حضور فقط (الوردية جارية)</option>
                     <option value="out">تسجيل انصراف فقط</option>
                     <option value="correction">تعديل توقيت بصمة سابقة</option>
                   </select>
@@ -5547,12 +6059,23 @@ export default function BranchManagerView({
                   />
                 </div>
                 <div className="field">
-                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>وقت الانصراف (الخروج):</label>
+                  <label style={{ fontWeight: 'bold', fontSize: '13px', color: manualPunchData.punchType === 'in' ? '#6b7280' : 'inherit' }}>
+                    وقت الانصراف (الخروج): {manualPunchData.punchType === 'in' && <span style={{ color: '#0d9488', fontSize: '11px' }}>(الوردية جارية)</span>}
+                  </label>
                   <input
                     type="time"
-                    value={manualPunchData.timeOut}
+                    value={manualPunchData.punchType === 'in' ? '' : manualPunchData.timeOut}
                     onChange={(e) => setManualPunchData({ ...manualPunchData, timeOut: e.target.value })}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                    disabled={manualPunchData.punchType === 'in'}
+                    placeholder={manualPunchData.punchType === 'in' ? '--:--' : ''}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border)',
+                      backgroundColor: manualPunchData.punchType === 'in' ? '#f3f4f6' : 'inherit',
+                      cursor: manualPunchData.punchType === 'in' ? 'not-allowed' : 'auto'
+                    }}
                   />
                 </div>
                 <div className="field">
@@ -5569,7 +6092,14 @@ export default function BranchManagerView({
                 </div>
               </div>
 
-              {manualPunchData.timeIn && manualPunchData.timeOut && (() => {
+              {manualPunchData.punchType === 'in' && manualPunchData.timeIn && (
+                <div style={{ background: '#f0fdf4', border: '1px solid #86efac', padding: '10px 14px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#166534' }}>
+                  <span>🟢</span>
+                  <span><strong>تسجيل / تعديل بصمة حضور فقط:</strong> سيتم تعديل وقت دخول الموظف إلى ({manualPunchData.timeIn}) مع إبقاء الوردية مستمرة دون تسجيل خروج أو إنهاء الوردية.</span>
+                </div>
+              )}
+
+              {manualPunchData.punchType !== 'in' && manualPunchData.timeIn && manualPunchData.timeOut && (() => {
                 const [inH, inM] = manualPunchData.timeIn.split(':').map(Number);
                 const [outH, outM] = manualPunchData.timeOut.split(':').map(Number);
                 let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
@@ -5601,11 +6131,339 @@ export default function BranchManagerView({
               <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '10px', boxShadow: '0 -4px 12px rgba(0,0,0,0.03)' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowManualPunchModal(false)}>إلغاء</button>
                 <button type="submit" className="btn btn-start" style={{ background: '#0d9488' }}>
-                  📤 إرسال طلب البصمة للإدارة العليا للاعتماد
+                  {manualPunchData.shiftId ? '📤 إرسال طلب تعديل البصمة للإدارة العليا للاعتماد' : '📤 إرسال طلب البصمة للإدارة العليا للاعتماد'}
                 </button>
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* ── MODAL 1.5: EMPLOYEE PUNCHES PREVIEW MODAL (معاينة جدول بصمات الموظف) ── */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {previewPunchesEmp && renderInPortal(
+        <div
+          className="modal-backdrop"
+          onClick={() => setPreviewPunchesEmp(null)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100dvh',
+            zIndex: 999999,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            padding: '12px 10px',
+            background: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(8px)',
+            boxSizing: 'border-box'
+          }}
+        >
+          {(() => {
+            const emp = previewPunchesEmp;
+            const cIdStr = String(liveBranch?.id || currentBranch?.id || '');
+            const empShifts = (state.shifts || []).filter((s) => {
+              if (!s || !s.date) return false;
+              if (s.status === 'cancelled' || s.isCancelled) return false;
+              const isMatch = String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code));
+              if (!isMatch) return false;
+              const isThisBranchShift = String(s.branchId) === cIdStr || (!s.branchId && String(emp.branchId) === cIdStr);
+              if (!isThisBranchShift) return false;
+              return matchesDateRange(s.date);
+            }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+            const empHours = empShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
+            const empBreak = empShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0);
+            const manualCount = getEmployeeManualPunchesCount(emp.id, state, matchesDateRange);
+
+            return (
+              <div
+                className="modal-content card"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  maxWidth: '960px',
+                  width: '96%',
+                  height: 'calc(100dvh - 28px)',
+                  maxHeight: 'calc(100dvh - 28px)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                  padding: 0,
+                  borderRadius: '16px',
+                  margin: 'auto',
+                  background: 'var(--surface, #ffffff)',
+                  boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+                }}
+              >
+                {/* Header */}
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '16px 20px',
+                  borderBottom: '1px solid var(--border)',
+                  background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+                  color: '#ffffff',
+                  flexShrink: 0
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{
+                      width: '42px',
+                      height: '42px',
+                      borderRadius: '50%',
+                      background: 'rgba(255,255,255,0.2)',
+                      border: '2px solid rgba(255,255,255,0.4)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '18px',
+                      fontWeight: 'bold',
+                      color: '#ffffff'
+                    }}>
+                      {emp.name ? emp.name.charAt(0) : 'م'}
+                    </div>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: '17px', color: '#ffffff', fontWeight: 800 }}>
+                        📋 سجل بصمات وورديات: {emp.name}
+                      </h3>
+                      <div style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.85)', marginTop: '2px' }}>
+                        كود الموظف: <strong>{emp.code}</strong> | {emp.jobTitle || 'موظف'} | فرع: {currentBranch?.name || ''} ({selectedMonth})
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{
+                        background: 'rgba(255,255,255,0.18)',
+                        color: '#ffffff',
+                        border: '1px solid rgba(255,255,255,0.3)',
+                        padding: '6px 14px',
+                        borderRadius: '8px',
+                        fontSize: '12.5px',
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => handlePrintEmployeePunches(emp, empShifts)}
+                    >
+                      <span>🖨️</span>
+                      <span>طباعة الكشف</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ color: '#ffffff', padding: '6px 10px', fontSize: '16px' }}
+                      onClick={() => setPreviewPunchesEmp(null)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                {/* Subheader KPI Summary */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: isMobileScreen ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+                  gap: '10px',
+                  background: '#f8fafc',
+                  borderBottom: '1px solid var(--border)',
+                  padding: '12px 20px',
+                  flexShrink: 0,
+                  textAlign: 'center'
+                }}>
+                  <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                    <span style={{ fontSize: '11.5px', color: 'var(--muted)', display: 'block' }}>إجمالي الورديات</span>
+                    <strong style={{ fontSize: '16px', color: '#0f172a' }}>{empShifts.length} وردية</strong>
+                  </div>
+                  <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                    <span style={{ fontSize: '11.5px', color: 'var(--muted)', display: 'block' }}>صافي ساعات العمل</span>
+                    <strong style={{ fontSize: '16px', color: '#0d9488' }}>{formatMoney(empHours)} ساعة</strong>
+                  </div>
+                  <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                    <span style={{ fontSize: '11.5px', color: 'var(--muted)', display: 'block' }}>إجمالي البريك المخصوم</span>
+                    <strong style={{ fontSize: '16px', color: '#b45309' }}>{formatMoney(empBreak)} ساعة</strong>
+                  </div>
+                  <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                    <span style={{ fontSize: '11.5px', color: 'var(--muted)', display: 'block' }}>البصمات اليدوية</span>
+                    <strong style={{ fontSize: '16px', color: manualCount > 0 ? '#b45309' : '#059669' }}>
+                      {manualCount > 0 ? `🖐️ ${manualCount} بصمة` : '0'}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* Table Container */}
+                <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', WebkitOverflowScrolling: 'touch' }}>
+                  {empShifts.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--muted)' }}>
+                      <span style={{ fontSize: '36px', display: 'block', marginBottom: '8px' }}>📭</span>
+                      <h4 style={{ margin: '0 0 6px' }}>لا توجد بصمات مسجلة للموظف خلال هذه الفترة</h4>
+                      <p style={{ margin: 0, fontSize: '13px' }}>يمكنك تسجيل أو طلب بصمة يدوية له بالضغط على الزر أدناه.</p>
+                    </div>
+                  ) : (
+                    <div className="table-responsive">
+                      <table className="bylaws-table" style={{ fontSize: '13px', width: '100%' }}>
+                        <thead>
+                          <tr style={{ background: '#f0fdf4', color: '#166534' }}>
+                            <th style={{ width: '40px' }}>#</th>
+                            <th>التاريخ</th>
+                            <th>اليوم</th>
+                            <th style={{ textAlign: 'center' }}>وقت الحضور</th>
+                            <th style={{ textAlign: 'center' }}>وقت الانصراف</th>
+                            <th style={{ textAlign: 'center' }}>البريك</th>
+                            <th style={{ textAlign: 'center' }}>صافي الساعات</th>
+                            <th>الملاحظات والحالة</th>
+                            <th style={{ textAlign: 'center', width: '130px' }}>إجراء</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {empShifts.map((s, idx) => {
+                            const perm = isApprovedPermissionForDate(emp.id, s.date, state);
+                            const hasPerm = s.hasApprovedPermission || !!perm;
+                            const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+                            const effHours = getEffectiveShiftHours(s, state);
+                            const isManualShift = isShiftManualPunch(s);
+
+                            return (
+                              <tr key={s.id || idx} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
+                                <td style={{ color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
+                                <td style={{ fontWeight: '700' }}>{s.date}</td>
+                                <td>{getArabicWeekday(s.date)}</td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <span style={{ background: '#dcfce7', color: '#15803d', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
+                                    {s.timeIn || '—'}
+                                  </span>
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
+                                    {s.timeOut || '—'}
+                                  </span>
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  {(s.breakHours || 0) > 0 ? (
+                                    <span style={{ background: '#fef3c7', color: '#b45309', padding: '2px 8px', borderRadius: '6px', fontWeight: '700', fontSize: '12px' }}>
+                                      {formatMoney(s.breakHours)} س
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: 'var(--muted)' }}>—</span>
+                                  )}
+                                </td>
+                                <td style={{ textAlign: 'center', fontWeight: '800', color: '#0d9488' }}>
+                                  {formatMoney(effHours)} س
+                                  {hasPerm && permHours > 0 && (
+                                    <div style={{ fontSize: '10.5px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
+                                      (فعلي: {formatMoney(Math.max(0, effHours - permHours))} س + إذن: {formatMoney(permHours)} س)
+                                    </div>
+                                  )}
+                                </td>
+                                <td style={{ fontSize: '12px' }}>
+                                  {isManualShift && (
+                                    <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, marginLeft: '5px' }}>
+                                      🖐️ بصمة يدوية
+                                    </span>
+                                  )}
+                                  {hasPerm && (
+                                    <span style={{ background: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, marginLeft: '5px' }}>
+                                      ⏰ إذن معتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})
+                                    </span>
+                                  )}
+                                  <span style={{ color: 'var(--text-muted)' }}>{s.note || (isManualShift ? 'بصمة يدوية معتمدة' : 'تسجيل اعتيادي')}</span>
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline"
+                                    style={{
+                                      padding: '4px 10px',
+                                      fontSize: '11.5px',
+                                      borderColor: '#0d9488',
+                                      color: '#0d9488',
+                                      fontWeight: 800,
+                                      borderRadius: '6px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}
+                                    onClick={() => handleOpenPunchEditModal(emp.id, s.date, s)}
+                                  >
+                                    <span>✏️</span>
+                                    <span>طلب تعديل</span>
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ fontWeight: '800', background: '#f8fafc' }}>
+                            <td colSpan="3" style={{ textAlign: 'right', paddingRight: '12px' }}>
+                              المجموع ({empShifts.length} وردية)
+                            </td>
+                            <td colSpan="2"></td>
+                            <td style={{ textAlign: 'center', color: '#b45309' }}>
+                              {formatMoney(empBreak)} س
+                            </td>
+                            <td style={{ textAlign: 'center', color: '#0d9488' }}>
+                              {formatMoney(empHours)} س
+                            </td>
+                            <td colSpan="2"></td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer Buttons */}
+                <div style={{
+                  padding: '14px 20px',
+                  borderTop: '1px solid var(--border)',
+                  background: 'var(--surface)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexShrink: 0
+                }}>
+                  <button
+                    type="button"
+                    className="btn btn-start"
+                    style={{
+                      padding: '8px 16px',
+                      fontSize: '13px',
+                      background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                    onClick={() => handleOpenPunchEditModal(emp.id)}
+                  >
+                    <span>➕</span>
+                    <span>طلب إضافة بصمة لهذا الموظف</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ padding: '8px 18px', fontSize: '13px' }}
+                    onClick={() => setPreviewPunchesEmp(null)}
+                  >
+                    إغلاق المعاينة
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

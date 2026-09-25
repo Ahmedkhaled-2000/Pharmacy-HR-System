@@ -92,8 +92,6 @@ export default function RosterPreviewModal({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose, editingDay]);
 
-  if (!employee) return null;
-
   const orgSettings = state?.orgSettings || {};
   const activeCycleDefault = useMemo(() => {
     return getActivePayrollMonth(orgSettings);
@@ -164,6 +162,8 @@ export default function RosterPreviewModal({
     }
     return list;
   }, [cycleRange]);
+
+  if (!employee) return null;
 
   const empRoster = getResolvedEmployeeRoster(employee, null, state, activeMonth);
   const hasApprovedRoster = Boolean(

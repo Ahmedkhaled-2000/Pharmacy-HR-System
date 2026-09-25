@@ -473,8 +473,8 @@ export default function BranchEditorModal({
         className="modal-card"
         onClick={(e) => e.stopPropagation()}
         style={{
-          maxWidth: '840px',
-          width: '95%',
+          maxWidth: '1080px',
+          width: '96%',
           height: '88vh',
           maxHeight: '90vh',
           display: 'flex',

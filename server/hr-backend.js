@@ -577,15 +577,9 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
               continue;
             }
 
-            // إذا كان الموظف ضمن قائمة الورديات المنتهية صراحة، نتحقق هل بدأ وردية جديدة لليوم
+            // إذا كان الموظف ضمن قائمة الورديات المنتهية صراحة، لا نسترجع شفته القديم أبداً
             if (endedEmpIdsSet.has(sEmpIdStr) || endedEmpIdsSet.has(empActualId) || (empCode && endedEmpIdsSet.has(empCode))) {
-              const isTrulyActiveNewShift = existingShift.date === today && Boolean(existingShift.timeIn) && (!existingShift.timeOut || existingShift.timeOut === '');
-              if (!isTrulyActiveNewShift) {
-                continue;
-              }
-              endedEmpIdsSet.delete(sEmpIdStr);
-              endedEmpIdsSet.delete(empActualId);
-              if (empCode) endedEmpIdsSet.delete(empCode);
+              continue;
             }
 
             // الوردية النشطة: لها date اليوم، ولها timeIn، وليس لها timeOut صريح
@@ -1302,19 +1296,49 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
           }
         });
 
-        // إغلاق سجل الوردية في shifts
-        let targetIdx = currentShifts.findIndex(s => s && (s.id === shiftId || (possibleKeys.has(String(s.employeeId)) && s.date === punchDate && (!s.timeOut || s.timeOut === ''))));
+        // إغلاق سجل الوردية في shifts بدقة بالغة مع دعم الورديات الليلية العابرة لمنتصف الليل
+        // 1. أولاً: البحث بمعرف الوردية المباشر shiftId إن وجد
+        let targetIdx = currentShifts.findIndex(s => s && (
+          (shiftId && (String(s.id) === String(shiftId) || String(s.shiftId) === String(shiftId))) ||
+          (p.shiftRecord?.id && String(s.id) === String(p.shiftRecord.id))
+        ));
+
+        // 2. ثانياً: البحث عن أحدث وردية مفتوحة للموظف خلال آخر 36 ساعة
+        if (targetIdx < 0) {
+          targetIdx = currentShifts.findIndex(s => s &&
+            (possibleKeys.has(String(s.employeeId)) || (s.employeeCode && possibleKeys.has(String(s.employeeCode)))) &&
+            (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === '-' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive)
+          );
+        }
+
+        // 3. ثالثاً: البحث عن وردية الموظف في نفس تاريخ البصمة
+        if (targetIdx < 0) {
+          targetIdx = currentShifts.findIndex(s => s &&
+            (possibleKeys.has(String(s.employeeId)) || (s.employeeCode && possibleKeys.has(String(s.employeeCode)))) &&
+            s.date === punchDate
+          );
+        }
+
         if (targetIdx >= 0) {
           const prevRec = currentShifts[targetIdx];
-          const timeInStr = prevRec.timeIn || '00:00';
+          const shiftDate = prevRec.date || punchDate;
+          const timeInStr = prevRec.timeIn || '09:00';
           let totalElapsedHrs = 0;
           let workedHrs = 0;
+
           try {
-            const [inH, inM] = timeInStr.split(':').map(Number);
-            const [outH, outM] = punchTime.split(':').map(Number);
-            let diffMins = (outH * 60 + outM) - (inH * 60 + inM);
-            if (diffMins < 0) diffMins += 24 * 60;
-            totalElapsedHrs = parseFloat((diffMins / 60).toFixed(2));
+            const startMs = prevRec.startEpoch || (shiftDate && timeInStr ? new Date(`${shiftDate}T${timeInStr.slice(0, 5)}:00`).getTime() : 0);
+            const punchEpoch = p.calculatedTrueEpoch || p.deviceLocalEpoch || (punchDate && punchTime ? new Date(`${punchDate}T${punchTime.slice(0, 5)}:00`).getTime() : Date.now());
+
+            if (startMs && punchEpoch && punchEpoch > startMs) {
+              totalElapsedHrs = parseFloat(((punchEpoch - startMs) / 3600000).toFixed(2));
+            } else {
+              const [inH, inM] = timeInStr.split(':').map(Number);
+              const [outH, outM] = punchTime.split(':').map(Number);
+              let diffMins = (outH * 60 + outM) - (inH * 60 + inM);
+              if (diffMins < 0 || shiftDate !== punchDate) diffMins += 24 * 60;
+              totalElapsedHrs = parseFloat((diffMins / 60).toFixed(2));
+            }
           } catch {}
 
           const effectiveBreak = parseFloat(prevRec.breakHours || activeBreakHours || p.breakHours || 0);
@@ -1325,6 +1349,8 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
 
           currentShifts[targetIdx] = {
             ...prevRec,
+            ...(p.shiftRecord ? p.shiftRecord : {}),
+            id: prevRec.id || shiftId,
             timeOut: punchTime,
             hours: workedHrs,
             actualWorkedHours: workedHrs,
@@ -1339,31 +1365,58 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
             status: 'completed',
             isOfflineSynced: true,
             syncedAt: now,
-            note: `${prevRec.note || ''} · انصراف أوفلاين ${punchTime}${effectiveBreak > 0 ? ` (بريك: ${effectiveBreak} س)` : ''}`.trim(),
+            note: `${prevRec.note || p.shiftRecord?.note || ''} · انصراف مسجل ${punchTime}${effectiveBreak > 0 ? ` (بريك: ${effectiveBreak} س)` : ''}`.trim(),
             updatedAt: now
           };
         } else if (!alreadyProcessed) {
-          currentShifts = [{
-            id: shiftId,
-            clientPunchId,
-            employeeId: empObj?.id || p.employeeId,
-            employeeCode: empObj?.code || p.employeeCode || '',
-            employeeName: empObj?.name || p.employeeName || '',
-            branchId: p.branchId || '',
-            branchName: p.branchName || '',
-            date: punchDate,
-            timeIn: '00:00',
-            timeOut: punchTime,
-            hours: 0,
-            isLiveActive: false,
-            status: 'completed',
-            source: 'kiosk_offline',
-            isOfflineSynced: true,
-            syncedAt: now,
-            note: `انصراف أوفلاين مسجل ${punchTime}`,
-            createdAt: now
-          }, ...currentShifts];
+          if (p.shiftRecord && p.shiftRecord.timeIn) {
+            currentShifts = [{
+              ...p.shiftRecord,
+              id: p.shiftRecord.id || shiftId,
+              clientPunchId,
+              isLiveActive: false,
+              status: 'completed',
+              isOfflineSynced: true,
+              syncedAt: now,
+              updatedAt: now
+            }, ...currentShifts];
+          } else {
+            currentShifts = [{
+              id: shiftId,
+              clientPunchId,
+              employeeId: empObj?.id || p.employeeId,
+              employeeCode: empObj?.code || p.employeeCode || '',
+              employeeName: empObj?.name || p.employeeName || '',
+              branchId: p.branchId || '',
+              branchName: p.branchName || '',
+              date: punchDate,
+              timeIn: punchTime,
+              timeOut: punchTime,
+              hours: 0,
+              isLiveActive: false,
+              status: 'completed',
+              source: 'kiosk_offline',
+              isOfflineSynced: true,
+              syncedAt: now,
+              note: `انصراف أوفلاين مسجل ${punchTime}`,
+              createdAt: now
+            }, ...currentShifts];
+          }
         }
+
+        // إغلاق أي ورديات مفتوحة متبقية لنفس الموظف لضمان عدم تعليق أي شفت قديم
+        currentShifts = currentShifts.map((s, idx) => {
+          if (idx !== targetIdx && possibleKeys.has(String(s.employeeId)) && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === '-' || s.isLiveActive)) {
+            return {
+              ...s,
+              timeOut: punchTime,
+              isLiveActive: false,
+              status: 'completed',
+              updatedAt: now
+            };
+          }
+          return s;
+        });
       }
 
       syncedIds.push(p.clientPunchId || shiftId);
@@ -1393,6 +1446,26 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
     };
 
     io.emit('punches:batch_synced', batchPayload);
+
+    // بث لحظي لكل بصمة على حدة لتحديث شاشات الكشك والإدارة دون الحاجة لإعادة تحميل الـ State كاملة
+    for (const sp of sortedPunches) {
+      const punchEmpId = sp.employeeId || sp.employeeCode;
+      const punchPayload = {
+        employeeId: punchEmpId,
+        empIdStr: String(punchEmpId),
+        branchId: sp.branchId || '',
+        actionType: sp.actionType || 'check_out',
+        date: sp.punchDate || sp.date || todayStr,
+        time: sp.punchTime || sp.time || now.slice(11, 16),
+        activeShifts: currentActiveShifts,
+        shiftRecord: currentShifts.find(s => String(s.employeeId) === String(punchEmpId) || (sp.employeeCode && String(s.employeeCode) === String(sp.employeeCode))) || null,
+        timestamp: now,
+        hlcTimestamp: sp.hlcTimestamp || `${now}_0000_vps`
+      };
+      io.emit('punch:recorded', punchPayload);
+      if (sp.branchId) io.to(`room:branch:${sp.branchId}`).emit('punch:recorded', punchPayload);
+      if (punchEmpId) io.to(`room:employee:${punchEmpId}`).emit('punch:recorded', punchPayload);
+    }
 
     // بث موجه لغرف الفروع المعنية وغرفة الإدارة
     const branchIds = new Set(sortedPunches.map(p => p.branchId).filter(Boolean));
@@ -3641,6 +3714,43 @@ async function checkAndRunScheduledDriveBackup() {
 
 // تشغيل فاحص الجدولة التلقائي كل 60 ثانية على مدار الساعة 24/7
 setInterval(checkAndRunScheduledDriveBackup, 60 * 1000);
+
+// ── 8.4. مهمة التنظيف والصيانة التلقائية لقاعدة البيانات (Automated 24/7 Maintenance Worker) ──
+async function runDatabaseMaintenance() {
+  try {
+    console.log('🧹 [Database Maintenance] بدء مهمة الصيانة الدورية وتنظيف السجلات القديمة...');
+    // 1. تنظيف سجلات المزامنة الأقدم من 30 يوماً
+    const purgeSyncLogs = await db.query(
+      "DELETE FROM public.sync_logs WHERE created_at < NOW() - INTERVAL '30 days'"
+    );
+    if (purgeSyncLogs.rowCount > 0) {
+      console.log(`🧹 [Database Maintenance] تم مسح ${purgeSyncLogs.rowCount} سجل مزامنة قديم من sync_logs.`);
+    }
+
+    // 2. تنظيف النسخ الاحتياطية القديمة من app_settings_backups مع الاحتفاظ بآخر 100 نسخة على الأقل
+    try {
+      await db.query(`
+        DELETE FROM public.app_settings_backups
+        WHERE created_at < NOW() - INTERVAL '30 days'
+          AND id NOT IN (
+            SELECT id FROM public.app_settings_backups
+            ORDER BY created_at DESC
+            LIMIT 100
+          )
+      `);
+    } catch (bErr) {
+      // Table might not exist in all environments
+    }
+
+    console.log('✅ [Database Maintenance] اكتملت صيانة قاعدة البيانات بنجاح.');
+  } catch (err) {
+    console.warn('⚠️ [Database Maintenance Warning]:', err.message);
+  }
+}
+
+// تشغيل الصيانة فور بدء التشغيل ثم تكرارها كل 24 ساعة
+setTimeout(runDatabaseMaintenance, 15 * 1000);
+setInterval(runDatabaseMaintenance, 24 * 60 * 60 * 1000);
 
 // ── 8.5. مسارات منظومة الحسابات العامة (Accounting & General Ledger API) ──
 app.get('/api/accounts', async (req, res) => {

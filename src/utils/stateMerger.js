@@ -717,6 +717,10 @@ export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShi
   const isEmpEndedOrClosed = (empKey, act) => {
     const kStr = String(empKey);
     if (deletedIds.has(kStr) || deletedIds.has(`emp_${kStr}`)) return true;
+    if (endedEmpIds.has(kStr)) return true;
+    if (act && act.employeeId && endedEmpIds.has(String(act.employeeId))) return true;
+    if (act && act.employeeCode && endedEmpIds.has(String(act.employeeCode))) return true;
+
     if (act) {
       if (act.shiftId && closedShiftIds.has(String(act.shiftId))) return true;
       if (act.date && act.timeIn) {
@@ -732,9 +736,6 @@ export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShi
         return false;
       }
     }
-    if (endedEmpIds.has(kStr)) return true;
-    if (act && act.employeeId && endedEmpIds.has(String(act.employeeId))) return true;
-    if (act && act.employeeCode && endedEmpIds.has(String(act.employeeCode))) return true;
     return false;
   };
 

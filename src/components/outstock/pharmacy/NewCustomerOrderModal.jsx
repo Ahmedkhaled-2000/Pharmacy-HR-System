@@ -1,6 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Search, UserCheck, UserPlus, Pill, DollarSign, Calendar, Clock, Printer } from 'lucide-react';
 import { outstockGetCustomers, outstockCreateOrder } from '../../../utils/outstockApiClient';
+import MedicationAutocompleteInput from './MedicationAutocompleteInput';
+
+// فحص هل الصنف عبوة واحدة غير قابلة للتجزئة (شراب، نقط، مرهم، إلخ)
+const isSingleUnitMed = (med) => {
+  if (!med) return false;
+  if (parseInt(med.pack_size || 1, 10) <= 1) return true;
+  return /(شراب|معلق|نقط|مرهم|كريم|بخاخ|زجاجة|شامبو|لوشن|susp|syrup|drop|cream|oint)/i.test(med.dosage_form || '');
+};
+
+const getUnitOptionLabel = (med) => {
+  if (!med) return 'شريط 💊';
+  const name = med.unit_name || '';
+  if (name === 'أمبول' || /(حقن|أمبول|ampoule)/i.test(med.dosage_form || '')) return 'أمبول 💉';
+  if (name === 'كيس فوار' || /(فوار|أكياس|sachet)/i.test(med.dosage_form || '')) return 'كيس فوار ✉️';
+  return 'شريط 💊';
+};
 
 /**
  * NewCustomerOrderModal.jsx
@@ -21,7 +37,7 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
 
   // ── 2. بنود الأدوية ──
   const [items, setItems] = useState([
-    { medicationName: '', unitType: 'pack', quantity: 1, unitPrice: '' }
+    { medicationName: '', unitType: 'pack', quantity: 1, unitPrice: '', selectedMed: null }
   ]);
 
   // ── 3. الحسابات المالية وموعد الاستلام ──
@@ -76,7 +92,7 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
 
   // التحكم في قائمة الأصناف
   const handleAddItem = () => {
-    setItems(prev => [...prev, { medicationName: '', unitType: 'pack', quantity: 1, unitPrice: '' }]);
+    setItems(prev => [...prev, { medicationName: '', unitType: 'pack', quantity: 1, unitPrice: '', selectedMed: null }]);
   };
 
   const handleRemoveItem = (index) => {
@@ -88,6 +104,57 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
     setItems(prev => {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  // اختيار دواء من قائمة هيئة الدواء ودراج آي وملء الأسعار تلقائياً
+  const handleMedicationSelect = (index, displayName, medObj) => {
+    setItems(prev => {
+      const next = [...prev];
+      const isSingle = isSingleUnitMed(medObj);
+      const targetUnitType = isSingle ? 'pack' : (next[index].unitType || 'pack');
+      
+      let autoPrice = '';
+      if (medObj) {
+        if (targetUnitType === 'strip') {
+          autoPrice = String(medObj.unit_price ?? (medObj.public_price / (medObj.pack_size || 1)).toFixed(2));
+        } else {
+          autoPrice = String(medObj.public_price ?? '');
+        }
+      }
+
+      next[index] = {
+        ...next[index],
+        medicationName: displayName,
+        unitType: targetUnitType,
+        unitPrice: autoPrice,
+        selectedMed: medObj
+      };
+      return next;
+    });
+  };
+
+  // التبديل التلقائي الذكي بين سعر العلبة وسعر الشريط
+  const handleUnitTypeChange = (index, newUnitType) => {
+    setItems(prev => {
+      const next = [...prev];
+      const it = next[index];
+      let newPrice = it.unitPrice;
+
+      if (it.selectedMed) {
+        if (newUnitType === 'strip') {
+          newPrice = String(it.selectedMed.unit_price ?? (it.selectedMed.public_price / (it.selectedMed.pack_size || 1)).toFixed(2));
+        } else {
+          newPrice = String(it.selectedMed.public_price ?? '');
+        }
+      }
+
+      next[index] = {
+        ...it,
+        unitType: newUnitType,
+        unitPrice: newPrice
+      };
       return next;
     });
   };
@@ -333,79 +400,101 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {items.map((it, idx) => (
-                  <div key={idx} className="outstock-med-item-card">
-                    <div className="outstock-med-top-line">
-                      <span style={{ color: '#0d9488', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                        <Pill size={16} />
-                      </span>
-                      <input
-                        type="text"
-                        required
-                        placeholder="اسم الدواء والتركيز (مثل: أوجمنتين 1 جم)..."
-                        value={it.medicationName}
-                        onChange={(e) => handleItemChange(idx, 'medicationName', e.target.value)}
-                        className="outstock-form-input"
-                        style={{ flex: 1, minHeight: '40px' }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveItem(idx)}
-                        disabled={items.length === 1}
-                        className="outstock-modal-close"
-                        style={{
-                          width: '36px',
-                          height: '36px',
-                          opacity: items.length === 1 ? 0.35 : 1,
-                          cursor: items.length === 1 ? 'not-allowed' : 'pointer',
-                          flexShrink: 0
-                        }}
-                        title="حذف هذا الصنف"
-                      >
-                        <Trash2 size={16} color={items.length === 1 ? '#94a3b8' : '#ef4444'} />
-                      </button>
-                    </div>
+                {items.map((it, idx) => {
+                  const singleUnit = isSingleUnitMed(it.selectedMed);
+                  const optionLabel = getUnitOptionLabel(it.selectedMed);
 
-                    <div className="outstock-med-sub-grid">
-                      <div>
-                        <select
-                          value={it.unitType}
-                          onChange={(e) => handleItemChange(idx, 'unitType', e.target.value)}
-                          className="outstock-form-select"
-                          style={{ minHeight: '40px', fontSize: '13px' }}
+                  return (
+                    <div key={idx} className="outstock-med-item-card">
+                      <div className="outstock-med-top-line" style={{ alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <MedicationAutocompleteInput
+                            value={it.medicationName}
+                            unitType={it.unitType}
+                            selectedMed={it.selectedMed}
+                            onMedicationSelect={(displayName, medObj) => handleMedicationSelect(idx, displayName, medObj)}
+                            onTextChange={(text) => handleItemChange(idx, 'medicationName', text)}
+                            placeholder="اسم الدواء أو التركيز (مثل: أوجمنتين 1 جم)..."
+                            required
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveItem(idx)}
+                          disabled={items.length === 1}
+                          className="outstock-modal-close"
+                          style={{
+                            width: '38px',
+                            height: '40px',
+                            opacity: items.length === 1 ? 0.35 : 1,
+                            cursor: items.length === 1 ? 'not-allowed' : 'pointer',
+                            flexShrink: 0
+                          }}
+                          title="حذف هذا الصنف"
                         >
-                          <option value="pack">علبة كاملة 📦</option>
-                          <option value="strip">شريط 💊</option>
-                        </select>
+                          <Trash2 size={16} color={items.length === 1 ? '#94a3b8' : '#ef4444'} />
+                        </button>
                       </div>
 
-                      <div>
-                        <input
-                          type="number"
-                          min="1"
-                          required
-                          placeholder="الكمية"
-                          value={it.quantity}
-                          onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
-                          className="outstock-form-input"
-                          style={{ minHeight: '40px', textAlign: 'center', fontWeight: 'bold' }}
-                        />
-                      </div>
+                      <div className="outstock-med-sub-grid" style={{ marginTop: '8px' }}>
+                        <div>
+                          <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', marginBottom: '2px', display: 'block' }}>
+                            الوحدة المطلوبة
+                          </label>
+                          <select
+                            value={it.unitType}
+                            onChange={(e) => handleUnitTypeChange(idx, e.target.value)}
+                            className="outstock-form-select"
+                            style={{ minHeight: '40px', fontSize: '13px' }}
+                          >
+                            <option value="pack">علبة كاملة 📦</option>
+                            {!singleUnit && (
+                              <option value="strip">{optionLabel}</option>
+                            )}
+                          </select>
+                        </div>
 
-                      <div>
-                        <input
-                          type="number"
-                          step="0.5"
-                          placeholder="السعر (ج.م)"
-                          value={it.unitPrice}
-                          onChange={(e) => handleItemChange(idx, 'unitPrice', e.target.value)}
-                          className="outstock-form-input"
-                          style={{ minHeight: '40px', textAlign: 'center', fontWeight: 'bold' }}
-                        />
+                        <div>
+                          <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', marginBottom: '2px', display: 'block' }}>
+                            الكمية
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            required
+                            placeholder="الكمية"
+                            value={it.quantity}
+                            onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
+                            className="outstock-form-input"
+                            style={{ minHeight: '40px', textAlign: 'center', fontWeight: 'bold' }}
+                          />
+                        </div>
+
+                        <div style={{ position: 'relative' }}>
+                          <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', marginBottom: '2px', display: 'block' }}>
+                            {it.selectedMed ? 'السعر الرسمي (تلقائي ⚡)' : 'سعر الوحدة (ج.م)'}
+                          </label>
+                          <input
+                            type="number"
+                            step="0.5"
+                            placeholder="السعر (ج.م)"
+                            value={it.unitPrice}
+                            onChange={(e) => handleItemChange(idx, 'unitPrice', e.target.value)}
+                            className="outstock-form-input"
+                            style={{
+                              minHeight: '40px',
+                              textAlign: 'center',
+                              fontWeight: 'bold',
+                              borderColor: it.selectedMed ? '#0d9488' : undefined,
+                              backgroundColor: it.selectedMed ? '#f0fdfa' : undefined
+                            }}
+                            title={it.selectedMed ? 'السعر معبأ تلقائياً من تسعيرة هيئة الدواء. يمكنك تعديله إذا كانت التشغيلة بالصيدلية بسعر قديم.' : 'السعر بالجنيه'}
+                          />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 

@@ -49,7 +49,13 @@ export const REQUEST_TYPE_LABELS = {
   eval_edit_request: 'طلب مراجعة تقييم الأداء',
   recruitment: 'طلب توظيف جديد',
   recruitment_application: 'طلب توظيف جديد',
-  job_application: 'طلب توظيف جديد'
+  job_application: 'طلب توظيف جديد',
+  financial_alert: 'فاتورة / مصروف بانتظار الاعتماد',
+  financial_expense: 'فاتورة مصروف فرع',
+  financial_approved: 'اعتماد فاتورة مصروف',
+  financial_rejected: 'رفض فاتورة مصروف',
+  expense: 'فاتورة مصروف فرع',
+  invoice: 'فاتورة فرع'
 };
 
 export function getRequestTypeArabicLabel(type) {
@@ -601,6 +607,39 @@ export function filterAdminNotifications(notifications = [], state = null) {
         }
       }
     });
+
+    // Handle pending financial invoices / expenses from branch transactions
+    (state.finances || state.transactions || []).forEach((tx) => {
+      if (tx && tx.approvalStatus === 'pending') {
+        const finId = `fin_${tx.id}`;
+        if (!seenReqs.has(finId) && !deletedIdsSet.has(finId) && !deletedIdsSet.has(String(tx.id))) {
+          seenReqs.add(finId);
+          const bName = tx.branchName || 'الفرع';
+          addIfAdminPending({
+            id: tx.id,
+            transactionId: tx.id,
+            type: 'financial_alert',
+            typeLabel: tx.type === 'expense' ? 'فاتورة مصروف فرع' : 'حركة مالية للفرع',
+            employeeName: tx.createdByName || `مدير فرع ${bName}`,
+            branchId: tx.branchId,
+            branchName: bName,
+            amount: tx.amount,
+            category: tx.category,
+            date: tx.date || (tx.createdAt ? tx.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+            reason: `فاتورة ${tx.type === 'expense' ? 'مصروف' : 'إيراد'} بقيمة ${tx.amount} ج.م (${tx.category || ''})`,
+            details: `قام مدير فرع ${bName} بإدراج ${tx.type === 'expense' ? 'مصروف' : 'إيراد'} بقيمة ${tx.amount} ج.م (${tx.category || ''}) بانتظار الاعتماد.`,
+            status: 'pending',
+            createdAt: tx.createdAt || tx.date || new Date().toISOString(),
+            targetRole: 'admin',
+            targetTab: 'requests',
+            filterType: 'expense',
+            attachmentData: tx.attachmentData,
+            attachmentName: tx.attachmentName,
+            attachmentType: tx.attachmentType
+          }, 'financial_alert');
+        }
+      }
+    });
   }
 
   const combined = [...explicitNotifs, ...synthesizedPendingNotifs];
@@ -938,13 +977,38 @@ export function getNotificationTarget(notification, role = 'admin') {
   // الفروع
   if (type.includes('branch') || title.includes('فرع')) return { tab: 'branches', subTab: null };
 
+  // فواتير ومصروفات وإيرادات الفروع بانتظار الاعتماد -> توجيه لمركز إدارة واعتماد الطلبات
+  if (
+    type === 'financial_alert' ||
+    type === 'financial_expense' ||
+    type === 'financial_income' ||
+    type === 'expense' ||
+    type === 'invoice' ||
+    type === 'financial' ||
+    reqId.startsWith('notif_fin_') ||
+    reqId.startsWith('trx_') ||
+    title.includes('فاتورة جديدة') ||
+    title.includes('بانتظار الاعتماد') ||
+    (title.includes('فاتورة') && (title.includes('اعتماد') || title.includes('موافقة') || title.includes('مصروف') || title.includes('إيراد'))) ||
+    msg.includes('بانتظار مراجعة واعتماد الإدارة') ||
+    msg.includes('بإدراج مصروف') ||
+    msg.includes('بإدراج إيراد')
+  ) {
+    return {
+      tab: 'requests',
+      subTab: null,
+      filterType: 'expense',
+      requestId: notification.requestId || notification.transactionId || notification.id
+    };
+  }
+
   // شؤون الموظفين العامة
   if (type.includes('employee_profile') || title.includes('إضافة موظف') || title.includes('ملف الموظف')) {
     return { tab: 'employees', subTab: 'cards' };
   }
 
   // الأرشيف
-  if (type.includes('archive') || title.includes('أرشيف') || title.includes('فاتورة')) return { tab: 'pharmacy-archive', subTab: null };
+  if (type.includes('archive') || title.includes('أرشيف') || (title.includes('فاتورة') && !title.includes('اعتماد') && !title.includes('جديدة') && !title.includes('مصروف') && !title.includes('إيراد'))) return { tab: 'pharmacy-archive', subTab: null };
 
   return { tab: 'requests', subTab: null };
 }
@@ -1026,14 +1090,15 @@ export function isRequestNotification(n) {
     'resignation', 'resignation_request', 'biometric_verification',
     'biometric_registration', 'biometric_reset', 'تأكيد بصمة الوجه',
     'تأكيد بصمة اليد', 'manual_punch', 'punch_correction', 'penalty_objection',
-    'bonus_request', 'overtime', 'recruitment'
+    'bonus_request', 'overtime', 'recruitment', 'financial_alert',
+    'financial_expense', 'expense', 'invoice', 'financial'
   ];
 
   if (REQUEST_TYPES.some((t) => type === t || type.startsWith(`${t}_`) || type.endsWith(`_${t}`))) {
     return true;
   }
 
-  if (title.startsWith('طلب ') || title.includes('طلب اعتماد') || title.includes('طلب إجازة') || title.includes('طلب سلفة') || title.includes('تظلم')) {
+  if (title.startsWith('طلب ') || title.includes('طلب اعتماد') || title.includes('طلب إجازة') || title.includes('طلب سلفة') || title.includes('تظلم') || title.includes('فاتورة جديدة') || title.includes('بانتظار الاعتماد')) {
     return true;
   }
 

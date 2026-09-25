@@ -4,32 +4,33 @@ import { getPublicSystemUrl } from '../utils/systemUrlHelper';
 
 import ErrorBoundary from '../components/common/ErrorBoundary';
 import LoginPage from '../components/auth/LoginPage';
-import EmployeePortalView from '../components/employee-portal/EmployeePortalView';
 import DesktopLayout from '../components/layout/DesktopLayout';
-import BranchManagerView from '../components/branch-manager/BranchManagerView';
 import Dashboard from '../components/dashboard/Dashboard';
 import EmployeesHubModule from '../components/employees/EmployeesHubModule';
-import BranchManagementModule from '../components/branches/BranchManagementModule';
-import BranchMonthlyRosterModule from '../components/branches/BranchMonthlyRosterModule';
-import BranchSalesModule from '../components/branches/BranchSalesModule';
-import RequestsModule from '../components/requests/RequestsModule';
-import LeavesTrackingModule from '../components/leaves/LeavesTrackingModule';
-import EmployeePermissionsManagementModule from '../components/permissions/EmployeePermissionsManagementModule';
-import PayrollModule from '../components/payroll/PayrollModule';
-import AdjustmentsModule from '../components/adjustments/AdjustmentsModule';
-import WhatsAppCenterModule from '../components/whatsapp/WhatsAppCenterModule';
-import AdminDirectivesModule from '../components/directives/AdminDirectivesModule';
-import BylawsModule from '../components/bylaws/BylawsModule';
-import AdminResignationModule from '../components/resignation/AdminResignationModule';
-import EvaluationsModule from '../components/evaluations/EvaluationsModule';
-import LoansMedsModule from '../components/loans/LoansMedsModule';
-import IncomeExpensesModule from '../components/finance/IncomeExpensesModule';
-import FinancialReportsModule from '../components/finance/FinancialReportsModule';
-import SettingsModule from '../components/settings/SettingsModule';
-import NotificationCenterModule from '../components/notifications/NotificationCenterModule';
-import ApprovalCenterModule from '../components/approvals/ApprovalCenterModule';
+// Lazy Loaded Independent Systems (Code-Splitting for Lightning Speed)
+const BranchManagementModule = lazy(() => import('../components/branches/BranchManagementModule'));
+const BranchMonthlyRosterModule = lazy(() => import('../components/branches/BranchMonthlyRosterModule'));
+const BranchSalesModule = lazy(() => import('../components/branches/BranchSalesModule'));
+const RequestsModule = lazy(() => import('../components/requests/RequestsModule'));
+const LeavesTrackingModule = lazy(() => import('../components/leaves/LeavesTrackingModule'));
+const EmployeePermissionsManagementModule = lazy(() => import('../components/permissions/EmployeePermissionsManagementModule'));
+const PayrollModule = lazy(() => import('../components/payroll/PayrollModule'));
+const AdjustmentsModule = lazy(() => import('../components/adjustments/AdjustmentsModule'));
+const WhatsAppCenterModule = lazy(() => import('../components/whatsapp/WhatsAppCenterModule'));
+const AdminDirectivesModule = lazy(() => import('../components/directives/AdminDirectivesModule'));
+const BylawsModule = lazy(() => import('../components/bylaws/BylawsModule'));
+const AdminResignationModule = lazy(() => import('../components/resignation/AdminResignationModule'));
+const EvaluationsModule = lazy(() => import('../components/evaluations/EvaluationsModule'));
+const LoansMedsModule = lazy(() => import('../components/loans/LoansMedsModule'));
+const IncomeExpensesModule = lazy(() => import('../components/finance/IncomeExpensesModule'));
+const FinancialReportsModule = lazy(() => import('../components/finance/FinancialReportsModule'));
+const SettingsModule = lazy(() => import('../components/settings/SettingsModule'));
+const NotificationCenterModule = lazy(() => import('../components/notifications/NotificationCenterModule'));
+const ApprovalCenterModule = lazy(() => import('../components/approvals/ApprovalCenterModule'));
 
 // Lazy Loaded Independent Systems (Code-Splitting for Lightning Speed)
+const EmployeePortalView = lazy(() => import('../components/employee-portal/EmployeePortalView'));
+const BranchManagerView = lazy(() => import('../components/branch-manager/BranchManagerView'));
 const ArchiveSystemView = lazy(() => import('../components/archive/ArchiveSystemView'));
 const AccountsSystemView = lazy(() => import('../components/accounts/AccountsSystemView'));
 const PublicCandidateApplyPortal = lazy(() => import('../components/recruitment/PublicCandidateApplyPortal'));
@@ -1010,6 +1011,17 @@ export default function AppRoutes() {
           });
       } catch {}
 
+      try {
+        const currentOrgEpoch = String(org?.sessionInvalidationEpoch || state?.orgSettings?.sessionInvalidationEpoch || '0');
+        if (currentOrgEpoch !== '0') {
+          localStorage.setItem('last_known_session_epoch', currentOrgEpoch);
+        }
+        const currentResetTok = state?._systemResetToken || '';
+        if (currentResetTok) {
+          localStorage.setItem('last_known_reset_token', currentResetTok);
+        }
+      } catch {}
+
       if (role === 'developer') {
         handleUnifiedLogin({ role: 'developer', redirectTab: 'overview' });
         try {
@@ -1388,34 +1400,36 @@ export default function AppRoutes() {
           )
         ) : (authRole === 'employee' && currentEmpUser) ? (
           <ErrorBoundary fallbackTitle="حدث خطأ في عرض بوابة الموظف">
-            <EmployeePortalView
-              currentEmpUser={currentEmpUser}
-              setCurrentEmpUser={setCurrentEmpUser}
-              handleEmpLogin={handleEmpLogin}
-              state={state}
-              setState={setState}
-              saveState={saveState}
-              computeEmpSummary={computeEmpSummary}
-              getEmpPermission={getEmpPermission}
-              showToast={showToast}
-              orgSettings={state.orgSettings}
-              startShift={startShift}
-              pauseShift={pauseShift}
-              resumeShift={resumeShift}
-              stopShift={stopShift}
-              getActiveElapsedStr={getActiveElapsedStr}
-              getActiveBreakStr={getActiveBreakStr}
-              openEditShift={openEditShift}
-              handleLogout={handleLogout}
-              deleteShift={deleteShift}
-              themeMode={themeMode}
-              toggleTheme={toggleTheme}
-              notifications={state.notifications || []}
-              onMarkNotificationRead={handleMarkNotificationRead}
-              onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
-              onDeleteNotification={handleDeleteNotification}
-              onClearReadNotifications={handleClearReadNotifications}
-            />
+            <Suspense fallback={<div className="loading-fallback">جاري تحميل بوابة الموظف...</div>}>
+              <EmployeePortalView
+                currentEmpUser={currentEmpUser}
+                setCurrentEmpUser={setCurrentEmpUser}
+                handleEmpLogin={handleEmpLogin}
+                state={state}
+                setState={setState}
+                saveState={saveState}
+                computeEmpSummary={computeEmpSummary}
+                getEmpPermission={getEmpPermission}
+                showToast={showToast}
+                orgSettings={state.orgSettings}
+                startShift={startShift}
+                pauseShift={pauseShift}
+                resumeShift={resumeShift}
+                stopShift={stopShift}
+                getActiveElapsedStr={getActiveElapsedStr}
+                getActiveBreakStr={getActiveBreakStr}
+                openEditShift={openEditShift}
+                handleLogout={handleLogout}
+                deleteShift={deleteShift}
+                themeMode={themeMode}
+                toggleTheme={toggleTheme}
+                notifications={state.notifications || []}
+                onMarkNotificationRead={handleMarkNotificationRead}
+                onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+                onDeleteNotification={handleDeleteNotification}
+                onClearReadNotifications={handleClearReadNotifications}
+              />
+            </Suspense>
           </ErrorBoundary>
         ) : (
           <DesktopLayout
@@ -1477,34 +1491,36 @@ export default function AppRoutes() {
           >
             {authRole === 'branch' ? (
               <ErrorBoundary fallbackTitle="حدث خطأ في عرض لوحة مدير الفرع">
-                <BranchManagerView
-                  state={sanitizedState}
-                  setState={setState}
-                  saveState={saveState}
-                  currentBranch={currentBranch}
-                  activeTab={activeNavTab}
-                  setActiveTab={setActiveNavTab}
-                  showToast={showToast}
-                  startShift={startShift}
-                  pauseShift={pauseShift}
-                  resumeShift={resumeShift}
-                  stopShift={stopShift}
-                  monthPicker={monthPicker}
-                  setMonthPicker={setMonthPicker}
-                  filterMode={adminFilterMode}
-                  setFilterMode={setAdminFilterMode}
-                  customFrom={adminCustomFrom}
-                  setCustomFrom={setAdminCustomFrom}
-                  customTo={adminCustomTo}
-                  setCustomTo={setAdminCustomTo}
-                  filterFn={currentFilterFn}
-                  getEmpPermission={getEmpPermission}
-                  onExportExcel={() => {
-                    const mgrEmp = (sanitizedState.employees || []).find((e) => e && e.id === currentBranch?.managerId) || (sanitizedState.employees || []).find((e) => e && e.branchId === currentBranch?.id);
-                    if (mgrEmp) exportEmpExcel(mgrEmp.id, 'month');
-                    else exportAllPayrollExcel();
-                  }}
-                />
+                <Suspense fallback={<div className="loading-fallback">جاري تحميل لوحة مدير الفرع...</div>}>
+                  <BranchManagerView
+                    state={sanitizedState}
+                    setState={setState}
+                    saveState={saveState}
+                    currentBranch={currentBranch}
+                    activeTab={activeNavTab}
+                    setActiveTab={setActiveNavTab}
+                    showToast={showToast}
+                    startShift={startShift}
+                    pauseShift={pauseShift}
+                    resumeShift={resumeShift}
+                    stopShift={stopShift}
+                    monthPicker={monthPicker}
+                    setMonthPicker={setMonthPicker}
+                    filterMode={adminFilterMode}
+                    setFilterMode={setAdminFilterMode}
+                    customFrom={adminCustomFrom}
+                    setCustomFrom={setAdminCustomFrom}
+                    customTo={adminCustomTo}
+                    setCustomTo={setAdminCustomTo}
+                    filterFn={currentFilterFn}
+                    getEmpPermission={getEmpPermission}
+                    onExportExcel={() => {
+                      const mgrEmp = (sanitizedState.employees || []).find((e) => e && e.id === currentBranch?.managerId) || (sanitizedState.employees || []).find((e) => e && e.branchId === currentBranch?.id);
+                      if (mgrEmp) exportEmpExcel(mgrEmp.id, 'month');
+                      else exportAllPayrollExcel();
+                    }}
+                  />
+                </Suspense>
               </ErrorBoundary>
             ) : isScreenInMaintenance(activeNavTab, activeSubTab) ? (
               <ScreenMaintenanceView
@@ -1516,6 +1532,7 @@ export default function AppRoutes() {
               />
             ) : (
               <ErrorBoundary fallbackTitle="حدث خطأ في عرض هذا القسم">
+                <Suspense fallback={<div className="loading-fallback" style={{ padding: '60px 20px', textAlign: 'center', fontSize: '15px', color: 'var(--muted, #64748b)' }}>⏳ جاري تحميل بيانات القسم...</div>}>
                 {/* 1. Dashboard */}
                 {activeNavTab === 'dashboard' && (
                   <Dashboard
@@ -2165,6 +2182,7 @@ export default function AppRoutes() {
                     </button>
                   </div>
                 )}
+                </Suspense>
               </ErrorBoundary>
             )}
           </DesktopLayout>

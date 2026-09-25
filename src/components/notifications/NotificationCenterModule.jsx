@@ -1321,12 +1321,19 @@ export default function NotificationCenterModule({
                         }));
                       }, 50);
                     }
-                    if (target.filterType) {
+                    if (target.tab === 'requests' || target.filterType) {
+                      const targetReqId = target.requestId || item.requestId || item.transactionId || item.id;
                       setTimeout(() => {
                         window.dispatchEvent(new CustomEvent('requests:set-filter-type', {
-                          detail: { filterType: target.filterType }
+                          detail: {
+                            filterType: target.filterType || 'all',
+                            inboxTab: 'pending',
+                            requestId: targetReqId,
+                            branchId: item.branchId,
+                            branchName: item.branchName
+                          }
                         }));
-                      }, 50);
+                      }, 70);
                     }
                     showToast?.(`الانتقال إلى: ${tabLabel}`);
                   }
@@ -1524,12 +1531,19 @@ export default function NotificationCenterModule({
                         }));
                       }, 50);
                     }
-                    if (target.filterType) {
+                    if (target.tab === 'requests' || target.filterType) {
+                      const targetReqId = target.requestId || item.requestId || item.transactionId || item.id;
                       setTimeout(() => {
                         window.dispatchEvent(new CustomEvent('requests:set-filter-type', {
-                          detail: { filterType: target.filterType }
+                          detail: {
+                            filterType: target.filterType || 'all',
+                            inboxTab: 'pending',
+                            requestId: targetReqId,
+                            branchId: item.branchId,
+                            branchName: item.branchName
+                          }
                         }));
-                      }, 50);
+                      }, 70);
                     }
                     showToast?.(`الانتقال إلى: ${tabLabel}`);
                   }

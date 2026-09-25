@@ -5,6 +5,12 @@
  */
 
 import crypto from 'crypto';
+import {
+  initEdaMedicationTables,
+  searchEdaMedications,
+  getDrugEyeSubstitutes,
+  syncOrUpdateMedications
+} from './eda-drugeye-catalog.js';
 
 // ── توليد توكن مصادقة آمن ──────────────────────────────────────────────────
 function generateToken(payload, secret) {
@@ -201,6 +207,9 @@ export async function initOutstockTables(db) {
 
     await db.query(schemaSql);
     console.log('✅ [OutStock Engine] تم إنشاء والتحقق من جداول نظام النواقص والمشتريات بنجاح.');
+
+    // تهيئة كتالوج أدوية هيئة الدواء المصرية ودراج آي والأسعار الرسمية
+    await initEdaMedicationTables(db);
 
     // غرس حساب المالك الافتراضي (out / 123)
     const checkOwner = await db.query("SELECT id FROM public.outstock_users WHERE username = 'out'");
@@ -526,6 +535,87 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       }
 
       res.status(404).json({ success: false, error: 'المستخدم غير موجود' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 1.5 كتالوج هيئة الدواء المصرية ودراج آي (EDA & Drug Eye Medications Engine)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  // بحث ذكي لحظي وسريع جداً عن الأدوية المصرية ومطابقتها
+  app.get('/api/outstock/medications/search', async (req, res) => {
+    try {
+      const q = String(req.query.q || '').trim();
+      const limit = parseInt(req.query.limit || 15, 10);
+      if (!q || q.length < 2) {
+        return res.json({ success: true, medications: [] });
+      }
+
+      const medications = await searchEdaMedications(db, q, limit);
+      res.json({ success: true, medications });
+    } catch (err) {
+      console.warn('[Medication Search Warn]:', err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // استرجاع المثائل والبدائل الدوائية المتاحة بنفس المادة الفعالة
+  app.get('/api/outstock/medications/substitutes', async (req, res) => {
+    try {
+      const generic = String(req.query.generic || '').trim();
+      const excludeId = req.query.excludeId || null;
+      if (!generic) {
+        return res.json({ success: true, substitutes: [] });
+      }
+
+      const substitutes = await getDrugEyeSubstitutes(db, generic, excludeId);
+      res.json({ success: true, substitutes });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // مزامنة واستيراد قوائم التسعير الجبري الجديدة من هيئة الدواء أو ملفات Drug Eye
+  app.post('/api/outstock/medications/sync', authMiddleware, async (req, res) => {
+    try {
+      const { medications, source } = req.body || {};
+      if (!Array.isArray(medications) || medications.length === 0) {
+        return res.status(400).json({ success: false, error: 'مطلوب مصفوفة أدوية صالحة للتحديث' });
+      }
+
+      const result = await syncOrUpdateMedications(db, medications, source || 'تحديث قائمة أسعار هيئة الدواء الرسمية');
+      broadcastOutstock('outstock:medications_synced', { timestamp: new Date().toISOString(), result });
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // إحصائيات كتالوج الأدوية المصرية وسجل تحريك الأسعار
+  app.get('/api/outstock/medications/stats', authMiddleware, async (req, res) => {
+    try {
+      const statsRes = await db.query(`
+        SELECT
+          COUNT(*) as total_medications,
+          COUNT(*) FILTER (WHERE is_table_drug = true) as table_drugs_count,
+          COUNT(*) FILTER (WHERE is_refrigerated = true) as refrigerated_count,
+          (SELECT COUNT(*) FROM public.outstock_price_audit_logs) as total_price_revisions
+        FROM public.outstock_medications
+      `);
+
+      const recentRevisionsRes = await db.query(`
+        SELECT * FROM public.outstock_price_audit_logs
+        ORDER BY created_at DESC
+        LIMIT 20
+      `);
+
+      res.json({
+        success: true,
+        stats: statsRes.rows[0],
+        recentRevisions: recentRevisionsRes.rows
+      });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }

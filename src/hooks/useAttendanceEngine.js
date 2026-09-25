@@ -205,9 +205,25 @@ export function useAttendanceEngine() {
     if (!daySchedule || !daySchedule.end) return currentState;
 
     const [sH, sM] = daySchedule.end.split(':').map(Number);
-    const schedEndMinutes = sH * 60 + sM;
+    let schedEndMinutes = sH * 60 + sM;
+    const [startH, startM] = (daySchedule.start || '00:00').split(':').map(Number);
+    const schedStartMinutes = startH * 60 + startM;
+
     const [outH, outM] = timeOutStr.split(':').map(Number);
-    const actualOutMinutes = outH * 60 + outM;
+    let actualOutMinutes = outH * 60 + outM;
+
+    // معالجة الورديات الممتدة عبر منتصف الليل
+    if (schedEndMinutes < schedStartMinutes) {
+      schedEndMinutes += 24 * 60;
+      if (actualOutMinutes < schedStartMinutes) {
+        actualOutMinutes += 24 * 60;
+      }
+    } else {
+      // وردية نهارية عادية، إذا كان وقت الخروج في الصباح الباكر بعد منتصف الليل (عمل إضافي ممتد)
+      if (actualOutMinutes < schedStartMinutes && actualOutMinutes < 360) {
+        actualOutMinutes += 24 * 60;
+      }
+    }
 
     const earlyMinutes = schedEndMinutes - actualOutMinutes;
     const gracePeriod = currentState.orgSettings?.earlyExitGracePeriodMinutes !== undefined
@@ -845,14 +861,22 @@ export function useAttendanceEngine() {
         )
       );
 
-    // إذا لم تكن الوردية موجودة في activeShifts (بسبب إعادة تحميل الصفحة أو مزامنة)، نبحث في shifts عن وردية مفتوحة
+    // إذا لم تكن الوردية موجودة في activeShifts (بسبب إعادة تحميل الصفحة أو مزامنة)، نبحث في shifts عن أحدث وردية مفتوحة
     if (!active) {
       const todayStr = getRealTodayStr();
-      const openShift = (state.shifts || []).find(s =>
-        isEmpShiftMatch(s) &&
-        isShiftOpen(s) &&
-        s.status !== 'cancelled' && !s.isCancelled
-      );
+      const openCandidates = (state.shifts || [])
+        .filter(s =>
+          isEmpShiftMatch(s) &&
+          isShiftOpen(s) &&
+          s.status !== 'cancelled' && !s.isCancelled
+        )
+        .sort((a, b) => {
+          const aEpoch = a.startEpoch || (a.createdAt ? new Date(a.createdAt).getTime() : (a.date && a.timeIn ? new Date(`${a.date}T${a.timeIn.slice(0, 5)}:00`).getTime() : 0));
+          const bEpoch = b.startEpoch || (b.createdAt ? new Date(b.createdAt).getTime() : (b.date && b.timeIn ? new Date(`${b.date}T${b.timeIn.slice(0, 5)}:00`).getTime() : 0));
+          return bEpoch - aEpoch; // الأحدث أولاً لتجنب التقاط ورديات متروكة قديمة
+        });
+
+      const openShift = openCandidates[0];
       if (openShift) {
         active = {
           shiftId: openShift.id,
@@ -1305,6 +1329,11 @@ export function useAttendanceEngine() {
       }).catch(err => {
         console.warn('[stopShift] Kiosk outbox enqueue warning:', err);
       });
+
+      // حفظ محلي فوري لمنع بقاء الوردية نشطة في الكشك عند إعادة تحميل الصفحة أو انقطاع النت
+      if (saveState) {
+        saveState(updatedState).catch(err => console.error('[stopShift] Kiosk state save error:', err));
+      }
     } else {
       apiRecordPunch({
         employeeId: empActualId || empId,

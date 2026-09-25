@@ -18,7 +18,8 @@ import {
   WifiOff,
   RefreshCw,
   Keyboard,
-  Lock
+  Lock,
+  MessageSquare
 } from 'lucide-react';
 import { outstockGetMe } from '../../utils/outstockApiClient';
 import {
@@ -36,11 +37,13 @@ import PharmacyOrdersTab from './pharmacy/PharmacyOrdersTab';
 import PharmacyCustomersTab from './pharmacy/PharmacyCustomersTab';
 import PharmacyProcurementTrackingTab from './pharmacy/PharmacyProcurementTrackingTab';
 import PharmacyDeficienciesTab from './pharmacy/PharmacyDeficienciesTab';
+import OutstockWhatsAppCenterTab from './pharmacy/OutstockWhatsAppCenterTab';
 
 // بوابات المشتريات
 import ProcurementOrdersTab from './procurement/ProcurementOrdersTab';
 import ProcurementDeliveryTrackingTab from './procurement/ProcurementDeliveryTrackingTab';
 import ProcurementUnavailableTab from './procurement/ProcurementUnavailableTab';
+import ProcurementWhatsAppCenterTab from './procurement/ProcurementWhatsAppCenterTab';
 
 // بوابات المالك
 import OwnerBranchOrdersTab from './owner/OwnerBranchOrdersTab';
@@ -234,6 +237,7 @@ export default function OutstockSystemView({
       if (tab4Item && matchesShortcutEvent(tab4Item, e)) {
         e.preventDefault();
         if (userRole === 'branch') setActiveTab('deficiencies');
+        else if (userRole === 'procurement') setActiveTab('procurement_whatsapp');
         else if (userRole === 'owner') setActiveTab('owner_settings');
         return;
       }
@@ -300,10 +304,20 @@ export default function OutstockSystemView({
                 <AlertTriangle size={15} />
                 <span>أدوية النواقص</span>
               </button>
+
+              <button
+                type="button"
+                className={`outstock-nav-btn ${activeTab === 'whatsapp' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('whatsapp')}
+                title="اتصال الواتساب بالفرع وإرسال الرسائل التلقائية للعملاء"
+              >
+                <MessageSquare size={15} />
+                <span>اتصال الواتساب والرسائل</span>
+              </button>
             </>
           )}
 
-          {/* 2. قوائم بوابة إدارة المشتريات (3 قوائم) */}
+          {/* 2. قوائم بوابة إدارة المشتريات (4 قوائم) */}
           {userRole === 'procurement' && (
             <>
               <button
@@ -332,10 +346,20 @@ export default function OutstockSystemView({
                 <AlertTriangle size={15} />
                 <span>أصناف غير متوفرة بالسوق</span>
               </button>
+
+              <button
+                type="button"
+                className={`outstock-nav-btn ${activeTab === 'procurement_whatsapp' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('procurement_whatsapp')}
+                title="مراسلة هواتف الفروع بالواتساب وإشعارات الشحن والنواقص"
+              >
+                <MessageSquare size={15} />
+                <span>واتساب الفروع</span>
+              </button>
             </>
           )}
 
-          {/* 3. قوائم بوابة المالك (4 قوائم) */}
+          {/* 3. قوائم بوابة المالك (5 قوائم) */}
           {userRole === 'owner' && (
             <>
               <button
@@ -363,6 +387,16 @@ export default function OutstockSystemView({
               >
                 <Users size={15} />
                 <span>دليل العملاء المركزي</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-nav-btn ${activeTab === 'owner_whatsapp' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('owner_whatsapp')}
+                title="مركز الواتساب والرسائل التلقائية لعملاء الفروع"
+              >
+                <MessageSquare size={15} />
+                <span>مركز الواتساب</span>
               </button>
 
               <button
@@ -581,6 +615,15 @@ export default function OutstockSystemView({
                   showToast={showToast}
                 />
               )}
+
+              {activeTab === 'whatsapp' && (
+                <OutstockWhatsAppCenterTab
+                  branchId={effectiveBranchId}
+                  branch={activeBranch}
+                  currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
+                  showToast={showToast}
+                />
+              )}
             </>
           );
         })()}
@@ -599,6 +642,13 @@ export default function OutstockSystemView({
             {activeTab === 'unavailable_items' && (
               <ProcurementUnavailableTab showToast={showToast} />
             )}
+
+            {activeTab === 'procurement_whatsapp' && (
+              <ProcurementWhatsAppCenterTab
+                currentOfficer={currentUser?.fullName || currentUser?.name || 'مسؤول المشتريات'}
+                showToast={showToast}
+              />
+            )}
           </>
         )}
 
@@ -615,6 +665,15 @@ export default function OutstockSystemView({
 
             {activeTab === 'owner_customers' && (
               <OwnerCustomersDirectoryTab />
+            )}
+
+            {activeTab === 'owner_whatsapp' && (
+              <OutstockWhatsAppCenterTab
+                branchId={activeBranch?.id || 'main'}
+                branch={activeBranch}
+                currentPharmacist={currentUser?.fullName || currentUser?.name || 'المالك / المدير'}
+                showToast={showToast}
+              />
             )}
 
             {activeTab === 'owner_settings' && (

@@ -72,12 +72,24 @@ export function useRealtimeSync(props = {}) {
     const normalized = normalizeState(parsed);
 
     // التحقق من حدوث تصفير شامل لقاعدة البيانات (Factory Reset) أو إبطال فوري للجلسات
+    // ── فحص إعادة الضبط المصنعي أو إبطال كافة الجلسات ──
     const currentKnownResetToken = localStorage.getItem('last_known_reset_token') || '';
     const currentKnownEpoch = localStorage.getItem('last_known_session_epoch') || '0';
     const serverEpoch = String(normalized?.orgSettings?.sessionInvalidationEpoch || '0');
 
-    const isResetTriggered = (normalized._systemResetToken && normalized._systemResetToken !== currentKnownResetToken) ||
-                             (serverEpoch !== '0' && serverEpoch !== currentKnownEpoch);
+    // إذا كانت القيمة غير مسجلة محلياً بعد (جلسة جديدة أو أول مزامنة)، يتم اعتمادها فورياً دون طرد المستخدم
+    if (serverEpoch !== '0' && (!currentKnownEpoch || currentKnownEpoch === '0')) {
+      try { localStorage.setItem('last_known_session_epoch', serverEpoch); } catch {}
+    }
+    if (normalized._systemResetToken && !currentKnownResetToken) {
+      try { localStorage.setItem('last_known_reset_token', normalized._systemResetToken); } catch {}
+    }
+
+    const effectiveKnownResetToken = localStorage.getItem('last_known_reset_token') || '';
+    const effectiveKnownEpoch = localStorage.getItem('last_known_session_epoch') || '0';
+
+    const isResetTriggered = (normalized._systemResetToken && effectiveKnownResetToken && normalized._systemResetToken !== effectiveKnownResetToken) ||
+                             (serverEpoch !== '0' && effectiveKnownEpoch !== '0' && serverEpoch !== effectiveKnownEpoch);
 
     if (isResetTriggered) {
       if (normalized._systemResetToken) localStorage.setItem('last_known_reset_token', normalized._systemResetToken);
@@ -189,9 +201,11 @@ export function useRealtimeSync(props = {}) {
       const liveBranch = (normalized?.branches || []).find(b => b && (String(b.id) === String(currentBranch.id) || String(b.branchCode) === String(currentBranch.branchCode)));
 
       if (liveBranch) {
-        const isRevoked = (myBranchPass && liveBranch.password && myBranchPass !== liveBranch.password) ||
-                          (Number(liveBranch.sessionVersion || 0) > myBranchVer);
-        if (isRevoked) {
+        const srvBranchVer = Number(liveBranch.sessionVersion || 0);
+        if (myBranchVer === 0 && srvBranchVer > 0) {
+          try { localStorage.setItem('app_branch_session_version', String(srvBranchVer)); } catch {}
+        } else if ((myBranchPass && liveBranch.password && myBranchPass !== liveBranch.password) ||
+                   (myBranchVer > 0 && srvBranchVer > 0 && srvBranchVer > myBranchVer)) {
           localStorage.removeItem('app_auth_role');
           localStorage.removeItem('app_current_branch');
           localStorage.removeItem('app_branch_password_snapshot');
@@ -208,9 +222,11 @@ export function useRealtimeSync(props = {}) {
       const liveEmp = (normalized?.employees || []).find(e => e && (String(e.id) === String(currentEmpUser.id) || String(e.code) === String(currentEmpUser.code)));
 
       if (liveEmp) {
-        const isRevoked = (myEmpPass && liveEmp.password && myEmpPass !== liveEmp.password) ||
-                          (Number(liveEmp.sessionVersion || 0) > myEmpVer);
-        if (isRevoked) {
+        const srvEmpVer = Number(liveEmp.sessionVersion || 0);
+        if (myEmpVer === 0 && srvEmpVer > 0) {
+          try { localStorage.setItem('app_emp_session_version', String(srvEmpVer)); } catch {}
+        } else if ((myEmpPass && liveEmp.password && myEmpPass !== liveEmp.password) ||
+                   (myEmpVer > 0 && srvEmpVer > 0 && srvEmpVer > myEmpVer)) {
           localStorage.removeItem('app_auth_role');
           localStorage.removeItem('app_current_emp_user');
           localStorage.removeItem('app_emp_password_snapshot');
@@ -261,12 +277,6 @@ export function useRealtimeSync(props = {}) {
         const fresh = (merged.employees || []).find(
           (e) => e && (e.id === prevEmp.id || (prevEmp.code && e.code === prevEmp.code))
         );
-        if (!fresh && (merged.employees || []).length === 0) {
-          localStorage.removeItem('app_current_emp_user');
-          localStorage.removeItem('app_auth_role');
-          setAuthRole('none');
-          return null;
-        }
         return fresh || prevEmp;
       });
 
@@ -274,12 +284,6 @@ export function useRealtimeSync(props = {}) {
       setCurrentBranch((prevBranch) => {
         if (!prevBranch) return prevBranch;
         const fresh = (merged.branches || []).find((b) => b && b.id === prevBranch.id);
-        if (!fresh && (merged.branches || []).length === 0) {
-          localStorage.removeItem('app_current_branch');
-          localStorage.removeItem('app_auth_role');
-          setAuthRole('none');
-          return null;
-        }
         return fresh || prevBranch;
       });
 

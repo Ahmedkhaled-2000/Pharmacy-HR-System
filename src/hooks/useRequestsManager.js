@@ -115,17 +115,28 @@ export function useRequestsManager() {
         if (target.type === 'punch_correction' || target.type === 'attendance_punch' || target.type === 'manual_punch') {
           const emp = (state.employees || []).find(e => String(e.id) === String(target.employeeId));
           const punchDate = target.date || target.punchDate || new Date().toISOString().slice(0, 10);
+          
+          const isCheckInOnly = target.punchType === 'in' || 
+                                target.targetAction === 'shift_start' || 
+                                (!target.timeOut && Boolean(target.timeIn)) ||
+                                (String(target.details || '').includes('حضور فقط') && !target.timeOut);
+          
+          const isCheckOutOnly = target.punchType === 'out' || target.targetAction === 'shift_end';
           const timeIn = target.timeIn || '09:00';
-          const timeOut = target.timeOut || '17:00';
+          const timeOut = isCheckInOnly ? '' : (target.timeOut || (isCheckOutOnly ? '17:00' : '17:00'));
           const empBreak = emp?.breakHours || emp?.defaultBreakHours || (emp?.branchesDetails && emp.branchesDetails[0]?.breakHours) || 0;
           const bH = Math.max(0, parseFloat(target.breakHours !== undefined && target.breakHours !== null ? target.breakHours : empBreak) || 0);
 
-          const [inH, inM] = timeIn.split(':').map(Number);
-          const [outH, outM] = timeOut.split(':').map(Number);
-          let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
-          if (diff < 0) diff += 24 * 60;
-          const grossHrs = Math.round((diff / 60) * 100) / 100;
-          const netTotalHrs = Math.max(0, Math.round((grossHrs - bH) * 100) / 100);
+          let calcGrossHrs = 0;
+          let calcNetTotalHrs = 0;
+          if (!isCheckInOnly && timeIn && timeOut) {
+            const [inH, inM] = timeIn.split(':').map(Number);
+            const [outH, outM] = timeOut.split(':').map(Number);
+            let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+            if (diff < 0) diff += 24 * 60;
+            calcGrossHrs = Math.round((diff / 60) * 100) / 100;
+            calcNetTotalHrs = Math.max(0, Math.round((calcGrossHrs - bH) * 100) / 100);
+          }
 
           const daySched = getEmployeeDaySchedule(target.employeeId, punchDate, state);
           const profileHours = parseFloat(emp?.workHoursPerDay || emp?.workHours) || 8;
@@ -143,39 +154,75 @@ export function useRequestsManager() {
             schedHours = parseFloat(target.scheduledHours);
           }
 
-          const regularHours = Math.min(netTotalHrs, schedHours);
-          const overtimeHours = Math.max(0, Math.round((netTotalHrs - schedHours) * 100) / 100);
+          const regularHours = isCheckInOnly ? 0 : Math.min(calcNetTotalHrs, schedHours);
+          const overtimeHours = isCheckInOnly ? 0 : Math.max(0, Math.round((calcNetTotalHrs - schedHours) * 100) / 100);
           const overtimeStatus = overtimeHours > 0 ? 'approved' : 'none';
 
           const existingShiftIndex = updatedShifts.findIndex(s => 
-            (String(s.employeeId) === String(target.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
-            s.date === punchDate
+            (target.shiftId && s.id === target.shiftId) ||
+            ((String(s.employeeId) === String(target.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
+            s.date === punchDate && (!s.timeOut || s.timeOut === '—' || target.shiftId))
           );
 
           if (existingShiftIndex >= 0) {
-            updatedShifts[existingShiftIndex] = {
-              ...updatedShifts[existingShiftIndex],
-              timeIn,
-              timeOut,
-              breakHours: bH,
-              hours: regularHours,
-              workHours: regularHours,
-              netHours: regularHours,
-              regularHours: regularHours,
-              actualWorkedHours: netTotalHrs,
-              grossHours: grossHrs,
-              scheduledHours: schedHours,
-              overtimeHours: overtimeHours,
-              overtimeStatus: overtimeStatus,
-              isManual: true,
-              manualPunch: true,
-              source: 'manual_admin',
-              adminApproved: true,
-              note: overtimeHours > 0
-                ? `بصمة يدوية معتمدة من الإدارة العليا (${target.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)`
-                : `بصمة يدوية معتمدة من الإدارة العليا (${target.reason || 'بناءً على طلب مدير الفرع'})`,
-              updatedAt: new Date().toISOString()
-            };
+            const existingShift = updatedShifts[existingShiftIndex];
+            const hasExistingTimeOut = existingShift.timeOut && existingShift.timeOut !== '—';
+
+            if (isCheckInOnly && !hasExistingTimeOut) {
+              // الموظف حالياً في شيفت ولم ينتهِ: تعديل وقت الدخول فقط دون تسجيل خروج ودون إنهاء الوردية
+              updatedShifts[existingShiftIndex] = {
+                ...existingShift,
+                timeIn,
+                timeOut: '',
+                isManual: true,
+                manualPunch: true,
+                source: 'manual_admin',
+                adminApproved: true,
+                statusLabel: 'وردية نشطة (بصمة حضور معدلة)',
+                note: `بصمة حضور معدلة ومعتمدة من الإدارة العليا (${target.reason || 'بناءً على طلب مدير الفرع'}) — الوردية مستمرة`,
+                updatedAt: new Date().toISOString()
+              };
+            } else {
+              const effectiveTimeOut = isCheckInOnly ? existingShift.timeOut : timeOut;
+              const effectiveTimeIn = isCheckOutOnly ? (existingShift.timeIn || timeIn) : timeIn;
+
+              let finalGross = calcGrossHrs;
+              let finalNet = calcNetTotalHrs;
+              if (effectiveTimeIn && effectiveTimeOut) {
+                const [inH, inM] = effectiveTimeIn.split(':').map(Number);
+                const [outH, outM] = effectiveTimeOut.split(':').map(Number);
+                let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+                if (diff < 0) diff += 24 * 60;
+                finalGross = Math.round((diff / 60) * 100) / 100;
+                finalNet = Math.max(0, Math.round((finalGross - bH) * 100) / 100);
+              }
+              const finalReg = Math.min(finalNet, schedHours);
+              const finalOt = Math.max(0, Math.round((finalNet - schedHours) * 100) / 100);
+
+              updatedShifts[existingShiftIndex] = {
+                ...existingShift,
+                timeIn: effectiveTimeIn,
+                timeOut: effectiveTimeOut,
+                breakHours: bH,
+                hours: finalReg,
+                workHours: finalReg,
+                netHours: finalReg,
+                regularHours: finalReg,
+                actualWorkedHours: finalNet,
+                grossHours: finalGross,
+                scheduledHours: schedHours,
+                overtimeHours: finalOt,
+                overtimeStatus: finalOt > 0 ? 'approved' : 'none',
+                isManual: true,
+                manualPunch: true,
+                source: 'manual_admin',
+                adminApproved: true,
+                note: finalOt > 0
+                  ? `بصمة معدلة ومعتمدة من الإدارة العليا (${target.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${finalReg} س + إضافي معتمد: ${finalOt} س)`
+                  : `بصمة معدلة ومعتمدة من الإدارة العليا (${target.reason || 'بناءً على طلب مدير الفرع'})`,
+                updatedAt: new Date().toISOString()
+              };
+            }
           } else {
             updatedShifts.unshift({
               id: `shift_manual_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
@@ -185,14 +232,14 @@ export function useRequestsManager() {
               branchId: target.branchId || emp?.branchId || '',
               date: punchDate,
               timeIn,
-              timeOut,
+              timeOut: isCheckInOnly ? '' : timeOut,
               breakHours: bH,
               hours: regularHours,
               workHours: regularHours,
               netHours: regularHours,
               regularHours: regularHours,
-              actualWorkedHours: netTotalHrs,
-              grossHours: grossHrs,
+              actualWorkedHours: calcNetTotalHrs,
+              grossHours: calcGrossHrs,
               scheduledHours: schedHours,
               overtimeHours: overtimeHours,
               overtimeStatus: overtimeStatus,
@@ -200,12 +247,40 @@ export function useRequestsManager() {
               manualPunch: true,
               source: 'manual_admin',
               adminApproved: true,
-              statusLabel: 'بصمة يدوية معتمدة',
+              statusLabel: isCheckInOnly ? 'وردية نشطة (بصمة حضور معدلة)' : 'بصمة يدوية معتمدة',
               note: overtimeHours > 0
                 ? `بصمة يدوية معتمدة من الإدارة العليا (${target.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)`
                 : `بصمة يدوية معتمدة من الإدارة العليا (${target.reason || 'بناءً على طلب مدير الفرع'})`,
               createdAt: new Date().toISOString()
             });
+          }
+
+          // تحديث أو إنهاء الشفت في activeShifts
+          if (isCheckInOnly) {
+            // الموظف حالياً في شيفت: نعدل توقيت الدخول في الشفت النشط دون حذفه لتبقى الوردية جارية
+            if (updatedActiveShifts) {
+              const empIdStr = String(target.employeeId);
+              const empCodeStr = emp?.code ? String(emp.code) : '';
+              const activeKey = updatedActiveShifts[empIdStr] 
+                ? empIdStr 
+                : (empCodeStr && updatedActiveShifts[empCodeStr] ? empCodeStr : empIdStr);
+              if (updatedActiveShifts[activeKey]) {
+                updatedActiveShifts[activeKey] = {
+                  ...updatedActiveShifts[activeKey],
+                  timeIn: timeIn,
+                  startTime: `${punchDate}T${timeIn}:00`,
+                  date: punchDate,
+                  isModified: true
+                };
+              }
+            }
+          } else if (timeOut && target.employeeId && updatedActiveShifts) {
+            delete updatedActiveShifts[target.employeeId];
+            delete updatedActiveShifts[String(target.employeeId)];
+            if (emp?.code) {
+              delete updatedActiveShifts[emp.code];
+              delete updatedActiveShifts[String(emp.code)];
+            }
           }
         }
 

@@ -537,8 +537,18 @@ export function DataProvider({ children, showToast = () => {} }) {
       const currentKnownEpoch = localStorage.getItem('last_known_session_epoch') || '0';
       const serverEpoch = String(normalized?.orgSettings?.sessionInvalidationEpoch || '0');
 
-      const isResetTriggered = (normalized._systemResetToken && normalized._systemResetToken !== currentKnownResetToken) ||
-                               (serverEpoch !== '0' && serverEpoch !== currentKnownEpoch);
+      if (serverEpoch !== '0' && (!currentKnownEpoch || currentKnownEpoch === '0')) {
+        try { localStorage.setItem('last_known_session_epoch', serverEpoch); } catch {}
+      }
+      if (normalized._systemResetToken && !currentKnownResetToken) {
+        try { localStorage.setItem('last_known_reset_token', normalized._systemResetToken); } catch {}
+      }
+
+      const effectiveKnownResetToken = localStorage.getItem('last_known_reset_token') || '';
+      const effectiveKnownEpoch = localStorage.getItem('last_known_session_epoch') || '0';
+
+      const isResetTriggered = (normalized._systemResetToken && effectiveKnownResetToken && normalized._systemResetToken !== effectiveKnownResetToken) ||
+                               (serverEpoch !== '0' && effectiveKnownEpoch !== '0' && serverEpoch !== effectiveKnownEpoch);
 
       if (isResetTriggered) {
         if (normalized._systemResetToken) localStorage.setItem('last_known_reset_token', normalized._systemResetToken);
@@ -607,28 +617,38 @@ export function DataProvider({ children, showToast = () => {} }) {
         const liveEmp = (normalized.employees || []).find(e => String(e.id) === String(activeEmp.id) || String(e.code) === String(activeEmp.code));
         const myEmpPass = localStorage.getItem('app_emp_password_snapshot');
         const myEmpVer = Number(localStorage.getItem('app_emp_session_version') || 0);
-        if (!liveEmp || (myEmpPass && liveEmp.password && myEmpPass !== liveEmp.password) ||
-            (Number(liveEmp.sessionVersion || 0) > myEmpVer)) {
-          if (handleLogout) handleLogout();
-          else {
-            localStorage.removeItem('app_auth_role');
-            localStorage.removeItem('app_current_emp_user');
-            setAuthRole('none');
-            setCurrentEmpUser(null);
+        if (liveEmp) {
+          const srvEmpVer = Number(liveEmp.sessionVersion || 0);
+          if (myEmpVer === 0 && srvEmpVer > 0) {
+            try { localStorage.setItem('app_emp_session_version', String(srvEmpVer)); } catch {}
+          } else if ((myEmpPass && liveEmp.password && myEmpPass !== liveEmp.password) ||
+              (myEmpVer > 0 && srvEmpVer > 0 && srvEmpVer > myEmpVer)) {
+            if (handleLogout) handleLogout();
+            else {
+              localStorage.removeItem('app_auth_role');
+              localStorage.removeItem('app_current_emp_user');
+              setAuthRole('none');
+              setCurrentEmpUser(null);
+            }
           }
         }
       } else if (activeRole === 'branch' && activeBranch) {
         const liveBranch = (normalized.branches || []).find(b => String(b.id) === String(activeBranch.id) || String(b.branchCode) === String(activeBranch.branchCode));
         const myBranchPass = localStorage.getItem('app_branch_password_snapshot');
         const myBranchVer = Number(localStorage.getItem('app_branch_session_version') || 0);
-        if (!liveBranch || (myBranchPass && liveBranch.password && myBranchPass !== liveBranch.password) ||
-            (Number(liveBranch.sessionVersion || 0) > myBranchVer)) {
-          if (handleLogout) handleLogout();
-          else {
-            localStorage.removeItem('app_auth_role');
-            localStorage.removeItem('app_current_branch');
-            setAuthRole('none');
-            setCurrentBranch(null);
+        if (liveBranch) {
+          const srvBranchVer = Number(liveBranch.sessionVersion || 0);
+          if (myBranchVer === 0 && srvBranchVer > 0) {
+            try { localStorage.setItem('app_branch_session_version', String(srvBranchVer)); } catch {}
+          } else if ((myBranchPass && liveBranch.password && myBranchPass !== liveBranch.password) ||
+              (myBranchVer > 0 && srvBranchVer > 0 && srvBranchVer > myBranchVer)) {
+            if (handleLogout) handleLogout();
+            else {
+              localStorage.removeItem('app_auth_role');
+              localStorage.removeItem('app_current_branch');
+              setAuthRole('none');
+              setCurrentBranch(null);
+            }
           }
         }
       }
@@ -926,11 +946,67 @@ export function DataProvider({ children, showToast = () => {} }) {
   // 🚀 الاستماع لدفعات البصمات المزامنة والبث المحلي الفوري (0ms Cross-Tab Mesh)
   useEffect(() => {
     const unsubBatch = subscribeToBatchPunches((batchPayload) => {
-      if (!batchPayload || !batchPayload.activeShifts) return;
-      setState((prev) => ({
-        ...prev,
-        activeShifts: { ...(prev.activeShifts || {}), ...batchPayload.activeShifts }
-      }));
+      if (!batchPayload) return;
+      setState((prev) => {
+        let prevActive = { ...(prev.activeShifts || {}) };
+        let prevShifts = [...(prev.shifts || [])];
+        const punches = Array.isArray(batchPayload.punches) ? batchPayload.punches : [];
+
+        for (const p of punches) {
+          const empId = String(p.employeeId || '');
+          const empCode = p.employeeCode ? String(p.employeeCode) : '';
+
+          if (p.actionType === 'check_out') {
+            // حذف الموظف من الورديات النشطة فورياً
+            delete prevActive[empId];
+            if (empCode) delete prevActive[empCode];
+            Object.keys(prevActive).forEach(k => {
+              const s = prevActive[k];
+              if (k === empId || k === empCode || (s && (String(s.employeeId) === empId || (empCode && String(s.employeeCode) === empCode)))) {
+                delete prevActive[k];
+              }
+            });
+
+            // تحديث سجل الوردية في قائمة الورديات
+            if (p.shiftRecord && p.shiftRecord.id) {
+              const idx = prevShifts.findIndex(s => s.id === p.shiftRecord.id || ((String(s.employeeId) === empId || (empCode && String(s.employeeCode) === empCode)) && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive)));
+              if (idx >= 0) {
+                prevShifts[idx] = { ...prevShifts[idx], ...p.shiftRecord, isLiveActive: false, status: 'completed' };
+              } else {
+                prevShifts = [{ ...p.shiftRecord, isLiveActive: false, status: 'completed' }, ...prevShifts];
+              }
+            } else {
+              prevShifts = prevShifts.map(s => {
+                if ((String(s.employeeId) === empId || (empCode && String(s.employeeCode) === empCode)) && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive)) {
+                  return { ...s, timeOut: p.time || s.timeOut || new Date().toISOString().slice(11, 16), isLiveActive: false, status: 'completed' };
+                }
+                return s;
+              });
+            }
+          } else if (p.actionType === 'check_in') {
+            if (p.shiftData) {
+              prevActive[empId] = p.shiftData;
+            }
+            if (p.shiftRecord) {
+              const exists = prevShifts.some(s => s.id === p.shiftRecord.id);
+              if (!exists) {
+                prevShifts = [{ ...p.shiftRecord, isLiveActive: true }, ...prevShifts];
+              }
+            }
+          }
+        }
+
+        // إذا أرسل السيرفر activeShifts صريحة ندمج فقط الورديات النشطة غير المنتهية
+        if (batchPayload.activeShifts && typeof batchPayload.activeShifts === 'object') {
+          Object.assign(prevActive, batchPayload.activeShifts);
+        }
+
+        return {
+          ...prev,
+          activeShifts: prevActive,
+          shifts: prevShifts
+        };
+      });
     });
 
     const unsubLocal = listenToLocalKioskPunches((localPunch) => {

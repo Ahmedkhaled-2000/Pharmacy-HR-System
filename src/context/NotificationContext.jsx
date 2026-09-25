@@ -214,6 +214,23 @@ export function NotificationProvider({ children }) {
       }
     });
 
+    // Pending branch invoices / expenses from finances and transactions
+    (state.finances || state.transactions || []).forEach((tx) => {
+      if (tx && tx.approvalStatus === 'pending') {
+        addUniqueAdmin({
+          id: tx.id,
+          type: 'expense',
+          subType: 'invoice',
+          status: 'pending_admin',
+          branchId: tx.branchId,
+          amount: tx.amount,
+          date: tx.date || (tx.createdAt ? tx.createdAt.slice(0, 10) : ''),
+          createdAt: tx.createdAt,
+          isDirectToAdmin: true
+        }, 'expense');
+      }
+    });
+
     return rawReqList.filter((r) => {
       if (!r || !r.id) return false;
       const idStr = String(r.id);

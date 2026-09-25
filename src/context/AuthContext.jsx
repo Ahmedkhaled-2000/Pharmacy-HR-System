@@ -277,34 +277,42 @@ export function AuthProvider({ children }) {
     }
 
     // 1. إذا كان الموظف المسجل غير موجود أو تم إيقاف حسابه أو إنهاء خدمته أو تغيير كلمة مروره
-    if (currentEmpUser && latestState.employees) {
+    if (currentEmpUser && latestState.employees && latestState.employees.length > 0) {
       const liveEmp = (latestState.employees || []).find(e => String(e.id) === String(currentEmpUser.id) || String(e.code) === String(currentEmpUser.code));
-      if (!liveEmp || liveEmp.accountSuspended || liveEmp.status === 'معلق' || liveEmp.isTerminated || liveEmp.status === 'تم الاستقالة' || liveEmp.is_active === false) {
-        handleLogout();
-        return;
-      }
-      const myEmpPass = localStorage.getItem('app_emp_password_snapshot');
-      const myEmpVer = Number(localStorage.getItem('app_emp_session_version') || 0);
-      if ((myEmpPass && liveEmp.password && myEmpPass !== liveEmp.password) ||
-          (Number(liveEmp.sessionVersion || 0) > myEmpVer)) {
-        handleLogout();
-        return;
+      if (liveEmp) {
+        if (liveEmp.accountSuspended || liveEmp.status === 'معلق' || liveEmp.isTerminated || liveEmp.status === 'تم الاستقالة' || liveEmp.is_active === false) {
+          handleLogout();
+          return;
+        }
+        const myEmpPass = localStorage.getItem('app_emp_password_snapshot');
+        const myEmpVer = Number(localStorage.getItem('app_emp_session_version') || 0);
+        const srvEmpVer = Number(liveEmp.sessionVersion || 0);
+
+        if (myEmpVer === 0 && srvEmpVer > 0) {
+          try { localStorage.setItem('app_emp_session_version', String(srvEmpVer)); } catch {}
+        } else if ((myEmpPass && liveEmp.password && myEmpPass !== liveEmp.password) ||
+            (myEmpVer > 0 && srvEmpVer > 0 && srvEmpVer > myEmpVer)) {
+          handleLogout();
+          return;
+        }
       }
     }
 
     // 2. إذا كان الفرع المسجل غير موجود في قائمة الفروع أو تم تغيير كلمة مروره
-    if (currentBranch && latestState.branches) {
+    if (currentBranch && latestState.branches && latestState.branches.length > 0) {
       const liveBranch = (latestState.branches || []).find(b => b && (String(b.id) === String(currentBranch?.id) || String(b.branchCode) === String(currentBranch?.branchCode)));
-      if (!liveBranch) {
-        handleLogout();
-        return;
-      }
-      const myBranchPass = localStorage.getItem('app_branch_password_snapshot');
-      const myBranchVer = Number(localStorage.getItem('app_branch_session_version') || 0);
-      if ((myBranchPass && liveBranch.password && myBranchPass !== liveBranch.password) ||
-          (Number(liveBranch.sessionVersion || 0) > myBranchVer)) {
-        handleLogout();
-        return;
+      if (liveBranch) {
+        const myBranchPass = localStorage.getItem('app_branch_password_snapshot');
+        const myBranchVer = Number(localStorage.getItem('app_branch_session_version') || 0);
+        const srvBranchVer = Number(liveBranch.sessionVersion || 0);
+
+        if (myBranchVer === 0 && srvBranchVer > 0) {
+          try { localStorage.setItem('app_branch_session_version', String(srvBranchVer)); } catch {}
+        } else if ((myBranchPass && liveBranch.password && myBranchPass !== liveBranch.password) ||
+            (myBranchVer > 0 && srvBranchVer > 0 && srvBranchVer > myBranchVer)) {
+          handleLogout();
+          return;
+        }
       }
     }
   };
@@ -315,6 +323,28 @@ export function AuthProvider({ children }) {
     const user = options.user || null;
     const branch = options.branch || null;
     const redirectTab = options.redirectTab || (role === 'employee' ? 'portal' : role === 'branch' ? 'branch' : 'dashboard');
+    const loginState = options.state || options.latestState || null;
+
+    try {
+      if (loginState?.orgSettings?.sessionInvalidationEpoch) {
+        localStorage.setItem('last_known_session_epoch', String(loginState.orgSettings.sessionInvalidationEpoch));
+      }
+      if (loginState?._systemResetToken) {
+        localStorage.setItem('last_known_reset_token', String(loginState._systemResetToken));
+      }
+      if (branch?.sessionVersion !== undefined) {
+        localStorage.setItem('app_branch_session_version', String(branch.sessionVersion || 0));
+      }
+      if (branch?.password) {
+        localStorage.setItem('app_branch_password_snapshot', String(branch.password));
+      }
+      if (user?.sessionVersion !== undefined) {
+        localStorage.setItem('app_emp_session_version', String(user.sessionVersion || 0));
+      }
+      if (user?.password) {
+        localStorage.setItem('app_emp_password_snapshot', String(user.password));
+      }
+    } catch {}
 
     setAuthRole(role);
     if (role === 'owner') {

@@ -131,7 +131,16 @@ export default function ElectronicKioskView({
     : null;
   const cleanKioskBranchId = (kioskBranchId && String(kioskBranchId).trim()) || null;
   const cleanUrlParam = (urlBranchParam && String(urlBranchParam).trim()) || null;
-  const effectiveKioskBranchId = cleanKioskBranchId || cleanUrlParam || null;
+  const savedKioskBranchId = typeof window !== 'undefined' ? (localStorage.getItem('kiosk_locked_branch_id') || '').trim() || null : null;
+  const effectiveKioskBranchId = cleanKioskBranchId || cleanUrlParam || savedKioskBranchId || null;
+
+  useEffect(() => {
+    if ((cleanKioskBranchId || cleanUrlParam) && typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('kiosk_locked_branch_id', cleanKioskBranchId || cleanUrlParam);
+      } catch {}
+    }
+  }, [cleanKioskBranchId, cleanUrlParam]);
 
   // البحث عن كائن الفرع المخصص للكشك ومطابقته بأمان وحسم
   const kioskBranchObj = useMemo(() => {
@@ -242,7 +251,16 @@ export default function ElectronicKioskView({
   const showBranchSelector = Boolean(matchedEmp && isGeneralKioskLink && isMultiBranchEmp);
 
   const todayStr = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
-  const rawActiveShift = matchedEmp ? (state.activeShifts?.[matchedEmp.id] || state.activeShifts?.[String(matchedEmp.id)]) : null;
+  const rawActiveShift = matchedEmp ? (
+    state.activeShifts?.[matchedEmp.id] ||
+    state.activeShifts?.[String(matchedEmp.id)] ||
+    (matchedEmp.code && state.activeShifts?.[String(matchedEmp.code)]) ||
+    Object.values(state.activeShifts || {}).find(s => s && (
+      String(s.employeeId) === String(matchedEmp.id) ||
+      (matchedEmp.code && String(s.employeeCode) === String(matchedEmp.code)) ||
+      (matchedEmp.code && String(s.employeeId) === String(matchedEmp.code))
+    ))
+  ) : null;
 
   // الوردية النشطة تعتبر تالفة فقط إذا مر عليها أكثر من 36 ساعة بدون إغلاق
   const rawShiftEpoch = rawActiveShift ? (rawActiveShift.startEpoch || (rawActiveShift.date && rawActiveShift.timeIn ? new Date(`${rawActiveShift.date}T${rawActiveShift.timeIn.slice(0, 5)}:00`).getTime() : 0)) : 0;
@@ -276,7 +294,10 @@ export default function ElectronicKioskView({
   // التحقق من الوردية في الذاكرة: يجب ألا تكون مغلقة في سجل الورديات
   let verifiedActiveShift = null;
   if (rawActiveShift && !isStaleActiveShift) {
-    const recordedMatch = (state.shifts || []).find(s => String(s.id) === String(rawActiveShift.shiftId || rawActiveShift.id));
+    const recordedMatch = (state.shifts || []).find(s =>
+      (rawActiveShift.shiftId && String(s.id) === String(rawActiveShift.shiftId)) ||
+      (String(s.employeeId) === String(matchedEmp.id) && s.date === rawActiveShift.date && s.timeIn === rawActiveShift.timeIn)
+    );
     if (recordedMatch) {
       if (isShiftTrulyOpen(recordedMatch)) {
         verifiedActiveShift = { ...rawActiveShift, ...recordedMatch };
@@ -286,15 +307,20 @@ export default function ElectronicKioskView({
     }
   }
 
-  // فحص سجلات الورديات لمعرفة ما إذا كانت هناك وردية مفتوحة حالياً (حضور مسجل بدون انصراف لليوم أو وردية ليلية بدأت أمس ومستمرة لليوم)
-  const empOpenShift = matchedEmp ? (state.shifts || []).find(s => {
-    const isMatch = (String(s.employeeId) === String(matchedEmp.id) || (matchedEmp.code && String(s.employeeCode) === String(matchedEmp.code)));
-    if (!isMatch || !isShiftTrulyOpen(s)) return false;
-    // استبعاد الورديات الأقدم من 36 ساعة فقط
-    const sEpoch = s.startEpoch || (s.createdAt ? new Date(s.createdAt).getTime() : (s.date && s.timeIn ? new Date(`${s.date}T${s.timeIn.slice(0, 5)}:00`).getTime() : 0));
-    if (sEpoch && (Date.now() - sEpoch > 36 * 3600 * 1000)) return false;
-    return true;
-  }) : null;
+  // فحص سجلات الورديات لمعرفة ما إذا كانت هناك وردية مفتوحة حالياً (الأحدث أولاً لتجنب الورديات المتروكة القديمة)
+  const empOpenShift = matchedEmp ? (state.shifts || [])
+    .filter(s => {
+      const isMatch = (String(s.employeeId) === String(matchedEmp.id) || (matchedEmp.code && String(s.employeeCode) === String(matchedEmp.code)));
+      if (!isMatch || !isShiftTrulyOpen(s)) return false;
+      const sEpoch = s.startEpoch || (s.createdAt ? new Date(s.createdAt).getTime() : (s.date && s.timeIn ? new Date(`${s.date}T${s.timeIn.slice(0, 5)}:00`).getTime() : 0));
+      if (sEpoch && (Date.now() - sEpoch > 36 * 3600 * 1000)) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const aEpoch = a.startEpoch || (a.createdAt ? new Date(a.createdAt).getTime() : (a.date && a.timeIn ? new Date(`${a.date}T${a.timeIn.slice(0, 5)}:00`).getTime() : 0));
+      const bEpoch = b.startEpoch || (b.createdAt ? new Date(b.createdAt).getTime() : (b.date && b.timeIn ? new Date(`${b.date}T${b.timeIn.slice(0, 5)}:00`).getTime() : 0));
+      return bEpoch - aEpoch; // الأحدث أولاً
+    })[0] || null : null;
 
   // تحديد الوردية النشطة: فقط إذا كانت الوردية مفتوحة حقاً وبدون تسجيل انصراف
   const activeShift = verifiedActiveShift || empOpenShift || null;
@@ -593,9 +619,9 @@ export default function ElectronicKioskView({
       return;
     }
     if (action === 'shift_end' && activeShift) {
-      const punchDate = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
-      if (activeShift.date === punchDate && activeShift.startTime) {
-        const elapsedSec = (Date.now() - Number(activeShift.startTime)) / 1000;
+      const shiftStartMs = activeShift.startEpoch || activeShift.startTime || (activeShift.createdAt ? new Date(activeShift.createdAt).getTime() : (activeShift.date && activeShift.timeIn ? new Date(`${activeShift.date}T${activeShift.timeIn.slice(0, 5)}:00`).getTime() : 0));
+      if (shiftStartMs) {
+        const elapsedSec = (Date.now() - Number(shiftStartMs)) / 1000;
         if (elapsedSec >= 0 && elapsedSec < 60) {
           setKioskAlertModal({
             isOpen: true,
@@ -1088,9 +1114,10 @@ export default function ElectronicKioskView({
 
     if (photoActionType) {
       const photoShiftData = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];
+      const effectiveShiftDate = (actionType === 'shift_end' && activeShift?.date) ? activeShift.date : dateStr;
       const photoShiftRecord = (actionType === 'shift_start')
         ? updatedShifts.find(s => s.id === shiftId)
-        : updatedShifts.find(s => String(s.employeeId) === String(currentEmp.id) && s.date === dateStr);
+        : updatedShifts.find(s => (shiftId && s.id === shiftId) || (String(s.employeeId) === String(currentEmp.id) && s.date === effectiveShiftDate));
 
       enqueueKioskPunch({
         employeeId: currentEmp.id,
@@ -1100,8 +1127,8 @@ export default function ElectronicKioskView({
         branchName: effectiveBranchObj?.name || '',
         actionType: photoActionType,
         time: punchTime,
-        date: dateStr,
-        shiftId: shiftId,
+        date: effectiveShiftDate,
+        shiftId: shiftId || activeShift?.shiftId || activeShift?.id || null,
         shiftData: photoShiftData || null,
         shiftRecord: photoShiftRecord || null,
         source: 'kiosk_photo'

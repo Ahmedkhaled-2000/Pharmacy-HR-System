@@ -15,8 +15,6 @@ export default function SalaryIncreasesHub({
   state,
   showToast = (msg) => alert(msg)
 }) {
-  if (!isOpen) return null;
-
   const employees = state?.employees || [];
   const branches = state?.branches || [];
   const orgSettings = state?.orgSettings || {};
@@ -160,6 +158,8 @@ export default function SalaryIncreasesHub({
       totalIncreasesCount
     };
   }, [enrichedEmployees]);
+
+  if (!isOpen) return null;
 
   // Checkbox Selection
   const handleSelectAll = () => {

@@ -320,3 +320,35 @@ export async function outstockGetBranchStock(branchId = '') {
 export async function outstockGetOwnerOverview() {
   return await outstockRequest('owner/overview', { method: 'GET' });
 }
+
+// ── 9. كتالوج أدوية هيئة الدواء المصرية ودراج آي (EDA & Drug Eye Catalog) ───
+export async function outstockSearchMedications(term, limit = 15) {
+  const clean = String(term || '').trim();
+  if (!clean || clean.length < 2) return { success: true, medications: [] };
+
+  const qs = new URLSearchParams({ q: clean, limit: String(limit) });
+  const res = await outstockRequest(`medications/search?${qs.toString()}`, { method: 'GET' });
+  if (res?.success && Array.isArray(res.medications)) {
+    return res;
+  }
+  return { success: false, medications: [], error: res?.error || 'فشل البحث في كتالوج الأدوية' };
+}
+
+export async function outstockGetSubstitutes(genericName, excludeId = null) {
+  if (!genericName) return { success: true, substitutes: [] };
+  const qs = new URLSearchParams({ generic: genericName });
+  if (excludeId) qs.append('excludeId', excludeId);
+
+  return await outstockRequest(`medications/substitutes?${qs.toString()}`, { method: 'GET' });
+}
+
+export async function outstockSyncMedications(medications, source) {
+  return await outstockRequest('medications/sync', {
+    method: 'POST',
+    body: JSON.stringify({ medications, source })
+  });
+}
+
+export async function outstockGetMedicationStats() {
+  return await outstockRequest('medications/stats', { method: 'GET' });
+}
