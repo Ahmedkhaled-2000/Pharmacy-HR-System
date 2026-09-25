@@ -235,11 +235,14 @@ export async function outstockCreateOrder(orderData) {
   return res;
 }
 
-export async function outstockDeliverOrder(orderId) {
+export async function outstockDeliverOrder(orderId, settlementData = {}) {
   return await outstockRequest(`orders/${orderId}/deliver`, {
-    method: 'POST'
+    method: 'POST',
+    body: JSON.stringify(settlementData)
   });
 }
+
+export const outstockSettleAndDeliverOrder = outstockDeliverOrder;
 
 export async function outstockMarkWhatsappNotified(orderId) {
   return await outstockRequest(`orders/${orderId}/whatsapp`, {
@@ -353,6 +356,33 @@ export async function outstockGetMedicationStats() {
   return await outstockRequest('medications/stats', { method: 'GET' });
 }
 
+export async function outstockUpdateMedicationPrice({ medicationId, newPublicPrice, packSize, reason, decreeNumber }) {
+  return await outstockRequest('medications/update-price', {
+    method: 'POST',
+    body: JSON.stringify({ medicationId, newPublicPrice, packSize, reason, decreeNumber })
+  });
+}
+
+export async function outstockBulkUpdatePrices({ items, source, decreeNumber }) {
+  return await outstockRequest('medications/bulk-price-update', {
+    method: 'POST',
+    body: JSON.stringify({ items, source, decreeNumber })
+  });
+}
+
+export async function outstockSyncCloudCatalog() {
+  return await outstockRequest('medications/sync-cloud', {
+    method: 'POST',
+    body: JSON.stringify({})
+  });
+}
+
+export async function outstockGetPriceAuditLogs({ page = 1, limit = 50, search = '' } = {}) {
+  const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (search) qs.append('search', search);
+  return await outstockRequest(`medications/price-audit-logs?${qs.toString()}`, { method: 'GET' });
+}
+
 // ── 10. إعدادات وهوية الصيدلية والشعار بالفاتورة ─────────────────────────────
 export async function outstockGetSettings() {
   const res = await outstockRequest('settings', { method: 'GET' });
@@ -388,4 +418,32 @@ export async function outstockSaveSettings(settingsData) {
 
   return res;
 }
+
+// ── 11. كارتة الصنف، إضافة وتعديل الأدوية والتقارير المالية ──────────────
+export async function outstockGetMedicationMasterCard(medicationId) {
+  return await outstockRequest(`medications/${medicationId}/master-card`, { method: 'GET' });
+}
+
+export async function outstockAddNewMedication(medicationData) {
+  return await outstockRequest('medications', {
+    method: 'POST',
+    body: JSON.stringify(medicationData)
+  });
+}
+
+export async function outstockUpdateMedicationDetails(medicationId, updateData) {
+  return await outstockRequest(`medications/${medicationId}`, {
+    method: 'PUT',
+    body: JSON.stringify(updateData)
+  });
+}
+
+export async function outstockGetFinancialReports({ branchId, fromDate, toDate } = {}) {
+  const qs = new URLSearchParams();
+  if (branchId) qs.append('branchId', branchId);
+  if (fromDate) qs.append('fromDate', fromDate);
+  if (toDate) qs.append('toDate', toDate);
+  return await outstockRequest(`reports/financial?${qs.toString()}`, { method: 'GET' });
+}
+
 

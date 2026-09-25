@@ -1300,22 +1300,34 @@ export async function searchEdaMedications(db, queryTerm, limit = 15) {
   const normalized = normalizeDrugSearchText(clean);
   const pattern = `%${normalized}%`;
   const rawPattern = `%${clean.toLowerCase()}%`;
+  const barcodePrefix = `${clean}%`;
+
+  // توليد بدائل صوتية للبحث مثل ألفانترن / الفنترن
+  let phoneticPattern = pattern;
+  if (normalized.includes('فانترن')) {
+    phoneticPattern = '%فنترن%';
+  } else if (normalized.includes('فنترن')) {
+    phoneticPattern = '%فانترن%';
+  }
 
   const sql = `
     SELECT
       id, eda_reg_no, trade_name_en, trade_name_ar, generic_name,
       dosage_form, strength, pack_size, unit_name, public_price,
       unit_price, manufacturer, category, is_table_drug, is_refrigerated,
-      gtin_barcode, market_status
+      gtin_barcode, market_status, updated_at, created_at
     FROM public.outstock_medications
     WHERE
       search_normalized LIKE $1
+      OR search_normalized LIKE $8
       OR LOWER(trade_name_en) LIKE $2
       OR LOWER(trade_name_ar) LIKE $2
       OR LOWER(generic_name) LIKE $2
       OR gtin_barcode = $3
+      OR gtin_barcode LIKE $9
     ORDER BY
       CASE
+        WHEN gtin_barcode = $3 THEN 0
         WHEN LOWER(trade_name_en) = LOWER($4) OR LOWER(trade_name_ar) = LOWER($4) THEN 1
         WHEN LOWER(trade_name_en) LIKE $5 OR LOWER(trade_name_ar) LIKE $5 THEN 2
         WHEN search_normalized LIKE $6 THEN 3
@@ -1332,7 +1344,9 @@ export async function searchEdaMedications(db, queryTerm, limit = 15) {
     clean.toLowerCase(),
     `${clean.toLowerCase()}%`,
     `${normalized}%`,
-    Math.min(30, Math.max(1, limit))
+    Math.min(30, Math.max(1, limit)),
+    phoneticPattern,
+    barcodePrefix
   ];
 
   const res = await db.query(sql, values);
@@ -1341,7 +1355,8 @@ export async function searchEdaMedications(db, queryTerm, limit = 15) {
     public_price: parseFloat(r.public_price || 0),
     unit_price: parseFloat(r.unit_price || 0),
     pack_size: parseInt(r.pack_size || 1, 10),
-    displayName: `${r.trade_name_ar} (${r.trade_name_en})`
+    displayName: `${r.trade_name_ar} (${r.trade_name_en})`,
+    has_recent_update: r.updated_at && r.created_at && (new Date(r.updated_at).getTime() - new Date(r.created_at).getTime() > 1000)
   }));
 }
 
@@ -1499,5 +1514,747 @@ export async function syncOrUpdateMedications(db, medicationsList, revisionSourc
     updatedCount,
     priceChangesCount,
     totalProcessed: medicationsList.length
+  };
+}
+
+// ── 8. تحديث سعر دواء محدد مع توثيق الرقابة (Individual Price Re-pricing) ───────
+export async function updateMedicationPrice(db, {
+  medicationId,
+  newPublicPrice,
+  packSize = null,
+  reason = 'تعديل السعر الرسمي للصنف',
+  changedBy = 'إدارة الصيدلية',
+  decreeNumber = null
+}) {
+  if (!medicationId) {
+    throw new Error('معرف الدواء مطلوب لتحديث السعر');
+  }
+
+  const parsedPrice = parseFloat(newPublicPrice);
+  if (isNaN(parsedPrice) || parsedPrice < 0) {
+    throw new Error('السعر الجديد غير صالح');
+  }
+
+  const medRes = await db.query(`
+    SELECT id, trade_name_ar, trade_name_en, public_price, unit_price, pack_size, unit_name
+    FROM public.outstock_medications
+    WHERE id = $1
+    LIMIT 1
+  `, [medicationId]);
+
+  if (medRes.rows.length === 0) {
+    throw new Error('الدواء غير موجود في الكتالوج');
+  }
+
+  const med = medRes.rows[0];
+  const oldPublic = parseFloat(med.public_price || 0);
+  const oldUnit = parseFloat(med.unit_price || 0);
+  const actualPackSize = Math.max(1, parseInt(packSize || med.pack_size || 1, 10));
+  const newUnitPrice = parseFloat((parsedPrice / actualPackSize).toFixed(2));
+
+  // تسجيل التدقيق الرقابي للأسعار
+  const auditRes = await db.query(`
+    INSERT INTO public.outstock_price_audit_logs (
+      medication_id, trade_name, old_public_price, new_public_price,
+      old_unit_price, new_unit_price, revision_source, decree_number,
+      changed_by, created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+    RETURNING id, created_at
+  `, [
+    med.id,
+    `${med.trade_name_ar} (${med.trade_name_en})`,
+    oldPublic,
+    parsedPrice,
+    oldUnit,
+    newUnitPrice,
+    reason,
+    decreeNumber,
+    changedBy
+  ]);
+
+  // تحديث السعر في قاعدة البيانات
+  await db.query(`
+    UPDATE public.outstock_medications
+    SET
+      public_price = $1,
+      unit_price = $2,
+      pack_size = $3,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = $4
+  `, [parsedPrice, newUnitPrice, actualPackSize, med.id]);
+
+  return {
+    success: true,
+    medicationId: med.id,
+    trade_name_ar: med.trade_name_ar,
+    trade_name_en: med.trade_name_en,
+    old_public_price: oldPublic,
+    new_public_price: parsedPrice,
+    old_unit_price: oldUnit,
+    new_unit_price: newUnitPrice,
+    audit_id: auditRes.rows[0]?.id,
+    updated_at: auditRes.rows[0]?.created_at
+  };
+}
+
+// ── 9. تحديث جماعي للأسعار من ملفات الإكسل ومنشورات هيئة الدواء (Bulk Re-Pricer) ─
+export async function bulkUpdateMedicationPrices(db, {
+  items,
+  source = 'منشور التسعيرة الجبرية - هيئة الدواء',
+  decreeNumber = null,
+  changedBy = 'إدارة المشتريات'
+}) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return { success: false, error: 'قائمة التحديث فارغة' };
+  }
+
+  let updatedCount = 0;
+  let priceIncreasesCount = 0;
+  let notFoundCount = 0;
+
+  for (const item of items) {
+    const rawPrice = item.newPublicPrice ?? item.public_price ?? item.price;
+    if (rawPrice === undefined || rawPrice === null) continue;
+    const newPrice = parseFloat(rawPrice);
+    if (isNaN(newPrice) || newPrice < 0) continue;
+
+    const barcode = item.barcode ? String(item.barcode).trim() : null;
+    const tradeName = item.tradeName ? String(item.tradeName).trim() : null;
+    const medId = item.id ? String(item.id).trim() : null;
+
+    let matchSql = '';
+    let matchParams = [];
+
+    if (medId) {
+      matchSql = 'WHERE id = $1';
+      matchParams = [medId];
+    } else if (barcode) {
+      matchSql = 'WHERE gtin_barcode = $1';
+      matchParams = [barcode];
+    } else if (tradeName) {
+      matchSql = 'WHERE LOWER(trade_name_en) = LOWER($1) OR trade_name_ar = $1';
+      matchParams = [tradeName];
+    } else {
+      continue;
+    }
+
+    const checkRes = await db.query(`
+      SELECT id, trade_name_ar, trade_name_en, public_price, unit_price, pack_size
+      FROM public.outstock_medications
+      ${matchSql}
+      LIMIT 1
+    `, matchParams);
+
+    if (checkRes.rows.length === 0) {
+      notFoundCount++;
+      continue;
+    }
+
+    const existing = checkRes.rows[0];
+    const oldPublic = parseFloat(existing.public_price || 0);
+    const oldUnit = parseFloat(existing.unit_price || 0);
+    const packSize = Math.max(1, parseInt(item.pack_size || existing.pack_size || 1, 10));
+    const newUnitPrice = parseFloat((newPrice / packSize).toFixed(2));
+
+    if (Math.abs(oldPublic - newPrice) > 0.05) {
+      priceIncreasesCount++;
+      await db.query(`
+        INSERT INTO public.outstock_price_audit_logs (
+          medication_id, trade_name, old_public_price, new_public_price,
+          old_unit_price, new_unit_price, revision_source, decree_number,
+          changed_by, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+      `, [
+        existing.id,
+        `${existing.trade_name_ar} (${existing.trade_name_en})`,
+        oldPublic,
+        newPrice,
+        oldUnit,
+        newUnitPrice,
+        source,
+        decreeNumber,
+        changedBy
+      ]);
+    }
+
+    await db.query(`
+      UPDATE public.outstock_medications
+      SET
+        public_price = $1,
+        unit_price = $2,
+        pack_size = $3,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $4
+    `, [newPrice, newUnitPrice, packSize, existing.id]);
+
+    updatedCount++;
+  }
+
+  return {
+    success: true,
+    totalProcessed: items.length,
+    updatedCount,
+    priceIncreasesCount,
+    notFoundCount
+  };
+}
+
+// ── 10. المزامنة السحابية الدورية مع أحدث البيانات (Cloud Catalog Sync) ──────────
+export async function syncCatalogFromCloud(db) {
+  try {
+    const https = await import('https');
+    const cloudUrl = 'https://raw.githubusercontent.com/mahmoudfalous/eg-drugs/main/data/eg_drugs.json';
+
+    console.log('🌐 [Cloud Sync] بدء جلب تحديثات الأدوية من السحابة:', cloudUrl);
+
+    const rawData = await new Promise((resolve, reject) => {
+      https.get(cloudUrl, (res) => {
+        if (res.statusCode !== 200) {
+          return reject(new Error(`فشل الاتصال بالسحابة: كود الاستجابة ${res.statusCode}`));
+        }
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => resolve(data));
+      }).on('error', reject);
+    });
+
+    const sanitized = rawData.replace(/[\u0000-\u0009\u000B\u000C\u000E-\u001F]+/g, ' ');
+    const drugs = JSON.parse(sanitized);
+
+    console.log(`📦 [Cloud Sync] تم تنزيل ${drugs.length} صنف. جاري فحص ومقارنة فروق الأسعار...`);
+
+    let priceChanges = 0;
+    let newItems = 0;
+
+    for (let i = 0; i < drugs.length; i += 300) {
+      const chunk = drugs.slice(i, i + 300);
+      for (const d of chunk) {
+        const id = `eg-${d.id}`;
+        const newPrice = parseFloat(String(d.price || '0').replace(/[^0-9.]/g, '')) || 0;
+        const packSize = Math.max(1, parseInt(d.units || 1, 10) || 1);
+        const newUnitPrice = parseFloat((newPrice / packSize).toFixed(2));
+
+        const exRes = await db.query(
+          'SELECT id, public_price, unit_price, trade_name_ar FROM public.outstock_medications WHERE id = $1 LIMIT 1',
+          [id]
+        );
+
+        if (exRes.rows.length > 0) {
+          const ex = exRes.rows[0];
+          const oldPrice = parseFloat(ex.public_price || 0);
+          if (Math.abs(oldPrice - newPrice) > 0.05) {
+            priceChanges++;
+            await db.query(`
+              INSERT INTO public.outstock_price_audit_logs (
+                medication_id, trade_name, old_public_price, new_public_price,
+                old_unit_price, new_unit_price, revision_source, decree_number
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            `, [
+              id,
+              ex.trade_name_ar || d.arabic || d.name,
+              oldPrice,
+              newPrice,
+              parseFloat(ex.unit_price || 0),
+              newUnitPrice,
+              'تحديث دوري سحابي - هيئة الدواء المصرية',
+              'EDA-SYNC-' + new Date().toISOString().slice(0, 10)
+            ]);
+
+            await db.query(`
+              UPDATE public.outstock_medications
+              SET public_price = $1, unit_price = $2, pack_size = $3, updated_at = CURRENT_TIMESTAMP
+              WHERE id = $4
+            `, [newPrice, newUnitPrice, packSize, id]);
+          }
+        }
+      }
+    }
+
+    console.log(`✅ [Cloud Sync Done] تم الانتهاء بنجاح. تم رصد وتحديث ${priceChanges} تغير في الأسعار.`);
+    return {
+      success: true,
+      totalChecked: drugs.length,
+      priceChanges,
+      timestamp: new Date().toISOString()
+    };
+  } catch (err) {
+    console.error('❌ [Cloud Sync Error]:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+// ── 11. استرجاع سجل تدقيق وتاريخ تغيرات الأسعار (Price Audit History) ───────────
+export async function getPriceAuditLogs(db, { limit = 50, page = 1, search = '' } = {}) {
+  const parsedLimit = Math.min(100, Math.max(1, parseInt(limit || 50, 10)));
+  const parsedPage = Math.max(1, parseInt(page || 1, 10));
+  const offset = (parsedPage - 1) * parsedLimit;
+
+  let whereClause = '';
+  let params = [];
+
+  if (search && String(search).trim().length > 0) {
+    whereClause = 'WHERE trade_name ILIKE $1 OR revision_source ILIKE $1 OR changed_by ILIKE $1';
+    params.push(`%${String(search).trim()}%`);
+  }
+
+  const countSql = `SELECT COUNT(*) as total FROM public.outstock_price_audit_logs ${whereClause}`;
+  const countRes = await db.query(countSql, params);
+  const total = parseInt(countRes.rows[0]?.total || 0, 10);
+
+  const queryParams = [...params, parsedLimit, offset];
+  const limitParamIdx = params.length + 1;
+  const offsetParamIdx = params.length + 2;
+
+  const dataSql = `
+    SELECT
+      id, medication_id, trade_name, old_public_price, new_public_price,
+      old_unit_price, new_unit_price, revision_source, decree_number,
+      changed_by, created_at
+    FROM public.outstock_price_audit_logs
+    ${whereClause}
+    ORDER BY created_at DESC
+    LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}
+  `;
+
+  const dataRes = await db.query(dataSql, queryParams);
+
+  return {
+    success: true,
+    total,
+    page: parsedPage,
+    limit: parsedLimit,
+    totalPages: Math.ceil(total / parsedLimit),
+    logs: dataRes.rows.map(r => ({
+      ...r,
+      old_public_price: parseFloat(r.old_public_price || 0),
+      new_public_price: parseFloat(r.new_public_price || 0),
+      old_unit_price: parseFloat(r.old_unit_price || 0),
+      new_unit_price: parseFloat(r.new_unit_price || 0),
+      price_diff: parseFloat((parseFloat(r.new_public_price || 0) - parseFloat(r.old_public_price || 0)).toFixed(2))
+    }))
+  };
+}
+
+// ── 12. إضافة دواء جديد بالكامل إلى قاعدة البيانات (Add New Medication) ────────
+export async function addNewMedication(db, medData, userRole = 'branch', username = 'الصيدلي') {
+  const nameEn = String(medData.trade_name_en || medData.tradeNameEn || '').trim();
+  const nameAr = String(medData.trade_name_ar || medData.tradeNameAr || nameEn).trim();
+
+  if (!nameEn && !nameAr) {
+    throw new Error('مطلوب تحديد اسم الدواء (بالعربية أو الإنجليزية)');
+  }
+
+  const publicPrice = parseFloat(medData.public_price ?? medData.publicPrice ?? 0);
+  if (isNaN(publicPrice) || publicPrice < 0) {
+    throw new Error('يرجى إدخال سعر بيع رسمي صالح');
+  }
+
+  const packSize = Math.max(1, parseInt(medData.pack_size ?? medData.packSize ?? 1, 10));
+  const unitPrice = parseFloat((publicPrice / packSize).toFixed(2));
+  const unitName = String(medData.unit_name || medData.unitName || (packSize > 1 ? 'شريط' : 'عبوة')).trim();
+  const genericName = String(medData.generic_name || medData.genericName || 'مستحضر دوائي').trim();
+  const dosageForm = String(medData.dosage_form || medData.dosageForm || 'أقراص').trim();
+  const manufacturer = String(medData.manufacturer || medData.company || 'شركة معتمدة').trim();
+  const category = String(medData.category || medData.description || 'أدوية علاجية').trim();
+  const barcode = String(medData.gtin_barcode || medData.barcode || '').trim() || null;
+  const isTableDrug = Boolean(medData.is_table_drug ?? medData.isTableDrug ?? false);
+  const isRefrigerated = Boolean(medData.is_refrigerated ?? medData.isRefrigerated ?? false);
+
+  // منع تكرار الصنف: فحص الباركود أو تطابق الاسم الإنجليزي والشكل الصيدلي
+  if (barcode) {
+    const checkBarcode = await db.query('SELECT id, trade_name_ar, trade_name_en FROM public.outstock_medications WHERE gtin_barcode = $1 LIMIT 1', [barcode]);
+    if (checkBarcode.rows.length > 0) {
+      const existing = checkBarcode.rows[0];
+      throw new Error(`الصنف مسجل بالفعل بنفس الباركود: "${existing.trade_name_ar} (${existing.trade_name_en})"`);
+    }
+  }
+
+  const checkName = await db.query(
+    'SELECT id, trade_name_ar FROM public.outstock_medications WHERE LOWER(trade_name_en) = LOWER($1) AND dosage_form = $2 LIMIT 1',
+    [nameEn, dosageForm]
+  );
+  if (checkName.rows.length > 0) {
+    throw new Error(`الصنف مسجل بالفعل بهذا الاسم والشكل الصيدلي: "${checkName.rows[0].trade_name_ar}"`);
+  }
+
+  const newId = `eg-add-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+  const edaRegNo = medData.eda_reg_no || `EDA-ADD-${Date.now().toString().slice(-6)}`;
+
+  const normalized = normalizeDrugSearchText(
+    `${nameEn} ${nameAr} ${genericName} ${manufacturer} ${barcode || ''} ${dosageForm}`
+  );
+
+  await db.query(`
+    INSERT INTO public.outstock_medications (
+      id, eda_reg_no, trade_name_en, trade_name_ar, generic_name, dosage_form,
+      strength, pack_size, unit_name, public_price, unit_price, manufacturer,
+      category, is_table_drug, is_refrigerated, gtin_barcode, market_status,
+      search_normalized, updated_at, created_at
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'available', $17, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    )
+  `, [
+    newId, edaRegNo, nameEn, nameAr, genericName, dosageForm,
+    medData.strength || '', packSize, unitName, publicPrice, unitPrice,
+    manufacturer, category, isTableDrug, isRefrigerated, barcode, normalized
+  ]);
+
+  // توثيق إضافة الصنف في سجل الرقابة
+  await db.query(`
+    INSERT INTO public.outstock_price_audit_logs (
+      medication_id, trade_name, old_public_price, new_public_price,
+      old_unit_price, new_unit_price, revision_source, decree_number, changed_by, created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+  `, [
+    newId, `${nameAr} (${nameEn})`, 0.00, publicPrice, 0.00, unitPrice,
+    `إضافة دواء جديد بواسطة (${userRole === 'owner' ? 'المالك' : 'صيدلي الفرع'})`,
+    'NEW-REG', username
+  ]);
+
+  return {
+    success: true,
+    medication: {
+      id: newId,
+      eda_reg_no: edaRegNo,
+      trade_name_en: nameEn,
+      trade_name_ar: nameAr,
+      generic_name: genericName,
+      dosage_form: dosageForm,
+      pack_size: packSize,
+      unit_name: unitName,
+      public_price: publicPrice,
+      unit_price: unitPrice,
+      manufacturer,
+      category,
+      is_table_drug: isTableDrug,
+      is_refrigerated: isRefrigerated,
+      gtin_barcode: barcode,
+      displayName: `${nameAr} (${nameEn})`
+    }
+  };
+}
+
+// ── 13. تعديل بيانات الصنف أو السعر مع ضوابط الفرع والمالك (Update Medication) ─
+export async function updateMedicationDetails(db, medId, updateData, userRole = 'branch', username = 'المستخدم') {
+  if (!medId) {
+    throw new Error('معرف الدواء مطلوب');
+  }
+
+  const existingRes = await db.query(
+    'SELECT * FROM public.outstock_medications WHERE id = $1 LIMIT 1',
+    [medId]
+  );
+  if (existingRes.rows.length === 0) {
+    throw new Error('الدواء غير موجود في الكتالوج');
+  }
+
+  const current = existingRes.rows[0];
+  const oldPublic = parseFloat(current.public_price || 0);
+  const oldUnit = parseFloat(current.unit_price || 0);
+
+  // 🛡️ الضابط الحاسم للصيدلي بالفرع:
+  // "لا يمكنه التعديل على أي صنف مع إمكانية تعديل السعر فقط إلى سعر أعلى وليس أقل"
+  if (userRole === 'branch') {
+    const rawNewPrice = updateData.public_price ?? updateData.newPublicPrice ?? updateData.publicPrice;
+    if (rawNewPrice === undefined || rawNewPrice === null) {
+      throw new Error('الصيدلي بالفرع مصرح له فقط بتعديل السعر الرسمي عند وصول تشغيلة جديدة بسعر أعلى.');
+    }
+
+    const newPublic = parseFloat(rawNewPrice);
+    if (isNaN(newPublic) || newPublic <= 0) {
+      throw new Error('يرجى إدخال سعر صالح');
+    }
+
+    // شرط التحقق الصارم: السعر يجب أن يكون أعلى قطعاً وليس أقل أو مساوي
+    if (newPublic <= oldPublic) {
+      throw new Error(`عفواً، لا يمكن خفض السعر الرسمي أو إبقاؤه كما هو من شاشة الفرع (السعر الحالي: ${oldPublic} ج.م). مسموح فقط برفع السعر إلى سعر أعلى لمواكبة منشورات التسعير الجبري الجديدة.`);
+    }
+
+    const packSize = Math.max(1, parseInt(updateData.pack_size || current.pack_size || 1, 10));
+    const newUnitPrice = parseFloat((newPublic / packSize).toFixed(2));
+
+    await db.query(`
+      UPDATE public.outstock_medications
+      SET public_price = $1, unit_price = $2, pack_size = $3, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $4
+    `, [newPublic, newUnitPrice, packSize, medId]);
+
+    // توثيق التعديل في سجل الرقابة
+    await db.query(`
+      INSERT INTO public.outstock_price_audit_logs (
+        medication_id, trade_name, old_public_price, new_public_price,
+        old_unit_price, new_unit_price, revision_source, decree_number, changed_by, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+    `, [
+      medId, `${current.trade_name_ar} (${current.trade_name_en})`,
+      oldPublic, newPublic, oldUnit, newUnitPrice,
+      updateData.reason || 'تحريك سعر رسمي من الفرع (سعر أعلى)',
+      updateData.decreeNumber || null,
+      username
+    ]);
+
+    return {
+      success: true,
+      message: `تم رفع وتعميم السعر بنجاح من ${oldPublic} ج.م إلى ${newPublic} ج.م`,
+      medicationId: medId,
+      old_public_price: oldPublic,
+      new_public_price: newPublic,
+      new_unit_price: newUnitPrice
+    };
+  }
+
+  // 👑 صلاحيات المالك / المشرف العام: تعديل كامل الحقول وتعديل السعر بحرية
+  const newNameEn = String(updateData.trade_name_en || current.trade_name_en).trim();
+  const newNameAr = String(updateData.trade_name_ar || current.trade_name_ar).trim();
+  const newPublic = updateData.public_price !== undefined ? parseFloat(updateData.public_price) : oldPublic;
+  const newPackSize = Math.max(1, parseInt(updateData.pack_size || current.pack_size || 1, 10));
+  const newUnitPrice = parseFloat((newPublic / newPackSize).toFixed(2));
+  const newGeneric = String(updateData.generic_name || current.generic_name).trim();
+  const newDosage = String(updateData.dosage_form || current.dosage_form).trim();
+  const newUnitName = String(updateData.unit_name || current.unit_name).trim();
+  const newManufacturer = String(updateData.manufacturer || current.manufacturer || '').trim();
+  const newCategory = String(updateData.category || current.category || '').trim();
+  const newBarcode = updateData.gtin_barcode !== undefined ? (String(updateData.gtin_barcode).trim() || null) : current.gtin_barcode;
+  const isTableDrug = updateData.is_table_drug !== undefined ? Boolean(updateData.is_table_drug) : current.is_table_drug;
+  const isRefrigerated = updateData.is_refrigerated !== undefined ? Boolean(updateData.is_refrigerated) : current.is_refrigerated;
+
+  const normalized = normalizeDrugSearchText(
+    `${newNameEn} ${newNameAr} ${newGeneric} ${newManufacturer} ${newBarcode || ''} ${newDosage}`
+  );
+
+  await db.query(`
+    UPDATE public.outstock_medications
+    SET
+      trade_name_en = $1, trade_name_ar = $2, generic_name = $3, dosage_form = $4,
+      pack_size = $5, unit_name = $6, public_price = $7, unit_price = $8,
+      manufacturer = $9, category = $10, is_table_drug = $11, is_refrigerated = $12,
+      gtin_barcode = $13, search_normalized = $14, updated_at = CURRENT_TIMESTAMP
+    WHERE id = $15
+  `, [
+    newNameEn, newNameAr, newGeneric, newDosage, newPackSize, newUnitName,
+    newPublic, newUnitPrice, newManufacturer, newCategory, isTableDrug, isRefrigerated,
+    newBarcode, normalized, medId
+  ]);
+
+  if (Math.abs(oldPublic - newPublic) > 0.05) {
+    await db.query(`
+      INSERT INTO public.outstock_price_audit_logs (
+        medication_id, trade_name, old_public_price, new_public_price,
+        old_unit_price, new_unit_price, revision_source, decree_number, changed_by, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+    `, [
+      medId, `${newNameAr} (${newNameEn})`, oldPublic, newPublic, oldUnit, newUnitPrice,
+      updateData.reason || 'تعديل شامل بواسطة الإدارة العامة', updateData.decreeNumber || null, username
+    ]);
+  }
+
+  return {
+    success: true,
+    message: 'تم تحديث بيانات الصنف بنجاح',
+    medicationId: medId,
+    new_public_price: newPublic,
+    new_unit_price: newUnitPrice
+  };
+}
+
+// ── 14. كارتة الصنف الشاملة والبدائل وسجل الأسعار (Item Master Card) ────────────
+export async function getMedicationMasterCard(db, medId) {
+  if (!medId) throw new Error('معرف الدواء مطلوب');
+
+  const medRes = await db.query(
+    'SELECT * FROM public.outstock_medications WHERE id = $1 LIMIT 1',
+    [medId]
+  );
+  if (medRes.rows.length === 0) {
+    throw new Error('الدواء غير موجود');
+  }
+
+  const med = medRes.rows[0];
+
+  // جلب سجل تغيرات الأسعار الخاصة بهذا الدواء
+  const historyRes = await db.query(`
+    SELECT * FROM public.outstock_price_audit_logs
+    WHERE medication_id = $1
+    ORDER BY created_at DESC
+    LIMIT 20
+  `, [medId]);
+
+  // جلب المثائل المباشرة (نفس المادة الفعالة)
+  const substitutesRes = await db.query(`
+    SELECT id, trade_name_ar, trade_name_en, dosage_form, pack_size, unit_name, public_price, unit_price, manufacturer, market_status
+    FROM public.outstock_medications
+    WHERE LOWER(generic_name) = LOWER($1) AND id <> $2
+    ORDER BY public_price ASC
+    LIMIT 10
+  `, [med.generic_name, medId]);
+
+  return {
+    success: true,
+    medication: {
+      ...med,
+      public_price: parseFloat(med.public_price || 0),
+      unit_price: parseFloat(med.unit_price || 0),
+      pack_size: parseInt(med.pack_size || 1, 10),
+      displayName: `${med.trade_name_ar} (${med.trade_name_en})`
+    },
+    priceHistory: historyRes.rows.map(h => ({
+      ...h,
+      old_public_price: parseFloat(h.old_public_price || 0),
+      new_public_price: parseFloat(h.new_public_price || 0),
+      old_unit_price: parseFloat(h.old_unit_price || 0),
+      new_unit_price: parseFloat(h.new_unit_price || 0)
+    })),
+    substitutes: substitutesRes.rows.map(s => ({
+      ...s,
+      public_price: parseFloat(s.public_price || 0),
+      unit_price: parseFloat(s.unit_price || 0),
+      pack_size: parseInt(s.pack_size || 1, 10)
+    }))
+  };
+}
+
+// ── 15. استرجاع تحليلات التقارير المالية المركزية للمالك (Executive Financials) ──
+export async function getFinancialReportsData(db, { branchId = null, fromDate = null, toDate = null } = {}) {
+  let dateFilter = '';
+  const params = [];
+
+  if (fromDate && toDate) {
+    params.push(fromDate, toDate);
+    dateFilter = ` AND o.created_at >= $${params.length - 1}::date AND o.created_at <= ($${params.length}::date + interval '1 day')`;
+  } else if (fromDate) {
+    params.push(fromDate);
+    dateFilter = ` AND o.created_at >= $${params.length}::date`;
+  }
+
+  let branchFilter = '';
+  if (branchId && branchId !== 'all') {
+    params.push(branchId);
+    branchFilter = ` AND o.branch_id = $${params.length}`;
+  }
+
+  // 1. مبيعات الطلبات المسلمة (Delivered Revenue)
+  const deliveredSql = `
+    SELECT
+      COUNT(DISTINCT o.id) as delivered_count,
+      COALESCE(SUM(o.net_amount), 0) as delivered_sales_total,
+      COALESCE(SUM(o.paid_amount), 0) as delivered_paid_total,
+      COALESCE(SUM(o.discount_value), 0) as delivered_discounts_total
+    FROM public.outstock_orders o
+    WHERE o.order_status = 'delivered' ${dateFilter} ${branchFilter}
+  `;
+  const deliveredRes = await db.query(deliveredSql, params);
+
+  // 2. العربونات المحصلة مسبقاً للطلبات النشطة غير المسلمة (Advance Deposits)
+  const depositsSql = `
+    SELECT
+      COUNT(DISTINCT o.id) as active_count,
+      COALESCE(SUM(o.paid_amount), 0) as active_deposits_total,
+      COALESCE(SUM(o.net_amount), 0) as active_pipeline_total,
+      COALESCE(SUM(o.remaining_amount), 0) as active_remaining_total
+    FROM public.outstock_orders o
+    WHERE o.order_status IN ('pending_procurement', 'partially_restocked', 'ready_for_pickup')
+      ${dateFilter} ${branchFilter}
+  `;
+  const depositsRes = await db.query(depositsSql, params);
+
+  // 3. المبيعات الضائعة بسبب نواقص السوق والأصناف غير المتوفرة (Lost Revenue Opportunity)
+  const lostSql = `
+    SELECT
+      COUNT(DISTINCT i.id) as lost_items_count,
+      COALESCE(SUM(i.total_price), 0) as lost_revenue_total
+    FROM public.outstock_order_items i
+    JOIN public.outstock_orders o ON i.order_id = o.id
+    WHERE (i.item_status = 'unavailable' OR o.order_status = 'cancelled')
+      ${dateFilter} ${branchFilter}
+  `;
+  const lostRes = await db.query(lostSql, params);
+
+  // 4. مصفوفة مقارنة الفروع المالية (Branch Matrix)
+  const branchMatrixSql = `
+    SELECT
+      b.id as branch_id,
+      b.name as branch_name,
+      COUNT(DISTINCT o.id) as total_orders,
+      COUNT(DISTINCT o.id) FILTER (WHERE o.order_status = 'delivered') as delivered_orders,
+      COALESCE(SUM(o.net_amount) FILTER (WHERE o.order_status = 'delivered'), 0) as delivered_sales,
+      COALESCE(SUM(o.paid_amount) FILTER (WHERE o.order_status IN ('pending_procurement', 'partially_restocked', 'ready_for_pickup')), 0) as active_deposits,
+      COALESCE(SUM(o.net_amount) FILTER (WHERE o.order_status IN ('pending_procurement', 'partially_restocked', 'ready_for_pickup')), 0) as pending_amount,
+      COALESCE((
+        SELECT SUM(i2.total_price)
+        FROM public.outstock_order_items i2
+        JOIN public.outstock_orders o2 ON i2.order_id = o2.id
+        WHERE o2.branch_id = b.id AND (i2.item_status = 'unavailable' OR o2.order_status = 'cancelled')
+      ), 0) as lost_revenue
+    FROM public.outstock_branches b
+    LEFT JOIN public.outstock_orders o ON b.id = o.branch_id ${dateFilter}
+    GROUP BY b.id, b.name
+    ORDER BY delivered_sales DESC
+  `;
+  const branchMatrixRes = await db.query(branchMatrixSql, params.slice(0, fromDate && toDate ? 2 : (fromDate ? 1 : 0)));
+
+  // 5. رادار أعلى 10 أصناف تسببت في نزيف الإيرادات (Top Revenue Drainers)
+  const topLostSql = `
+    SELECT
+      i.medication_name,
+      SUM(i.quantity) as total_lost_qty,
+      AVG(i.unit_price) as avg_price,
+      SUM(i.total_price) as total_lost_amount,
+      COUNT(DISTINCT o.branch_id) as branches_count,
+      COUNT(DISTINCT o.id) as orders_count
+    FROM public.outstock_order_items i
+    JOIN public.outstock_orders o ON i.order_id = o.id
+    WHERE (i.item_status = 'unavailable' OR o.order_status = 'cancelled')
+      ${dateFilter} ${branchFilter}
+    GROUP BY i.medication_name
+    ORDER BY total_lost_amount DESC
+    LIMIT 10
+  `;
+  const topLostRes = await db.query(topLostSql, params);
+
+  // 6. آخر عمليات التحصيل والتسليم المسجلة بالفروع
+  const recentSalesSql = `
+    SELECT s.*, b.name as branch_name
+    FROM public.outstock_branch_sales s
+    LEFT JOIN public.outstock_branches b ON s.branch_id = b.id
+    ${branchId && branchId !== 'all' ? 'WHERE s.branch_id = $1' : ''}
+    ORDER BY s.created_at DESC
+    LIMIT 15
+  `;
+  const recentSalesRes = await db.query(recentSalesSql, branchId && branchId !== 'all' ? [branchId] : []);
+
+  return {
+    success: true,
+    kpis: {
+      deliveredSales: parseFloat(deliveredRes.rows[0]?.delivered_sales_total || 0),
+      deliveredOrdersCount: parseInt(deliveredRes.rows[0]?.delivered_count || 0, 10),
+      deliveredDiscounts: parseFloat(deliveredRes.rows[0]?.delivered_discounts_total || 0),
+      activeDeposits: parseFloat(depositsRes.rows[0]?.active_deposits_total || 0),
+      pendingPipeline: parseFloat(depositsRes.rows[0]?.active_pipeline_total || 0),
+      pendingRemaining: parseFloat(depositsRes.rows[0]?.active_remaining_total || 0),
+      activeOrdersCount: parseInt(depositsRes.rows[0]?.active_count || 0, 10),
+      lostRevenue: parseFloat(lostRes.rows[0]?.lost_revenue_total || 0),
+      lostItemsCount: parseInt(lostRes.rows[0]?.lost_items_count || 0, 10)
+    },
+    branchMatrix: branchMatrixRes.rows.map(b => ({
+      ...b,
+      total_orders: parseInt(b.total_orders || 0, 10),
+      delivered_orders: parseInt(b.delivered_orders || 0, 10),
+      delivered_sales: parseFloat(b.delivered_sales || 0),
+      active_deposits: parseFloat(b.active_deposits || 0),
+      pending_amount: parseFloat(b.pending_amount || 0),
+      lost_revenue: parseFloat(b.lost_revenue || 0),
+      collection_rate: parseFloat(b.delivered_sales || 0) + parseFloat(b.pending_amount || 0) > 0
+        ? parseFloat(((parseFloat(b.delivered_sales || 0) / (parseFloat(b.delivered_sales || 0) + parseFloat(b.pending_amount || 0))) * 100).toFixed(1))
+        : 100
+    })),
+    topLostItems: topLostRes.rows.map(t => ({
+      ...t,
+      total_lost_qty: parseInt(t.total_lost_qty || 0, 10),
+      avg_price: parseFloat(t.avg_price || 0),
+      total_lost_amount: parseFloat(t.total_lost_amount || 0),
+      branches_count: parseInt(t.branches_count || 0, 10),
+      orders_count: parseInt(t.orders_count || 0, 10)
+    })),
+    recentSales: recentSalesRes.rows
   };
 }

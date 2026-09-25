@@ -3,7 +3,7 @@ import { Plus, Search, Printer, CheckCircle, MessageSquare, AlertCircle, Clock, 
 import { outstockGetOrders, outstockDeliverOrder, outstockMarkWhatsappNotified } from '../../../utils/outstockApiClient';
 import NewCustomerOrderModal from './NewCustomerOrderModal';
 import DualCashierReceiptModal from './DualCashierReceiptModal';
-import OutstockConfirmModal from '../common/OutstockConfirmModal';
+import OrderDeliverySettlementModal from './OrderDeliverySettlementModal';
 
 /**
  * PharmacyOrdersTab.jsx
@@ -463,25 +463,22 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
         />
       )}
 
-      {/* ── نافذة تأكيد تسليم الدواء للعميل وتحصيل المبلغ ── */}
-      <OutstockConfirmModal
-        isOpen={Boolean(deliveryConfirmOrder)}
-        title="تأكيد تسليم الطلب وتحصيل المبلغ"
-        message="هل حضر العميل واستلم كافة أصناف الأدوية المحجوزة وتم تحصيل المبلغ المتبقي بالدرج؟"
-        iconType="success"
-        confirmText="نعم، تم التسليم والتحصيل"
-        cancelText="تراجع"
-        confirmBtnStyle="success"
-        badge={deliveryConfirmOrder ? `إيصال #${deliveryConfirmOrder.order_number || deliveryConfirmOrder.orderNumber}` : null}
-        details={deliveryConfirmOrder ? [
-          { label: 'العميل', value: deliveryConfirmOrder.customer_name || deliveryConfirmOrder.customerName },
-          { label: 'الهاتف', value: deliveryConfirmOrder.customer_phone || deliveryConfirmOrder.customerPhone || '-' },
-          { label: 'المبلغ المتبقي', value: `${parseFloat(deliveryConfirmOrder.remaining_amount || deliveryConfirmOrder.remainingAmount || 0).toFixed(2)} ج.م` }
-        ] : null}
-        isProcessing={isDelivering}
-        onConfirm={executeDeliver}
-        onClose={() => setDeliveryConfirmOrder(null)}
-      />
+      {/* ── نافذة تسليم الطلب للعميل وتسوية باقي المبلغ وإدراجه بمبيعات الفرع ── */}
+      {deliveryConfirmOrder && (
+        <OrderDeliverySettlementModal
+          order={deliveryConfirmOrder}
+          branch={branch}
+          currentPharmacist={currentPharmacist}
+          onClose={() => setDeliveryConfirmOrder(null)}
+          onDeliveredSuccess={(deliveredOrder) => {
+            setOrders(prev => prev.filter(o => o.id !== deliveredOrder.id));
+          }}
+          onOpenReceiptPrint={(receiptOrder) => {
+            setPrintingOrder(receiptOrder);
+          }}
+          showToast={showToast}
+        />
+      )}
     </div>
   );
 }

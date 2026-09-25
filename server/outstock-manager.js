@@ -9,7 +9,15 @@ import {
   initEdaMedicationTables,
   searchEdaMedications,
   getDrugEyeSubstitutes,
-  syncOrUpdateMedications
+  syncOrUpdateMedications,
+  updateMedicationPrice,
+  bulkUpdateMedicationPrices,
+  syncCatalogFromCloud,
+  getPriceAuditLogs,
+  addNewMedication,
+  updateMedicationDetails,
+  getMedicationMasterCard,
+  getFinancialReportsData
 } from './eda-drugeye-catalog.js';
 
 // ── توليد توكن مصادقة آمن ──────────────────────────────────────────────────
@@ -210,6 +218,26 @@ export async function initOutstockTables(db) {
           setting_value JSONB NOT NULL,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
+
+      -- 11. جدول مبيعات الفروع المباشرة للطلبات المسلمة والتحصيل اليومي
+      CREATE TABLE IF NOT EXISTS public.outstock_branch_sales (
+          id VARCHAR(100) PRIMARY KEY,
+          branch_id VARCHAR(50) NOT NULL,
+          order_id VARCHAR(100) NOT NULL,
+          customer_name VARCHAR(150) NULL,
+          customer_phone VARCHAR(50) NULL,
+          total_order_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          advance_deposit NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          remaining_collected NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          net_collected_now NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          payment_method VARCHAR(50) NOT NULL DEFAULT 'cash',
+          collected_by VARCHAR(100) NULL,
+          receipt_number VARCHAR(100) NULL,
+          notes TEXT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_outstock_branch_sales_branch ON public.outstock_branch_sales (branch_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_outstock_branch_sales_order ON public.outstock_branch_sales (order_id);
     `;
 
     await db.query(schemaSql);
@@ -623,6 +651,126 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         stats: statsRes.rows[0],
         recentRevisions: recentRevisionsRes.rows
       });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // تحديث سعر صنف محدد من شاشة البيع أو الإدارة وتعميمه لحظياً مع التوثيق
+  app.post('/api/outstock/medications/update-price', authMiddleware, async (req, res) => {
+    try {
+      const { medicationId, newPublicPrice, packSize, reason, decreeNumber } = req.body || {};
+      const changedBy = req.user?.username || req.user?.full_name || 'صيدلي الفرع';
+
+      const result = await updateMedicationPrice(db, {
+        medicationId,
+        newPublicPrice,
+        packSize,
+        reason: reason || 'تعديل السعر الرسمي عند البيع/الاستلام',
+        changedBy,
+        decreeNumber
+      });
+
+      broadcastOutstock('outstock:price_updated', result);
+      res.json(result);
+    } catch (err) {
+      console.warn('[Update Price Warn]:', err.message);
+      res.status(400).json({ success: false, error: err.message });
+    }
+  });
+
+  // تحديث جماعي للأسعار من ملفات الإكسل أو منشورات هيئة الدواء
+  app.post('/api/outstock/medications/bulk-price-update', authMiddleware, async (req, res) => {
+    try {
+      const { items, source, decreeNumber } = req.body || {};
+      const changedBy = req.user?.username || 'إدارة المشتريات';
+
+      const result = await bulkUpdateMedicationPrices(db, {
+        items,
+        source: source || 'منشور التسعيرة الجبرية - هيئة الدواء',
+        decreeNumber,
+        changedBy
+      });
+
+      broadcastOutstock('outstock:bulk_prices_updated', {
+        timestamp: new Date().toISOString(),
+        summary: result
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  });
+
+  // مزامنة كتالوج الأدوية سحابياً مع التحديثات الرسمية
+  app.post('/api/outstock/medications/sync-cloud', authMiddleware, async (req, res) => {
+    try {
+      const result = await syncCatalogFromCloud(db);
+      if (result.success) {
+        broadcastOutstock('outstock:cloud_sync_completed', result);
+      }
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // استرجاع سجل تدقيق وتاريخ تغيرات الأسعار الرسمية
+  app.get('/api/outstock/medications/price-audit-logs', authMiddleware, async (req, res) => {
+    try {
+      const { page, limit, search } = req.query || {};
+      const result = await getPriceAuditLogs(db, { page, limit, search });
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // كارتة الصنف الشاملة والبدائل وسجل تحريك الأسعار
+  app.get('/api/outstock/medications/:id/master-card', authMiddleware, async (req, res) => {
+    try {
+      const result = await getMedicationMasterCard(db, req.params.id);
+      res.json(result);
+    } catch (err) {
+      res.status(404).json({ success: false, error: err.message });
+    }
+  });
+
+  // إضافة صنف دوائي جديد للكتالوج المركزي (متاح للمالك وللصيدلي بالفرع)
+  app.post('/api/outstock/medications', authMiddleware, async (req, res) => {
+    try {
+      const userRole = (req.outstockUser?.role === 'owner' || req.outstockUser?.role === 'admin') ? 'owner' : 'branch';
+      const username = req.outstockUser?.username || req.outstockUser?.full_name || 'صيدلي الفرع';
+
+      const result = await addNewMedication(db, req.body, userRole, username);
+      broadcastOutstock('outstock:medication_added', result);
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  });
+
+  // تعديل بيانات الصنف أو السعر
+  // (الصيدلي بالفرع مصرح له فقط بزيادة السعر إلى سعر أعلى وليس أقل، بينما المالك يعدل كامل البيانات)
+  app.put('/api/outstock/medications/:id', authMiddleware, async (req, res) => {
+    try {
+      const userRole = (req.outstockUser?.role === 'owner' || req.outstockUser?.role === 'admin') ? 'owner' : 'branch';
+      const username = req.outstockUser?.username || req.outstockUser?.full_name || 'المستخدم';
+
+      const result = await updateMedicationDetails(db, req.params.id, req.body, userRole, username);
+      broadcastOutstock('outstock:price_updated', result);
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  });
+
+  // استرجاع تحليلات التقارير المالية للمالك والفروع
+  app.get('/api/outstock/reports/financial', authMiddleware, async (req, res) => {
+    try {
+      const { branchId, fromDate, toDate } = req.query || {};
+      const result = await getFinancialReportsData(db, { branchId, fromDate, toDate });
+      res.json(result);
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -1152,21 +1300,48 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     }
   });
 
-  // تسليم الطلب للعميل
+  // تسليم الطلب للعميل وتسوية باقي المبلغ وإدراجه في مبيعات الفرع اليومية
   app.post('/api/outstock/orders/:id/deliver', authMiddleware, async (req, res) => {
     try {
       const orderId = req.params.id;
-      const orderRes = await db.query('SELECT * FROM public.outstock_orders WHERE id = $1', [orderId]);
+      const {
+        collectedAmount,
+        paymentMethod = 'cash',
+        notes = '',
+        cashierName = '',
+        receiptNumber = ''
+      } = req.body || {};
+
+      const orderRes = await db.query(`
+        SELECT o.*, c.full_name as customer_name, c.whatsapp_phone as customer_phone
+        FROM public.outstock_orders o
+        LEFT JOIN public.outstock_customers c ON o.customer_id = c.id
+        WHERE o.id = $1
+      `, [orderId]);
+
       if (orderRes.rows.length === 0) {
         return res.status(404).json({ success: false, error: 'الطلب غير موجود' });
       }
 
       const order = orderRes.rows[0];
+      const previousPaid = parseFloat(order.paid_amount || 0);
+      const netTotal = parseFloat(order.net_amount || 0);
+      const remainingDue = Math.max(0, netTotal - previousPaid);
+
+      // احتساب المبلغ المحصل فعلياً عند التسليم
+      const nowCollected = collectedAmount !== undefined ? Math.max(0, parseFloat(collectedAmount)) : remainingDue;
+      const newTotalPaid = previousPaid + nowCollected;
+      const newRemaining = Math.max(0, netTotal - newTotalPaid);
+
       await db.query(`
         UPDATE public.outstock_orders
-        SET order_status = 'delivered', delivered_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        WHERE id = $1
-      `, [orderId]);
+        SET order_status = 'delivered',
+            paid_amount = $1,
+            remaining_amount = $2,
+            delivered_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+      `, [newTotalPaid, newRemaining, orderId]);
 
       await db.query(`
         UPDATE public.outstock_order_items
@@ -1189,11 +1364,78 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         `, [item.quantity, order.branch_id, item.medication_name, item.unit_type]);
       }
 
-      // ⚡ بث فوري
-      broadcastOutstock('outstock:order_delivered', { orderId, branchId: order.branch_id });
+      // إدراج حركة التحصيل في جدول مبيعات الفروع المباشرة
+      const saleId = `sale_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const cashier = cashierName || req.outstockUser?.username || req.outstockUser?.full_name || 'صيدلي الفرع';
+      const rcpt = receiptNumber || `REC-${order.order_number || Date.now()}`;
 
-      res.json({ success: true, message: 'تم تسليم الطلب للعميل واكتمال المعاملة بنجاح' });
+      await db.query(`
+        INSERT INTO public.outstock_branch_sales (
+          id, branch_id, order_id, customer_name, customer_phone,
+          total_order_amount, advance_deposit, remaining_collected, net_collected_now,
+          payment_method, collected_by, receipt_number, notes, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP)
+      `, [
+        saleId, order.branch_id, orderId, order.customer_name || 'عميل نقدي', order.customer_phone || '',
+        netTotal, previousPaid, nowCollected, nowCollected,
+        paymentMethod, cashier, rcpt, notes
+      ]);
+
+      // ترحيل المبيعات تلقائياً إلى سجلات مبيعات الفرع اليومية في منظومة الـ HR (app_settings -> pharmacy-tracker-data)
+      try {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const settingsRes = await db.query("SELECT value_data FROM public.app_settings WHERE key_name = 'pharmacy-tracker-data'");
+        if (settingsRes.rows.length > 0) {
+          const currentSettings = settingsRes.rows[0].value_data || {};
+          const branchSales = Array.isArray(currentSettings.branchSales) ? [...currentSettings.branchSales] : [];
+
+          branchSales.push({
+            id: `sale_outstock_${orderId}`,
+            branchId: order.branch_id,
+            date: todayStr,
+            totalSales: netTotal,
+            cashSales: paymentMethod === 'cash' ? (nowCollected + previousPaid) : 0,
+            visaSales: (paymentMethod === 'visa' || paymentMethod === 'card') ? nowCollected : 0,
+            notes: `مبيعات طلب نواقص مسلّم رقم ${order.order_number} للعميل ${order.customer_name || ''}`,
+            createdAt: new Date().toISOString(),
+            createdBy: cashier
+          });
+
+          await db.query(
+            "UPDATE public.app_settings SET value_data = $1, updated_at = CURRENT_TIMESTAMP WHERE key_name = 'pharmacy-tracker-data'",
+            [JSON.stringify({ ...currentSettings, branchSales })]
+          );
+        }
+      } catch (hrSaleErr) {
+        console.warn('[HR BranchSales Sync Warning]:', hrSaleErr.message);
+      }
+
+      // ⚡ بث فوري للأحداث
+      broadcastOutstock('outstock:order_delivered', {
+        orderId,
+        branchId: order.branch_id,
+        collectedAmount: nowCollected,
+        netTotal,
+        paymentMethod
+      });
+      broadcastOutstock('outstock:sale_recorded', {
+        saleId,
+        branchId: order.branch_id,
+        orderId,
+        netTotal,
+        collectedAmount: nowCollected
+      });
+
+      res.json({
+        success: true,
+        message: `تم تسليم الطلب للعميل بنجاح وتحصيل ${nowCollected.toFixed(2)} ج.م وإدراجها في مبيعات الفرع`,
+        saleId,
+        orderId,
+        collectedAmount: nowCollected,
+        remainingAmount: newRemaining
+      });
     } catch (err) {
+      console.error('[Deliver Order Error]:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });

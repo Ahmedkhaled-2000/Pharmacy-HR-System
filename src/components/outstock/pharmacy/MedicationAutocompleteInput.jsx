@@ -5,6 +5,23 @@ import { outstockSearchMedications, outstockGetSubstitutes } from '../../../util
 // ── كتالوج محلي فائق السرعة لضمان العمل اللحظي دون أي تأخير ───────────────
 const LOCAL_FALLBACK_MEDS = [
   {
+    id: 'eg-441',
+    trade_name_en: 'alphintern 30 f.c.tabs',
+    trade_name_ar: 'الفنترن 30 قرص',
+    generic_name: 'chymotrypsin+trypsin',
+    dosage_form: 'أقراص',
+    strength: '',
+    pack_size: 3,
+    unit_name: 'شريط',
+    public_price: 87.00,
+    unit_price: 29.00,
+    manufacturer: 'Amoun',
+    is_table_drug: false,
+    is_refrigerated: false,
+    gtin_barcode: '6221025030733',
+    displayName: 'الفنترن 30 قرص (alphintern 30 f.c.tabs)'
+  },
+  {
     id: 'f-1',
     trade_name_en: 'Augmentin 1g Tablets',
     trade_name_ar: 'أوجمنتين 1 جم أقراص',

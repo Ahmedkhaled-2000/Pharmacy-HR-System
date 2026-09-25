@@ -19,7 +19,10 @@ import {
   RefreshCw,
   Keyboard,
   Lock,
-  MessageSquare
+  MessageSquare,
+  Search,
+  BarChart3,
+  Pill
 } from 'lucide-react';
 import { outstockGetMe } from '../../utils/outstockApiClient';
 import {
@@ -45,11 +48,13 @@ import ProcurementDeliveryTrackingTab from './procurement/ProcurementDeliveryTra
 import ProcurementUnavailableTab from './procurement/ProcurementUnavailableTab';
 import ProcurementWhatsAppCenterTab from './procurement/ProcurementWhatsAppCenterTab';
 
-// بوابات المالك
 import OwnerBranchOrdersTab from './owner/OwnerBranchOrdersTab';
 import OwnerProcurementMonitoringTab from './owner/OwnerProcurementMonitoringTab';
 import OwnerCustomersDirectoryTab from './owner/OwnerCustomersDirectoryTab';
 import OwnerSettingsTab from './owner/OwnerSettingsTab';
+import OwnerMedicationsPricingTab from './owner/OwnerMedicationsPricingTab';
+import OwnerFinancialReportsTab from './owner/OwnerFinancialReportsTab';
+import PharmacyMedicationSearchTab from './pharmacy/PharmacyMedicationSearchTab';
 
 /**
  * OutstockSystemView.jsx
@@ -307,6 +312,16 @@ export default function OutstockSystemView({
 
               <button
                 type="button"
+                className={`outstock-nav-btn ${activeTab === 'branch_medication_search' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('branch_medication_search')}
+                title="البحث عن صنف أو بديل، كارتة الصنف، إضافة صنف جديد، وتعديل السعر للأعلى فقط"
+              >
+                <Search size={15} />
+                <span>البحث عن صنف والبدائل</span>
+              </button>
+
+              <button
+                type="button"
                 className={`outstock-nav-btn ${activeTab === 'whatsapp' ? 'is-active' : ''}`}
                 onClick={() => setActiveTab('whatsapp')}
                 title="اتصال الواتساب بالفرع وإرسال الرسائل التلقائية للعملاء"
@@ -356,12 +371,32 @@ export default function OutstockSystemView({
                 <MessageSquare size={15} />
                 <span>واتساب الفروع</span>
               </button>
+
+              <button
+                type="button"
+                className={`outstock-nav-btn ${activeTab === 'procurement_medications' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('procurement_medications')}
+                title="كتالوج وتسعير الأدوية وهيئة الدواء ودراج آي"
+              >
+                <Pill size={15} />
+                <span>كتالوج وتسعير الأدوية</span>
+              </button>
             </>
           )}
 
-          {/* 3. قوائم بوابة المالك (5 قوائم) */}
+          {/* 3. قوائم بوابة المالك (6 قوائم) */}
           {userRole === 'owner' && (
             <>
+              <button
+                type="button"
+                className={`outstock-nav-btn ${activeTab === 'owner_financial_reports' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('owner_financial_reports')}
+                title="متابعة التقارير المالية ومبيعات الفروع والعربونات ونواقص السوق"
+              >
+                <BarChart3 size={15} />
+                <span>التقارير المالية والأرباح</span>
+              </button>
+
               <button
                 type="button"
                 className={`outstock-nav-btn ${activeTab === 'owner_branches' ? 'is-active' : ''}`}
@@ -378,6 +413,16 @@ export default function OutstockSystemView({
               >
                 <TrendingUp size={15} />
                 <span>متابعة إدارة المشتريات</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-nav-btn ${activeTab === 'owner_medications' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('owner_medications')}
+                title="كتالوج وتسعير الأدوية وهيئة الدواء ودراج آي"
+              >
+                <Pill size={15} />
+                <span>كتالوج وتسعير الأدوية</span>
               </button>
 
               <button
@@ -616,6 +661,15 @@ export default function OutstockSystemView({
                 />
               )}
 
+              {activeTab === 'branch_medication_search' && (
+                <PharmacyMedicationSearchTab
+                  branchId={effectiveBranchId}
+                  branch={activeBranch}
+                  currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
+                  showToast={showToast}
+                />
+              )}
+
               {activeTab === 'whatsapp' && (
                 <OutstockWhatsAppCenterTab
                   branchId={effectiveBranchId}
@@ -649,18 +703,30 @@ export default function OutstockSystemView({
                 showToast={showToast}
               />
             )}
+
+            {activeTab === 'procurement_medications' && (
+              <OwnerMedicationsPricingTab showToast={showToast} />
+            )}
           </>
         )}
 
         {/* ── ج) تبويبات المالك ── */}
         {userRole === 'owner' && (
           <>
+            {activeTab === 'owner_financial_reports' && (
+              <OwnerFinancialReportsTab showToast={showToast} />
+            )}
+
             {activeTab === 'owner_branches' && (
               <OwnerBranchOrdersTab showToast={showToast} />
             )}
 
             {activeTab === 'owner_procurement' && (
               <OwnerProcurementMonitoringTab />
+            )}
+
+            {activeTab === 'owner_medications' && (
+              <OwnerMedicationsPricingTab showToast={showToast} />
             )}
 
             {activeTab === 'owner_customers' && (

@@ -57,3 +57,5 @@ release/
 dist-electron/
 server/whatsapp-auth/
 whatsapp-auth/
+*.tar.gz
+server/data/
