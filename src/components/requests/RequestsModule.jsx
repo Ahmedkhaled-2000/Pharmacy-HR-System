@@ -229,48 +229,6 @@ export default function RequestsModule({
   const [showHiddenAdminRequests, setShowHiddenAdminRequests] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useEffect(() => {
-    const handleSetFilter = (e) => {
-      if (e?.detail?.filterType) {
-        setFilterType(e.detail.filterType);
-      }
-      if (e?.detail?.inboxTab) {
-        setInboxTab(e.detail.inboxTab);
-      }
-      if (e?.detail?.requestId || e?.detail?.filterType === 'expense') {
-        const rId = e?.detail?.requestId ? String(e.detail.requestId) : '';
-        const bName = e?.detail?.branchName ? String(e.detail.branchName) : '';
-        setTimeout(() => {
-          let match = null;
-          if (rId) {
-            match = allRequests.find(r => 
-              String(r.id) === rId || 
-              String(r.transactionId) === rId || 
-              String(r.requestId) === rId ||
-              rId.includes(String(r.id)) ||
-              String(r.id).includes(rId)
-            );
-          }
-          if (!match && (e?.detail?.filterType === 'expense' || rId.includes('notif_fin_') || rId.includes('trx_'))) {
-            match = allRequests.find(r => 
-              (r.type === 'expense' || r.type === 'financial_expense' || r.type === 'invoice') &&
-              (r.status === 'pending' || !r.adminApproved) &&
-              (!bName || String(r.branchName || '').includes(bName) || bName.includes(String(r.branchName || '')))
-            ) || allRequests.find(r => 
-              (r.type === 'expense' || r.type === 'financial_expense' || r.type === 'invoice') &&
-              (r.status === 'pending' || !r.adminApproved)
-            );
-          }
-          if (match) {
-            handleOpenPreview(match);
-          }
-        }, 120);
-      }
-    };
-    window.addEventListener('requests:set-filter-type', handleSetFilter);
-    return () => window.removeEventListener('requests:set-filter-type', handleSetFilter);
-  }, [allRequests]);
-
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     try {
@@ -596,6 +554,48 @@ export default function RequestsModule({
 
   const clearableAllRequestsCount = useMemo(() => {
     return allRequests.filter(r => !isPendingRequest(r)).length;
+  }, [allRequests]);
+
+  useEffect(() => {
+    const handleSetFilter = (e) => {
+      if (e?.detail?.filterType) {
+        setFilterType(e.detail.filterType);
+      }
+      if (e?.detail?.inboxTab) {
+        setInboxTab(e.detail.inboxTab);
+      }
+      if (e?.detail?.requestId || e?.detail?.filterType === 'expense') {
+        const rId = e?.detail?.requestId ? String(e.detail.requestId) : '';
+        const bName = e?.detail?.branchName ? String(e.detail.branchName) : '';
+        setTimeout(() => {
+          let match = null;
+          if (rId) {
+            match = allRequests.find(r => 
+              String(r.id) === rId || 
+              String(r.transactionId) === rId || 
+              String(r.requestId) === rId ||
+              rId.includes(String(r.id)) ||
+              String(r.id).includes(rId)
+            );
+          }
+          if (!match && (e?.detail?.filterType === 'expense' || rId.includes('notif_fin_') || rId.includes('trx_'))) {
+            match = allRequests.find(r => 
+              (r.type === 'expense' || r.type === 'financial_expense' || r.type === 'invoice') &&
+              (r.status === 'pending' || !r.adminApproved) &&
+              (!bName || String(r.branchName || '').includes(bName) || bName.includes(String(r.branchName || '')))
+            ) || allRequests.find(r => 
+              (r.type === 'expense' || r.type === 'financial_expense' || r.type === 'invoice') &&
+              (r.status === 'pending' || !r.adminApproved)
+            );
+          }
+          if (match) {
+            handleOpenPreview(match);
+          }
+        }, 120);
+      }
+    };
+    window.addEventListener('requests:set-filter-type', handleSetFilter);
+    return () => window.removeEventListener('requests:set-filter-type', handleSetFilter);
   }, [allRequests]);
 
   const employees = state.employees || [];
