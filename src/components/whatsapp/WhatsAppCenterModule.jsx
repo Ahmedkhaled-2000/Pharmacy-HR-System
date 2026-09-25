@@ -350,7 +350,7 @@ export default function WhatsAppCenterModule({
 
     // 1. محاولة الاتصال بالرابط النشط
     try {
-      const res = await fetch(`${activeUrl.replace(/\/$/, '')}/api/status`, {
+      const res = await fetch(`${activeUrl.replace(/\/$/, '')}/api/status?sessionId=hr_main`, {
         headers: { 'bypass-tunnel-reminder': 'true' },
         signal: AbortSignal.timeout(3500)
       });
@@ -361,7 +361,7 @@ export default function WhatsAppCenterModule({
         setWaLiveQr(data.qrCodeDataUrl || '');
         statusFound = true;
         if (!silent && data.status === 'CONNECTED') {
-          showToast?.(`🟢 خادم الواتساب متصل ومقترن بنجاح (+${data.phone})`);
+          showToast?.(`🟢 خادم الواتساب (جلسة الـ HR) متصل ومقترن بنجاح (+${data.phone})`);
         }
       }
     } catch {}
@@ -720,12 +720,12 @@ export default function WhatsAppCenterModule({
         const res = await window.desktopAPI.restartWhatsAppServer();
         showToast?.(res?.message || 'تمت إعادة تشغيل الخادم بنجاح');
       } else {
-        await fetch(`${serverUrl.replace(/\/$/, '')}/api/restart`, {
+        await fetch(`${serverUrl.replace(/\/$/, '')}/api/restart?sessionId=hr_main`, {
           method: 'POST',
           headers: { 'bypass-tunnel-reminder': 'true' },
           signal: AbortSignal.timeout(3000)
         });
-        showToast?.('تم إرسال أمر إعادة تشغيل الخادم بنجاح');
+        showToast?.('تم إرسال أمر إعادة تشغيل واتساب الإدارة بنجاح');
       }
     } catch (err) {
       console.warn('Restart trigger warning:', err);
@@ -761,7 +761,7 @@ export default function WhatsAppCenterModule({
         const res = await window.desktopAPI.forceResetWhatsAppServer();
         showToast?.(res?.message || 'تم تصفير الجلسة بنجاح');
       } else {
-        await fetch(`${serverUrl.replace(/\/$/, '')}/api/force-reset`, {
+        await fetch(`${serverUrl.replace(/\/$/, '')}/api/force-reset?sessionId=hr_main`, {
           method: 'POST',
           headers: { 'bypass-tunnel-reminder': 'true' },
           signal: AbortSignal.timeout(4000)
@@ -809,7 +809,7 @@ export default function WhatsAppCenterModule({
       if (typeof window !== 'undefined' && window.desktopAPI?.logoutWhatsAppServer) {
         await window.desktopAPI.logoutWhatsAppServer();
       } else {
-        await fetch(`${serverUrl.replace(/\/$/, '')}/api/logout`, {
+        await fetch(`${serverUrl.replace(/\/$/, '')}/api/logout?sessionId=hr_main`, {
           method: 'POST',
           headers: { 'bypass-tunnel-reminder': 'true' },
           signal: AbortSignal.timeout(4000)
@@ -1008,7 +1008,7 @@ export default function WhatsAppCenterModule({
       const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/send-bulk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true' },
-        body: JSON.stringify({ messages: messagesPayload })
+        body: JSON.stringify({ sessionId: 'hr_main', messages: messagesPayload })
       });
 
       if (res.ok) {
@@ -1032,9 +1032,22 @@ export default function WhatsAppCenterModule({
       {/* ── الرأس التعريفي ─────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h2 style={{ margin: 0, color: 'var(--text)', fontSize: '22px', fontWeight: 800 }}>
-            💬 مركز مراسلات الواتساب الذكي (WhatsApp Center)
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <h2 style={{ margin: 0, color: 'var(--text)', fontSize: '22px', fontWeight: 800 }}>
+              💬 مركز مراسلات الواتساب الذكي (WhatsApp Center)
+            </h2>
+            <span style={{
+              fontSize: '11px',
+              fontWeight: '800',
+              padding: '3px 10px',
+              borderRadius: '12px',
+              background: '#ecfdf5',
+              color: '#065f46',
+              border: '1px solid #a7f3d0'
+            }}>
+              🏢 جلسة واتساب الإدارة العامة والرواتب (hr_main)
+            </span>
+          </div>
           <p style={{ margin: '4px 0 0 0', color: 'var(--muted)', fontSize: '13.5px' }}>
             كشوفات المرتبات التفصيلية مع ملف PDF معتمد، رسائل التهنئة، وإشعارات الدوام التلقائية على مدار 24 ساعة
           </p>

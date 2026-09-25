@@ -62,11 +62,17 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
   // عنوان سيرفر الواتساب المعتمد
   const waServerUrl = useMemo(() => getResolvedWhatsAppServerUrl(), []);
 
-  // ── 1. فحص حالة الاتصال واسترجاع الـ QR ─────────────────────────────────────
+  // معرف الجلسة المعزولة الخاصة بهذا الفرع حصراً
+  const branchSessionId = useMemo(() => {
+    const raw = String(branchId || branch?.id || 'default');
+    return raw.startsWith('branch_') ? raw : `branch_${raw}`;
+  }, [branchId, branch?.id]);
+
+  // ── 1. فحص حالة الاتصال واسترجاع الـ QR الخاص بجلسة هذا الفرع ───────────────
   const fetchWhatsAppStatus = useCallback(async (silent = false) => {
     if (!silent) setIsLoadingStatus(true);
     try {
-      const res = await fetch(`${waServerUrl}/api/status`, {
+      const res = await fetch(`${waServerUrl}/api/status?sessionId=${branchSessionId}`, {
         headers: { 'bypass-tunnel-reminder': 'true' }
       });
       const data = await res.json();
@@ -88,9 +94,9 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
     } finally {
       if (!silent) setIsLoadingStatus(false);
     }
-  }, [waServerUrl]);
+  }, [waServerUrl, branchSessionId]);
 
-  // فحص دوري كل 5 ثوانٍ عند انتظار مسح الـ QR أو دوري كل 25 ثانية
+  // فحص دوري كل 4 ثوانٍ عند انتظار مسح الـ QR أو دوري كل 25 ثانية
   useEffect(() => {
     fetchWhatsAppStatus();
     const interval = setInterval(() => {
@@ -119,16 +125,16 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
     }
   }, [branchId]);
 
-  // ── 2. إجراءات الخادم (إعادة تشغيل / فك الاقتران) ───────────────────────────
+  // ── 2. إجراءات الخادم لجلسة هذا الفرع (إعادة تشغيل / فك الاقتران) ───────────
   const handleRestartServer = async () => {
     setIsActionLoading(true);
     try {
-      const res = await fetch(`${waServerUrl}/api/restart`, {
+      const res = await fetch(`${waServerUrl}/api/restart?sessionId=${branchSessionId}`, {
         method: 'POST',
         headers: { 'bypass-tunnel-reminder': 'true' }
       });
       const data = await res.json().catch(() => ({}));
-      showToast?.(data.message || 'تم إرسال أمر إعادة تشغيل محرك الواتساب بنجاح');
+      showToast?.(data.message || `تم إرسال أمر إعادة تشغيل واتساب فرع "${branch?.name || branchId}" بنجاح`);
       setTimeout(fetchWhatsAppStatus, 1500);
     } catch (err) {
       showToast?.('تعذر إعادة تشغيل الخادم');
@@ -138,14 +144,14 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
   };
 
   const handleLogoutServer = async () => {
-    if (!window.confirm('هل أنت متأكد من رغبتك في تسجيل الخروج من جلسة الواتساب وفك الاقتران؟')) return;
+    if (!window.confirm(`هل أنت متأكد من رغبتك في تسجيل الخروج من جلسة واتساب فرع "${branch?.name || branchId}"؟ لن تتأثر باقي الفروع إطلاقاً.`)) return;
     setIsActionLoading(true);
     try {
-      await fetch(`${waServerUrl}/api/logout`, {
+      await fetch(`${waServerUrl}/api/logout?sessionId=${branchSessionId}`, {
         method: 'POST',
         headers: { 'bypass-tunnel-reminder': 'true' }
       });
-      showToast?.('تم تسجيل الخروج بنجاح. يمكنك الآن مسح الـ QR بهاتف آخر.');
+      showToast?.('تم تسجيل الخروج بنجاح. يمكنك الآن مسح الـ QR بهاتف صيدلية آخر.');
       setTimeout(fetchWhatsAppStatus, 1500);
     } catch (err) {
       showToast?.('تعذر تسجيل الخروج');
@@ -217,6 +223,7 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
     setIsSending(true);
     try {
       const payload = {
+        sessionId: branchSessionId,
         phone: cleanPhone,
         message: customMessage
       };
@@ -336,6 +343,18 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
                     غير متصل
                   </span>
                 )}
+
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: '800',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  background: '#ecfdf5',
+                  color: '#065f46',
+                  border: '1px solid #a7f3d0'
+                }}>
+                  📱 جلسة خاصة بالفرع ({branchSessionId})
+                </span>
               </div>
 
               <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#64748b' }}>

@@ -15,18 +15,18 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 
-// منع انهيار خادم Node بسبب أي استثناءات غير متوقعة في مكتبة Baileys أو اتصالات الشبكة
+// ── منع انهيار خادم Node بسبب أي استثناءات غير متوقعة في مكتبة Baileys ───────────
 process.on('uncaughtException', (err) => {
-  console.error('[WhatsApp Gateway UncaughtException]:', err?.stack || err?.message || err);
+  console.error('[WhatsApp Multi-Gateway UncaughtException]:', err?.stack || err?.message || err);
 });
 process.on('unhandledRejection', (reason) => {
-  console.error('[WhatsApp Gateway UnhandledRejection]:', reason?.stack || reason?.message || reason);
+  console.error('[WhatsApp Multi-Gateway UnhandledRejection]:', reason?.stack || reason?.message || reason);
 });
 process.on('exit', (code) => {
-  console.error('[WhatsApp Gateway Process Exited]: Code =', code);
+  console.error('[WhatsApp Multi-Gateway Process Exited]: Code =', code);
 });
 
-// محرك تحويل HTML إلى ملفات PDF احترافية باستخدام متصفح Chromium المتاح على النظام (ويندوز أو لينكس)
+// ── محرك تحويل HTML إلى ملفات PDF احترافية باستخدام متصفح Chromium المتاح ────────
 function findBrowserBinary() {
   const candidates = [
     process.env.CHROME_BIN,
@@ -99,89 +99,72 @@ export async function renderHtmlToPdfBuffer(htmlContent) {
   });
 }
 
+// ── إعداد مسارات تخزين الجلسات المتعددة ──────────────────────────────────────────
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const AUTH_DIR = process.env.WA_AUTH_PATH || path.join(__dirname, 'whatsapp-auth');
+const AUTH_BASE_DIR = process.env.WA_AUTH_PATH || path.join(__dirname, 'whatsapp-auth');
 
-if (!fs.existsSync(AUTH_DIR)) {
+if (!fs.existsSync(AUTH_BASE_DIR)) {
   try {
-    fs.mkdirSync(AUTH_DIR, { recursive: true });
+    fs.mkdirSync(AUTH_BASE_DIR, { recursive: true });
   } catch (err) {
-    console.error('Failed to create AUTH_DIR:', err);
+    console.error('Failed to create AUTH_BASE_DIR:', err);
   }
 }
 
+// تطهير وتوحيد اسم الجلسة لمنع اختراق المسارات
+export function sanitizeSessionId(rawId) {
+  if (!rawId || typeof rawId !== 'string') return 'hr_main';
+  const clean = rawId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  if (!clean || clean === 'default' || clean === 'main') return 'hr_main';
+  return clean.slice(0, 64);
+}
+
+// هجرة تلقائية ذكية: نقل ملفات الجلسة الأحادية السابقة إلى مجلد 'hr_main' دون فقدان الاقتران
+function migrateLegacySessionIfNeeded() {
+  try {
+    const legacyCreds = path.join(AUTH_BASE_DIR, 'creds.json');
+    if (fs.existsSync(legacyCreds)) {
+      console.log('[WhatsApp Gateway] 🔄 Migrating legacy root session to "hr_main"...');
+      const targetDir = path.join(AUTH_BASE_DIR, 'hr_main');
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+      const entries = fs.readdirSync(AUTH_BASE_DIR, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile()) {
+          const src = path.join(AUTH_BASE_DIR, entry.name);
+          const dst = path.join(targetDir, entry.name);
+          try {
+            fs.copyFileSync(src, dst);
+            fs.unlinkSync(src);
+          } catch (mErr) {
+            console.warn(`[Migration Warn] ${entry.name}:`, mErr.message);
+          }
+        }
+      }
+      console.log('[WhatsApp Gateway] ✅ Legacy session successfully migrated to "hr_main".');
+    }
+  } catch (err) {
+    console.warn('[WhatsApp Gateway Migration Warning]:', err.message);
+  }
+}
+migrateLegacySessionIfNeeded();
+
+// استكشاف عناوين الـ IP الخاصة بالشبكة المحلية
 function getLocalNetworkIps() {
   const interfaces = os.networkInterfaces();
   const ips = [];
   for (const name of Object.keys(interfaces)) {
-    // تجاهل واجهات الدوكر والشبكات الافتراضية
     if (name.startsWith('docker') || name.startsWith('br-') || name.startsWith('veth')) continue;
     for (const iface of interfaces[name] || []) {
       if (iface.family === 'IPv4' && !iface.internal) {
-        // استبعاد عناوين شبكات الدوكر الافتراضية
         if (/^172\.(17|18|19)\./.test(iface.address)) continue;
         ips.push({ interface: name, address: iface.address });
       }
     }
   }
   return ips;
-}
-
-const app = express();
-const PORT = process.env.PORT || 3100;
-
-// سماح بالوصول الكامل لجميع الأجهزة على الشبكة المحلية وخارجها مع دعم Private Network Access
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, bypass-tunnel-reminder, ngrok-skip-browser-warning, accept, origin');
-  res.header('Access-Control-Allow-Private-Network', 'true');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  next();
-});
-
-app.use(cors());
-app.use(express.json({ limit: '15mb' }));
-
-// حالة محرك الواتساب
-let serverState = {
-  status: 'DISCONNECTED', // 'CONNECTING' | 'QR_READY' | 'CONNECTED' | 'DISCONNECTED'
-  phone: '',
-  deviceName: '',
-  qrCodeDataUrl: '',
-  sentCount: 0,
-  logs: [],
-  lastError: null,
-  uptime: Date.now()
-};
-
-let sock = null;
-let isConnecting = false;
-let reconnectTimer = null;
-let consecutiveFailures = 0;
-
-// تنظيف محتويات مجلد الجلسة بشكل آمن (متوافق مع مجلدات Docker وحظر EBUSY)
-function purgeAuthDir() {
-  try {
-    if (fs.existsSync(AUTH_DIR)) {
-      const entries = fs.readdirSync(AUTH_DIR);
-      for (const entry of entries) {
-        try {
-          fs.rmSync(path.join(AUTH_DIR, entry), { recursive: true, force: true });
-        } catch (fileErr) {
-          console.warn(`[WhatsApp Gateway] Warning deleting ${entry}:`, fileErr.message);
-        }
-      }
-    } else {
-      fs.mkdirSync(AUTH_DIR, { recursive: true });
-    }
-    console.log('[WhatsApp Gateway] 🧹 Auth directory contents purged successfully.');
-  } catch (err) {
-    console.warn('[WhatsApp Gateway] Warning purging AUTH_DIR:', err.message);
-  }
 }
 
 // تنسيق وتوحيد رقم الهاتف بالصيغة الدولية لواتساب
@@ -194,215 +177,428 @@ function formatWhatsAppNumber(phone) {
   return `${clean}@s.whatsapp.net`;
 }
 
-// دالة الاتصال بمحرك Baileys
-async function connectToWhatsApp() {
-  if (isConnecting) return;
-  isConnecting = true;
+// ── فئة إدارة جلسة الواتساب المنفصلة (WhatsAppSession) ───────────────────────────
+class WhatsAppSession {
+  constructor(sessionId, sessionDir) {
+    this.sessionId = sessionId;
+    this.sessionDir = sessionDir;
+    this.sock = null;
+    this.status = 'DISCONNECTED'; // 'CONNECTING' | 'QR_READY' | 'CONNECTED' | 'DISCONNECTED'
+    this.phone = '';
+    this.deviceName = '';
+    this.qrCodeDataUrl = '';
+    this.sentCount = 0;
+    this.logs = [];
+    this.lastError = null;
+    this.isConnecting = false;
+    this.reconnectTimer = null;
+    this.consecutiveFailures = 0;
+    this.uptime = Date.now();
+  }
 
-  try {
-    if (sock) {
-      try { sock.ev.removeAllListeners(); } catch {}
-      try { sock.end(undefined); } catch {}
-      sock = null;
-    }
-
-    // فحص ملف creds.json - تنظيفه فقط إذا كان تالفاً (غير صالح كـ JSON)
-    const credsFile = path.join(AUTH_DIR, 'creds.json');
-    if (fs.existsSync(credsFile)) {
-      try {
-        JSON.parse(fs.readFileSync(credsFile, 'utf8'));
-      } catch {
-        console.warn('[WhatsApp Gateway] ⚠️ Corrupted creds.json, purging session contents...');
-        purgeAuthDir();
-      }
-    }
-
-    console.log('[WhatsApp Gateway] 🔄 Initializing connection to WhatsApp multi-device...');
-    serverState.status = 'CONNECTING';
-
-    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-
-    // مزامنة النسخة الأحدث لبروتوكول واتساب
-    let waVersion = [2, 3000, 1043857760];
+  // تنظيف مجلد اعتمادات الجلسة
+  purgeSessionDir() {
     try {
-      const fetched = await fetchLatestBaileysVersion();
-      if (fetched?.version) waVersion = fetched.version;
-    } catch {}
+      if (fs.existsSync(this.sessionDir)) {
+        const entries = fs.readdirSync(this.sessionDir);
+        for (const entry of entries) {
+          try {
+            fs.rmSync(path.join(this.sessionDir, entry), { recursive: true, force: true });
+          } catch (fileErr) {
+            console.warn(`[WhatsApp:${this.sessionId}] Warning deleting ${entry}:`, fileErr.message);
+          }
+        }
+      } else {
+        fs.mkdirSync(this.sessionDir, { recursive: true });
+      }
+      console.log(`[WhatsApp:${this.sessionId}] 🧹 Session auth purged successfully.`);
+    } catch (err) {
+      console.warn(`[WhatsApp:${this.sessionId}] Warning purging sessionDir:`, err.message);
+    }
+  }
 
-    sock = makeWASocket({
-      version: waVersion,
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
-      },
-      logger: pino({ level: 'silent' }),
-      printQRInTerminal: false,
-      browser: Browsers.appropriate('Chrome'),
-      syncFullHistory: false,
-      connectTimeoutMs: 60000,
-      keepAliveIntervalMs: 25000,
-      emitOwnEvents: false,
-      markOnlineOnConnect: true
-    });
+  // التحقق من وجود ملف creds.json سليم
+  hasValidCreds() {
+    try {
+      const credsFile = path.join(this.sessionDir, 'creds.json');
+      if (!fs.existsSync(credsFile)) return false;
+      JSON.parse(fs.readFileSync(credsFile, 'utf8'));
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
-    sock.ev.on('creds.update', saveCreds);
+  // الاتصال بمحرك Baileys
+  async connect() {
+    if (this.isConnecting) return;
+    this.isConnecting = true;
 
-    sock.ev.on('connection.update', async (update) => {
-      const { connection, lastDisconnect, qr } = update;
+    try {
+      if (this.sock) {
+        try { this.sock.ev.removeAllListeners(); } catch {}
+        try { this.sock.end(undefined); } catch {}
+        this.sock = null;
+      }
 
-      // 1. التقاط رمز الـ QR وتحديثه في الواجهة
-      if (qr) {
+      // فحص سلامة ملف الاعتمادات
+      const credsFile = path.join(this.sessionDir, 'creds.json');
+      if (fs.existsSync(credsFile)) {
         try {
-          serverState.qrCodeDataUrl = await QRCode.toDataURL(qr, {
-            margin: 2,
-            width: 320,
-            color: {
-              dark: '#0F172A',
-              light: '#FFFFFF'
-            }
-          });
-          serverState.status = 'QR_READY';
-          serverState.lastError = null;
-          consecutiveFailures = 0; // تم توليد QR بنجاح
-          console.log('[WhatsApp Gateway] 📸 Live QR Code generated successfully.');
-        } catch (err) {
-          console.error('[WhatsApp Gateway] QR generation error:', err);
+          JSON.parse(fs.readFileSync(credsFile, 'utf8'));
+        } catch {
+          console.warn(`[WhatsApp:${this.sessionId}] ⚠️ Corrupted creds.json, purging session...`);
+          this.purgeSessionDir();
         }
       }
 
-      // 2. تحديث حالة الاتصال
-      if (connection === 'connecting') {
-        serverState.status = 'CONNECTING';
-      }
+      console.log(`[WhatsApp:${this.sessionId}] 🔄 Initializing connection...`);
+      this.status = 'CONNECTING';
 
-      // 3. نجاح الاقتران والاتصال
-      if (connection === 'open') {
-        isConnecting = false;
-        consecutiveFailures = 0;
-        serverState.status = 'CONNECTED';
-        serverState.qrCodeDataUrl = '';
-        serverState.lastError = null;
+      const { state, saveCreds } = await useMultiFileAuthState(this.sessionDir);
 
-        const rawJid = sock.user?.id || '';
-        const cleanPhone = rawJid.split(':')[0].replace(/\D/g, '') || rawJid.split('@')[0];
-        serverState.phone = cleanPhone;
-        serverState.deviceName = sock.user?.name || `WhatsApp Linked Phone (+${cleanPhone})`;
+      let waVersion = [2, 3000, 1043857760];
+      try {
+        const fetched = await fetchLatestBaileysVersion();
+        if (fetched?.version) waVersion = fetched.version;
+      } catch {}
 
-        console.log(`[WhatsApp Gateway] 🎉 CONNECTED! Linked Phone: +${cleanPhone}`);
-      }
+      const sessionBrowserName = this.sessionId.startsWith('branch_')
+        ? `Pharmacy Branch (${this.sessionId.replace('branch_', '')})`
+        : (this.sessionId === 'procurement' ? 'Procurement Center' : 'HR Management Hub');
 
-      // 4. انقطاع الاتصال
-      if (connection === 'close') {
-        isConnecting = false;
-        const statusCode = (lastDisconnect?.error)?.output?.statusCode || (lastDisconnect?.error)?.status;
-        const errorMessage = lastDisconnect?.error?.message || '';
+      this.sock = makeWASocket({
+        version: waVersion,
+        auth: {
+          creds: state.creds,
+          keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+        },
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: false,
+        browser: Browsers.appropriate(sessionBrowserName),
+        syncFullHistory: false,
+        connectTimeoutMs: 60000,
+        keepAliveIntervalMs: 25000,
+        emitOwnEvents: false,
+        markOnlineOnConnect: true
+      });
 
-        // معالجة مهلة مسح الـ QR (Code 408) - إعادة توليد رمز QR طازج فوراً دون تصنيفها كفشل
-        if (statusCode === 408 || errorMessage.includes('QR refs') || errorMessage.includes('timed out')) {
-          console.log('[WhatsApp Gateway] ⏱️ QR code expired waiting for scan. Auto-refreshing clean QR code...');
-          consecutiveFailures = 0;
-          serverState.status = 'QR_READY';
-          if (reconnectTimer) clearTimeout(reconnectTimer);
-          reconnectTimer = setTimeout(connectToWhatsApp, 1200);
-          return;
+      this.sock.ev.on('creds.update', saveCreds);
+
+      this.sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        // 1. التقاط رمز الـ QR وتوليد DataURL
+        if (qr) {
+          try {
+            this.qrCodeDataUrl = await QRCode.toDataURL(qr, {
+              margin: 2,
+              width: 320,
+              color: {
+                dark: '#0F172A',
+                light: '#FFFFFF'
+              }
+            });
+            this.status = 'QR_READY';
+            this.lastError = null;
+            this.consecutiveFailures = 0;
+            console.log(`[WhatsApp:${this.sessionId}] 📸 QR Code ready for scan.`);
+          } catch (err) {
+            console.error(`[WhatsApp:${this.sessionId}] QR generation error:`, err);
+          }
         }
 
-        // تسجيل الخروج الصريح فقط من تطبيق واتساب (كود 401 loggedOut) هو ما يتطلب تصفير المفاتيح
-        // لا نقوم بمسح الجلسة أبداً عند أخطاء الشبكة المؤقتة (500 أو 440 أو انقطاع الإنترنت)
-        const isExplicitLoggedOut = statusCode === DisconnectReason.loggedOut;
-
-        console.warn(`[WhatsApp Gateway] ⚠️ Connection closed (statusCode: ${statusCode}, message: ${errorMessage}, isLoggedOut: ${isExplicitLoggedOut})`);
-
-        if (isExplicitLoggedOut) {
-          console.warn('[WhatsApp Gateway] 🔄 Explicit logout detected from mobile app. Purging auth session for fresh pairing...');
-          serverState.status = 'DISCONNECTED';
-          serverState.phone = '';
-          serverState.deviceName = '';
-          serverState.qrCodeDataUrl = '';
-          consecutiveFailures = 0;
-          purgeAuthDir();
-
-          if (reconnectTimer) clearTimeout(reconnectTimer);
-          reconnectTimer = setTimeout(connectToWhatsApp, 2500);
-        } else {
-          // الحفاظ على المفاتيح وإعادة الاتصال التلقائي المتدرج
-          consecutiveFailures++;
-          serverState.status = serverState.phone ? 'CONNECTING' : 'DISCONNECTED';
-          if (reconnectTimer) clearTimeout(reconnectTimer);
-          // تدرج زمني: 2ث، 4ث، 6ث... بحد أقصى 15 ثانية لمنع الضغط وحماية السيرفر
-          const delay = Math.min(2000 * Math.max(1, consecutiveFailures), 15000);
-          console.log(`[WhatsApp Gateway] ⏳ Network/reconnect drop. Preserving session & reconnecting in ${delay / 1000}s (attempt: ${consecutiveFailures})...`);
-          reconnectTimer = setTimeout(connectToWhatsApp, delay);
+        // 2. حالة الاتصال
+        if (connection === 'connecting') {
+          this.status = 'CONNECTING';
         }
+
+        // 3. نجاح الاتصال والاقتران
+        if (connection === 'open') {
+          this.isConnecting = false;
+          this.consecutiveFailures = 0;
+          this.status = 'CONNECTED';
+          this.qrCodeDataUrl = '';
+          this.lastError = null;
+
+          const rawJid = this.sock.user?.id || '';
+          const cleanPhone = rawJid.split(':')[0].replace(/\D/g, '') || rawJid.split('@')[0];
+          this.phone = cleanPhone;
+          this.deviceName = this.sock.user?.name || `WhatsApp Linked (+${cleanPhone})`;
+
+          console.log(`[WhatsApp:${this.sessionId}] 🎉 CONNECTED! Linked Phone: +${cleanPhone}`);
+        }
+
+        // 4. انقطاع الاتصال
+        if (connection === 'close') {
+          this.isConnecting = false;
+          const statusCode = (lastDisconnect?.error)?.output?.statusCode || (lastDisconnect?.error)?.status;
+          const errorMessage = lastDisconnect?.error?.message || '';
+
+          // مهلة انتهاء الـ QR (Code 408)
+          if (statusCode === 408 || errorMessage.includes('QR refs') || errorMessage.includes('timed out')) {
+            console.log(`[WhatsApp:${this.sessionId}] ⏱️ QR expired. Refreshing...`);
+            this.consecutiveFailures = 0;
+            this.status = 'QR_READY';
+            if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = setTimeout(() => this.connect(), 1200);
+            return;
+          }
+
+          const isExplicitLoggedOut = statusCode === DisconnectReason.loggedOut;
+          console.warn(`[WhatsApp:${this.sessionId}] ⚠️ Connection closed (statusCode: ${statusCode}, isLoggedOut: ${isExplicitLoggedOut})`);
+
+          if (isExplicitLoggedOut) {
+            console.warn(`[WhatsApp:${this.sessionId}] 🔄 Logged out from device. Purging session...`);
+            this.status = 'DISCONNECTED';
+            this.phone = '';
+            this.deviceName = '';
+            this.qrCodeDataUrl = '';
+            this.consecutiveFailures = 0;
+            this.purgeSessionDir();
+
+            if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = setTimeout(() => this.connect(), 2500);
+          } else {
+            this.consecutiveFailures++;
+            this.status = this.phone ? 'CONNECTING' : 'DISCONNECTED';
+            if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+            const delay = Math.min(2000 * Math.max(1, this.consecutiveFailures), 15000);
+            console.log(`[WhatsApp:${this.sessionId}] ⏳ Reconnecting in ${delay / 1000}s (attempt: ${this.consecutiveFailures})...`);
+            this.reconnectTimer = setTimeout(() => this.connect(), delay);
+          }
+        }
+      });
+
+    } catch (err) {
+      this.isConnecting = false;
+      this.consecutiveFailures++;
+      this.status = this.phone ? 'CONNECTING' : 'DISCONNECTED';
+      this.lastError = err.message;
+      console.error(`[WhatsApp:${this.sessionId}] Connection initialization error:`, err);
+
+      if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+      const delay = Math.min(3000 * Math.max(1, this.consecutiveFailures), 20000);
+      this.reconnectTimer = setTimeout(() => this.connect(), delay);
+    }
+  }
+
+  // إعادة التشغيل يدوياً
+  async restart() {
+    try {
+      if (this.sock) {
+        try { this.sock.ev.removeAllListeners(); } catch {}
+        try { this.sock.end(undefined); } catch {}
       }
-    });
+    } catch {}
+    this.sock = null;
+    this.status = 'CONNECTING';
+    this.isConnecting = false;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => this.connect(), 1500);
+  }
 
-  } catch (err) {
-    isConnecting = false;
-    consecutiveFailures++;
-    serverState.status = serverState.phone ? 'CONNECTING' : 'DISCONNECTED';
-    serverState.lastError = err.message;
-    console.error('[WhatsApp Gateway] Connection initialization error:', err);
+  // تسجيل الخروج وفك الارتباط
+  async logout() {
+    try {
+      if (this.sock) {
+        try { this.sock.ev.removeAllListeners(); } catch {}
+        await Promise.race([
+          this.sock.logout().catch(() => {}),
+          new Promise((resolve) => setTimeout(resolve, 1500))
+        ]);
+        try { this.sock.end(undefined); } catch {}
+      }
+    } catch (err) {
+      console.warn(`[WhatsApp:${this.sessionId}] Logout cleanup warning:`, err.message);
+    }
+    this.sock = null;
+    this.status = 'DISCONNECTED';
+    this.phone = '';
+    this.deviceName = '';
+    this.qrCodeDataUrl = '';
+    this.isConnecting = false;
 
-    // لا نمسح الجلسة أبداً في حالة خطأ التهيئة، بل نعيد المحاولة بأمان
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    const delay = Math.min(3000 * Math.max(1, consecutiveFailures), 20000);
-    reconnectTimer = setTimeout(connectToWhatsApp, delay);
+    this.purgeSessionDir();
+
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => this.connect(), 1500);
+  }
+
+  // تصفير الجلسة وتوليد رمز QR فوري
+  async forceReset() {
+    try {
+      if (this.sock) {
+        try { this.sock.ev.removeAllListeners(); } catch {}
+        try { this.sock.end(undefined); } catch {}
+      }
+    } catch {}
+    this.sock = null;
+    this.status = 'CONNECTING';
+    this.phone = '';
+    this.deviceName = '';
+    this.qrCodeDataUrl = '';
+    this.lastError = null;
+    this.consecutiveFailures = 0;
+    this.isConnecting = false;
+
+    this.purgeSessionDir();
+
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => this.connect(), 800);
+  }
+
+  getStatusObject() {
+    return {
+      sessionId: this.sessionId,
+      status: this.status,
+      phone: this.phone,
+      deviceName: this.deviceName,
+      qrCodeDataUrl: this.qrCodeDataUrl,
+      sentCount: this.sentCount,
+      lastError: this.lastError,
+      timestamp: new Date().toISOString(),
+      logs: this.logs.slice(-30)
+    };
   }
 }
 
-// بدء الاتصال تلقائياً عند إقلاع الخادم
-connectToWhatsApp();
+// ── سجل الجلسات المتعددة (Multi-Session Registry) ──────────────────────────────
+const sessionRegistry = new Map();
 
-// ── حارس ذاتي ذكي (24/7 Watchdog Loop) ──────────────────────────────────
-// فحص دوري خفيف كل 30 ثانية للتأكد من استمرار عمل الاتصال في الخلفية
-// حتى لو لم يكن المتصفح مفتوحاً، مع الحفاظ الكامل على استقرار الـ VPS
-setInterval(() => {
-  try {
-    const credsFile = path.join(AUTH_DIR, 'creds.json');
-    const hasValidCreds = fs.existsSync(credsFile);
-
-    if (serverState.status !== 'CONNECTED' && !isConnecting && hasValidCreds) {
-      console.log('[WhatsApp Watchdog] 🛡️ Periodic check: WhatsApp is disconnected but paired session exists. Auto-reconnecting now...');
-      connectToWhatsApp();
+function getOrCreateSession(rawId, autoConnect = true) {
+  const sessionId = sanitizeSessionId(rawId);
+  if (!sessionRegistry.has(sessionId)) {
+    const sessionDir = path.join(AUTH_BASE_DIR, sessionId);
+    if (!fs.existsSync(sessionDir)) {
+      fs.mkdirSync(sessionDir, { recursive: true });
     }
-  } catch (watchdogErr) {
-    console.warn('[WhatsApp Watchdog] Warning during health tick:', watchdogErr.message);
+    const session = new WhatsAppSession(sessionId, sessionDir);
+    sessionRegistry.set(sessionId, session);
+
+    if (autoConnect || session.hasValidCreds()) {
+      session.connect();
+    }
+  }
+  return sessionRegistry.get(sessionId);
+}
+
+// تشغيل الجلسات الموجودة مسبقاً تلقائياً عند إقلاع الخادم
+function bootExistingSessions() {
+  try {
+    // 1. التأكد من وجود جلسة hr_main دائماً
+    getOrCreateSession('hr_main', true);
+
+    // 2. فحص المجلدات الفرعية في AUTH_BASE_DIR
+    const entries = fs.readdirSync(AUTH_BASE_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const sId = sanitizeSessionId(entry.name);
+        const credsFile = path.join(AUTH_BASE_DIR, entry.name, 'creds.json');
+        if (fs.existsSync(credsFile)) {
+          console.log(`[Session Boot] Found existing paired session: "${sId}". Auto-booting...`);
+          getOrCreateSession(sId, true);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Session Boot Error]:', err.message);
+  }
+}
+bootExistingSessions();
+
+// ── حارس ذاتي ذكي لكل الجلسات (24/7 Watchdog Loop) ─────────────────────────────
+setInterval(() => {
+  for (const session of sessionRegistry.values()) {
+    try {
+      if (session.status !== 'CONNECTED' && !session.isConnecting && session.hasValidCreds()) {
+        console.log(`[Watchdog] 🛡️ Auto-reconnecting paired session "${session.sessionId}"...`);
+        session.connect();
+      }
+    } catch (err) {
+      console.warn(`[Watchdog] Warning for "${session.sessionId}":`, err.message);
+    }
   }
 }, 30000);
 
-// ── مسارات الـ REST API ───────────────────────────────────────────────────
+// ── إعداد خادم Express ومسارات الـ REST API ────────────────────────────────────
+const app = express();
+const PORT = process.env.PORT || 3100;
 
-// فحص الصحة (Health Check)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, bypass-tunnel-reminder, ngrok-skip-browser-warning, accept, origin, x-session-id');
+  res.header('Access-Control-Allow-Private-Network', 'true');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
+app.use(cors());
+app.use(express.json({ limit: '15mb' }));
+
+// مستخرج معرف الجلسة الذكي من الطلب
+function extractSessionId(req) {
+  const fromQuery = req.query?.sessionId;
+  const fromBody = req.body?.sessionId;
+  const fromHeader = req.headers?.['x-session-id'];
+  return sanitizeSessionId(fromQuery || fromBody || fromHeader || 'hr_main');
+}
+
+// 1. فحص الصحة العام (Global Health Check)
 app.get(['/health', '/api/health'], (req, res) => {
+  const sessionsSummary = Array.from(sessionRegistry.values()).map(s => ({
+    sessionId: s.sessionId,
+    status: s.status,
+    phone: s.phone,
+    sentCount: s.sentCount
+  }));
+
   res.json({
     status: 'ok',
-    waStatus: serverState.status,
-    phone: serverState.phone,
-    uptimeSeconds: Math.floor((Date.now() - serverState.uptime) / 1000)
+    mode: 'multi-session',
+    activeSessionsCount: sessionRegistry.size,
+    sessions: sessionsSummary,
+    uptimeSeconds: Math.floor((Date.now() - (sessionRegistry.get('hr_main')?.uptime || Date.now())) / 1000)
   });
 });
 
-// استعلام حالة السيرفر ورمز الـ QR المباشر مع إيقاظ تلقائي
-app.get(['/status', '/api/status'], (req, res) => {
-  if (serverState.status === 'DISCONNECTED' && !sock && !isConnecting) {
-    console.log('[WhatsApp Gateway] ⚡ Connection dormant, auto-waking up on status probe...');
-    connectToWhatsApp();
+// 2. دليل وتفاصيل جميع الجلسات النشطة (Sessions Directory)
+app.get(['/sessions', '/api/sessions'], (req, res) => {
+  const result = [];
+  for (const session of sessionRegistry.values()) {
+    result.push({
+      sessionId: session.sessionId,
+      status: session.status,
+      phone: session.phone,
+      deviceName: session.deviceName,
+      sentCount: session.sentCount,
+      hasQr: Boolean(session.qrCodeDataUrl)
+    });
   }
-  res.json({
-    status: serverState.status,
-    phone: serverState.phone,
-    deviceName: serverState.deviceName,
-    qrCodeDataUrl: serverState.qrCodeDataUrl,
-    sentCount: serverState.sentCount,
-    lastError: serverState.lastError,
-    timestamp: new Date().toISOString(),
-    logs: serverState.logs.slice(-30)
-  });
+  res.json({ success: true, sessions: result });
 });
 
-// نقطة فحص عناوين الشبكة المحلية لربط الأجهزة الأخرى (الموبايلات وأجهزة الصيدلية)
+// 3. فحص حالة الجلسة المعنية مع إيقاظ تلقائي ورمز QR
+app.get(['/status', '/api/status'], (req, res) => {
+  const sId = extractSessionId(req);
+  const session = getOrCreateSession(sId, true);
+
+  if (session.status === 'DISCONNECTED' && !session.sock && !session.isConnecting) {
+    console.log(`[WhatsApp:${sId}] ⚡ Dormant session probe, auto-waking up...`);
+    session.connect();
+  }
+
+  res.json(session.getStatusObject());
+});
+
+// 4. استكشاف الشبكة المحلية ومعلومات الجلسة
 app.get(['/network-info', '/api/network-info'], (req, res) => {
+  const sId = extractSessionId(req);
+  const session = getOrCreateSession(sId, false);
+
   const isHttps = req.headers['x-forwarded-proto'] === 'https';
   const host = req.headers['host'] || '';
   const ips = getLocalNetworkIps();
@@ -412,17 +608,18 @@ app.get(['/network-info', '/api/network-info'], (req, res) => {
     : (primaryIp !== '127.0.0.1' ? `http://${primaryIp}:${PORT}` : `http://127.0.0.1:${PORT}`);
 
   res.json({
-    status: serverState.status,
+    sessionId: sId,
+    status: session.status,
     port: PORT,
     localIps: ips,
     primaryIp,
     suggestedLanUrl,
-    phone: serverState.phone,
-    deviceName: serverState.deviceName
+    phone: session.phone,
+    deviceName: session.deviceName
   });
 });
 
-// تحويل HTML إلى PDF Base64
+// 5. تحويل HTML إلى PDF Base64
 app.post(['/render-pdf', '/api/render-pdf'], async (req, res) => {
   const { html } = req.body;
   if (!html) {
@@ -441,18 +638,27 @@ app.post(['/render-pdf', '/api/render-pdf'], async (req, res) => {
   }
 });
 
-// إرسال رسالة فردية مع محاكاة بشرية لمكافحة الحظر ودعم PDF مباشر
+// 6. إرسال رسالة فردية أو فاتورة PDF عبر جلسة محددة
 app.post(['/send', '/api/send', '/send-message', '/api/send-message'], async (req, res) => {
+  const sId = extractSessionId(req);
+  const session = getOrCreateSession(sId, false);
+
   const { phone, message, pdfBase64, pdfHtml, fileName } = req.body;
 
   if (!phone || (!message && !pdfBase64 && !pdfHtml)) {
     return res.status(400).json({ success: false, error: 'رقم الهاتف ونص الرسالة أو ملف PDF مطلوبان.' });
   }
 
-  if (serverState.status !== 'CONNECTED' || !sock) {
+  if (session.status !== 'CONNECTED' || !session.sock) {
+    const sessionLabel = sId.startsWith('branch_')
+      ? `فرع الصيدلية (#${sId.replace('branch_', '')})`
+      : (sId === 'procurement' ? 'إدارة المشتريات' : 'إدارة الـ HR');
+
     return res.status(503).json({
       success: false,
-      error: 'خادم الواتساب غير متصل بالهاتف حالياً. يرجى مسح رمز الـ QR للاقتران أولاً.'
+      error: `واتساب ${sessionLabel} غير متصل بالهاتف حالياً. يرجى مسح رمز الـ QR الخاص بهذا القسم للاقتران أولاً.`,
+      sessionId: sId,
+      status: session.status
     });
   }
 
@@ -462,38 +668,37 @@ app.post(['/send', '/api/send', '/send-message', '/api/send-message'], async (re
   }
 
   try {
-    // تجهيز ملف الـ PDF إما من Base64 الجاهز أو بتحويل الـ HTML فوراً
     let pdfBuffer = null;
     if (pdfBase64) {
       pdfBuffer = Buffer.from(pdfBase64, 'base64');
     } else if (pdfHtml) {
       try {
-        console.log(`[WhatsApp Gateway] 📄 Rendering PDF from HTML for +${jid}...`);
+        console.log(`[WhatsApp:${sId}] 📄 Rendering PDF from HTML for +${jid}...`);
         pdfBuffer = await renderHtmlToPdfBuffer(pdfHtml);
       } catch (renderErr) {
-        console.error('[WhatsApp Gateway] PDF rendering error:', renderErr.message);
+        console.error(`[WhatsApp:${sId}] PDF rendering error:`, renderErr.message);
       }
     }
 
-    // محاكاة كتابة بشرية (1.2 ثانية) لمنع خوارزميات الحظر
+    // محاكاة كتابة بشرية لمنع خوارزميات الحظر
     try {
-      await sock.sendPresenceUpdate('composing', jid);
+      await session.sock.sendPresenceUpdate('composing', jid);
       await new Promise((resolve) => setTimeout(resolve, 1200));
-      await sock.sendPresenceUpdate('paused', jid);
+      await session.sock.sendPresenceUpdate('paused', jid);
     } catch {}
 
     let sent;
     if (pdfBuffer) {
-      sent = await sock.sendMessage(jid, {
+      sent = await session.sock.sendMessage(jid, {
         document: pdfBuffer,
         mimetype: 'application/pdf',
-        fileName: fileName || 'كشف_المرتب.pdf',
+        fileName: fileName || 'مستند_رسمي.pdf',
         caption: message || ''
       });
     } else {
-      sent = await sock.sendMessage(jid, { text: message });
+      sent = await session.sock.sendMessage(jid, { text: message });
     }
-    serverState.sentCount++;
+    session.sentCount++;
 
     const logEntry = {
       id: sent.key?.id || 'WAM_' + Date.now(),
@@ -501,46 +706,51 @@ app.post(['/send', '/api/send', '/send-message', '/api/send-message'], async (re
       messageSnippet: (message || (pdfBuffer ? '📎 [ملف PDF مرفق]' : '')).slice(0, 60),
       timestamp: new Date().toLocaleTimeString('ar-EG'),
       status: 'DELIVERED',
-      hasPdf: Boolean(pdfBuffer)
+      hasPdf: Boolean(pdfBuffer),
+      sessionId: sId
     };
-    serverState.logs.push(logEntry);
+    session.logs.push(logEntry);
 
-    console.log(`[WhatsApp Gateway] ✅ Sent to +${jid.split('@')[0]} ${pdfBuffer ? '📎 [مع ملف PDF]' : ''}`);
+    console.log(`[WhatsApp:${sId}] ✅ Sent to +${jid.split('@')[0]} ${pdfBuffer ? '📎 [مع PDF]' : ''}`);
     res.json({
       success: true,
+      sessionId: sId,
       messageId: sent.key?.id,
       phone: jid.split('@')[0],
       status: 'DELIVERED',
       hasPdf: Boolean(pdfBuffer)
     });
   } catch (err) {
-    console.error(`[WhatsApp Gateway] Error sending to +${jid}:`, err);
+    console.error(`[WhatsApp:${sId}] Error sending to +${jid}:`, err);
     res.status(500).json({ success: false, error: err.message || 'فشل إرسال الرسالة عبر الواتساب.' });
   }
 });
 
-// إرسال جماعي ذكي مع طابور زمني آمن وتوليد وتضمين ملفات الـ PDF تلقائياً
+// 7. إرسال جماعي ذكي مع طابور زمني آمن لجلسة محددة
 app.post(['/send-bulk', '/api/send-bulk'], async (req, res) => {
+  const sId = extractSessionId(req);
+  const session = getOrCreateSession(sId, false);
+
   const { messages } = req.body;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ success: false, error: 'قائمة الرسائل فارغة.' });
   }
 
-  if (serverState.status !== 'CONNECTED' || !sock) {
+  if (session.status !== 'CONNECTED' || !session.sock) {
     return res.status(503).json({
       success: false,
-      error: 'خادم الواتساب غير متصل بالهاتف حالياً. يرجى مسح رمز الـ QR للاقتران أولاً.'
+      error: `خادم الواتساب (${sId}) غير متصل بالهاتف حالياً. يرجى مسح رمز الـ QR للاقتران أولاً.`
     });
   }
 
   res.json({
     success: true,
-    message: `بدأت عملية إرسال ${messages.length} رسالة بأمان في الخلفية مع توليد ملفات الـ PDF وفواصل مكافحة الحظر.`,
+    sessionId: sId,
+    message: `بدأت عملية إرسال ${messages.length} رسالة بأمان عبر جلسة (${sId}).`,
     totalCount: messages.length
   });
 
-  // معالجة الخلفية
   (async () => {
     for (let i = 0; i < messages.length; i++) {
       const item = messages[i];
@@ -551,142 +761,87 @@ app.post(['/send-bulk', '/api/send-bulk'], async (req, res) => {
         const delayMs = 2500 + Math.floor(Math.random() * 2000);
         await new Promise((resolve) => setTimeout(resolve, delayMs));
 
-        await sock.sendPresenceUpdate('composing', jid);
+        await session.sock.sendPresenceUpdate('composing', jid);
         await new Promise((resolve) => setTimeout(resolve, 800));
-        await sock.sendPresenceUpdate('paused', jid);
+        await session.sock.sendPresenceUpdate('paused', jid);
 
-        // تجهيز ملف الـ PDF إما من Base64 أو عبر محرك Chromium
         let pdfBuffer = null;
         if (item.pdfBase64) {
           pdfBuffer = Buffer.from(item.pdfBase64, 'base64');
         } else if (item.pdfHtml) {
           try {
-            console.log(`[WhatsApp Bulk] 📄 Rendering PDF for (${item.empName || jid})...`);
+            console.log(`[WhatsApp:${sId} Bulk] 📄 Rendering PDF for (${item.empName || jid})...`);
             pdfBuffer = await renderHtmlToPdfBuffer(item.pdfHtml);
           } catch (renderErr) {
-            console.error(`[WhatsApp Bulk PDF Render Error for ${item.empName}]:`, renderErr.message);
+            console.error(`[WhatsApp:${sId} Bulk PDF Render Error for ${item.empName}]:`, renderErr.message);
           }
         }
 
         if (pdfBuffer) {
-          await sock.sendMessage(jid, {
+          await session.sock.sendMessage(jid, {
             document: pdfBuffer,
             mimetype: 'application/pdf',
-            fileName: item.fileName || `كشف_مرتب_${item.empName || 'موظف'}.pdf`,
+            fileName: item.fileName || `مستند_${item.empName || 'رسمي'}.pdf`,
             caption: item.message || ''
           });
         } else {
-          await sock.sendMessage(jid, { text: item.message });
+          await session.sock.sendMessage(jid, { text: item.message });
         }
-        serverState.sentCount++;
+        session.sentCount++;
 
-        serverState.logs.push({
+        session.logs.push({
           id: 'WAM_' + Date.now(),
           phone: jid.split('@')[0],
           empName: item.empName || '',
           messageSnippet: (item.message || (pdfBuffer ? '📎 [ملف PDF مرفق]' : '')).slice(0, 50),
           timestamp: new Date().toLocaleTimeString('ar-EG'),
           status: 'DELIVERED',
-          hasPdf: Boolean(pdfBuffer)
+          hasPdf: Boolean(pdfBuffer),
+          sessionId: sId
         });
 
-        console.log(`[WhatsApp Bulk] (${i + 1}/${messages.length}) Sent to ${item.empName || jid} ${pdfBuffer ? '📎 [مع PDF]' : ''}`);
+        console.log(`[WhatsApp:${sId} Bulk] (${i + 1}/${messages.length}) Sent to ${item.empName || jid}`);
       } catch (err) {
-        console.error(`[WhatsApp Bulk] Error sending to ${item.empName || jid}:`, err.message);
+        console.error(`[WhatsApp:${sId} Bulk] Error sending to ${item.empName || jid}:`, err.message);
       }
     }
   })();
 });
 
-// إعادة تشغيل الاتصال يدوياً بضغطة زر
+// 8. إعادة تشغيل الجلسة المعنية يدوياً
 app.post(['/restart', '/api/restart'], async (req, res) => {
-  console.log('[WhatsApp Gateway] 🔄 Manual restart requested...');
-  try {
-    if (sock) {
-      try { sock.ev.removeAllListeners(); } catch {}
-      try { sock.end(undefined); } catch {}
-    }
-  } catch {}
-  sock = null;
-
-  serverState.status = 'CONNECTING';
-  isConnecting = false;
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(connectToWhatsApp, 1500);
-
-  res.json({ success: true, message: 'جاري إعادة تهيئة واتصال خادم الواتساب...' });
+  const sId = extractSessionId(req);
+  console.log(`[WhatsApp:${sId}] 🔄 Manual restart requested...`);
+  const session = getOrCreateSession(sId, false);
+  await session.restart();
+  res.json({ success: true, sessionId: sId, message: `جاري إعادة تهيئة واتصال جلسة (${sId})...` });
 });
 
-// تسجيل الخروج وإعادة توليد رمز الاقتران لتبديل الرقم
+// 9. تسجيل الخروج وفك الارتباط لجلسة محددة
 app.post(['/logout', '/api/logout'], async (req, res) => {
-  console.log('[WhatsApp Gateway] 🚪 Logout requested to change connected phone number...');
-  try {
-    if (sock) {
-      try { sock.ev.removeAllListeners(); } catch {}
-      await Promise.race([
-        sock.logout().catch(() => {}),
-        new Promise((resolve) => setTimeout(resolve, 1500))
-      ]);
-      try { sock.end(undefined); } catch {}
-    }
-  } catch (err) {
-    console.warn('[WhatsApp Gateway] Logout socket cleanup warning:', err.message);
-  }
-  sock = null;
-
-  serverState.status = 'DISCONNECTED';
-  serverState.phone = '';
-  serverState.deviceName = '';
-  serverState.qrCodeDataUrl = '';
-  isConnecting = false;
-
-  try {
-    if (fs.existsSync(AUTH_DIR)) {
-      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-    }
-    fs.mkdirSync(AUTH_DIR, { recursive: true });
-  } catch (err) {
-    console.warn('[WhatsApp Gateway] Failed to reset AUTH_DIR:', err.message);
-  }
-
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(connectToWhatsApp, 1500);
-
-  res.json({ success: true, message: 'تم تسجيل الخروج وفك ارتباط الرقم بنجاح، وجاري توليد رمز الاقتران الجديد.' });
+  const sId = extractSessionId(req);
+  console.log(`[WhatsApp:${sId}] 🚪 Logout requested...`);
+  const session = getOrCreateSession(sId, false);
+  await session.logout();
+  res.json({ success: true, sessionId: sId, message: `تم تسجيل الخروج وفك ارتباط الرقم لجلسة (${sId}) بنجاح.` });
 });
 
-// تصفير الجلسة تماماً وتوليد رمز QR جديد فوري بنقرة زر
+// 10. تصفير الجلسة تماماً وتوليد رمز QR جديد فوري
 app.post(['/force-reset', '/api/force-reset'], async (req, res) => {
-  console.log('[WhatsApp Gateway] ⚡ Force reset requested from client...');
-  try {
-    if (sock) {
-      try { sock.ev.removeAllListeners(); } catch {}
-      try { sock.end(undefined); } catch {}
-    }
-  } catch {}
-  sock = null;
-
-  serverState.status = 'CONNECTING';
-  serverState.phone = '';
-  serverState.deviceName = '';
-  serverState.qrCodeDataUrl = '';
-  serverState.lastError = null;
-  consecutiveFailures = 0;
-  isConnecting = false;
-
-  purgeAuthDir();
-
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(connectToWhatsApp, 800);
-
-  res.json({ success: true, message: 'تم تصفير جلسة الواتساب بنجاح، وجاري توليد رمز الاقتران الجديد فوراً.' });
+  const sId = extractSessionId(req);
+  console.log(`[WhatsApp:${sId}] ⚡ Force reset requested...`);
+  const session = getOrCreateSession(sId, false);
+  await session.forceReset();
+  res.json({ success: true, sessionId: sId, message: `تم تصفير جلسة (${sId}) بنجاح وجاري توليد رمز الاقتران الجديد.` });
 });
 
+// ── بدء تشغيل الخادم ──────────────────────────────────────────────────────────
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 [WhatsApp Gateway] Production Baileys Engine running on http://localhost:${PORT}`);
+  console.log(`🚀 [WhatsApp Multi-Gateway] Production Engine running on http://localhost:${PORT}`);
+  console.log(`⚡ Multi-Session Architecture active with base directory: ${AUTH_BASE_DIR}`);
   const ips = getLocalNetworkIps();
   if (ips.length > 0) {
-    console.log('🌐 [WhatsApp Gateway] Available on local network for other devices at:');
+    console.log('🌐 [WhatsApp Gateway] Available on network:');
     ips.forEach(ip => console.log(`   👉 http://${ip.address}:${PORT}`));
   }
 });
@@ -698,7 +853,7 @@ server.on('error', async (err) => {
       const httpModule = await import('http');
       const testReq = httpModule.default.get(`http://127.0.0.1:${PORT}/health`, { timeout: 1500 }, (testRes) => {
         if (testRes.statusCode === 200) {
-          console.log(`[WhatsApp Gateway] Active healthy instance already running on port ${PORT}. Cleanly exiting duplicate instance.`);
+          console.log(`[WhatsApp Gateway] Active healthy instance already running on port ${PORT}. Cleanly exiting duplicate.`);
           process.exit(0);
         }
       });
@@ -709,5 +864,4 @@ server.on('error', async (err) => {
   }
 });
 
-export { app, server, serverState };
-
+export { app, server, sessionRegistry, getOrCreateSession };

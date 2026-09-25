@@ -93,12 +93,13 @@ export default function ProcurementWhatsAppCenterTab({ currentOfficer = 'مسؤ�
 
   // عنوان سيرفر الواتساب المعتمد
   const waServerUrl = useMemo(() => getResolvedWhatsAppServerUrl(), []);
+  const procurementSessionId = 'procurement';
 
-  // ── 1. جلب وفحص حالة خادم الواتساب ─────────────────────────────────────────
+  // ── 1. جلب وفحص حالة خادم الواتساب الخاص بإدارة المشتريات ──────────────────
   const fetchWhatsAppStatus = useCallback(async (silent = false) => {
     if (!silent) setIsLoadingStatus(true);
     try {
-      const res = await fetch(`${waServerUrl}/api/status`, {
+      const res = await fetch(`${waServerUrl}/api/status?sessionId=${procurementSessionId}`, {
         headers: { 'bypass-tunnel-reminder': 'true' }
       });
       const data = await res.json();
@@ -230,16 +231,16 @@ export default function ProcurementWhatsAppCenterTab({ currentOfficer = 'مسؤ�
     setCustomMessage(msg);
   }, [selectedTemplate, currentSelectedBranch, shipmentDetails, shortageDetails, currentOfficer]);
 
-  // ── 4. إجراءات الخادم (إعادة تشغيل / فك الاقتران) ───────────────────────────
+  // ── 4. إجراءات الخادم لجلسة المشتريات (إعادة تشغيل / فك الاقتران) ────────
   const handleRestartServer = async () => {
     setIsActionLoading(true);
     try {
-      const res = await fetch(`${waServerUrl}/api/restart`, {
+      const res = await fetch(`${waServerUrl}/api/restart?sessionId=${procurementSessionId}`, {
         method: 'POST',
         headers: { 'bypass-tunnel-reminder': 'true' }
       });
       const data = await res.json().catch(() => ({}));
-      showToast?.(data.message || 'تم إرسال أمر إعادة تشغيل محرك الواتساب بنجاح');
+      showToast?.(data.message || 'تم إرسال أمر إعادة تشغيل واتساب المشتريات بنجاح');
       setTimeout(fetchWhatsAppStatus, 1500);
     } catch (err) {
       showToast?.('تعذر إعادة تشغيل الخادم');
@@ -249,10 +250,10 @@ export default function ProcurementWhatsAppCenterTab({ currentOfficer = 'مسؤ�
   };
 
   const handleLogoutServer = async () => {
-    if (!window.confirm('هل أنت متأكد من تسجيل الخروج وفك اقتران الواتساب؟')) return;
+    if (!window.confirm('هل أنت متأكد من تسجيل الخروج وفك اقتران واتساب المشتريات؟ لن تتأثر باقي الفروع أو شؤون العاملين.')) return;
     setIsActionLoading(true);
     try {
-      await fetch(`${waServerUrl}/api/logout`, {
+      await fetch(`${waServerUrl}/api/logout?sessionId=${procurementSessionId}`, {
         method: 'POST',
         headers: { 'bypass-tunnel-reminder': 'true' }
       });
@@ -332,6 +333,7 @@ export default function ProcurementWhatsAppCenterTab({ currentOfficer = 'مسؤ�
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true' },
           body: JSON.stringify({
+            sessionId: procurementSessionId,
             phone: cleanPhone,
             message: finalMsg
           })
@@ -455,6 +457,18 @@ export default function ProcurementWhatsAppCenterTab({ currentOfficer = 'مسؤ�
                 border: `1px solid ${waState.status === 'CONNECTED' ? '#a7f3d0' : waState.status === 'QR_READY' ? '#fde68a' : '#fecaca'}`
               }}>
                 {waState.status === 'CONNECTED' ? '● متصل ومقترن بالهاتف' : waState.status === 'QR_READY' ? '⏳ بانتظار مسح الـ QR' : '○ غير متصل'}
+              </span>
+
+              <span style={{
+                fontSize: '11px',
+                fontWeight: '800',
+                padding: '3px 10px',
+                borderRadius: '12px',
+                background: '#eff6ff',
+                color: '#1d4ed8',
+                border: '1px solid #bfdbfe'
+              }}>
+                📱 جلسة مستقلة للمشتريات (procurement)
               </span>
             </div>
 

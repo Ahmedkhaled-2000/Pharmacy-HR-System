@@ -372,7 +372,7 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate) 
 /**
  * إرسال الفاتورة الرسمية PDF للعميل عبر خادم الواتساب
  */
-export async function sendInvoicePdfViaWhatsApp({ order, branch, waServerUrl, customMessage = '' }) {
+export async function sendInvoicePdfViaWhatsApp({ order, branch, waServerUrl, customMessage = '', sessionId }) {
   const phone = order.customer_phone || order.customerPhone || '';
   if (!phone) {
     throw new Error('لا يوجد رقم هاتف مسجل لهذا العميل');
@@ -383,6 +383,7 @@ export async function sendInvoicePdfViaWhatsApp({ order, branch, waServerUrl, cu
   const bName = branch?.name || order.branch_name || 'الصيدلية';
   const remaining = parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2);
   const pickupDate = order.expected_pickup_date || order.expectedPickupDate || '';
+  const targetSessionId = sessionId || (branch?.id ? `branch_${branch.id}` : (order?.branch_id ? `branch_${order.branch_id}` : 'hr_main'));
 
   const caption = customMessage || `السلام عليكم ورحمة الله وبركاته،\nأهلاً بك أ/ *${cName}* 🌸\n\nمرفق لسيادتكم الفاتورة الرسمية / إيصال حجز وتوفير الدواء الخاص بكم من *${bName}* كملف PDF معتمد.\n\n📋 رقم الإيصال: *#${orderNo}*\n💵 المبلغ المتبقي عند الاستلام: *${remaining} ج.م*${pickupDate ? `\n📅 موعد الاستلام المتوقع: *${pickupDate}*` : ''}\n\nنسعد دائماً بخدمتكم وتوفير كافة احتياجاتكم الطبية ✨`;
 
@@ -395,6 +396,7 @@ export async function sendInvoicePdfViaWhatsApp({ order, branch, waServerUrl, cu
       'bypass-tunnel-reminder': 'true'
     },
     body: JSON.stringify({
+      sessionId: targetSessionId,
       phone,
       message: caption,
       pdfHtml,
