@@ -3058,11 +3058,11 @@ app.get('/api/app/update-manifest', async (req, res) => {
       });
     }
 
-    // مانيفست افتراضي آمن للإصدار v1.2.56 على خادم الـ VPS
+    // مانيفست افتراضي آمن للإصدار v1.2.57 على خادم الـ VPS
     res.json({
       success: true,
-      latest_version: '1.2.56',
-      latest_version_code: 11,
+      latest_version: '1.2.57',
+      latest_version_code: 12,
       min_supported_code: 1,
       download_url: '/downloads/pharmacy-employee-portal.apk',
       sha256_checksum: '1bd625404f5db9883a7aec72dda0e466b6a35273e90b6bf581cdb1062ab35ad0',

@@ -517,6 +517,7 @@ export function normalizeState(parsed) {
   })();
 
   const effectiveOwnerUser = parsed.orgSettings?.ownerUsername || savedOwnerUser || 'owner';
+  const effectiveOwnerPass = parsed.orgSettings?.ownerPassword || savedOwnerPass || 'owner123';
   const rawOrg = parsed.orgSettings?.orgName;
   const effectiveOrgName = (rawOrg && !rawOrg.includes('الموارد البشرية')) ? rawOrg : 'نظام إدارة الصيدليات';
 

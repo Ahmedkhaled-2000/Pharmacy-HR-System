@@ -673,13 +673,14 @@ export default function AppRoutes() {
               localStorage.setItem('app_auth_token', outRes.token);
             } catch {}
           }
+          const isBranchRole = oUser.role === 'branch' || targetRole === 'outstock_branch' || Boolean(oUser.branch_id || oUser.branchData?.id);
           handleUnifiedLogin({
             role: targetRole,
             user: oUser,
-            branch: oUser.branch_id || oUser.branchData?.id || oUser.id ? {
+            branch: isBranchRole ? (oUser.branchData || {
               id: oUser.branch_id || oUser.branchData?.id || oUser.id,
               name: oUser.branch_name || oUser.branchData?.name || oUser.full_name || oUser.name
-            } : null,
+            }) : null,
             redirectTab: 'outstock'
           });
           return { success: true, role: targetRole };
@@ -867,10 +868,11 @@ export default function AppRoutes() {
                 localStorage.setItem('app_auth_token', loginRes.token);
               } catch {}
             }
+            const isBranchRole = sRole === 'outstock_branch' || sUser.role === 'branch' || Boolean(sUser.branch_id || sUser.branchId);
             handleUnifiedLogin({
               role: targetRole,
               user: sUser,
-              branch: sUser.branch_id || sUser.branchId || sUser.id ? {
+              branch: isBranchRole ? {
                 id: sUser.branch_id || sUser.branchId || sUser.id,
                 name: sUser.name || sUser.fullName || sUser.full_name
               } : null,
