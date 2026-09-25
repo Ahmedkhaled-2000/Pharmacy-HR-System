@@ -3058,17 +3058,17 @@ app.get('/api/app/update-manifest', async (req, res) => {
       });
     }
 
-    // مانيفست افتراضي آمن للإصدار v1.2.41 على خادم الـ VPS
+    // مانيفست افتراضي آمن للإصدار v1.2.56 على خادم الـ VPS
     res.json({
       success: true,
-      latest_version: '1.2.41',
-      latest_version_code: 5,
+      latest_version: '1.2.56',
+      latest_version_code: 11,
       min_supported_code: 1,
-      download_url: '/downloads/pharmacy-hr-employee-1.2.41.apk',
-      sha256_checksum: '',
-      file_size: 99099961,
+      download_url: '/downloads/pharmacy-employee-portal.apk',
+      sha256_checksum: '1bd625404f5db9883a7aec72dda0e466b6a35273e90b6bf581cdb1062ab35ad0',
+      file_size: 392779466,
       mandatory_update: false,
-      release_notes: 'تحديث شامل لمنظومة الموارد البشرية وبوابة الموظف وربطها بسيرفر VPS السحابي',
+      release_notes: 'تحديث شامل: تغيير اسم وهوية النظام إلى Pharma System وتحديثات شاملة لنظام إدارة الصيدليات والمبيعات والمشتريات وبوابة الموظف.',
       release_date: new Date().toISOString()
     });
   } catch (err) {
@@ -3079,7 +3079,7 @@ app.get('/api/app/update-manifest', async (req, res) => {
 
 // مسار التحميل المباشر للإصدار الأخير
 app.get(['/api/app/download-latest', '/downloads/latest.apk'], (req, res) => {
-  res.redirect(302, '/downloads/pharmacy-hr-employee-1.2.41.apk');
+  res.redirect(302, '/downloads/pharmacy-employee-portal.apk');
 });
 
 app.post('/api/app/releases', async (req, res) => {
