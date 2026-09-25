@@ -1,6 +1,6 @@
 {
   "appId": "com.pharmacy.hr.system",
-  "productName": "منظومة الموارد البشرية",
+  "productName": "Pharma System",
   "directories": {
     "output": "release",
     "buildResources": "assets"
@@ -32,7 +32,7 @@
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
-    "shortcutName": "منظومة إدارة الموارد البشرية والرواتب",
+    "shortcutName": "Pharma System",
     "runAfterFinish": true,
     "deleteAppDataOnUninstall": false,
     "language": "1025"

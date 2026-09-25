@@ -1,8 +1,8 @@
 {
   "name": "pharmacy-hr-system",
-  "productName": "منظومة الموارد البشرية",
+  "productName": "Pharma System",
   "version": "1.2.55",
-  "description": "منظومة إدارة الموارد البشرية والرواتب - تطبيق ويندوز المكتبي",
+  "description": "نظام إدارة الصيدليات - Pharma System",
   "repository": {
     "type": "git",
     "url": "https://github.com/Ahmedkhaled-2000/Pharmacy-HR-System.git"

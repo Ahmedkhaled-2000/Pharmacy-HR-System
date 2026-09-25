@@ -1117,7 +1117,7 @@ export default function AppRoutes() {
             return '/icons/logo_512x512.png';
           })();
 
-        const effectiveOrgName = state?.orgSettings?.orgName ||
+        const rawOrg = state?.orgSettings?.orgName ||
           (() => {
             try {
               const saved = localStorage.getItem('pharmacy-tracker-data');
@@ -1126,8 +1126,9 @@ export default function AppRoutes() {
                 if (parsed?.orgSettings?.orgName) return parsed.orgSettings.orgName;
               }
             } catch {}
-            return 'منظومة إدارة الموارد البشرية والرواتب';
+            return 'نظام إدارة الصيدليات';
           })();
+        const effectiveOrgName = (rawOrg && !rawOrg.includes('الموارد البشرية')) ? rawOrg : 'نظام إدارة الصيدليات';
 
         return (
           <div style={{

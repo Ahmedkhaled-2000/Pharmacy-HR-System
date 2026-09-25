@@ -71,7 +71,7 @@ const DESKTOP_CONFIG_FILE = path.join(userDataPath, 'desktop_config.json');
 
 // ── 1.2. محرك إدارة إعدادات وتخصيصات تطبيق الويندوز (Desktop Customization Config) ──
 const DEFAULT_DESKTOP_CONFIG = {
-  appName: 'منظومة إدارة الموارد البشرية والرواتب',
+  appName: 'Pharma System',
   customLogoPath: null,
   customIcoPath: null,
   zoomFactor: 0.92,
@@ -85,6 +85,9 @@ function getDesktopConfig() {
     if (fs.existsSync(DESKTOP_CONFIG_FILE)) {
       const data = JSON.parse(fs.readFileSync(DESKTOP_CONFIG_FILE, 'utf8'));
       const merged = { ...DEFAULT_DESKTOP_CONFIG, ...data };
+      if (merged.appName && merged.appName.includes('الموارد البشرية')) {
+        merged.appName = 'Pharma System';
+      }
       if (merged.customLogoPath && fs.existsSync(merged.customLogoPath)) {
         try {
           const imgBuf = fs.readFileSync(merged.customLogoPath);
@@ -184,7 +187,7 @@ function updateWindowsDesktopShortcuts(customIcoPath, customAppName) {
 
     try {
       const config = getDesktopConfig();
-      const appName = (customAppName || config.appName || 'منظومة الموارد البشرية والرواتب').trim();
+      const appName = (customAppName || (config.appName && !config.appName.includes('الموارد البشرية') ? config.appName : 'Pharma System')).trim();
 
       // إنشاء مجلد آمن للملفات ومسار خالي من مشاكل الترميز
       const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE, 'AppData', 'Local');
@@ -568,7 +571,7 @@ function createMainWindow() {
     resolvedIcon = fs.existsSync(iconPath) ? iconPath : (fs.existsSync(fallbackIconPath) ? fallbackIconPath : undefined);
   }
 
-  const appTitle = desktopConfig.appName || 'منظومة إدارة الموارد البشرية والرواتب';
+  const appTitle = (desktopConfig.appName && !desktopConfig.appName.includes('الموارد البشرية')) ? desktopConfig.appName : 'نظام إدارة الصيدليات — Pharma System';
 
   mainWindow = new BrowserWindow({
     width: 1366,
@@ -1543,7 +1546,7 @@ ipcMain.handle('desktop:select-logo', async () => {
     createIcoFromImage(targetFile, targetIco);
 
     const config = getDesktopConfig();
-    const updatedAppName = config.appName || 'منظومة إدارة الموارد البشرية والرواتب';
+    const updatedAppName = (config.appName && !config.appName.includes('الموارد البشرية')) ? config.appName : 'Pharma System';
 
     // تحديث الإعدادات المحفوظة
     saveDesktopConfig({
@@ -1655,7 +1658,7 @@ ipcMain.handle('desktop:show-notification', async (_event, { title, body, icon, 
       if (fs.existsSync(defaultIcon)) notifIcon = defaultIcon;
     }
 
-    const notifTitle = title || config.appName || 'منظومة إدارة الموارد البشرية والرواتب';
+    const notifTitle = title || (config.appName && !config.appName.includes('الموارد البشرية') ? config.appName : 'Pharma System');
     const notifBody = body || '';
     const isSilent = silent || config.notificationSound === false;
 

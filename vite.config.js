@@ -16,9 +16,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'icons/*.svg', 'offline.html'],
       manifest: {
-        name: 'بوابة موظفي الصيدلية',
-        short_name: 'بوابة الموظف',
-        description: 'تطبيق تتبع الحضور والانصراف لموظفي الصيدلية',
+        name: 'نظام إدارة الصيدليات — Pharma System',
+        short_name: 'Pharma System',
+        description: 'نظام إدارة الصيدليات المتكامل — Pharma System',
         start_url: '/',
         scope: '/',
         display: 'standalone',

@@ -93,7 +93,7 @@ export async function showSystemNotification({ title, body, id = null, icon = nu
   if (isDesktopApp() && window.desktopAPI?.showDesktopNotification) {
     try {
       const res = await window.desktopAPI.showDesktopNotification({
-        title: title || 'منظومة الموارد البشرية والرواتب',
+        title: title || 'Pharma System 🔔',
         body: body || 'لديك إشعار جديد في المنظومة.',
         icon: icon || null
       });
@@ -114,7 +114,7 @@ export async function showSystemNotification({ title, body, id = null, icon = nu
 
       await NativeNotification.showNotification({
         id: numericId,
-        title: title || 'منظومة الموارد البشرية',
+        title: title || 'Pharma System 🔔',
         body: body || 'لديك إشعار جديد في المنظومة.'
       });
       return true;
@@ -126,7 +126,7 @@ export async function showSystemNotification({ title, body, id = null, icon = nu
   // 3. بيئة المتصفح (Web Notification)
   if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
     try {
-      new Notification(title || 'منظومة الموارد البشرية', {
+      new Notification(title || 'Pharma System 🔔', {
         body: body || '',
         icon: icon || '/icons/logo_192x192.png',
         badge: '/icons/logo_192x192.png',

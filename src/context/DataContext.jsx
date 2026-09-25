@@ -175,7 +175,7 @@ export function DataProvider({ children, showToast = () => {} }) {
   // Core Data State with Default Settings
   const [state, setState] = useState({
     orgSettings: {
-      orgName: 'منظومة إدارة الموارد البشرية والرواتب',
+      orgName: 'نظام إدارة الصيدليات',
       logoUrl: '',
       ownerUsername: (() => {
         try {

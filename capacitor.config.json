@@ -1,6 +1,6 @@
 {
   "appId": "com.pharmacy.employee",
-  "appName": "بوابة الموظف",
+  "appName": "Pharma System",
   "webDir": "dist",
   "bundledWebRuntime": false,
   "server": {

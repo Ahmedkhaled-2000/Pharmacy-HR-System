@@ -330,7 +330,7 @@ export default function DesktopSystemTitleBar() {
             color: 'inherit'
           }}
         >
-          {desktopConfig?.appName || 'منظومة إدارة الموارد البشرية والرواتب'}
+          {(desktopConfig?.appName && !desktopConfig.appName.includes('الموارد البشرية')) ? desktopConfig.appName : 'نظام إدارة الصيدليات — Pharma System'}
         </span>
 
         {/* شارة الإصدار الحالي */}

@@ -22,7 +22,8 @@ export default function LoginPage({ onLogin, onOpenRegister, onOpenDeveloper, st
     }
   });
 
-  const orgName = state?.orgSettings?.orgName?.trim() || 'مجموعة الصيدليات الطبية';
+  const orgRaw = state?.orgSettings?.orgName?.trim();
+  const orgName = (orgRaw && !orgRaw.includes('الموارد البشرية')) ? orgRaw : 'نظام إدارة الصيدليات';
   const orgLogo = state?.orgSettings?.logoUrl;
   const generalManager = state?.orgSettings?.generalManagerName;
 

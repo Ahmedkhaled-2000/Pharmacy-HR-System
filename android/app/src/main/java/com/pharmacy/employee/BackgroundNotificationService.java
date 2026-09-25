@@ -93,7 +93,7 @@ public class BackgroundNotificationService extends Service {
             // 2. قناة التنبيهات الفورية ذات الأولوية القصوى (High Priority مع صوت واهتزاز)
             NotificationChannel alertChannel = new NotificationChannel(
                 ALERTS_CHANNEL_ID,
-                "إشعارات منظومة الموارد البشرية",
+                "إشعارات Pharma System",
                 NotificationManager.IMPORTANCE_HIGH
             );
             alertChannel.setDescription("تنبيهات فورية بالطلبات والردود والتعليمات الإدارية");
@@ -112,7 +112,7 @@ public class BackgroundNotificationService extends Service {
 
         return new NotificationCompat.Builder(this, PERSISTENT_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("منظومة الموارد البشرية")
+            .setContentTitle("Pharma System")
             .setContentText("المزامنة اللحظية نشطة لتلقي الإشعارات في الخلفية")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
@@ -195,7 +195,7 @@ public class BackgroundNotificationService extends Service {
                     String type = req.optString("type", "طلب جديد");
                     String status = req.optString("status", "pending");
 
-                    String title = "منظومة الموارد البشرية 🔔";
+                    String title = "Pharma System 🔔";
                     String body = "طلب جديد من " + empName + " (" + type + ")";
                     if ("approved".equals(status)) {
                         body = "تمت الموافقة على طلبك: " + type;

@@ -32,7 +32,7 @@ import com.getcapacitor.annotation.PermissionCallback;
 public class NativeNotificationPlugin extends Plugin {
 
     private static final String CHANNEL_ID = "pharmacy_hr_system_notifications";
-    private static final String CHANNEL_NAME = "إشعارات منظومة الموارد البشرية";
+    private static final String CHANNEL_NAME = "إشعارات Pharma System";
     private static final String CHANNEL_DESC = "تنبيهات فورية للموظفين والإدارة بالطلبات، الردود، والتعليمات الإدارية";
 
     private void createNotificationChannel() {
@@ -88,7 +88,7 @@ public class NativeNotificationPlugin extends Plugin {
             Context context = getContext();
             createNotificationChannel();
 
-            String title = call.getString("title", "منظومة الموارد البشرية");
+            String title = call.getString("title", "Pharma System");
             String body = call.getString("body", "");
             int id = call.getInt("id", (int) (System.currentTimeMillis() % Integer.MAX_VALUE));
 

@@ -41,7 +41,7 @@ export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved })
   const [originalConfig, setOriginalConfig] = useState(null);
 
   // إعدادات النموذج التفاعلي
-  const [appName, setAppName] = useState('منظومة إدارة الموارد البشرية والرواتب');
+  const [appName, setAppName] = useState('نظام إدارة الصيدليات');
   const [logoPreview, setLogoPreview] = useState('');
   const [hasCustomLogo, setHasCustomLogo] = useState(false);
   const [zoomFactor, setZoomFactor] = useState(0.92);
@@ -63,7 +63,8 @@ export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved })
       window.desktopAPI.getDesktopConfig().then((cfg) => {
         if (!isMounted || !cfg) return;
         setOriginalConfig(cfg);
-        setAppName(cfg.appName || 'منظومة إدارة الموارد البشرية والرواتب');
+        const savedName = cfg.appName;
+        setAppName((savedName && !savedName.includes('الموارد البشرية')) ? savedName : 'نظام إدارة الصيدليات');
         setZoomFactor(Number(cfg.zoomFactor) || 0.92);
         setEnableNotifications(cfg.enableNotifications !== false);
         setNotificationSound(cfg.notificationSound !== false);
@@ -139,7 +140,7 @@ export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved })
     setTestNotifSent(false);
     try {
       await window.desktopAPI.showDesktopNotification({
-        title: appName || 'منظومة إدارة الموارد البشرية والرواتب',
+        title: appName || 'نظام إدارة الصيدليات',
         body: 'مرحباً بك! نظام إشعارات ويندوز يعمل بكامل طاقته وصوته مثل الواتساب.',
         silent: !notificationSound
       });
@@ -169,7 +170,7 @@ export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved })
     setShortcutSyncResult(null);
     try {
       await window.desktopAPI.saveDesktopConfig?.({
-        appName: appName.trim() || 'منظومة إدارة الموارد البشرية والرواتب'
+        appName: appName.trim() || 'نظام إدارة الصيدليات'
       });
       const res = await window.desktopAPI.syncDesktopShortcut();
       if (res && res.success) {
@@ -192,7 +193,7 @@ export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved })
     setSaving(true);
     try {
       const newConfig = {
-        appName: appName.trim() || 'منظومة إدارة الموارد البشرية والرواتب',
+        appName: appName.trim() || 'نظام إدارة الصيدليات',
         zoomFactor: Number(zoomFactor) || 0.92,
         enableNotifications,
         notificationSound,
@@ -540,7 +541,7 @@ export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved })
                         style={{ width: '16px', height: '16px', borderRadius: '3px', objectFit: 'contain' }}
                       />
                       <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#f8fafc' }}>
-                        {appName || 'منظومة إدارة الموارد البشرية والرواتب'}
+                        {appName || 'نظام إدارة الصيدليات'}
                       </span>
                     </div>
                   </div>

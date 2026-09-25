@@ -45,7 +45,7 @@ export default function EnterpriseHeaderSettingsCard({
   const [email, setEmail] = useState(orgSettings.email || orgSettings.officialEmail || '');
   const [contractTitle, setContractTitle] = useState(orgSettings.contractTitle || 'عَقْدُ عَمَلٍ فَرْدِيّ مُوَحَّد');
   const [contractPrefix, setContractPrefix] = useState(orgSettings.contractNumberPrefix !== undefined ? orgSettings.contractNumberPrefix : 'CNT-Modawa@kane-');
-  const [printFooterText, setPrintFooterText] = useState(orgSettings.printFooterText || 'وثيقة رسمية معتمدة صادرة آلياً من منظومة إدارة الموارد البشرية والرواتب');
+  const [printFooterText, setPrintFooterText] = useState(orgSettings.printFooterText || 'وثيقة رسمية معتمدة صادرة آلياً من نظام إدارة الصيدليات (Pharma System)');
   const [logoUrl, setLogoUrl] = useState(orgSettings.logoUrl || '');
   const [headerTheme, setHeaderTheme] = useState(orgSettings.headerTheme || 'emerald'); // 'emerald' | 'classic' | 'slate'
   const [saving, setSaving] = useState(false);
@@ -117,7 +117,7 @@ export default function EnterpriseHeaderSettingsCard({
     setEmail('');
     setContractTitle('عَقْدُ عَمَلٍ فَرْدِيّ مُوَحَّد');
     setContractPrefix('CNT-Modawa@kane-');
-    setPrintFooterText('وثيقة رسمية معتمدة صادرة آلياً من منظومة إدارة الموارد البشرية والرواتب');
+    setPrintFooterText('وثيقة رسمية معتمدة صادرة آلياً من نظام إدارة الصيدليات (Pharma System)');
     setHeaderTheme('emerald');
     showToast?.('🔄 تمت استعادة القيم الافتراضية للترويسة');
   };
@@ -144,7 +144,7 @@ export default function EnterpriseHeaderSettingsCard({
       officialEmail: email.trim(),
       contractTitle: contractTitle.trim() || 'عَقْدُ عَمَلٍ فَرْدِيّ مُوَحَّد',
       contractNumberPrefix: contractPrefix.trim(),
-      printFooterText: printFooterText.trim() || 'وثيقة رسمية معتمدة صادرة آلياً من منظومة إدارة الموارد البشرية والرواتب',
+      printFooterText: printFooterText.trim() || 'وثيقة رسمية معتمدة صادرة آلياً من نظام إدارة الصيدليات (Pharma System)',
       logoUrl: logoUrl || '',
       headerTheme: headerTheme,
       updatedAt: Date.now()
@@ -551,7 +551,7 @@ export default function EnterpriseHeaderSettingsCard({
             type="text"
             value={printFooterText}
             onChange={(e) => setPrintFooterText(e.target.value)}
-            placeholder="مثال: وثيقة رسمية معتمدة صادرة آلياً من منظومة إدارة الموارد البشرية والرواتب"
+            placeholder="مثال: وثيقة رسمية معتمدة صادرة آلياً من نظام إدارة الصيدليات (Pharma System)"
             disabled={!canEdit}
             readOnly={!canEdit}
             style={{ ...fieldInputStyle, fontSize: '13px' }}

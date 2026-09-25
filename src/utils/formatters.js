@@ -517,10 +517,11 @@ export function normalizeState(parsed) {
   })();
 
   const effectiveOwnerUser = parsed.orgSettings?.ownerUsername || savedOwnerUser || 'owner';
-  const effectiveOwnerPass = parsed.orgSettings?.ownerPassword || savedOwnerPass || 'owner123';
+  const rawOrg = parsed.orgSettings?.orgName;
+  const effectiveOrgName = (rawOrg && !rawOrg.includes('الموارد البشرية')) ? rawOrg : 'نظام إدارة الصيدليات';
 
   const orgSettings = {
-    orgName: 'منظومة إدارة الموارد البشرية والرواتب',
+    orgName: 'نظام إدارة الصيدليات',
     logoUrl: '',
     waServerUrl: '',
     adminUsername: 'admin',
@@ -528,6 +529,7 @@ export function normalizeState(parsed) {
     permissions: {},
     empPermissions: {},
     ...(parsed.orgSettings || {}),
+    orgName: effectiveOrgName,
     ownerUsername: effectiveOwnerUser,
     ownerPassword: effectiveOwnerPass,
     gmailConfig: effectiveGmailConfig,

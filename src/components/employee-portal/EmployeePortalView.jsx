@@ -2779,7 +2779,10 @@ export default function EmployeePortalView({
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)', whiteSpace: 'nowrap' }}>
-                {orgSettings?.orgName || state?.orgSettings?.orgName || 'منظومة الموارد البشرية'}
+                {(() => {
+                  const name = orgSettings?.orgName || state?.orgSettings?.orgName;
+                  return (name && !name.includes('الموارد البشرية')) ? name : 'نظام إدارة الصيدليات';
+                })()}
               </span>
 
 
