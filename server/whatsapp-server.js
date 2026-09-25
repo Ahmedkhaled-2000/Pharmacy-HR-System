@@ -70,6 +70,8 @@ export async function renderHtmlToPdfBuffer(htmlContent) {
       '--disable-gpu',
       '--no-first-run',
       '--no-pdf-header-footer',
+      '--run-all-compositor-stages-before-draw',
+      '--virtual-time-budget=2500',
       '--print-to-pdf=' + pdfPath,
       htmlPath
     ], (err) => {

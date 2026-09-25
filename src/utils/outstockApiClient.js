@@ -352,3 +352,40 @@ export async function outstockSyncMedications(medications, source) {
 export async function outstockGetMedicationStats() {
   return await outstockRequest('medications/stats', { method: 'GET' });
 }
+
+// ── 10. إعدادات وهوية الصيدلية والشعار بالفاتورة ─────────────────────────────
+export async function outstockGetSettings() {
+  const res = await outstockRequest('settings', { method: 'GET' });
+  if (res?.success && res.settings) {
+    try {
+      localStorage.setItem('outstock_general_settings', JSON.stringify(res.settings));
+    } catch {}
+    return res;
+  }
+
+  // دعم استرجاع الإعدادات من التخزين المحلي في حال عدم توفر الاتصال
+  try {
+    const cached = localStorage.getItem('outstock_general_settings');
+    if (cached) {
+      return { success: true, settings: JSON.parse(cached), isFromCache: true };
+    }
+  } catch {}
+
+  return res;
+}
+
+export async function outstockSaveSettings(settingsData) {
+  const res = await outstockRequest('settings', {
+    method: 'POST',
+    body: JSON.stringify(settingsData)
+  });
+
+  if (res?.success && res.settings) {
+    try {
+      localStorage.setItem('outstock_general_settings', JSON.stringify(res.settings));
+    } catch {}
+  }
+
+  return res;
+}
+

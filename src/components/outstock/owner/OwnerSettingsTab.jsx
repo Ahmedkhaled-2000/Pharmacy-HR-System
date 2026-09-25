@@ -1,11 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, UserPlus, Users, Key, Save, Edit2, Shield, Check, Keyboard, RotateCcw } from 'lucide-react';
+import {
+  Building2,
+  UserPlus,
+  Users,
+  Key,
+  Save,
+  Edit2,
+  Shield,
+  Check,
+  Keyboard,
+  RotateCcw,
+  Image as ImageIcon,
+  Upload,
+  Trash2,
+  Eye,
+  Receipt,
+  Sparkles,
+  Phone,
+  MapPin
+} from 'lucide-react';
 import {
   outstockGetBranches,
   outstockSaveBranch,
   outstockGetUsers,
   outstockSaveUser,
-  outstockChangePassword
+  outstockChangePassword,
+  outstockGetSettings,
+  outstockSaveSettings
 } from '../../../utils/outstockApiClient';
 import {
   getActiveShortcuts,
@@ -17,14 +38,15 @@ import {
 /**
  * OwnerSettingsTab.jsx
  * شاشة الإعدادات والتحكم والصلاحيات للمالك والمشرف العام
- * 1. إنشاء الفروع وجلب بياناتها من منظومة الرواتب وتعيين اسم مستخدم وكلمة مرور فريدين
- * 2. إنشاء وتعديل يوزرات إدارة المشتريات
- * 3. تخصيص صلاحيات فروع محددة لمسؤولي المشتريات المساعدين (Sub-Purchasing Scope)
- * 4. تعديل كلمة مرور المالك وتأمين الحساب
- * 5. تخصيص وإدارة اختصارات لوحة المفاتيح
+ * 1. تخصيص وإدارة شعار وهوية الصيدلية بالفاتورة الرسمية A4 والإيصالات الحرارية
+ * 2. إنشاء الفروع وجلب بياناتها من منظومة الرواتب وتعيين اسم مستخدم وكلمة مرور فريدين
+ * 3. إنشاء وتعديل يوزرات إدارة المشتريات
+ * 4. تخصيص صلاحيات فروع محددة لمسؤولي المشتريات المساعدين (Sub-Purchasing Scope)
+ * 5. تعديل كلمة مرور المالك وتأمين الحساب
+ * 6. تخصيص وإدارة اختصارات لوحة المفاتيح
  */
 export default function OwnerSettingsTab({ showToast }) {
-  const [activeSubSection, setActiveSubSection] = useState('branches'); // 'branches', 'procurement_users', 'security', 'shortcuts'
+  const [activeSubSection, setActiveSubSection] = useState('pharmacy_identity'); // 'pharmacy_identity', 'branches', 'procurement_users', 'security', 'shortcuts'
 
   const [shortcutsList, setShortcutsList] = useState(() => getActiveShortcuts());
   const [editingShortcutId, setEditingShortcutId] = useState(null);
@@ -35,6 +57,15 @@ export default function OwnerSettingsTab({ showToast }) {
   const [hrBranches, setHrBranches] = useState([]);
   const [users, setUsers] = useState([]);
   const [_isLoading, setIsLoading] = useState(true);
+
+  // إعدادات وهوية وشعار الصيدلية بالفاتورة
+  const [pharmacyLogo, setPharmacyLogo] = useState('');
+  const [pharmacyOrgName, setPharmacyOrgName] = useState('');
+  const [pharmacySlogan, setPharmacySlogan] = useState('إدارة الصيدليات ورعاية العملاء - قسم توفير النواقص');
+  const [pharmacyContactPhone, setPharmacyContactPhone] = useState('');
+  const [pharmacyMainAddress, setPharmacyMainAddress] = useState('');
+  const [pharmacyInvoiceFooter, setPharmacyInvoiceFooter] = useState('نسعد دائماً بخدمتكم وتوفير كافة احتياجاتكم الدوائية والطبية بأعلى معايير الجودة والسرعة ✨');
+  const [isSavingIdentity, setIsSavingIdentity] = useState(false);
 
   // فورم إضافة / تعديل فرع
   const [editingBranch, setEditingBranch] = useState(null);
@@ -65,9 +96,10 @@ export default function OwnerSettingsTab({ showToast }) {
   const fetchSettingsData = async () => {
     setIsLoading(true);
     try {
-      const [branchRes, usersRes] = await Promise.all([
+      const [branchRes, usersRes, settingsRes] = await Promise.all([
         outstockGetBranches(),
-        outstockGetUsers()
+        outstockGetUsers(),
+        outstockGetSettings()
       ]);
 
       if (branchRes?.success) {
@@ -76,6 +108,15 @@ export default function OwnerSettingsTab({ showToast }) {
       }
       if (usersRes?.success) {
         setUsers(usersRes.users || []);
+      }
+      if (settingsRes?.success && settingsRes.settings) {
+        const s = settingsRes.settings;
+        setPharmacyLogo(s.pharmacyLogo || s.logoUrl || '');
+        setPharmacyOrgName(s.pharmacyName || s.orgName || '');
+        if (s.slogan) setPharmacySlogan(s.slogan);
+        if (s.phone) setPharmacyContactPhone(s.phone);
+        if (s.address) setPharmacyMainAddress(s.address);
+        if (s.invoiceFooter) setPharmacyInvoiceFooter(s.invoiceFooter);
       }
     } catch (e) {
       console.warn('Fetch settings data error:', e);
@@ -87,6 +128,79 @@ export default function OwnerSettingsTab({ showToast }) {
   useEffect(() => {
     fetchSettingsData();
   }, []);
+
+  // معالجة واختيار ملف الشعار وضغطه تلقائياً ليبقى فائق الجودة وخفيفاً
+  const handleLogoFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast?.('⚠️ يرجى اختيار ملف صورة صالح (PNG, JPG, WebP, SVG)');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const src = event.target?.result;
+      if (!src) return;
+
+      const img = new Image();
+      img.onload = () => {
+        const maxWidth = 550;
+        const maxHeight = 300;
+        let { width, height } = img;
+
+        if (width > maxWidth || height > maxHeight) {
+          const ratio = Math.min(maxWidth / width, maxHeight / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const compressed = canvas.toDataURL('image/png', 0.92);
+        setPharmacyLogo(compressed);
+        showToast?.('✅ تم استيراد وتحسين شعار الصيدلية بنجاح');
+      };
+      img.onerror = () => {
+        setPharmacyLogo(src);
+      };
+      img.src = src;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // حفظ هوية وشعار الصيدلية
+  const handleSaveIdentitySubmit = async (e) => {
+    e?.preventDefault();
+    setIsSavingIdentity(true);
+    try {
+      const payload = {
+        pharmacyLogo,
+        logoUrl: pharmacyLogo,
+        pharmacyName: pharmacyOrgName,
+        slogan: pharmacySlogan,
+        phone: pharmacyContactPhone,
+        address: pharmacyMainAddress,
+        invoiceFooter: pharmacyInvoiceFooter
+      };
+
+      const res = await outstockSaveSettings(payload);
+      if (res?.success) {
+        showToast?.('✅ تم حفظ هوية وشعار الصيدلية بنجاح، وسيظهر الشعار تلقائياً أعلى فواتير العملاء!');
+      } else {
+        showToast?.(`⚠️ ${res?.error || 'تعذر حفظ الإعدادات'}`);
+      }
+    } catch {
+      showToast?.('حدث خطأ أثناء حفظ هوية الصيدلية');
+    } finally {
+      setIsSavingIdentity(false);
+    }
+  };
 
   // عند اختيار صيدلية من قائمة فروع الرواتب
   const handleSelectHrBranch = (e) => {
@@ -249,6 +363,15 @@ export default function OwnerSettingsTab({ showToast }) {
         <div className="outstock-subnav-bar">
           <button
             type="button"
+            className={`outstock-nav-btn ${activeSubSection === 'pharmacy_identity' ? 'is-active' : ''}`}
+            onClick={() => setActiveSubSection('pharmacy_identity')}
+          >
+            <ImageIcon size={16} />
+            <span>هوية وشعار الصيدلية بالفاتورة</span>
+          </button>
+
+          <button
+            type="button"
             className={`outstock-nav-btn ${activeSubSection === 'branches' ? 'is-active' : ''}`}
             onClick={() => setActiveSubSection('branches')}
           >
@@ -284,6 +407,337 @@ export default function OwnerSettingsTab({ showToast }) {
           </button>
         </div>
       </div>
+
+      {/* ── 0. قسم هوية وشعار الصيدلية بالفاتورة ── */}
+      {activeSubSection === 'pharmacy_identity' && (
+        <div className="outstock-settings-grid">
+          {/* بطاقة رفع الشعار وتخصيص البيانات */}
+          <div className="outstock-card">
+            <h3 className="outstock-card-title" style={{ marginBottom: '12px' }}>
+              <ImageIcon size={18} color="#0d9488" />
+              <span>شعار وهوية الصيدلية في الفواتير الرسمية</span>
+            </h3>
+            <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 16px', lineHeight: '1.5' }}>
+              قم برفع الشعار الرسمي وتخصيص بيانات الترويسة والتذييل، وسيتم استخدام هذا الشعار تلقائياً أعلى فاتورة العميل PDF والإيصالات المطبوعة.
+            </p>
+
+            <form onSubmit={handleSaveIdentitySubmit}>
+              {/* منطقة رفع ومعاينة الشعار */}
+              <div style={{ marginBottom: '18px' }}>
+                <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f766e', display: 'block', marginBottom: '8px' }}>
+                  🖼️ شعار الصيدلية (Pharmacy Logo) *
+                </label>
+
+                <div style={{
+                  border: '2px dashed #0d9488',
+                  borderRadius: '12px',
+                  padding: '16px',
+                  textAlign: 'center',
+                  background: '#f8fafc',
+                  position: 'relative'
+                }}>
+                  {pharmacyLogo ? (
+                    <div>
+                      <div style={{
+                        maxWidth: '220px',
+                        maxHeight: '120px',
+                        margin: '0 auto 12px',
+                        background: '#ffffff',
+                        padding: '8px',
+                        borderRadius: '8px',
+                        border: '1px solid #e2e8f0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        <img
+                          src={pharmacyLogo}
+                          alt="شعار الصيدلية"
+                          style={{ maxHeight: '100px', maxWidth: '100%', objectFit: 'contain' }}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                        <label className="outstock-btn outstock-btn-secondary" style={{ cursor: 'pointer', padding: '6px 12px', fontSize: '12px' }}>
+                          <Upload size={14} />
+                          <span>تغيير الشعار</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            onChange={handleLogoFileSelect}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="outstock-btn"
+                          style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', padding: '6px 12px', fontSize: '12px' }}
+                          onClick={() => setPharmacyLogo('')}
+                        >
+                          <Trash2 size={14} />
+                          <span>حذف الشعار</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <ImageIcon size={38} color="#94a3b8" style={{ margin: '0 auto 8px' }} />
+                      <p style={{ margin: '0 0 8px', fontSize: '13px', fontWeight: 'bold', color: '#334155' }}>
+                        لم يتم اختيار شعار للصيدلية بعد
+                      </p>
+                      <p style={{ margin: '0 0 12px', fontSize: '11.5px', color: '#64748b' }}>
+                        صيغ مدعومة: PNG, JPG, WebP, SVG (يُفضل بخلفية شفافة أو بيضاء)
+                      </p>
+                      <label className="outstock-btn outstock-btn-primary" style={{ cursor: 'pointer', padding: '7px 16px', display: 'inline-flex' }}>
+                        <Upload size={15} />
+                        <span>اختيار صورة الشعار من الجهاز</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          style={{ display: 'none' }}
+                          onChange={handleLogoFileSelect}
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+
+                {/* خيار إدخال رابط الشعار المباشر */}
+                <div style={{ marginTop: '10px' }}>
+                  <label style={{ fontSize: '11.5px', color: '#64748b', display: 'block', marginBottom: '4px' }}>
+                    أو لصق رابط الشعار المباشر (URL / Base64):
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="https://... أو data:image/png;base64,..."
+                    value={pharmacyLogo.startsWith('data:') ? 'بيانات الصورة مشفرة (Base64 Data)' : pharmacyLogo}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      if (v !== 'بيانات الصورة مشفرة (Base64 Data)') {
+                        setPharmacyLogo(v);
+                      }
+                    }}
+                    className="outstock-form-input"
+                    style={{ fontSize: '11px' }}
+                  />
+                </div>
+              </div>
+
+              {/* حقول الهوية النصية */}
+              <div className="outstock-form-group" style={{ marginBottom: '12px' }}>
+                <label>اسم الصيدلية / الاسم التجاري العام *</label>
+                <input
+                  type="text"
+                  placeholder="مثال: صيدليات الشفاء والنور"
+                  value={pharmacyOrgName}
+                  onChange={(e) => setPharmacyOrgName(e.target.value)}
+                  className="outstock-form-input"
+                />
+              </div>
+
+              <div className="outstock-form-group" style={{ marginBottom: '12px' }}>
+                <label>الشعار النصي (Slogan) / سطر الوصف أعلى الفاتورة</label>
+                <input
+                  type="text"
+                  placeholder="إدارة الصيدليات ورعاية العملاء - قسم توفير النواقص"
+                  value={pharmacySlogan}
+                  onChange={(e) => setPharmacySlogan(e.target.value)}
+                  className="outstock-form-input"
+                />
+              </div>
+
+              <div className="outstock-form-row" style={{ marginBottom: '12px' }}>
+                <div className="outstock-form-group">
+                  <label>هاتف خدمة العملاء الموحد</label>
+                  <input
+                    type="tel"
+                    placeholder="01xxxxxxxxx"
+                    value={pharmacyContactPhone}
+                    onChange={(e) => setPharmacyContactPhone(e.target.value)}
+                    className="outstock-form-input"
+                    dir="ltr"
+                    style={{ textAlign: 'right' }}
+                  />
+                </div>
+                <div className="outstock-form-group">
+                  <label>العنوان الرئيسي / الإدارة</label>
+                  <input
+                    type="text"
+                    placeholder="المقر الرئيسي - القاهرة"
+                    value={pharmacyMainAddress}
+                    onChange={(e) => setPharmacyMainAddress(e.target.value)}
+                    className="outstock-form-input"
+                  />
+                </div>
+              </div>
+
+              <div className="outstock-form-group" style={{ marginBottom: '18px' }}>
+                <label>نص تذييل الفاتورة الرسمي (Footer Note)</label>
+                <textarea
+                  rows={2}
+                  placeholder="نسعد دائماً بخدمتكم وتوفير كافة احتياجاتكم الدوائية والطبية بأعلى معايير الجودة والسرعة ✨"
+                  value={pharmacyInvoiceFooter}
+                  onChange={(e) => setPharmacyInvoiceFooter(e.target.value)}
+                  className="outstock-form-input"
+                  style={{ resize: 'vertical' }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSavingIdentity}
+                className="outstock-btn outstock-btn-primary"
+                style={{ width: '100%', padding: '10px 16px', fontWeight: '800' }}
+              >
+                <Save size={16} />
+                <span>{isSavingIdentity ? 'جاري حفظ هوية الصيدلية...' : 'حفظ هوية وشعار الصيدلية بالفاتورة'}</span>
+              </button>
+            </form>
+          </div>
+
+          {/* بطاقة المعاينة الحية المباشرة لشكل الفاتورة */}
+          <div className="outstock-card">
+            <h3 className="outstock-card-title" style={{ marginBottom: '12px' }}>
+              <Eye size={18} color="#0d9488" />
+              <span>معاينة حية لترويسة فاتورة العميل (Live Invoice Preview)</span>
+            </h3>
+            <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 16px' }}>
+              هكذا ستظهر الفاتورة للعميل في ملف الـ PDF وعلى الطابعة الحرارية:
+            </p>
+
+            {/* صندوق محاكاة ورقة الفاتورة A4 */}
+            <div style={{
+              border: '2px solid #0d9488',
+              borderRadius: '12px',
+              padding: '18px',
+              background: '#ffffff',
+              boxShadow: '0 4px 14px rgba(0,0,0,0.06)'
+            }}>
+              {/* رأس الفاتورة المحاكي */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                borderBottom: '2px solid #0d9488',
+                paddingBottom: '14px',
+                marginBottom: '14px',
+                gap: '12px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  {pharmacyLogo ? (
+                    <img
+                      src={pharmacyLogo}
+                      alt="شعار الصيدلية"
+                      style={{
+                        maxHeight: '65px',
+                        maxWidth: '120px',
+                        objectFit: 'contain',
+                        borderRadius: '8px',
+                        border: '1px solid #e2e8f0',
+                        padding: '2px',
+                        background: '#ffffff'
+                      }}
+                    />
+                  ) : (
+                    <div style={{
+                      width: '65px',
+                      height: '65px',
+                      borderRadius: '8px',
+                      background: '#f1f5f9',
+                      border: '1px dashed #cbd5e1',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#94a3b8',
+                      fontSize: '10px',
+                      textAlign: 'center'
+                    }}>
+                      شعار الفاتورة
+                    </div>
+                  )}
+
+                  <div>
+                    <h4 style={{ margin: '0 0 3px', fontSize: '17px', fontWeight: '900', color: '#0f766e' }}>
+                      {pharmacyOrgName || 'صيدلية النور والشفاء (اسم الفرع)'}
+                    </h4>
+                    <p style={{ margin: '2px 0', fontSize: '11px', color: '#475569' }}>
+                      {pharmacySlogan}
+                    </p>
+                    {pharmacyContactPhone && (
+                      <p style={{ margin: '2px 0', fontSize: '10.5px', color: '#64748b' }}>
+                        📞 هاتف: {pharmacyContactPhone}
+                      </p>
+                    )}
+                    {pharmacyMainAddress && (
+                      <p style={{ margin: '2px 0', fontSize: '10.5px', color: '#64748b' }}>
+                        📍 {pharmacyMainAddress}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{
+                  background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+                  color: '#ffffff',
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  textAlign: 'center',
+                  minWidth: '120px'
+                }}>
+                  <div style={{ fontSize: '13px', fontWeight: '800' }}>فاتورة حجز دواء</div>
+                  <div style={{ fontSize: '10.5px', opacity: 0.9 }}>إيصال معتمد #1042</div>
+                </div>
+              </div>
+
+              {/* عناصر وهمية داخل المعاينة */}
+              <div style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '6px',
+                padding: '8px 12px',
+                fontSize: '11px',
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '4px 12px',
+                marginBottom: '10px'
+              }}>
+                <div>العميل: <strong>أحمد محمود</strong></div>
+                <div>رقم الإيصال: <strong>#1042</strong></div>
+                <div>التاريخ: <strong>{new Date().toLocaleDateString('ar-EG')}</strong></div>
+                <div>الحالة: <strong style={{ color: '#0d9488' }}>قيد المتابعة والتجهيز</strong></div>
+              </div>
+
+              {/* جدول أصناف تجريبي */}
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '10px' }}>
+                <thead>
+                  <tr style={{ background: '#0f766e', color: '#fff' }}>
+                    <th style={{ padding: '4px 8px', textAlign: 'right' }}>الصنف الدوائي</th>
+                    <th style={{ padding: '4px 8px', textAlign: 'center' }}>الكمية</th>
+                    <th style={{ padding: '4px 8px', textAlign: 'left' }}>الإجمالي</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                    <td style={{ padding: '4px 8px' }}>Augmentin 1g Tablets</td>
+                    <td style={{ padding: '4px 8px', textAlign: 'center' }}>1 علبة</td>
+                    <td style={{ padding: '4px 8px', textAlign: 'left' }}>95.00 ج.م</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              {/* ذيل الفاتورة */}
+              <div style={{
+                borderTop: '1px dashed #cbd5e1',
+                paddingTop: '8px',
+                textAlign: 'center',
+                fontSize: '10px',
+                color: '#64748b'
+              }}>
+                {pharmacyInvoiceFooter}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── 1. قسم إدارة الفروع وتكاملها مع نظام الرواتب ── */}
       {activeSubSection === 'branches' && (

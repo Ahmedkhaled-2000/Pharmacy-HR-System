@@ -7,20 +7,76 @@
  * 3. إرسال مباشر عبر خادم الواتساب السحابي/المحلي
  */
 
+// ── جدول محارف الترميز المعياري العالمي Code 128 (ISO/IEC 15417) ──────────────
+const CODE128_PATTERNS = [
+  '212222', '222122', '222221', '121223', '121322', '131222', '122213', '122312', '132212', '221213', // 0-9
+  '221312', '231212', '112232', '122132', '122231', '113222', '123122', '123221', '223211', '221132', // 10-19
+  '221231', '213212', '223112', '312131', '311222', '321122', '321221', '312212', '322112', '322211', // 20-29
+  '212123', '212321', '232121', '111323', '131123', '131321', '112313', '132113', '132311', '211313', // 30-39
+  '231113', '231311', '112133', '112331', '132131', '113123', '113321', '133121', '313121', '211331', // 40-49
+  '231131', '213113', '213311', '213131', '311123', '311321', '331121', '312113', '312311', '332111', // 50-59
+  '314111', '221411', '431111', '111224', '111422', '121124', '121421', '141122', '141221', '112214', // 60-69
+  '112412', '122114', '122411', '142112', '142211', '241211', '221114', '413111', '241112', '134111', // 70-79
+  '111242', '121142', '121241', '114212', '124112', '124211', '411212', '421112', '421211', '212141', // 80-89
+  '214121', '412121', '111143', '111341', '131141', '114113', '114311', '411113', '411311', '113141', // 90-99
+  '114131', '311141', '411131', '211412', '211214', '211232', '2331112' // 100-106 (104=START B, 105=START C, 106=STOP)
+];
+
 /**
- * توليد كود الباركود كـ SVG نقي يعمل 100% دون إنترنت
+ * توليد كود الباركود المعياري العالمي Code 128 كـ SVG نقي عالي الدقة
+ * يعمل 100% بدون إنترنت ومقروء من جميع أجهزة وقارئات الباركود المحمولة وكاميرات الموبايل
  */
-export function generateBarcodeSvgString(code) {
-  const cleanCode = String(code || '00000000').replace(/[^a-zA-Z0-9-]/g, '');
-  const barWidths = [2, 4, 1.5, 3.5, 2.5, 4.5, 2, 3];
-  let rects = '';
-  for (let i = 0; i < cleanCode.length * 3; i++) {
-    const isThick = (i * 7 + cleanCode.charCodeAt(i % cleanCode.length)) % 3 === 0;
-    const w = barWidths[i % barWidths.length];
-    rects += `<rect x="${i * 5}" y="0" width="${isThick ? w + 1 : w}" height="38" fill="#000000" />`;
+export function generateBarcodeSvgString(code, options = {}) {
+  const rawCode = String(code || '00000000').trim();
+  // تنظيف الكود ليكون محارف ASCII صالحة لـ Code 128 B (من 32 إلى 126)
+  const cleanCode = rawCode.replace(/[^\x20-\x7E]/g, '') || '00000000';
+
+  const START_B = 104;
+  const STOP = 106;
+  const codes = [START_B];
+  let checkSum = START_B;
+
+  for (let i = 0; i < cleanCode.length; i++) {
+    const charCode = cleanCode.charCodeAt(i);
+    let val = charCode - 32;
+    if (val < 0 || val > 95) val = 0;
+    codes.push(val);
+    checkSum += (i + 1) * val;
   }
-  const totalW = cleanCode.length * 15 + 10;
-  return `<svg width="${totalW}" height="38" viewBox="0 0 ${totalW} 38" xmlns="http://www.w3.org/2000/svg" style="display:inline-block">${rects}</svg>`;
+
+  const checkChar = checkSum % 103;
+  codes.push(checkChar);
+  codes.push(STOP);
+
+  const moduleWidth = options.moduleWidth || 1.6;
+  const barHeight = options.height || 48;
+  const quietZoneModules = options.quietZoneModules || 10;
+
+  let totalModules = quietZoneModules * 2;
+  const patterns = [];
+  for (const c of codes) {
+    const pattern = CODE128_PATTERNS[c];
+    patterns.push(pattern);
+    for (const d of pattern) totalModules += parseInt(d, 10);
+  }
+
+  const totalWidth = Math.round(totalModules * moduleWidth);
+  let currentX = quietZoneModules * moduleWidth;
+  let rects = '';
+
+  for (const pattern of patterns) {
+    let isBar = true;
+    for (const d of pattern) {
+      const width = parseInt(d, 10) * moduleWidth;
+      if (isBar) {
+        rects += `<rect x="${currentX.toFixed(2)}" y="0" width="${width.toFixed(2)}" height="${barHeight}" fill="#000000" />`;
+      }
+      currentX += width;
+      isBar = !isBar;
+    }
+  }
+
+  return `<svg width="${totalWidth}" height="${barHeight}" viewBox="0 0 ${totalWidth} ${barHeight}" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;background:#ffffff;vertical-align:middle;">${rects}</svg>`;
 }
 
 /**
@@ -40,9 +96,9 @@ export function generateQrSvgString(_code) {
 }
 
 /**
- * بناء صفحة HTML للفاتورة الرسمية بأعلى معايير الطباعة والـ PDF
+ * بناء صفحة HTML للفاتورة الرسمية بأعلى معايير الطباعة والـ PDF مع دعم الشعار والخط العربي الأصيل
  */
-export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate) {
+export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, options = {}) {
   const branchName = branch?.name || order.branch_name || 'صيدلية النور والشفاء';
   const branchPhone = branch?.phone || '';
   const branchAddress = branch?.address || '';
@@ -59,10 +115,29 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate) 
   const pickupDate = order.expected_pickup_date || order.expectedPickupDate || '';
   const pickupTime = order.expected_pickup_time || order.expectedPickupTime || '';
 
+  // جلب شعار الصيدلية من الإعدادات المحفوظة أو الفرع أو الخيارات
+  let logoUrl = options?.logoUrl || branch?.logoUrl || order?.logoUrl || '';
+  let slogan = options?.slogan || 'إدارة الصيدليات ورعاية العملاء - قسم توفير النواقص';
+  let footerNote = options?.footerNote || 'نسعد دائماً بخدمتكم وتوفير كافة احتياجاتكم الدوائية والطبية بأعلى معايير الجودة والسرعة ✨';
+
+  if (!logoUrl && typeof localStorage !== 'undefined') {
+    try {
+      const cachedSettings = localStorage.getItem('outstock_general_settings');
+      if (cachedSettings) {
+        const parsed = JSON.parse(cachedSettings);
+        if (parsed.pharmacyLogo || parsed.logoUrl) {
+          logoUrl = parsed.pharmacyLogo || parsed.logoUrl;
+        }
+        if (parsed.slogan) slogan = parsed.slogan;
+        if (parsed.invoiceFooter) footerNote = parsed.invoiceFooter;
+      }
+    } catch {}
+  }
+
   const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill);
 
   const finalBarcode = barcodeValue || order.barcode_data || order.barcodeData || orderNo;
-  const barcodeSvg = generateBarcodeSvgString(finalBarcode);
+  const barcodeSvg = generateBarcodeSvgString(finalBarcode, { moduleWidth: 1.65, height: 48 });
   const qrSvg = generateQrSvgString(finalBarcode);
 
   const dateStr = formattedDate || (order.created_at ? new Date(order.created_at).toLocaleString('ar-EG') : new Date().toLocaleString('ar-EG'));
@@ -73,18 +148,24 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate) 
 <head>
   <meta charset="utf-8" />
   <title>فاتورة استلام دواء #${orderNo}</title>
+  <!-- خطوط عربية فائقة الدقة والوضوح (Google Fonts Cairo & Tajawal) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
   <style>
     @page {
       size: A4 portrait;
-      margin: 14mm 16mm;
+      margin: 12mm 15mm;
     }
     * {
       box-sizing: border-box;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
+      letter-spacing: 0 !important;
+      word-spacing: normal !important;
     }
     body {
-      font-family: 'Segoe UI', Tahoma, Cairo, Arial, sans-serif;
+      font-family: 'Cairo', 'Noto Sans Arabic', 'Tajawal', -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, Arial, sans-serif;
       color: #0f172a;
       background: #ffffff;
       margin: 0;
@@ -93,6 +174,10 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate) 
       text-align: right;
       font-size: 13px;
       line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      font-feature-settings: "liga" 1, "calt" 1;
     }
     .invoice-shell {
       border: 2px solid #0d9488;
@@ -109,16 +194,33 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate) 
       border-bottom: 2px solid #0d9488;
       padding-bottom: 16px;
       margin-bottom: 18px;
+      gap: 16px;
+    }
+    .brand-identity-box {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .brand-logo-img {
+      max-height: 70px;
+      max-width: 130px;
+      object-fit: contain;
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 2px;
+      border: 1px solid #e2e8f0;
+      flex-shrink: 0;
     }
     .brand-title h1 {
       margin: 0 0 4px;
-      font-size: 22px;
+      font-size: 21px;
       font-weight: 900;
       color: #0f766e;
+      letter-spacing: 0 !important;
     }
     .brand-title p {
       margin: 2px 0;
-      font-size: 12px;
+      font-size: 11.5px;
       color: #475569;
     }
     .invoice-title-pill {
@@ -127,7 +229,20 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate) 
       padding: 10px 20px;
       border-radius: 10px;
       text-align: center;
+      flex-shrink: 0;
     }
+    .invoice-title-pill h2 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: 0 !important;
+    }
+    .invoice-title-pill span {
+      font-size: 12px;
+      opacity: 0.95;
+      letter-spacing: 0 !important;
+    }
+
     .invoice-title-pill h2 {
       margin: 0;
       font-size: 16px;
@@ -259,11 +374,14 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate) 
 <body>
   <div class="invoice-shell">
     <div class="header-row">
-      <div class="brand-title">
-        <h1>${branchName}</h1>
-        <p>إدارة الصيدليات ورعاية العملاء - قسم توفير النواقص</p>
-        ${branchPhone ? `<p>📞 هاتف: ${branchPhone}</p>` : ''}
-        ${branchAddress ? `<p>📍 العنوان: ${branchAddress}</p>` : ''}
+      <div class="brand-identity-box">
+        ${logoUrl ? `<img src="${logoUrl}" alt="${branchName}" class="brand-logo-img" />` : ''}
+        <div class="brand-title">
+          <h1>${branchName}</h1>
+          <p>${slogan}</p>
+          ${branchPhone ? `<p>📞 هاتف: ${branchPhone}</p>` : ''}
+          ${branchAddress ? `<p>📍 العنوان: ${branchAddress}</p>` : ''}
+        </div>
       </div>
       <div class="invoice-title-pill">
         <h2>فاتورة حجز دواء</h2>
@@ -361,7 +479,7 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate) 
     </div>
 
     <div class="official-footer-note">
-      نسعد دائماً بخدمتكم وتوفير كافة احتياجاتكم الدوائية والطبية بأعلى معايير الجودة والسرعة ✨
+      ${footerNote}
     </div>
   </div>
 </body>
@@ -372,7 +490,7 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate) 
 /**
  * إرسال الفاتورة الرسمية PDF للعميل عبر خادم الواتساب
  */
-export async function sendInvoicePdfViaWhatsApp({ order, branch, waServerUrl, customMessage = '', sessionId }) {
+export async function sendInvoicePdfViaWhatsApp({ order, branch, waServerUrl, customMessage = '', sessionId, options = {} }) {
   const phone = order.customer_phone || order.customerPhone || '';
   if (!phone) {
     throw new Error('لا يوجد رقم هاتف مسجل لهذا العميل');
@@ -387,7 +505,7 @@ export async function sendInvoicePdfViaWhatsApp({ order, branch, waServerUrl, cu
 
   const caption = customMessage || `السلام عليكم ورحمة الله وبركاته،\nأهلاً بك أ/ *${cName}* 🌸\n\nمرفق لسيادتكم الفاتورة الرسمية / إيصال حجز وتوفير الدواء الخاص بكم من *${bName}* كملف PDF معتمد.\n\n📋 رقم الإيصال: *#${orderNo}*\n💵 المبلغ المتبقي عند الاستلام: *${remaining} ج.م*${pickupDate ? `\n📅 موعد الاستلام المتوقع: *${pickupDate}*` : ''}\n\nنسعد دائماً بخدمتكم وتوفير كافة احتياجاتكم الطبية ✨`;
 
-  const pdfHtml = buildInvoicePdfHtml(order, branch);
+  const pdfHtml = buildInvoicePdfHtml(order, branch, null, null, options);
 
   const res = await fetch(`${waServerUrl}/api/send-message`, {
     method: 'POST',

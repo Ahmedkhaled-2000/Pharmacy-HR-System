@@ -203,6 +203,13 @@ export async function initOutstockTables(db) {
           created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_outstock_audit_created ON public.outstock_audit_logs (created_at DESC);
+
+      -- 10. جدول إعدادات نظام النواقص وهوية الصيدلية والشعار
+      CREATE TABLE IF NOT EXISTS public.outstock_settings (
+          setting_key VARCHAR(100) PRIMARY KEY,
+          setting_value JSONB NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
     `;
 
     await db.query(schemaSql);
@@ -1647,6 +1654,64 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         branches: branchStatsRes.rows,
         procurementKpi: procurementKpisRes.rows[0]
       });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 9. مسارات إعدادات وهوية الصيدلية والشعار (Pharmacy Brand Identity & Logo)
+  // ───────────────────────────────────────────────────────────────────────────
+  app.get('/api/outstock/settings', async (req, res) => {
+    try {
+      const rowsRes = await db.query('SELECT setting_key, setting_value FROM public.outstock_settings');
+      const settingsMap = {};
+      rowsRes.rows.forEach(r => {
+        settingsMap[r.setting_key] = r.setting_value;
+      });
+
+      const general = settingsMap['general_settings'] || {};
+
+      // في حال لم يتم تعيين شعار بعد في إعدادات النواقص، جلب الشعار من orgSettings تلقائياً كـ Fallback
+      if (!general.pharmacyLogo && !general.logoUrl) {
+        try {
+          const appSetRes = await db.query("SELECT value_data FROM public.app_settings WHERE key_name = 'pharmacy-tracker-data'");
+          const appVal = appSetRes.rows[0]?.value_data;
+          const fallbackLogo = appVal?.orgSettings?.logoUrl || appVal?.orgSettings?.logo || '';
+          if (fallbackLogo) {
+            general.pharmacyLogo = fallbackLogo;
+            general.logoUrl = fallbackLogo;
+          }
+        } catch {}
+      }
+
+      res.json({
+        success: true,
+        settings: general
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/outstock/settings', authMiddleware, async (req, res) => {
+    try {
+      if (req.outstockUser.role !== 'owner') {
+        return res.status(403).json({ success: false, error: 'غير مصرح - تعديل الهوية متاح للمالك فقط' });
+      }
+
+      const settings = req.body || {};
+      await db.query(`
+        INSERT INTO public.outstock_settings (setting_key, setting_value, updated_at)
+        VALUES ('general_settings', $1::jsonb, CURRENT_TIMESTAMP)
+        ON CONFLICT (setting_key) DO UPDATE SET
+          setting_value = EXCLUDED.setting_value,
+          updated_at = CURRENT_TIMESTAMP
+      `, [JSON.stringify(settings)]);
+
+      broadcastOutstock('outstock:settings_updated', settings);
+
+      res.json({ success: true, settings });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }

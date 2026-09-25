@@ -25,21 +25,41 @@ import {
   buildInvoicePdfHtml,
   sendInvoicePdfViaWhatsApp
 } from '../../../utils/invoicePdfGenerator';
+import { outstockGetSettings } from '../../../utils/outstockApiClient';
 
 /**
  * DualCashierReceiptModal.jsx
  * طباعة فاتورة الكاشير الحرارية المزدوجة (نسخة العميل + نسخة الصيدلية)
  * المميزات الاحترافية المضافة:
  * 1. أمر قص منفصل (Auto-Cut) لكل نسخة على حدة لمنع التصاق الورق
- * 2. إرسال الفاتورة الرسمية PDF للعميل عبر الواتساب مباشرة بضغطة زر
+ * 2. إرسال الفاتورة الرسمية PDF للعميل عبر الواتساب مباشرة بضغطة زر مع الشعار
  * 3. إمكانية تنزيل الفاتورة PDF أو فتح محادثة WhatsApp Web كبديل فوري
  * 4. خيارات طباعة متعددة: نسختين مقصوصتين، نسخة العميل فقط، أو نسخة الصيدلية فقط
+ * 5. باركود Code 128 قياسي فائق الدقة مقروء بنسبة 100%
  */
 export default function DualCashierReceiptModal({ order, branch, onClose }) {
   const printAreaRef = useRef(null);
   const [printProfile, setPrintProfile] = useState('pos'); // 'pos' (80mm) | 'a4'
   const [isPrinting, setIsPrinting] = useState(false);
   const [printStatusText, setPrintStatusText] = useState('');
+
+  // إعدادات وهوية وشعار الصيدلية بالفاتورة
+  const [pharmacySettings, setPharmacySettings] = useState(() => {
+    try {
+      const cached = localStorage.getItem('outstock_general_settings');
+      return cached ? JSON.parse(cached) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    outstockGetSettings().then(res => {
+      if (res?.success && res.settings) {
+        setPharmacySettings(res.settings);
+      }
+    }).catch(() => {});
+  }, []);
 
   // حالة إرسال الفاتورة عبر الواتساب
   const [isSendingPdf, setIsSendingPdf] = useState(false);
@@ -58,6 +78,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
   const branchPhone = branch?.phone || '';
   const branchAddress = branch?.address || '';
   const barcodeValue = String(order?.barcode_data || order?.barcodeData || order?.order_number || order?.orderNumber || '00000000');
+  const pharmacyLogo = pharmacySettings?.pharmacyLogo || pharmacySettings?.logoUrl || branch?.logoUrl || '';
 
   // ── 1. محرك الطباعة مع أمر القص التلقائي لكل نسخة على حدة (Sequential Multi-Job Auto-Cut) ──
   const executeIsolatedPrintJob = useCallback((innerHtmlContent, jobTitle = 'Receipt') => {
@@ -321,7 +342,12 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
       await sendInvoicePdfViaWhatsApp({
         order,
         branch,
-        waServerUrl
+        waServerUrl,
+        options: {
+          logoUrl: pharmacyLogo,
+          slogan: pharmacySettings?.slogan,
+          footerNote: pharmacySettings?.invoiceFooter
+        }
       });
 
       setWaSendFeedback({
@@ -356,7 +382,11 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
 
   // ── 4. تحميل / معاينة الفاتورة الرسمية A4 كـ PDF ──────────────────────────
   const handleDownloadInvoicePdf = () => {
-    const invoicePdfHtml = buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate);
+    const invoicePdfHtml = buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, {
+      logoUrl: pharmacyLogo,
+      slogan: pharmacySettings?.slogan,
+      footerNote: pharmacySettings?.invoiceFooter
+    });
     const win = window.open('', '_blank');
     if (win) {
       win.document.open();
@@ -561,6 +591,15 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
             {/* ── 1. نسخة العميل ── */}
             <div className="receipt-copy" id="receipt-copy-customer">
               <div className="receipt-header">
+                {pharmacyLogo ? (
+                  <div style={{ textAlign: 'center', marginBottom: '6px' }}>
+                    <img
+                      src={pharmacyLogo}
+                      alt="شعار الصيدلية"
+                      style={{ maxHeight: '48px', maxWidth: '120px', objectFit: 'contain' }}
+                    />
+                  </div>
+                ) : null}
                 <h3>{branchName}</h3>
                 <p>إيصال حجز وتوفير دواء (نسخة العميل)</p>
                 {branchPhone && <p><Phone size={10} style={{ display: 'inline' }} /> {branchPhone}</p>}
@@ -636,7 +675,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
 
               <div className="receipt-barcode">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px', margin: '4px 0' }}>
-                  <div dangerouslySetInnerHTML={{ __html: generateBarcodeSvgString(barcodeValue) }} />
+                  <div dangerouslySetInnerHTML={{ __html: generateBarcodeSvgString(barcodeValue, { moduleWidth: 1.45, height: 44 }) }} />
                   <div dangerouslySetInnerHTML={{ __html: generateQrSvgString(barcodeValue) }} />
                 </div>
                 <div style={{ fontSize: '10px', marginTop: '2px', fontWeight: 'bold' }}>
@@ -694,7 +733,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
               <div style={{ marginTop: '14px', borderTop: '1px dashed #000', paddingTop: '8px', fontSize: '11px' }}>
                 <p style={{ margin: '0 0 10px' }}>توقيع العميل بالاستلام: ..............................</p>
                 <div className="receipt-barcode">
-                  <div dangerouslySetInnerHTML={{ __html: generateBarcodeSvgString(barcodeValue) }} />
+                  <div dangerouslySetInnerHTML={{ __html: generateBarcodeSvgString(barcodeValue, { moduleWidth: 1.45, height: 44 }) }} />
                 </div>
               </div>
             </div>
