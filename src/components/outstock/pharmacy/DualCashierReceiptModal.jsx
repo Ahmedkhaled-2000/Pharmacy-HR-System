@@ -74,7 +74,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
     return d.toLocaleDateString('ar-EG') + ' - ' + d.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
   }, [order]);
 
-  const branchName = branch?.name || order.branch_name || 'صيدلية النور والشفاء';
+  const branchName = branch?.name || order?.branch_name || 'صيدلية النور والشفاء';
   const branchPhone = branch?.phone || '';
   const branchAddress = branch?.address || '';
   const barcodeValue = String(order?.barcode_data || order?.barcodeData || order?.order_number || order?.orderNumber || '00000000');
@@ -249,7 +249,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
   /**
    * تنفيذ الطباعة المزدوجة مع أمر القص التلقائي لكل نسخة
    */
-  const handlePrintDualAutoCut = async () => {
+  const handlePrintDualAutoCut = useCallback(async () => {
     setIsPrinting(true);
     setPrintStatusText('✂️ جاري إرسال نسخة العميل للطابعة وأمر القص...');
 
@@ -294,7 +294,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
       setIsPrinting(false);
       setPrintStatusText('');
     }
-  };
+  }, [barcodeValue, executeIsolatedPrintJob, order?.order_number]);
 
   /**
    * طباعة نسخة العميل فقط مع القص

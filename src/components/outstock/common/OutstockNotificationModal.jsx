@@ -20,15 +20,13 @@ export default function OutstockNotificationModal({
 }) {
   const [progress, setProgress] = useState(100);
   const [isPaused, setIsPaused] = useState(false);
-  const timerRef = useRef(null);
   const progressTimerRef = useRef(null);
 
-  if (!notification || !notification.message) return null;
+  const hasNotification = Boolean(notification && notification.message);
+  const rawMsg = hasNotification ? String(notification.message || '') : '';
+  let detectedType = notification?.type || 'info';
 
-  const rawMsg = String(notification.message || '');
-  let detectedType = notification.type || 'info';
-
-  if (!notification.type) {
+  if (hasNotification && !notification.type) {
     if (rawMsg.includes('✅') || rawMsg.includes('بنجاح') || rawMsg.includes('تم حفظ') || rawMsg.includes('تم إضافة')) {
       detectedType = 'success';
     } else if (rawMsg.includes('❌') || rawMsg.includes('خطأ') || rawMsg.includes('فشل') || rawMsg.includes('تعذر')) {
@@ -42,7 +40,7 @@ export default function OutstockNotificationModal({
 
   // إزالة الرموز التعبيرية المكررة من بداية النص لتنسيق أنيق
   const cleanMessage = rawMsg.replace(/^[✅❌⚠️ℹ️⌨️📊🔍\s]+/, '').trim();
-  const title = notification.title || (
+  const title = notification?.title || (
     detectedType === 'success' ? 'تمت العملية بنجاح' :
     detectedType === 'error' ? 'تنبيه خطأ' :
     detectedType === 'warning' ? 'تنبيه هـام' :
@@ -51,11 +49,19 @@ export default function OutstockNotificationModal({
 
   const isMultiLine = cleanMessage.includes('\n');
   const lines = isMultiLine ? cleanMessage.split('\n').filter(Boolean) : [cleanMessage];
-  const autoCloseDuration = notification.duration !== undefined ? notification.duration : (isMultiLine ? 7000 : 3800);
+  const autoCloseDuration = notification?.duration !== undefined ? notification.duration : (isMultiLine ? 7000 : 3800);
+
+  // إعادة ضبط شريط التقدم عند وصول إشعار جديد
+  useEffect(() => {
+    if (hasNotification) {
+      setProgress(100);
+      setIsPaused(false);
+    }
+  }, [hasNotification, notification?.message]);
 
   // إغلاق تلقائي مع شريط تقدم
   useEffect(() => {
-    if (autoCloseDuration <= 0) return;
+    if (!hasNotification || autoCloseDuration <= 0) return;
 
     const intervalStep = 50;
     const decrement = (intervalStep / autoCloseDuration) * 100;
@@ -76,10 +82,12 @@ export default function OutstockNotificationModal({
     return () => {
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
     };
-  }, [autoCloseDuration, isPaused, onClose]);
+  }, [hasNotification, autoCloseDuration, isPaused, onClose]);
 
   // إغلاق بزر Esc أو Enter
   useEffect(() => {
+    if (!hasNotification) return;
+
     const handleKeyDown = (e) => {
       if (e.key === 'Escape' || e.key === 'Enter') {
         onClose?.();
@@ -87,7 +95,9 @@ export default function OutstockNotificationModal({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [hasNotification, onClose]);
+
+  if (!hasNotification) return null;
 
   // الألوان والسمات البصرية
   const themeConfig = {

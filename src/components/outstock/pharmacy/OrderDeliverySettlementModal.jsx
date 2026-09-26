@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   CheckCircle,
@@ -30,19 +30,29 @@ export default function OrderDeliverySettlementModal({
   onOpenReceiptPrint,
   showToast = alert
 }) {
-  if (!order) return null;
-
-  const totalAmount = parseFloat(order.net_amount || order.netAmount || order.total_amount || 0);
-  const paidAdvance = parseFloat(order.paid_amount || order.paidAmount || 0);
+  const totalAmount = parseFloat(order?.net_amount || order?.netAmount || order?.total_amount || 0);
+  const paidAdvance = parseFloat(order?.paid_amount || order?.paidAmount || 0);
   const initialRemaining = Math.max(0, totalAmount - paidAdvance);
 
   const [collectedAmount, setCollectedAmount] = useState(String(initialRemaining > 0 ? initialRemaining : 0));
   const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' | 'card' | 'wallet' | 'credit'
   const [cashierName, setCashierName] = useState(currentPharmacist || 'د. الصيدلي');
-  const [receiptNumber, setReceiptNumber] = useState(`REC-${order.order_number || Date.now().toString().slice(-6)}`);
+  const [receiptNumber, setReceiptNumber] = useState(`REC-${order?.order_number || Date.now().toString().slice(-6)}`);
   const [notes, setNotes] = useState('');
   const [shouldPrintReceipt, setShouldPrintReceipt] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (order) {
+      const tot = parseFloat(order.net_amount || order.netAmount || order.total_amount || 0);
+      const paid = parseFloat(order.paid_amount || order.paidAmount || 0);
+      const rem = Math.max(0, tot - paid);
+      setCollectedAmount(String(rem > 0 ? rem : 0));
+      setReceiptNumber(`REC-${order.order_number || Date.now().toString().slice(-6)}`);
+    }
+  }, [order]);
+
+  if (!order) return null;
 
   // احتساب المتبقي بعد التحصيل الحالي
   const currentCollectNum = Math.max(0, parseFloat(collectedAmount) || 0);

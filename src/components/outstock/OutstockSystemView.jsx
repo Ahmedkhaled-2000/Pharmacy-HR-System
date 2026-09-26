@@ -91,6 +91,8 @@ export default function OutstockSystemView({
     name: currentUser?.fullName || currentUser?.name || 'فرع الصيدلية الرئيسي'
   });
 
+  const effectiveBranchId = activeBranch?.id || currentUser?.branchId || currentUser?.branch_id || currentUser?.id || 'main';
+
   // التبويب النشط
   const [activeTab, setActiveTab] = useState(() => {
     if (userRole === 'branch') return 'orders';
@@ -765,60 +767,57 @@ export default function OutstockSystemView({
       {/* ── جسم الشاشة ومحتوى التبويبات ── */}
       <main className="outstock-content-body">
         {/* ── أ) تبويبات الصيدلية ── */}
-        {userRole === 'branch' && (() => {
-          const effectiveBranchId = activeBranch?.id || currentUser?.branchId || currentUser?.branch_id || currentUser?.id || 'main';
-          return (
-            <>
-              {activeTab === 'orders' && (
-                <PharmacyOrdersTab
-                  branchId={effectiveBranchId}
-                  branch={activeBranch}
-                  currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
-                  showToast={triggerNotification}
-                />
-              )}
+        {userRole === 'branch' && (
+          <>
+            {activeTab === 'orders' && (
+              <PharmacyOrdersTab
+                branchId={effectiveBranchId}
+                branch={activeBranch}
+                currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
+                showToast={triggerNotification}
+              />
+            )}
 
-              {activeTab === 'customers' && (
-                <PharmacyCustomersTab
-                  branchId={effectiveBranchId}
-                  showToast={triggerNotification}
-                />
-              )}
+            {activeTab === 'customers' && (
+              <PharmacyCustomersTab
+                branchId={effectiveBranchId}
+                showToast={triggerNotification}
+              />
+            )}
 
-              {activeTab === 'procurement_tracking' && (
-                <PharmacyProcurementTrackingTab
-                  branchId={effectiveBranchId}
-                />
-              )}
+            {activeTab === 'procurement_tracking' && (
+              <PharmacyProcurementTrackingTab
+                branchId={effectiveBranchId}
+              />
+            )}
 
-              {activeTab === 'deficiencies' && (
-                <PharmacyDeficienciesTab
-                  branchId={effectiveBranchId}
-                  currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
-                  showToast={triggerNotification}
-                />
-              )}
+            {activeTab === 'deficiencies' && (
+              <PharmacyDeficienciesTab
+                branchId={effectiveBranchId}
+                currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
+                showToast={triggerNotification}
+              />
+            )}
 
-              {activeTab === 'branch_medication_search' && (
-                <PharmacyMedicationSearchTab
-                  branchId={effectiveBranchId}
-                  branch={activeBranch}
-                  currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
-                  showToast={triggerNotification}
-                />
-              )}
+            {activeTab === 'branch_medication_search' && (
+              <PharmacyMedicationSearchTab
+                branchId={effectiveBranchId}
+                branch={activeBranch}
+                currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
+                showToast={triggerNotification}
+              />
+            )}
 
-              {activeTab === 'whatsapp' && (
-                <OutstockWhatsAppCenterTab
-                  branchId={effectiveBranchId}
-                  branch={activeBranch}
-                  currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
-                  showToast={triggerNotification}
-                />
-              )}
-            </>
-          );
-        })()}
+            {activeTab === 'whatsapp' && (
+              <OutstockWhatsAppCenterTab
+                branchId={effectiveBranchId}
+                branch={activeBranch}
+                currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
+                showToast={triggerNotification}
+              />
+            )}
+          </>
+        )}
 
         {/* ── ب) تبويبات إدارة المشتريات ── */}
         {userRole === 'procurement' && (
@@ -892,10 +891,12 @@ export default function OutstockSystemView({
       </main>
 
       {/* ── نافذة الإشعارات والتنبيهات المنبثقة الاحترافية ── */}
-      <OutstockNotificationModal
-        notification={activeNotification}
-        onClose={() => setActiveNotification(null)}
-      />
+      {activeNotification && (
+        <OutstockNotificationModal
+          notification={activeNotification}
+          onClose={() => setActiveNotification(null)}
+        />
+      )}
     </div>
   );
 }
