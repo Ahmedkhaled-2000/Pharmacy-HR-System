@@ -206,10 +206,43 @@ function buildDayPunchObject(dateStr, empId, defaultTimeIn = '09:00', defaultTim
   };
 }
 
-function generateBatchDaysList(startStr, endStr, empId, excludeOffDays = true, defaultTimeIn = '09:00', defaultTimeOut = '17:00', defaultBreak = '0', defaultPunchType = 'full', state = {}) {
+function generateBatchDaysList(
+  startStr,
+  endStr,
+  empId,
+  arg4 = true,
+  arg5 = '09:00',
+  arg6 = '17:00',
+  arg7 = '0',
+  arg8 = 'full',
+  arg9 = {}
+) {
   if (!startStr || !endStr) return [];
   const results = [];
   try {
+    let excludeOffDays = true;
+    let defaultTimeIn = '09:00';
+    let defaultTimeOut = '17:00';
+    let defaultBreak = '0';
+    let defaultPunchType = 'full';
+    let stateObj = {};
+
+    if (typeof arg4 === 'boolean') {
+      excludeOffDays = arg4;
+      defaultTimeIn = typeof arg5 === 'string' ? arg5 : '09:00';
+      defaultTimeOut = typeof arg6 === 'string' ? arg6 : '17:00';
+      defaultBreak = String(arg7 ?? '0');
+      defaultPunchType = typeof arg8 === 'string' ? arg8 : 'full';
+      stateObj = (arg9 && typeof arg9 === 'object') ? arg9 : {};
+    } else if (typeof arg4 === 'string') {
+      defaultTimeIn = arg4 || '09:00';
+      defaultTimeOut = typeof arg5 === 'string' ? arg5 : '17:00';
+      defaultBreak = String(arg6 ?? '0');
+      defaultPunchType = typeof arg7 === 'string' ? arg7 : 'full';
+      excludeOffDays = typeof arg8 === 'boolean' ? arg8 : true;
+      stateObj = (arg9 && typeof arg9 === 'object') ? arg9 : {};
+    }
+
     let curr = new Date(startStr);
     let end = new Date(endStr);
     if (isNaN(curr.getTime()) || isNaN(end.getTime())) return results;
@@ -221,7 +254,7 @@ function generateBatchDaysList(startStr, endStr, empId, excludeOffDays = true, d
     let count = 0;
     while (curr <= end && count < 60) {
       const dStr = curr.toISOString().slice(0, 10);
-      const dayObj = buildDayPunchObject(dStr, empId, defaultTimeIn, defaultTimeOut, defaultBreak, defaultPunchType, state);
+      const dayObj = buildDayPunchObject(dStr, empId, defaultTimeIn, defaultTimeOut, defaultBreak, defaultPunchType, stateObj);
       if (!(excludeOffDays && dayObj.isOffDay)) {
         results.push(dayObj);
       }
@@ -6874,37 +6907,56 @@ export default function BranchManagerView({
                     </div>
 
                     {/* Batch Days Interactive Table */}
-                    <div style={{ border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden' }}>
-                      <div style={{ background: '#f8fafc', padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontWeight: 'bold', fontSize: '13px', color: 'var(--text)' }}>
-                          📋 جدول الأيام المحددة للتعديل ({manualPunchData.selectedDays?.length || 0} يوم):
-                        </span>
-                        {manualPunchData.selectedDays?.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setManualPunchData(prev => ({ ...prev, selectedDays: [] }))}
-                            style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '12px', cursor: 'pointer', fontWeight: 'bold' }}
-                          >
-                            🗑️ تفريغ الجدول
-                          </button>
-                        )}
+                    <div style={{ border: '1px solid #cbd5e1', borderRadius: '12px', overflow: 'hidden', background: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                      <div style={{ background: '#f8fafc', padding: '12px 16px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                        <div>
+                          <span style={{ fontWeight: '800', fontSize: '13.5px', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span>📋</span>
+                            <span>جدول الأيام المحددة للتعديل والمعاينة التفصيلية ({manualPunchData.selectedDays?.length || 0} يوم):</span>
+                          </span>
+                          <span style={{ fontSize: '11.5px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                            يمكنك تعديل توقيت الحضور والانصراف أو نوع التسجيل لكل يوم على حدة مباشرة في الجدول أدناه:
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          {manualPunchData.selectedDays?.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setManualPunchData(prev => ({ ...prev, selectedDays: [] }))}
+                              style={{ background: '#fee2e2', border: '1px solid #fca5a5', color: '#dc2626', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}
+                            >
+                              <span>🗑️</span>
+                              <span>تفريغ الجدول</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {(!manualPunchData.selectedDays || manualPunchData.selectedDays.length === 0) ? (
-                        <div style={{ padding: '24px', textAlign: 'center', color: 'var(--muted)', fontSize: '13px' }}>
-                          <span>📭 لم يتم تحديد أي أيام بعد. اختر الفترة واضغط على "توليد جدول الأيام" أو أضف يوماً يدوياً.</span>
+                        <div style={{ padding: '28px 20px', textAlign: 'center', color: '#64748b', fontSize: '13px', background: '#fafafa' }}>
+                          <span style={{ fontSize: '32px', display: 'block', marginBottom: '8px' }}>📭</span>
+                          <div style={{ fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>لم يتم تحديد أي أيام بعد في الجدول</div>
+                          <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '12px' }}>اختر فترة متصلة ثم اضغط "توليد جدول الأيام" أو أضف يوماً مخصصاً أعلاه</div>
+                          <button
+                            type="button"
+                            onClick={() => handleAddCustomDateToBatch(getRealTodayStr())}
+                            style={{ background: '#0d9488', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
+                          >
+                            ➕ إضافة تاريخ اليوم ({getRealTodayStr()})
+                          </button>
                         </div>
                       ) : (
-                        <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+                        <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
                           <table className="bylaws-table" style={{ width: '100%', fontSize: '12px', margin: 0 }}>
                             <thead>
                               <tr style={{ background: '#f0fdf4', color: '#166534', position: 'sticky', top: 0, zIndex: 2 }}>
                                 <th style={{ width: '35px', textAlign: 'center' }}>#</th>
-                                <th>التاريخ واليوم</th>
-                                <th style={{ textAlign: 'center', width: '110px' }}>الحضور</th>
-                                <th style={{ textAlign: 'center', width: '110px' }}>الانصراف</th>
-                                <th style={{ textAlign: 'center', width: '80px' }}>البريك</th>
-                                <th style={{ textAlign: 'center', width: '100px' }}>الصافي</th>
+                                <th style={{ minWidth: '140px' }}>التاريخ واليوم</th>
+                                <th style={{ minWidth: '105px', textAlign: 'center' }}>نوع التسجيل</th>
+                                <th style={{ textAlign: 'center', width: '105px' }}>وقت الحضور</th>
+                                <th style={{ textAlign: 'center', width: '105px' }}>وقت الانصراف</th>
+                                <th style={{ textAlign: 'center', width: '75px' }}>البريك</th>
+                                <th style={{ textAlign: 'center', width: '95px' }}>الصافي</th>
                                 <th style={{ width: '40px', textAlign: 'center' }}>حذف</th>
                               </tr>
                             </thead>
@@ -6912,22 +6964,47 @@ export default function BranchManagerView({
                               {manualPunchData.selectedDays.map((d, idx) => {
                                 const isCheckInOnly = d.punchType === 'in';
                                 return (
-                                  <tr key={d.date} style={{ background: d.hasExistingShift ? '#fefce8' : 'transparent' }}>
+                                  <tr key={d.date} style={{ background: d.hasExistingShift ? '#fefce8' : (idx % 2 === 0 ? '#ffffff' : '#f8fafc') }}>
                                     <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--muted)' }}>{idx + 1}</td>
                                     <td>
-                                      <div style={{ fontWeight: 'bold' }}>{d.date}</div>
-                                      <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
-                                        {d.dayName}
-                                        {d.hasExistingShift && <span style={{ marginRight: '4px', color: '#b45309' }}>[وردية مسجلة]</span>}
-                                        {d.isOff && <span style={{ marginRight: '4px', color: '#9333ea' }}>[راحة]</span>}
+                                      <div style={{ fontWeight: 'bold', color: '#0f172a' }}>{d.date}</div>
+                                      <div style={{ fontSize: '11px', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px', flexWrap: 'wrap' }}>
+                                        <span style={{ fontWeight: '600' }}>{d.dayName}</span>
+                                        {d.hasExistingShift && (
+                                          <span style={{ color: '#b45309', background: '#fef3c7', padding: '1px 5px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 'bold' }}>
+                                            وردية مسجلة
+                                          </span>
+                                        )}
+                                        {d.isOff && (
+                                          <span style={{ color: '#7e22ce', background: '#f3e8ff', padding: '1px 5px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 'bold' }}>
+                                            راحة
+                                          </span>
+                                        )}
+                                        {!d.hasExistingShift && !d.isOff && (
+                                          <span style={{ color: '#15803d', background: '#dcfce7', padding: '1px 5px', borderRadius: '4px', fontSize: '10.5px' }}>
+                                            يوم جديد
+                                          </span>
+                                        )}
                                       </div>
+                                    </td>
+                                    <td style={{ textAlign: 'center' }}>
+                                      <select
+                                        value={d.punchType || 'full'}
+                                        onChange={(e) => handleUpdateBatchDayRow(d.date, 'punchType', e.target.value)}
+                                        style={{ padding: '4px 6px', fontSize: '11.5px', borderRadius: '6px', border: '1px solid #cbd5e1', width: '100%', maxWidth: '100px' }}
+                                      >
+                                        <option value="full">وردية كاملة</option>
+                                        <option value="in">حضور فقط</option>
+                                        <option value="out">انصراف فقط</option>
+                                        <option value="correction">تعديل توقيت</option>
+                                      </select>
                                     </td>
                                     <td style={{ textAlign: 'center' }}>
                                       <input
                                         type="time"
                                         value={d.timeIn || '09:00'}
                                         onChange={(e) => handleUpdateBatchDayRow(d.date, 'timeIn', e.target.value)}
-                                        style={{ padding: '4px 6px', fontSize: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', width: '95px' }}
+                                        style={{ padding: '4px 6px', fontSize: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', width: '92px' }}
                                       />
                                     </td>
                                     <td style={{ textAlign: 'center' }}>
@@ -6937,7 +7014,15 @@ export default function BranchManagerView({
                                         disabled={isCheckInOnly}
                                         placeholder={isCheckInOnly ? '--:--' : ''}
                                         onChange={(e) => handleUpdateBatchDayRow(d.date, 'timeOut', e.target.value)}
-                                        style={{ padding: '4px 6px', fontSize: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', width: '95px' }}
+                                        style={{
+                                          padding: '4px 6px',
+                                          fontSize: '12px',
+                                          borderRadius: '6px',
+                                          border: '1px solid #cbd5e1',
+                                          width: '92px',
+                                          backgroundColor: isCheckInOnly ? '#f1f5f9' : '#ffffff',
+                                          cursor: isCheckInOnly ? 'not-allowed' : 'auto'
+                                        }}
                                       />
                                     </td>
                                     <td style={{ textAlign: 'center' }}>
@@ -6963,7 +7048,7 @@ export default function BranchManagerView({
                                       <button
                                         type="button"
                                         onClick={() => handleRemoveBatchDay(d.date)}
-                                        style={{ background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', padding: '3px 7px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                                        style={{ background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
                                         title="حذف هذا اليوم من القائمة"
                                       >
                                         ✕
@@ -7008,6 +7093,141 @@ export default function BranchManagerView({
                   </>
                 )}
 
+                {/* ── PRE-SUBMISSION VERIFICATION PREVIEW (معاينة الأيام ومواعيدها قبل الإرسال) ── */}
+                {manualPunchData.mode === 'multiple' ? (
+                  manualPunchData.selectedDays?.length > 0 && (() => {
+                    const totalDays = manualPunchData.selectedDays.length;
+                    const totalNet = manualPunchData.selectedDays.reduce((acc, d) => acc + (d.netHours || 0), 0);
+                    return (
+                      <div style={{
+                        background: 'linear-gradient(135deg, #f0fdfa, #ecfdf5)',
+                        border: '1.5px solid #0d9488',
+                        borderRadius: '12px',
+                        padding: '14px 16px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px',
+                        boxShadow: '0 2px 8px rgba(13, 148, 136, 0.08)'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '18px' }}>👁️</span>
+                            <div>
+                              <strong style={{ fontSize: '13.5px', color: '#0f766e' }}>
+                                معاينة تفصيلية لمواعيد الأيام قبل إرسال الطلب للاعتماد ({totalDays} يوم):
+                              </strong>
+                              <div style={{ fontSize: '11.5px', color: '#475569', marginTop: '2px' }}>
+                                راجع المواعيد التالية بعناية، سيتم رفعها كطلب رسمي للإدارة العليا:
+                              </div>
+                            </div>
+                          </div>
+                          <span style={{ background: '#0d9488', color: '#ffffff', padding: '4px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold' }}>
+                            إجمالي الصافي: {formatMoney(totalNet)} س
+                          </span>
+                        </div>
+
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                          gap: '8px',
+                          maxHeight: '160px',
+                          overflowY: 'auto',
+                          padding: '4px 2px'
+                        }}>
+                          {manualPunchData.selectedDays.map((d) => (
+                            <div
+                              key={d.date}
+                              style={{
+                                background: '#ffffff',
+                                border: '1px solid #ccfbf1',
+                                borderRadius: '8px',
+                                padding: '8px 12px',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                              }}
+                            >
+                              <div>
+                                <div style={{ fontWeight: 'bold', fontSize: '12px', color: '#0f172a' }}>
+                                  📅 {d.dayName} {d.date}
+                                </div>
+                                <div style={{ fontSize: '11.5px', color: '#475569', marginTop: '2px', direction: 'ltr', textAlign: 'right' }}>
+                                  {d.punchType === 'in'
+                                    ? `🟢 دخول فقط: ${d.timeIn || '—'}`
+                                    : `⏱️ ${d.timeIn || '—'} ➔ ${d.timeOut || '—'}`}
+                                  {parseFloat(d.breakHours) > 0 ? ` (بريك ${d.breakHours}س)` : ''}
+                                </div>
+                              </div>
+                              <div style={{ textAlign: 'left' }}>
+                                <span style={{
+                                  background: '#ccfbf1',
+                                  color: '#0f766e',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '11.5px',
+                                  fontWeight: '800'
+                                }}>
+                                  {formatMoney(d.netHours || 0)} س
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  /* Single Day Preview Box */
+                  manualPunchData.date && (
+                    <div style={{
+                      background: 'linear-gradient(135deg, #f0fdfa, #ecfdf5)',
+                      border: '1.5px solid #0d9488',
+                      borderRadius: '12px',
+                      padding: '12px 16px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '10px'
+                    }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>👁️</span>
+                          <strong style={{ fontSize: '13px', color: '#0f766e' }}>معاينة توقيت البصمة قبل الإرسال:</strong>
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#334155', marginTop: '4px' }}>
+                          📅 يوم {getArabicWeekday(manualPunchData.date)} ({manualPunchData.date})
+                          {manualPunchData.punchType === 'in'
+                            ? ` · تسجيل حضور فقط في تمام الساعة: ${manualPunchData.timeIn}`
+                            : ` · من ${manualPunchData.timeIn || '—'} إلى ${manualPunchData.timeOut || '—'} · بريك: ${manualPunchData.breakHours || 0} س`}
+                        </div>
+                      </div>
+                      {manualPunchData.punchType !== 'in' && manualPunchData.timeIn && manualPunchData.timeOut && (() => {
+                        const [inH, inM] = manualPunchData.timeIn.split(':').map(Number);
+                        const [outH, outM] = manualPunchData.timeOut.split(':').map(Number);
+                        let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+                        if (diff < 0) diff += 24 * 60;
+                        const gross = Math.round((diff / 60) * 100) / 100;
+                        const bH = Math.max(0, parseFloat(manualPunchData.breakHours) || 0);
+                        const net = Math.max(0, Math.round((gross - bH) * 100) / 100);
+                        return (
+                          <span style={{
+                            background: '#0d9488',
+                            color: '#ffffff',
+                            padding: '4px 14px',
+                            borderRadius: '8px',
+                            fontSize: '13px',
+                            fontWeight: '900'
+                          }}>
+                            {net} س صافي
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  )
+                )}
+
                 <div className="field">
                   <label style={{ fontWeight: 'bold', fontSize: '13px' }}>سبب التسجيل / التعديل اليدوي وملاحظات مدير الفرع:</label>
                   <textarea
@@ -7025,7 +7245,7 @@ export default function BranchManagerView({
                 <button type="button" className="btn btn-ghost" onClick={() => setShowManualPunchModal(false)}>إلغاء</button>
                 <button type="submit" className="btn btn-start" style={{ background: '#0d9488' }}>
                   {manualPunchData.mode === 'multiple'
-                    ? `📤 إرسال طلب اعتماد البصمات لـ (${manualPunchData.selectedDays?.length || 0}) أيام للإدارة العليا`
+                    ? `📤 إرسال طلب اعتماد البصمات لـ (${manualPunchData.selectedDays?.length || 0}) أيام للإدارة العليا (${formatMoney(manualPunchData.selectedDays?.reduce((acc, d) => acc + (d.netHours || 0), 0) || 0)} س صافي)`
                     : (manualPunchData.shiftId ? '📤 إرسال طلب تعديل البصمة للإدارة العليا للاعتماد' : '📤 إرسال طلب البصمة للإدارة العليا للاعتماد')}
                 </button>
               </div>
