@@ -487,31 +487,24 @@ export default function OwnerSettingsTab({
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 'min(100%, 260px)', flex: '1 1 auto', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-          <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f766e', whiteSpace: 'nowrap' }}>
-            الانتقال إلى قسم إعدادات آخر :
-          </label>
-          <select
-            value={activeSubSection}
-            onChange={(e) => changeSubSection(e.target.value)}
-            className="outstock-form-select"
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span
             style={{
-              minWidth: '200px',
-              maxWidth: '100%',
-              flex: '1 1 200px',
+              fontSize: '12px',
               fontWeight: '800',
-              fontSize: '13.5px',
-              padding: '8px 14px',
-              borderColor: '#0d9488',
-              backgroundColor: '#ffffff'
+              padding: '5px 12px',
+              borderRadius: '999px',
+              background: '#f0fdfa',
+              color: '#0f766e',
+              border: '1px solid #99f6e4',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px'
             }}
           >
-            {SETTINGS_SECTIONS.map((sec) => (
-              <option key={sec.id} value={sec.id}>
-                {sec.iconText} {sec.title}
-              </option>
-            ))}
-          </select>
+            <span>{SETTINGS_SECTIONS.find(s => s.id === activeSubSection)?.iconText || '⚙️'}</span>
+            <span>القسم النشط حالياً</span>
+          </span>
         </div>
       </div>
 
