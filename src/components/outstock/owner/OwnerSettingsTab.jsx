@@ -487,7 +487,7 @@ export default function OwnerSettingsTab({
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: '320px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 'min(100%, 260px)', flex: '1 1 auto', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
           <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f766e', whiteSpace: 'nowrap' }}>
             الانتقال إلى قسم إعدادات آخر :
           </label>
@@ -496,7 +496,9 @@ export default function OwnerSettingsTab({
             onChange={(e) => changeSubSection(e.target.value)}
             className="outstock-form-select"
             style={{
-              flex: 1,
+              minWidth: '200px',
+              maxWidth: '100%',
+              flex: '1 1 200px',
               fontWeight: '800',
               fontSize: '13.5px',
               padding: '8px 14px',

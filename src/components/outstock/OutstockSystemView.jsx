@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import './outstock.css';
 import {
   Package,
@@ -25,7 +26,8 @@ import {
   Pill,
   Image as ImageIcon,
   MapPin,
-  Key
+  Key,
+  Check
 } from 'lucide-react';
 import OutstockNotificationModal from './common/OutstockNotificationModal';
 import { outstockGetMe } from '../../utils/outstockApiClient';
@@ -102,12 +104,42 @@ export default function OutstockSystemView({
 
   // قائمة الأقسام الفرعية لصفحة الإعدادات والصلاحيات للمالك
   const OWNER_SETTINGS_SUBSECTIONS = [
-    { id: 'pharmacy_identity', title: 'هوية وشعار الصيدلية بالفاتورة', icon: ImageIcon },
-    { id: 'delivery_zones', title: 'إدارة مناطق وأحياء التوصيل', icon: MapPin },
-    { id: 'branches', title: 'إدارة وتفعيل الفروع والصيدليات', icon: Building2 },
-    { id: 'procurement_users', title: 'يوزرات إدارة المشتريات والصلاحيات', icon: Users },
-    { id: 'security', title: 'تأمين حساب المالك وكلمة المرور', icon: Key },
-    { id: 'shortcuts', title: 'تخصيص اختصارات لوحة المفاتيح', icon: Keyboard }
+    {
+      id: 'pharmacy_identity',
+      title: 'هوية وشعار الصيدلية بالفاتورة',
+      desc: 'تخصيص الشعار الرسمي والترويسة وبيانات الفواتير المطبوعة',
+      icon: ImageIcon
+    },
+    {
+      id: 'delivery_zones',
+      title: 'إدارة مناطق وأحياء التوصيل',
+      desc: 'إضافة وتعديل مناطق التوصيل المتاحة وتكاليف الشحن',
+      icon: MapPin
+    },
+    {
+      id: 'branches',
+      title: 'إدارة وتفعيل الفروع والصيدليات',
+      desc: 'ربط بيانات الفروع وتعيين حسابات الدخول وحالات العمل',
+      icon: Building2
+    },
+    {
+      id: 'procurement_users',
+      title: 'يوزرات إدارة المشتريات والصلاحيات',
+      desc: 'إدارة مسؤولي المشتريات وتحديد نطاق وصلاحيات الفروع',
+      icon: Users
+    },
+    {
+      id: 'security',
+      title: 'تأمين حساب المالك وكلمة المرور',
+      desc: 'حماية وتعديل كلمة مرور حساب المالك وبيانات الدخول',
+      icon: Key
+    },
+    {
+      id: 'shortcuts',
+      title: 'تخصيص اختصارات لوحة المفاتيح',
+      desc: 'تعيين مفاتيح سريعة للوصول للعمليات والأقسام فوراً',
+      icon: Keyboard
+    }
   ];
 
   // ── نظام الإشعارات المنبثقة الاحترافية داخل النظام ──
@@ -132,20 +164,114 @@ export default function OutstockSystemView({
     return () => window.removeEventListener('outstock:notify', handleOutstockNotify);
   }, []);
 
-  // قسم إعدادات المالك والقائمة المنسدلة
+  // ── قسم إعدادات المالك والقائمة المنسدلة الذكية ──
   const [ownerSettingsSection, setOwnerSettingsSection] = useState('pharmacy_identity');
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
-  const settingsDropdownRef = React.useRef(null);
+  const settingsButtonRef = useRef(null);
+  const settingsMenuRef = useRef(null);
+  const [menuCoords, setMenuCoords] = useState({
+    top: 0,
+    left: 0,
+    width: 340,
+    maxHeight: 460,
+    arrowOffset: 24,
+    alignMode: 'right'
+  });
 
+  // حساب موضع القائمة الذكي يميناً ويساراً حسب المساحة المتاحة للشاشة (Adaptive Dynamic Positioning)
+  const updateMenuPosition = useCallback(() => {
+    if (!settingsButtonRef.current) return;
+    const rect = settingsButtonRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const margin = 10;
+    // عرض القائمة متكيف: 340px كحد أقصى أو عرض الشاشة مع هوامش أمان
+    const menuWidth = Math.min(340, viewportWidth - (margin * 2));
+    
+    // الموضع الرأسي أسفل الزر مباشرةً
+    const top = Math.round(rect.bottom + 6);
+
+    // حساب الموضع الأفقي يميناً ويساراً حسب المساحة المتاحة:
+    // 1. في الواجهات العربية RTL، المحاذاة الطبيعية هي محاذاة الحافة اليمنى للقائمة مع الحافة اليمنى للزر
+    let left = Math.round(rect.right - menuWidth);
+    let alignMode = 'right';
+
+    // 2. إذا لم تكف المساحة جهة اليسار وتجاوزت حدود الشاشة:
+    if (left < margin) {
+      // نفحص إمكانية محاذاة الحافة اليسرى للقائمة مع يسار الزر (تنسدل جهة اليمين)
+      if (rect.left + menuWidth <= viewportWidth - margin) {
+        left = Math.round(rect.left);
+        alignMode = 'left';
+      } else {
+        // 3. في شاشات الجوال الضيقة، نقوم بضبط القائمة داخل حدود الشاشة بشكل متوازن وآمن
+        left = Math.round(Math.max(margin, Math.min(rect.left, viewportWidth - menuWidth - margin)));
+        alignMode = 'clamped';
+      }
+    } else if (left + menuWidth > viewportWidth - margin) {
+      left = Math.round(viewportWidth - menuWidth - margin);
+      alignMode = 'right';
+    }
+
+    // حساب موضع السهم الصغير ليتجه دائماً بدقة لمنتصف زر التبويبة
+    const buttonCenter = rect.left + (rect.width / 2);
+    const arrowOffset = Math.round(Math.max(22, Math.min(menuWidth - 22, buttonCenter - left)));
+
+    // أقصى ارتفاع متاح للقائمة لتجنب الخروج خارج الشاشة
+    const maxMenuHeight = Math.max(220, viewportHeight - top - 16);
+
+    setMenuCoords({
+      top,
+      left,
+      width: menuWidth,
+      maxHeight: maxMenuHeight,
+      arrowOffset,
+      alignMode
+    });
+  }, []);
+
+  // إدارة الأحداث للقائمة المنسدلة: النقر الخارجي، تغيير حجم الشاشة، والتمرير
   useEffect(() => {
-    const handleOutside = (e) => {
-      if (settingsDropdownRef.current && !settingsDropdownRef.current.contains(e.target)) {
+    if (!isSettingsMenuOpen) return;
+    updateMenuPosition();
+
+    const handleUpdate = () => {
+      updateMenuPosition();
+    };
+
+    const handleClickOutside = (e) => {
+      if (
+        settingsButtonRef.current && settingsButtonRef.current.contains(e.target)
+      ) {
+        return;
+      }
+      if (
+        settingsMenuRef.current && settingsMenuRef.current.contains(e.target)
+      ) {
+        return;
+      }
+      setIsSettingsMenuOpen(false);
+    };
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
         setIsSettingsMenuOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleOutside);
-    return () => document.removeEventListener('mousedown', handleOutside);
-  }, []);
+
+    window.addEventListener('resize', handleUpdate, { passive: true });
+    window.addEventListener('scroll', handleUpdate, { capture: true, passive: true });
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside, { passive: true });
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('resize', handleUpdate);
+      window.removeEventListener('scroll', handleUpdate, { capture: true });
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isSettingsMenuOpen, updateMenuPosition]);
 
   // تحديث التبويب التلقائي عند تبديل الدور
   useEffect(() => {
@@ -666,99 +792,36 @@ export default function OutstockSystemView({
                 <span>مركز الواتساب</span>
               </button>
 
-              {/* قائمة الإعدادات والصلاحيات المنسدلة */}
-              <div
-                ref={settingsDropdownRef}
-                style={{ position: 'relative', display: 'inline-block' }}
-                onMouseEnter={() => setIsSettingsMenuOpen(true)}
-                onMouseLeave={() => setIsSettingsMenuOpen(false)}
-              >
-                <button
-                  type="button"
-                  className={`outstock-subnav-btn ${activeTab === 'owner_settings' ? 'is-active' : ''}`}
-                  onClick={() => {
+              {/* تبويبة وقائمة الإعدادات والصلاحيات المنسدلة الذكية */}
+              <button
+                ref={settingsButtonRef}
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'owner_settings' ? 'is-active' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (activeTab !== 'owner_settings') {
                     setActiveTab('owner_settings');
+                    setIsSettingsMenuOpen(true);
+                  } else {
                     setIsSettingsMenuOpen(prev => !prev);
+                  }
+                }}
+                title="إعدادات وصلاحيات وهوية النظام والفروع"
+                aria-haspopup="true"
+                aria-expanded={isSettingsMenuOpen}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Settings size={16} />
+                <span>الإعدادات والصلاحيات</span>
+                <ChevronDown
+                  size={14}
+                  style={{
+                    transform: isSettingsMenuOpen ? 'rotate(180deg)' : 'none',
+                    transition: 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                    opacity: 0.85
                   }}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                >
-                  <Settings size={16} />
-                  <span>الإعدادات والصلاحيات</span>
-                  <ChevronDown
-                    size={14}
-                    style={{
-                      transform: isSettingsMenuOpen ? 'rotate(180deg)' : 'none',
-                      transition: 'transform 0.2s ease'
-                    }}
-                  />
-                </button>
-
-                {isSettingsMenuOpen && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 'calc(100% + 4px)',
-                      left: 0,
-                      minWidth: '260px',
-                      background: '#ffffff',
-                      border: '1.5px solid #cbd5e1',
-                      borderRadius: '14px',
-                      boxShadow: '0 16px 36px rgba(0, 0, 0, 0.16)',
-                      zIndex: 9999,
-                      padding: '8px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '4px',
-                      animation: 'outstockFadeIn 0.15s ease'
-                    }}
-                  >
-                    <div style={{ padding: '4px 8px', fontSize: '11px', fontWeight: '800', color: '#94a3b8', borderBottom: '1px solid #f1f5f9', marginBottom: '2px' }}>
-                      ⚙️ أقسام الإعدادات والصلاحيات:
-                    </div>
-                    {OWNER_SETTINGS_SUBSECTIONS.map((sub) => {
-                      const isCurrent = activeTab === 'owner_settings' && ownerSettingsSection === sub.id;
-                      const IconComponent = sub.icon;
-                      return (
-                        <button
-                          key={sub.id}
-                          type="button"
-                          onClick={() => {
-                            setActiveTab('owner_settings');
-                            setOwnerSettingsSection(sub.id);
-                            setIsSettingsMenuOpen(false);
-                          }}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '10px',
-                            padding: '9px 12px',
-                            borderRadius: '9px',
-                            border: isCurrent ? '1.5px solid #99f6e4' : '1.5px solid transparent',
-                            background: isCurrent ? '#f0fdfa' : 'transparent',
-                            color: isCurrent ? '#0f766e' : '#334155',
-                            fontWeight: isCurrent ? '800' : '600',
-                            fontSize: '12.5px',
-                            cursor: 'pointer',
-                            textAlign: 'right',
-                            width: '100%',
-                            transition: 'all 0.12s ease'
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!isCurrent) e.currentTarget.style.background = '#f8fafc';
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!isCurrent) e.currentTarget.style.background = 'transparent';
-                          }}
-                        >
-                          <IconComponent size={16} color={isCurrent ? '#0d9488' : '#64748b'} />
-                          <span style={{ flex: 1 }}>{sub.title}</span>
-                          {isCurrent && <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#0d9488' }} />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+                />
+              </button>
             </>
           )}
         </div>
@@ -889,6 +952,75 @@ export default function OutstockSystemView({
           </>
         )}
       </main>
+
+      {/* ── قائمة الانتقال لأقسام الإعدادات والصلاحيات المنسدلة الاحترافية (Portal) ── */}
+      {isSettingsMenuOpen && createPortal(
+        <div
+          ref={settingsMenuRef}
+          className="outstock-settings-dropdown-portal"
+          style={{
+            position: 'fixed',
+            top: `${menuCoords.top}px`,
+            left: `${menuCoords.left}px`,
+            width: `${menuCoords.width}px`,
+            maxHeight: `${menuCoords.maxHeight}px`,
+            zIndex: 99999
+          }}
+        >
+          {/* سهم المؤشر الأنيق المتطابق مع منتصف الزر */}
+          <div
+            className="outstock-dropdown-arrow"
+            style={{
+              left: `${menuCoords.arrowOffset}px`
+            }}
+          />
+
+          {/* ترويسة القائمة المنسدلة */}
+          <div className="outstock-dropdown-header">
+            <div className="outstock-dropdown-header-title">
+              <Settings size={15} className="outstock-dropdown-header-icon" />
+              <span>الانتقال إلى قسم إعدادات آخر</span>
+            </div>
+            <span className="outstock-dropdown-header-badge">
+              {OWNER_SETTINGS_SUBSECTIONS.length} أقسام
+            </span>
+          </div>
+
+          {/* قائمة الأقسام القابلة للتحديد */}
+          <div className="outstock-dropdown-list">
+            {OWNER_SETTINGS_SUBSECTIONS.map((sub) => {
+              const isCurrent = activeTab === 'owner_settings' && ownerSettingsSection === sub.id;
+              const IconComp = sub.icon;
+              return (
+                <button
+                  key={sub.id}
+                  type="button"
+                  className={`outstock-dropdown-item ${isCurrent ? 'is-active' : ''}`}
+                  onClick={() => {
+                    setActiveTab('owner_settings');
+                    setOwnerSettingsSection(sub.id);
+                    setIsSettingsMenuOpen(false);
+                  }}
+                >
+                  <div className={`outstock-dropdown-item-icon ${isCurrent ? 'is-active' : ''}`}>
+                    <IconComp size={18} />
+                  </div>
+                  <div className="outstock-dropdown-item-text">
+                    <span className="outstock-dropdown-item-title">{sub.title}</span>
+                    <span className="outstock-dropdown-item-desc">{sub.desc}</span>
+                  </div>
+                  {isCurrent && (
+                    <div className="outstock-dropdown-item-check" title="القسم المعروض حالياً">
+                      <Check size={14} />
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* ── نافذة الإشعارات والتنبيهات المنبثقة الاحترافية ── */}
       {activeNotification && (
