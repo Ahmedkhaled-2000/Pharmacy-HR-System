@@ -448,16 +448,28 @@ export default function AttendanceModule({
                   return isMatch && activePeriodFilter(p.date);
                 });
 
-                // فحص ما إذا كان الموظف لديه بصمة حضور نشطة اليوم (Live Active Shift)
+                // فحص ما إذا كان الموظف لديه بصمة حضور نشطة اليوم أو وردية ليلية عابرة لمنتصف الليل (Live Active Shift)
                 const todayStrNow = typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
                 const openShiftInShifts = (state.shifts || []).find(s =>
                   (String(s.employeeId) === String(emp.id) || String(s.employeeCode) === String(emp.code)) &&
-                  s.date === todayStrNow &&
+                  (s.date === todayStrNow || (s.date < todayStrNow && (Date.now() - (s.startEpoch || (s.createdAt ? new Date(s.createdAt).getTime() : Date.now()))) < 30 * 3600 * 1000)) &&
                   Boolean(s.timeIn && s.timeIn !== '—' && (!s.timeOut || s.timeOut === '—' || s.timeOut === '' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive)) &&
                   s.status !== 'cancelled' && !s.isCancelled
                 );
-                const activeShift = state.activeShifts?.[emp.id] || state.activeShifts?.[String(emp.id)] || openShiftInShifts;
-                const hasLiveShift = Boolean(activeShift && isEmployeeActive(emp) && activeShift.date === todayStrNow);
+                const activeShift = state.activeShifts?.[emp.id] ||
+                  state.activeShifts?.[String(emp.id)] ||
+                  (emp.code && state.activeShifts?.[emp.code]) ||
+                  (emp.code && state.activeShifts?.[String(emp.code)]) ||
+                  openShiftInShifts;
+
+                const isOvernightActive = Boolean(
+                  activeShift &&
+                  isEmployeeActive(emp) &&
+                  activeShift.date &&
+                  activeShift.date < todayStrNow &&
+                  (Date.now() - (activeShift.startEpoch || (activeShift.createdAt ? new Date(activeShift.createdAt).getTime() : Date.now()))) < 30 * 3600 * 1000
+                );
+                const hasLiveShift = Boolean(activeShift && isEmployeeActive(emp) && (activeShift.date === todayStrNow || isOvernightActive));
                 const liveElapsedHours = hasLiveShift
                   ? Math.max(0, Math.round(((Date.now() - (activeShift.startEpoch || (activeShift.createdAt ? new Date(activeShift.createdAt).getTime() : Date.now()))) / 3600000) * 10) / 10)
                   : 0;
@@ -476,7 +488,9 @@ export default function AttendanceModule({
                       {getEmpDisplayName(emp)}
                       {hasLiveShift && (
                         <span style={{ display: 'block', marginTop: '2px', fontSize: '11px', color: '#059669', fontWeight: '800' }}>
-                          🟢 متواجد الآن ({activeShift.timeIn})
+                          {isOvernightActive
+                            ? `🟢 متواجد الآن 🌙 (وردية ليلية بدأت أمس ${activeShift.timeIn})`
+                            : `🟢 متواجد الآن (${activeShift.timeIn})`}
                         </span>
                       )}
                     </td>
@@ -487,7 +501,7 @@ export default function AttendanceModule({
                         <span className="badge badge-primary">{totalShiftsCount} وردية</span>
                         {hasLiveShift && (
                           <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: '800', textAlign: 'center' }}>
-                            حضور حي
+                            {isOvernightActive ? 'حضور حي 🌙 عابر لمنتصف الليل' : 'حضور حي'}
                           </span>
                         )}
                       </div>

@@ -185,12 +185,14 @@ export function compileDailyDigestData(state, targetDate = getRealTodayStr()) {
     return sDate === targetDate;
   });
 
-  // الموظفون الذين لديهم شفتات نشطة جارية الآن
+  // الموظفون الذين لديهم شفتات نشطة جارية الآن (بما في ذلك الورديات الليلية العابرة لمنتصف الليل)
   const activeEmpIds = Object.keys(activeShiftsMap).filter((empId) => {
     const act = activeShiftsMap[empId];
     if (!act) return false;
     const actDate = act.date || (act.startTime ? String(act.startTime).slice(0, 10) : targetDate);
-    return actDate === targetDate;
+    const actEpoch = act.startEpoch || (act.createdAt ? new Date(act.createdAt).getTime() : 0);
+    const isOvernightActive = actDate < targetDate && (!actEpoch || (Date.now() - actEpoch) < 30 * 3600 * 1000);
+    return actDate === targetDate || isOvernightActive;
   });
 
   // معرفات الموظفين الحاضرين (منتهي + نشط حالياً)
@@ -217,7 +219,7 @@ export function compileDailyDigestData(state, targetDate = getRealTodayStr()) {
 
     // موظفو الفرع الذين هم على رأس عملهم حالياً
     const branchActiveEmps = branchEmps.filter((e) => {
-      const act = activeShiftsMap[e.id];
+      const act = activeShiftsMap[e.id] || activeShiftsMap[String(e.id)] || (e.code && activeShiftsMap[e.code]);
       return act && String(act.branchId || e.branchId) === bId;
     });
 
@@ -226,15 +228,17 @@ export function compileDailyDigestData(state, targetDate = getRealTodayStr()) {
     const recordedPresentEmpIds = new Set();
 
     branchActiveEmps.forEach((e) => {
-      const act = activeShiftsMap[e.id];
+      const act = activeShiftsMap[e.id] || activeShiftsMap[String(e.id)] || (e.code && activeShiftsMap[e.code]);
       recordedPresentEmpIds.add(String(e.id));
+      const actDate = act.date || (act.startTime ? String(act.startTime).slice(0, 10) : targetDate);
+      const isNight = actDate < targetDate;
       branchPresentEmpDetails.push({
         id: e.id,
         name: e.name,
         code: e.code || '—',
         role: e.jobTitle || 'موظف',
-        status: 'على رأس العمل حالياً 🟢',
-        timeIn: act.startTime ? (typeof act.startTime === 'string' ? (act.startTime.slice(11, 16) || act.startTime) : String(act.startTime)) : '—',
+        status: isNight ? 'على رأس العمل (وردية ليلية 🌙)' : 'على رأس العمل حالياً 🟢',
+        timeIn: act.timeIn || (act.startTime ? (typeof act.startTime === 'string' ? (act.startTime.slice(11, 16) || act.startTime) : String(act.startTime)) : '—'),
         punchType: act.source || 'بصمة حية'
       });
     });

@@ -534,10 +534,19 @@ export default function Dashboard({
                   const branchActiveCount = (targetLiveDate === todayDate)
                     ? branchEmps.filter((e) => {
                         if (!e || !e.id || !isEmployeeActive(e)) return false;
-                        const act = state?.activeShifts?.[e.id] || state?.activeShifts?.[String(e.id)];
+                        const act = state?.activeShifts?.[e.id] ||
+                          state?.activeShifts?.[String(e.id)] ||
+                          (e.code && state?.activeShifts?.[e.code]) ||
+                          (e.code && state?.activeShifts?.[String(e.code)]) ||
+                          Object.values(state?.activeShifts || {}).find(s =>
+                            s && (String(s.employeeId) === String(e.id) || (e.code && String(s.employeeCode) === String(e.code)))
+                          );
                         if (!act) return false;
-                        const isToday = act.date ? String(act.date).slice(0, 10) === targetLiveDate : true;
-                        return isToday && String(act.branchId || e.branchId) === String(b.id);
+                        const actDate = act.date ? String(act.date).slice(0, 10) : targetLiveDate;
+                        const actEpoch = act.startEpoch || (act.createdAt ? new Date(act.createdAt).getTime() : 0);
+                        const isCrossMidnight = actDate < targetLiveDate && (!actEpoch || (Date.now() - actEpoch) < 30 * 3600 * 1000);
+                        const isCurrentShift = (actDate === targetLiveDate) || isCrossMidnight;
+                        return isCurrentShift && String(act.branchId || e.branchId) === String(b.id);
                       }).length
                     : branchTargetPunches.length;
                   const allLeaves = [...(state?.leaveRequests || []), ...(state?.requests || [])];
@@ -629,7 +638,14 @@ export default function Dashboard({
                                      )
                                    ))
                                 : null;
-                              const isShiftTarget = rawActive && (rawActive.date ? String(rawActive.date).slice(0, 10) === targetLiveDate : true);
+                              const rawActiveDate = rawActive?.date ? String(rawActive.date).slice(0, 10) : targetLiveDate;
+                              const rawActiveEpoch = rawActive?.startEpoch || (rawActive?.createdAt ? new Date(rawActive.createdAt).getTime() : 0);
+                              const isCrossMidnightActive = Boolean(
+                                rawActive &&
+                                rawActiveDate < targetLiveDate &&
+                                (!rawActiveEpoch || (Date.now() - rawActiveEpoch) < 30 * 3600 * 1000)
+                              );
+                              const isShiftTarget = rawActive && (rawActiveDate === targetLiveDate || isCrossMidnightActive);
                               const isActiveInThisBranch = rawActive && isShiftTarget && isEmployeeActive(emp) && (String(rawActive.branchId || emp.branchId) === String(b.id));
                               const isActiveInOtherBranch = rawActive && isShiftTarget && isEmployeeActive(emp) && !isActiveInThisBranch;
 
@@ -656,20 +672,24 @@ export default function Dashboard({
                               let badgeBorder = '#fecdd3';
 
                               if (isActiveInThisBranch) {
+                                const isNightShift = isCrossMidnightActive || (rawActive.date && rawActive.date < targetLiveDate);
                                 if (rawActive.isOnBreak || rawActive.isPaused) {
-                                  statusText = '⏸️ في استراحة';
+                                  statusText = isNightShift ? '⏸️ في استراحة (وردية ليلية 🌙)' : '⏸️ في استراحة';
                                   badgeBg = '#fffbeb';
                                   badgeColor = '#b45309';
                                   badgeBorder = '#fde68a';
                                 } else {
-                                  statusText = '🟢 حاضر حالياً';
+                                  statusText = isNightShift
+                                    ? `🟢 حاضر حالياً (وردية ليلية 🌙 بدأت ${rawActive.timeIn})`
+                                    : '🟢 حاضر حالياً';
                                   badgeBg = '#ecfdf5';
                                   badgeColor = '#047857';
                                   badgeBorder = '#a7f3d0';
                                 }
                               } else if (isActiveInOtherBranch) {
                                 const otherBranchObj = branches.find((br) => br && String(br.id) === String(rawActive?.branchId));
-                                statusText = `🏢 بوردية بفرع ${otherBranchObj ? otherBranchObj.name : 'آخر'}`;
+                                const isNightShift = isCrossMidnightActive || (rawActive.date && rawActive.date < targetLiveDate);
+                                statusText = `🏢 بوردية ${isNightShift ? 'ليلية 🌙 ' : ''}بفرع ${otherBranchObj ? otherBranchObj.name : 'آخر'}`;
                                 badgeBg = '#f1f5f9';
                                 badgeColor = '#475569';
                                 badgeBorder = '#e2e8f0';
@@ -766,14 +786,25 @@ export default function Dashboard({
         const allLeaves = [...(state?.leaveRequests || []), ...(state?.requests || [])];
         const absentEmpsToday = employees.filter((emp) => {
           if (!emp || !emp.id) return false;
-          const rawActive = (targetAbsentDate === todayDate) ? (state?.activeShifts?.[emp.id] || state?.activeShifts?.[String(emp.id)]) : null;
-          const isShiftToday = rawActive && (
-            rawActive.date
-              ? String(rawActive.date).slice(0, 10) === targetAbsentDate
-              : (rawActive.timestamp ? String(rawActive.timestamp).slice(0, 10) === targetAbsentDate : false)
+          const rawActive = (targetAbsentDate === todayDate)
+            ? (state?.activeShifts?.[emp.id] ||
+               state?.activeShifts?.[String(emp.id)] ||
+               (emp.code && state?.activeShifts?.[emp.code]) ||
+               (emp.code && state?.activeShifts?.[String(emp.code)]) ||
+               Object.values(state?.activeShifts || {}).find(s =>
+                 s && (String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code)))
+               ))
+            : null;
+          const rawActiveDate = rawActive?.date ? String(rawActive.date).slice(0, 10) : targetAbsentDate;
+          const rawActiveEpoch = rawActive?.startEpoch || (rawActive?.createdAt ? new Date(rawActive.createdAt).getTime() : 0);
+          const isCrossMidnightActive = Boolean(
+            rawActive &&
+            rawActiveDate < targetAbsentDate &&
+            (!rawActiveEpoch || (Date.now() - rawActiveEpoch) < 30 * 3600 * 1000)
           );
+          const isShiftToday = rawActive && (rawActiveDate === targetAbsentDate || isCrossMidnightActive);
           if (rawActive && isShiftToday) return false;
-          const hasPunchedToday = punches.some((p) => p && String(p.employeeId) === String(emp.id) && (
+          const hasPunchedToday = punches.some((p) => p && (String(p.employeeId) === String(emp.id) || (emp.code && String(p.employeeCode) === String(emp.code))) && (
             String(p.date || '').slice(0, 10) === targetAbsentDate ||
             (p.timestamp && String(p.timestamp).slice(0, 10) === targetAbsentDate)
           ));

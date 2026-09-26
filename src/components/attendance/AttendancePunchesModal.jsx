@@ -56,13 +56,20 @@ export default function AttendancePunchesModal({
         (employee.code && (String(s.employeeId) === String(employee.code) || String(s.employeeCode) === String(employee.code)))
       )
     );
-  const hasActiveShift = Boolean(activeShift && activePeriodFilter(activeShift.date));
+  const todayStrNow = typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
+  const isOvernightActive = Boolean(
+    activeShift &&
+    activeShift.date &&
+    activeShift.date < todayStrNow &&
+    (Date.now() - (activeShift.startEpoch || (activeShift.createdAt ? new Date(activeShift.createdAt).getTime() : Date.now()))) < 30 * 3600 * 1000
+  );
+  const hasActiveShift = Boolean(activeShift && (activePeriodFilter(activeShift.date) || isOvernightActive));
   const activeElapsedHours = hasActiveShift
-    ? Math.max(0, Math.round(((Date.now() - (activeShift.startEpoch || Date.now())) / 3600000) * 10) / 10)
+    ? Math.max(0, Math.round(((Date.now() - (activeShift.startEpoch || (activeShift.createdAt ? new Date(activeShift.createdAt).getTime() : Date.now()))) / 3600000) * 10) / 10)
     : 0;
 
   const livePunch = hasActiveShift ? {
-    id: activeShift.id || `active_${employee.id}_${activeShift.date}`,
+    id: activeShift.id || activeShift.shiftId || `active_${employee.id}_${activeShift.date}`,
     employeeId: employee.id,
     employeeCode: employee.code || '',
     employeeName: employee.name || '',
@@ -71,12 +78,15 @@ export default function AttendancePunchesModal({
     timeIn: activeShift.timeIn,
     timeOut: 'قيد العمل الآن',
     isLiveActive: true,
+    isOvernight: isOvernightActive,
     hours: activeElapsedHours,
     netHours: activeElapsedHours,
     workHours: activeElapsedHours,
     breakHours: activeShift.breakHours || 0,
-    note: '🟢 وردية نشطة مستمرة حالياً (حضور حي)',
-    statusLabel: 'حضور حي',
+    note: isOvernightActive
+      ? '🟢 وردية ليلية نشطة مستمرة حالياً (عابرة لمنتصف الليل)'
+      : '🟢 وردية نشطة مستمرة حالياً (حضور حي)',
+    statusLabel: isOvernightActive ? 'حضور حي 🌙 (عابر لمنتصف الليل)' : 'حضور حي',
     source: activeShift.source || 'kiosk'
   } : null;
 
@@ -104,10 +114,14 @@ export default function AttendancePunchesModal({
   const enrichedMonthPunches = rawMonthPunches.map(p => {
     const isLive = p.isLiveActive || (!p.timeOut || p.timeOut === '—' || p.timeOut === '' || p.timeOut === 'قيد العمل الآن');
     if (isLive) {
-      const liveElapsed = p.createdAt ? Math.max(0, Math.round(((Date.now() - new Date(p.createdAt).getTime()) / 3600000) * 10) / 10) : activeElapsedHours;
+      const isNight = Boolean(p.isOvernight || (p.date && p.date < todayStrNow));
+      const liveElapsed = p.startEpoch
+        ? Math.max(0, Math.round(((Date.now() - Number(p.startEpoch)) / 3600000) * 10) / 10)
+        : (p.createdAt ? Math.max(0, Math.round(((Date.now() - new Date(p.createdAt).getTime()) / 3600000) * 10) / 10) : activeElapsedHours);
       return {
         ...p,
         isLiveActive: true,
+        isOvernight: isNight,
         timeOut: 'قيد العمل الآن',
         hours: p.hours || liveElapsed,
         netHours: p.netHours || liveElapsed
@@ -134,7 +148,7 @@ export default function AttendancePunchesModal({
     try {
       const p = targetPunch || unclosedShift || livePunch;
       const todayStr = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
-      const isPastDate = p && p.date && p.date < todayStr;
+      const isPastDate = p && p.date && p.date < todayStr && !p.isLiveActive;
 
       // 1. إذا كانت الوردية لليوم الحالي ونشطة في activeShifts، نستدعي stopShift الأساسي
       if (!isPastDate && typeof stopShift === 'function' && state.activeShifts && (state.activeShifts[employee.id] || (employee.code && state.activeShifts[String(employee.code)]))) {
@@ -784,10 +798,19 @@ export default function AttendancePunchesModal({
               <span style={{ fontSize: '26px' }}>🟢</span>
               <div>
                 <strong style={{ color: '#065f46', fontSize: '15px' }}>
-                  {livePunch ? 'الموظف على رأس العمل حالياً (حضور حي نشط)' : 'توجد وردية مفتوحة للموظف بانتظار إنهاء الانصراف'}
+                  {livePunch?.isOvernight
+                    ? 'الموظف على رأس العمل حالياً 🌙 (وردية ليلية عابرة لمنتصف الليل)'
+                    : livePunch
+                    ? 'الموظف على رأس العمل حالياً (حضور حي نشط)'
+                    : 'توجد وردية مفتوحة للموظف بانتظار إنهاء الانصراف'}
                 </strong>
                 <div style={{ fontSize: '13px', color: '#047857', marginTop: '3px' }}>
-                  تاريخ الوردية: <strong>{(livePunch || unclosedShift)?.date}</strong> | وقت الدخول: <strong>{(livePunch || unclosedShift)?.timeIn}</strong>
+                  {livePunch?.isOvernight && (
+                    <span style={{ background: '#047857', color: '#fff', padding: '1px 7px', borderRadius: '4px', fontSize: '11px', fontWeight: 800, marginLeft: '6px', display: 'inline-block' }}>
+                      🌙 وردية ليلية بدأت أمس
+                    </span>
+                  )}
+                  تاريخ البدء: <strong>{(livePunch || unclosedShift)?.date}</strong> | وقت الدخول: <strong>{(livePunch || unclosedShift)?.timeIn}</strong>
                   {livePunch ? ` | المنقضي حتى الآن: ${activeElapsedHours} ساعة` : ' | الحالة: غير منتهية (قيد العمل)'}
                 </div>
               </div>
@@ -934,8 +957,8 @@ export default function AttendancePunchesModal({
                                 </td>
                                 <td style={{ textAlign: 'center' }}>
                                   {p.isLiveActive ? (
-                                    <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '4px 10px', borderRadius: '12px', fontWeight: '800', fontSize: '11.5px', display: 'inline-block' }}>
-                                      🟢 قيد العمل الآن
+                                    <span style={{ background: p.isOvernight ? '#ecfdf5' : '#dcfce7', color: '#15803d', border: `1px solid ${p.isOvernight ? '#6ee7b7' : '#86efac'}`, padding: '4px 10px', borderRadius: '12px', fontWeight: '800', fontSize: '11.5px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                      {p.isOvernight ? '🟢 🌙 وردية ليلية جارية' : '🟢 قيد العمل الآن'}
                                     </span>
                                   ) : (
                                     <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '4px 10px', borderRadius: '12px', fontWeight: '800', fontSize: '12.5px', display: 'inline-block' }}>
@@ -1204,8 +1227,8 @@ export default function AttendancePunchesModal({
                         {/* Exit Time Pill */}
                         <td style={{ textAlign: 'center' }}>
                           {p.isLiveActive ? (
-                            <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '4px 10px', borderRadius: '12px', fontWeight: '800', fontSize: '11.5px', display: 'inline-block' }}>
-                              🟢 قيد العمل الآن
+                            <span style={{ background: p.isOvernight ? '#ecfdf5' : '#dcfce7', color: '#15803d', border: `1px solid ${p.isOvernight ? '#6ee7b7' : '#86efac'}`, padding: '4px 10px', borderRadius: '12px', fontWeight: '800', fontSize: '11.5px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              {p.isOvernight ? '🟢 🌙 وردية ليلية جارية' : '🟢 قيد العمل الآن'}
                             </span>
                           ) : (
                             <span style={{

@@ -2075,11 +2075,11 @@ export default function BranchManagerView({
             const cIdStr = String(currentBranch?.id || '');
             const totalBranchStaff = branchEmployees.length;
             const activeStaffCount = branchEmployees.filter(emp => {
-              const s = state.activeShifts?.[emp.id];
+              const s = state.activeShifts?.[emp.id] || state.activeShifts?.[String(emp.id)] || (emp.code && state.activeShifts?.[emp.code]);
               return s && !s.isOnBreak && !s.isPaused && (String(s.branchId || emp.branchId) === cIdStr);
             }).length;
             const breakStaffCount = branchEmployees.filter(emp => {
-              const s = state.activeShifts?.[emp.id];
+              const s = state.activeShifts?.[emp.id] || state.activeShifts?.[String(emp.id)] || (emp.code && state.activeShifts?.[emp.code]);
               return s && (s.isOnBreak || s.isPaused) && (String(s.branchId || emp.branchId) === cIdStr);
             }).length;
             const pendingBranchReqsCount = (branchRequests || []).filter(r => !r.branchApproved && r.status !== 'rejected').length;
@@ -2145,12 +2145,19 @@ export default function BranchManagerView({
               <div style={{ display: 'grid', gridTemplateColumns: isMobileScreen ? '1fr' : 'repeat(auto-fill, minmax(260px, 1fr))', gap: isMobileScreen ? '10px' : '14px' }}>
                 {branchEmployees.filter(Boolean).map((emp) => {
                   if (!emp || !emp.id) return null;
-                  const activeShift = state.activeShifts?.[emp.id];
+                  const activeShift = state.activeShifts?.[emp.id] ||
+                    state.activeShifts?.[String(emp.id)] ||
+                    (emp.code && state.activeShifts?.[emp.code]) ||
+                    (emp.code && state.activeShifts?.[String(emp.code)]) ||
+                    Object.values(state.activeShifts || {}).find(s =>
+                      s && (String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code)))
+                    );
                   const cIdStr = String(currentBranch?.id || '');
                   const activeInThisBranch = activeShift && (String(activeShift.branchId || emp.branchId) === cIdStr);
                   const activeInOtherBranch = activeShift && !activeInThisBranch;
 
                   const todayStrVal = getRealTodayStr();
+                  const isNightShift = Boolean(activeShift && activeShift.date && activeShift.date < todayStrVal);
                   const todayShiftsInThisBranch = (state.shifts || []).filter(
                     (s) => s && String(s.employeeId) === String(emp.id) && s.date === todayStrVal && (String(s.branchId || emp.branchId) === cIdStr)
                   );
@@ -2171,20 +2178,20 @@ export default function BranchManagerView({
                   if (activeInThisBranch) {
                     if (activeShift.isOnBreak || activeShift.isPaused) {
                       const breakTime = getActiveBreakStr ? getActiveBreakStr(activeShift) : '';
-                      statusLabel = `⏸️ في استراحة ${breakTime ? `(${breakTime})` : ''}`;
+                      statusLabel = isNightShift ? `⏸️ في استراحة (وردية ليلية 🌙) ${breakTime ? `(${breakTime})` : ''}` : `⏸️ في استراحة ${breakTime ? `(${breakTime})` : ''}`;
                       statusBg = 'rgba(245, 158, 11, 0.1)';
                       statusColor = '#d97706';
                       statusDotClass = 'syncing';
                     } else {
                       const workTime = getActiveElapsedStr ? getActiveElapsedStr(activeShift) : '';
-                      statusLabel = `🟢 على رأس العمل ${workTime ? `(${workTime})` : ''}`;
+                      statusLabel = isNightShift ? `🟢 على رأس العمل (وردية ليلية 🌙 بدأت ${activeShift.timeIn}) ${workTime ? `(${workTime})` : ''}` : `🟢 على رأس العمل ${workTime ? `(${workTime})` : ''}`;
                       statusBg = 'rgba(34, 197, 94, 0.1)';
                       statusColor = '#16a34a';
                       statusDotClass = 'online';
                     }
                   } else if (activeInOtherBranch) {
                     const otherBranch = (state.branches || []).find((b) => b && String(b.id) === String(activeShift.branchId));
-                    statusLabel = `🏢 في وردية بفرع آخر (${otherBranch ? otherBranch.name : 'فرع آخر'})`;
+                    statusLabel = `🏢 في وردية ${isNightShift ? 'ليلية 🌙 ' : ''}بفرع آخر (${otherBranch ? otherBranch.name : 'فرع آخر'})`;
                     statusBg = 'var(--surface-muted)';
                     statusColor = 'var(--muted)';
                   } else if (todayShiftsInThisBranch.length > 0) {
