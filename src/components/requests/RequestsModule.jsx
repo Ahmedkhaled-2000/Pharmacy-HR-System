@@ -54,6 +54,10 @@ export function getFormattedRequestBadge(type, leaveType, targetAction, fullReq 
   );
 
   if (isBranchPunch) {
+    if (reqObj?.isMultiDay || (Array.isArray(reqObj?.dates) && reqObj.dates.length > 1) || (Array.isArray(reqObj?.batchDays) && reqObj.batchDays.length > 1)) {
+      const daysCount = reqObj.daysCount || reqObj.dates?.length || reqObj.batchDays?.length || 0;
+      return <span className="badge" style={{ background: '#0d9488', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🗓️ تعديل بصمات لعدة أيام ({daysCount} أيام)</span>;
+    }
     const punchAction = String(reqObj?.punchType || cleanAction || '').toLowerCase();
     const isCheckIn = punchAction === 'in' || punchAction === 'shift_start' || punchAction === 'دخول' || punchAction === 'حضور' || String(reqObj?.details || '').includes('حضور فقط') || String(reqObj?.typeLabel || '').includes('حضور');
     const isCheckOut = punchAction === 'out' || punchAction === 'shift_end' || punchAction === 'خروج' || punchAction === 'انصراف' || String(reqObj?.details || '').includes('انصراف فقط') || String(reqObj?.typeLabel || '').includes('انصراف');
@@ -138,6 +142,10 @@ export function getFormattedRequestBadge(type, leaveType, targetAction, fullReq 
     return <span className="badge badge-primary">↩️ تراجع عن استقالة</span>;
   }
   if (cleanType === 'punch_correction') {
+    if (reqObj?.isMultiDay || (Array.isArray(reqObj?.dates) && reqObj.dates.length > 1) || (Array.isArray(reqObj?.batchDays) && reqObj.batchDays.length > 1)) {
+      const daysCount = reqObj.daysCount || reqObj.dates?.length || reqObj.batchDays?.length || 0;
+      return <span className="badge" style={{ background: '#0d9488', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🗓️ تعديل بصمات لعدة أيام ({daysCount} أيام)</span>;
+    }
     if (cleanAction === 'shift_start' || cleanAction === 'دخول' || cleanAction === 'حضور') {
       return <span className="badge" style={{ background: '#059669', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🟢 تعديل بصمة دخول</span>;
     }
@@ -953,176 +961,211 @@ export default function RequestsModule({
         });
       }
 
-      // 0.1 Manual Punch / Punch Correction Request Approval
+      // 0.1 Manual Punch / Punch Correction Request Approval (Supports single-day and multi-day batch)
       if (approvedTargetReq.type === 'punch_correction' || approvedTargetReq.type === 'attendance_punch' || approvedTargetReq.type === 'manual_punch') {
         const emp = (state.employees || []).find(e => String(e.id) === String(approvedTargetReq.employeeId));
-        const punchDate = approvedTargetReq.date || approvedTargetReq.punchDate || new Date().toISOString().slice(0, 10);
-        
-        const isCheckInOnly = approvedTargetReq.punchType === 'in' || 
-                              approvedTargetReq.targetAction === 'shift_start' || 
-                              (!approvedTargetReq.timeOut && Boolean(approvedTargetReq.timeIn)) ||
-                              (String(approvedTargetReq.details || '').includes('حضور فقط') && !approvedTargetReq.timeOut);
-        
-        const isCheckOutOnly = approvedTargetReq.punchType === 'out' || approvedTargetReq.targetAction === 'shift_end';
-        const timeIn = approvedTargetReq.timeIn || '09:00';
-        const timeOut = isCheckInOnly ? '' : (approvedTargetReq.timeOut || (isCheckOutOnly ? '17:00' : '17:00'));
         const empBreak = emp?.breakHours || emp?.defaultBreakHours || (emp?.branchesDetails && emp.branchesDetails[0]?.breakHours) || 0;
-        const bH = Math.max(0, parseFloat(approvedTargetReq.breakHours !== undefined && approvedTargetReq.breakHours !== null ? approvedTargetReq.breakHours : empBreak) || 0);
+        const fallbackBreak = Math.max(0, parseFloat(approvedTargetReq.breakHours !== undefined && approvedTargetReq.breakHours !== null ? approvedTargetReq.breakHours : empBreak) || 0);
 
-        let calcGrossHrs = 0;
-        let calcNetTotalHrs = 0;
-        if (!isCheckInOnly && timeIn && timeOut) {
-          const [inH, inM] = timeIn.split(':').map(Number);
-          const [outH, outM] = timeOut.split(':').map(Number);
-          let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
-          if (diff < 0) diff += 24 * 60;
-          calcGrossHrs = Math.round((diff / 60) * 100) / 100;
-          calcNetTotalHrs = Math.max(0, Math.round((calcGrossHrs - bH) * 100) / 100);
-        }
+        const daysToProcess = (Array.isArray(approvedTargetReq.batchDays) && approvedTargetReq.batchDays.length > 0)
+          ? approvedTargetReq.batchDays
+          : (Array.isArray(approvedTargetReq.dates) && approvedTargetReq.dates.length > 1)
+            ? approvedTargetReq.dates.map(d => ({ date: d }))
+            : [{
+                date: approvedTargetReq.date || approvedTargetReq.punchDate || new Date().toISOString().slice(0, 10),
+                timeIn: approvedTargetReq.timeIn,
+                timeOut: approvedTargetReq.timeOut,
+                breakHours: approvedTargetReq.breakHours,
+                shiftId: approvedTargetReq.shiftId,
+                punchType: approvedTargetReq.punchType
+              }];
 
-        const daySched = getEmployeeDaySchedule(approvedTargetReq.employeeId, punchDate, state);
-        const profileHours = parseFloat(emp?.workHoursPerDay || emp?.workHours) || 8;
-        let schedHours = profileHours;
-        if (daySched && daySched.start && daySched.end && daySched.type !== 'off') {
-          const [sH, sM] = daySched.start.split(':').map(Number);
-          const [eH, eM] = daySched.end.split(':').map(Number);
-          let sMins = sH * 60 + (sM || 0);
-          let eMins = eH * 60 + (eM || 0);
-          if (eMins <= sMins) eMins += 24 * 60;
-          schedHours = Math.round(((eMins - sMins) / 60) * 100) / 100;
-        } else if (daySched && daySched.hours && daySched.type !== 'off') {
-          schedHours = parseFloat(daySched.hours) || profileHours;
-        } else if (approvedTargetReq.scheduledHours) {
-          schedHours = parseFloat(approvedTargetReq.scheduledHours);
-        }
+        const processedDates = [];
 
-        const regularHours = isCheckInOnly ? 0 : Math.min(calcNetTotalHrs, schedHours);
-        const overtimeHours = isCheckInOnly ? 0 : Math.max(0, Math.round((calcNetTotalHrs - schedHours) * 100) / 100);
-        const overtimeStatus = overtimeHours > 0 ? 'approved' : 'none';
+        daysToProcess.forEach((dayItem) => {
+          const punchDate = dayItem.date || approvedTargetReq.date || approvedTargetReq.punchDate || new Date().toISOString().slice(0, 10);
+          processedDates.push(punchDate);
+          const itemPunchType = dayItem.punchType || approvedTargetReq.punchType;
+          const isCheckInOnly = itemPunchType === 'in' || 
+                                approvedTargetReq.targetAction === 'shift_start' || 
+                                (!dayItem.timeOut && !approvedTargetReq.timeOut && Boolean(dayItem.timeIn || approvedTargetReq.timeIn)) ||
+                                (String(approvedTargetReq.details || '').includes('حضور فقط') && !(dayItem.timeOut || approvedTargetReq.timeOut));
+          
+          const isCheckOutOnly = itemPunchType === 'out' || approvedTargetReq.targetAction === 'shift_end';
+          const timeIn = dayItem.timeIn || approvedTargetReq.timeIn || '09:00';
+          const timeOut = isCheckInOnly ? '' : (dayItem.timeOut || approvedTargetReq.timeOut || (isCheckOutOnly ? '17:00' : '17:00'));
+          const bH = Math.max(0, parseFloat(dayItem.breakHours !== undefined && dayItem.breakHours !== null ? dayItem.breakHours : fallbackBreak) || 0);
 
-        const existingShiftIndex = updatedShifts.findIndex(s => 
-          (approvedTargetReq.shiftId && s.id === approvedTargetReq.shiftId) ||
-          ((String(s.employeeId) === String(approvedTargetReq.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
-          s.date === punchDate && (!s.timeOut || s.timeOut === '—' || approvedTargetReq.shiftId))
-        );
-
-        if (existingShiftIndex >= 0) {
-          const existingShift = updatedShifts[existingShiftIndex];
-          const hasExistingTimeOut = existingShift.timeOut && existingShift.timeOut !== '—';
-
-          if (isCheckInOnly && !hasExistingTimeOut) {
-            // الموظف حالياً في شيفت ولم ينتهِ: تعديل وقت الدخول فقط دون تسجيل خروج ودون إنهاء الوردية
-            updatedShifts[existingShiftIndex] = {
-              ...existingShift,
-              timeIn,
-              timeOut: '',
-              isManual: true,
-              manualPunch: true,
-              source: 'manual_admin',
-              adminApproved: true,
-              statusLabel: 'وردية نشطة (بصمة حضور معدلة)',
-              note: `بصمة حضور معدلة ومعتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'}) — الوردية مستمرة`,
-              updatedAt: new Date().toISOString()
-            };
-          } else {
-            const effectiveTimeOut = isCheckInOnly ? existingShift.timeOut : timeOut;
-            const effectiveTimeIn = isCheckOutOnly ? (existingShift.timeIn || timeIn) : timeIn;
-
-            let finalGross = calcGrossHrs;
-            let finalNet = calcNetTotalHrs;
-            if (effectiveTimeIn && effectiveTimeOut) {
-              const [inH, inM] = effectiveTimeIn.split(':').map(Number);
-              const [outH, outM] = effectiveTimeOut.split(':').map(Number);
-              let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
-              if (diff < 0) diff += 24 * 60;
-              finalGross = Math.round((diff / 60) * 100) / 100;
-              finalNet = Math.max(0, Math.round((finalGross - bH) * 100) / 100);
-            }
-            const finalReg = Math.min(finalNet, schedHours);
-            const finalOt = Math.max(0, Math.round((finalNet - schedHours) * 100) / 100);
-
-            updatedShifts[existingShiftIndex] = {
-              ...existingShift,
-              timeIn: effectiveTimeIn,
-              timeOut: effectiveTimeOut,
-              breakHours: bH,
-              hours: finalReg,
-              workHours: finalReg,
-              netHours: finalReg,
-              regularHours: finalReg,
-              actualWorkedHours: finalNet,
-              grossHours: finalGross,
-              scheduledHours: schedHours,
-              overtimeHours: finalOt,
-              overtimeStatus: finalOt > 0 ? 'approved' : 'none',
-              isManual: true,
-              manualPunch: true,
-              source: 'manual_admin',
-              adminApproved: true,
-              note: finalOt > 0
-                ? `بصمة معدلة ومعتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${finalReg} س + إضافي معتمد: ${finalOt} س)`
-                : `بصمة معدلة ومعتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
-              updatedAt: new Date().toISOString()
-            };
+          let calcGrossHrs = 0;
+          let calcNetTotalHrs = 0;
+          if (!isCheckInOnly && timeIn && timeOut) {
+            const [inH, inM] = timeIn.split(':').map(Number);
+            const [outH, outM] = timeOut.split(':').map(Number);
+            let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+            if (diff < 0) diff += 24 * 60;
+            calcGrossHrs = Math.round((diff / 60) * 100) / 100;
+            calcNetTotalHrs = Math.max(0, Math.round((calcGrossHrs - bH) * 100) / 100);
           }
-        } else {
-          updatedShifts.unshift({
-            id: `shift_manual_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-            employeeId: approvedTargetReq.employeeId,
-            employeeCode: emp?.code || approvedTargetReq.employeeCode || '',
-            employeeName: emp?.name || approvedTargetReq.employeeName || 'موظف',
-            branchId: approvedTargetReq.branchId || emp?.branchId || '',
-            date: punchDate,
-            timeIn,
-            timeOut: isCheckInOnly ? '' : timeOut,
-            breakHours: bH,
-            hours: regularHours,
-            workHours: regularHours,
-            netHours: regularHours,
-            regularHours: regularHours,
-            actualWorkedHours: calcNetTotalHrs,
-            grossHours: calcGrossHrs,
-            scheduledHours: schedHours,
-            overtimeHours: overtimeHours,
-            overtimeStatus: overtimeStatus,
-            isManual: true,
-            manualPunch: true,
-            source: 'manual_admin',
-            adminApproved: true,
-            statusLabel: isCheckInOnly ? 'وردية نشطة (بصمة حضور معدلة)' : 'بصمة يدوية معتمدة',
-            note: overtimeHours > 0
-              ? `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)`
-              : `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
-            createdAt: new Date().toISOString()
-          });
-        }
 
-        // تحديث أو إنهاء الشفت في activeShifts
-        if (isCheckInOnly) {
-          // الموظف حالياً في شيفت: نعدل توقيت الدخول في الشفت النشط دون حذفه لتبقى الوردية جارية
-          if (updatedActiveShifts) {
-            const empIdStr = String(approvedTargetReq.employeeId);
-            const empCodeStr = emp?.code ? String(emp.code) : '';
-            const activeKey = updatedActiveShifts[empIdStr] 
-              ? empIdStr 
-              : (empCodeStr && updatedActiveShifts[empCodeStr] ? empCodeStr : empIdStr);
-            if (updatedActiveShifts[activeKey]) {
-              updatedActiveShifts[activeKey] = {
-                ...updatedActiveShifts[activeKey],
-                timeIn: timeIn,
-                startTime: `${punchDate}T${timeIn}:00`,
-                date: punchDate,
-                isModified: true
+          const daySched = getEmployeeDaySchedule(approvedTargetReq.employeeId, punchDate, state);
+          const profileHours = parseFloat(emp?.workHoursPerDay || emp?.workHours) || 8;
+          let schedHours = profileHours;
+          if (daySched && daySched.start && daySched.end && daySched.type !== 'off') {
+            const [sH, sM] = daySched.start.split(':').map(Number);
+            const [eH, eM] = daySched.end.split(':').map(Number);
+            let sMins = sH * 60 + (sM || 0);
+            let eMins = eH * 60 + (eM || 0);
+            if (eMins <= sMins) eMins += 24 * 60;
+            schedHours = Math.round(((eMins - sMins) / 60) * 100) / 100;
+          } else if (daySched && daySched.hours && daySched.type !== 'off') {
+            schedHours = parseFloat(daySched.hours) || profileHours;
+          } else if (dayItem.scheduledHours || approvedTargetReq.scheduledHours) {
+            schedHours = parseFloat(dayItem.scheduledHours || approvedTargetReq.scheduledHours);
+          }
+
+          const regularHours = isCheckInOnly ? 0 : Math.min(calcNetTotalHrs, schedHours);
+          const overtimeHours = isCheckInOnly ? 0 : Math.max(0, Math.round((calcNetTotalHrs - schedHours) * 100) / 100);
+          const overtimeStatus = overtimeHours > 0 ? 'approved' : 'none';
+
+          const targetShiftId = dayItem.shiftId || (daysToProcess.length === 1 ? approvedTargetReq.shiftId : null);
+          const existingShiftIndex = updatedShifts.findIndex(s => 
+            (targetShiftId && s.id === targetShiftId) ||
+            ((String(s.employeeId) === String(approvedTargetReq.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
+            s.date === punchDate && (!s.timeOut || s.timeOut === '—' || targetShiftId))
+          );
+
+          if (existingShiftIndex >= 0) {
+            const existingShift = updatedShifts[existingShiftIndex];
+            const hasExistingTimeOut = existingShift.timeOut && existingShift.timeOut !== '—';
+
+            if (isCheckInOnly && !hasExistingTimeOut) {
+              // الموظف حالياً في شيفت ولم ينتهِ: تعديل وقت الدخول فقط دون تسجيل خروج ودون إنهاء الوردية
+              updatedShifts[existingShiftIndex] = {
+                ...existingShift,
+                timeIn,
+                timeOut: '',
+                isManual: true,
+                manualPunch: true,
+                source: 'manual_admin',
+                adminApproved: true,
+                statusLabel: 'وردية نشطة (بصمة حضور معدلة)',
+                note: `بصمة حضور معدلة ومعتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'}) — الوردية مستمرة`,
+                updatedAt: new Date().toISOString()
+              };
+            } else {
+              const effectiveTimeOut = isCheckInOnly ? existingShift.timeOut : timeOut;
+              const effectiveTimeIn = isCheckOutOnly ? (existingShift.timeIn || timeIn) : timeIn;
+
+              let finalGross = calcGrossHrs;
+              let finalNet = calcNetTotalHrs;
+              if (effectiveTimeIn && effectiveTimeOut) {
+                const [inH, inM] = effectiveTimeIn.split(':').map(Number);
+                const [outH, outM] = effectiveTimeOut.split(':').map(Number);
+                let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+                if (diff < 0) diff += 24 * 60;
+                finalGross = Math.round((diff / 60) * 100) / 100;
+                finalNet = Math.max(0, Math.round((finalGross - bH) * 100) / 100);
+              }
+              const finalReg = Math.min(finalNet, schedHours);
+              const finalOt = Math.max(0, Math.round((finalNet - schedHours) * 100) / 100);
+
+              updatedShifts[existingShiftIndex] = {
+                ...existingShift,
+                timeIn: effectiveTimeIn,
+                timeOut: effectiveTimeOut,
+                breakHours: bH,
+                hours: finalReg,
+                workHours: finalReg,
+                netHours: finalReg,
+                regularHours: finalReg,
+                actualWorkedHours: finalNet,
+                grossHours: finalGross,
+                scheduledHours: schedHours,
+                overtimeHours: finalOt,
+                overtimeStatus: finalOt > 0 ? 'approved' : 'none',
+                isManual: true,
+                manualPunch: true,
+                source: 'manual_admin',
+                adminApproved: true,
+                note: finalOt > 0
+                  ? `بصمة معدلة ومعتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${finalReg} س + إضافي معتمد: ${finalOt} س)`
+                  : `بصمة معدلة ومعتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
+                updatedAt: new Date().toISOString()
               };
             }
+          } else {
+            updatedShifts.unshift({
+              id: `shift_manual_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+              employeeId: approvedTargetReq.employeeId,
+              employeeCode: emp?.code || approvedTargetReq.employeeCode || '',
+              employeeName: emp?.name || approvedTargetReq.employeeName || 'موظف',
+              branchId: approvedTargetReq.branchId || emp?.branchId || '',
+              date: punchDate,
+              timeIn,
+              timeOut: isCheckInOnly ? '' : timeOut,
+              breakHours: bH,
+              hours: regularHours,
+              workHours: regularHours,
+              netHours: regularHours,
+              regularHours: regularHours,
+              actualWorkedHours: calcNetTotalHrs,
+              grossHours: calcGrossHrs,
+              scheduledHours: schedHours,
+              overtimeHours: overtimeHours,
+              overtimeStatus: overtimeStatus,
+              isManual: true,
+              manualPunch: true,
+              source: 'manual_admin',
+              adminApproved: true,
+              statusLabel: isCheckInOnly ? 'وردية نشطة (بصمة حضور معدلة)' : 'بصمة يدوية معتمدة',
+              note: overtimeHours > 0
+                ? `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)`
+                : `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            });
           }
-        } else if (timeOut && approvedTargetReq.employeeId && updatedActiveShifts) {
-          delete updatedActiveShifts[approvedTargetReq.employeeId];
-          delete updatedActiveShifts[String(approvedTargetReq.employeeId)];
-          if (emp?.code) {
-            delete updatedActiveShifts[emp.code];
-            delete updatedActiveShifts[String(emp.code)];
+
+          // تحديث أو إنهاء الشفت في activeShifts
+          if (isCheckInOnly) {
+            if (updatedActiveShifts) {
+              const empIdStr = String(approvedTargetReq.employeeId);
+              const empCodeStr = emp?.code ? String(emp.code) : '';
+              const activeKey = updatedActiveShifts[empIdStr] 
+                ? empIdStr 
+                : (empCodeStr && updatedActiveShifts[empCodeStr] ? empCodeStr : empIdStr);
+              if (updatedActiveShifts[activeKey]) {
+                updatedActiveShifts[activeKey] = {
+                  ...updatedActiveShifts[activeKey],
+                  timeIn: timeIn,
+                  startTime: `${punchDate}T${timeIn}:00`,
+                  date: punchDate,
+                  isModified: true
+                };
+              }
+            }
+          } else if (timeOut && approvedTargetReq.employeeId && updatedActiveShifts) {
+            delete updatedActiveShifts[approvedTargetReq.employeeId];
+            delete updatedActiveShifts[String(approvedTargetReq.employeeId)];
+            if (emp?.code) {
+              delete updatedActiveShifts[emp.code];
+              delete updatedActiveShifts[String(emp.code)];
+            }
           }
+        });
+
+        // Cancel any late penalties on these approved dates for this employee
+        if (processedDates.length > 0) {
+          updatedRequests = updatedRequests.map((r) => {
+            if (
+              String(r.employeeId) === String(approvedTargetReq.employeeId) &&
+              processedDates.includes(r.date) &&
+              (r.subType === 'lateness' || r.type === 'late_penalty' || String(r.id).startsWith('req_late_inc_'))
+            ) {
+              return { ...r, status: 'cancelled', note: 'ملغي لاعتماد تعديل البصمة' };
+            }
+            return r;
+          });
         }
       }
 
@@ -3358,12 +3401,22 @@ export default function RequestsModule({
                       />
                     </td>
                     <td style={{ whiteSpace: 'nowrap' }}>
-                      <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '3px', background: 'var(--surface-muted)', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                        <span style={{ fontWeight: '900', color: 'var(--primary-dark)', fontSize: '13px' }}>
-                          📅 {formatDateStr(getRequestDate(req))}
+                      <div style={{
+                        display: 'inline-flex',
+                        flexDirection: 'column',
+                        gap: '3px',
+                        background: req.isMultiDay ? 'rgba(13,148,136,0.08)' : 'var(--surface-muted)',
+                        padding: '6px 10px',
+                        borderRadius: '8px',
+                        border: req.isMultiDay ? '1.5px solid #2dd4bf' : '1px solid var(--border)'
+                      }}>
+                        <span style={{ fontWeight: '900', color: req.isMultiDay ? '#0f766e' : 'var(--primary-dark)', fontSize: '13px' }}>
+                          📅 {req.isMultiDay
+                            ? `${req.startDate || req.dates?.[0] || ''} ➔ ${req.endDate || req.dates?.[req.dates.length - 1] || ''}`
+                            : formatDateStr(getRequestDate(req))}
                         </span>
-                        <span style={{ fontWeight: '800', color: 'var(--primary)', fontSize: '12px' }}>
-                          ⏰ {getRequestTime(req)}
+                        <span style={{ fontWeight: '800', color: req.isMultiDay ? '#0d9488' : 'var(--primary)', fontSize: '12px' }}>
+                          {req.isMultiDay ? `🗓️ دفعة (${req.daysCount || req.dates?.length || req.batchDays?.length || 0} أيام)` : `⏰ ${getRequestTime(req)}`}
                         </span>
                       </div>
                     </td>
@@ -4124,45 +4177,142 @@ export default function RequestsModule({
 
                 {/* ── PUNCH CORRECTION / MANUAL PUNCH DETAILS ── */}
                 {isPunch && (
-                  <div style={{ background: 'var(--surface-muted)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
-                    <h4 style={{ margin: '0 0 10px', color: 'var(--success)', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      🖐️ تفاصيل تسجيل / تعديل البصمة اليدوية:
-                    </h4>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-                      <div>
-                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>نوع البصمة:</span>
-                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
-                          {previewModalReq.punchType === 'full' ? 'حضور وانصراف (وردية كاملة)' : previewModalReq.punchType === 'in' ? 'تسجيل حضور فقط' : previewModalReq.punchType === 'out' ? 'تسجيل انصراف فقط' : 'تعديل توقيت بصمة'}
-                        </div>
+                  previewModalReq.isMultiDay || (Array.isArray(previewModalReq.batchDays) && previewModalReq.batchDays.length > 0) || (Array.isArray(previewModalReq.dates) && previewModalReq.dates.length > 1) ? (
+                    <div style={{ background: '#f0fdfa', padding: '18px', borderRadius: '14px', border: '1.5px solid #2dd4bf', boxShadow: '0 4px 14px rgba(13, 148, 136, 0.08)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                        <h4 style={{ margin: 0, color: '#0f766e', fontSize: '15px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          🗓️ تفاصيل طلب تعديل البصمات لعدة أيام ({previewModalReq.daysCount || previewModalReq.batchDays?.length || previewModalReq.dates?.length} أيام):
+                        </h4>
+                        <span style={{ background: '#ccfbf1', color: '#0f766e', border: '1px solid #99f6e4', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 800 }}>
+                          دفعة متعددة الأيام
+                        </span>
                       </div>
-                      <div>
-                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>تاريخ البصمة:</span>
-                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
-                          📅 {previewModalReq.date || '—'} {previewModalReq.date && `(${arabicWeekday(previewModalReq.date)})`}
+
+                      {/* KPI Summary Cards */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+                        <div style={{ background: '#ffffff', padding: '10px', borderRadius: '10px', border: '1px solid #ccfbf1', textAlign: 'center' }}>
+                          <span style={{ fontSize: '11.5px', color: '#64748b', display: 'block' }}>إجمالي الأيام</span>
+                          <strong style={{ fontSize: '17px', color: '#0f766e' }}>{previewModalReq.daysCount || previewModalReq.batchDays?.length || previewModalReq.dates?.length} أيام</strong>
                         </div>
-                      </div>
-                      <div>
-                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>وقت الحضور والانصراف:</span>
-                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
-                          من <strong>{previewModalReq.timeIn || '—'}</strong> إلى <strong>{previewModalReq.timeOut || '—'}</strong>
+                        <div style={{ background: '#ffffff', padding: '10px', borderRadius: '10px', border: '1px solid #ccfbf1', textAlign: 'center' }}>
+                          <span style={{ fontSize: '11.5px', color: '#64748b', display: 'block' }}>الفترة الزمنية</span>
+                          <strong style={{ fontSize: '12.5px', color: '#0f172a', direction: 'ltr', display: 'inline-block' }}>
+                            {previewModalReq.startDate || previewModalReq.dates?.[0]} ➔ {previewModalReq.endDate || previewModalReq.dates?.[previewModalReq.dates?.length - 1]}
+                          </strong>
                         </div>
-                      </div>
-                      <div>
-                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>ساعات البريك المخصومة:</span>
-                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
-                          ☕ {previewModalReq.breakHours !== undefined ? previewModalReq.breakHours : 0} ساعة
+                        <div style={{ background: '#ffffff', padding: '10px', borderRadius: '10px', border: '1px solid #ccfbf1', textAlign: 'center' }}>
+                          <span style={{ fontSize: '11.5px', color: '#64748b', display: 'block' }}>إجمالي الساعات</span>
+                          <strong style={{ fontSize: '17px', color: '#16a34a' }}>⏱️ {previewModalReq.hours || previewModalReq.regularHours || '—'} س</strong>
                         </div>
+                        {parseFloat(previewModalReq.overtimeHours) > 0 && (
+                          <div style={{ background: '#fef3c7', padding: '10px', borderRadius: '10px', border: '1px solid #fde68a', textAlign: 'center' }}>
+                            <span style={{ fontSize: '11.5px', color: '#92400e', display: 'block' }}>إضافي معتمد</span>
+                            <strong style={{ fontSize: '17px', color: '#b45309' }}>⭐ +{previewModalReq.overtimeHours} س</strong>
+                          </div>
+                        )}
                       </div>
-                      {previewModalReq.hours && (
-                        <div style={{ background: 'var(--success-tint)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--success)' }}>
-                          <span style={{ fontSize: '12px', color: 'var(--success)', fontWeight: 'bold' }}>صافي ساعات العمل المحسوبة:</span>
-                          <div style={{ fontWeight: '900', color: 'var(--success)', fontSize: '16px' }}>
-                            ⏱️ {previewModalReq.hours} ساعة
+
+                      {/* Multi-Day Table */}
+                      <div className="table-responsive" style={{ maxHeight: '280px', overflowY: 'auto', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#ffffff' }}>
+                        <table className="bylaws-table" style={{ width: '100%', fontSize: '12.5px', margin: 0 }}>
+                          <thead>
+                            <tr style={{ background: '#f0fdf4', color: '#166534', position: 'sticky', top: 0, zIndex: 1 }}>
+                              <th style={{ width: '35px', textAlign: 'center' }}>#</th>
+                              <th>التاريخ</th>
+                              <th>اليوم</th>
+                              <th style={{ textAlign: 'center' }}>وقت الحضور</th>
+                              <th style={{ textAlign: 'center' }}>وقت الانصراف</th>
+                              <th style={{ textAlign: 'center' }}>البريك</th>
+                              <th style={{ textAlign: 'center' }}>صافي الساعات</th>
+                              <th style={{ textAlign: 'center' }}>الإضافي</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(previewModalReq.batchDays || (previewModalReq.dates || []).map(d => ({ date: d, timeIn: previewModalReq.timeIn, timeOut: previewModalReq.timeOut, breakHours: previewModalReq.breakHours }))).map((dItem, idx) => {
+                              const dDate = dItem.date || dItem;
+                              const dTimeIn = dItem.timeIn || previewModalReq.timeIn || '—';
+                              const dTimeOut = dItem.timeOut || previewModalReq.timeOut || '—';
+                              const dBreak = dItem.breakHours !== undefined ? dItem.breakHours : (previewModalReq.breakHours || 0);
+                              const dHours = dItem.netHours !== undefined ? dItem.netHours : (dItem.hours || '—');
+                              const dOt = dItem.overtimeHours || 0;
+                              return (
+                                <tr key={dDate || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                  <td style={{ textAlign: 'center', color: '#64748b', fontWeight: 'bold' }}>{idx + 1}</td>
+                                  <td style={{ fontWeight: 700 }}>{dDate}</td>
+                                  <td>{arabicWeekday(dDate)}</td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <span style={{ background: '#dcfce7', color: '#15803d', padding: '2px 8px', borderRadius: '6px', fontWeight: 700 }}>
+                                      {dTimeIn}
+                                    </span>
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '2px 8px', borderRadius: '6px', fontWeight: 700 }}>
+                                      {dTimeOut}
+                                    </span>
+                                  </td>
+                                  <td style={{ textAlign: 'center', color: '#b45309' }}>
+                                    {parseFloat(dBreak) > 0 ? `${dBreak} س` : '—'}
+                                  </td>
+                                  <td style={{ textAlign: 'center', fontWeight: 800, color: '#0d9488' }}>
+                                    {dHours !== '—' ? `${dHours} س` : '—'}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {parseFloat(dOt) > 0 ? (
+                                      <span style={{ background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, fontSize: '11px' }}>
+                                        +{dOt} س
+                                      </span>
+                                    ) : (
+                                      <span style={{ color: '#94a3b8' }}>—</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ background: 'var(--surface-muted)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                      <h4 style={{ margin: '0 0 10px', color: 'var(--success)', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        🖐️ تفاصيل تسجيل / تعديل البصمة اليدوية:
+                      </h4>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                        <div>
+                          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>نوع البصمة:</span>
+                          <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
+                            {previewModalReq.punchType === 'full' ? 'حضور وانصراف (وردية كاملة)' : previewModalReq.punchType === 'in' ? 'تسجيل حضور فقط' : previewModalReq.punchType === 'out' ? 'تسجيل انصراف فقط' : 'تعديل توقيت بصمة'}
                           </div>
                         </div>
-                      )}
+                        <div>
+                          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>تاريخ البصمة:</span>
+                          <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
+                            📅 {previewModalReq.date || '—'} {previewModalReq.date && `(${arabicWeekday(previewModalReq.date)})`}
+                          </div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>وقت الحضور والانصراف:</span>
+                          <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
+                            من <strong>{previewModalReq.timeIn || '—'}</strong> إلى <strong>{previewModalReq.timeOut || '—'}</strong>
+                          </div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>ساعات البريك المخصومة:</span>
+                          <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
+                            ☕ {previewModalReq.breakHours !== undefined ? previewModalReq.breakHours : 0} ساعة
+                          </div>
+                        </div>
+                        {previewModalReq.hours && (
+                          <div style={{ background: 'var(--success-tint)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--success)' }}>
+                            <span style={{ fontSize: '12px', color: 'var(--success)', fontWeight: 'bold' }}>صافي ساعات العمل المحسوبة:</span>
+                            <div style={{ fontWeight: '900', color: 'var(--success)', fontSize: '16px' }}>
+                              ⏱️ {previewModalReq.hours} ساعة
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )
                 )}
 
                 {/* ── BIOMETRIC VERIFICATION / PHOTO PUNCH DETAILS ── */}

@@ -944,8 +944,18 @@ export function useAttendanceEngine() {
     if (active.isPaused && active.pauseStartEpoch) {
       currentPauseMs += (nowMs - active.pauseStartEpoch);
     }
-    const totalElapsedMs = nowMs - (active.startEpoch || (nowMs - 60000));
-    const totalElapsedHours = Math.round((totalElapsedMs / 3600000) * 100) / 100;
+    let totalElapsedHours = 0;
+    if (active.startEpoch && nowMs >= active.startEpoch) {
+      totalElapsedHours = Math.round(((nowMs - active.startEpoch) / 3600000) * 100) / 100;
+    } else {
+      const [inH, inM] = String(active.timeIn || '09:00').split(':').map(Number);
+      const [outH, outM] = String(timeOut).split(':').map(Number);
+      let diffMinutes = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+      if (diffMinutes <= 0 || (active.date && active.date !== getRealTodayStr())) {
+        diffMinutes += 24 * 60;
+      }
+      totalElapsedHours = Math.round((diffMinutes / 60) * 100) / 100;
+    }
     const trackedBreak = Math.round((currentPauseMs / 3600000) * 100) / 100;
     const configuredBreak = parseFloat(emp?.breakHours || emp?.defaultBreakHours || emp?.branchesDetails?.[0]?.breakHours) || 0;
     const effectiveBreak = trackedBreak > 0 ? trackedBreak : (totalElapsedHours > configuredBreak ? configuredBreak : 0);

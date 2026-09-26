@@ -899,14 +899,14 @@ export default function ElectronicKioskView({
 
       // حساب ساعات العمل والبريك والإضافي بدقة (مع دعم الورديات العابرة لمنتصف الليل واليوم التالي)
       let totalElapsedHours = 0;
-      const startMs = active?.startEpoch || (openShiftIdx >= 0 && updatedShifts[openShiftIdx].startEpoch) || (effectiveShiftDate && effectiveTimeIn ? new Date(`${effectiveShiftDate}T${effectiveTimeIn.slice(0, 5)}:00`).getTime() : 0);
+      const startMs = active?.startEpoch || (openShiftIdx >= 0 && updatedShifts[openShiftIdx].startEpoch);
       if (startMs && now.getTime() >= startMs) {
         totalElapsedHours = Math.round(((now.getTime() - startMs) / 3600000) * 100) / 100;
       } else {
-        const [inH, inM] = effectiveTimeIn.split(':').map(Number);
-        const [outH, outM] = punchTime.split(':').map(Number);
+        const [inH, inM] = String(effectiveTimeIn || '09:00').split(':').map(Number);
+        const [outH, outM] = String(punchTime).split(':').map(Number);
         let diffMinutes = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
-        if (diffMinutes < 0) diffMinutes += 24 * 60;
+        if (diffMinutes <= 0 || (effectiveShiftDate && effectiveShiftDate !== dateStr)) diffMinutes += 24 * 60;
         totalElapsedHours = Math.round((diffMinutes / 60) * 100) / 100;
       }
 

@@ -1336,50 +1336,74 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
         if (targetIdx >= 0) {
           const prevRec = currentShifts[targetIdx];
           const shiftDate = prevRec.date || punchDate;
-          const timeInStr = prevRec.timeIn || '09:00';
+          const timeInStr = prevRec.timeIn || p.shiftRecord?.timeIn || '09:00';
           let totalElapsedHrs = 0;
           let workedHrs = 0;
 
           try {
-            const startMs = prevRec.startEpoch || (shiftDate && timeInStr ? new Date(`${shiftDate}T${timeInStr.slice(0, 5)}:00`).getTime() : 0);
-            const punchEpoch = p.calculatedTrueEpoch || p.deviceLocalEpoch || (punchDate && punchTime ? new Date(`${punchDate}T${punchTime.slice(0, 5)}:00`).getTime() : Date.now());
-
-            if (startMs && punchEpoch && punchEpoch > startMs) {
-              totalElapsedHrs = parseFloat(((punchEpoch - startMs) / 3600000).toFixed(2));
-            } else {
-              const [inH, inM] = timeInStr.split(':').map(Number);
-              const [outH, outM] = punchTime.split(':').map(Number);
-              let diffMins = (outH * 60 + outM) - (inH * 60 + inM);
-              if (diffMins < 0 || shiftDate !== punchDate) diffMins += 24 * 60;
+            // حساب الفارق الزمني اعتماداً على التوقيت المحلي بدقة بالغة مع دعم الورديات الليلية العابرة لمنتصف الليل
+            const [inH, inM] = String(timeInStr).split(':').map(Number);
+            const [outH, outM] = String(punchTime).split(':').map(Number);
+            if (!isNaN(inH) && !isNaN(outH)) {
+              let diffMins = (outH * 60 + (outM || 0)) - (inH * 60 + (inM || 0));
+              // إذا كان وقت الانصراف أقل من أو يساوي وقت الحضور أو تغير التاريخ -> الوردية عابرة لمنتصف الليل
+              if (diffMins <= 0 || (shiftDate && punchDate && shiftDate !== punchDate)) {
+                diffMins += 24 * 60;
+              }
               totalElapsedHrs = parseFloat((diffMins / 60).toFixed(2));
             }
           } catch {}
 
-          const effectiveBreak = parseFloat(prevRec.breakHours || activeBreakHours || p.breakHours || 0);
+          const effectiveBreak = parseFloat(
+            p.shiftRecord?.breakHours !== undefined
+              ? p.shiftRecord.breakHours
+              : (prevRec.breakHours || activeBreakHours || p.breakHours || 0)
+          );
           workedHrs = Math.max(0, parseFloat((totalElapsedHrs - effectiveBreak).toFixed(2)));
-          const schedHours = parseFloat(prevRec.scheduledHours || empObj?.workHoursPerDay || 8);
-          const regularHours = Math.min(workedHrs, schedHours);
-          const overtimeHours = Math.max(0, parseFloat((workedHrs - schedHours).toFixed(2)));
+          const schedHours = parseFloat(
+            p.shiftRecord?.scheduledHours !== undefined
+              ? p.shiftRecord.scheduledHours
+              : (prevRec.scheduledHours || empObj?.workHoursPerDay || 8)
+          );
+          const calculatedRegularHours = Math.min(workedHrs, schedHours);
+          const calculatedOvertimeHours = Math.max(0, parseFloat((workedHrs - schedHours).toFixed(2)));
+
+          // نعتمد بيانات shiftRecord المحسوبة بدقة من الكشك إذا كانت متوفرة وصحيحة، مع ضمان عدم احتساب ساعات خاطئة
+          const finalActualWorked = (p.shiftRecord && p.shiftRecord.actualWorkedHours !== undefined && parseFloat(p.shiftRecord.actualWorkedHours) > 0)
+            ? parseFloat(p.shiftRecord.actualWorkedHours)
+            : workedHrs;
+          const finalHours = (p.shiftRecord && p.shiftRecord.hours !== undefined && parseFloat(p.shiftRecord.hours) > 0)
+            ? parseFloat(p.shiftRecord.hours)
+            : workedHrs;
+          const finalRegularHours = (p.shiftRecord && p.shiftRecord.regularHours !== undefined && parseFloat(p.shiftRecord.regularHours) > 0)
+            ? parseFloat(p.shiftRecord.regularHours)
+            : calculatedRegularHours;
+          const finalOvertimeHours = (p.shiftRecord && p.shiftRecord.overtimeHours !== undefined)
+            ? parseFloat(p.shiftRecord.overtimeHours)
+            : calculatedOvertimeHours;
+          const finalOvertimeStatus = p.shiftRecord?.overtimeStatus || (finalOvertimeHours > 0 ? 'pending' : 'none');
 
           currentShifts[targetIdx] = {
             ...prevRec,
             ...(p.shiftRecord ? p.shiftRecord : {}),
             id: prevRec.id || shiftId,
             timeOut: punchTime,
-            hours: workedHrs,
-            actualWorkedHours: workedHrs,
+            hours: finalHours,
+            actualWorkedHours: finalActualWorked,
             breakHours: effectiveBreak,
             scheduledHours: schedHours,
-            regularHours: regularHours,
-            overtimeHours: overtimeHours,
-            overtimeStatus: overtimeHours > 0 ? 'pending' : 'none',
+            regularHours: finalRegularHours,
+            overtimeHours: finalOvertimeHours,
+            overtimeStatus: finalOvertimeStatus,
             isLiveActive: false,
             isPaused: false,
             isOnBreak: false,
             status: 'completed',
             isOfflineSynced: true,
             syncedAt: now,
-            note: `${prevRec.note || p.shiftRecord?.note || ''} · انصراف مسجل ${punchTime}${effectiveBreak > 0 ? ` (بريك: ${effectiveBreak} س)` : ''}`.trim(),
+            note: (p.shiftRecord?.note && p.shiftRecord.note.includes(punchTime))
+              ? p.shiftRecord.note
+              : `${prevRec.note || p.shiftRecord?.note || ''} · انصراف مسجل ${punchTime}${effectiveBreak > 0 ? ` (بريك: ${effectiveBreak} س)` : ''}`.trim(),
             updatedAt: now
           };
         } else if (!alreadyProcessed) {

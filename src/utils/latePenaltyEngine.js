@@ -224,6 +224,8 @@ export function isApprovedPermissionForDate(employeeId, dateStr, state) {
   if (!employeeId || !dateStr || !state) return null;
   const empIdStr = String(employeeId);
   const targetDate = String(dateStr).slice(0, 10);
+  const emp = (state.employees || []).find((e) => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
+  const empCodeStr = emp?.code ? String(emp.code) : '';
 
   const allReqs = [
     ...(state.requests || []),
@@ -234,7 +236,7 @@ export function isApprovedPermissionForDate(employeeId, dateStr, state) {
   return allReqs.find((r) => {
     if (!r) return false;
     const rEmpId = String(r.employeeId || r.empId || '');
-    if (rEmpId !== empIdStr) return false;
+    if (rEmpId !== empIdStr && (!empCodeStr || rEmpId !== empCodeStr)) return false;
 
     // فحص التاريخ بمرونة
     const rDate = String(r.date || r.startDate || r.effectiveDate || r.reqDate || (r.createdAt ? r.createdAt.slice(0, 10) : '')).slice(0, 10);
@@ -534,8 +536,10 @@ export function recalculateEmployeeCycleLateness({
   if (!employeeId || !state) return { incidents: [], updatedRequests: state.requests || [] };
 
   const empIdStr = String(employeeId);
-  const emp = (state.employees || []).find((e) => e && String(e.id) === empIdStr);
+  const emp = (state.employees || []).find((e) => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
   if (!emp) return { incidents: [], updatedRequests: state.requests || [] };
+
+  const empCodeStr = emp?.code ? String(emp.code) : '';
 
   // لا يتم تطبيق لائحة التأخيرات على الموظف الذي ليس له جدول شهري
   if (emp.noMonthlySchedule) return { incidents: [], updatedRequests: state.requests || [] };
@@ -545,7 +549,7 @@ export function recalculateEmployeeCycleLateness({
 
   // 1. جلب جميع الورديات المسجلة للموظف في الدورة مرتبة تصاعدياً
   const empShifts = (state.shifts || [])
-    .filter((s) => String(s.employeeId) === empIdStr && (!cycleFilterFn || cycleFilterFn(s.date)))
+    .filter((s) => (String(s.employeeId) === empIdStr || (empCodeStr && (String(s.employeeCode) === empCodeStr || String(s.employeeId) === empCodeStr))) && (!cycleFilterFn || cycleFilterFn(s.date)))
     .sort((a, b) => (a.date === b.date ? (a.timeIn || '').localeCompare(b.timeIn || '') : a.date.localeCompare(b.date)));
 
   // عدادات تكرار مستقلة تبدأ من صفر لكل فئة
@@ -563,7 +567,7 @@ export function recalculateEmployeeCycleLateness({
   // جلب كافة طلبات الأذونات المعتمدة للموظف (إذن تأخير / إذن خروج مبكر / إذن عام)
   const approvedPermissions = (state.requests || []).filter(
     (r) =>
-      String(r.employeeId) === empIdStr &&
+      (String(r.employeeId) === empIdStr || (empCodeStr && (String(r.employeeCode) === empCodeStr || String(r.employeeId) === empCodeStr))) &&
       (r.type === 'permission' || r.type === 'إذن' || r.type === 'late_permission' || r.type === 'early_leave') &&
       (r.status === 'approved' || r.adminApproved === true || (r.branchApproved && r.status !== 'rejected' && !r.isRejected)) &&
       r.status !== 'rejected' &&
@@ -597,7 +601,7 @@ export function recalculateEmployeeCycleLateness({
     // فحص ما إذا كان هناك تظلم معتمد أو إلغاء رسمي للواقعة
     const approvedObjReq = (state.requests || []).find(
       (r) =>
-        String(r.employeeId) === empIdStr &&
+        (String(r.employeeId) === empIdStr || (empCodeStr && (String(r.employeeCode) === empCodeStr || String(r.employeeId) === empCodeStr))) &&
         (r.type === 'penalty_objection' || r.type === 'objection' || r.type === 'penalty') &&
         (r.status === 'approved' || r.adminApproved || r.objection?.status === 'approved') &&
         (r.penaltyId === incId || r.id === `obj_inc_${incId}` || r.id === `req_${incId}` || (r.date === shift.date && (r.subType === 'lateness' || r.type === 'penalty')))
@@ -617,7 +621,7 @@ export function recalculateEmployeeCycleLateness({
        prevInc?.status === 'objection_pending' ||
        (state.requests || []).some(
          (r) =>
-           String(r.employeeId) === empIdStr &&
+           (String(r.employeeId) === empIdStr || (empCodeStr && (String(r.employeeCode) === empCodeStr || String(r.employeeId) === empCodeStr))) &&
            (r.type === 'penalty_objection' || r.type === 'objection') &&
            r.status === 'pending' &&
            (r.penaltyId === incId || r.id === `obj_inc_${incId}` || (r.date === shift.date && r.subType === 'lateness'))
@@ -638,7 +642,7 @@ export function recalculateEmployeeCycleLateness({
     // فحص ما إذا كان هناك طلب تعديل شيفت معتمد لهذا الموظف وهذا التاريخ
     const approvedShiftAdj = (state.requests || []).find(
       (r) =>
-        (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
+        (String(r.employeeId) === empIdStr || (empCodeStr && (String(r.employeeCode) === empCodeStr || String(r.employeeId) === empCodeStr))) &&
         r.type === 'shift_adjustment' &&
         (r.status === 'approved' || r.adminApproved) &&
         (r.date === shift.date || (Array.isArray(r.dates) && r.dates.includes(shift.date)) || (r.schedule && r.schedule[shift.date]))
@@ -746,7 +750,7 @@ export function recalculateEmployeeCycleLateness({
   // 2. تحديث الطلبات والتسويات (Requests) لتعكس الجزاءات المحدثة
   const existingReqs = state.requests || [];
   const otherReqs = existingReqs.filter(
-    (r) => !(String(r.employeeId) === empIdStr && (r.subType === 'lateness' || r.type === 'late_penalty') && (!cycleFilterFn || cycleFilterFn(r.date)))
+    (r) => !((String(r.employeeId) === empIdStr || (empCodeStr && (String(r.employeeCode) === empCodeStr || String(r.employeeId) === empCodeStr))) && (r.subType === 'lateness' || r.type === 'late_penalty') && (!cycleFilterFn || cycleFilterFn(r.date)))
   );
 
   const newLateRequests = newIncidents
@@ -915,7 +919,11 @@ export function getEffectiveShiftHours(shift, state) {
   // إذا كانت الوردية تحتوي على وقت إضافي، نعتمد الساعات الأساسية المقررة (regularHours)
   // لكي لا يتم صرف الإضافي تلقائياً قبل اعتماد الإدارة، وتجنباً للازدواج المالي عند صرفه في بند الوقت الإضافي
   // باستثناء موظف الساعات المتغيرة حيث تحسب ساعاته الفعلية كاملة بدون تقسيم إضافي
-  if (!emp?.noMonthlySchedule && (parseFloat(shift.overtimeHours) > 0 || shift.overtimeStatus) && shift.regularHours !== undefined) {
+  if (
+    !emp?.noMonthlySchedule &&
+    (parseFloat(shift.overtimeHours) > 0 || (shift.overtimeStatus && shift.overtimeStatus !== 'none' && shift.overtimeStatus !== 'rejected')) &&
+    shift.regularHours !== undefined
+  ) {
     return parseFloat(shift.regularHours) || 0;
   }
 
