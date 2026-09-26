@@ -1,5 +1,6 @@
 import React from 'react';
 import { forceClearCacheAndReload } from '../../utils/cacheManager';
+import { selfHealingEngine } from '../../utils/selfHealingEngine';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -14,6 +15,13 @@ class ErrorBoundary extends React.Component {
   componentDidCatch(error, errorInfo) {
     console.error('[ErrorBoundary] Caught runtime error:', error, errorInfo);
     this.setState({ errorInfo });
+    try {
+      selfHealingEngine.diagnoseAndHeal(error, {
+        screenName: typeof window !== 'undefined' ? window.location.pathname : '',
+        componentStack: errorInfo?.componentStack,
+        userRole: 'error_boundary'
+      }).catch(() => {});
+    } catch {}
   }
 
   handleReload = () => {

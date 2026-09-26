@@ -206,23 +206,31 @@ async function runImport() {
       const rowPlaceholders = [];
 
       chunk.forEach((d, idx) => {
-        const id = `eg-${d.id}`;
+        const id = `eg-${String(d.id || '').replace(/^(?:eg-)+/, '')}`;
         const nameEn = String(d.name || '').trim();
         const nameAr = String(d.arabic || nameEn).trim();
         const active = String(d.active || 'مستحضر دوائي').trim();
         const company = String(d.company || '').trim();
         const publicPrice = parseFloat(String(d.price || '0').replace(/[^0-9.]/g, '')) || 0;
         const barcode = String(d.barcode || '').trim();
-        const { dosageForm, unitName, packSize } = deduceDosageFormAndUnits(d);
-        const unitPrice = parseFloat((publicPrice / packSize).toFixed(2));
+
+        const dosageForm = d.dosage_form || 'مستحضر دوائي';
+        const unitName = d.unit_name || 'شريط';
+        const packSize = Math.max(1, parseInt(d.pack_size || d.units || 1, 10));
+        const unitPrice = d.unit_price ? parseFloat(d.unit_price) : parseFloat((publicPrice / packSize).toFixed(2));
 
         // فحص أدوية الجداول والمخدرات
-        const isTableDrug = /(tramadol|pregabalin|gabapentin|clonazepam|diazepam|alprazolam|zolpidem|جدول|مخدر)/i.test(`${nameEn} ${nameAr} ${active}`);
+        const isTableDrug = typeof d.is_table_drug === 'boolean'
+          ? d.is_table_drug
+          : /(tramadol|pregabalin|gabapentin|clonazepam|diazepam|alprazolam|zolpidem|جدول|مخدر)/i.test(`${nameEn} ${nameAr} ${active}`);
+        
         // فحص أدوية الثلاجة
-        const isRefrigerated = /(insulin|انسولين|ثلاجة|clexane|vaccine|لقاح|مصل|refrigerat)/i.test(`${nameEn} ${nameAr} ${active}`);
+        const isRefrigerated = typeof d.is_refrigerated === 'boolean'
+          ? d.is_refrigerated
+          : /(insulin|انسولين|ثلاجة|clexane|vaccine|لقاح|مصل|refrigerat)/i.test(`${nameEn} ${nameAr} ${active}`);
 
         const arVariants = generateArabicVariants(nameAr);
-        const normalized = normalizeSearchText(
+        const normalized = d.search_normalized || normalizeSearchText(
           `${nameEn} ${nameAr} ${arVariants} ${active} ${company} ${barcode} ${dosageForm}`
         );
 

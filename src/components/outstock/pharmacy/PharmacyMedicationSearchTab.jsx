@@ -27,6 +27,8 @@ import {
   outstockUpdateMedicationDetails,
   outstockAddNewMedication
 } from '../../../utils/outstockApiClient';
+import MedicationMasterCardModal from '../common/MedicationMasterCardModal';
+import AddMedicationModal from '../common/AddMedicationModal';
 
 /**
  * PharmacyMedicationSearchTab.jsx
@@ -41,11 +43,12 @@ export default function PharmacyMedicationSearchTab({
   branchId,
   branch,
   currentPharmacist = '',
-  showToast = alert
+  showToast = (msg) => window.dispatchEvent(new CustomEvent('outstock:notify', { detail: msg }))
 }) {
-  const [searchTerm, setSearchTerm] = useState('alphintern');
+  const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const searchDebounceRef = useRef(null);
 
   // كارتة الصنف
   const [masterCardMedId, setMasterCardMedId] = useState(null);
@@ -62,27 +65,10 @@ export default function PharmacyMedicationSearchTab({
 
   // إضافة صنف جديد
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [newMedForm, setNewMedForm] = useState({
-    trade_name_ar: '',
-    trade_name_en: '',
-    generic_name: '',
-    dosage_form: 'أقراص (Tablets)',
-    strength: '',
-    pack_size: 1,
-    unit_name: 'شريط',
-    public_price: '',
-    manufacturer: '',
-    category: '',
-    gtin_barcode: '',
-    is_table_drug: false,
-    is_refrigerated: false
-  });
-  const [isSavingNewMed, setIsSavingNewMed] = useState(false);
 
   // تنفيذ البحث
   const handleSearch = async (term) => {
-    const q = String(term !== undefined ? term : searchTerm).trim();
-    if (!q || q.length < 2) return;
+    const q = term !== undefined ? String(term).trim() : String(searchTerm).trim();
 
     setIsLoading(true);
     try {
@@ -99,9 +85,16 @@ export default function PharmacyMedicationSearchTab({
     }
   };
 
+  // ⚡ البحث اللحظي التلقائي بمجرد الكتابة دون الحاجة لضغط Enter
   useEffect(() => {
-    handleSearch('alphintern');
-  }, []);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      handleSearch(searchTerm);
+    }, 240);
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [searchTerm]);
 
   // الاستماع لتحديثات الأسعار اللحظية لإنعاش الشاشة دون إعادة تحميل
   useEffect(() => {
@@ -204,48 +197,6 @@ export default function PharmacyMedicationSearchTab({
     }
   };
 
-  // حفظ صنف جديد بالكتالوج المركزي
-  const handleSaveNewMedication = async (e) => {
-    e.preventDefault();
-    if (!newMedForm.trade_name_ar.trim() || !newMedForm.public_price) {
-      showToast('يرجى ملء الحقول الإلزامية (اسم الصنف بالعربي والسعر الرسمي)');
-      return;
-    }
-
-    setIsSavingNewMed(true);
-    try {
-      const res = await outstockAddNewMedication(newMedForm);
-      if (res?.success) {
-        showToast(
-          `✅ تم إضافة الدواء (${res.medication?.displayName || newMedForm.trade_name_ar}) بنجاح وإدراجه في الكتالوج المركزي.`
-        );
-        setIsAddModalOpen(false);
-        setNewMedForm({
-          trade_name_ar: '',
-          trade_name_en: '',
-          generic_name: '',
-          dosage_form: 'أقراص (Tablets)',
-          strength: '',
-          pack_size: 1,
-          unit_name: 'شريط',
-          public_price: '',
-          manufacturer: '',
-          category: '',
-          gtin_barcode: '',
-          is_table_drug: false,
-          is_refrigerated: false
-        });
-        setSearchTerm(res.medication?.trade_name_ar || '');
-        handleSearch(res.medication?.trade_name_ar || '');
-      } else {
-        showToast(`❌ تعذر إضافة الصنف: ${res?.error || 'خطأ'}`);
-      }
-    } catch (err) {
-      showToast(`❌ خطأ: ${err.message}`);
-    } finally {
-      setIsSavingNewMed(false);
-    }
-  };
 
   return (
     <div className="outstock-tab-container" style={{ direction: 'rtl', padding: '16px' }}>
@@ -351,10 +302,7 @@ export default function PharmacyMedicationSearchTab({
               {searchTerm && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setSearchTerm('');
-                    setSearchResults([]);
-                  }}
+                  onClick={() => setSearchTerm('')}
                   style={{
                     position: 'absolute',
                     left: '12px',
@@ -368,10 +316,12 @@ export default function PharmacyMedicationSearchTab({
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center'
+                    justifyContent: 'center',
+                    color: '#475569'
                   }}
+                  title="مسح البحث وعرض الكتالوج"
                 >
-                  <X size={14} color="#475569" />
+                  <X size={14} />
                 </button>
               )}
             </div>
@@ -1194,289 +1144,14 @@ export default function PharmacyMedicationSearchTab({
       {/* ─────────────────────────────────────────────────────────────────────── */}
       {/* ── 3. نافذة إضافة صنف جديد (Branch Add New Medication Modal) ── */}
       {/* ─────────────────────────────────────────────────────────────────────── */}
-      {isAddModalOpen && (
-        <div
-          className="outstock-modal-backdrop"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.75)',
-            backdropFilter: 'blur(5px)',
-            zIndex: 9999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px'
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !isSavingNewMed) setIsAddModalOpen(false);
-          }}
-        >
-          <div
-            style={{
-              background: '#ffffff',
-              borderRadius: '16px',
-              width: '100%',
-              maxWidth: '650px',
-              maxHeight: '92vh',
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-              direction: 'rtl'
-            }}
-          >
-            {/* الرأس */}
-            <div
-              style={{
-                padding: '16px 20px',
-                background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
-                color: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Plus size={22} />
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800' }}>إضافة صنف دوائي جديد للكتالوج</h3>
-                  <p style={{ margin: 0, fontSize: '12px', opacity: 0.9 }}>
-                    يتم الحفظ في قاعدة البيانات المركزية ويظهر فوراً في كافة الفروع
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsAddModalOpen(false)}
-                disabled={isSavingNewMed}
-                style={{
-                  background: 'rgba(255, 255, 255, 0.2)',
-                  border: 'none',
-                  borderRadius: '6px',
-                  color: '#ffffff',
-                  cursor: 'pointer',
-                  padding: '5px'
-                }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* النموذج */}
-            <form onSubmit={handleSaveNewMedication} style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1e293b', display: 'block', marginBottom: '4px' }}>
-                    اسم الصنف بالعربي * :
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="مثال: ألفانترن أقراص"
-                    value={newMedForm.trade_name_ar}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, trade_name_ar: e.target.value })}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1e293b', display: 'block', marginBottom: '4px' }}>
-                    الاسم بالإنجليزي (Trade Name):
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Alphintern 30 Tabs"
-                    value={newMedForm.trade_name_en}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, trade_name_en: e.target.value })}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box', direction: 'ltr' }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1e293b', display: 'block', marginBottom: '4px' }}>
-                  المادة الفعالة (Generic Name):
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Chymotrypsin + Trypsin"
-                  value={newMedForm.generic_name}
-                  onChange={(e) => setNewMedForm({ ...newMedForm, generic_name: e.target.value })}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box', direction: 'ltr' }}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                    الشكل الدوائي:
-                  </label>
-                  <select
-                    value={newMedForm.dosage_form}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, dosage_form: e.target.value })}
-                    style={{ width: '100%', padding: '9px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
-                  >
-                    <option value="أقراص (Tablets)">أقراص (Tablets)</option>
-                    <option value="كبسولات (Capsules)">كبسولات (Capsules)</option>
-                    <option value="شراب (Syrup)">شراب (Syrup)</option>
-                    <option value="حقن (Injection)">حقن (Injection)</option>
-                    <option value="مرهم / كريم (Ointment/Cream)">مرهم / كريم</option>
-                    <option value="نقط (Drops)">نقط (Drops)</option>
-                    <option value="فوار / أكياس (Sachets)">فوار / أكياس</option>
-                    <option value="أخرى">أخرى</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                    عدد الشرائط/الوحدات:
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={newMedForm.pack_size}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, pack_size: parseInt(e.target.value || 1, 10) })}
-                    style={{ width: '100%', padding: '9px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                    اسم الوحدة:
-                  </label>
-                  <input
-                    type="text"
-                    value={newMedForm.unit_name}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, unit_name: e.target.value })}
-                    style={{ width: '100%', padding: '9px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#047857', display: 'block', marginBottom: '4px' }}>
-                    السعر الرسمي للعبوة (ج.م) * :
-                  </label>
-                  <input
-                    type="number"
-                    step="0.25"
-                    min="0"
-                    placeholder="مثال: 87.00"
-                    value={newMedForm.public_price}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, public_price: e.target.value })}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '2px solid #059669', fontSize: '14px', fontWeight: 'bold', boxSizing: 'border-box' }}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1e293b', display: 'block', marginBottom: '4px' }}>
-                    الباركود الدولي (GTIN / Barcode):
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="مثال: 6221025030733"
-                    value={newMedForm.gtin_barcode}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, gtin_barcode: e.target.value })}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ fontSize: '12px', color: '#475569', fontWeight: '600', display: 'block', marginBottom: '4px' }}>
-                    الشركة المصنعة (Manufacturer):
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="مثال: Amoun / Eva / Novartis"
-                    value={newMedForm.manufacturer}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, manufacturer: e.target.value })}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '12px', color: '#475569', fontWeight: '600', display: 'block', marginBottom: '4px' }}>
-                    التصنيف الدوائي (Category):
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="مثال: مضاد للالتهاب والتورم"
-                    value={newMedForm.category}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, category: e.target.value })}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '20px', background: '#f8fafc', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', color: '#991b1b' }}>
-                  <input
-                    type="checkbox"
-                    checked={newMedForm.is_table_drug}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, is_table_drug: e.target.checked })}
-                    style={{ width: '16px', height: '16px', accentColor: '#dc2626' }}
-                  />
-                  <span>صنف جدول رقابة دوائية</span>
-                </label>
-
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', color: '#0369a1' }}>
-                  <input
-                    type="checkbox"
-                    checked={newMedForm.is_refrigerated}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, is_refrigerated: e.target.checked })}
-                    style={{ width: '16px', height: '16px', accentColor: '#0284c7' }}
-                  />
-                  <span>يحفظ بالثلاجة (2 - 8 درجات مئوية) ❄️</span>
-                </label>
-              </div>
-
-              {/* أزرار الإجراء */}
-              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-                <button
-                  type="submit"
-                  disabled={isSavingNewMed}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '10px',
-                    fontSize: '14px',
-                    fontWeight: '800',
-                    cursor: isSavingNewMed ? 'not-allowed' : 'pointer',
-                    boxShadow: '0 4px 12px rgba(5, 150, 105, 0.25)'
-                  }}
-                >
-                  {isSavingNewMed ? 'جاري الحفظ في الكتالوج...' : 'حفظ وإضافة الصنف للكتالوج'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  disabled={isSavingNewMed}
-                  style={{
-                    padding: '12px 18px',
-                    background: '#f1f5f9',
-                    color: '#475569',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '10px',
-                    fontWeight: '700',
-                    cursor: 'pointer'
-                  }}
-                >
-                  إلغاء
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <AddMedicationModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onSaveSuccess={(createdMed) => {
+          showToast?.(`✅ تم إضافة صنف "${createdMed.trade_name_ar}" للكتالوج المركزي بنجاح`);
+          handleSearch(searchTerm || '');
+        }}
+      />
     </div>
   );
 }

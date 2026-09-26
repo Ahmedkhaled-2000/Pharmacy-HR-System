@@ -82,7 +82,93 @@
   white-space: nowrap;
 }
 
-/* تبويبات الشريط العلوي */
+/* ── 2.5 شريط التبويبات الفرعي المخصص (Sub Navigation Bar) أسفل الشريط العلوي ── */
+.outstock-sub-navbar {
+  position: sticky;
+  top: 64px;
+  z-index: 890;
+  background: var(--surface, #ffffff);
+  border-bottom: 1.5px solid var(--border-subtle, #e2e8f0);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.03);
+  padding: 6px 20px;
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.outstock-sub-navbar-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  flex-wrap: nowrap;
+  min-width: max-content;
+}
+
+.outstock-subnav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 7px 15px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted, #64748b);
+  font-size: 13px;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  white-space: nowrap;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.outstock-subnav-btn:hover {
+  color: #0d9488;
+  background: rgba(13, 148, 136, 0.08);
+  border-color: rgba(13, 148, 136, 0.15);
+}
+
+.outstock-subnav-btn.is-active {
+  background: #f0fdfa;
+  color: #0d9488;
+  border: 1.5px solid rgba(13, 148, 136, 0.35);
+  font-weight: 900;
+  box-shadow: 0 2px 8px rgba(13, 148, 136, 0.12);
+}
+
+.dark-mode .outstock-sub-navbar {
+  background: #0f172a;
+  border-bottom-color: #1e293b;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.dark-mode .outstock-subnav-btn {
+  color: #94a3b8;
+}
+
+.dark-mode .outstock-subnav-btn:hover {
+  color: #2dd4bf;
+  background: rgba(45, 212, 191, 0.12);
+  border-color: rgba(45, 212, 191, 0.2);
+}
+
+.dark-mode .outstock-subnav-btn.is-active {
+  background: rgba(13, 148, 136, 0.22);
+  color: #2dd4bf;
+  border-color: #0d9488;
+  box-shadow: 0 2px 10px rgba(13, 148, 136, 0.25);
+}
+
+/* تبويبات الشريط العلوي (القديمة للمحافظة على التوافق) */
 .outstock-nav-tabs {
   display: flex;
   align-items: center;

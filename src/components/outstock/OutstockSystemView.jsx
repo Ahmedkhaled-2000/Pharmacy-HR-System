@@ -22,8 +22,12 @@ import {
   MessageSquare,
   Search,
   BarChart3,
-  Pill
+  Pill,
+  Image as ImageIcon,
+  MapPin,
+  Key
 } from 'lucide-react';
+import OutstockNotificationModal from './common/OutstockNotificationModal';
 import { outstockGetMe } from '../../utils/outstockApiClient';
 import {
   initOutstockSyncService,
@@ -93,6 +97,53 @@ export default function OutstockSystemView({
     if (userRole === 'procurement') return 'branch_orders';
     return 'owner_branches';
   });
+
+  // قائمة الأقسام الفرعية لصفحة الإعدادات والصلاحيات للمالك
+  const OWNER_SETTINGS_SUBSECTIONS = [
+    { id: 'pharmacy_identity', title: 'هوية وشعار الصيدلية بالفاتورة', icon: ImageIcon },
+    { id: 'delivery_zones', title: 'إدارة مناطق وأحياء التوصيل', icon: MapPin },
+    { id: 'branches', title: 'إدارة وتفعيل الفروع والصيدليات', icon: Building2 },
+    { id: 'procurement_users', title: 'يوزرات إدارة المشتريات والصلاحيات', icon: Users },
+    { id: 'security', title: 'تأمين حساب المالك وكلمة المرور', icon: Key },
+    { id: 'shortcuts', title: 'تخصيص اختصارات لوحة المفاتيح', icon: Keyboard }
+  ];
+
+  // ── نظام الإشعارات المنبثقة الاحترافية داخل النظام ──
+  const [activeNotification, setActiveNotification] = useState(null);
+
+  const triggerNotification = (msgOrObj) => {
+    if (!msgOrObj) return;
+    if (typeof msgOrObj === 'string') {
+      setActiveNotification({ message: msgOrObj });
+    } else {
+      setActiveNotification(msgOrObj);
+    }
+  };
+
+  // استماع للحدث الموحد من أي مكان بالنظام
+  useEffect(() => {
+    const handleOutstockNotify = (e) => {
+      const detail = e?.detail || e;
+      if (detail) triggerNotification(detail);
+    };
+    window.addEventListener('outstock:notify', handleOutstockNotify);
+    return () => window.removeEventListener('outstock:notify', handleOutstockNotify);
+  }, []);
+
+  // قسم إعدادات المالك والقائمة المنسدلة
+  const [ownerSettingsSection, setOwnerSettingsSection] = useState('pharmacy_identity');
+  const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
+  const settingsDropdownRef = React.useRef(null);
+
+  useEffect(() => {
+    const handleOutside = (e) => {
+      if (settingsDropdownRef.current && !settingsDropdownRef.current.contains(e.target)) {
+        setIsSettingsMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
 
   // تحديث التبويب التلقائي عند تبديل الدور
   useEffect(() => {
@@ -269,193 +320,6 @@ export default function OutstockSystemView({
           </div>
         </div>
 
-        {/* ── قوائم البوابة حسب الدور ── */}
-        <nav className="outstock-nav-tabs">
-          {/* 1. قوائم بوابة الصيدلية (4 قوائم) */}
-          {userRole === 'branch' && (
-            <>
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'orders' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('orders')}
-              >
-                <Package size={15} />
-                <span>طلبات العملاء</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'customers' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('customers')}
-              >
-                <Users size={15} />
-                <span>العملاء المسجلين</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'procurement_tracking' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('procurement_tracking')}
-              >
-                <Clock size={15} />
-                <span>متابعة طلبات المشتريات</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'deficiencies' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('deficiencies')}
-              >
-                <AlertTriangle size={15} />
-                <span>أدوية النواقص</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'branch_medication_search' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('branch_medication_search')}
-                title="البحث عن صنف أو بديل، كارتة الصنف، إضافة صنف جديد، وتعديل السعر للأعلى فقط"
-              >
-                <Search size={15} />
-                <span>البحث عن صنف والبدائل</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'whatsapp' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('whatsapp')}
-                title="اتصال الواتساب بالفرع وإرسال الرسائل التلقائية للعملاء"
-              >
-                <MessageSquare size={15} />
-                <span>اتصال الواتساب والرسائل</span>
-              </button>
-            </>
-          )}
-
-          {/* 2. قوائم بوابة إدارة المشتريات (4 قوائم) */}
-          {userRole === 'procurement' && (
-            <>
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'branch_orders' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('branch_orders')}
-              >
-                <Building2 size={15} />
-                <span>طلبات الفروع المجمعة</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'delivery_tracking' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('delivery_tracking')}
-              >
-                <Activity size={15} />
-                <span>متابعة تسليم الأصناف</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'unavailable_items' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('unavailable_items')}
-              >
-                <AlertTriangle size={15} />
-                <span>أصناف غير متوفرة بالسوق</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'procurement_whatsapp' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('procurement_whatsapp')}
-                title="مراسلة هواتف الفروع بالواتساب وإشعارات الشحن والنواقص"
-              >
-                <MessageSquare size={15} />
-                <span>واتساب الفروع</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'procurement_medications' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('procurement_medications')}
-                title="كتالوج وتسعير الأدوية وهيئة الدواء ودراج آي"
-              >
-                <Pill size={15} />
-                <span>كتالوج وتسعير الأدوية</span>
-              </button>
-            </>
-          )}
-
-          {/* 3. قوائم بوابة المالك (6 قوائم) */}
-          {userRole === 'owner' && (
-            <>
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'owner_financial_reports' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('owner_financial_reports')}
-                title="متابعة التقارير المالية ومبيعات الفروع والعربونات ونواقص السوق"
-              >
-                <BarChart3 size={15} />
-                <span>التقارير المالية والأرباح</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'owner_branches' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('owner_branches')}
-              >
-                <Building2 size={15} />
-                <span>طلبات الفروع وأرصدتها</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'owner_procurement' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('owner_procurement')}
-              >
-                <TrendingUp size={15} />
-                <span>متابعة إدارة المشتريات</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'owner_medications' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('owner_medications')}
-                title="كتالوج وتسعير الأدوية وهيئة الدواء ودراج آي"
-              >
-                <Pill size={15} />
-                <span>كتالوج وتسعير الأدوية</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'owner_customers' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('owner_customers')}
-              >
-                <Users size={15} />
-                <span>دليل العملاء المركزي</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'owner_whatsapp' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('owner_whatsapp')}
-                title="مركز الواتساب والرسائل التلقائية لعملاء الفروع"
-              >
-                <MessageSquare size={15} />
-                <span>مركز الواتساب</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-nav-btn ${activeTab === 'owner_settings' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('owner_settings')}
-              >
-                <Settings size={15} />
-                <span>الإعدادات والصلاحيات</span>
-              </button>
-            </>
-          )}
-        </nav>
-
         {/* أدوات التحكم والوضع الليلي وتسجيل الخروج */}
         <div className="outstock-user-controls">
           {/* مؤشر حالة المزامنة اللحظية والأوفلاين */}
@@ -624,6 +488,280 @@ export default function OutstockSystemView({
         </div>
       </header>
 
+      {/* ── شريط القوائم والتبويبات المخصص (Sub Navigation Bar) على غرار شريط الإدارة العليا في نظام HR ── */}
+      <nav className="outstock-sub-navbar" aria-label="أقسام منظومة النواقص">
+        <div className="outstock-sub-navbar-container">
+          {/* 1. قوائم بوابة الصيدلية (6 قوائم) */}
+          {userRole === 'branch' && (
+            <>
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'orders' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('orders')}
+              >
+                <Package size={16} />
+                <span>طلبات العملاء</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'customers' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('customers')}
+              >
+                <Users size={16} />
+                <span>العملاء المسجلين</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'procurement_tracking' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('procurement_tracking')}
+              >
+                <Clock size={16} />
+                <span>متابعة طلبات المشتريات</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'deficiencies' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('deficiencies')}
+              >
+                <AlertTriangle size={16} />
+                <span>أدوية النواقص</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'branch_medication_search' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('branch_medication_search')}
+                title="البحث عن صنف أو بديل، كارتة الصنف، إضافة صنف جديد، وتعديل السعر للأعلى فقط"
+              >
+                <Search size={16} />
+                <span>البحث عن صنف والبدائل</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'whatsapp' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('whatsapp')}
+                title="اتصال الواتساب بالفرع وإرسال الرسائل التلقائية للعملاء"
+              >
+                <MessageSquare size={16} />
+                <span>اتصال الواتساب والرسائل</span>
+              </button>
+            </>
+          )}
+
+          {/* 2. قوائم بوابة إدارة المشتريات (5 قوائم) */}
+          {userRole === 'procurement' && (
+            <>
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'branch_orders' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('branch_orders')}
+              >
+                <Building2 size={16} />
+                <span>طلبات الفروع المجمعة</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'delivery_tracking' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('delivery_tracking')}
+              >
+                <Activity size={16} />
+                <span>متابعة تسليم الأصناف</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'unavailable_items' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('unavailable_items')}
+              >
+                <AlertTriangle size={16} />
+                <span>أصناف غير متوفرة بالسوق</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'procurement_whatsapp' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('procurement_whatsapp')}
+                title="مراسلة هواتف الفروع بالواتساب وإشعارات الشحن والنواقص"
+              >
+                <MessageSquare size={16} />
+                <span>واتساب الفروع</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'procurement_medications' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('procurement_medications')}
+                title="كتالوج وتسعير الأدوية وهيئة الدواء ودراج آي"
+              >
+                <Pill size={16} />
+                <span>كتالوج وتسعير الأدوية</span>
+              </button>
+            </>
+          )}
+
+          {/* 3. قوائم بوابة المالك (7 قوائم) */}
+          {userRole === 'owner' && (
+            <>
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'owner_financial_reports' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('owner_financial_reports')}
+                title="متابعة التقارير المالية ومبيعات الفروع والعربونات ونواقص السوق"
+              >
+                <BarChart3 size={16} />
+                <span>التقارير المالية والأرباح</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'owner_branches' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('owner_branches')}
+              >
+                <Building2 size={16} />
+                <span>طلبات الفروع وأرصدتها</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'owner_procurement' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('owner_procurement')}
+              >
+                <TrendingUp size={16} />
+                <span>متابعة إدارة المشتريات</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'owner_medications' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('owner_medications')}
+                title="كتالوج وتسعير الأدوية وهيئة الدواء ودراج آي"
+              >
+                <Pill size={16} />
+                <span>كتالوج وتسعير الأدوية</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'owner_customers' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('owner_customers')}
+              >
+                <Users size={16} />
+                <span>دليل العملاء المركزي</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'owner_whatsapp' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('owner_whatsapp')}
+                title="مركز الواتساب والرسائل التلقائية لعملاء الفروع"
+              >
+                <MessageSquare size={16} />
+                <span>مركز الواتساب</span>
+              </button>
+
+              {/* قائمة الإعدادات والصلاحيات المنسدلة */}
+              <div
+                ref={settingsDropdownRef}
+                style={{ position: 'relative', display: 'inline-block' }}
+                onMouseEnter={() => setIsSettingsMenuOpen(true)}
+                onMouseLeave={() => setIsSettingsMenuOpen(false)}
+              >
+                <button
+                  type="button"
+                  className={`outstock-subnav-btn ${activeTab === 'owner_settings' ? 'is-active' : ''}`}
+                  onClick={() => {
+                    setActiveTab('owner_settings');
+                    setIsSettingsMenuOpen(prev => !prev);
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <Settings size={16} />
+                  <span>الإعدادات والصلاحيات</span>
+                  <ChevronDown
+                    size={14}
+                    style={{
+                      transform: isSettingsMenuOpen ? 'rotate(180deg)' : 'none',
+                      transition: 'transform 0.2s ease'
+                    }}
+                  />
+                </button>
+
+                {isSettingsMenuOpen && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 4px)',
+                      left: 0,
+                      minWidth: '260px',
+                      background: '#ffffff',
+                      border: '1.5px solid #cbd5e1',
+                      borderRadius: '14px',
+                      boxShadow: '0 16px 36px rgba(0, 0, 0, 0.16)',
+                      zIndex: 9999,
+                      padding: '8px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px',
+                      animation: 'outstockFadeIn 0.15s ease'
+                    }}
+                  >
+                    <div style={{ padding: '4px 8px', fontSize: '11px', fontWeight: '800', color: '#94a3b8', borderBottom: '1px solid #f1f5f9', marginBottom: '2px' }}>
+                      ⚙️ أقسام الإعدادات والصلاحيات:
+                    </div>
+                    {OWNER_SETTINGS_SUBSECTIONS.map((sub) => {
+                      const isCurrent = activeTab === 'owner_settings' && ownerSettingsSection === sub.id;
+                      const IconComponent = sub.icon;
+                      return (
+                        <button
+                          key={sub.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveTab('owner_settings');
+                            setOwnerSettingsSection(sub.id);
+                            setIsSettingsMenuOpen(false);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            padding: '9px 12px',
+                            borderRadius: '9px',
+                            border: isCurrent ? '1.5px solid #99f6e4' : '1.5px solid transparent',
+                            background: isCurrent ? '#f0fdfa' : 'transparent',
+                            color: isCurrent ? '#0f766e' : '#334155',
+                            fontWeight: isCurrent ? '800' : '600',
+                            fontSize: '12.5px',
+                            cursor: 'pointer',
+                            textAlign: 'right',
+                            width: '100%',
+                            transition: 'all 0.12s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isCurrent) e.currentTarget.style.background = '#f8fafc';
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isCurrent) e.currentTarget.style.background = 'transparent';
+                          }}
+                        >
+                          <IconComponent size={16} color={isCurrent ? '#0d9488' : '#64748b'} />
+                          <span style={{ flex: 1 }}>{sub.title}</span>
+                          {isCurrent && <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#0d9488' }} />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </nav>
+
       {/* ── جسم الشاشة ومحتوى التبويبات ── */}
       <main className="outstock-content-body">
         {/* ── أ) تبويبات الصيدلية ── */}
@@ -636,14 +774,14 @@ export default function OutstockSystemView({
                   branchId={effectiveBranchId}
                   branch={activeBranch}
                   currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
-                  showToast={showToast}
+                  showToast={triggerNotification}
                 />
               )}
 
               {activeTab === 'customers' && (
                 <PharmacyCustomersTab
                   branchId={effectiveBranchId}
-                  showToast={showToast}
+                  showToast={triggerNotification}
                 />
               )}
 
@@ -657,7 +795,7 @@ export default function OutstockSystemView({
                 <PharmacyDeficienciesTab
                   branchId={effectiveBranchId}
                   currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
-                  showToast={showToast}
+                  showToast={triggerNotification}
                 />
               )}
 
@@ -666,7 +804,7 @@ export default function OutstockSystemView({
                   branchId={effectiveBranchId}
                   branch={activeBranch}
                   currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
-                  showToast={showToast}
+                  showToast={triggerNotification}
                 />
               )}
 
@@ -675,7 +813,7 @@ export default function OutstockSystemView({
                   branchId={effectiveBranchId}
                   branch={activeBranch}
                   currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
-                  showToast={showToast}
+                  showToast={triggerNotification}
                 />
               )}
             </>
@@ -686,7 +824,7 @@ export default function OutstockSystemView({
         {userRole === 'procurement' && (
           <>
             {activeTab === 'branch_orders' && (
-              <ProcurementOrdersTab showToast={showToast} />
+              <ProcurementOrdersTab showToast={triggerNotification} />
             )}
 
             {activeTab === 'delivery_tracking' && (
@@ -694,18 +832,18 @@ export default function OutstockSystemView({
             )}
 
             {activeTab === 'unavailable_items' && (
-              <ProcurementUnavailableTab showToast={showToast} />
+              <ProcurementUnavailableTab showToast={triggerNotification} />
             )}
 
             {activeTab === 'procurement_whatsapp' && (
               <ProcurementWhatsAppCenterTab
                 currentOfficer={currentUser?.fullName || currentUser?.name || 'مسؤول المشتريات'}
-                showToast={showToast}
+                showToast={triggerNotification}
               />
             )}
 
             {activeTab === 'procurement_medications' && (
-              <OwnerMedicationsPricingTab showToast={showToast} />
+              <OwnerMedicationsPricingTab showToast={triggerNotification} />
             )}
           </>
         )}
@@ -714,11 +852,11 @@ export default function OutstockSystemView({
         {userRole === 'owner' && (
           <>
             {activeTab === 'owner_financial_reports' && (
-              <OwnerFinancialReportsTab showToast={showToast} />
+              <OwnerFinancialReportsTab showToast={triggerNotification} />
             )}
 
             {activeTab === 'owner_branches' && (
-              <OwnerBranchOrdersTab showToast={showToast} />
+              <OwnerBranchOrdersTab showToast={triggerNotification} />
             )}
 
             {activeTab === 'owner_procurement' && (
@@ -726,7 +864,7 @@ export default function OutstockSystemView({
             )}
 
             {activeTab === 'owner_medications' && (
-              <OwnerMedicationsPricingTab showToast={showToast} />
+              <OwnerMedicationsPricingTab showToast={triggerNotification} />
             )}
 
             {activeTab === 'owner_customers' && (
@@ -738,16 +876,26 @@ export default function OutstockSystemView({
                 branchId={activeBranch?.id || 'main'}
                 branch={activeBranch}
                 currentPharmacist={currentUser?.fullName || currentUser?.name || 'المالك / المدير'}
-                showToast={showToast}
+                showToast={triggerNotification}
               />
             )}
 
             {activeTab === 'owner_settings' && (
-              <OwnerSettingsTab showToast={showToast} />
+              <OwnerSettingsTab
+                showToast={triggerNotification}
+                activeSubSectionProp={ownerSettingsSection}
+                onSubSectionChange={setOwnerSettingsSection}
+              />
             )}
           </>
         )}
       </main>
+
+      {/* ── نافذة الإشعارات والتنبيهات المنبثقة الاحترافية ── */}
+      <OutstockNotificationModal
+        notification={activeNotification}
+        onClose={() => setActiveNotification(null)}
+      />
     </div>
   );
 }

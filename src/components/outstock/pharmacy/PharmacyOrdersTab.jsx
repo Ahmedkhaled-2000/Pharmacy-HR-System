@@ -286,6 +286,20 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                         </span>
                       )}
 
+                      {order.delivery_type === 'home_delivery' || order.deliveryType === 'home_delivery' ? (
+                        <span className="outstock-badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontSize: '11.5px', padding: '3px 8px' }}>
+                          🛵 توصيل منزلي
+                        </span>
+                      ) : (order.delivery_type === 'other_branch_pickup' || order.deliveryType === 'other_branch_pickup') ? (
+                        <span className="outstock-badge" style={{ background: '#eff6ff', color: '#1e40af', border: '1px solid #bfdbfe', fontSize: '11.5px', padding: '3px 8px' }}>
+                          🔄 استلام: {order.delivery_target_branch || order.deliveryTargetBranch || 'فرع آخر'}
+                        </span>
+                      ) : (
+                        <span className="outstock-badge" style={{ background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0', fontSize: '11.5px', padding: '3px 8px' }}>
+                          🏪 بالفرع
+                        </span>
+                      )}
+
                       <span style={{
                         background: '#f8fafc',
                         border: '1px dashed #cbd5e1',

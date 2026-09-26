@@ -376,3 +376,303 @@ export async function exportProcurementOrdersExcel(aggregatedData = [], options 
 
   return true;
 }
+
+/**
+ * ══════════════════════════════════════════════════════════════════════════════
+ * تصدير ملف إكسل فارغ بتصميم احترافي لكتالوج الأدوية وتحديث الأسعار
+ * يحتوي على جميع حقول كارتة الصنف مع أمثلة إرشادية وتنسيق ملكي
+ * ══════════════════════════════════════════════════════════════════════════════
+ */
+export async function exportMedicationCatalogTemplateExcel() {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'منظومة إدارة النواقص والمشتريات';
+  wb.lastModifiedBy = 'المسؤول - هيئة الدواء المصرية ودراج آي';
+  wb.created = new Date();
+  wb.modified = new Date();
+
+  const ws = wb.addWorksheet('تحديث وتعديل أسعار الأدوية', {
+    views: [{ rtl: true, showGridLines: true }],
+    pageSetup: { orientation: 'landscape', fitToPage: true }
+  });
+
+  // ترويسة النموذج الاحترافي
+  ws.mergeCells('A1:L1');
+  const titleCell = ws.getCell('A1');
+  titleCell.value = '📋 نموذج استيراد وتحديث أسعار الأدوية الرسمي (Bulk Medication Re-Pricer)';
+  titleCell.font = { name: 'Arial', size: 14, bold: true, color: { argb: THEME.white } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.headerBg } };
+  ws.getRow(1).height = 36;
+
+  // سطر الإرشادات
+  ws.mergeCells('A2:L2');
+  const infoCell = ws.getCell('A2');
+  infoCell.value = '💡 تعليمات: يرجى إدخال الباركود الدولي أو اسم الدواء مع السعر الجديد وعدد الشرائط بالعلبة. لن يتم تكرار الأصناف وستُحدث الأسعار فور الرفع.';
+  infoCell.font = { name: 'Arial', size: 10, italic: true, color: { argb: '134E4A' } };
+  infoCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  infoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'CCFBF1' } };
+  ws.getRow(2).height = 24;
+
+  // أعمدة الجدول
+  const columns = [
+    { key: 'barcode', header: 'الباركود الدولي (GTIN)', width: 22 },
+    { key: 'nameAr', header: 'اسم الدواء التجاري (عربي) *', width: 28 },
+    { key: 'nameEn', header: 'اسم الدواء التجاري (إنجليزي) *', width: 28 },
+    { key: 'generic', header: 'المادة الفعالة (Generic Name)', width: 32 },
+    { key: 'dosageForm', header: 'الشكل الصيدلاني (أقراص/كبسول/شراب)', width: 24 },
+    { key: 'strength', header: 'التركيز (Strength)', width: 16 },
+    { key: 'packSize', header: 'عدد الشرائط بالعلبة *', width: 18 },
+    { key: 'unitName', header: 'اسم الوحدة (شريط/أمبول)', width: 18 },
+    { key: 'publicPrice', header: 'السعر الرسمي للعلبة (ج.م) *', width: 22 },
+    { key: 'manufacturer', header: 'الشركة المصنعة (Manufacturer)', width: 24 },
+    { key: 'isTableDrug', header: 'جدول مخدرات (نعم/لا)', width: 18 },
+    { key: 'isRefrigerated', header: 'ثلاجة 2-8°C (نعم/لا)', width: 18 }
+  ];
+
+  ws.columns = columns;
+
+  // صف الترويسة الرئيسية للأعمدة
+  const headerRow = ws.getRow(3);
+  headerRow.values = columns.map(c => c.header);
+  headerRow.height = 28;
+  headerRow.eachCell((cell) => {
+    cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: THEME.white } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.subHeaderBg } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    cell.border = THIN_BORDER;
+  });
+
+  // إضافة صفوف أمثلة توضيحية لسهولة التعبئة
+  const sampleRows = [
+    [
+      '6221025030733',
+      'الفنترن 30 قرص',
+      'alphintern 30 f.c.tabs',
+      'chymotrypsin+trypsin',
+      'أقراص مغلفة',
+      '',
+      3,
+      'شريط',
+      87.00,
+      'Amoun',
+      'لا',
+      'لا'
+    ],
+    [
+      '6221025032362',
+      'أوجمنتين 1 جم أقراص',
+      'Augmentin 1g Tablets',
+      'Amoxicillin + Clavulanic Acid',
+      'أقراص مغلفة',
+      '1000 mg',
+      2,
+      'شريط',
+      130.00,
+      'GlaxoSmithKline (GSK)',
+      'لا',
+      'لا'
+    ]
+  ];
+
+  sampleRows.forEach((rowValues) => {
+    const row = ws.addRow(rowValues);
+    row.height = 22;
+    row.eachCell((cell, colNumber) => {
+      cell.font = { name: 'Arial', size: 10, color: { argb: THEME.textDark } };
+      cell.border = THIN_BORDER;
+      cell.alignment = { vertical: 'middle' };
+
+      if (colNumber === 1) {
+        cell.numFmt = '@'; // نص لضمان عدم ضياع أصفار الباركود
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (colNumber === 7 || colNumber === 9) {
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (colNumber === 9) {
+          cell.numFmt = '#,##0.00';
+          cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: '065F46' } };
+        }
+      } else if (colNumber === 11 || colNumber === 12) {
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      }
+    });
+  });
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `نموذج-استيراد-وتحديث-أسعار-الأدوية-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(anchor);
+
+  return true;
+}
+
+/**
+ * ══════════════════════════════════════════════════════════════════════════════
+ * قراءة وتحليل ملف الإكسل المسترد لتحديث الأسعار مع منع التكرار
+ * ══════════════════════════════════════════════════════════════════════════════
+ */
+export async function parseMedicationExcelFile(file) {
+  if (!file) throw new Error('يرجى اختيار ملف إكسل');
+
+  const arrayBuffer = await file.arrayBuffer();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(arrayBuffer);
+
+  const ws = wb.worksheets[0];
+  if (!ws) throw new Error('الملف فارغ أو لا يحتوي على أوراق عمل صالحة');
+
+  // استكشاف موقع الترويسة
+  let headerRowIndex = 3;
+  let barcodeCol = -1;
+  let nameArCol = -1;
+  let nameEnCol = -1;
+  let genericCol = -1;
+  let dosageFormCol = -1;
+  let packSizeCol = -1;
+  let unitNameCol = -1;
+  let priceCol = -1;
+  let manufacturerCol = -1;
+  let tableDrugCol = -1;
+  let refrigeratedCol = -1;
+
+  // فحص أول 6 أسطر للبحث عن الترويسات
+  for (let r = 1; r <= Math.min(ws.rowCount, 6); r++) {
+    const row = ws.getRow(r);
+    let foundCount = 0;
+    row.eachCell((cell, colNumber) => {
+      const txt = String(cell.value || '').trim().toLowerCase();
+      if (txt.includes('باركود') || txt.includes('gtin') || txt.includes('barcode')) {
+        barcodeCol = colNumber;
+        foundCount++;
+      } else if (txt.includes('عربي') || (txt.includes('اسم') && txt.includes('دواء'))) {
+        nameArCol = colNumber;
+        foundCount++;
+      } else if (txt.includes('إنجليزي') || txt.includes('trade') || txt.includes('english')) {
+        nameEnCol = colNumber;
+        foundCount++;
+      } else if (txt.includes('فعالة') || txt.includes('generic')) {
+        genericCol = colNumber;
+        foundCount++;
+      } else if (txt.includes('شكل') || txt.includes('dosage')) {
+        dosageFormCol = colNumber;
+        foundCount++;
+      } else if (txt.includes('شرائط') || txt.includes('حجم') || txt.includes('pack')) {
+        packSizeCol = colNumber;
+        foundCount++;
+      } else if (txt.includes('وحدة') || txt.includes('unit')) {
+        unitNameCol = colNumber;
+        foundCount++;
+      } else if (txt.includes('سعر') || txt.includes('price')) {
+        priceCol = colNumber;
+        foundCount++;
+      } else if (txt.includes('شركة') || txt.includes('مصنع') || txt.includes('manufacturer')) {
+        manufacturerCol = colNumber;
+        foundCount++;
+      } else if (txt.includes('جدول') || txt.includes('مخدر')) {
+        tableDrugCol = colNumber;
+      } else if (txt.includes('ثلاجة') || txt.includes('تبريد')) {
+        refrigeratedCol = colNumber;
+      }
+    });
+
+    if (foundCount >= 2) {
+      headerRowIndex = r;
+      break;
+    }
+  }
+
+  // Fallbacks إذا كانت الملفات بأعمدة قياسية
+  if (barcodeCol === -1) barcodeCol = 1;
+  if (nameArCol === -1) nameArCol = 2;
+  if (nameEnCol === -1) nameEnCol = 3;
+  if (genericCol === -1) genericCol = 4;
+  if (dosageFormCol === -1) dosageFormCol = 5;
+  if (packSizeCol === -1) packSizeCol = 7;
+  if (unitNameCol === -1) unitNameCol = 8;
+  if (priceCol === -1) priceCol = 9;
+  if (manufacturerCol === -1) manufacturerCol = 10;
+  if (tableDrugCol === -1) tableDrugCol = 11;
+  if (refrigeratedCol === -1) refrigeratedCol = 12;
+
+  const parsedItems = [];
+  const seenBarcodes = new Set();
+  const seenNames = new Set();
+  let duplicatesCount = 0;
+  const warnings = [];
+
+  for (let r = headerRowIndex + 1; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    const getVal = (col) => {
+      if (col <= 0) return '';
+      const cell = row.getCell(col);
+      if (!cell || cell.value === null || cell.value === undefined) return '';
+      if (typeof cell.value === 'object' && cell.value.text) return String(cell.value.text).trim();
+      if (typeof cell.value === 'object' && cell.value.result !== undefined) return String(cell.value.result).trim();
+      return String(cell.value).trim();
+    };
+
+    const barcode = getVal(barcodeCol).replace(/\s+/g, '');
+    const nameAr = getVal(nameArCol);
+    const nameEn = getVal(nameEnCol);
+    const rawPrice = getVal(priceCol).replace(/[^\d.-]/g, '');
+    const price = parseFloat(rawPrice || 0);
+
+    // تخطي السطور الفارغة تماماً
+    if (!barcode && !nameAr && !nameEn && !price) continue;
+
+    // استبعاد تكرار الأصناف داخل نفس الملف
+    const uniqueKey = barcode || `${nameAr.toLowerCase()}|${nameEn.toLowerCase()}`;
+    if (uniqueKey) {
+      if (seenBarcodes.has(uniqueKey) || (barcode && seenBarcodes.has(barcode)) || (nameAr && seenNames.has(nameAr.toLowerCase()))) {
+        duplicatesCount++;
+        warnings.push(`تم تخطي صنف مكرر بالملف في السطر ${r}: ${nameAr || nameEn || barcode}`);
+        continue;
+      }
+      if (barcode) seenBarcodes.add(barcode);
+      if (nameAr) seenNames.add(nameAr.toLowerCase());
+      seenBarcodes.add(uniqueKey);
+    }
+
+    const rawPackSize = parseInt(getVal(packSizeCol).replace(/[^\d]/g, '') || 1, 10);
+    const packSize = Math.max(1, isNaN(rawPackSize) ? 1 : rawPackSize);
+    const unitPrice = packSize > 0 ? parseFloat((price / packSize).toFixed(2)) : price;
+
+    const tableVal = getVal(tableDrugCol).toLowerCase();
+    const isTableDrug = tableVal.includes('نعم') || tableVal.includes('true') || tableVal.includes('1') || tableVal.includes('جدول');
+
+    const fridgeVal = getVal(refrigeratedCol).toLowerCase();
+    const isRefrigerated = fridgeVal.includes('نعم') || fridgeVal.includes('true') || fridgeVal.includes('1') || fridgeVal.includes('ثلاجة');
+
+    parsedItems.push({
+      rowNumber: r,
+      gtin_barcode: barcode,
+      trade_name_ar: nameAr || nameEn,
+      trade_name_en: nameEn || nameAr,
+      generic_name: getVal(genericCol),
+      dosage_form: getVal(dosageFormCol) || 'أقراص',
+      pack_size: packSize,
+      unit_name: getVal(unitNameCol) || 'شريط',
+      public_price: price,
+      unit_price: unitPrice,
+      manufacturer: getVal(manufacturerCol),
+      is_table_drug: isTableDrug,
+      is_refrigerated: isRefrigerated
+    });
+  }
+
+  return {
+    success: true,
+    items: parsedItems,
+    totalRows: parsedItems.length,
+    duplicatesCount,
+    warnings
+  };
+}

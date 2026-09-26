@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { getPublicSystemUrl } from '../utils/systemUrlHelper';
 
 import ErrorBoundary from '../components/common/ErrorBoundary';
+import { selfHealingEngine } from '../utils/selfHealingEngine';
 import LoginPage from '../components/auth/LoginPage';
 import DesktopLayout from '../components/layout/DesktopLayout';
 import Dashboard from '../components/dashboard/Dashboard';
@@ -259,31 +260,42 @@ export default function AppRoutes() {
     }
   }, [isImpersonating]);
 
-  // ── مصيدة الأخطاء اللحظية وإرسالها لمركز رصد المطور (Telemetry Bug Sentry) ──
+  // ── منظومة الإصلاح الذاتي الذكي ومصيدة الأخطاء الفورية (Autonomous Self-Healing Sentry) ──
   useEffect(() => {
     const handleWindowError = (event) => {
       try {
-        const errorMsg = event.message || event.error?.message || String(event);
-        const errorStack = event.error?.stack || '';
-        const companyId = state?.orgSettings?.companyId || '';
-        const companyCode = state?.orgSettings?.companyCode || '';
-        fetch('/api/telemetry/report-error', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            error_message: errorMsg,
-            error_stack: errorStack,
-            screen_name: location.pathname + (location.search || ''),
-            company_id: companyId,
-            company_code: companyCode,
-            user_role: authRole
-          })
+        const error = event.error || event.message || String(event);
+        selfHealingEngine.diagnoseAndHeal(error, {
+          screenName: location.pathname + (location.search || ''),
+          companyId: state?.orgSettings?.companyId || '',
+          companyCode: state?.orgSettings?.companyCode || '',
+          userRole: authRole || 'none',
+          filename: event.filename,
+          lineno: event.lineno,
+          colno: event.colno
+        }).catch(() => {});
+      } catch {}
+    };
+
+    const handleUnhandledRejection = (event) => {
+      try {
+        const error = event.reason || 'Unhandled Promise Rejection';
+        selfHealingEngine.diagnoseAndHeal(error, {
+          screenName: location.pathname + (location.search || ''),
+          companyId: state?.orgSettings?.companyId || '',
+          companyCode: state?.orgSettings?.companyCode || '',
+          userRole: authRole || 'none',
+          type: 'unhandledrejection'
         }).catch(() => {});
       } catch {}
     };
 
     window.addEventListener('error', handleWindowError);
-    return () => window.removeEventListener('error', handleWindowError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    return () => {
+      window.removeEventListener('error', handleWindowError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
   }, [state?.orgSettings, authRole, location.pathname]);
 
   const {

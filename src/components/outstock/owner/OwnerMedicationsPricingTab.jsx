@@ -20,7 +20,14 @@ import {
   Printer,
   Plus,
   FileText,
-  Tag
+  Tag,
+  Download,
+  CheckSquare,
+  Square,
+  Trash2,
+  CheckCircle2,
+  FileCheck,
+  Cpu
 } from 'lucide-react';
 import {
   outstockSearchMedications,
@@ -33,6 +40,13 @@ import {
   outstockAddNewMedication
 } from '../../../utils/outstockApiClient';
 import { generateBarcodeSvgString } from '../../../utils/invoicePdfGenerator';
+import {
+  exportMedicationCatalogTemplateExcel,
+  parseMedicationExcelFile
+} from '../../../utils/outstockExcelExporter';
+import { extractMedicationsWithAi } from '../../../utils/outstockMedicationAiExtractor';
+import MedicationMasterCardModal from '../common/MedicationMasterCardModal';
+import AddMedicationModal from '../common/AddMedicationModal';
 
 export default function OwnerMedicationsPricingTab({ showToast = alert }) {
   // ── 1. الحالات العامة ──
@@ -47,7 +61,7 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
   const [isSyncing, setIsSyncing] = useState(false);
 
   // ── 2. حالة البحث في الكتالوج ──
-  const [searchTerm, setSearchTerm] = useState('alphintern');
+  const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
 
@@ -95,12 +109,23 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
   const [auditTotalPages, setAuditTotalPages] = useState(1);
   const [isLoadingAudit, setIsLoadingAudit] = useState(false);
 
-  // ── 8. حالة الرفع الجماعي للأسعار (Bulk Re-Pricer) ──
-  const [bulkCsvText, setBulkCsvText] = useState('');
+  // ── 8. حالة الرفع الجماعي للأسعار (Bulk Re-Pricer) مع إكسل والذكاء الاصطناعي ──
   const [bulkSource, setBulkSource] = useState('منشور التسعيرة الجبرية - هيئة الدواء المصرية');
   const [bulkDecree, setBulkDecree] = useState('');
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   const [bulkResult, setBulkResult] = useState(null);
+
+  // حالة استيراد الإكسل والتحليل بالذكاء الاصطناعي
+  const [bulkPreviewItems, setBulkPreviewItems] = useState([]);
+  const [selectedPreviewIndices, setSelectedPreviewIndices] = useState(new Set());
+  const [previewDuplicatesCount, setPreviewDuplicatesCount] = useState(0);
+  const [previewWarnings, setPreviewWarnings] = useState([]);
+  const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
+  const [aiStatusMsg, setAiStatusMsg] = useState('');
+  const [bulkMode, setBulkMode] = useState(null); // 'excel' | 'ai'
+
+  const excelFileInputRef = useRef(null);
+  const aiFileInputRef = useRef(null);
 
   // جلب الإحصائيات عند التحميل
   const fetchStats = async () => {
@@ -116,16 +141,15 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
 
   useEffect(() => {
     fetchStats();
-    handleSearch('alphintern');
+    handleSearch('');
   }, []);
 
   // دالة البحث في الأدوية
   const handleSearch = async (term) => {
     const q = String(term !== undefined ? term : searchTerm).trim();
-    if (!q || q.length < 2) return;
     setIsSearching(true);
     try {
-      const res = await outstockSearchMedications(q, 30);
+      const res = await outstockSearchMedications(q, 40);
       if (res?.success && Array.isArray(res.medications)) {
         setSearchResults(res.medications);
       } else {
@@ -135,6 +159,133 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
       console.warn('Med search error:', e);
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  // 1. تصدير نموذج إكسل فارغ واحترافي
+  const handleExportExcelTemplate = async () => {
+    try {
+      await exportMedicationCatalogTemplateExcel();
+      showToast('✅ تم تحميل نموذج الإكسل الاحترافي بنجاح');
+    } catch (err) {
+      showToast(`❌ فشل التصدير: ${err.message}`);
+    }
+  };
+
+  // 2. استيراد ملف إكسل مملوء بالأسعار
+  const handleExcelFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsBulkProcessing(true);
+    try {
+      const res = await parseMedicationExcelFile(file);
+      if (res.success && res.items.length > 0) {
+        setBulkPreviewItems(res.items);
+        setSelectedPreviewIndices(new Set(res.items.map((_, i) => i)));
+        setPreviewDuplicatesCount(res.duplicatesCount || 0);
+        setPreviewWarnings(res.warnings || []);
+        setBulkMode('excel');
+        setBulkResult(null);
+        showToast(`🎉 تم قراءة ${res.items.length} صنف من ملف الإكسل (تم استبعاد ${res.duplicatesCount || 0} تكرار)`);
+      } else {
+        showToast('⚠️ لم يتم العثور على أسطر صالحة بالملف');
+      }
+    } catch (err) {
+      showToast(`❌ تعذر قراءة ملف الإكسل: ${err.message}`);
+    } finally {
+      setIsBulkProcessing(false);
+      if (excelFileInputRef.current) excelFileInputRef.current.value = '';
+    }
+  };
+
+  // 3. تحليل بالذكاء الاصطناعي (Excel / PDF / صورة)
+  const handleAiFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsAiAnalyzing(true);
+    setAiStatusMsg('جاري بدء التحليل الذكي...');
+    try {
+      const res = await extractMedicationsWithAi(file, (msg) => setAiStatusMsg(msg));
+      if (res.success && res.items.length > 0) {
+        setBulkPreviewItems(res.items);
+        setSelectedPreviewIndices(new Set(res.items.map((_, i) => i)));
+        setPreviewDuplicatesCount(res.duplicatesCount || 0);
+        setPreviewWarnings(res.warnings || []);
+        setBulkMode('ai');
+        setBulkResult(null);
+        showToast(`✨ تم استخراج ${res.items.length} صنف بالذكاء الاصطناعي بنجاح!`);
+      } else {
+        showToast('⚠️ لم يتعرف الذكاء الاصطناعي على أصناف واضحة في المستند');
+      }
+    } catch (err) {
+      showToast(`❌ فشل التحليل بالذكاء الاصطناعي: ${err.message}`);
+    } finally {
+      setIsAiAnalyzing(false);
+      setAiStatusMsg('');
+      if (aiFileInputRef.current) aiFileInputRef.current.value = '';
+    }
+  };
+
+  // 4. التحكم في صفوف المعاينة
+  const handleTogglePreviewRow = (idx) => {
+    setSelectedPreviewIndices(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  const handleToggleAllPreview = () => {
+    if (selectedPreviewIndices.size === bulkPreviewItems.length) {
+      setSelectedPreviewIndices(new Set());
+    } else {
+      setSelectedPreviewIndices(new Set(bulkPreviewItems.map((_, i) => i)));
+    }
+  };
+
+  const handleRemovePreviewRow = (idx) => {
+    setBulkPreviewItems(prev => prev.filter((_, i) => i !== idx));
+    setSelectedPreviewIndices(prev => {
+      const next = new Set();
+      prev.forEach(i => {
+        if (i < idx) next.add(i);
+        else if (i > idx) next.add(i - 1);
+      });
+      return next;
+    });
+  };
+
+  // 5. تأكيد وحفظ التحديث الجماعي
+  const handleConfirmBulkSave = async () => {
+    const itemsToSave = bulkPreviewItems.filter((_, i) => selectedPreviewIndices.has(i));
+    if (itemsToSave.length === 0) {
+      showToast('⚠️ يرجى تحديد صنف واحد على الأقل للحفظ');
+      return;
+    }
+
+    setIsBulkProcessing(true);
+    try {
+      const res = await outstockBulkUpdatePrices({
+        items: itemsToSave,
+        source: bulkSource,
+        decreeNumber: bulkDecree
+      });
+
+      if (res?.success) {
+        setBulkResult(res);
+        setBulkPreviewItems([]);
+        setSelectedPreviewIndices(new Set());
+        showToast(`🎉 تم بنجاح تحديث وتعميم ${res.updatedCount || itemsToSave.length} صنف وإضافة ${res.insertedCount || 0} صنف جديد!`);
+        fetchStats();
+        handleSearch('');
+      } else {
+        showToast(`❌ خطأ في المعالجة: ${res?.error}`);
+      }
+    } catch (err) {
+      showToast(`❌ فشل التحديث الجماعي: ${err.message}`);
+    } finally {
+      setIsBulkProcessing(false);
     }
   };
 
@@ -317,61 +468,6 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
     link.click();
     document.body.removeChild(link);
     showToast('✅ تم تصدير الكتالوج إلى CSV بنجاح');
-  };
-
-  // معالجة التحديث الجماعي من النص أو CSV
-  const handleProcessBulk = async () => {
-    if (!bulkCsvText.trim()) {
-      showToast('يرجى لصق بيانات الأسعار أو الباركود');
-      return;
-    }
-
-    const lines = bulkCsvText.trim().split('\n');
-    const items = [];
-
-    for (const line of lines) {
-      const parts = line.split(/[,\t;|]+/).map(p => p.trim());
-      if (parts.length >= 2) {
-        // إذا كان العمود الأول باركود أو اسم
-        const col1 = parts[0];
-        const col2 = parseFloat(parts[1].replace(/[^0-9.]/g, ''));
-        const col3 = parts[2] ? parseInt(parts[2], 10) : 1;
-
-        if (!isNaN(col2)) {
-          if (/^\d{10,14}$/.test(col1)) {
-            items.push({ barcode: col1, newPublicPrice: col2, pack_size: col3 });
-          } else {
-            items.push({ tradeName: col1, newPublicPrice: col2, pack_size: col3 });
-          }
-        }
-      }
-    }
-
-    if (items.length === 0) {
-      showToast('لم يتم العثور على أسطر صالحة. التنسيق المطلوب: الباركود أو اسم الدواء، ثم السعر الجديد');
-      return;
-    }
-
-    setIsBulkProcessing(true);
-    try {
-      const res = await outstockBulkUpdatePrices({
-        items,
-        source: bulkSource,
-        decreeNumber: bulkDecree
-      });
-
-      if (res?.success) {
-        setBulkResult(res);
-        showToast(`🎉 تم تحديث ${res.updatedCount} صنف بنجاح! تم رصد ${res.priceIncreasesCount} زيادة في الأسعار.`);
-        fetchStats();
-      } else {
-        showToast(`❌ خطأ في المعالجة: ${res?.error}`);
-      }
-    } catch (e) {
-      showToast(`❌ فشل التحديث الجماعي: ${e.message}`);
-    } finally {
-      setIsBulkProcessing(false);
-    }
   };
 
   return (
@@ -947,7 +1043,7 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
         </div>
       )}
 
-      {/* ── 3. تبويب مستورد الأسعار الجماعي من Excel / CSV ── */}
+      {/* ── 3. تبويب مستورد وتحديث الأسعار الجماعي الذكي (Bulk Re-Pricer) ── */}
       {activeSubTab === 'bulk_upload' && (
         <div style={{
           background: '#ffffff',
@@ -956,30 +1052,54 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
           padding: '24px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '16px'
+          gap: '20px',
+          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.03)'
         }}>
-          <div>
-            <h3 style={{ fontSize: '16px', fontWeight: '900', color: '#0f172a', margin: '0 0 6px 0' }}>
-              مستورد قوائم التسعيرة الجبرية الجماعي (Bulk Excel & CSV Re-Pricer)
-            </h3>
-            <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>
-              يتيح لمدير المشتريات والمالك تحديث آلاف الأدوية دفعة واحدة عن طريق نسخ ولصق أعمدة الإكسل (الباركود والسعر الجديد) أو من منشورات هيئة الدواء.
-            </p>
+          {/* ترويسة التبويب */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <h3 style={{ fontSize: '18px', fontWeight: '900', color: '#0f172a', margin: '0 0 6px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FileSpreadsheet size={22} color="#0d9488" />
+                <span>مستورد وتحديث الأسعار الجماعي الذكي (Bulk Re-Pricer)</span>
+              </h3>
+              <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>
+                تصدير نموذج إكسل رسمي فارغ بكافة بيانات كارتة الصنف، أو الاستيراد المباشر من ملفات الإكسل، أو التحليل الشامل بالذكاء الاصطناعي مع منع التكرار.
+              </p>
+            </div>
+
+            {bulkResult && (
+              <div style={{
+                padding: '8px 16px',
+                background: '#ecfdf5',
+                border: '1px solid #a7f3d0',
+                borderRadius: '10px',
+                color: '#065f46',
+                fontSize: '13px',
+                fontWeight: '800',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}>
+                <CheckCircle2 size={16} />
+                <span>تم بنجاح تحديث {bulkResult.updatedCount} صنف دوائي!</span>
+              </div>
+            )}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px' }}>
+          {/* حقول مصدر التحديث والقرار الوزاري */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px', background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
             <div className="outstock-form-group">
-              <label>مصدر التعديل أو المنشور</label>
+              <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#334155' }}>مصدر التعديل أو المنشور</label>
               <input
                 type="text"
                 value={bulkSource}
                 onChange={(e) => setBulkSource(e.target.value)}
-                placeholder="مثلاً: منشور لجنة التسعير الجبري رقم 12"
+                placeholder="مثلاً: منشور لجنة التسعير الجبري الرسمي - هيئة الدواء"
                 className="outstock-form-input"
               />
             </div>
             <div className="outstock-form-group">
-              <label>رقم القرار الوزاري / المنشور (اختياري)</label>
+              <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#334155' }}>رقم القرار الوزاري / المنشور (اختياري)</label>
               <input
                 type="text"
                 value={bulkDecree}
@@ -990,47 +1110,389 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
             </div>
           </div>
 
-          <div className="outstock-form-group">
-            <label style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>انسخ والصق أعمدة الإكسل هنا (الباركود أو اسم الدواء ثم السعر الجديد)</span>
-              <span style={{ color: '#0d9488', fontSize: '12px' }}>مثال: 6221025030733, 87.00, 3</span>
-            </label>
-            <textarea
-              rows={8}
-              value={bulkCsvText}
-              onChange={(e) => setBulkCsvText(e.target.value)}
-              placeholder={`6221025030733, 87.00, 3\n6221025032362, 99.00, 3\n6221025022431, 52.00, 2`}
-              className="outstock-form-input"
-              style={{ fontFamily: 'monospace', fontSize: '13px', direction: 'ltr', textAlign: 'left' }}
-            />
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-            <button
-              type="button"
-              onClick={handleProcessBulk}
-              disabled={isBulkProcessing}
-              className="outstock-btn outstock-btn-primary"
-              style={{ padding: '10px 24px', fontSize: '14px' }}
-            >
-              <Upload size={17} />
-              <span>{isBulkProcessing ? 'جاري المعالجة السريعة وتحديث الأسعار...' : 'بدء تحديث وتعميم الأسعار فوراً'}</span>
-            </button>
-
-            {bulkResult && (
-              <div style={{
-                padding: '8px 16px',
-                background: '#ecfdf5',
-                border: '1px solid #a7f3d0',
-                borderRadius: '8px',
-                color: '#065f46',
-                fontSize: '13px',
-                fontWeight: '800'
-              }}>
-                تم بنجاح تحديث {bulkResult.updatedCount} صنف دوائي!
+          {/* ── بطاقات الإجراءات الثلاث الفاخرة (Export Template, Import Excel, AI Analyzer) ── */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: '16px'
+          }}>
+            {/* 1. بطاقة تصدير نموذج الإكسل الفارغ */}
+            <div style={{
+              background: '#f0fdfa',
+              border: '1.5px solid #99f6e4',
+              borderRadius: '14px',
+              padding: '18px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: '12px'
+            }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#0f766e', fontWeight: '900', fontSize: '14.5px', marginBottom: '6px' }}>
+                  <Download size={18} />
+                  <span>1. تصدير نموذج إكسل فارغ</span>
+                </div>
+                <p style={{ margin: 0, fontSize: '12.5px', color: '#475569', lineHeight: 1.45 }}>
+                  تحميل ملف إكسل رسمي منسق باحترافية يحتوي على كافة حقول كارتة الصنف وأمثلة إرشادية لملئه بالأسعار الجديدة.
+                </p>
               </div>
-            )}
+
+              <button
+                type="button"
+                onClick={handleExportExcelTemplate}
+                className="outstock-btn outstock-btn-primary"
+                style={{ width: '100%', padding: '10px 14px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+              >
+                <Download size={16} />
+                <span>تحميل نموذج الإكسل الفارغ (.xlsx)</span>
+              </button>
+            </div>
+
+            {/* 2. بطاقة استيراد وتحديث من ملف إكسل */}
+            <div style={{
+              background: '#eff6ff',
+              border: '1.5px solid #bfdbfe',
+              borderRadius: '14px',
+              padding: '18px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: '12px'
+            }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1d4ed8', fontWeight: '900', fontSize: '14.5px', marginBottom: '6px' }}>
+                  <Upload size={18} />
+                  <span>2. استيراد وتحديث من إكسل</span>
+                </div>
+                <p style={{ margin: 0, fontSize: '12.5px', color: '#475569', lineHeight: 1.45 }}>
+                  رفع ملف الإكسل المعبأ من قبل المسؤول لاستخراج وتدقيق وتحديث الأسعار جماعياً مع منع تام لتكرار الأصناف.
+                </p>
+              </div>
+
+              {/* مدخل ملف مخفي */}
+              <input
+                type="file"
+                ref={excelFileInputRef}
+                accept=".xlsx, .xls"
+                style={{ display: 'none' }}
+                onChange={handleExcelFileSelect}
+              />
+
+              <button
+                type="button"
+                onClick={() => excelFileInputRef.current?.click()}
+                disabled={isBulkProcessing}
+                style={{
+                  background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '10px',
+                  padding: '10px 14px',
+                  fontSize: '13px',
+                  fontWeight: '800',
+                  cursor: isBulkProcessing ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Upload size={16} />
+                <span>{isBulkProcessing && bulkMode === 'excel' ? 'جاري قراءة الإكسل...' : 'استيراد وتدقيق ملف إكسل'}</span>
+              </button>
+            </div>
+
+            {/* 3. بطاقة التحليل بالذكاء الاصطناعي (AI Document Analyzer) */}
+            <div style={{
+              background: 'linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)',
+              border: '1.5px solid #d8b4fe',
+              borderRadius: '14px',
+              padding: '18px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: '12px'
+            }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#7e22ce', fontWeight: '900', fontSize: '14.5px', marginBottom: '6px' }}>
+                  <Sparkles size={18} color="#9333ea" />
+                  <span>3. تحليل بالذكاء الاصطناعي</span>
+                </div>
+                <p style={{ margin: 0, fontSize: '12.5px', color: '#475569', lineHeight: 1.45 }}>
+                  تحليل ذكي فوري لأي ملف إكسل أو مستند PDF أو صورة فاتورة/كشف لاستخراج الأصناف والبيانات والتسعيرة مع منع التكرار.
+                </p>
+              </div>
+
+              {/* مدخل ملف ذكاء اصطناعي مخفي */}
+              <input
+                type="file"
+                ref={aiFileInputRef}
+                accept=".xlsx, .xls, .pdf, image/*"
+                style={{ display: 'none' }}
+                onChange={handleAiFileSelect}
+              />
+
+              <button
+                type="button"
+                onClick={() => aiFileInputRef.current?.click()}
+                disabled={isAiAnalyzing}
+                style={{
+                  background: 'linear-gradient(135deg, #9333ea, #7e22ce)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '10px',
+                  padding: '10px 14px',
+                  fontSize: '13px',
+                  fontWeight: '800',
+                  cursor: isAiAnalyzing ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 12px rgba(147, 51, 234, 0.28)',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Sparkles size={16} />
+                <span>{isAiAnalyzing ? 'جاري التحليل بالذكاء الاصطناعي...' : 'تحليل ذكي (Excel / PDF / صورة)'}</span>
+              </button>
+            </div>
           </div>
+
+          {/* مؤشر حالة تحليل الذكاء الاصطناعي */}
+          {isAiAnalyzing && (
+            <div style={{
+              background: '#fdf4ff',
+              border: '1.5px solid #f0abfc',
+              borderRadius: '12px',
+              padding: '14px 18px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              color: '#86198f',
+              fontSize: '13.5px',
+              fontWeight: '700'
+            }}>
+              <RefreshCw size={18} className="spin" color="#a21caf" />
+              <span>{aiStatusMsg || 'جاري استخراج بيانات الأدوية والأسعار بالذكاء الاصطناعي...'}</span>
+            </div>
+          )}
+
+          {/* تنبيهات التكرار إن وجدت */}
+          {previewDuplicatesCount > 0 && (
+            <div style={{
+              background: '#fffbeb',
+              border: '1px solid #fde68a',
+              borderRadius: '10px',
+              padding: '10px 14px',
+              color: '#92400e',
+              fontSize: '12.5px',
+              fontWeight: '700',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}>
+              <AlertTriangle size={16} color="#d97706" />
+              <span>تم رصد واستبعاد {previewDuplicatesCount} صنف مكرر تلقائياً لضمان سلامة قاعدة البيانات وعدم تكرار الأصناف.</span>
+            </div>
+          )}
+
+          {/* ── جدول المعاينة والتأكيد قبل الحفظ (Interactive Pre-Save Preview) ── */}
+          {bulkPreviewItems.length > 0 && (
+            <div style={{
+              background: '#ffffff',
+              border: '1.5px solid #0d9488',
+              borderRadius: '16px',
+              padding: '18px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+              boxShadow: '0 8px 24px rgba(13, 148, 136, 0.08)'
+            }}>
+              {/* شريط أدوات المعاينة */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '15px', fontWeight: '900', color: '#0f172a' }}>
+                    معاينة الأصناف المستخرجة قبل الاعتماد ({selectedPreviewIndices.size} محدد من {bulkPreviewItems.length})
+                  </span>
+                  <span style={{
+                    padding: '3px 10px',
+                    borderRadius: '20px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    background: bulkMode === 'ai' ? '#f3e8ff' : '#eff6ff',
+                    color: bulkMode === 'ai' ? '#7e22ce' : '#1d4ed8',
+                    border: '1px solid',
+                    borderColor: bulkMode === 'ai' ? '#d8b4fe' : '#bfdbfe'
+                  }}>
+                    {bulkMode === 'ai' ? '✨ استخراج بالذكاء الاصطناعي' : '📊 مستورد من ملف إكسل'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={handleToggleAllPreview}
+                    className="outstock-btn outstock-btn-secondary"
+                    style={{ fontSize: '12px', padding: '6px 12px' }}
+                  >
+                    {selectedPreviewIndices.size === bulkPreviewItems.length ? 'إلغاء تحديد الكل' : 'تحديد جميع الأصناف'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm('هل تريد إلغاء المعاينة وتفريغ القائمة؟')) {
+                        setBulkPreviewItems([]);
+                        setSelectedPreviewIndices(new Set());
+                      }
+                    }}
+                    className="outstock-btn outstock-btn-secondary"
+                    style={{ fontSize: '12px', padding: '6px 12px', color: '#dc2626' }}
+                  >
+                    إلغاء المعاينة
+                  </button>
+                </div>
+              </div>
+
+              {/* الجدول التفاعلي */}
+              <div style={{ maxHeight: '420px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '12px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '12.5px' }}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #e2e8f0', color: '#475569' }}>
+                      <th style={{ padding: '10px 12px', textAlign: 'center', width: '40px' }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedPreviewIndices.size === bulkPreviewItems.length && bulkPreviewItems.length > 0}
+                          onChange={handleToggleAllPreview}
+                        />
+                      </th>
+                      <th style={{ padding: '10px 10px', width: '45px', textAlign: 'center' }}>#</th>
+                      <th style={{ padding: '10px 12px' }}>الباركود الدولي</th>
+                      <th style={{ padding: '10px 12px' }}>اسم الدواء التجاري</th>
+                      <th style={{ padding: '10px 12px' }}>المادة الفعالة</th>
+                      <th style={{ padding: '10px 12px' }}>الشكل والتركيز</th>
+                      <th style={{ padding: '10px 10px', textAlign: 'center' }}>الشرائط</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left' }}>سعر العلبة</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left' }}>سعر الشريط</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'center' }}>الرقابة</th>
+                      <th style={{ padding: '10px 10px', textAlign: 'center' }}>حذف</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bulkPreviewItems.map((item, idx) => {
+                      const isChecked = selectedPreviewIndices.has(idx);
+                      return (
+                        <tr
+                          key={idx}
+                          style={{
+                            borderBottom: '1px solid #f1f5f9',
+                            background: isChecked ? '#ffffff' : '#f8fafc',
+                            opacity: isChecked ? 1 : 0.6
+                          }}
+                        >
+                          <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => handleTogglePreviewRow(idx)}
+                            />
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'center', color: '#94a3b8', fontSize: '11px' }}>
+                            {idx + 1}
+                          </td>
+                          <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: '12px', color: '#334155' }}>
+                            {item.gtin_barcode || '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px' }}>
+                            <div style={{ fontWeight: '800', color: '#0f172a' }}>{item.trade_name_ar}</div>
+                            {item.trade_name_en && (
+                              <div style={{ fontSize: '11.5px', color: '#64748b', direction: 'ltr', textAlign: 'right' }}>
+                                {item.trade_name_en}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '8px 12px', color: '#475569', fontSize: '12px' }}>
+                            {item.generic_name || '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px', color: '#475569' }}>
+                            {item.dosage_form} {item.strength || ''}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 'bold' }}>
+                            {item.pack_size}
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '900', color: '#0f766e' }}>
+                            {parseFloat(item.public_price || 0).toFixed(2)} ج.م
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '700', color: '#059669' }}>
+                            {parseFloat(item.unit_price || 0).toFixed(2)} ج.م
+                          </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                            <div style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+                              {item.is_table_drug && (
+                                <span style={{ padding: '1px 5px', borderRadius: '4px', background: '#fee2e2', color: '#b91c1c', fontSize: '10px', fontWeight: 'bold' }}>
+                                  جدول 🚨
+                                </span>
+                              )}
+                              {item.is_refrigerated && (
+                                <span style={{ padding: '1px 5px', borderRadius: '4px', background: '#eff6ff', color: '#1d4ed8', fontSize: '10px', fontWeight: 'bold' }}>
+                                  ثلاجة ❄️
+                                </span>
+                              )}
+                              {!item.is_table_drug && !item.is_refrigerated && (
+                                <span style={{ color: '#94a3b8', fontSize: '11px' }}>عادي</span>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePreviewRow(idx)}
+                              style={{
+                                border: 'none',
+                                background: 'transparent',
+                                color: '#ef4444',
+                                cursor: 'pointer',
+                                padding: '4px',
+                                borderRadius: '6px'
+                              }}
+                              title="حذف من المعاينة"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* زر الحفظ النهائي المعتمد */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', paddingTop: '8px' }}>
+                <div style={{ fontSize: '13px', color: '#475569', fontWeight: '700' }}>
+                  سيتم تطبيق ونشر الأسعار الرسمية فوراً على قاعدة بيانات الكتالوج المركزي وتوثيقها في سجل التدقيق الرقابي.
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleConfirmBulkSave}
+                  disabled={isBulkProcessing || selectedPreviewIndices.size === 0}
+                  className="outstock-btn outstock-btn-primary"
+                  style={{ padding: '11px 26px', fontSize: '14px', fontWeight: '800' }}
+                >
+                  <CheckCircle2 size={18} />
+                  <span>
+                    {isBulkProcessing
+                      ? 'جاري حفظ وتعميم الأسعار...'
+                      : `تأكيد واعتماد وتحديث (${selectedPreviewIndices.size}) صنف الآن 🚀`}
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1170,255 +1632,13 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
       )}
 
       {/* ── 5. نافذة كارتة الصنف والبدائل (Item Master Card Modal) ── */}
-      {masterCardMedId && (
-        <div
-          className="outstock-modal-backdrop"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.75)',
-            backdropFilter: 'blur(5px)',
-            zIndex: 99999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px'
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setMasterCardMedId(null);
-          }}
-        >
-          <div
-            style={{
-              background: '#ffffff',
-              borderRadius: '16px',
-              width: '100%',
-              maxWidth: '750px',
-              maxHeight: '90vh',
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-              direction: 'rtl'
-            }}
-          >
-            <div
-              style={{
-                padding: '16px 20px',
-                background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
-                color: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <FileText size={22} />
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800' }}>كارتة الصنف الشاملة والبدائل الدوائية</h3>
-                  <p style={{ margin: 0, fontSize: '12px', opacity: 0.9 }}>
-                    هيئة الدواء المصرية ودليل دراج آي الشامل
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setMasterCardMedId(null)}
-                style={{
-                  background: 'rgba(255, 255, 255, 0.2)',
-                  border: 'none',
-                  borderRadius: '6px',
-                  color: '#ffffff',
-                  cursor: 'pointer',
-                  padding: '5px'
-                }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-              {isLoadingMasterCard || !masterCardData ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
-                  <RefreshCw size={28} className="outstock-spin" style={{ margin: '0 auto 8px' }} />
-                  <p>جاري استرجاع بيانات كارتة الصنف والبدائل...</p>
-                </div>
-              ) : (
-                <>
-                  <div style={{ background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '16px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
-                      <div>
-                        <h2 style={{ margin: '0 0 4px 0', fontSize: '18px', fontWeight: '800', color: '#0f172a' }}>
-                          {masterCardData.medication.trade_name_ar}
-                        </h2>
-                        <div style={{ fontSize: '14px', color: '#0d9488', fontWeight: '700', direction: 'ltr', textAlign: 'right' }}>
-                          {masterCardData.medication.trade_name_en}
-                        </div>
-                      </div>
-                      <div style={{ textAlign: 'left' }}>
-                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>السعر الرسمي</span>
-                        <strong style={{ fontSize: '20px', color: '#065f46' }}>
-                          {masterCardData.medication.public_price.toFixed(2)} ج.م
-                        </strong>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginTop: '14px', fontSize: '12.5px', borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block' }}>المادة الفعالة:</span>
-                        <strong style={{ color: '#0f172a' }}>{masterCardData.medication.generic_name || 'غير محدد'}</strong>
-                      </div>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block' }}>الشكل والتركيز:</span>
-                        <strong style={{ color: '#0f172a' }}>{masterCardData.medication.dosage_form} {masterCardData.medication.strength || ''}</strong>
-                      </div>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block' }}>حجم العبوة:</span>
-                        <strong style={{ color: '#0f172a' }}>{masterCardData.medication.pack_size} {masterCardData.medication.unit_name || 'شريط'} (الشريط: {masterCardData.medication.unit_price.toFixed(2)} ج.م)</strong>
-                      </div>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block' }}>الشركة المصنعة:</span>
-                        <strong style={{ color: '#0f172a' }}>{masterCardData.medication.manufacturer || 'غير مسجلة'}</strong>
-                      </div>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block' }}>الباركود الدولي:</span>
-                        <strong style={{ color: '#0f172a', fontFamily: 'monospace' }}>{masterCardData.medication.gtin_barcode || 'لا يوجد'}</strong>
-                      </div>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block' }}>رقم التسجيل (EDA):</span>
-                        <strong style={{ color: '#0f172a', fontFamily: 'monospace' }}>{masterCardData.medication.eda_reg_no || 'غير مسجل'}</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Layers size={16} color="#0d9488" />
-                      <span>المثائل والبدائل بنفس المادة الفعالة ({masterCardData.substitutes?.length || 0}):</span>
-                    </h4>
-
-                    {Array.isArray(masterCardData.substitutes) && masterCardData.substitutes.length > 0 ? (
-                      <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px', overflow: 'hidden' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
-                          <thead>
-                            <tr style={{ background: '#f8fafc', color: '#475569', textAlign: 'right' }}>
-                              <th style={{ padding: '8px 12px' }}>اسم البديل</th>
-                              <th style={{ padding: '8px 12px' }}>الشكل</th>
-                              <th style={{ padding: '8px 12px' }}>الشركة</th>
-                              <th style={{ padding: '8px 12px', textAlign: 'left' }}>سعر العبوة</th>
-                              <th style={{ padding: '8px 12px', textAlign: 'center' }}>إجراء</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {masterCardData.substitutes.map((sub) => {
-                              const diff = sub.public_price - masterCardData.medication.public_price;
-                              return (
-                                <tr key={sub.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                  <td style={{ padding: '8px 12px', fontWeight: '700', color: '#1e293b' }}>
-                                    {sub.trade_name_ar}
-                                    <span style={{ fontSize: '11.5px', color: '#64748b', display: 'block', direction: 'ltr', textAlign: 'right' }}>
-                                      {sub.trade_name_en}
-                                    </span>
-                                  </td>
-                                  <td style={{ padding: '8px 12px', color: '#475569' }}>{sub.dosage_form}</td>
-                                  <td style={{ padding: '8px 12px', color: '#64748b' }}>{sub.manufacturer || '-'}</td>
-                                  <td style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 'bold' }}>
-                                    <span style={{ color: diff < 0 ? '#15803d' : diff > 0 ? '#b91c1c' : '#0d9488' }}>
-                                      {sub.public_price.toFixed(2)} ج.م
-                                    </span>
-                                  </td>
-                                  <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenMasterCard(sub.id)}
-                                      style={{
-                                        background: '#f1f5f9',
-                                        border: '1px solid #cbd5e1',
-                                        borderRadius: '6px',
-                                        padding: '4px 8px',
-                                        fontSize: '11.5px',
-                                        fontWeight: '700',
-                                        cursor: 'pointer',
-                                        color: '#334155'
-                                      }}
-                                    >
-                                      عرض
-                                    </button>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
-                        لا توجد بدائل مسجلة بنفس المادة الفعالة حالياً.
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <History size={16} color="#059669" />
-                      <span>سجل تحريك وتغيرات الأسعار:</span>
-                    </h4>
-
-                    {Array.isArray(masterCardData.priceHistory) && masterCardData.priceHistory.length > 0 ? (
-                      <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px', overflow: 'hidden' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                          <thead>
-                            <tr style={{ background: '#f8fafc', color: '#475569', textAlign: 'right' }}>
-                              <th style={{ padding: '8px 10px' }}>التاريخ</th>
-                              <th style={{ padding: '8px 10px' }}>السابق</th>
-                              <th style={{ padding: '8px 10px' }}>الجديد</th>
-                              <th style={{ padding: '8px 10px' }}>المصدر والقرار</th>
-                              <th style={{ padding: '8px 10px' }}>المعدل</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {masterCardData.priceHistory.map((h, i) => (
-                              <tr key={h.id || i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                <td style={{ padding: '8px 10px', color: '#475569' }}>
-                                  {new Date(h.created_at).toLocaleDateString('ar-EG')}
-                                </td>
-                                <td style={{ padding: '8px 10px', color: '#64748b', textDecoration: 'line-through' }}>
-                                  {h.old_public_price?.toFixed(2)} ج.م
-                                </td>
-                                <td style={{ padding: '8px 10px', fontWeight: 'bold', color: '#059669' }}>
-                                  {h.new_public_price?.toFixed(2)} ج.م
-                                </td>
-                                <td style={{ padding: '8px 10px', color: '#334155' }}>
-                                  {h.revision_source || h.decree_number || 'تعديل رسمي'}
-                                </td>
-                                <td style={{ padding: '8px 10px', color: '#64748b' }}>{h.changed_by || 'الإدارة'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', textAlign: 'center', color: '#64748b', fontSize: '12.5px' }}>
-                        لا توجد تعديلات سعرية سابقة مسجلة.
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div style={{ padding: '12px 20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', textAlign: 'left' }}>
-              <button
-                type="button"
-                onClick={() => setMasterCardMedId(null)}
-                style={{ padding: '8px 18px', borderRadius: '8px', background: '#e2e8f0', color: '#334155', border: 'none', fontWeight: '700', cursor: 'pointer' }}
-              >
-                إغلاق
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <MedicationMasterCardModal
+        medicationId={masterCardMedId}
+        masterCardData={masterCardData}
+        isLoading={isLoadingMasterCard}
+        onClose={() => setMasterCardMedId(null)}
+        onSelectSubstitute={(subId) => handleOpenMasterCard(subId)}
+      />
 
       {/* ── 6. نافذة طباعة ملصق الباركود الحراري (Barcode Label Printing Modal) ── */}
       {barcodeMedToPrint && (
@@ -1634,271 +1854,14 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
       )}
 
       {/* ── 7. نافذة إضافة صنف دوائي جديد (Owner Add Medication Modal) ── */}
-      {isAddModalOpen && (
-        <div
-          className="outstock-modal-backdrop"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.75)',
-            backdropFilter: 'blur(5px)',
-            zIndex: 99999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px'
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !isSavingNewMed) setIsAddModalOpen(false);
-          }}
-        >
-          <div
-            style={{
-              background: '#ffffff',
-              borderRadius: '16px',
-              width: '100%',
-              maxWidth: '650px',
-              maxHeight: '92vh',
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-              direction: 'rtl'
-            }}
-          >
-            <div
-              style={{
-                padding: '16px 20px',
-                background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
-                color: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Plus size={22} />
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800' }}>إضافة دواء جديد للكتالوج المركزي</h3>
-                  <p style={{ margin: 0, fontSize: '12px', opacity: 0.9 }}>
-                    يتم الحفظ في قاعدة البيانات ويظهر فوراً لكافة الفروع
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsAddModalOpen(false)}
-                disabled={isSavingNewMed}
-                style={{ background: 'rgba(255, 255, 255, 0.2)', border: 'none', borderRadius: '6px', color: '#ffffff', cursor: 'pointer', padding: '5px' }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveNewMedication} style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1e293b', display: 'block', marginBottom: '4px' }}>
-                    اسم الصنف بالعربي * :
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="مثال: ألفانترن أقراص"
-                    value={newMedForm.trade_name_ar}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, trade_name_ar: e.target.value })}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1e293b', display: 'block', marginBottom: '4px' }}>
-                    الاسم بالإنجليزي (Trade Name):
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Alphintern 30 Tabs"
-                    value={newMedForm.trade_name_en}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, trade_name_en: e.target.value })}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box', direction: 'ltr' }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1e293b', display: 'block', marginBottom: '4px' }}>
-                  المادة الفعالة (Generic Name):
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Chymotrypsin + Trypsin"
-                  value={newMedForm.generic_name}
-                  onChange={(e) => setNewMedForm({ ...newMedForm, generic_name: e.target.value })}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box', direction: 'ltr' }}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                    الشكل الدوائي:
-                  </label>
-                  <select
-                    value={newMedForm.dosage_form}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, dosage_form: e.target.value })}
-                    style={{ width: '100%', padding: '9px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
-                  >
-                    <option value="أقراص (Tablets)">أقراص (Tablets)</option>
-                    <option value="كبسولات (Capsules)">كبسولات (Capsules)</option>
-                    <option value="شراب (Syrup)">شراب (Syrup)</option>
-                    <option value="حقن (Injection)">حقن (Injection)</option>
-                    <option value="مرهم / كريم (Ointment/Cream)">مرهم / كريم</option>
-                    <option value="نقط (Drops)">نقط (Drops)</option>
-                    <option value="فوار / أكياس (Sachets)">فوار / أكياس</option>
-                    <option value="أخرى">أخرى</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                    عدد الشرائط/الوحدات:
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={newMedForm.pack_size}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, pack_size: parseInt(e.target.value || 1, 10) })}
-                    style={{ width: '100%', padding: '9px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                    اسم الوحدة:
-                  </label>
-                  <input
-                    type="text"
-                    value={newMedForm.unit_name}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, unit_name: e.target.value })}
-                    style={{ width: '100%', padding: '9px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#047857', display: 'block', marginBottom: '4px' }}>
-                    السعر الرسمي للعبوة (ج.م) * :
-                  </label>
-                  <input
-                    type="number"
-                    step="0.25"
-                    min="0"
-                    placeholder="مثال: 87.00"
-                    value={newMedForm.public_price}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, public_price: e.target.value })}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '2px solid #059669', fontSize: '14px', fontWeight: 'bold', boxSizing: 'border-box' }}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1e293b', display: 'block', marginBottom: '4px' }}>
-                    الباركود الدولي (Barcode):
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="مثال: 6221025030733"
-                    value={newMedForm.gtin_barcode}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, gtin_barcode: e.target.value })}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ fontSize: '12px', color: '#475569', fontWeight: '600', display: 'block', marginBottom: '4px' }}>
-                    الشركة المصنعة (Manufacturer):
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="مثال: Amoun / Eva / Novartis"
-                    value={newMedForm.manufacturer}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, manufacturer: e.target.value })}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '12px', color: '#475569', fontWeight: '600', display: 'block', marginBottom: '4px' }}>
-                    التصنيف الدوائي (Category):
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="مثال: مضاد للتورم والالتهاب"
-                    value={newMedForm.category}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, category: e.target.value })}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '20px', background: '#f8fafc', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', color: '#991b1b' }}>
-                  <input
-                    type="checkbox"
-                    checked={newMedForm.is_table_drug}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, is_table_drug: e.target.checked })}
-                    style={{ width: '16px', height: '16px', accentColor: '#dc2626' }}
-                  />
-                  <span>صنف جدول رقابة دوائية</span>
-                </label>
-
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', color: '#0369a1' }}>
-                  <input
-                    type="checkbox"
-                    checked={newMedForm.is_refrigerated}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, is_refrigerated: e.target.checked })}
-                    style={{ width: '16px', height: '16px', accentColor: '#0284c7' }}
-                  />
-                  <span>يحفظ بالثلاجة ❄️</span>
-                </label>
-              </div>
-
-              <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-                <button
-                  type="submit"
-                  disabled={isSavingNewMed}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '10px',
-                    fontSize: '14px',
-                    fontWeight: '800',
-                    cursor: isSavingNewMed ? 'not-allowed' : 'pointer',
-                    boxShadow: '0 4px 12px rgba(5, 150, 105, 0.25)'
-                  }}
-                >
-                  {isSavingNewMed ? 'جاري الحفظ في الكتالوج...' : 'حفظ وإضافة الصنف للكتالوج المركزي'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  disabled={isSavingNewMed}
-                  style={{ padding: '12px 18px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: '10px', fontWeight: '700', cursor: 'pointer' }}
-                >
-                  إلغاء
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <AddMedicationModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onSaveSuccess={(createdMed) => {
+          showToast?.(`✅ تم إضافة صنف "${createdMed.trade_name_ar}" للكتالوج المركزي بنجاح`);
+          handleSearch(searchTerm || '');
+        }}
+      />
     </div>
   );
 }

@@ -1295,7 +1295,28 @@ export async function seedEdaMedications(db, medsList) {
 // ── 5. البحث اللحظي السريع في كتالوج الأدوية (Fast Realtime Autocomplete) ──────
 export async function searchEdaMedications(db, queryTerm, limit = 15) {
   const clean = String(queryTerm || '').trim();
-  if (!clean || clean.length < 2) return [];
+  if (!clean) {
+    const fetchLimit = Math.min(100, Math.max(1, limit || 40));
+    const res = await db.query(`
+      SELECT
+        id, eda_reg_no, trade_name_en, trade_name_ar, generic_name,
+        dosage_form, strength, pack_size, unit_name, public_price,
+        unit_price, manufacturer, category, is_table_drug, is_refrigerated,
+        gtin_barcode, market_status, updated_at, created_at
+      FROM public.outstock_medications
+      ORDER BY trade_name_en ASC
+      LIMIT $1
+    `, [fetchLimit]);
+
+    return res.rows.map(r => ({
+      ...r,
+      public_price: parseFloat(r.public_price || 0),
+      unit_price: parseFloat(r.unit_price || 0),
+      pack_size: parseInt(r.pack_size || 1, 10),
+      displayName: `${r.trade_name_ar} (${r.trade_name_en})`,
+      has_recent_update: r.updated_at && r.created_at && (new Date(r.updated_at).getTime() - new Date(r.created_at).getTime() > 1000)
+    }));
+  }
 
   const normalized = normalizeDrugSearchText(clean);
   const pattern = `%${normalized}%`;
@@ -1406,14 +1427,22 @@ export async function syncOrUpdateMedications(db, medicationsList, revisionSourc
       `${med.trade_name_en || ''} ${med.trade_name_ar || ''} ${med.generic_name || ''} ${med.manufacturer || ''}`
     );
 
-    // البحث عن الدواء إذا كان مسجلاً مسبقاً لمقارنة السعر
+    // البحث عن الدواء إذا كان مسجلاً مسبقاً لمقارنة السعر ومنع تكرار الأصناف
     const existingRes = await db.query(`
       SELECT id, public_price, unit_price, trade_name_ar
       FROM public.outstock_medications
       WHERE (eda_reg_no IS NOT NULL AND eda_reg_no = $1)
-         OR (LOWER(trade_name_en) = LOWER($2) AND dosage_form = $3)
+         OR (gtin_barcode IS NOT NULL AND gtin_barcode != '' AND gtin_barcode = $4)
+         OR (LOWER(trade_name_en) = LOWER($2) AND (dosage_form = $3 OR $3 IS NULL OR $3 = ''))
+         OR (LOWER(trade_name_ar) = LOWER($5) AND (dosage_form = $3 OR $3 IS NULL OR $3 = ''))
       LIMIT 1
-    `, [med.eda_reg_no || '__none__', med.trade_name_en || '', med.dosage_form || '']);
+    `, [
+      med.eda_reg_no || '__none__',
+      med.trade_name_en || '',
+      med.dosage_form || '',
+      med.gtin_barcode || '__none__',
+      med.trade_name_ar || ''
+    ]);
 
     if (existingRes.rows.length > 0) {
       const existing = existingRes.rows[0];
@@ -1699,78 +1728,213 @@ export async function bulkUpdateMedicationPrices(db, {
   };
 }
 
+// ── 9.6 دوال استنتاج وتدقيق العبوات والشرائط التلقائية (Packaging Deduction Engine) ─
+function cleanNameForMatching(n) {
+  return String(n || '')
+    .toLowerCase()
+    .replace(/\s*\((?:n\/a|cancelled|illegal import|imported)[^)]*\)/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+export function deducePackagingAndStrips(nameEn, nameAr, defaultUnits = 1, description = '') {
+  const nEn = String(nameEn || '').toLowerCase();
+  const nAr = String(nameAr || '');
+  const text = (nEn + ' ' + nAr).toLowerCase();
+
+  // 1. السوائل والمستحضرات الموضعية
+  if (/\b(syrup|شراب)\b/i.test(text)) return { dosageForm: 'شراب فموي', unitName: 'زجاجة', packSize: 1 };
+  if (/\b(susp|suspension|معلق)\b/i.test(text)) return { dosageForm: 'معلق للشرب', unitName: 'زجاجة', packSize: 1 };
+  if (/\b(drop|drops|نقط|قطرة|قطره)\b/i.test(text)) return { dosageForm: 'نقط (قطرة)', unitName: 'زجاجة', packSize: 1 };
+  if (/\b(cream|كريم)\b/i.test(text)) return { dosageForm: 'كريم موضعي', unitName: 'أنبوبة', packSize: 1 };
+  if (/\b(oint|ointment|مرهم)\b/i.test(text)) return { dosageForm: 'مرهم موضعي', unitName: 'أنبوبة', packSize: 1 };
+  if (/\b(gel|جل)\b/i.test(text)) return { dosageForm: 'جل موضعي', unitName: 'أنبوبة', packSize: 1 };
+  if (/\b(spray|بخاخ|بخاخة)\b/i.test(text)) return { dosageForm: 'بخاخ موضعي', unitName: 'بخاخ', packSize: 1 };
+  if (/\b(lotion|لوشن)\b/i.test(text)) return { dosageForm: 'لوشن موضعي', unitName: 'زجاجة', packSize: 1 };
+  if (/\b(mouth\s*wash|مضمضة|غسول)\b/i.test(text)) return { dosageForm: 'غسول فم', unitName: 'زجاجة', packSize: 1 };
+  if (/\b(shampoo|شامبو)\b/i.test(text)) return { dosageForm: 'شامبو', unitName: 'زجاجة', packSize: 1 };
+  if (/\b(solution|محلول)\b/i.test(text) && !/tab|cap|amp|sachet/i.test(text)) return { dosageForm: 'محلول', unitName: 'زجاجة', packSize: 1 };
+
+  // 2. الفيال (حقن فيال)
+  if (/\b(vial|vials|فيال)\b/i.test(text)) {
+    const m = text.match(/(\d+)\s*(vial|vials|فيال)/i);
+    const count = m ? parseInt(m[1], 10) : (defaultUnits > 1 && defaultUnits <= 50 ? defaultUnits : 1);
+    return { dosageForm: 'فيال حقن', unitName: 'فيال', packSize: Math.max(1, count) };
+  }
+
+  // 3. الأمبولات (حقن أمبولات)
+  if (/\b(amp|amps|ampoule|ampoules|امبول|أمبول|أمبولات|امبولات)\b/i.test(text)) {
+    const m = text.match(/(\d+)\s*(amp|amps|ampoule|ampoules|امبول|أمبول|أمبولات|امبولات)/i);
+    let count = m ? parseInt(m[1], 10) : (defaultUnits > 1 && defaultUnits <= 50 ? defaultUnits : 1);
+    return { dosageForm: 'أمبولات حقن', unitName: 'أمبول', packSize: Math.max(1, count) };
+  }
+
+  // 4. الفوار والأكياس
+  if (/\b(sachet|sachets|efferv|فوار|أكياس|اكياس|كيس)\b/i.test(text) || /eff\.?\s*gr/i.test(text)) {
+    const m = text.match(/(\d+)\s*(sachet|sachets|eff|كيس|أكياس|اكياس)/i);
+    let count = m ? parseInt(m[1], 10) : (defaultUnits > 1 && defaultUnits <= 100 ? defaultUnits : 1);
+    return { dosageForm: 'أكياس فوار', unitName: 'كيس فوار', packSize: Math.max(1, count) };
+  }
+
+  // 5. اللبوس (تحاميل)
+  if (/\b(supp|supps|suppository|suppositories|لبوس|تحاميل|قمع)\b/i.test(text)) {
+    const m = text.match(/(\d+)\s*(supp|supps|suppository|suppositories|لبوس|تحاميل)/i);
+    const count = m ? parseInt(m[1], 10) : 5;
+    const strips = count >= 10 ? Math.round(count / 5) : 1;
+    return { dosageForm: 'لبوس (تحاميل)', unitName: 'شريط', packSize: strips };
+  }
+
+  // 6. عدد الشرائط المذكور صراحة
+  const stripMatch = text.match(/(\d+)\s*(strip|strips|شريط|شرائط|اشرطة)/i);
+  if (stripMatch) {
+    const count = parseInt(stripMatch[1], 10);
+    return { dosageForm: 'أقراص', unitName: 'شريط', packSize: Math.max(1, count) };
+  }
+  if (/شريطين|شريطان/.test(text)) {
+    return { dosageForm: 'أقراص', unitName: 'شريط', packSize: 2 };
+  }
+
+  // 7. النمط المركب (XxY) أو X*Y
+  const multMatch = text.match(/(\d+)\s*[*xX]\s*(\d+)\s*(tab|cap|قرص|كبسول)/i);
+  if (multMatch) {
+    const num1 = parseInt(multMatch[1], 10);
+    const num2 = parseInt(multMatch[2], 10);
+    const strips = Math.min(num1, num2) <= 10 && Math.max(num1, num2) >= 10 ? Math.min(num1, num2) : num1;
+    return { dosageForm: 'أقراص', unitName: 'شريط', packSize: Math.max(1, strips) };
+  }
+
+  // 8. الأشكال الصلبة (أقراص وكبسولات ومضغ واستحلاب)
+  const isCap = /\b(cap|caps|capsule|capsules|softgel|softgels|s\.g\.cap|veg\.cap|كبسول|كبسولة|كبسولات)\b/i.test(text);
+  const isTab = /\b(tab|tabs|tablet|tablets|f\.?c\.?\s*tab|f\.?c\.?\s*tabs|lozenges|chew\.?\s*tab|قرص|أقراص|اقراص)\b/i.test(text);
+
+  if (isCap || isTab) {
+    const dosageForm = isCap ? 'كبسولات' : 'أقراص';
+    const solidRegex = /(\d+)\s*(?:[a-z().-]+\s*)*(tabs?|tablets?|caps?|capsules?|lozenges|softgels?|أقراص|اقراص|قرص|كبسولات?|كبسول)\b/i;
+    const tabMatch = text.match(solidRegex);
+    if (tabMatch) {
+      const total = parseInt(tabMatch[1], 10);
+      let strips = 1;
+      if (total >= 90 && total <= 100) strips = 10;
+      else if (total === 84) strips = 6;
+      else if (total === 60) strips = 6;
+      else if (total === 56) strips = 4;
+      else if (total === 50) strips = 5;
+      else if (total === 48) strips = 4;
+      else if (total === 42) strips = 3;
+      else if (total === 40) strips = 4;
+      else if (total === 36) strips = 3;
+      else if (total === 30) strips = 3;
+      else if (total === 28) strips = 2;
+      else if (total === 24) strips = 2;
+      else if (total === 21) strips = 3;
+      else if (total === 20) strips = 2;
+      else if (total === 16) strips = 2;
+      else if (total === 15) strips = 1;
+      else if (total === 14) strips = 2;
+      else if (total === 12) strips = 2;
+      else if (total === 10) strips = 1;
+      else if (total <= 8) strips = 1;
+      else {
+        if (total % 10 === 0 && total <= 100) strips = total / 10;
+        else if (defaultUnits && defaultUnits > 0 && defaultUnits <= 10) strips = defaultUnits;
+        else strips = 1;
+      }
+      return { dosageForm, unitName: 'شريط', packSize: Math.max(1, strips) };
+    }
+
+    let strips = 1;
+    if (defaultUnits && defaultUnits > 1 && defaultUnits <= 10) strips = defaultUnits;
+    return { dosageForm, unitName: 'شريط', packSize: strips };
+  }
+
+  let packSize = 1;
+  if (defaultUnits && defaultUnits > 1 && defaultUnits <= 10) packSize = defaultUnits;
+  return {
+    dosageForm: description || 'مستحضر دوائي',
+    unitName: packSize > 1 ? 'شريط' : 'عبوة',
+    packSize
+  };
+}
+
 // ── 10. المزامنة السحابية الدورية مع أحدث البيانات (Cloud Catalog Sync) ──────────
 export async function syncCatalogFromCloud(db) {
   try {
-    const https = await import('https');
-    const cloudUrl = 'https://raw.githubusercontent.com/mahmoudfalous/eg-drugs/main/data/eg_drugs.json';
+    const cloudUrl = 'https://raw.githubusercontent.com/karem505/egyptian-drug-database/main/data/egyptian-drugs.json';
+    console.log('🌐 [Cloud Sync] بدء جلب أحدث تحديثات الأدوية المصرية الحية:', cloudUrl);
 
-    console.log('🌐 [Cloud Sync] بدء جلب تحديثات الأدوية من السحابة:', cloudUrl);
-
-    const rawData = await new Promise((resolve, reject) => {
-      https.get(cloudUrl, (res) => {
-        if (res.statusCode !== 200) {
-          return reject(new Error(`فشل الاتصال بالسحابة: كود الاستجابة ${res.statusCode}`));
-        }
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => resolve(data));
-      }).on('error', reject);
+    const response = await fetch(cloudUrl, {
+      headers: { 'User-Agent': 'Pharma-HR-System-LiveSync/2.0' }
     });
 
-    const sanitized = rawData.replace(/[\u0000-\u0009\u000B\u000C\u000E-\u001F]+/g, ' ');
-    const drugs = JSON.parse(sanitized);
+    if (!response.ok) {
+      throw new Error(`فشل الاتصال بالسحابة: كود الاستجابة ${response.status}`);
+    }
 
-    console.log(`📦 [Cloud Sync] تم تنزيل ${drugs.length} صنف. جاري فحص ومقارنة فروق الأسعار...`);
+    const drugs = await response.json();
+    console.log(`📦 [Cloud Sync] تم تحميل ${drugs.length} صنف. جاري فحص ومقارنة فروق الأسعار والشرائط...`);
 
     let priceChanges = 0;
     let newItems = 0;
 
-    for (let i = 0; i < drugs.length; i += 300) {
-      const chunk = drugs.slice(i, i + 300);
+    for (let i = 0; i < drugs.length; i += 200) {
+      const chunk = drugs.slice(i, i + 200);
       for (const d of chunk) {
-        const id = `eg-${d.id}`;
-        const newPrice = parseFloat(String(d.price || '0').replace(/[^0-9.]/g, '')) || 0;
-        const packSize = Math.max(1, parseInt(d.units || 1, 10) || 1);
-        const newUnitPrice = parseFloat((newPrice / packSize).toFixed(2));
+        const nameEn = String(d.commercial_name_en || d.trade_name_en || '').trim();
+        const nameAr = String(d.commercial_name_ar || d.trade_name_ar || nameEn).trim();
+        const cleanPrice = parseFloat(String(d.price_egp || d.price || '0').replace(/[^0-9.]/g, '')) || 0;
+        if (!nameEn || cleanPrice <= 0) continue;
+
+        const { dosageForm, unitName, packSize } = deducePackagingAndStrips(nameEn, nameAr, 1, d.drug_class || '');
+        const unitPrice = parseFloat((cleanPrice / packSize).toFixed(2));
 
         const exRes = await db.query(
-          'SELECT id, public_price, unit_price, trade_name_ar FROM public.outstock_medications WHERE id = $1 LIMIT 1',
-          [id]
+          `SELECT id, public_price, unit_price, pack_size, trade_name_ar, trade_name_en 
+           FROM public.outstock_medications 
+           WHERE LOWER(trade_name_en) = LOWER($1) OR id = $2 LIMIT 1`,
+          [nameEn, `eg-k-${d.id}`]
         );
 
         if (exRes.rows.length > 0) {
           const ex = exRes.rows[0];
           const oldPrice = parseFloat(ex.public_price || 0);
-          if (Math.abs(oldPrice - newPrice) > 0.05) {
+
+          if (Math.abs(oldPrice - cleanPrice) > 0.5) {
             priceChanges++;
             await db.query(`
               INSERT INTO public.outstock_price_audit_logs (
                 medication_id, trade_name, old_public_price, new_public_price,
-                old_unit_price, new_unit_price, revision_source, decree_number
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                old_unit_price, new_unit_price, revision_source, decree_number,
+                changed_by, created_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'مزامنة سحابية تلقائية', CURRENT_TIMESTAMP)
             `, [
-              id,
-              ex.trade_name_ar || d.arabic || d.name,
+              ex.id,
+              ex.trade_name_ar || nameAr,
               oldPrice,
-              newPrice,
+              cleanPrice,
               parseFloat(ex.unit_price || 0),
-              newUnitPrice,
+              unitPrice,
               'تحديث دوري سحابي - هيئة الدواء المصرية',
               'EDA-SYNC-' + new Date().toISOString().slice(0, 10)
             ]);
 
             await db.query(`
               UPDATE public.outstock_medications
-              SET public_price = $1, unit_price = $2, pack_size = $3, updated_at = CURRENT_TIMESTAMP
-              WHERE id = $4
-            `, [newPrice, newUnitPrice, packSize, id]);
+              SET public_price = $1, unit_price = $2, pack_size = $3, unit_name = $4, updated_at = CURRENT_TIMESTAMP
+              WHERE id = $5
+            `, [cleanPrice, unitPrice, packSize, unitName, ex.id]);
           }
         }
       }
     }
 
-    console.log(`✅ [Cloud Sync Done] تم الانتهاء بنجاح. تم رصد وتحديث ${priceChanges} تغير في الأسعار.`);
+    // حفظ توقيت آخر مزامنة ناجحة
+    await db.query(`
+      INSERT INTO public.app_settings (key_name, value_data, updated_at)
+      VALUES ('medications_last_cloud_sync', to_jsonb($1::text), CURRENT_TIMESTAMP)
+      ON CONFLICT (key_name) DO UPDATE 
+      SET value_data = EXCLUDED.value_data, updated_at = CURRENT_TIMESTAMP
+    `, [new Date().toISOString()]);
+
+    console.log(`✅ [Cloud Sync Done] تم الانتهاء بنجاح. تم فحص ${drugs.length} صنف، وتحديث ${priceChanges} تغير في الأسعار.`);
     return {
       success: true,
       totalChecked: drugs.length,
@@ -1779,6 +1943,53 @@ export async function syncCatalogFromCloud(db) {
     };
   } catch (err) {
     console.error('❌ [Cloud Sync Error]:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+// ── 10.5 البحث الفوري بالباركود الدولي (Barcode GTIN Search) ────────────────────
+export async function searchEdaMedicationsByBarcode(db, barcode) {
+  const clean = String(barcode || '').trim();
+  if (!clean) return null;
+  const res = await db.query(
+    `SELECT * FROM public.outstock_medications WHERE gtin_barcode = $1 OR eda_reg_no = $1 LIMIT 1`,
+    [clean]
+  );
+  if (res.rows.length === 0) return null;
+  const r = res.rows[0];
+  return {
+    ...r,
+    public_price: parseFloat(r.public_price || 0),
+    unit_price: parseFloat(r.unit_price || 0),
+    pack_size: parseInt(r.pack_size || 1, 10),
+    displayName: `${r.trade_name_ar} (${r.trade_name_en})`
+  };
+}
+
+// ── 10.6 حالة المزامنة اللحظية الشاملة (Sync Status & Metadata) ─────────────────
+export async function getMedicationsSyncStatus(db) {
+  try {
+    const countRes = await db.query('SELECT COUNT(*) as total FROM public.outstock_medications');
+    const logsRes = await db.query('SELECT COUNT(*) as total_logs, MAX(created_at) as last_log_date FROM public.outstock_price_audit_logs');
+    
+    let lastCloudSync = null;
+    try {
+      const lastSyncSetting = await db.query('SELECT value_data FROM public.app_settings WHERE key_name = $1 LIMIT 1', ['medications_last_cloud_sync']);
+      if (lastSyncSetting.rows.length > 0) {
+        lastCloudSync = lastSyncSetting.rows[0].value_data;
+      }
+    } catch (_) {}
+    
+    return {
+      success: true,
+      totalMedications: parseInt(countRes.rows[0]?.total || 0, 10),
+      totalPriceRevisions: parseInt(logsRes.rows[0]?.total_logs || 0, 10),
+      lastPriceRevisionDate: logsRes.rows[0]?.last_log_date || null,
+      lastCloudSync: lastCloudSync || logsRes.rows[0]?.last_log_date || new Date().toISOString(),
+      cronInterval: 'Every 24 hours (Automated at 03:00 AM)',
+      provider: 'Egyptian Drug Authority & Drug Eye Open Feed 2026'
+    };
+  } catch (err) {
     return { success: false, error: err.message };
   }
 }

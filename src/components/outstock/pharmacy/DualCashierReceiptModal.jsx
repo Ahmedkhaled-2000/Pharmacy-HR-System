@@ -610,6 +610,13 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                 <div>رقم الإيصال: <strong>{order.order_number || order.orderNumber}</strong></div>
                 <div>العميل: <strong>{order.customer_name || order.customerName}</strong></div>
                 <div>الهاتف: {order.customer_phone || order.customerPhone}</div>
+                <div>طريقة التسليم: <strong>
+                  {order.delivery_type === 'home_delivery' || order.deliveryType === 'home_delivery'
+                    ? '🛵 توصيل دليفري للعنوان'
+                    : (order.delivery_type === 'other_branch_pickup' || order.deliveryType === 'other_branch_pickup'
+                        ? `🔄 استلام من فرع: ${order.delivery_target_branch || order.deliveryTargetBranch || 'فرع آخر'}`
+                        : '🏪 استلام من الفرع')}
+                </strong></div>
                 <div>التاريخ: {formattedDate}</div>
                 <div>الصيدلي المسؤول: {order.responsible_pharmacist || order.responsiblePharmacist || 'د. صيدلي'}</div>
               </div>
@@ -712,6 +719,13 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
               <div className="receipt-meta">
                 <div>رقم الإيصال: <strong>{order.order_number || order.orderNumber}</strong></div>
                 <div>العميل: <strong>{order.customer_name || order.customerName}</strong> ({order.customer_phone || order.customerPhone})</div>
+                <div>طريقة التسليم: <strong>
+                  {order.delivery_type === 'home_delivery' || order.deliveryType === 'home_delivery'
+                    ? '🛵 دليفري'
+                    : (order.delivery_type === 'other_branch_pickup' || order.deliveryType === 'other_branch_pickup'
+                        ? `🔄 تحويل استلام لفرع: ${order.delivery_target_branch || order.deliveryTargetBranch || ''}`
+                        : '🏪 استلام من الفرع')}
+                </strong></div>
                 <div>المتبقي تحصيله: <strong style={{ color: '#dc2626', fontSize: '13px' }}>{parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2)} ج.م</strong></div>
               </div>
 

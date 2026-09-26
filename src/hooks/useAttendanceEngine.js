@@ -740,6 +740,23 @@ export function useAttendanceEngine() {
         timestamp: `${getRealTodayStr()} · ${nowTime}`,
         branchName: state.branches?.find(b => String(b.id) === String(active?.branchId))?.name || ''
       });
+
+      enqueueKioskPunch({
+        employeeId: emp?.id || empId,
+        employeeCode: emp?.code || '',
+        employeeName: emp?.name || '',
+        branchId: active?.branchId || '',
+        branchName: state.branches?.find(b => String(b.id) === String(active?.branchId))?.name || '',
+        actionType: 'break_start',
+        time: nowTime,
+        date: active?.date || getRealTodayStr(),
+        shiftId: active?.shiftId || null,
+        shiftData: pausedData,
+        shiftRecord: openIdx >= 0 ? currentShifts[openIdx] : null,
+        source: 'kiosk_biometric'
+      }).catch(err => {
+        console.warn('[pauseShift] Kiosk outbox enqueue warning:', err);
+      });
     } else {
       showToast(`تم إيقاف وردية ${emp ? emp.name : ''} مؤقتاً (بريك)`);
     }
@@ -810,6 +827,23 @@ export function useAttendanceEngine() {
         message: 'تم إنهاء البريك واستئناف العمل بنجاح.',
         timestamp: `${getRealTodayStr()} · ${nowTimeStr().slice(0, 5)}`,
         branchName: state.branches?.find(b => String(b.id) === String(active?.branchId))?.name || ''
+      });
+
+      enqueueKioskPunch({
+        employeeId: emp?.id || empId,
+        employeeCode: emp?.code || '',
+        employeeName: emp?.name || '',
+        branchId: active?.branchId || '',
+        branchName: state.branches?.find(b => String(b.id) === String(active?.branchId))?.name || '',
+        actionType: 'break_end',
+        time: nowTimeStr().slice(0, 5),
+        date: active?.date || getRealTodayStr(),
+        shiftId: active?.shiftId || null,
+        shiftData: resumedData,
+        shiftRecord: openIdx >= 0 ? currentShifts[openIdx] : null,
+        source: 'kiosk_biometric'
+      }).catch(err => {
+        console.warn('[resumeShift] Kiosk outbox enqueue warning:', err);
       });
     } else {
       showToast(`تم استئناف وردية ${emp ? emp.name : ''}`);

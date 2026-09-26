@@ -17,7 +17,8 @@ import {
   flushKioskOutbox,
   subscribeToKioskOutbox,
   getPendingKioskPunches,
-  getPendingKioskCount
+  getPendingKioskCount,
+  getCalibratedNow
 } from '../../utils/kioskOutbox';
 import '../../kiosk-modern.css';
 
@@ -34,7 +35,8 @@ export default function ElectronicKioskView({
   const uiContext = useOptionalUI();
   const { kioskConfirmModal } = uiContext || {};
   const { orgSettings, employees, ipRestrictions } = state;
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => getCalibratedNow().calibratedEpoch);
+  const [isExecutingPunch, setIsExecutingPunch] = useState(false);
   const [currentIp, setCurrentIp] = useState('');
   const [authStatus, setAuthStatus] = useState({ isAuthorized: true });
 
@@ -328,7 +330,7 @@ export default function ElectronicKioskView({
   useEffect(() => {
     // التحميل الاستباقي لمحرك الوجه في الكشك ليعمل فورياً عند وقوف أي موظف
     preWarmFaceModels();
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => setNow(getCalibratedNow().calibratedEpoch), 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -594,6 +596,7 @@ export default function ElectronicKioskView({
   };
 
   const handleActionClick = (action) => {
+    if (isExecutingPunch) return;
     if (action === 'shift_start' && activeShift) {
       setKioskAlertModal({
         isOpen: true,
@@ -670,8 +673,13 @@ export default function ElectronicKioskView({
 
   const onVerifyFailed = (actionType, photoUrl) => {
     setActiveAction(null);
+    if (isExecutingPunch) return;
+    setIsExecutingPunch(true);
     const currentEmp = matchedEmp;
-    if (!currentEmp) return;
+    if (!currentEmp) {
+      setIsExecutingPunch(false);
+      return;
+    }
 
     const actionLabels = {
       shift_start: 'تسجيل دخول (بداية الوردية)',
@@ -707,10 +715,12 @@ export default function ElectronicKioskView({
     const effectiveBranchId = targetBranch.id;
     const branchName = targetBranch.name;
 
-    const now = new Date();
-    const dateStr = getRealTodayStr ? getRealTodayStr() : now.toISOString().slice(0, 10);
-    const punchTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const { calibratedEpoch, timeStr, dateStr } = getCalibratedNow();
+    const now = new Date(calibratedEpoch);
+    const punchTime = timeStr;
     const displayTime = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+
+    setTimeout(() => setIsExecutingPunch(false), 1000);
 
     const requestId = 'REQ-BIO-' + now.getTime();
     const shiftId = 'shift_bio_' + now.getTime() + '_' + Math.random().toString(36).substr(2, 4);
@@ -1124,7 +1134,7 @@ export default function ElectronicKioskView({
         employeeCode: currentEmp.code || '',
         employeeName: currentEmp.name || '',
         branchId: effectiveBranchId,
-        branchName: effectiveBranchObj?.name || '',
+        branchName: branchName || '',
         actionType: photoActionType,
         time: punchTime,
         date: effectiveShiftDate,
@@ -1206,7 +1216,8 @@ export default function ElectronicKioskView({
   };
 
   const executeAction = async (actionType) => {
-    if (!matchedEmp) return;
+    if (!matchedEmp || isExecutingPunch) return;
+    setIsExecutingPunch(true);
     const empId = matchedEmp.id;
     const empName = matchedEmp.name;
     const empCode = matchedEmp.code || '';
@@ -1225,30 +1236,8 @@ export default function ElectronicKioskView({
         if (startShift) res = await startShift(empId, 'kiosk', effectiveBranchId);
       } else if (actionType === 'break_start') {
         if (pauseShift) res = await pauseShift(empId, 'kiosk');
-        enqueueKioskPunch({
-          employeeId: empId,
-          employeeCode: empCode,
-          employeeName: empName,
-          branchId: effectiveBranchId,
-          branchName: branchName,
-          actionType: 'break_start',
-          time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-          date: getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10),
-          source: 'kiosk'
-        }).catch(() => { });
       } else if (actionType === 'break_end') {
         if (resumeShift) res = await resumeShift(empId, 'kiosk');
-        enqueueKioskPunch({
-          employeeId: empId,
-          employeeCode: empCode,
-          employeeName: empName,
-          branchId: effectiveBranchId,
-          branchName: branchName,
-          actionType: 'break_end',
-          time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-          date: getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10),
-          source: 'kiosk'
-        }).catch(() => { });
       } else if (actionType === 'shift_end') {
         if (stopShift) res = await stopShift(empId, 'kiosk');
       }
@@ -1276,6 +1265,8 @@ export default function ElectronicKioskView({
         countdown: 6,
         onClose: () => setKioskAlertModal(null)
       });
+    } finally {
+      setTimeout(() => setIsExecutingPunch(false), 800);
     }
   };
 

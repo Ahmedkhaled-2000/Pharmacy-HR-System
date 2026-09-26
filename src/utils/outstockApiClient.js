@@ -97,6 +97,25 @@ export async function outstockSaveBranch(branchData) {
   });
 }
 
+// ── 2.1 موظفو الفروع ────────────────────────────────────────────────────────
+export async function outstockGetEmployees(branchId = '') {
+  const qs = branchId ? `?branchId=${encodeURIComponent(branchId)}` : '';
+  const res = await outstockRequest(`employees${qs}`, { method: 'GET' });
+  if (res?.success && Array.isArray(res.employees)) {
+    try {
+      localStorage.setItem(`outstock_cached_employees_${branchId || 'all'}`, JSON.stringify(res.employees));
+    } catch {}
+    return res;
+  }
+  try {
+    const cached = localStorage.getItem(`outstock_cached_employees_${branchId || 'all'}`) || localStorage.getItem('outstock_cached_employees_all');
+    if (cached) {
+      return { success: true, employees: JSON.parse(cached), isFromCache: true };
+    }
+  } catch {}
+  return res || { success: false, employees: [] };
+}
+
 // ── 3. المستخدمين ───────────────────────────────────────────────────────────
 export async function outstockGetUsers() {
   return await outstockRequest('users', { method: 'GET' });
@@ -445,5 +464,6 @@ export async function outstockGetFinancialReports({ branchId, fromDate, toDate }
   if (toDate) qs.append('toDate', toDate);
   return await outstockRequest(`reports/financial?${qs.toString()}`, { method: 'GET' });
 }
+
 
 

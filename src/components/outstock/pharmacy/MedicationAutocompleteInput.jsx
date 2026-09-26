@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Pill, Search, AlertTriangle, Snowflake, Sparkles, Check, ChevronDown, RefreshCw, Layers } from 'lucide-react';
+import { Pill, Search, AlertTriangle, Snowflake, Sparkles, Check, ChevronDown, RefreshCw, Layers, Plus } from 'lucide-react';
 import { outstockSearchMedications, outstockGetSubstitutes } from '../../../utils/outstockApiClient';
 
 // ── كتالوج محلي فائق السرعة لضمان العمل اللحظي دون أي تأخير ───────────────
@@ -383,7 +383,9 @@ export default function MedicationAutocompleteInput({
   onTextChange,
   placeholder = 'اسم الدواء أو التركيز (مثل: أوجمنتين 1 جم)...',
   required = true,
-  disabled = false
+  disabled = false,
+  inputRef = null,
+  onAddNewMedication = null
 }) {
   const [inputValue, setInputValue] = useState(value || '');
   const [suggestions, setSuggestions] = useState([]);
@@ -396,6 +398,17 @@ export default function MedicationAutocompleteInput({
 
   const containerRef = useRef(null);
   const debounceTimerRef = useRef(null);
+  const itemRefs = useRef([]);
+
+  // التمرير التلقائي اللحظي في القائمة المنسدلة عند النزول والصعود بالأسهم
+  useEffect(() => {
+    if (activeIndex >= 0 && itemRefs.current[activeIndex]) {
+      itemRefs.current[activeIndex].scrollIntoView({
+        block: 'nearest',
+        behavior: 'smooth'
+      });
+    }
+  }, [activeIndex]);
 
   // مزامنة القيمة عند تغيرها خارجياً
   useEffect(() => {
@@ -448,11 +461,12 @@ export default function MedicationAutocompleteInput({
             m.generic_name.toLowerCase().includes(s)
           );
           setSuggestions(localMatched);
-          setIsOpen(localMatched.length > 0);
+          setIsOpen(true);
           setActiveIndex(-1);
         }
       } catch (err) {
         console.warn('Medication autocomplete search error:', err);
+        setIsOpen(true);
       } finally {
         setIsLoading(false);
       }
@@ -520,6 +534,7 @@ export default function MedicationAutocompleteInput({
       {/* حقل الإدخال الذكي */}
       <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
         <input
+          ref={inputRef}
           type="text"
           required={required}
           disabled={disabled}
@@ -527,7 +542,9 @@ export default function MedicationAutocompleteInput({
           value={inputValue}
           onChange={handleInputChange}
           onFocus={() => {
-            if (suggestions.length > 0) setIsOpen(true);
+            if (suggestions.length > 0 || (onAddNewMedication && inputValue.trim().length >= 1)) {
+              setIsOpen(true);
+            }
           }}
           onKeyDown={handleKeyDown}
           className="outstock-form-input"
@@ -648,7 +665,7 @@ export default function MedicationAutocompleteInput({
       )}
 
       {/* ── القائمة المنسدلة الذكية (Autocomplete Dropdown) ── */}
-      {isOpen && suggestions.length > 0 && (
+      {isOpen && (suggestions.length > 0 || (onAddNewMedication && inputValue.trim().length >= 1)) && (
         <div
           style={{
             position: 'absolute',
@@ -657,124 +674,201 @@ export default function MedicationAutocompleteInput({
             left: 0,
             background: '#ffffff',
             border: '1.5px solid #cbd5e1',
-            borderRadius: '12px',
-            boxShadow: '0 12px 28px rgba(0, 0, 0, 0.15)',
-            maxHeight: '320px',
+            borderRadius: '14px',
+            boxShadow: '0 18px 40px rgba(0, 0, 0, 0.18)',
+            maxHeight: '380px',
             overflowY: 'auto',
             zIndex: 9999,
-            padding: '4px'
+            padding: '8px'
           }}
         >
-          <div style={{
-            padding: '6px 10px',
-            fontSize: '11px',
-            fontWeight: 'bold',
-            color: '#64748b',
-            background: '#f8fafc',
-            borderRadius: '8px',
-            marginBottom: '4px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between'
-          }}>
-            <span>💊 نتائج البحث من قاعدة بيانات هيئة الدواء المصرية ودراج آي ({suggestions.length})</span>
-            <span style={{ fontSize: '10px', color: '#0d9488' }}>استخدم الأسهم للتنقل و Enter للاختيار</span>
-          </div>
+          {suggestions.length > 0 ? (
+            <>
+              <div style={{
+                padding: '7px 12px',
+                fontSize: '11.5px',
+                fontWeight: 'bold',
+                color: '#475569',
+                background: '#f8fafc',
+                borderRadius: '9px',
+                marginBottom: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                border: '1px solid #e2e8f0'
+              }}>
+                <span>💊 نتائج البحث من قاعدة بيانات هيئة الدواء المصرية ودراج آي ({suggestions.length})</span>
+                <span style={{ fontSize: '10.5px', color: '#0d9488', fontWeight: '800' }}>
+                  استخدم الأسهم ⬇️ ⬆️ للتنقل و Enter للاختيار
+                </span>
+              </div>
 
-          {suggestions.map((med, idx) => {
-            const isSelected = activeIndex === idx;
-            const packPrice = parseFloat(med.public_price || 0);
-            const unitPrice = parseFloat(med.unit_price || (packPrice / (med.pack_size || 1))).toFixed(2);
+              {suggestions.map((med, idx) => {
+                const isSelected = activeIndex === idx;
+                const packPrice = parseFloat(med.public_price || 0);
+                const unitPrice = parseFloat(med.unit_price || (packPrice / (med.pack_size || 1))).toFixed(2);
 
-            return (
-              <div
-                key={med.id || idx}
-                onClick={() => handleSelectMedication(med)}
-                onMouseEnter={() => setActiveIndex(idx)}
+                return (
+                  <div
+                    key={med.id || idx}
+                    ref={(el) => (itemRefs.current[idx] = el)}
+                    onClick={() => handleSelectMedication(med)}
+                    onMouseEnter={() => setActiveIndex(idx)}
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: '10px',
+                      cursor: 'pointer',
+                      backgroundColor: isSelected ? '#f0fdfa' : '#ffffff',
+                      border: isSelected ? '1.5px solid #0d9488' : '1px solid #f1f5f9',
+                      boxShadow: isSelected ? '0 2px 8px rgba(13, 148, 136, 0.15)' : 'none',
+                      marginBottom: '4px',
+                      transition: 'all 0.12s ease',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px'
+                    }}
+                  >
+                    {/* السطر الأول: الأسماء العربية والإنجليزية والأسعار وشارات التنبيه */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: '900', fontSize: '13.5px', color: isSelected ? '#0f766e' : '#0f172a' }}>
+                          {med.trade_name_ar}
+                        </span>
+                        <span style={{ fontSize: '12px', color: '#475569', direction: 'ltr', fontWeight: '700' }}>
+                          ({med.trade_name_en})
+                        </span>
+                        {med.is_table_drug && (
+                          <span style={{
+                            padding: '2px 6px',
+                            background: '#fee2e2',
+                            color: '#b91c1c',
+                            borderRadius: '5px',
+                            fontSize: '10.5px',
+                            fontWeight: '800'
+                          }}>
+                            جدول 🚨
+                          </span>
+                        )}
+                        {med.is_refrigerated && (
+                          <span style={{
+                            padding: '2px 6px',
+                            background: '#eff6ff',
+                            color: '#1d4ed8',
+                            borderRadius: '5px',
+                            fontSize: '10.5px',
+                            fontWeight: '800'
+                          }}>
+                            ثلاجة ❄️
+                          </span>
+                        )}
+                      </div>
+
+                      {/* بطاقات الأسعار الرسمية */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        <span style={{
+                          background: '#ecfdf5',
+                          color: '#065f46',
+                          border: '1px solid #a7f3d0',
+                          padding: '3px 9px',
+                          borderRadius: '7px',
+                          fontSize: '12px',
+                          fontWeight: '900'
+                        }}>
+                          📦 علبة: {packPrice} ج.م
+                        </span>
+
+                        {med.pack_size > 1 && (
+                          <span style={{
+                            background: '#f8fafc',
+                            color: '#334155',
+                            border: '1px solid #cbd5e1',
+                            padding: '3px 9px',
+                            borderRadius: '7px',
+                            fontSize: '11.5px',
+                            fontWeight: '800'
+                          }}>
+                            💊 {med.unit_name || 'شريط'}: {unitPrice} ج.م ({med.pack_size} شرائط)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* السطر الثاني: المادة الفعالة والشكل والشركة المصنعة */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      fontSize: '11.5px',
+                      color: '#64748b',
+                      flexWrap: 'wrap',
+                      background: isSelected ? 'rgba(255, 255, 255, 0.7)' : '#f8fafc',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #f1f5f9'
+                    }}>
+                      <span>🧬 المادة: <strong style={{ color: '#0284c7' }}>{med.generic_name || 'غير محدد'}</strong></span>
+                      <span>•</span>
+                      <span>💉 الشكل: <strong style={{ color: '#334155' }}>{med.dosage_form || 'أقراص'}{med.strength ? ` (${med.strength})` : ''}</strong></span>
+                      {med.manufacturer && (
+                        <>
+                          <span>•</span>
+                          <span>🏢 الشركة: <strong style={{ color: '#475569' }}>{med.manufacturer}</strong></span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          ) : (
+            <div style={{ padding: '14px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+              <div style={{ marginBottom: '6px', fontWeight: '700' }}>
+                🔍 لا توجد أدوية مطابقة لـ "{inputValue.trim()}" في الكتالوج الحالي
+              </div>
+            </div>
+          )}
+
+          {/* زر إضافة دواء غير مسجل */}
+          {onAddNewMedication && inputValue.trim().length >= 1 && (
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsOpen(false);
+                onAddNewMedication(inputValue.trim());
+              }}
+              style={{
+                marginTop: '6px',
+                padding: '10px 14px',
+                background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)',
+                border: '1.5px dashed #10b981',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#dcfce7'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)'; }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#065f46', fontWeight: '800', fontSize: '13px' }}>
+                <Plus size={16} color="#059669" />
+                <span>+ إضافة دواء غير مسجل: <strong>"{inputValue.trim()}"</strong></span>
+              </div>
+              <span
                 style={{
-                  padding: '8px 12px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  backgroundColor: isSelected ? '#f0fdfa' : '#ffffff',
-                  border: isSelected ? '1px solid #99f6e4' : '1px solid transparent',
-                  marginBottom: '2px',
-                  transition: 'all 0.12s ease'
+                  background: '#059669',
+                  color: '#ffffff',
+                  fontSize: '11px',
+                  fontWeight: '800',
+                  padding: '3px 10px',
+                  borderRadius: '6px'
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
-                    <span style={{ fontWeight: '800', fontSize: '13px', color: '#0f172a' }}>
-                      {med.trade_name_ar}
-                    </span>
-                    <span style={{ fontSize: '12px', color: '#475569', direction: 'ltr', fontWeight: '600' }}>
-                      ({med.trade_name_en})
-                    </span>
-                    {med.is_table_drug && (
-                      <span style={{
-                        padding: '1px 5px',
-                        background: '#fee2e2',
-                        color: '#b91c1c',
-                        borderRadius: '4px',
-                        fontSize: '10px',
-                        fontWeight: 'bold'
-                      }}>
-                        جدول 🚨
-                      </span>
-                    )}
-                  </div>
-
-                  {/* بطاقة الأسعار الرسمية (علبة وشريط) */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                    <span style={{
-                      background: '#ecfdf5',
-                      color: '#065f46',
-                      border: '1px solid #a7f3d0',
-                      padding: '2px 8px',
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                      fontWeight: '800'
-                    }}>
-                      علبة: {packPrice} ج.م
-                    </span>
-
-                    {med.pack_size > 1 && (
-                      <span style={{
-                        background: '#f1f5f9',
-                        color: '#334155',
-                        border: '1px solid #e2e8f0',
-                        padding: '2px 8px',
-                        borderRadius: '6px',
-                        fontSize: '11.5px',
-                        fontWeight: '700'
-                      }}>
-                        {med.unit_name || 'شريط'}: {unitPrice} ج.م
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* المادة الفعالة والشكل الصيدلي والشركة */}
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  fontSize: '11px',
-                  color: '#64748b',
-                  marginTop: '4px'
-                }}>
-                  <span>🧬 المادة: <strong style={{ color: '#0284c7' }}>{med.generic_name}</strong></span>
-                  <span>•</span>
-                  <span>الشكل: {med.dosage_form}</span>
-                  {med.manufacturer && (
-                    <>
-                      <span>•</span>
-                      <span>الشركة: {med.manufacturer}</span>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+                تسجيل فوري بالكتالوج
+              </span>
+            </div>
+          )}
         </div>
       )}
 

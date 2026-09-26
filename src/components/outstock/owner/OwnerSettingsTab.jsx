@@ -45,8 +45,48 @@ import {
  * 5. تعديل كلمة مرور المالك وتأمين الحساب
  * 6. تخصيص وإدارة اختصارات لوحة المفاتيح
  */
-export default function OwnerSettingsTab({ showToast }) {
-  const [activeSubSection, setActiveSubSection] = useState('pharmacy_identity'); // 'pharmacy_identity', 'branches', 'procurement_users', 'security', 'shortcuts'
+const DEFAULT_DELIVERY_ZONES = [
+  'المعادي', 'المعادي الجديدة', 'زهراء المعادي', 'مدينة نصر', 'مصر الجديدة',
+  'التجمع الأول', 'التجمع الخامس', 'الدقي', 'المهندسين', 'وسط البلد',
+  'شبرا', 'الهرم', 'فيصل', 'المقطم', 'حلوان', 'العاشر من رمضان', 'الشيخ زايد', '6 أكتوبر'
+];
+
+const SETTINGS_SECTIONS = [
+  { id: 'pharmacy_identity', title: 'هوية وشعار الصيدلية بالفاتورة', iconText: '🖼️' },
+  { id: 'delivery_zones', title: 'إدارة مناطق وأحياء التوصيل', iconText: '📍' },
+  { id: 'branches', title: 'إدارة وتفعيل الفروع والصيدليات', iconText: '🏢' },
+  { id: 'procurement_users', title: 'يوزرات إدارة المشتريات والصلاحيات', iconText: '👥' },
+  { id: 'security', title: 'تأمين حساب المالك وكلمة المرور', iconText: '🔑' },
+  { id: 'shortcuts', title: 'تخصيص اختصارات لوحة المفاتيح', iconText: '⌨️' }
+];
+
+export default function OwnerSettingsTab({
+  showToast,
+  activeSubSectionProp = null,
+  onSubSectionChange = null
+}) {
+  const [activeSubSection, setActiveSubSection] = useState(activeSubSectionProp || 'pharmacy_identity');
+
+  useEffect(() => {
+    if (activeSubSectionProp && activeSubSectionProp !== activeSubSection) {
+      setActiveSubSection(activeSubSectionProp);
+    }
+  }, [activeSubSectionProp]);
+
+  const changeSubSection = (secId) => {
+    setActiveSubSection(secId);
+    onSubSectionChange?.(secId);
+  };
+
+  const [deliveryZones, setDeliveryZones] = useState(() => {
+    try {
+      const cached = localStorage.getItem('outstock_delivery_zones');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return DEFAULT_DELIVERY_ZONES;
+  });
+  const [newZoneName, setNewZoneName] = useState('');
+  const [isSavingZones, setIsSavingZones] = useState(false);
 
   const [shortcutsList, setShortcutsList] = useState(() => getActiveShortcuts());
   const [editingShortcutId, setEditingShortcutId] = useState(null);
@@ -117,6 +157,12 @@ export default function OwnerSettingsTab({ showToast }) {
         if (s.phone) setPharmacyContactPhone(s.phone);
         if (s.address) setPharmacyMainAddress(s.address);
         if (s.invoiceFooter) setPharmacyInvoiceFooter(s.invoiceFooter);
+        if (Array.isArray(s.deliveryZones) && s.deliveryZones.length > 0) {
+          setDeliveryZones(s.deliveryZones);
+          try {
+            localStorage.setItem('outstock_delivery_zones', JSON.stringify(s.deliveryZones));
+          } catch {}
+        }
       }
     } catch (e) {
       console.warn('Fetch settings data error:', e);
@@ -128,6 +174,48 @@ export default function OwnerSettingsTab({ showToast }) {
   useEffect(() => {
     fetchSettingsData();
   }, []);
+
+  // حفظ قائمة مناطق التوصيل
+  const persistDeliveryZones = async (updated) => {
+    setDeliveryZones(updated);
+    try {
+      localStorage.setItem('outstock_delivery_zones', JSON.stringify(updated));
+    } catch {}
+    setIsSavingZones(true);
+    try {
+      await outstockSaveSettings({ deliveryZones: updated });
+      showToast?.('✅ تم حفظ وتحديث قائمة مناطق التوصيل بنجاح');
+    } catch (err) {
+      console.warn('Save delivery zones error:', err);
+      showToast?.('⚠️ تم الحفظ محلياً وتعذر الحفظ السحابي');
+    } finally {
+      setIsSavingZones(false);
+    }
+  };
+
+  const handleAddDeliveryZone = (e) => {
+    e.preventDefault();
+    const clean = String(newZoneName || '').trim();
+    if (!clean) return;
+    if (deliveryZones.some(z => z.toLowerCase() === clean.toLowerCase())) {
+      showToast?.('⚠️ هذه المنطقة مسجلة بالفعل بالقائمة');
+      return;
+    }
+    const updated = [...deliveryZones, clean];
+    persistDeliveryZones(updated);
+    setNewZoneName('');
+  };
+
+  const handleDeleteDeliveryZone = (zoneToDelete) => {
+    if (!window.confirm(`هل أنت متأكد من حذف منطقة "${zoneToDelete}" من قائمة التوصيل؟`)) return;
+    const updated = deliveryZones.filter(z => z !== zoneToDelete);
+    persistDeliveryZones(updated);
+  };
+
+  const handleResetDeliveryZones = () => {
+    if (!window.confirm('هل تريد استعادة قائمة المناطق والأحياء الافتراضية؟')) return;
+    persistDeliveryZones(DEFAULT_DELIVERY_ZONES);
+  };
 
   // معالجة واختيار ملف الشعار وضغطه تلقائياً ليبقى فائق الجودة وخفيفاً
   const handleLogoFileSelect = (e) => {
@@ -358,53 +446,70 @@ export default function OwnerSettingsTab({ showToast }) {
 
   return (
     <div>
-      {/* ── شريط التبويبات الفرعية للإعدادات ── */}
-      <div className="outstock-card" style={{ padding: '12px' }}>
-        <div className="outstock-subnav-bar">
-          <button
-            type="button"
-            className={`outstock-nav-btn ${activeSubSection === 'pharmacy_identity' ? 'is-active' : ''}`}
-            onClick={() => setActiveSubSection('pharmacy_identity')}
+      {/* ── قائمة اختيار قسم الإعدادات (قائمة منسدلة حديثة ومدمجة) ── */}
+      <div
+        className="outstock-card"
+        style={{
+          padding: '14px 20px',
+          marginBottom: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px',
+          background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
+          border: '1.5px solid #e2e8f0',
+          boxShadow: '0 2px 6px rgba(0, 0, 0, 0.03)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div
+            style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '10px',
+              background: '#e0f2fe',
+              color: '#0284c7',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
           >
-            <ImageIcon size={16} />
-            <span>هوية وشعار الصيدلية بالفاتورة</span>
-          </button>
+            <Shield size={20} color="#0d9488" />
+          </div>
+          <div>
+            <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '700' }}>
+              قسم الإعدادات والصلاحيات المعروض:
+            </span>
+            <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '900', color: '#0f172a' }}>
+              {SETTINGS_SECTIONS.find(s => s.id === activeSubSection)?.title || 'الإعدادات'}
+            </h4>
+          </div>
+        </div>
 
-          <button
-            type="button"
-            className={`outstock-nav-btn ${activeSubSection === 'branches' ? 'is-active' : ''}`}
-            onClick={() => setActiveSubSection('branches')}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: '320px' }}>
+          <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f766e', whiteSpace: 'nowrap' }}>
+            الانتقال إلى قسم إعدادات آخر :
+          </label>
+          <select
+            value={activeSubSection}
+            onChange={(e) => changeSubSection(e.target.value)}
+            className="outstock-form-select"
+            style={{
+              flex: 1,
+              fontWeight: '800',
+              fontSize: '13.5px',
+              padding: '8px 14px',
+              borderColor: '#0d9488',
+              backgroundColor: '#ffffff'
+            }}
           >
-            <Building2 size={16} />
-            <span>إدارة وتفعيل الفروع والصيدليات</span>
-          </button>
-
-          <button
-            type="button"
-            className={`outstock-nav-btn ${activeSubSection === 'procurement_users' ? 'is-active' : ''}`}
-            onClick={() => setActiveSubSection('procurement_users')}
-          >
-            <Users size={16} />
-            <span>يوزرات إدارة المشتريات والصلاحيات</span>
-          </button>
-
-          <button
-            type="button"
-            className={`outstock-nav-btn ${activeSubSection === 'security' ? 'is-active' : ''}`}
-            onClick={() => setActiveSubSection('security')}
-          >
-            <Key size={16} />
-            <span>تأمين حساب المالك وكلمة المرور</span>
-          </button>
-
-          <button
-            type="button"
-            className={`outstock-nav-btn ${activeSubSection === 'shortcuts' ? 'is-active' : ''}`}
-            onClick={() => setActiveSubSection('shortcuts')}
-          >
-            <Keyboard size={16} />
-            <span>تخصيص اختصارات لوحة المفاتيح</span>
-          </button>
+            {SETTINGS_SECTIONS.map((sec) => (
+              <option key={sec.id} value={sec.id}>
+                {sec.iconText} {sec.title}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -735,6 +840,111 @@ export default function OwnerSettingsTab({ showToast }) {
                 {pharmacyInvoiceFooter}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 0.5 قسم إدارة مناطق وأحياء التوصيل للعملاء ── */}
+      {activeSubSection === 'delivery_zones' && (
+        <div className="outstock-card" style={{ maxWidth: '850px', margin: '0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
+            <div>
+              <h3 className="outstock-card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                <MapPin size={20} color="#0d9488" />
+                <span>إدارة مناطق وأحياء التوصيل (Customer Delivery Zones)</span>
+              </h3>
+              <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#64748b' }}>
+                تظهر هذه المناطق تلقائياً في القائمة المنسدلة عند تسجيل طلب جديد لعميل في الصيدلية لتحديد موقع التوصيل بدقة وسرعة.
+              </p>
+            </div>
+            <span style={{ background: '#f0fdfa', color: '#0d9488', border: '1px solid #ccfbf1', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '800' }}>
+              {deliveryZones.length} منطقة مسجلة
+            </span>
+          </div>
+
+          {/* إضافة منطقة جديدة */}
+          <form onSubmit={handleAddDeliveryZone} style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+            <input
+              type="text"
+              required
+              placeholder="اكتب اسم الحي أو المنطقة الجديدة (مثل: التجمع الأول، الدقي، الشيخ زايد)..."
+              value={newZoneName}
+              onChange={(e) => setNewZoneName(e.target.value)}
+              className="outstock-form-input"
+              style={{ flex: 1, borderColor: '#0d9488' }}
+            />
+            <button
+              type="submit"
+              disabled={isSavingZones}
+              className="outstock-btn outstock-btn-primary"
+              style={{ padding: '0 20px', flexShrink: 0 }}
+            >
+              <span>+ إضافة المنطقة</span>
+            </button>
+          </form>
+
+          {/* شبكة المناطق الحالية */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', minHeight: '120px', padding: '14px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+            {deliveryZones.length === 0 ? (
+              <div style={{ width: '100%', textAlign: 'center', color: '#94a3b8', fontSize: '13px', padding: '24px 0' }}>
+                لا توجد مناطق مسجلة حالياً. أضف منطقة من النموذج أعلاه أو استعد القائمة الافتراضية.
+              </div>
+            ) : (
+              deliveryZones.map((zone, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '6px 12px',
+                    background: '#ffffff',
+                    border: '1.5px solid #cbd5e1',
+                    borderRadius: '10px',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    color: '#0f172a',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                  }}
+                >
+                  <MapPin size={13} color="#0d9488" />
+                  <span>{zone}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteDeliveryZone(zone)}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#ef4444',
+                      cursor: 'pointer',
+                      padding: '0 2px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      opacity: 0.75,
+                      transition: 'opacity 0.15s'
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.75'; }}
+                    title={`حذف منطقة ${zone}`}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* استعادة الافتراضي */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+            <button
+              type="button"
+              onClick={handleResetDeliveryZones}
+              className="outstock-btn outstock-btn-secondary"
+              style={{ fontSize: '12px', padding: '6px 14px' }}
+            >
+              <RotateCcw size={13} />
+              <span>استعادة القائمة الافتراضية للمناطق</span>
+            </button>
           </div>
         </div>
       )}

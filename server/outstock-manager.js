@@ -8,6 +8,8 @@ import crypto from 'crypto';
 import {
   initEdaMedicationTables,
   searchEdaMedications,
+  searchEdaMedicationsByBarcode,
+  getMedicationsSyncStatus,
   getDrugEyeSubstitutes,
   syncOrUpdateMedications,
   updateMedicationPrice,
@@ -242,6 +244,16 @@ export async function initOutstockTables(db) {
 
     await db.query(schemaSql);
     console.log('✅ [OutStock Engine] تم إنشاء والتحقق من جداول نظام النواقص والمشتريات بنجاح.');
+
+    // التحقق من أعمدة طريقة التسليم بالطلب
+    try {
+      await db.query(`
+        ALTER TABLE public.outstock_orders ADD COLUMN IF NOT EXISTS delivery_type VARCHAR(50) DEFAULT 'branch_pickup';
+        ALTER TABLE public.outstock_orders ADD COLUMN IF NOT EXISTS delivery_target_branch VARCHAR(100) NULL;
+      `);
+    } catch (migErr) {
+      console.warn('⚠️ [OutStock Delivery Columns Migration]:', migErr.message);
+    }
 
     // تهيئة كتالوج أدوية هيئة الدواء المصرية ودراج آي والأسعار الرسمية
     await initEdaMedicationTables(db);
@@ -583,15 +595,41 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   app.get('/api/outstock/medications/search', async (req, res) => {
     try {
       const q = String(req.query.q || '').trim();
-      const limit = parseInt(req.query.limit || 15, 10);
-      if (!q || q.length < 2) {
-        return res.json({ success: true, medications: [] });
-      }
-
+      const limit = parseInt(req.query.limit || 40, 10);
       const medications = await searchEdaMedications(db, q, limit);
       res.json({ success: true, medications });
     } catch (err) {
       console.warn('[Medication Search Warn]:', err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // فحص مباشر وفوري بالباركود الدولي (Barcode GTIN Lookup)
+  app.get('/api/outstock/medications/barcode/:barcode', async (req, res) => {
+    try {
+      const barcode = String(req.params.barcode || '').trim();
+      if (!barcode) {
+        return res.status(400).json({ success: false, error: 'يرجى تقديم باركود صالح' });
+      }
+
+      const medication = await searchEdaMedicationsByBarcode(db, barcode);
+      if (!medication) {
+        return res.status(404).json({ success: false, error: 'لم يتم العثور على دواء بهذا الباركود' });
+      }
+
+      res.json({ success: true, medication });
+    } catch (err) {
+      console.warn('[Medication Barcode Warn]:', err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // حالة المزامنة اللحظية الشاملة وتاريخ آخر تحديث سحابي
+  app.get('/api/outstock/medications/sync-status', async (req, res) => {
+    try {
+      const status = await getMedicationsSyncStatus(db);
+      res.json(status);
+    } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -802,6 +840,63 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         success: true,
         branches: outstockBranches,
         hrBranches
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // جلب موظفي وصيادلة الفروع من قاعدة بيانات الـ HR لاستخدامهم في مسؤولي الطلبات (مع استبعاد الدليفري والطيارين)
+  app.get('/api/outstock/employees', authMiddleware, async (req, res) => {
+    try {
+      const { branchId } = req.query || {};
+      let employees = [];
+      try {
+        if (typeof getSettingsFromStorage === 'function') {
+          const mainState = await getSettingsFromStorage('pharmacy-tracker-data');
+          if (mainState && Array.isArray(mainState.employees)) {
+            employees = mainState.employees;
+          }
+        } else {
+          const sRes = await db.query("SELECT value_data FROM public.app_settings WHERE key_name = 'pharmacy-tracker-data'");
+          const sData = sRes.rows[0]?.value_data;
+          if (sData && Array.isArray(sData.employees)) {
+            employees = sData.employees;
+          }
+        }
+      } catch (e) {
+        console.warn('[Outstock Get Employees Warning]:', e.message);
+      }
+
+      const DELIVERY_REGEX = /(طيار|دليفري|توصيل|سائق|مندوب توصيل|delivery|driver)/i;
+      // استبعاد المستقيلين والمفصولين وعمال الدليفري
+      let eligible = employees.filter((emp) => {
+        if (!emp || emp.isTerminated || emp.status === 'تم الاستقالة' || emp.status === 'مفصول') return false;
+        const job = `${emp.jobTitle || ''} ${emp.role || ''} ${emp.department || ''}`;
+        return !DELIVERY_REGEX.test(job);
+      });
+
+      // إذا حُدد فرع، نحاول التصفية بالفرع، وإذا كانت النتيجة فارغة نُعيد كافة موظفي الصيدلية النشطين
+      if (branchId) {
+        const branchMatched = eligible.filter((emp) => {
+          return String(emp.branchId) === String(branchId) ||
+                 String(emp.branch) === String(branchId) ||
+                 String(emp.workplace) === String(branchId);
+        });
+        if (branchMatched.length > 0) {
+          eligible = branchMatched;
+        }
+      }
+
+      res.json({
+        success: true,
+        employees: eligible.map((e) => ({
+          id: e.id,
+          name: e.name,
+          jobTitle: e.jobTitle || 'صيدلي',
+          branch: e.branch || '',
+          branchId: e.branchId || ''
+        }))
       });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
@@ -1163,7 +1258,9 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         expectedPickupDate,
         expectedPickupTime,
         responsiblePharmacist,
-        customerNotes
+        customerNotes,
+        deliveryType = 'branch_pickup',
+        deliveryTargetBranch = null
       } = req.body || {};
 
       let branchId = bodyBranchId;
@@ -1228,13 +1325,15 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         INSERT INTO public.outstock_orders (
           id, order_number, branch_id, customer_id, total_amount, paid_amount, remaining_amount,
           discount_type, discount_value, net_amount, order_status, expected_pickup_date,
-          expected_pickup_time, responsible_pharmacist, customer_notes, barcode_data
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending_procurement', $11, $12, $13, $14, $15)
+          expected_pickup_time, responsible_pharmacist, customer_notes, barcode_data,
+          delivery_type, delivery_target_branch
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending_procurement', $11, $12, $13, $14, $15, $16, $17)
       `, [
         orderId, orderNumber, branchId, customerId, totalAmount, paid, remaining,
         discountType || 'none', discVal, netAmount,
         expectedPickupDate || null, expectedPickupTime || null,
-        responsiblePharmacist || 'الصيدلي المسؤول', customerNotes || null, barcodeData
+        responsiblePharmacist || 'الصيدلي المسؤول', customerNotes || null, barcodeData,
+        deliveryType || 'branch_pickup', deliveryTargetBranch || null
       ]);
 
       // إدراج بنود الأصناف
@@ -1282,6 +1381,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         expectedPickupTime,
         responsiblePharmacist,
         barcodeData,
+        deliveryType: deliveryType || 'branch_pickup',
+        deliveryTargetBranch: deliveryTargetBranch || null,
         items: insertedItems,
         createdAt: new Date().toISOString()
       };
@@ -1958,6 +2059,30 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       res.status(500).json({ success: false, error: err.message });
     }
   });
+
+  // ── 12. محرك الجدولة والمزامنة السحابية التلقائية اليومية للأدوية (Automated Daily Cloud Sync) ──
+  let catalogSyncRunning = false;
+  async function runAutomatedCatalogSync() {
+    if (catalogSyncRunning) return;
+    try {
+      catalogSyncRunning = true;
+      console.log('⏰ [Cron Engine] بدء فحص ومزامنة أسعار الأدوية اليومية التلقائية...');
+      const syncResult = await syncCatalogFromCloud(db);
+      if (syncResult && syncResult.success && syncResult.priceChanges > 0) {
+        console.log(`⚡ [Cron Engine] تم تحديث ${syncResult.priceChanges} صنف دوائي وبث التعديلات فورياً.`);
+        broadcastOutstock('outstock:cloud_sync_completed', syncResult);
+      }
+    } catch (cronErr) {
+      console.warn('⚠️ [Cron Sync Warning]:', cronErr.message);
+    } finally {
+      catalogSyncRunning = false;
+    }
+  }
+
+  // تشغيل أولي بعد 45 ثانية من إقلاع السيرفر
+  setTimeout(runAutomatedCatalogSync, 45000);
+  // ثم تشغيل دوري كل 24 ساعة (أوتوماتيكي بالكامل بدون تدخل يدوي)
+  setInterval(runAutomatedCatalogSync, 24 * 60 * 60 * 1000);
 }
 
 // ── دوال مساعدة لإعادة الحساب وتحديث حالات الطلبات ─────────────────────────
