@@ -476,10 +476,13 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
       const queue = deviceCommandQueues.get(sn) || [];
       if (queue.length > 0) {
-        const nextCmd = queue.shift();
+        // سحب دفعة أوامر (حتى 10 أوامر في المرة الواحدة) لتسريع الترحيل
+        const batch = queue.splice(0, 10);
         deviceCommandQueues.set(sn, queue);
-        console.log(`[Biometric Manager] 📤 إرسال أمر للجهاز ${sn}: ${nextCmd}`);
-        return res.status(200).send(nextCmd);
+        const payload = batch.join('\r\n');
+        console.log(`[Biometric Manager] 📤 إرسال ${batch.length} أمر/أوامر للجهاز ${sn}`);
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        return res.status(200).send(payload);
       }
 
       return res.status(200).send('OK');
@@ -539,6 +542,118 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     try {
       const q = await db.query('SELECT * FROM public.biometric_devices ORDER BY created_at DESC');
       res.json({ success: true, devices: q.rows || [] });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.1 إضافة جهاز بصمة جديد يدوياً
+  app.post('/api/biometrics/devices', async (req, res) => {
+    try {
+      const { deviceName, serialNumber, branchId, branchName, ipAddress, deviceType } = req.body;
+      if (!serialNumber || !serialNumber.trim()) {
+        return res.status(400).json({ success: false, error: 'الرقم التسلسلي (Serial Number) مطلوب' });
+      }
+
+      const sn = serialNumber.trim().toUpperCase();
+      const id = `dev_${sn.toLowerCase()}`;
+      const name = deviceName?.trim() || `جهاز بصمة ZKTeco (${sn})`;
+
+      const q = await db.query(
+        `INSERT INTO public.biometric_devices 
+         (id, device_name, serial_number, branch_id, branch_name, ip_address, protocol, status, device_type, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'ADMS', 'ONLINE', $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         ON CONFLICT (serial_number) DO UPDATE SET
+           device_name = EXCLUDED.device_name,
+           branch_id = COALESCE(EXCLUDED.branch_id, public.biometric_devices.branch_id),
+           branch_name = COALESCE(EXCLUDED.branch_name, public.biometric_devices.branch_name),
+           ip_address = COALESCE(EXCLUDED.ip_address, public.biometric_devices.ip_address),
+           device_type = COALESCE(EXCLUDED.device_type, public.biometric_devices.device_type),
+           updated_at = CURRENT_TIMESTAMP
+         RETURNING *`,
+        [id, name, sn, branchId || null, branchName || null, ipAddress || null, deviceType || 'MB20']
+      );
+
+      console.log(`[Biometric Manager] ➕ تم تسجيل جهاز بصمة جديد يدوياً: ${name} (${sn})`);
+      res.json({ success: true, device: q.rows[0] });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.2 ترحيل بيانات وأسماء الموظفين لشاشة جهاز البصمة LCD
+  app.post('/api/biometrics/devices/:serialNumber/push-users', async (req, res) => {
+    try {
+      const { serialNumber } = req.params;
+      const { employeeIds, allBranchUsers } = req.body;
+
+      const state = await getSettingsFromStorage(STORAGE_KEY);
+      const employees = Array.isArray(state?.employees) ? state.employees : [];
+
+      // جلب أرقام PIN المعرفة في النظام
+      const profRes = await db.query('SELECT * FROM public.employee_biometric_profiles');
+      const profilesMap = new Map((profRes.rows || []).map(p => [String(p.employee_id), p.device_user_pin]));
+
+      // تحديد قائمة الموظفين المستهدفين
+      let targetEmps = [];
+      if (Array.isArray(employeeIds) && employeeIds.length > 0) {
+        targetEmps = employees.filter(e => employeeIds.includes(e.id));
+      } else if (allBranchUsers) {
+        const devRes = await db.query('SELECT branch_id FROM public.biometric_devices WHERE serial_number = $1', [serialNumber]);
+        const branchId = devRes.rows?.[0]?.branch_id;
+        targetEmps = branchId ? employees.filter(e => String(e.branchId) === String(branchId)) : employees;
+      } else {
+        targetEmps = employees;
+      }
+
+      if (targetEmps.length === 0) {
+        return res.status(400).json({ success: false, error: 'لا يوجد موظفون محددون للترحيل' });
+      }
+
+      let count = 0;
+      targetEmps.forEach((emp, index) => {
+        const pin = profilesMap.get(String(emp.id)) || emp.code || emp.id;
+        if (!pin) return;
+        const cleanName = (emp.name || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 24);
+
+        // أمر ZKTeco ADMS القياسي لتحديث مستخدم:
+        // C:seq:DATA UPDATE USER PIN=107\tName=Ahmed Khaled\tPri=0\tPasswd=\tCard=
+        const cmdId = Date.now() + index;
+        const cmd = `C:${cmdId}:DATA UPDATE USER PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=`;
+        queueDeviceCommand(serialNumber, cmd);
+        count++;
+      });
+
+      console.log(`[Biometric Manager] 📤 تم جدولة ترحيل ${count} موظف إلى جهاز البصمة ${serialNumber}`);
+      res.json({
+        success: true,
+        message: `تم جدولة ترحيل ${count} موظف إلى شاشة الجهاز بنجاح`,
+        queuedCount: count
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.3 أمر إعادة تشغيل الجهاز عن بُعد (Remote Reboot)
+  app.post('/api/biometrics/devices/:serialNumber/reboot', async (req, res) => {
+    try {
+      const { serialNumber } = req.params;
+      const cmd = `C:${Date.now()}:REBOOT`;
+      queueDeviceCommand(serialNumber, cmd);
+      res.json({ success: true, message: 'تم إرسال أمر إعادة تشغيل الجهاز بنجاح' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.4 أمر مسح سجلات الحركات القديمة من ذاكرة الجهاز (Clear Device Logs)
+  app.post('/api/biometrics/devices/:serialNumber/clear-log', async (req, res) => {
+    try {
+      const { serialNumber } = req.params;
+      const cmd = `C:${Date.now()}:CLEAR LOG`;
+      queueDeviceCommand(serialNumber, cmd);
+      res.json({ success: true, message: 'تم إرسال أمر مسح سجلات الحركات القديمة من الجهاز' });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }

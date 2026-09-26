@@ -9,6 +9,20 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
 
+  // نصوص وأوضاع النوافذ المنبثقة (Modals)
+  const [showAddDeviceModal, setShowAddDeviceModal] = useState(false);
+  const [newDeviceName, setNewDeviceName] = useState('');
+  const [newDeviceSerial, setNewDeviceSerial] = useState('');
+  const [newDeviceBranchId, setNewDeviceBranchId] = useState('');
+  const [newDeviceType, setNewDeviceType] = useState('MB20');
+  const [newDeviceIp, setNewDeviceIp] = useState('');
+
+  const [selectedDeviceForManage, setSelectedDeviceForManage] = useState(null);
+  const [editDeviceName, setEditDeviceName] = useState('');
+  const [editDeviceBranchId, setEditDeviceBranchId] = useState('');
+  const [isPushingUsers, setIsPushingUsers] = useState(false);
+  const [pushScope, setPushScope] = useState('branch'); // 'branch' | 'all'
+
   // حقول محاكي الاختبار
   const [simPin, setSimPin] = useState('107');
   const [simVerifyType, setSimVerifyType] = useState('FINGERPRINT');
@@ -82,7 +96,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
         });
       };
 
-      const onPunch = (punchPayload) => {
+      const onPunch = () => {
         fetchLogs();
       };
 
@@ -96,25 +110,120 @@ export default function BiometricDevicesCard({ state, showToast }) {
     }
   }, [fetchDevices, fetchLogs, fetchProfiles]);
 
-  // تحديث فرع الجهاز
-  const handleAssignBranch = async (serialNumber, branchId) => {
+  const branches = state?.branches || [];
+  const employees = state?.employees || [];
+
+  // إضافة جهاز بصمة جديد يدوياً
+  const handleAddNewDevice = async (e) => {
+    e.preventDefault();
+    if (!newDeviceSerial.trim()) {
+      showToast?.('⚠️ يرجى إدخال الرقم التسلسلي للجهاز (Serial Number)');
+      return;
+    }
+
     try {
-      const branchObj = (state?.branches || []).find(b => String(b.id) === String(branchId));
-      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}`, {
+      const branchObj = branches.find(b => String(b.id) === String(newDeviceBranchId));
+      const res = await fetch('/api/biometrics/devices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceName: newDeviceName.trim() || `جهاز بصمة ZKTeco (${newDeviceSerial.trim()})`,
+          serialNumber: newDeviceSerial.trim(),
+          branchId: newDeviceBranchId || null,
+          branchName: branchObj?.name || null,
+          ipAddress: newDeviceIp.trim() || null,
+          deviceType: newDeviceType
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        showToast?.('✅ تم تسجيل جهاز البصمة الجديد بنجاح');
+        setShowAddDeviceModal(false);
+        setNewDeviceName('');
+        setNewDeviceSerial('');
+        setNewDeviceBranchId('');
+        setNewDeviceIp('');
+        fetchDevices();
+      } else {
+        showToast?.(`❌ خطأ: ${data.error || 'تعذر إضافة الجهاز'}`);
+      }
+    } catch (err) {
+      showToast?.(`❌ فشل الاتصال: ${err.message}`);
+    }
+  };
+
+  // فتح نافذة إدارة وتعديل إعدادات الجهاز
+  const openManageModal = (dev) => {
+    setSelectedDeviceForManage(dev);
+    setEditDeviceName(dev.device_name || '');
+    setEditDeviceBranchId(dev.branch_id || '');
+  };
+
+  // حفظ تعديلات الجهاز
+  const handleSaveDeviceSettings = async () => {
+    if (!selectedDeviceForManage) return;
+    try {
+      const branchObj = branches.find(b => String(b.id) === String(editDeviceBranchId));
+      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(selectedDeviceForManage.serial_number)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          branchId,
-          branchName: branchObj?.name || 'الفرع المحدد'
+          deviceName: editDeviceName.trim(),
+          branchId: editDeviceBranchId,
+          branchName: branchObj?.name || ''
         })
       });
       const data = await res.json();
       if (data.success) {
-        showToast?.('✅ تم ربط جهاز البصمة بالفرع بنجاح');
+        showToast?.('✅ تم تحديث بيانات وإعدادات الجهاز بنجاح');
+        setSelectedDeviceForManage(null);
         fetchDevices();
       }
     } catch {
       showToast?.('❌ تعذر حفظ إعدادات الجهاز');
+    }
+  };
+
+  // حذف جهاز
+  const handleDeleteDevice = async (serialNumber) => {
+    if (!window.confirm(`هل أنت متأكد من رغبتك في حذف جهاز البصمة (${serialNumber})؟`)) return;
+    try {
+      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.('🗑️ تم حذف الجهاز بنجاح');
+        setSelectedDeviceForManage(null);
+        fetchDevices();
+      }
+    } catch {
+      showToast?.('❌ تعذر حذف الجهاز');
+    }
+  };
+
+  // ترحيل بيانات وأسماء الموظفين للجهاز
+  const handlePushUsersToDevice = async (serialNumber, scope = 'branch') => {
+    setIsPushingUsers(true);
+    try {
+      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}/push-users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          allBranchUsers: scope === 'branch'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.(`🎉 ${data.message} (خلال ثوانٍ سيسحبها الجهاز تلقائياً)`);
+      } else {
+        showToast?.(`⚠️ خطأ: ${data.error || 'تعذر الترحيل'}`);
+      }
+    } catch (e) {
+      showToast?.(`❌ فشل الترحيل: ${e.message}`);
+    } finally {
+      setIsPushingUsers(false);
     }
   };
 
@@ -130,6 +239,38 @@ export default function BiometricDevicesCard({ state, showToast }) {
       }
     } catch {
       showToast?.('❌ تعذر إرسال أمر المزامنة');
+    }
+  };
+
+  // إعادة تشغيل الجهاز عن بُعد
+  const handleRebootDevice = async (serialNumber) => {
+    if (!window.confirm(`هل ترغب في إرسال أمر إعادة تشغيل (Reboot) لجهاز البصمة (${serialNumber})؟`)) return;
+    try {
+      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}/reboot`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.('🔄 تم إرسال أمر إعادة التشغيل للجهاز');
+      }
+    } catch {
+      showToast?.('❌ تعذر إرسال أمر إعادة التشغيل');
+    }
+  };
+
+  // مسح سجلات الحركات القديمة من الجهاز
+  const handleClearDeviceLogs = async (serialNumber) => {
+    if (!window.confirm(`تنبيه: سيتم مسح سجل الحركات من ذاكرة جهاز البصمة الداخلي. هل تود المتابعة؟`)) return;
+    try {
+      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}/clear-log`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.('🧹 تم إرسال أمر تفريغ الذاكرة للماكينة');
+      }
+    } catch {
+      showToast?.('❌ تعذر إرسال الأمر');
     }
   };
 
@@ -182,9 +323,6 @@ export default function BiometricDevicesCard({ state, showToast }) {
       setIsSimulating(false);
     }
   };
-
-  const branches = state?.branches || [];
-  const employees = state?.employees || [];
 
   return (
     <div
@@ -241,7 +379,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
         </div>
 
         {/* أزرار التبويبات الداخلية */}
-        <div style={{ display: 'flex', gap: '8px', background: '#f8fafc', padding: '4px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+        <div style={{ display: 'flex', gap: '8px', background: '#f8fafc', padding: '4px', borderRadius: '12px', border: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
           <button
             type="button"
             onClick={() => setActiveSubTab('devices')}
@@ -312,7 +450,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
               boxShadow: activeSubTab === 'guide' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none'
             }}
           >
-            🛠️ دليل الضبط والمحاكي
+            📖 دليل التشغيل والمحاكي
           </button>
         </div>
       </div>
@@ -320,6 +458,54 @@ export default function BiometricDevicesCard({ state, showToast }) {
       {/* ── التبويب 1: الأجهزة المتصلة ────────────────────────────────────────── */}
       {activeSubTab === 'devices' && (
         <div>
+          {/* شريط الإجراءات: إضافة جهاز جديد وتحديث */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <span style={{ fontWeight: 800, color: '#334155', fontSize: '0.95rem' }}>
+              قائمة أجهزة البصمة المربوطة بالسحابة:
+            </span>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setShowAddDeviceModal(true)}
+                style={{
+                  padding: '9px 16px',
+                  borderRadius: '10px',
+                  background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontWeight: 800,
+                  fontSize: '0.88rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontFamily: 'Cairo',
+                  boxShadow: '0 2px 8px rgba(2, 132, 199, 0.25)'
+                }}
+              >
+                <span>➕</span> إضافة جهاز بصمة جديد
+              </button>
+              <button
+                type="button"
+                onClick={fetchDevices}
+                style={{
+                  padding: '9px 14px',
+                  borderRadius: '10px',
+                  background: '#f8fafc',
+                  color: '#475569',
+                  border: '1px solid #cbd5e1',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>🔄</span> تحديث
+              </button>
+            </div>
+          </div>
+
           {devices.length === 0 ? (
             <div
               style={{
@@ -333,131 +519,127 @@ export default function BiometricDevicesCard({ state, showToast }) {
               <div style={{ fontSize: '42px', marginBottom: '12px' }}>📡</div>
               <h4 style={{ margin: '0 0 6px', color: '#334155', fontWeight: 800 }}>لا توجد أجهزة متصلة مسجلة بعد</h4>
               <p style={{ margin: '0 auto 16px', maxWidth: '520px', color: '#64748b', fontSize: '0.9rem' }}>
-                بمجرد تشغيل جهاز ZKTeco MB20 وضبط إعدادات الـ Cloud Server على الدومين الخاص بك، سيتم اكتشاف الجهاز وتسجيله هنا تلقائياً دون أي إدخال يدوي!
+                بمجرد تشغيل جهاز ZKTeco MB20 وضبط إعدادات الـ Cloud Server على الدومين الخاص بك، سيتم اكتشاف الجهاز وتسجيله هنا تلقائياً، أو يمكنك إضافته يدوياً بالضغط على زر "إضافة جهاز بصمة جديد".
               </p>
-              <button
-                type="button"
-                onClick={fetchDevices}
-                style={{
-                  padding: '10px 20px',
-                  borderRadius: '10px',
-                  background: '#0284c7',
-                  color: '#fff',
-                  border: 'none',
-                  fontWeight: 700,
-                  cursor: 'pointer'
-                }}
-              >
-                🔄 إعادة فحص الأجهزة المتصلة
-              </button>
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '16px' }}>
-              {devices.map((dev) => (
-                <div
-                  key={dev.serial_number}
-                  style={{
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '14px',
-                    padding: '18px',
-                    background: '#ffffff',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+              {devices.map((dev) => {
+                const devBranch = branches.find(b => String(b.id) === String(dev.branch_id));
+                const branchNameDisplay = devBranch?.name || dev.branch_name || 'غير محدد';
+
+                return (
+                  <div
+                    key={dev.serial_number}
+                    style={{
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '14px',
+                      padding: '18px',
+                      background: '#ffffff',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between'
+                    }}
+                  >
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '1.4rem' }}>📟</span>
-                        <strong style={{ fontSize: '1.05rem', color: '#0f172a' }}>{dev.device_name || 'ZKTeco MB20'}</strong>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '1.4rem' }}>📟</span>
+                            <strong style={{ fontSize: '1.05rem', color: '#0f172a' }}>{dev.device_name || 'ZKTeco MB20'}</strong>
+                          </div>
+                          <span style={{ fontSize: '0.82rem', color: '#64748b', fontFamily: 'monospace' }}>
+                            SN: {dev.serial_number}
+                          </span>
+                        </div>
+                        <span
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '20px',
+                            fontSize: '0.78rem',
+                            fontWeight: 800,
+                            background: dev.status === 'ONLINE' ? '#ecfdf5' : '#fef2f2',
+                            color: dev.status === 'ONLINE' ? '#059669' : '#dc2626',
+                            border: `1px solid ${dev.status === 'ONLINE' ? '#a7f3d0' : '#fecaca'}`
+                          }}
+                        >
+                          {dev.status === 'ONLINE' ? '🟢 متصل (Online)' : '🔴 غير متصل'}
+                        </span>
                       </div>
-                      <span style={{ fontSize: '0.82rem', color: '#64748b', fontFamily: 'monospace' }}>
-                        SN: {dev.serial_number}
-                      </span>
+
+                      <div style={{ fontSize: '0.85rem', color: '#475569', marginBottom: '14px', lineHeight: '1.8', background: '#f8fafc', padding: '10px 12px', borderRadius: '10px' }}>
+                        <div>🏥 <strong>الفرع التابع له:</strong> <span style={{ color: '#0284c7', fontWeight: 800 }}>{branchNameDisplay}</span></div>
+                        <div>🌐 <strong>عنوان الـ IP:</strong> {dev.ip_address || '127.0.0.1'}</div>
+                        <div>📡 <strong>البروتوكول:</strong> {dev.protocol || 'ADMS'} ({dev.device_type || 'MB20'})</div>
+                        <div>⏱️ <strong>آخر نبض (Heartbeat):</strong> {dev.last_heartbeat ? new Date(dev.last_heartbeat).toLocaleTimeString('ar-EG') : 'الآن'}</div>
+                      </div>
                     </div>
-                    <span
-                      style={{
-                        padding: '4px 10px',
-                        borderRadius: '20px',
-                        fontSize: '0.78rem',
-                        fontWeight: 800,
-                        background: dev.status === 'ONLINE' ? '#ecfdf5' : '#fef2f2',
-                        color: dev.status === 'ONLINE' ? '#059669' : '#dc2626',
-                        border: `1px solid ${dev.status === 'ONLINE' ? '#a7f3d0' : '#fecaca'}`
-                      }}
-                    >
-                      {dev.status === 'ONLINE' ? '🟢 متصل (Online)' : '🔴 غير متصل'}
-                    </span>
-                  </div>
 
-                  <div style={{ fontSize: '0.85rem', color: '#475569', marginBottom: '14px', lineHeight: '1.8' }}>
-                    <div>🌐 <strong>الـ IP:</strong> {dev.ip_address || 'غير محدد'}</div>
-                    <div>📡 <strong>البروتوكول:</strong> {dev.protocol || 'ADMS'}</div>
-                    <div>⏱️ <strong>آخر نبض:</strong> {dev.last_heartbeat ? new Date(dev.last_heartbeat).toLocaleTimeString('ar-EG') : 'الآن'}</div>
-                  </div>
+                    {/* أزرار الإجراءات على بطاقة الجهاز */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          type="button"
+                          disabled={isPushingUsers}
+                          onClick={() => handlePushUsersToDevice(dev.serial_number, 'branch')}
+                          style={{
+                            flex: 1,
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                            color: '#ffffff',
+                            border: 'none',
+                            fontWeight: 800,
+                            fontSize: '0.82rem',
+                            cursor: isPushingUsers ? 'not-allowed' : 'pointer',
+                            fontFamily: 'Cairo',
+                            boxShadow: '0 2px 6px rgba(16, 185, 129, 0.25)'
+                          }}
+                        >
+                          📤 ترحيل أسماء موظفي الفرع للجهاز
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openManageModal(dev)}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            background: '#f8fafc',
+                            color: '#334155',
+                            border: '1px solid #cbd5e1',
+                            fontWeight: 700,
+                            fontSize: '0.82rem',
+                            cursor: 'pointer',
+                            fontFamily: 'Cairo'
+                          }}
+                        >
+                          ⚙️ إعدادات الجهاز
+                        </button>
+                      </div>
 
-                  {/* تحديد الفرع التابع له الجهاز */}
-                  <div style={{ marginBottom: '14px' }}>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
-                      🏥 الفرع المخصص لهذا الجهاز:
-                    </label>
-                    <select
-                      value={dev.branch_id || ''}
-                      onChange={(e) => handleAssignBranch(dev.serial_number, e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '9px 12px',
-                        borderRadius: '10px',
-                        border: '1px solid #cbd5e1',
-                        fontFamily: 'Cairo',
-                        fontWeight: 700,
-                        fontSize: '0.9rem',
-                        background: '#f8fafc'
-                      }}
-                    >
-                      <option value="">-- اختر الفرع التابع له الجهاز --</option>
-                      {branches.map(b => (
-                        <option key={b.id} value={b.id}>{b.name}</option>
-                      ))}
-                    </select>
+                      <button
+                        type="button"
+                        onClick={() => handleSyncTime(dev.serial_number)}
+                        style={{
+                          width: '100%',
+                          padding: '7px',
+                          borderRadius: '8px',
+                          background: '#f0f9ff',
+                          color: '#0284c7',
+                          border: '1px solid #bae6fd',
+                          fontWeight: 700,
+                          fontSize: '0.8rem',
+                          cursor: 'pointer',
+                          fontFamily: 'Cairo'
+                        }}
+                      >
+                        🕒 مزامنة التوقيت الذري مع السيرفر
+                      </button>
+                    </div>
                   </div>
-
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      type="button"
-                      onClick={() => handleSyncTime(dev.serial_number)}
-                      style={{
-                        flex: 1,
-                        padding: '8px',
-                        borderRadius: '8px',
-                        background: '#f0f9ff',
-                        color: '#0284c7',
-                        border: '1px solid #bae6fd',
-                        fontWeight: 700,
-                        fontSize: '0.82rem',
-                        cursor: 'pointer',
-                        fontFamily: 'Cairo'
-                      }}
-                    >
-                      🕒 مزامنة التوقيت الذري
-                    </button>
-                    <button
-                      type="button"
-                      onClick={fetchDevices}
-                      style={{
-                        padding: '8px 12px',
-                        borderRadius: '8px',
-                        background: '#f8fafc',
-                        color: '#64748b',
-                        border: '1px solid #cbd5e1',
-                        fontWeight: 700,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      🔄
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -467,7 +649,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
       {activeSubTab === 'mapping' && (
         <div>
           <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '14px', marginBottom: '18px', color: '#166534', fontSize: '0.9rem' }}>
-            💡 <strong>ملاحظة هامة:</strong> رقم الـ (Device PIN) هو الرقم الذي يُسجل به الموظف على شاشة ماكينة البصمة (مثلاً 107 أو 1). النظام يقوم تلقائياً بمطابقة كود الموظف أو يمكنك تحديد PIN مخصص لكل موظف هنا.
+            💡 <strong>ملاحظة هامة:</strong> رقم الـ (Device PIN) هو المعرّف الرقمي للموظف على ماكينة البصمة. النظام يربطه تلقائياً بكود الموظف، وبإمكانك هنا تعديله أو تخصيصه لكل موظف بنقرة واحدة، ثم الضغط على زر الترحيل لكي تظهر أسماؤهم على شاشة الماكينة LCD.
           </div>
 
           <div style={{ overflowX: 'auto' }}>
@@ -638,7 +820,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
         </div>
       )}
 
-      {/* ── التبويب 4: دليل الضبط والمحاكي ────────────────────────────────────── */}
+      {/* ── التبويب 4: دليل التشغيل الشامل والمحاكي ────────────────────────────── */}
       {activeSubTab === 'guide' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
           {/* محاكي الاختبار الفوري */}
@@ -736,29 +918,462 @@ export default function BiometricDevicesCard({ state, showToast }) {
             </div>
           </div>
 
-          {/* خطوات ضبط الجهاز الميدانية */}
+          {/* الدليل العملي الكامل خطوة بخطوة */}
           <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px' }}>
             <h4 style={{ margin: '0 0 8px', color: '#0f172a', fontWeight: 800 }}>
-              📋 خطوات التأكيد على شاشة ZKTeco MB20:
+              📘 الدليل التشغيلي: من إضافة الجهاز إلى تسجيل البصمة الحية:
             </h4>
-            <ol style={{ paddingRight: '20px', margin: 0, fontSize: '0.88rem', color: '#334155', lineHeight: '2' }}>
-              <li>
-                <strong>شاشة Ethernet:</strong> تأكد أن <code>DHCP: ON</code> لضمان أخذ IP متصل بالإنترنت من راوتر الفرع.
-              </li>
-              <li>
-                <strong>شاشة Cloud Server Setting:</strong>
-                <ul style={{ paddingRight: '18px' }}>
-                  <li><code>Server Mode:</code> <strong>ADMS</strong></li>
-                  <li><code>Enable Domain Name:</code> <strong>ON</strong></li>
-                  <li><code>Server Address:</code> <strong>63-183-147-199.sslip.io</strong></li>
-                  <li><code>Server Port:</code> <strong>5000</strong> (أو 443 بحسب منفذ الـ Reverse Proxy)</li>
-                  <li><code>HTTPS:</code> <strong>OFF</strong> (أو ON إذا كان الـ SSL يعمل على المنفذ)</li>
-                </ul>
-              </li>
-              <li>
-                <strong>اختبار الاتصال:</strong> بمجرد الحفظ، ستظهر أيقونة السحابة ☁️ على شاشة الماكينة وسيظهر السيريال <code>EUF7242701836</code> متصلاً بلون أخضر في تبويب "الأجهزة المتصلة" أعلاه!
-              </li>
-            </ol>
+            
+            <div style={{ fontSize: '0.86rem', color: '#334155', lineHeight: '1.9' }}>
+              <p style={{ margin: '0 0 8px', fontWeight: 800, color: '#0284c7' }}>
+                1️⃣ ترحيل أسماء الموظفين لجهاز البصمة (لتظهر أسماؤهم على الشاشة LCD):
+              </p>
+              <ul style={{ paddingRight: '18px', margin: '0 0 12px' }}>
+                <li>اضغط على زر <strong>"📤 ترحيل أسماء موظفي الفرع للجهاز"</strong> في بطاقة الجهاز.</li>
+                <li>خلال ثوانٍ، يقوم السيرفر بإرسال أمر <code>DATA UPDATE USER</code> للجهاز.</li>
+                <li>عندما يبصم الموظف، سيظهر اسمه بالكامل على شاشة الجهاز بالصوت والصورة!</li>
+              </ul>
+
+              <p style={{ margin: '0 0 8px', fontWeight: 800, color: '#059669' }}>
+                2️⃣ تسجيل بصمة الإصبع أو الوجه للموظف على الجهاز (Enrollment):
+              </p>
+              <ul style={{ paddingRight: '18px', margin: '0 0 12px' }}>
+                <li>اضغط مطولاً على زر <strong>M/OK</strong> في ماكينة البصمة لفتح القائمة.</li>
+                <li>ادخل إلى <strong>User Mgt (إدارة المستخدمين)</strong> ➔ <strong>New User (مستخدم جديد)</strong>.</li>
+                <li>في خانة <strong>User ID</strong>: اكتب نفس رقم الـ <strong>PIN</strong> للموظف (مثال: <code>107</code>).</li>
+                <li>اختر <strong>Fingerprint (بصمة الإصبع)</strong> وضع الإصبع 3 مرات حتى تكتمل، أو اختر <strong>Face</strong> لالتقاط بصمة الوجه بالكاميرا.</li>
+                <li>اضغط <strong>OK</strong> للحفظ.</li>
+              </ul>
+
+              <p style={{ margin: '0 0 8px', fontWeight: 800, color: '#d97706' }}>
+                3️⃣ التجربة الحية على أرض الواقع:
+              </p>
+              <ul style={{ paddingRight: '18px', margin: 0 }}>
+                <li>ضع إصبعك على مستشعر الجهاز.</li>
+                <li>ستقول الماكينة: <em>"شكراً لك (Thank you)"</em>.</li>
+                <li>في نفس اللحظة، ستصدر شاشة كشك الصيدلية صوتاً ترحيبياً وتظهر بطاقة الموظف، ويتحول شريط الوردية إلى اللون الأخضر، ويُسجل الحضور تلقائياً في شيت الحضور ومحرك اللائحة.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal 1: نافذة إضافة جهاز بصمة جديد يدوياً ───────────────────────── */}
+      {showAddDeviceModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.6)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px'
+          }}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              padding: '24px',
+              width: '100%',
+              maxWidth: '480px',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.2)',
+              direction: 'rtl'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: '#0f172a' }}>
+                ➕ إضافة جهاز بصمة جديد
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowAddDeviceModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#94a3b8' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleAddNewDevice} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  اسم الجهاز (توصيف اختياري):
+                </label>
+                <input
+                  type="text"
+                  value={newDeviceName}
+                  onChange={(e) => setNewDeviceName(e.target.value)}
+                  placeholder="مثال: جهاز بصمة فرع المروة"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '0.9rem',
+                    fontFamily: 'Cairo'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  الرقم التسلسلي (Serial Number) <span style={{ color: '#ef4444' }}>*</span>:
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newDeviceSerial}
+                  onChange={(e) => setNewDeviceSerial(e.target.value)}
+                  placeholder="مثال: EUF7242701836"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '0.95rem',
+                    fontFamily: 'monospace',
+                    fontWeight: 700
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  الفرع التابع له الجهاز:
+                </label>
+                <select
+                  value={newDeviceBranchId}
+                  onChange={(e) => setNewDeviceBranchId(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid #cbd5e1',
+                    fontFamily: 'Cairo',
+                    fontWeight: 700,
+                    fontSize: '0.9rem'
+                  }}
+                >
+                  <option value="">-- اختر الفرع --</option>
+                  {branches.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  نوع وطراز الجهاز:
+                </label>
+                <select
+                  value={newDeviceType}
+                  onChange={(e) => setNewDeviceType(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid #cbd5e1',
+                    fontFamily: 'Cairo',
+                    fontWeight: 700,
+                    fontSize: '0.9rem'
+                  }}
+                >
+                  <option value="MB20">ZKTeco MB20 (إصبع + وجه)</option>
+                  <option value="K40">ZKTeco K40 / IN01</option>
+                  <option value="SilkFP">ZKTeco SilkFP / Live20R</option>
+                  <option value="Other">جهاز بصمة شبكي آخر (ADMS)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  عنوان IP المحلي بالفرع (اختياري):
+                </label>
+                <input
+                  type="text"
+                  value={newDeviceIp}
+                  onChange={(e) => setNewDeviceIp(e.target.value)}
+                  placeholder="مثال: 192.168.1.3"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '0.9rem',
+                    fontFamily: 'monospace'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                <button
+                  type="submit"
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontWeight: 800,
+                    fontSize: '0.95rem',
+                    cursor: 'pointer',
+                    fontFamily: 'Cairo'
+                  }}
+                >
+                  💾 حفظ الجهاز
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddDeviceModal(false)}
+                  style={{
+                    padding: '12px 18px',
+                    borderRadius: '10px',
+                    background: '#f8fafc',
+                    color: '#64748b',
+                    border: '1px solid #cbd5e1',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    fontFamily: 'Cairo'
+                  }}
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal 2: نافذة إعدادات وأوامر الجهاز المتقدمة ───────────────────────── */}
+      {selectedDeviceForManage && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.6)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px'
+          }}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              padding: '24px',
+              width: '100%',
+              maxWidth: '520px',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.2)',
+              direction: 'rtl'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
+              <div>
+                <h3 style={{ margin: '0 0 4px', fontSize: '1.2rem', fontWeight: 800, color: '#0f172a' }}>
+                  ⚙️ إعدادات وأوامر ماكينة البصمة
+                </h3>
+                <span style={{ fontSize: '0.8rem', color: '#64748b', fontFamily: 'monospace' }}>
+                  السيريال: {selectedDeviceForManage.serial_number}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedDeviceForManage(null)}
+                style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#94a3b8' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '18px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  اسم الجهاز في المنظومة:
+                </label>
+                <input
+                  type="text"
+                  value={editDeviceName}
+                  onChange={(e) => setEditDeviceName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '0.9rem',
+                    fontFamily: 'Cairo'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  الفرع المخصص:
+                </label>
+                <select
+                  value={editDeviceBranchId}
+                  onChange={(e) => setEditDeviceBranchId(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid #cbd5e1',
+                    fontFamily: 'Cairo',
+                    fontWeight: 700,
+                    fontSize: '0.9rem'
+                  }}
+                >
+                  <option value="">-- اختر الفرع --</option>
+                  {branches.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveDeviceSettings}
+                style={{
+                  padding: '10px',
+                  borderRadius: '10px',
+                  background: '#0284c7',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  fontFamily: 'Cairo'
+                }}
+              >
+                💾 حفظ الاسم والفرع
+              </button>
+            </div>
+
+            {/* قسم الأوامر المباشرة عن بُعد */}
+            <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <strong style={{ fontSize: '0.9rem', color: '#0f172a' }}>
+                🚀 أوامر التحكم الفوري عن بُعد (Remote Commands):
+              </strong>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <button
+                  type="button"
+                  disabled={isPushingUsers}
+                  onClick={() => handlePushUsersToDevice(selectedDeviceForManage.serial_number, 'branch')}
+                  style={{
+                    padding: '10px 8px',
+                    borderRadius: '8px',
+                    background: '#ecfdf5',
+                    color: '#059669',
+                    border: '1px solid #a7f3d0',
+                    fontWeight: 700,
+                    fontSize: '0.8rem',
+                    cursor: isPushingUsers ? 'not-allowed' : 'pointer',
+                    fontFamily: 'Cairo'
+                  }}
+                >
+                  📤 ترحيل موظفي الفرع
+                </button>
+                <button
+                  type="button"
+                  disabled={isPushingUsers}
+                  onClick={() => handlePushUsersToDevice(selectedDeviceForManage.serial_number, 'all')}
+                  style={{
+                    padding: '10px 8px',
+                    borderRadius: '8px',
+                    background: '#f0fdf4',
+                    color: '#166534',
+                    border: '1px solid #86efac',
+                    fontWeight: 700,
+                    fontSize: '0.8rem',
+                    cursor: isPushingUsers ? 'not-allowed' : 'pointer',
+                    fontFamily: 'Cairo'
+                  }}
+                >
+                  🌐 ترحيل كل الموظفين
+                </button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => handleSyncTime(selectedDeviceForManage.serial_number)}
+                  style={{
+                    padding: '9px 8px',
+                    borderRadius: '8px',
+                    background: '#f0f9ff',
+                    color: '#0284c7',
+                    border: '1px solid #bae6fd',
+                    fontWeight: 700,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    fontFamily: 'Cairo'
+                  }}
+                >
+                  🕒 مزامنة التوقيت الذري
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRebootDevice(selectedDeviceForManage.serial_number)}
+                  style={{
+                    padding: '9px 8px',
+                    borderRadius: '8px',
+                    background: '#fffbeb',
+                    color: '#d97706',
+                    border: '1px solid #fde68a',
+                    fontWeight: 700,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    fontFamily: 'Cairo'
+                  }}
+                >
+                  🔄 إعادة تشغيل الماكينة
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => handleClearDeviceLogs(selectedDeviceForManage.serial_number)}
+                  style={{
+                    flex: 1,
+                    padding: '8px',
+                    borderRadius: '8px',
+                    background: '#fef2f2',
+                    color: '#b91c1c',
+                    border: '1px solid #fecaca',
+                    fontWeight: 700,
+                    fontSize: '0.78rem',
+                    cursor: 'pointer',
+                    fontFamily: 'Cairo'
+                  }}
+                >
+                  🧹 مسح سجلات الحركات القديمة
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteDevice(selectedDeviceForManage.serial_number)}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    background: '#fee2e2',
+                    color: '#dc2626',
+                    border: '1px solid #fca5a5',
+                    fontWeight: 700,
+                    fontSize: '0.78rem',
+                    cursor: 'pointer',
+                    fontFamily: 'Cairo'
+                  }}
+                >
+                  🗑️ حذف الجهاز
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
