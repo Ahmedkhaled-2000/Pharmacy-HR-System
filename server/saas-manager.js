@@ -1974,6 +1974,12 @@ export function registerSaasRoutes(app, db, io, JWT_SECRET, getSettingsFromStora
 
       if (!error_message) return res.status(400).json({ success: false });
 
+      // تجاهل أخطاء انقطاع الاتصال الطبيعية ومهلة الإنترنت لتفادي تلويث سجل مصيدة الأخطاء البرمجية
+      const isTransientNetwork = /Failed to fetch|NetworkError|AbortError|انتهت مهلة الاتصال بالخادم|تعذر الاتصال بالخادم|Load failed|The user aborted|net::ERR_|Network request failed/i.test(error_message);
+      if (isTransientNetwork) {
+        return res.json({ success: true, ignored: true, reason: 'transient_network_offline' });
+      }
+
       const errId = `err_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       await db.query(`
         INSERT INTO public.system_error_logs (id, company_id, company_code, error_message, error_stack, screen_name, user_role, user_agent)

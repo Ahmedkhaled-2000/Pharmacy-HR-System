@@ -188,7 +188,16 @@ class SelfHealingEngine {
       this.recordHealingAction('STORAGE_SANITIZED', { errorMsg });
     }
 
-    // ── 4. إرسال تقرير تشخيصي متكامل للخادم لمركز الرصد ──
+    // ── 3.1 إدارة حالات انقطاع أو ضعف الشبكة ومهلة الاتصال الطبيعية كوضع أوفلاين آمن ──
+    const isNetworkOffline = /Failed to fetch|NetworkError|AbortError|انتهت مهلة الاتصال بالخادم|تعذر الاتصال بالخادم|Load failed|The user aborted|net::ERR_|Network request failed/i.test(errorMsg);
+    if (isNetworkOffline) {
+      this.healNetworkReconnection();
+      this.recordHealingAction('NETWORK_OFFLINE_HANDLED', { errorMsg });
+      // عدم تصعيد انقطاع الإنترنت أو التراجع إلى التخزين المحلي كعطل برمجي في Sentry Bug Hub لأن المنظومة تدعم العمل دون اتصال PWA
+      return { handled: true, isNetworkOffline: true };
+    }
+
+    // ── 4. إرسال تقرير تشخيصي متكامل للخادم لمركز الرصد للأخطاء البرمجية الحقيقية فقط ──
     this.sendTelemetryReport(enrichedMsg, errorStack, context);
 
     return { handled: true, enrichedMsg };

@@ -280,6 +280,10 @@ export default function AppRoutes() {
     const handleUnhandledRejection = (event) => {
       try {
         const error = event.reason || 'Unhandled Promise Rejection';
+        const msg = error?.message || String(error || '');
+        if (/Failed to fetch|NetworkError|AbortError|انتهت مهلة الاتصال بالخادم|تعذر الاتصال بالخادم|Load failed|The user aborted|net::ERR_|Network request failed/i.test(msg)) {
+          return;
+        }
         selfHealingEngine.diagnoseAndHeal(error, {
           screenName: location.pathname + (location.search || ''),
           companyId: state?.orgSettings?.companyId || '',
