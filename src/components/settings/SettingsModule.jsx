@@ -34,6 +34,7 @@ import AccountingSystemGuideCard from './AccountingSystemGuideCard';
 import KeyboardShortcutsSettingsCard from './KeyboardShortcutsSettingsCard';
 import EnterpriseHeaderSettingsCard from './EnterpriseHeaderSettingsCard';
 import AndroidAppDownloadCard from './AndroidAppDownloadCard';
+import BiometricDevicesCard from './BiometricDevicesCard';
 import SubscriptionBillingCard from './SubscriptionBillingCard';
 import SupportTicketsCard from './SupportTicketsCard';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
@@ -2004,6 +2005,7 @@ export default function SettingsModule({
         {[
           { id: 'mobile_app', label: '📱 تطبيق الأندرويد (APK)' },
           { id: 'general', label: '🏥 بيانات المؤسسة' },
+          { id: 'biometrics', label: '📟 أجهزة البصمة (ZKTeco)' },
           { id: 'subscription', label: '💳 متابعة الاشتراك والمدفوعات' },
           { id: 'support', label: '🎫 تذاكر الدعم الفني' },
           { id: 'dates', label: '📅 التواريخ وفترات الرواتب' },
@@ -2057,6 +2059,11 @@ export default function SettingsModule({
       {/* Tab: Android Mobile App APK */}
       {activeTab === 'mobile_app' && (
         <AndroidAppDownloadCard showToast={showToast} isCompact={false} />
+      )}
+
+      {/* Tab: Biometric Hardware Terminals (ZKTeco MB20 / ADMS) */}
+      {activeTab === 'biometrics' && (
+        <BiometricDevicesCard state={state} showToast={showToast} />
       )}
 
       {/* Tab: Subscription & Invoices Ledger */}

@@ -18,6 +18,7 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { initSaasTables, registerSaasRoutes, DEFAULT_DEV_USER, DEFAULT_DEV_PASS } from './saas-manager.js';
 import { initOutstockTables, registerOutstockRoutes } from './outstock-manager.js';
+import { initBiometricTables, registerBiometricRoutes } from './biometric-manager.js';
 
 dotenv.config();
 
@@ -111,6 +112,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+app.use(express.text({ type: ['text/*', 'application/octet-stream', 'text/plain'], limit: '10mb' }));
 
 const io = new SocketIOServer(server, {
   cors: {
@@ -388,6 +390,7 @@ async function initDatabaseTables() {
     console.log('🐘 [PostgreSQL] الجداول الأساسية وجداول الأجهزة والتحديثات مفهرسة ومجهزة بنجاح.');
     await initSaasTables(db);
     await initOutstockTables(db);
+    await initBiometricTables(db);
   } catch (err) {
     console.error('❌ [PostgreSQL Init Error]:', err.message);
   }
@@ -4001,6 +4004,9 @@ registerSaasRoutes(app, db, io, JWT_SECRET, getSettingsFromStorage, saveSettings
 
 // ── 9.6 تسجيل مسارات نظام النواقص وطلبات أدوية العملاء والمشتريات (OutStock) ────
 registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromStorage);
+
+// ── 9.7 تسجيل مسارات محرك أجهزة البصمة الحيوية (ZKTeco MB20 / ADMS Push Engine) ───
+registerBiometricRoutes(app, db, io, redis, getSettingsFromStorage, saveSettingsToStorage);
 
 // ── 10. بدء تشغيل الخادم والإغلاق الآمن ───────────────────────────────────────
 server.listen(PORT, '0.0.0.0', () => {

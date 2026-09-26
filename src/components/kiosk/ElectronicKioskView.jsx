@@ -20,6 +20,8 @@ import {
   getPendingKioskCount,
   getCalibratedNow
 } from '../../utils/kioskOutbox';
+import { subscribeToPunchRecorded } from '../../utils/socketClient';
+import { playFingerprintChime } from '../../hooks/useAudio';
 import '../../kiosk-modern.css';
 
 export default function ElectronicKioskView({
@@ -153,6 +155,43 @@ export default function ElectronicKioskView({
   const resolvedKioskBranchId = kioskBranchObj ? String(kioskBranchObj.id) : (effectiveKioskBranchId ? String(effectiveKioskBranchId) : null);
   const resolvedKioskBranchName = kioskBranchObj?.name || '';
   const isGeneralKioskLink = !resolvedKioskBranchId;
+
+  // ── الاستماع اللحظي لحركات جهاز البصمة الحيوية (ZKTeco Hardware Push) ──
+  useEffect(() => {
+    const unsubscribe = subscribeToPunchRecorded((payload) => {
+      if (!payload || !payload.employeeId) return;
+      if (payload.source !== 'biometric_device') return;
+
+      // فحص الفرع إذا كان الكشك مقفولاً على فرع معين
+      if (resolvedKioskBranchId && payload.branchId && String(payload.branchId) !== String(resolvedKioskBranchId)) {
+        return;
+      }
+
+      try {
+        playFingerprintChime('success');
+      } catch {}
+
+      const actionLabel = payload.actionType === 'check_out' ? 'انصراف' : 'حضور';
+      const verifyLabel = payload.verifyType === 'FACE' ? 'بصمة الوجه' : 'بصمة الإصبع';
+      const empName = payload.employeeName || 'الموظف';
+
+      setKioskAlertModal({
+        isOpen: true,
+        type: 'success',
+        title: `🌟 تم تسجيل ${actionLabel} الموظف`,
+        subtitle: `عبر جهاز الفرع (${payload.deviceName || 'ZKTeco MB20'})`,
+        message: `أهلاً بك د. ${empName} - تم توثيق الختم بنجاح بـ ${verifyLabel}`,
+        timeStr: payload.time || '',
+        dateStr: payload.date || '',
+        countdown: 4,
+        onClose: () => setKioskAlertModal(null)
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [resolvedKioskBranchId]);
 
   // دالة موحدة ومعتمدة لحسم الفرع المستهدف للبصمة بأعلى دقة وحوكمة
   const resolveTargetBranch = (emp, chosenBranchId) => {

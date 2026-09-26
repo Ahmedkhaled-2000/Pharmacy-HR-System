@@ -707,7 +707,63 @@ BEGIN
     FOREACH tbl IN ARRAY new_tables
     LOOP
         EXECUTE format('DROP POLICY IF EXISTS "Allow Authenticated Access" ON public.%I', tbl);
-        EXECUTE format('CREATE POLICY "Allow Authenticated Access" ON public.%I FOR ALL USING (true) WITH CHECK (true)', tbl);
-    END LOOP;
-END $$;
+
+-- ==============================================================================
+-- 16. جداول منظومة أجهزة البصمة الحيوية اللحظية (Biometric Terminals / ADMS)
+-- ==============================================================================
+
+-- 16.1 جدول أجهزة البصمة المتصلة بالسحابة
+CREATE TABLE IF NOT EXISTS public.biometric_devices (
+    id VARCHAR(36) PRIMARY KEY,
+    device_name VARCHAR(100) NOT NULL,
+    serial_number VARCHAR(100) NOT NULL UNIQUE,
+    branch_id VARCHAR(50) NULL,
+    branch_name VARCHAR(100) NULL,
+    ip_address VARCHAR(45) NULL,
+    protocol VARCHAR(20) NOT NULL DEFAULT 'ADMS',
+    status VARCHAR(20) NOT NULL DEFAULT 'ONLINE',
+    last_heartbeat TIMESTAMPTZ NULL,
+    firmware_version VARCHAR(50) NULL,
+    device_type VARCHAR(50) DEFAULT 'MB20',
+    settings JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_biometric_dev_serial ON public.biometric_devices (serial_number);
+CREATE INDEX IF NOT EXISTS idx_biometric_dev_branch ON public.biometric_devices (branch_id);
+
+-- 16.2 جدول سجلات البصمة الخام اللحظية (Immutable Event Stream)
+CREATE TABLE IF NOT EXISTS public.biometric_raw_punches (
+    id BIGSERIAL PRIMARY KEY,
+    device_serial VARCHAR(100) NOT NULL,
+    device_user_pin VARCHAR(50) NOT NULL,
+    punch_time TIMESTAMPTZ NOT NULL,
+    verify_type VARCHAR(30) DEFAULT 'FINGERPRINT',
+    raw_punch_state SMALLINT DEFAULT 0,
+    employee_id VARCHAR(100) NULL,
+    employee_name VARCHAR(255) NULL,
+    branch_id VARCHAR(50) NULL,
+    action_type VARCHAR(50) NULL,
+    process_status VARCHAR(30) NOT NULL DEFAULT 'PROCESSED',
+    process_notes TEXT NULL,
+    raw_payload TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_raw_punches_dev_time ON public.biometric_raw_punches (device_serial, punch_time DESC);
+CREATE INDEX IF NOT EXISTS idx_raw_punches_emp ON public.biometric_raw_punches (employee_id);
+CREATE INDEX IF NOT EXISTS idx_raw_punches_status ON public.biometric_raw_punches (process_status);
+
+-- 16.3 جدول ربط بصمات وأرقام PIN الموظفين بالأجهزة
+CREATE TABLE IF NOT EXISTS public.employee_biometric_profiles (
+    id VARCHAR(36) PRIMARY KEY,
+    employee_id VARCHAR(100) NOT NULL UNIQUE,
+    device_user_pin VARCHAR(50) NOT NULL UNIQUE,
+    card_rfid VARCHAR(50) NULL,
+    privilege VARCHAR(20) DEFAULT 'USER',
+    notes TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_emp_bio_pin ON public.employee_biometric_profiles (device_user_pin);
+
 
