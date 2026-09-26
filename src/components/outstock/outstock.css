@@ -697,16 +697,18 @@
 @media (min-width: 769px) {
   .outstock-med-item-card {
     flex-direction: row;
-    align-items: center;
-    padding: 10px 14px;
+    align-items: flex-start;
+    padding: 12px 14px;
+    gap: 12px;
   }
   .outstock-med-top-line {
-    flex: 3;
+    flex: 4;
   }
   .outstock-med-sub-grid {
-    flex: 3.5;
+    flex: 3;
     grid-template-columns: 130px 90px 110px;
     gap: 8px;
+    margin-top: 0 !important;
   }
 }
 

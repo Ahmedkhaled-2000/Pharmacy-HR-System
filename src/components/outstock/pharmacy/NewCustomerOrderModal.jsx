@@ -843,10 +843,12 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                       border: '1.5px solid #e2e8f0',
                       borderRadius: '14px',
                       padding: '14px',
-                      boxShadow: '0 2px 6px rgba(0, 0, 0, 0.03)'
+                      boxShadow: '0 2px 6px rgba(0, 0, 0, 0.03)',
+                      position: 'relative',
+                      zIndex: items.length - idx
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                    <div className="outstock-med-top-line" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <MedicationAutocompleteInput
                           inputRef={(el) => (itemInputRefs.current[idx] = el)}
@@ -1046,7 +1048,7 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                     )}
 
                     {/* تفاصيل الوحدة والكمية والسعر */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1.2fr', gap: '10px', marginTop: '10px' }}>
+                    <div className="outstock-med-sub-grid" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1.2fr', gap: '10px', marginTop: '10px' }}>
                       <div>
                         <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', marginBottom: '3px', display: 'block' }}>
                           الوحدة المطلوبة
