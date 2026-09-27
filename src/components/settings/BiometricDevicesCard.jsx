@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { getSocket } from '../../utils/socketClient';
+import { exportBiometricPunchesExcel, deduplicatePunches } from '../../utils/biometricExcelExporter';
 
 export default function BiometricDevicesCard({ state, showToast }) {
-  const [activeSubTab, setActiveSubTab] = useState('devices'); // 'devices' | 'dispatch' | 'hqEnroll' | 'mapping' | 'logs' | 'guide'
+  const [activeSubTab, setActiveSubTab] = useState('devices'); // 'devices' | 'deviceUsers' | 'excelExport' | 'dispatch' | 'multiBranch' | 'hqEnroll' | 'whatsappAlerts' | 'mapping' | 'logs' | 'guide'
   const [devices, setDevices] = useState([]);
   const [logs, setLogs] = useState([]);
   const [profiles, setProfiles] = useState([]);
@@ -10,6 +11,41 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const [dispatchLogs, setDispatchLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
+
+  // مستكشف مستخدمي الأجهزة الفعليين
+  const [selectedDeviceSnForUsers, setSelectedDeviceSnForUsers] = useState('');
+  const [deviceUsers, setDeviceUsers] = useState([]);
+  const [isLoadingDeviceUsers, setIsLoadingDeviceUsers] = useState(false);
+  const [editingDeviceUser, setEditingDeviceUser] = useState(null);
+
+  // محرك الإكسيل الذكي المانع للتكرار
+  const [excelEmpId, setExcelEmpId] = useState('ALL');
+  const [excelBranchId, setExcelBranchId] = useState('ALL');
+  const [excelDateFrom, setExcelDateFrom] = useState(() => new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10));
+  const [excelDateTo, setExcelDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [excelPunchType, setExcelPunchType] = useState('ALL'); // 'ALL' | 'check_in' | 'check_out'
+  const [excelDedupEnabled, setExcelDedupEnabled] = useState(true);
+  const [excelDedupMinutes, setExcelDedupMinutes] = useState(5);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
+
+  // أكواد الفروع المتعددة للموظف (Multi-Branch Multi-PIN)
+  const [branchPins, setBranchPins] = useState([]);
+  const [newBranchPinEmpId, setNewBranchPinEmpId] = useState('');
+  const [newBranchPinBranchId, setNewBranchPinBranchId] = useState('');
+  const [newBranchPinVal, setNewBranchPinVal] = useState('');
+  const [newBranchPinAutoDispatch, setNewBranchPinAutoDispatch] = useState(true);
+  const [isSavingBranchPin, setIsSavingBranchPin] = useState(false);
+
+  // إعدادات إشعارات واتساب للإدارة العليا
+  const [waConfig, setWaConfig] = useState({
+    enabled: true,
+    notifyCheckIn: true,
+    notifyCheckOut: true,
+    recipientPhones: []
+  });
+  const [newWaPhone, setNewWaPhone] = useState('');
+  const [isSavingWaConfig, setIsSavingWaConfig] = useState(false);
+  const [isTestingWa, setIsTestingWa] = useState(false);
 
   // حالة مركز الترحيل والتوزيع بين الفروع (Cross-Branch Dispatcher)
   const [selectedDispatchEmps, setSelectedDispatchEmps] = useState([]);
@@ -109,12 +145,57 @@ export default function BiometricDevicesCard({ state, showToast }) {
     }
   }, []);
 
+  // جلب مستخدمي جهاز محدد من الذاكرة
+  const fetchDeviceUsers = useCallback(async (sn) => {
+    if (!sn) return;
+    setIsLoadingDeviceUsers(true);
+    try {
+      const res = await fetch(`/api/biometrics/devices/${sn}/users`);
+      const data = await res.json();
+      if (data.success) {
+        setDeviceUsers(data.users || []);
+      }
+    } catch (e) {
+      console.warn('Error fetching device users:', e.message);
+    } finally {
+      setIsLoadingDeviceUsers(false);
+    }
+  }, []);
+
+  // جلب أكواد الفروع المتعددة
+  const fetchBranchPins = useCallback(async () => {
+    try {
+      const res = await fetch('/api/biometrics/branch-pins');
+      const data = await res.json();
+      if (data.success) {
+        setBranchPins(data.branchPins || []);
+      }
+    } catch (e) {
+      console.warn('Error fetching branch pins:', e.message);
+    }
+  }, []);
+
+  // جلب إعدادات إشعارات واتساب
+  const fetchWaConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/biometrics/whatsapp-config');
+      const data = await res.json();
+      if (data.success && data.config) {
+        setWaConfig(data.config);
+      }
+    } catch (e) {
+      console.warn('Error fetching WhatsApp config:', e.message);
+    }
+  }, []);
+
   useEffect(() => {
     fetchDevices();
     fetchLogs();
     fetchProfiles();
     fetchTemplates();
     fetchDispatchLogs();
+    fetchBranchPins();
+    fetchWaConfig();
 
     // الاستماع لنبض الجهاز ولحظية البصمات عبر Socket.io
     const socket = getSocket();
@@ -156,19 +237,40 @@ export default function BiometricDevicesCard({ state, showToast }) {
         }
       };
 
+      const onDeviceUsersUpdated = (data) => {
+        if (data?.serialNumber) {
+          fetchDeviceUsers(data.serialNumber);
+          showToast?.(`👥 تم تحديث قائمة مستخدمي الجهاز (${data.serialNumber}) من الذاكرة بنجاح!`);
+        }
+      };
+
       socket.on('biometric:device_status', onStatus);
       socket.on('punch:recorded', onPunch);
       socket.on('biometric:template_vaulted', onTemplateVaulted);
       socket.on('biometric:command_ack', onCmdAck);
+      socket.on('biometric:device_users_updated', onDeviceUsersUpdated);
 
       return () => {
         socket.off('biometric:device_status', onStatus);
         socket.off('punch:recorded', onPunch);
         socket.off('biometric:template_vaulted', onTemplateVaulted);
         socket.off('biometric:command_ack', onCmdAck);
+        socket.off('biometric:device_users_updated', onDeviceUsersUpdated);
       };
     }
-  }, [fetchDevices, fetchLogs, fetchProfiles, fetchTemplates, fetchDispatchLogs, showToast]);
+  }, [fetchDevices, fetchLogs, fetchProfiles, fetchTemplates, fetchDispatchLogs, fetchBranchPins, fetchWaConfig, fetchDeviceUsers, showToast]);
+
+  useEffect(() => {
+    if (!selectedDeviceSnForUsers && devices.length > 0) {
+      setSelectedDeviceSnForUsers(devices[0].serial_number);
+    }
+  }, [devices, selectedDeviceSnForUsers]);
+
+  useEffect(() => {
+    if (selectedDeviceSnForUsers) {
+      fetchDeviceUsers(selectedDeviceSnForUsers);
+    }
+  }, [selectedDeviceSnForUsers, fetchDeviceUsers]);
 
   const branches = state?.branches || [];
   const employees = state?.employees || [];
@@ -475,6 +577,201 @@ export default function BiometricDevicesCard({ state, showToast }) {
     }
   };
 
+  // ── وظائف مستكشف مستخدمي الجهاز والتحكم بالذاكرة ─────────────────────────
+  const handleSyncDeviceUsers = async () => {
+    if (!selectedDeviceSnForUsers) return;
+    try {
+      const res = await fetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/users/sync`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.('🔄 تم إرسال أمر فحص ذاكرة الجهاز، ستظهر الأسماء فور استقبالها!');
+      }
+    } catch {
+      showToast?.('❌ تعذر إرسال أمر الفحص');
+    }
+  };
+
+  const handleSaveDeviceUserEdit = async (e) => {
+    e.preventDefault();
+    if (!editingDeviceUser || !selectedDeviceSnForUsers) return;
+    try {
+      const res = await fetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/users/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingDeviceUser)
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.('✅ تم إرسال أمر تحديث المستخدم للجهاز');
+        setEditingDeviceUser(null);
+        fetchDeviceUsers(selectedDeviceSnForUsers);
+      } else {
+        showToast?.(`⚠️ ${data.error || 'فشل التحديث'}`);
+      }
+    } catch (err) {
+      showToast?.(`❌ فشل التحديث: ${err.message}`);
+    }
+  };
+
+  const handleDeleteDeviceUser = async (pin) => {
+    if (!confirm(`هل أنت متأكد من مسح المستخدم برقم PIN (${pin}) من ذاكرة الماكينة؟`)) return;
+    try {
+      const res = await fetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/users/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.(`🗑️ ${data.message}`);
+        fetchDeviceUsers(selectedDeviceSnForUsers);
+      }
+    } catch {
+      showToast?.('❌ تعذر مسح المستخدم');
+    }
+  };
+
+  const handleToggleDeviceUserActive = async (pin, currentActive) => {
+    const nextActive = !currentActive;
+    try {
+      const res = await fetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/users/toggle-active`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin, isActive: nextActive })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.(data.message);
+        fetchDeviceUsers(selectedDeviceSnForUsers);
+      }
+    } catch {
+      showToast?.('❌ تعذر تغيير حالة البصمة');
+    }
+  };
+
+  // ── وظائف أكواد الفروع المتعددة للموظف ──────────────────────────────────────
+  const handleSaveBranchPin = async (e) => {
+    e.preventDefault();
+    if (!newBranchPinEmpId || !newBranchPinBranchId || !newBranchPinVal.trim()) {
+      showToast?.('⚠️ يرجى ملء كافة بيانات كود الفرع');
+      return;
+    }
+    setIsSavingBranchPin(true);
+    try {
+      const res = await fetch('/api/biometrics/branch-pins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employeeId: newBranchPinEmpId,
+          branchId: newBranchPinBranchId,
+          deviceUserPin: newBranchPinVal.trim(),
+          autoDispatch: newBranchPinAutoDispatch
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.(`🎉 ${data.message}`);
+        setNewBranchPinVal('');
+        fetchBranchPins();
+      } else {
+        showToast?.(`⚠️ ${data.error || 'فشل الحفظ'}`);
+      }
+    } catch (err) {
+      showToast?.(`❌ فشل الحفظ: ${err.message}`);
+    } finally {
+      setIsSavingBranchPin(false);
+    }
+  };
+
+  const handleDeleteBranchPin = async (id) => {
+    if (!confirm('هل أنت متأكد من حذف كود هذا الفرع للموظف؟')) return;
+    try {
+      const res = await fetch(`/api/biometrics/branch-pins/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.('🗑️ تم حذف كود الفرع بنجاح');
+        fetchBranchPins();
+      }
+    } catch {
+      showToast?.('❌ تعذر حذف كود الفرع');
+    }
+  };
+
+  // ── وظائف إشعارات واتساب للإدارة العليا ─────────────────────────────────────
+  const handleSaveWaConfig = async () => {
+    setIsSavingWaConfig(true);
+    try {
+      const res = await fetch('/api/biometrics/whatsapp-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: waConfig })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.('✅ تم حفظ إعدادات إشعارات واتساب للإدارة بنجاح');
+      }
+    } catch {
+      showToast?.('❌ تعذر حفظ إعدادات واتساب');
+    } finally {
+      setIsSavingWaConfig(false);
+    }
+  };
+
+  const handleTestWaAlert = async (testPhone) => {
+    setIsTestingWa(true);
+    try {
+      const res = await fetch('/api/biometrics/whatsapp-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ testPhone: testPhone || (waConfig.recipientPhones?.[0] || '') })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.('📲 تم إرسال إشعار تجريبي فوري بنجاح، تحقق من تطبيق واتساب!');
+      } else {
+        showToast?.(`⚠️ ${data.error || 'فشل الإرسال التجريبي'}`);
+      }
+    } catch (err) {
+      showToast?.(`❌ تعذر الإرسال: ${err.message}`);
+    } finally {
+      setIsTestingWa(false);
+    }
+  };
+
+  // ── تصدير إكسيل الاحترافي المانع للتكرار ────────────────────────────────────
+  const handleExportExcel = async () => {
+    setIsExportingExcel(true);
+    try {
+      const raw = logs || [];
+      const filtered = raw.filter(p => {
+        const pDate = p.punch_time ? p.punch_time.slice(0, 10) : (p.date || '');
+        if (excelDateFrom && pDate < excelDateFrom) return false;
+        if (excelDateTo && pDate > excelDateTo) return false;
+        if (excelEmpId !== 'ALL' && String(p.employee_id || p.employeeId) !== String(excelEmpId)) return false;
+        if (excelBranchId !== 'ALL' && String(p.branch_id || p.branchId) !== String(excelBranchId)) return false;
+        if (excelPunchType !== 'ALL' && String(p.action_type || p.actionType) !== excelPunchType) return false;
+        return true;
+      });
+
+      const bObj = branches.find(b => String(b.id) === String(excelBranchId));
+      const eObj = employees.find(e => String(e.id) === String(excelEmpId));
+
+      await exportBiometricPunchesExcel({
+        punches: filtered,
+        companyName: state?.orgSettings?.orgName || 'مجموعة صيدليات المروة والدكتور سيف',
+        branchName: bObj?.name || 'كافة الفروع',
+        filterEmployeeName: eObj?.name || 'كافة الكوادر',
+        showToast,
+        enableDeduplication: excelDedupEnabled,
+        dedupMinutes: excelDedupMinutes
+      });
+    } catch (err) {
+      showToast?.(`❌ تعذر تصدير الإكسيل: ${err.message}`);
+    } finally {
+      setIsExportingExcel(false);
+    }
+  };
+
   return (
     <div
       className="card settings-card"
@@ -530,7 +827,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
         </div>
 
         {/* أزرار التبويبات الداخلية */}
-        <div style={{ display: 'flex', gap: '8px', background: '#f8fafc', padding: '4px', borderRadius: '12px', border: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '8px', background: '#f8fafc', padding: '6px', borderRadius: '14px', border: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
           <button
             type="button"
             onClick={() => setActiveSubTab('devices')}
@@ -547,7 +844,43 @@ export default function BiometricDevicesCard({ state, showToast }) {
               boxShadow: activeSubTab === 'devices' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none'
             }}
           >
-            🔌 الأجهزة المتصلة ({devices.length})
+            🔌 الأجهزة ({devices.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('deviceUsers')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '9px',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: '0.88rem',
+              fontFamily: 'Cairo',
+              background: activeSubTab === 'deviceUsers' ? '#ffffff' : 'transparent',
+              color: activeSubTab === 'deviceUsers' ? '#0284c7' : '#64748b',
+              boxShadow: activeSubTab === 'deviceUsers' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none'
+            }}
+          >
+            👥 مستخدمو الماكينة والذاكرة ({deviceUsers.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('excelExport')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '9px',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: '0.88rem',
+              fontFamily: 'Cairo',
+              background: activeSubTab === 'excelExport' ? '#ffffff' : 'transparent',
+              color: activeSubTab === 'excelExport' ? '#0d9488' : '#64748b',
+              boxShadow: activeSubTab === 'excelExport' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none'
+            }}
+          >
+            📊 تصدير إكسيل الاحترافي
           </button>
           <button
             type="button"
@@ -565,7 +898,25 @@ export default function BiometricDevicesCard({ state, showToast }) {
               boxShadow: activeSubTab === 'dispatch' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none'
             }}
           >
-            🌐 ترحيل وتوزيع البصمات للفروع
+            🌐 ترحيل وتوزيع البصمات
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('multiBranch')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '9px',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: '0.88rem',
+              fontFamily: 'Cairo',
+              background: activeSubTab === 'multiBranch' ? '#ffffff' : 'transparent',
+              color: activeSubTab === 'multiBranch' ? '#7c3aed' : '#64748b',
+              boxShadow: activeSubTab === 'multiBranch' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none'
+            }}
+          >
+            🏢 أكواد الفروع المتعددة ({branchPins.length})
           </button>
           <button
             type="button"
@@ -584,6 +935,24 @@ export default function BiometricDevicesCard({ state, showToast }) {
             }}
           >
             🏢 التسجيل المركزي بالإدارة
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('whatsappAlerts')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '9px',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: '0.88rem',
+              fontFamily: 'Cairo',
+              background: activeSubTab === 'whatsappAlerts' ? '#ffffff' : 'transparent',
+              color: activeSubTab === 'whatsappAlerts' ? '#16a34a' : '#64748b',
+              boxShadow: activeSubTab === 'whatsappAlerts' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none'
+            }}
+          >
+            💬 إشعارات واتساب الإدارة
           </button>
           <button
             type="button"
@@ -619,7 +988,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
               boxShadow: activeSubTab === 'logs' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none'
             }}
           >
-            📜 السجل الحي اللحظي
+            📜 السجل الحي ({logs.length})
           </button>
           <button
             type="button"
@@ -1490,6 +1859,759 @@ export default function BiometricDevicesCard({ state, showToast }) {
         </div>
       )}
 
+      {/* ── التبويب: استعراض وإدارة مستخدمي الجهاز من الذاكرة ── */}
+      {activeSubTab === 'deviceUsers' && (
+        <div>
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px', marginBottom: '18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.92rem' }}>📟 اختر الماكينة لمعاينة المسجلين بذاكرتها:</span>
+              <select
+                value={selectedDeviceSnForUsers}
+                onChange={(e) => setSelectedDeviceSnForUsers(e.target.value)}
+                style={{
+                  padding: '9px 14px',
+                  borderRadius: '10px',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '0.9rem',
+                  fontFamily: 'Cairo',
+                  fontWeight: 700,
+                  background: '#ffffff'
+                }}
+              >
+                {devices.map(d => (
+                  <option key={d.serial_number} value={d.serial_number}>
+                    {d.device_name || 'جهاز بصمة'} ({d.branch_name || 'بدون فرع'}) [{d.serial_number}]
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              disabled={isLoadingDeviceUsers || !selectedDeviceSnForUsers}
+              onClick={handleSyncDeviceUsers}
+              style={{
+                padding: '9px 18px',
+                borderRadius: '10px',
+                background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                color: '#ffffff',
+                border: 'none',
+                fontWeight: 800,
+                fontSize: '0.85rem',
+                cursor: isLoadingDeviceUsers ? 'not-allowed' : 'pointer',
+                fontFamily: 'Cairo',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <span>🔄</span> {isLoadingDeviceUsers ? 'جاري الفحص...' : 'فحص ذاكرة الماكينة ومزامنة المستخدمين'}
+            </button>
+          </div>
+
+          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '12px 16px', marginBottom: '16px', color: '#166534', fontSize: '0.88rem' }}>
+            💡 <strong>تحكم كامل عن بُعد:</strong> يتم هنا عرض الموظفين المسجلين على ماكينة البصمة الفعلية. يمكنك تعديل الاسم، الصلاحيات (مستخدم عادي / مدير فرع / سوبر أدمن)، أو إيقاف بصمة الموظف فورياً مع الاحتفاظ بها في السحابة، أو مسحها نهائياً.
+          </div>
+
+          <div style={{ overflowX: 'auto', background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+              <thead>
+                <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'right' }}>
+                  <th style={{ padding: '12px' }}>PIN على الماكينة</th>
+                  <th style={{ padding: '12px' }}>الاسم على شاشة الماكينة</th>
+                  <th style={{ padding: '12px' }}>الموظف المربوط بالنظام</th>
+                  <th style={{ padding: '12px' }}>مستوى الصلاحية</th>
+                  <th style={{ padding: '12px' }}>نمط التحقق</th>
+                  <th style={{ padding: '12px' }}>حالة البصمة</th>
+                  <th style={{ padding: '12px', textAlign: 'center' }}>إجراءات التحكم</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deviceUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ textAlign: 'center', padding: '36px', color: '#94a3b8' }}>
+                      {isLoadingDeviceUsers
+                        ? '⏳ جاري قراءة ذاكرة الماكينة...'
+                        : 'لم يتم العثور على مستخدمين مسجلين لهذه الماكينة بعد. اضغط "فحص ذاكرة الماكينة ومزامنة المستخدمين" لقراءتها أو قم بترحيل الموظفين إليها.'}
+                    </td>
+                  </tr>
+                ) : (
+                  deviceUsers.map(u => {
+                    const emp = employees.find(e => String(e.id) === String(u.employee_id));
+                    const isNormalUser = Number(u.privilege) === 0;
+                    const isManager = Number(u.privilege) === 6;
+                    const isSuperAdmin = Number(u.privilege) === 14;
+
+                    return (
+                      <tr key={u.id || u.device_user_pin} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '12px', fontFamily: 'monospace', fontWeight: 800, color: '#0284c7' }}>
+                          {u.device_user_pin}
+                        </td>
+                        <td style={{ padding: '12px', fontWeight: 800, color: '#0f172a' }}>
+                          {u.display_name || '—'}
+                        </td>
+                        <td style={{ padding: '12px', color: '#334155' }}>
+                          {emp ? (
+                            <span style={{ fontWeight: 700, color: '#059669' }}>
+                              ✅ {emp.name} ({emp.code || emp.id})
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94a3b8' }}>غير مقترن بملف HR</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '12px' }}>
+                          <span
+                            style={{
+                              padding: '3px 10px',
+                              borderRadius: '20px',
+                              fontSize: '0.78rem',
+                              fontWeight: 800,
+                              background: isSuperAdmin ? '#fef2f2' : isManager ? '#fffbeb' : '#f0fdf4',
+                              color: isSuperAdmin ? '#dc2626' : isManager ? '#d97706' : '#166534',
+                              border: `1px solid ${isSuperAdmin ? '#fecaca' : isManager ? '#fde68a' : '#bbf7d0'}`
+                            }}
+                          >
+                            {isSuperAdmin ? '🛡️ سوبر أدمن (14)' : isManager ? '👔 مدير فرع (6)' : '👤 مستخدم عادي (0)'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px', fontSize: '0.82rem', color: '#64748b' }}>
+                          {Number(u.verify_mode) === 1 ? '👆 بصمة فقط' :
+                           Number(u.verify_mode) === 2 ? '🔢 PIN فقط' :
+                           Number(u.verify_mode) === 3 ? '🔑 كلمة مرور فقط' :
+                           Number(u.verify_mode) === 4 ? '👆+🔑 بصمة + كلمة مرور' :
+                           Number(u.verify_mode) === 5 ? '👤 وجه فقط' : '⚡ افتراضي / أي وسيلة'}
+                        </td>
+                        <td style={{ padding: '12px' }}>
+                          <span
+                            style={{
+                              padding: '3px 10px',
+                              borderRadius: '20px',
+                              fontSize: '0.78rem',
+                              fontWeight: 800,
+                              background: u.is_active !== false ? '#ecfdf5' : '#f1f5f9',
+                              color: u.is_active !== false ? '#059669' : '#64748b',
+                              border: `1px solid ${u.is_active !== false ? '#a7f3d0' : '#cbd5e1'}`
+                            }}
+                          >
+                            {u.is_active !== false ? '🟢 نشطة ومفعلة' : '⏸️ موقوفة مؤقتاً'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => setEditingDeviceUser({
+                                pin: u.device_user_pin,
+                                name: u.display_name,
+                                privilege: Number(u.privilege) || 0,
+                                verifyMode: Number(u.verify_mode) || 0,
+                                password: u.device_password || '',
+                                cardNumber: u.card_number || ''
+                              })}
+                              title="تعديل بيانات وصلاحيات المستخدم على الماكينة"
+                              style={{
+                                padding: '5px 10px',
+                                borderRadius: '7px',
+                                background: '#f8fafc',
+                                border: '1px solid #cbd5e1',
+                                color: '#334155',
+                                cursor: 'pointer',
+                                fontSize: '0.78rem',
+                                fontWeight: 700,
+                                fontFamily: 'Cairo'
+                              }}
+                            >
+                              ✏️ تعديل
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleToggleDeviceUserActive(u.device_user_pin, u.is_active !== false)}
+                              title={u.is_active !== false ? 'إيقاف بصمة الموظف على الماكينة' : 'إعادة تفعيل البصمة على الماكينة'}
+                              style={{
+                                padding: '5px 10px',
+                                borderRadius: '7px',
+                                background: u.is_active !== false ? '#fffbeb' : '#ecfdf5',
+                                border: `1px solid ${u.is_active !== false ? '#fde68a' : '#a7f3d0'}`,
+                                color: u.is_active !== false ? '#d97706' : '#059669',
+                                cursor: 'pointer',
+                                fontSize: '0.78rem',
+                                fontWeight: 700,
+                                fontFamily: 'Cairo'
+                              }}
+                            >
+                              {u.is_active !== false ? '⏸️ إيقاف' : '▶️ تفعيل'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteDeviceUser(u.device_user_pin)}
+                              title="مسح المستخدم وقوالبه من ذاكرة الماكينة"
+                              style={{
+                                padding: '5px 10px',
+                                borderRadius: '7px',
+                                background: '#fef2f2',
+                                border: '1px solid #fecaca',
+                                color: '#dc2626',
+                                cursor: 'pointer',
+                                fontSize: '0.78rem',
+                                fontWeight: 700,
+                                fontFamily: 'Cairo'
+                              }}
+                            >
+                              🗑️ مسح
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── التبويب: محرك تصدير إكسيل الاحترافي المانع للتكرار ── */}
+      {activeSubTab === 'excelExport' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '20px' }}>
+            <h4 style={{ margin: '0 0 14px', color: '#0f172a', fontWeight: 800, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>📊</span> فلترة وتخصيص شيت الإكسيل الملكي
+            </h4>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  تحديد الموظف (موظف محدد أو الكل):
+                </label>
+                <select
+                  value={excelEmpId}
+                  onChange={(e) => setExcelEmpId(e.target.value)}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'Cairo', fontWeight: 700, background: '#ffffff' }}
+                >
+                  <option value="ALL">👥 كافة موظفي وكوادر المؤسسة</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.code || emp.id})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  تحديد الفرع:
+                </label>
+                <select
+                  value={excelBranchId}
+                  onChange={(e) => setExcelBranchId(e.target.value)}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'Cairo', fontWeight: 700, background: '#ffffff' }}
+                >
+                  <option value="ALL">🏥 كافة الفروع</option>
+                  {branches.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                    من تاريخ:
+                  </label>
+                  <input
+                    type="date"
+                    value={excelDateFrom}
+                    onChange={(e) => setExcelDateFrom(e.target.value)}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'Cairo' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                    إلى تاريخ:
+                  </label>
+                  <input
+                    type="date"
+                    value={excelDateTo}
+                    onChange={(e) => setExcelDateTo(e.target.value)}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'Cairo' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  نوع الحركة:
+                </label>
+                <select
+                  value={excelPunchType}
+                  onChange={(e) => setExcelPunchType(e.target.value)}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'Cairo', background: '#ffffff' }}
+                >
+                  <option value="ALL">🔄 كل الحركات (حضور + انصراف)</option>
+                  <option value="check_in">🟢 حركات الحضور فقط</option>
+                  <option value="check_out">🚪 حركات الانصراف فقط</option>
+                </select>
+              </div>
+
+              {/* خيارات منع التكرار الذكي */}
+              <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '12px', padding: '14px', marginTop: '4px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 800, color: '#065f46', fontSize: '0.9rem', marginBottom: '8px' }}>
+                  <input
+                    type="checkbox"
+                    checked={excelDedupEnabled}
+                    onChange={(e) => setExcelDedupEnabled(e.target.checked)}
+                  />
+                  <span>🛡️ تفعيل الخوارزمية الذكية لمنع تكرار البصمات (Deduplication)</span>
+                </label>
+                <div style={{ fontSize: '0.8rem', color: '#047857', marginBottom: '10px', lineHeight: '1.5' }}>
+                  عند وضع الموظف إصبعه أكثر من مرة متتالية خلال فترة زمنية قصيرة، يتم احتساب البصمة الأولى فقط واستبعاد البصمات المكررة لضمان دقة ساعات العمل المحسوبة.
+                </div>
+                {excelDedupEnabled && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#065f46' }}>النافذة الزمنية المانعة للتكرار:</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={excelDedupMinutes}
+                      onChange={(e) => setExcelDedupMinutes(Number(e.target.value) || 5)}
+                      style={{ width: '70px', padding: '6px 10px', borderRadius: '8px', border: '1px solid #6ee7b7', textAlign: 'center', fontWeight: 800, fontSize: '0.9rem' }}
+                    />
+                    <span style={{ fontSize: '0.82rem', color: '#065f46' }}>دقائق</span>
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                disabled={isExportingExcel}
+                onClick={handleExportExcel}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  borderRadius: '12px',
+                  background: isExportingExcel ? '#94a3b8' : 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontWeight: 800,
+                  fontSize: '0.98rem',
+                  cursor: isExportingExcel ? 'not-allowed' : 'pointer',
+                  fontFamily: 'Cairo',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 14px rgba(13, 148, 136, 0.3)',
+                  marginTop: '6px'
+                }}
+              >
+                <span>📥</span> {isExportingExcel ? 'جاري تجهيز الشيت الملكي...' : 'تصدير شيت إكسيل احترافي وتنزيله الآن'}
+              </button>
+            </div>
+          </div>
+
+          {/* ميزات ومواصفات الشيت الملكي */}
+          <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <div>
+              <h4 style={{ margin: '0 0 12px', color: '#0f172a', fontWeight: 800, fontSize: '1.02rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>✨</span> معايير تصميم الشيت الاحترافي
+              </h4>
+              <ul style={{ paddingRight: '20px', margin: 0, color: '#475569', fontSize: '0.88rem', lineHeight: '2' }}>
+                <li>🏛️ <strong>تصميم مؤسسي فاخر (Executive Royal Theme):</strong> ترويسة كحلية أنيقة وشعار المجموعة.</li>
+                <li>📊 <strong>بطاقات مؤشرات أداء KPI:</strong> إجمالي البصمات، حركات الحضور، الانصراف، وعدد البصمات المكررة المستبعدة تلقائياً.</li>
+                <li>🛡️ <strong>منع التكرار التلقائي:</strong> فلترة دقيقة تمنع ازدواجية السجلات عند التبصيم المتكرر دون قصد.</li>
+                <li>🟢 <strong>تمييز بصري فوري:</strong> خلايا الحضور باللون الأخضر وخلايا الانصراف بالأحمر الداكن مع أيقونات إرشادية.</li>
+                <li>📑 <strong>دعم اتجاه اليمين لليسار (RTL):</strong> متوافق كلياً مع مايكروسوفت إكسيل، أوفيس 365، وجوجل شيتس.</li>
+                <li>🖨️ <strong>إعدادات طباعة جاهزة:</strong> خط Cairo الرسمي وهوامش طباعة منسقة بصيغة A4.</li>
+              </ul>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px dashed #cbd5e1', marginTop: '16px' }}>
+              <div style={{ fontSize: '0.82rem', color: '#64748b' }}>
+                📌 <strong>معلومة:</strong> الشيت المصدّر يصلح مباشرة لتقديمه للجهات الرقابية، الإدارة العليا، أو استيراده في برامج الرواتب ومحاسبة الأجور.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── التبويب: أكواد الفروع المتعددة للموظف ── */}
+      {activeSubTab === 'multiBranch' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+          {/* نموذج ربط كود جديد لفرع محدد */}
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '20px' }}>
+            <h4 style={{ margin: '0 0 14px', color: '#0f172a', fontWeight: 800, fontSize: '1.02rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>🏢</span> تخصيص كود PIN مستقل لموظف يعمل في فرع محدد
+            </h4>
+
+            <p style={{ margin: '0 0 16px', fontSize: '0.85rem', color: '#64748b', lineHeight: '1.6' }}>
+              إذا كان الموظف يعمل في أكثر من فرع (أو يغطي مناوبات)، يمكنك هنا تعيين رقم PIN خاص به على ماكينة ذلك الفرع بشكل منفصل، وترحيل بياناته وقوالبه إليها تلقائياً.
+            </p>
+
+            <form onSubmit={handleSaveBranchPin} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  الموظف <span style={{ color: '#ef4444' }}>*</span>:
+                </label>
+                <select
+                  required
+                  value={newBranchPinEmpId}
+                  onChange={(e) => setNewBranchPinEmpId(e.target.value)}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'Cairo', fontWeight: 700, background: '#ffffff' }}
+                >
+                  <option value="">-- اختر الموظف --</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.code || emp.id})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  الفرع المستهدف <span style={{ color: '#ef4444' }}>*</span>:
+                </label>
+                <select
+                  required
+                  value={newBranchPinBranchId}
+                  onChange={(e) => setNewBranchPinBranchId(e.target.value)}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'Cairo', fontWeight: 700, background: '#ffffff' }}
+                >
+                  <option value="">-- اختر الفرع --</option>
+                  {branches.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  رقم PIN على ماكينة هذا الفرع <span style={{ color: '#ef4444' }}>*</span>:
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newBranchPinVal}
+                  onChange={(e) => setNewBranchPinVal(e.target.value)}
+                  placeholder="مثال: 205 أو 1022"
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.95rem', fontFamily: 'monospace', fontWeight: 800 }}
+                />
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', color: '#334155', fontWeight: 700, userSelect: 'none' }}>
+                <input
+                  type="checkbox"
+                  checked={newBranchPinAutoDispatch}
+                  onChange={(e) => setNewBranchPinAutoDispatch(e.target.checked)}
+                />
+                <span>🚀 ترحيل فوري للموظف وقوالب بصمته لماكينة هذا الفرع فور الحفظ</span>
+              </label>
+
+              <button
+                type="submit"
+                disabled={isSavingBranchPin}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  borderRadius: '10px',
+                  background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontWeight: 800,
+                  fontSize: '0.9rem',
+                  cursor: isSavingBranchPin ? 'not-allowed' : 'pointer',
+                  fontFamily: 'Cairo',
+                  boxShadow: '0 4px 12px rgba(124, 58, 237, 0.25)'
+                }}
+              >
+                {isSavingBranchPin ? 'جاري الحفظ والترحيل...' : '💾 حفظ وتعيين كود الفرع'}
+              </button>
+            </form>
+          </div>
+
+          {/* قائمة الأكواد المسجلة */}
+          <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h4 style={{ margin: 0, color: '#0f172a', fontWeight: 800, fontSize: '1.02rem' }}>
+                📋 جدول أكواد الفروع المتعددة ({branchPins.length})
+              </h4>
+              <button
+                type="button"
+                onClick={fetchBranchPins}
+                style={{ padding: '6px 12px', borderRadius: '8px', background: '#f8fafc', border: '1px solid #cbd5e1', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700, fontFamily: 'Cairo' }}
+              >
+                🔄 تحديث
+              </button>
+            </div>
+
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'right' }}>
+                    <th style={{ padding: '10px' }}>الموظف</th>
+                    <th style={{ padding: '10px' }}>الفرع</th>
+                    <th style={{ padding: '10px' }}>رقم PIN</th>
+                    <th style={{ padding: '10px', textAlign: 'center' }}>إجراء</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {branchPins.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>
+                        لا توجد أكواد فروع متعددة مسجلة بعد. عند تعيين كود مستقل لأي موظف في فرع ثانٍ سيظهر هنا.
+                      </td>
+                    </tr>
+                  ) : (
+                    branchPins.map(bp => {
+                      const emp = employees.find(e => String(e.id) === String(bp.employee_id));
+                      const br = branches.find(b => String(b.id) === String(bp.branch_id));
+                      return (
+                        <tr key={bp.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '10px', fontWeight: 700, color: '#0f172a' }}>
+                            {emp?.name || bp.employee_id}
+                          </td>
+                          <td style={{ padding: '10px', color: '#0284c7', fontWeight: 700 }}>
+                            {br?.name || bp.branch_id}
+                          </td>
+                          <td style={{ padding: '10px', fontFamily: 'monospace', fontWeight: 800, color: '#7c3aed' }}>
+                            {bp.device_user_pin}
+                          </td>
+                          <td style={{ padding: '10px', textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteBranchPin(bp.id)}
+                              style={{ padding: '4px 8px', borderRadius: '6px', background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700, fontFamily: 'Cairo' }}
+                            >
+                              🗑️ حذف
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── التبويب: إشعارات واتساب للإدارة العليا ── */}
+      {activeSubTab === 'whatsappAlerts' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+          {/* إعدادات الإشعارات */}
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '20px' }}>
+            <h4 style={{ margin: '0 0 14px', color: '#0f172a', fontWeight: 800, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>💬</span> ربط إشعارات الحضور والانصراف بواتساب الإدارة العليا
+            </h4>
+
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '12px 14px', marginBottom: '16px', color: '#166534', fontSize: '0.85rem', lineHeight: '1.6' }}>
+              🟢 <strong>خادم واتساب نشط ومتصل:</strong> يتم إرسال الإشعار اللحظي إلى هواتف الإدارة العليا المسجلة بالأسفل بمجرد أن يضع الموظف إصبعه أو يمرر وجهه أمام جهاز البصمة في أي فرع.
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>
+                <input
+                  type="checkbox"
+                  checked={waConfig.enabled}
+                  onChange={(e) => setWaConfig({ ...waConfig, enabled: e.target.checked })}
+                />
+                <span>تفعيل نظام إشعارات واتساب اللحظية عند التبصيم</span>
+              </label>
+
+              <div style={{ paddingRight: '26px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>
+                  <input
+                    type="checkbox"
+                    checked={waConfig.notifyCheckIn}
+                    onChange={(e) => setWaConfig({ ...waConfig, notifyCheckIn: e.target.checked })}
+                  />
+                  <span>🟢 إرسال إشعار فوري عند بصمة الحضور (Check-In)</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>
+                  <input
+                    type="checkbox"
+                    checked={waConfig.notifyCheckOut}
+                    onChange={(e) => setWaConfig({ ...waConfig, notifyCheckOut: e.target.checked })}
+                  />
+                  <span>🚪 إرسال إشعار فوري عند بصمة الانصراف (Check-Out)</span>
+                </label>
+              </div>
+
+              {/* أرقام هواتف الإدارة المستلمة */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  📱 أرقام هواتف الإدارة العليا (بصيغة دولية مثال: 201080739315):
+                </label>
+
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                  <input
+                    type="text"
+                    value={newWaPhone}
+                    onChange={(e) => setNewWaPhone(e.target.value)}
+                    placeholder="مثال: 201080739315"
+                    style={{ flex: 1, padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'monospace' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clean = newWaPhone.replace(/[^0-9]/g, '');
+                      if (!clean || clean.length < 8) {
+                        showToast?.('⚠️ يرجى إدخال رقم هاتف صحيح');
+                        return;
+                      }
+                      const existing = waConfig.recipientPhones || [];
+                      if (existing.includes(clean)) {
+                        showToast?.('⚠️ هذا الرقم مضاف مسبقاً');
+                        return;
+                      }
+                      setWaConfig({ ...waConfig, recipientPhones: [...existing, clean] });
+                      setNewWaPhone('');
+                    }}
+                    style={{ padding: '9px 16px', borderRadius: '8px', background: '#0284c7', color: '#ffffff', border: 'none', fontWeight: 700, cursor: 'pointer', fontFamily: 'Cairo' }}
+                  >
+                    ➕ إضافة
+                  </button>
+                </div>
+
+                {/* قائمة الأرقام المضافة */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', minHeight: '40px', padding: '10px', background: '#ffffff', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                  {(waConfig.recipientPhones || []).length === 0 ? (
+                    <span style={{ fontSize: '0.82rem', color: '#94a3b8' }}>
+                      لم تُضف أرقام مخصصة بعد (سيتم استخدام هاتف الإدارة المسجل بإعدادات المنشأة تلقائياً).
+                    </span>
+                  ) : (
+                    waConfig.recipientPhones.map(ph => (
+                      <span
+                        key={ph}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '4px 10px',
+                          borderRadius: '20px',
+                          background: '#ecfdf5',
+                          border: '1px solid #a7f3d0',
+                          color: '#065f46',
+                          fontSize: '0.82rem',
+                          fontFamily: 'monospace',
+                          fontWeight: 700
+                        }}
+                      >
+                        <span>📱 {ph}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWaConfig({
+                              ...waConfig,
+                              recipientPhones: waConfig.recipientPhones.filter(p => p !== ph)
+                            });
+                          }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontWeight: 800, padding: 0 }}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                <button
+                  type="button"
+                  disabled={isSavingWaConfig}
+                  onClick={handleSaveWaConfig}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontWeight: 800,
+                    fontSize: '0.9rem',
+                    cursor: isSavingWaConfig ? 'not-allowed' : 'pointer',
+                    fontFamily: 'Cairo',
+                    boxShadow: '0 4px 12px rgba(22, 163, 74, 0.25)'
+                  }}
+                >
+                  {isSavingWaConfig ? 'جاري الحفظ...' : '💾 حفظ إعدادات واتساب'}
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isTestingWa}
+                  onClick={() => handleTestWaAlert()}
+                  style={{
+                    padding: '12px 18px',
+                    borderRadius: '10px',
+                    background: '#f8fafc',
+                    color: '#0f172a',
+                    border: '1px solid #cbd5e1',
+                    fontWeight: 800,
+                    fontSize: '0.88rem',
+                    cursor: isTestingWa ? 'not-allowed' : 'pointer',
+                    fontFamily: 'Cairo'
+                  }}
+                >
+                  {isTestingWa ? '⏳ جاري الاختبار...' : '📲 إرسال إشعار تجريبي فوري'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* معاينة الرسالة */}
+          <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '20px' }}>
+            <h4 style={{ margin: '0 0 12px', color: '#0f172a', fontWeight: 800, fontSize: '1.02rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>👁️</span> نموذج ومعاينة رسالة الإشعار الحية
+            </h4>
+            <p style={{ margin: '0 0 14px', fontSize: '0.82rem', color: '#64748b' }}>
+              هذا الشكل النموذجي للرسالة التي ستصل على هواتف الإدارة العليا فور التبصيم:
+            </p>
+
+            <div
+              style={{
+                background: '#e5ddd5',
+                padding: '16px',
+                borderRadius: '14px',
+                fontFamily: 'Cairo',
+                fontSize: '0.88rem',
+                lineHeight: '1.7',
+                border: '1px solid #cbd5e1',
+                boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.05)'
+              }}
+            >
+              <div
+                style={{
+                  background: '#ffffff',
+                  padding: '14px 16px',
+                  borderRadius: '10px',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+                  maxWidth: '320px',
+                  marginRight: 'auto',
+                  borderTopRightRadius: '0'
+                }}
+              >
+                <div style={{ fontWeight: 800, color: '#075e54', borderBottom: '1px solid #e2e8f0', paddingBottom: '6px', marginBottom: '8px' }}>
+                  🏢 مجموعة صيدليات المروة والدكتور سيف<br />
+                  🔔 إشعار بصمة فوري - حضور
+                </div>
+                <div>👤 <strong>الموظف:</strong> د. أحمد خالد</div>
+                <div>🏥 <strong>الفرع:</strong> فرع المروة الرئيسي</div>
+                <div>⏰ <strong>الوقت:</strong> 09:15:32 ص</div>
+                <div>📅 <strong>التاريخ:</strong> 27/09/2026</div>
+                <div>📟 <strong>الجهاز:</strong> MB20 (SN: EUF7242701836)</div>
+                <div>🧬 <strong>وسيلة التحقق:</strong> بصمة إصبع (Fingerprint)</div>
+                <div style={{ borderTop: '1px dashed #cbd5e1', marginTop: '8px', paddingTop: '6px', fontSize: '0.75rem', color: '#64748b', textAlign: 'left' }}>
+                  نظام إدارة الموارد البشرية الذكي ⚡
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── التبويب 2: ربط أرقام الموظفين PIN ──────────────────────────────────── */}
       {activeSubTab === 'mapping' && (
         <div>
@@ -2238,6 +3360,157 @@ export default function BiometricDevicesCard({ state, showToast }) {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal 4: نافذة تعديل مستخدم الماكينة وصلاحياته ─────────────────── */}
+      {editingDeviceUser && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.6)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px'
+          }}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              padding: '24px',
+              width: '100%',
+              maxWidth: '480px',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.2)',
+              direction: 'rtl'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#0f172a' }}>
+                ✏️ تعديل بيانات وصلاحيات المستخدم على الماكينة
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingDeviceUser(null)}
+                style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#94a3b8' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveDeviceUserEdit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  رقم الـ PIN على الماكينة (ثابت):
+                </label>
+                <input
+                  type="text"
+                  disabled
+                  value={editingDeviceUser.pin}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#f1f5f9', fontSize: '0.95rem', fontFamily: 'monospace', fontWeight: 800 }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  الاسم المعروض على شاشة الماكينة:
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editingDeviceUser.name}
+                  onChange={(e) => setEditingDeviceUser({ ...editingDeviceUser, name: e.target.value })}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'Cairo', fontWeight: 700 }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  مستوى الصلاحية على الماكينة:
+                </label>
+                <select
+                  value={editingDeviceUser.privilege}
+                  onChange={(e) => setEditingDeviceUser({ ...editingDeviceUser, privilege: Number(e.target.value) })}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'Cairo', fontWeight: 700, background: '#ffffff' }}
+                >
+                  <option value={0}>👤 مستخدم عادي (Normal User - لا يفتح القائمة)</option>
+                  <option value={6}>👔 مشرف فرع (Manager - صلاحيات محدودة)</option>
+                  <option value={14}>🛡️ سوبر أدمن (Super Admin - يفتح قائمة الجهاز بالكامل)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  نمط التحقق المطلوب:
+                </label>
+                <select
+                  value={editingDeviceUser.verifyMode}
+                  onChange={(e) => setEditingDeviceUser({ ...editingDeviceUser, verifyMode: Number(e.target.value) })}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'Cairo', fontWeight: 700, background: '#ffffff' }}
+                >
+                  <option value={0}>⚡ افتراضي / أي وسيلة (Any / Default)</option>
+                  <option value={1}>👆 بصمة إصبع فقط (Fingerprint Only)</option>
+                  <option value={2}>🔢 PIN فقط</option>
+                  <option value={3}>🔑 كلمة مرور فقط (Password Only)</option>
+                  <option value={4}>👆+🔑 بصمة + كلمة مرور</option>
+                  <option value={5}>👤 بصمة وجه فقط (Face Only)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  كلمة مرور لوحة المفاتيح (اختياري):
+                </label>
+                <input
+                  type="password"
+                  value={editingDeviceUser.password || ''}
+                  onChange={(e) => setEditingDeviceUser({ ...editingDeviceUser, password: e.target.value })}
+                  placeholder="اتركه فارغاً إن لم ترغب بتعيين كلمة سر"
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                <button
+                  type="submit"
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontWeight: 800,
+                    fontSize: '0.9rem',
+                    cursor: 'pointer',
+                    fontFamily: 'Cairo'
+                  }}
+                >
+                  💾 حفظ وإرسال للماكينة
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingDeviceUser(null)}
+                  style={{
+                    padding: '12px 18px',
+                    borderRadius: '10px',
+                    background: '#f1f5f9',
+                    color: '#475569',
+                    border: 'none',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    fontFamily: 'Cairo'
+                  }}
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
