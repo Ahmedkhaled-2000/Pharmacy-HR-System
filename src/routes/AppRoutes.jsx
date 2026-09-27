@@ -40,6 +40,10 @@ const ElectronicKioskView = lazy(() => import('../components/kiosk/ElectronicKio
 const DeveloperPortalView = lazy(() => import('../components/developer/DeveloperPortalView'));
 const CompanyRegisterPage = lazy(() => import('../components/auth/CompanyRegisterPage'));
 const OutstockSystemView = lazy(() => import('../components/outstock/OutstockSystemView'));
+const OwnerAccessAndIdentityModule = lazy(() => import('../components/permissions/OwnerAccessAndIdentityModule'));
+import OwnerCommandLaunchpadModal from '../components/auth/OwnerCommandLaunchpadModal';
+import UnifiedWorkspaceSwitcherModal from '../components/auth/UnifiedWorkspaceSwitcherModal';
+import { applyBrandIdentityToDOM, getEffectiveBrandIdentity } from '../utils/brandThemeEngine';
 import OutstockOwnerGate from '../components/outstock/OutstockOwnerGate';
 import AdminSuspensionView from '../components/auth/AdminSuspensionView';
 import StaffSuspensionView from '../components/auth/StaffSuspensionView';
@@ -142,6 +146,87 @@ export default function AppRoutes() {
     };
   }, []);
 
+  // ── منظومة التبديل الموحد والتحكم السيادي (Unified Access & Switcher) ──
+  const [showOwnerLaunchpad, setShowOwnerLaunchpad] = useState(false);
+  const [showWorkspaceSwitcher, setShowWorkspaceSwitcher] = useState(false);
+  const [switcherUser, setSwitcherUser] = useState(null);
+  const [ownerDisplayName, setOwnerDisplayName] = useState(() => {
+    try {
+      return localStorage.getItem('app_owner_display_name') || 'المالك (Owner)';
+    } catch {
+      return 'المالك (Owner)';
+    }
+  });
+
+  // تطبيق هوية المنظومة تلقائياً عند الإقلاع أو تحديث الإعدادات
+  useEffect(() => {
+    const brand = getEffectiveBrandIdentity(state?.orgSettings);
+    applyBrandIdentityToDOM(brand);
+  }, [state?.orgSettings?.brandIdentity, state?.orgSettings?.orgName, state?.orgSettings?.generalManagerName]);
+
+  // الاستماع لأحداث فتح البوابة والمحول الموحد من الشريط العلوي أو شاشات النظام
+  useEffect(() => {
+    const handleOpenOwnerLaunchpad = () => setShowOwnerLaunchpad(true);
+    const handleOpenWorkspaceSwitcher = (e) => {
+      const u = e?.detail?.user || currentEmpUser;
+      if (u) setSwitcherUser(u);
+      setShowWorkspaceSwitcher(true);
+    };
+    window.addEventListener('app:open-owner-launchpad', handleOpenOwnerLaunchpad);
+    window.addEventListener('app:open-workspace-switcher', handleOpenWorkspaceSwitcher);
+    return () => {
+      window.removeEventListener('app:open-owner-launchpad', handleOpenOwnerLaunchpad);
+      window.removeEventListener('app:open-workspace-switcher', handleOpenWorkspaceSwitcher);
+    };
+  }, [currentEmpUser]);
+
+  const handleSelectOwnerSystem = useCallback((systemId) => {
+    setShowOwnerLaunchpad(false);
+    if (systemId === 'hr') {
+      setActiveNavTab('dashboard');
+    } else if (systemId === 'outstock') {
+      setActiveNavTab('outstock');
+    } else if (systemId === 'accounts') {
+      setActiveNavTab('accounts');
+    } else if (systemId === 'permissions') {
+      setActiveNavTab('owner-permissions');
+    }
+  }, [setActiveNavTab]);
+
+  const handleSelectWorkspace = useCallback((workspace) => {
+    setShowWorkspaceSwitcher(false);
+    const targetUser = switcherUser || currentEmpUser;
+    if (!workspace || !targetUser) return;
+
+    const kind = workspace.type || workspace.id;
+
+    if (kind === 'portal' || kind === 'hr_portal') {
+      handleUnifiedLogin({ role: 'employee', user: targetUser, redirectTab: 'portal' });
+    } else if (kind === 'branch' || kind === 'branch_manager') {
+      const bId = workspace.branchId || workspace.branch?.id || targetUser.branchId;
+      const targetBranch = workspace.branch || (state?.branches || []).find(b => String(b.id) === String(bId) || String(b.code) === String(bId)) || { id: bId };
+      handleUnifiedLogin({ role: 'branch', branch: targetBranch, user: targetUser, redirectTab: 'branch' });
+    } else if (kind === 'top_management') {
+      const firstTab = workspace.allowedModules?.[0] || 'dashboard';
+      handleUnifiedLogin({
+        role: 'admin',
+        user: { ...targetUser, allowedModules: workspace.allowedModules, isMultiRole: true },
+        redirectTab: firstTab
+      });
+    } else if (kind === 'outstock') {
+      const outRole = workspace.role || workspace.outstockRole || 'outstock_pharmacy';
+      const bId = workspace.branch?.id || workspace.branchId || targetUser.branchId;
+      handleUnifiedLogin({
+        role: outRole.startsWith('outstock_') ? outRole : ('outstock_' + outRole),
+        user: targetUser,
+        branch: { id: bId },
+        redirectTab: 'outstock'
+      });
+    } else if (kind === 'accounts') {
+      handleUnifiedLogin({ role: 'admin', user: targetUser, redirectTab: 'accounts' });
+    }
+  }, [switcherUser, currentEmpUser, state?.branches, handleUnifiedLogin]);
+
   // ── فحص حالة صيانة شاشات المنظومة وبيئة Sandbox ──
   const [maintenanceStatus, setMaintenanceStatus] = useState(() => {
     try {
@@ -197,7 +282,8 @@ export default function AppRoutes() {
     careers: 'بوابة التوظيف والمقابلات',
     recruitment: 'بوابة التوظيف وفرز السير الذاتية',
     whatsapp_center: 'مركز مراسلات الواتساب التلقائي',
-    outstock: 'نظام متابعة نواقص وطلبات أدوية العملاء والفروع (OutStock Handling)'
+    outstock: 'نظام متابعة نواقص وطلبات أدوية العملاء والفروع (OutStock Handling)',
+    'owner-permissions': '👑 صلاحيات الموظفين وهوية المنظومة السيادية'
   }), []);
 
   const isScreenInMaintenance = useCallback((tabKey, subTabKey = '') => {
@@ -731,10 +817,46 @@ export default function AppRoutes() {
         return { role: 'developer', matched: true };
       }
 
-      // 1. Check Owner (يوزر المالك)
+      // 1. Check Sovereign Primary Owner 'saif' / '181013'
+      if ((cleanUser === 'saif' || stdUser === 'saif') && isPasswordMatch('181013', cleanPass)) {
+        return {
+          role: 'owner',
+          matched: true,
+          org,
+          ownerUser: { username: 'saif', name: 'المالك سيف', isOwner: true }
+        };
+      }
+
+      // 1.1 Check Multi-Owners in org.systemOwners
+      const systemOwners = Array.isArray(org.systemOwners) ? org.systemOwners : [];
+      const matchedSystemOwner = systemOwners.find((o) => {
+        if (!o || o.isActive === false) return false;
+        const oUser = cleanStr(o.username || '').toLowerCase();
+        const oPass = cleanStr(o.password || '');
+        return (oUser === cleanUser || toStdDigits(oUser) === stdUser) && isPasswordMatch(oPass, cleanPass);
+      });
+      if (matchedSystemOwner) {
+        return {
+          role: 'owner',
+          matched: true,
+          org,
+          ownerUser: {
+            username: matchedSystemOwner.username,
+            name: matchedSystemOwner.fullName || matchedSystemOwner.name || 'مالك المنظومة',
+            isOwner: true
+          }
+        };
+      }
+
+      // 1.2 Check Default Owner (يوزر المالك)
       const isOwnerUserMatch = cleanUser === ownerUser || stdUser === toStdDigits(ownerUser);
       if (isOwnerUserMatch && isPasswordMatch(ownerPass, cleanPass)) {
-        return { role: 'owner', matched: true, org };
+        return {
+          role: 'owner',
+          matched: true,
+          org,
+          ownerUser: { username: ownerUser, name: org.ownerName || 'مالك المنظومة', isOwner: true }
+        };
       }
 
       // 2. Check Admin (يوزر الأدمن)
@@ -765,8 +887,11 @@ export default function AppRoutes() {
 
       // 4. Check Employee (الموظف)
       const employees = currentState?.employees || [];
+      const employeeUnifiedAccess = currentState?.orgSettings?.employeeUnifiedAccess || {};
       const userPhoneNorm = normPhone(cleanUser);
       const userCodeNorm = normCode(cleanUser);
+
+      let matchedEmpAccess = null;
 
       const matchedEmp = employees.find((e) => {
         if (!e) return false;
@@ -775,30 +900,49 @@ export default function AppRoutes() {
         const ePhone = cleanStr(e.phone || '');
         const ePass = cleanStr(e.password || '123');
 
-        // مطابقة الكود
+        // أ) فحص مطابقة حساب الدخول الموحد المخصص
+        const uAccess = employeeUnifiedAccess[e.id] || employeeUnifiedAccess[e.code] || e.unifiedAccess;
+        if (uAccess && uAccess.isEnabled && uAccess.credentials?.username && uAccess.credentials?.password) {
+          const uUser = cleanStr(uAccess.credentials.username).toLowerCase();
+          const uPass = cleanStr(uAccess.credentials.password);
+          if ((uUser === cleanUser || toStdDigits(uUser) === stdUser) && isPasswordMatch(uPass, cleanPass)) {
+            matchedEmpAccess = uAccess;
+            return true;
+          }
+        }
+
+        // ب) مطابقة الكود
         const isCodeMatch = eCode === cleanUser ||
           toStdDigits(eCode) === stdUser ||
           (userCodeNorm && normCode(eCode) === userCodeNorm);
 
-        // مطابقة اسم المستخدم
+        // ج) مطابقة اسم المستخدم
         const isUsernameMatch = eUser && (eUser === cleanUser || toStdDigits(eUser) === stdUser);
 
-        // مطابقة رقم الهاتف
+        // د) مطابقة رقم الهاتف
         const ePhoneNorm = normPhone(ePhone);
         const isPhoneMatch = (userPhoneNorm && ePhoneNorm && userPhoneNorm.length >= 7 && ePhoneNorm === userPhoneNorm) ||
           ePhone === cleanUser || toStdDigits(ePhone) === stdUser;
 
         const isUserMatch = isCodeMatch || isUsernameMatch || isPhoneMatch;
-        return isUserMatch && isPasswordMatch(ePass, cleanPass);
+        if (isUserMatch && isPasswordMatch(ePass, cleanPass)) {
+          matchedEmpAccess = uAccess || null;
+          return true;
+        }
+        return false;
       });
 
       if (matchedEmp) {
+        const empUser = {
+          ...matchedEmp,
+          unifiedAccess: matchedEmpAccess || matchedEmp.unifiedAccess || null
+        };
         if (matchedEmp.accountSuspended || matchedEmp.biometricSuspended || matchedEmp.punchDisabled || matchedEmp.status === 'معلق') {
           return {
             matched: true,
             suspended: true,
             reason: matchedEmp.suspensionReason || 'إيقاف مؤقت لحين المراجعة',
-            user: matchedEmp
+            user: empUser
           };
         }
         if (matchedEmp.isTerminated || matchedEmp.status === 'تم الاستقالة' || matchedEmp.is_active === false) {
@@ -806,10 +950,10 @@ export default function AppRoutes() {
             matched: true,
             terminated: true,
             reason: matchedEmp.terminationReason || 'إنهاء تعاقد أو استقالة',
-            user: matchedEmp
+            user: empUser
           };
         }
-        return { role: 'employee', matched: true, user: matchedEmp };
+        return { role: 'employee', matched: true, user: empUser };
       }
 
       return { matched: false };
@@ -898,7 +1042,16 @@ export default function AppRoutes() {
           } else if (sRole === 'admin') {
             authResult = { role: 'admin', matched: true, org: state?.orgSettings || {} };
           } else if (sRole === 'owner') {
-            authResult = { role: 'owner', matched: true, org: state?.orgSettings || {} };
+            authResult = {
+              role: 'owner',
+              matched: true,
+              org: state?.orgSettings || {},
+              ownerUser: sUser || { name: 'مالك المنظومة', isOwner: true }
+            };
+          }
+
+          if (loginRes.brandIdentity) {
+            applyBrandIdentityToDOM(loginRes.brandIdentity);
           }
 
           // مزامنة حالة التطبيق بالكامل في الخلفية دون تعطيل أو تأخير الدخول
@@ -1050,19 +1203,23 @@ export default function AppRoutes() {
       }
 
       if (role === 'owner') {
+        const dName = authResult.ownerUser?.name || authResult.ownerUser?.fullName || 'المالك (Owner)';
+        setOwnerDisplayName(dName);
         handleUnifiedLogin({ role: 'owner', redirectTab: 'dashboard' });
         try {
           localStorage.setItem('app_auth_role', 'owner');
           localStorage.setItem('app_owner_authenticated', 'true');
+          localStorage.setItem('app_owner_display_name', dName);
           localStorage.setItem('app_owner_password_snapshot', cleanPass);
           localStorage.setItem('app_owner_session_version', String(org?.ownerSessionVersion || 1));
           sessionStorage.setItem('app_owner_authenticated', 'true');
         } catch {}
+        setShowOwnerLaunchpad(true);
         return { success: true, role: 'owner' };
       }
 
       if (role === 'admin') {
-        handleUnifiedLogin({ role: 'admin', redirectTab: 'dashboard' });
+        handleUnifiedLogin({ role: 'admin', user: authResult.user || null, redirectTab: 'dashboard' });
         try {
           localStorage.setItem('app_auth_role', 'admin');
           localStorage.setItem('app_admin_password_snapshot', cleanPass);
@@ -1084,10 +1241,123 @@ export default function AppRoutes() {
       }
 
       if (role === 'employee') {
-        handleUnifiedLogin({ role: 'employee', user, redirectTab: 'portal' });
+        const targetUser = user;
+        const uAccess = targetUser?.unifiedAccess || state?.orgSettings?.employeeUnifiedAccess?.[targetUser?.id] || state?.orgSettings?.employeeUnifiedAccess?.[targetUser?.code];
+
+        if (uAccess && uAccess.isEnabled) {
+          const perms = uAccess.permissions || {};
+          const workspaces = [];
+
+          // 1. بوابة الموظف الذاتية
+          if (perms.personalPortal !== false) {
+            workspaces.push({
+              id: 'portal',
+              type: 'portal',
+              title: 'بوابة الموظف الذاتية (HR Portal)',
+              desc: 'عرض كشف الراتب، تسجيل الحضور، تقديم الإجازات والطلبات'
+            });
+          }
+
+          // 2. مدير الفرع
+          if (perms.branchManager?.enabled) {
+            const bId = perms.branchManager.branchId;
+            const bObj = (state?.branches || []).find(b => String(b.id) === String(bId) || String(b.code) === String(bId));
+            workspaces.push({
+              id: 'branch',
+              type: 'branch',
+              branchId: bId,
+              branch: bObj,
+              title: `لوحة إدارة فرع (${bObj?.name || bId || 'الفرع المحدد'})`,
+              desc: 'إدارة حضور وورديات ومبيعات موظفي الفرع'
+            });
+          }
+
+          // 3. الإدارة العليا
+          if (perms.topManagement?.enabled) {
+            const mods = perms.topManagement.allowedModules || [];
+            workspaces.push({
+              id: 'top_management',
+              type: 'top_management',
+              allowedModules: mods,
+              title: 'شاشات الإدارة العليا المعتمدة',
+              desc: `الوصول إلى (${mods.length}) شاشات إدارية مخصصة لك`
+            });
+          }
+
+          // 4. النواقص والمشتريات
+          if (perms.outstockHandling?.enabled || perms.outstock?.enabled) {
+            const outPerm = perms.outstockHandling || perms.outstock || {};
+            workspaces.push({
+              id: 'outstock',
+              type: 'outstock',
+              outstockRole: outPerm.role || 'outstock_pharmacy',
+              branchId: outPerm.branchId,
+              title: 'نظام متابعة النواقص والمشتريات (OutStock)',
+              desc: 'تسجيل ومتابعة طلبات ونواقص الأدوية'
+            });
+          }
+
+          // 5. شجرة الحسابات والمالية
+          if (perms.accountsSystem?.enabled || perms.accounts?.enabled) {
+            workspaces.push({
+              id: 'accounts',
+              type: 'accounts',
+              title: 'شجرة الحسابات والمالية (ERP)',
+              desc: 'القيود اليومية والتقارير المحاسبية والميزانية'
+            });
+          }
+
+          if (workspaces.length > 1) {
+            const userWithWorkspaces = {
+              ...targetUser,
+              unifiedAccess: {
+                ...uAccess,
+                hasMultiWorkspaces: true,
+                workspaces
+              }
+            };
+            setSwitcherUser(userWithWorkspaces);
+            setShowWorkspaceSwitcher(true);
+            try {
+              localStorage.setItem('app_emp_password_snapshot', cleanPass);
+              localStorage.setItem('app_emp_session_version', String(targetUser?.sessionVersion || 1));
+            } catch {}
+            return { success: true, pendingWorkspaceSelection: true, user: userWithWorkspaces };
+          } else if (workspaces.length === 1) {
+            const single = workspaces[0];
+            try {
+              localStorage.setItem('app_emp_password_snapshot', cleanPass);
+              localStorage.setItem('app_emp_session_version', String(targetUser?.sessionVersion || 1));
+            } catch {}
+            if (single.type === 'portal') {
+              handleUnifiedLogin({ role: 'employee', user: targetUser, redirectTab: 'portal' });
+            } else if (single.type === 'branch') {
+              handleUnifiedLogin({ role: 'branch', branch: single.branch || { id: single.branchId }, user: targetUser, redirectTab: 'branch' });
+            } else if (single.type === 'top_management') {
+              const firstTab = single.allowedModules?.[0] || 'dashboard';
+              handleUnifiedLogin({
+                role: 'admin',
+                user: { ...targetUser, allowedModules: single.allowedModules, isMultiRole: false },
+                redirectTab: firstTab
+              });
+            } else if (single.type === 'outstock') {
+              handleUnifiedLogin({
+                role: single.outstockRole || 'outstock_pharmacy',
+                user: targetUser,
+                branch: { id: single.branchId },
+                redirectTab: 'outstock'
+              });
+            } else if (single.type === 'accounts') {
+              handleUnifiedLogin({ role: 'admin', user: targetUser, redirectTab: 'accounts' });
+            }
+            return { success: true, role: single.type };
+          }
+        }
+
+        handleUnifiedLogin({ role: 'employee', user: targetUser, redirectTab: 'portal' });
         try {
           localStorage.setItem('app_emp_password_snapshot', cleanPass);
-          localStorage.setItem('app_emp_session_version', String(user?.sessionVersion || 1));
+          localStorage.setItem('app_emp_session_version', String(targetUser?.sessionVersion || 1));
         } catch {}
         return { success: true, role: 'employee' };
       }
@@ -1471,16 +1741,30 @@ export default function AppRoutes() {
             onClearReadNotifications={handleClearReadNotifications}
             userProfile={
               authRole === 'owner'
-                ? { name: 'المالك (Owner)', jobTitle: 'مالك المنظومة والمشرف العام', code: 'OWNER', isOwner: true }
+                ? {
+                    name: ownerDisplayName || 'المالك (Owner)',
+                    jobTitle: 'مالك المنظومة والمشرف العام',
+                    code: 'OWNER',
+                    isOwner: true,
+                    unifiedAccess: { isEnabled: true }
+                  }
                 : authRole === 'branch'
                 ? {
                     name: (state.employees || []).find((e) => e && e.id === currentBranch?.managerId)?.name || (currentBranch?.name ? `مدير فرع ${currentBranch.name}` : 'مدير الفرع'),
                     jobTitle: (state.employees || []).find((e) => e && e.id === currentBranch?.managerId)?.jobTitle || 'مدير فرع',
                     code: (state.employees || []).find((e) => e && e.id === currentBranch?.managerId)?.code || 'MGR',
-                    photoUrl: (state.employees || []).find((e) => e && e.id === currentBranch?.managerId)?.photoUrl || ''
+                    photoUrl: (state.employees || []).find((e) => e && e.id === currentBranch?.managerId)?.photoUrl || '',
+                    unifiedAccess: currentEmpUser?.unifiedAccess
                   }
-                : { name: 'الإدارة العليا', jobTitle: 'Super Admin', code: 'ADMIN' }
+                : {
+                    name: currentEmpUser?.name || 'الإدارة العليا',
+                    jobTitle: currentEmpUser?.jobTitle || 'Super Admin',
+                    code: currentEmpUser?.code || 'ADMIN',
+                    unifiedAccess: currentEmpUser?.unifiedAccess,
+                    allowedModules: currentEmpUser?.allowedModules || currentEmpUser?.unifiedAccess?.permissions?.topManagement?.allowedModules || null
+                  }
             }
+            orgSettings={state?.orgSettings}
             activeTab={activeNavTab}
             setActiveTab={setActiveNavTab}
             activeSubTab={activeSubTab}
@@ -1550,6 +1834,32 @@ export default function AppRoutes() {
                 onBypassSandbox={() => handleSandboxBypass(activeNavTab)}
                 onNavigateHome={() => setActiveNavTab('dashboard')}
               />
+            ) : (authRole === 'admin' && Array.isArray(currentEmpUser?.allowedModules) && currentEmpUser.allowedModules.length > 0 && !currentEmpUser.allowedModules.includes(activeNavTab)) ? (
+              <div style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: '16px',
+                padding: '48px 24px',
+                textAlign: 'center',
+                fontFamily: "'Tajawal', 'Cairo', sans-serif",
+                margin: '20px'
+              }}>
+                <div style={{ fontSize: '56px', marginBottom: '16px' }}>🔒</div>
+                <h3 style={{ margin: '0 0 10px', color: 'var(--text)', fontSize: '22px', fontWeight: '800' }}>
+                  غير مصرح بالدخول لهذا القسم
+                </h3>
+                <p style={{ color: 'var(--muted)', fontSize: '14px', margin: '0 0 24px', maxWidth: '500px', marginInline: 'auto' }}>
+                  صلاحيات حسابك المحددة لا تسمح بالوصول إلى هذا القسم ({tabTitles[activeNavTab] || activeNavTab}). يرجى مراجعة إدارة المنظومة أو العودة إلى شاشاتك المصرح بها.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-start"
+                  onClick={() => setActiveNavTab(currentEmpUser.allowedModules[0] || 'dashboard')}
+                  style={{ padding: '10px 24px', fontSize: '14px', fontWeight: 'bold' }}
+                >
+                  العودة للقسم المصرح به
+                </button>
+              </div>
             ) : (
               <ErrorBoundary fallbackTitle="حدث خطأ في عرض هذا القسم">
                 <Suspense fallback={<div className="loading-fallback" style={{ padding: '60px 20px', textAlign: 'center', fontSize: '15px', color: 'var(--muted, #64748b)' }}>⏳ جاري تحميل بيانات القسم...</div>}>
@@ -2146,6 +2456,22 @@ export default function AppRoutes() {
                   </ErrorBoundary>
                 )}
 
+                {/* 22. Sovereign Owner Access & Brand Identity (صلاحيات الموظفين وهوية النظام السيادية) */}
+                {activeNavTab === 'owner-permissions' && (
+                  <ErrorBoundary fallbackTitle="حدث خطأ في عرض صلاحيات الموظفين وهوية النظام">
+                    <Suspense fallback={<div className="loading-fallback">جاري تحميل منظومة الصلاحيات والهوية...</div>}>
+                      <OwnerAccessAndIdentityModule
+                        state={sanitizedState}
+                        setState={setState}
+                        saveState={saveState}
+                        currentRole={authRole}
+                        showToast={showToast}
+                        themeMode={themeMode}
+                      />
+                    </Suspense>
+                  </ErrorBoundary>
+                )}
+
                 {/* Fallback for Unknown Tab */}
                 {![
                   'dashboard',
@@ -2175,7 +2501,8 @@ export default function AppRoutes() {
                   'approvals',
                   'resignation',
                   'kiosk',
-                  'outstock'
+                  'outstock',
+                  'owner-permissions'
                 ].includes(activeNavTab) && (
                   <div style={{
                     background: 'var(--surface)',
@@ -2208,6 +2535,25 @@ export default function AppRoutes() {
           </DesktopLayout>
         )
       )}
+
+      {/* 🌟 بوابة قيادة المالك للتبديل بين المنظومات الأربعة */}
+      <OwnerCommandLaunchpadModal
+        isOpen={showOwnerLaunchpad}
+        onClose={() => setShowOwnerLaunchpad(false)}
+        onSelectSystem={handleSelectOwnerSystem}
+        ownerName={ownerDisplayName}
+        brandIdentity={getEffectiveBrandIdentity(state?.orgSettings)}
+      />
+
+      {/* 🌟 محول مسارات العمل الموحد للموظف متعدد الصلاحيات */}
+      <UnifiedWorkspaceSwitcherModal
+        isOpen={showWorkspaceSwitcher}
+        onClose={() => setShowWorkspaceSwitcher(false)}
+        employeeName={(switcherUser || currentEmpUser)?.name || ''}
+        unifiedAccess={(switcherUser || currentEmpUser)?.unifiedAccess}
+        branches={state?.branches || []}
+        onSelectWorkspace={handleSelectWorkspace}
+      />
 
       {/* ── System Temporary Lock Overlay (Scroll Lock) ── */}
       {isSystemLocked && authRole && authRole !== 'none' && (

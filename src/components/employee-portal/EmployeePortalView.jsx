@@ -2642,6 +2642,25 @@ export default function EmployeePortalView({
                 ⚙️
               </button>
 
+              {currentEmpUser?.unifiedAccess?.isEnabled && (
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('app:open-workspace-switcher', { detail: { user: currentEmpUser } }))}
+                  style={{
+                    border: '1px solid var(--primary, #0d9488)',
+                    background: 'rgba(13, 148, 136, 0.12)',
+                    color: 'var(--primary, #0d9488)',
+                    padding: '4px 7px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    lineHeight: 1
+                  }}
+                  title="التبديل بين الصفحات والأنظمة المصرح بها"
+                >
+                  🔄
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {

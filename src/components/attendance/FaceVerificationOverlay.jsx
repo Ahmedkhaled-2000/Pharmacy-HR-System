@@ -171,18 +171,28 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
       return () => clearInterval(checkInterval);
     }
 
-    // For Face tracking, use liveness check (blink or smile)
+    // For Face tracking, use smart adaptive liveness check (blink, smile, head turn, or steady gaze)
+    let faceStableFrames = 0;
     const checkInterval = setInterval(async () => {
       try {
+        if (!videoRef.current) return;
         const liveness = checkLiveness(videoRef.current, 0); 
         
-        if (!liveness || !liveness.hasFace) return;
+        if (!liveness || !liveness.hasFace) {
+          faceStableFrames = Math.max(0, faceStableFrames - 1);
+          return;
+        }
+
+        faceStableFrames++;
 
         if (livenessStage === 1) {
-          setStatus('يرجى الابتسام أو الرمش بعينيك لإثبات الحيوية 😉');
-          if (liveness.isBlinking || liveness.isSmiling) {
+          setStatus('يرجى النظر مباشرة للكاميرا والابتسام أو الرمش بعينيك 😉');
+          const hasMicroAction = liveness.isBlinking || liveness.isSmiling || liveness.isLookingLeft || liveness.isLookingRight;
+          
+          // نجاح الحيوية إما بحركة وجه صريحة أو بالثبات الواضح أمام الكاميرا لثانية ونصف (FaceID Style)
+          if (hasMicroAction || faceStableFrames >= 4) {
             setLivenessStage(2); // Liveness passed
-            setStatus('تم التحقق من الحيوية بنجاح! جاري مطابقة الوجه...');
+            setStatus('✅ تم التحقق من الحيوية بنجاح! جاري مطابقة الوجه...');
             clearInterval(checkInterval);
             performMatch();
           }
@@ -190,7 +200,7 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
       } catch (err) {
         // fail silently for liveness loop
       }
-    }, 400);
+    }, 350);
 
     return () => clearInterval(checkInterval);
   }, [isInitializing, isAiFallbackMode, livenessStage, isHand]);

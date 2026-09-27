@@ -1142,13 +1142,7 @@ export default function ElectronicKioskView({
         console.error('[Kiosk Photo Attendance] setState error:', err);
       }
     }
-    if (saveState) {
-      try {
-        saveState(finalState).catch(err => console.error('[Kiosk Photo Attendance] Save error:', err));
-      } catch (err) {
-        console.error('[Kiosk Photo Attendance] saveState error:', err);
-      }
-    }
+    // ⚡ تحديث محلي فوري (Zero-Latency UI) والمزامنة الحقيقية مفوضة لصندوق إرسال الكشك الذري (Outbox) أدناه دون رفع الـ State كاملة
 
     // ⚡ تسجيل ذري في صندوق إرسال الكشك (Kiosk Outbox) لحفظ البصمة فورياً ومزامنتها بأمان حتى بدون إنترنت
     const photoActionType = (actionType === 'shift_start')

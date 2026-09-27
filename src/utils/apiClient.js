@@ -418,6 +418,42 @@ export async function apiTerminateOwnerSessions({
   return res;
 }
 
+// ── 0.3 حفظ صلاحيات الدخول الموحد للموظف ──────────────────────────────────────
+export async function apiSaveEmployeeAccessConfig(employeeId, accessConfig) {
+  resetBackendCircuitBreaker();
+  return await request('auth/permissions/save-employee-access', {
+    method: 'POST',
+    body: JSON.stringify({ employeeId, accessConfig }),
+    timeout: 25000,
+    retries: 2,
+    noCache: true
+  });
+}
+
+// ── 0.4 إدارة المالكين المتعددين ──────────────────────────────────────────────
+export async function apiManageSystemOwners(action, ownerData, ownerId) {
+  resetBackendCircuitBreaker();
+  return await request('auth/owners/manage', {
+    method: 'POST',
+    body: JSON.stringify({ action, ownerData, ownerId }),
+    timeout: 25000,
+    retries: 2,
+    noCache: true
+  });
+}
+
+// ── 0.5 تعيين وتعميم هوية النظام المركزية ─────────────────────────────────────
+export async function apiSaveBrandIdentity(brandData) {
+  resetBackendCircuitBreaker();
+  return await request('system/brand-identity', {
+    method: 'POST',
+    body: JSON.stringify(brandData),
+    timeout: 25000,
+    retries: 2,
+    noCache: true
+  });
+}
+
 // ── 1. دوال إعدادات وبيانات التطبيق الرئيسية (Settings / State) ────────────────
 export async function apiFetchSettings(key = STORAGE_KEY, options = {}) {
   const res = await request(`settings?key=${encodeURIComponent(key)}`, {

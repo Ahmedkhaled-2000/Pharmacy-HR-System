@@ -675,7 +675,7 @@ export function useAttendanceEngine() {
       });
     }
 
-    if (saveState) {
+    if (saveState && source !== 'kiosk') {
       saveState(updatedState).catch(err => console.error('[startShift] Background save error:', err));
     }
 
@@ -761,7 +761,7 @@ export function useAttendanceEngine() {
       showToast(`تم إيقاف وردية ${emp ? emp.name : ''} مؤقتاً (بريك)`);
     }
 
-    if (saveState) {
+    if (saveState && source !== 'kiosk') {
       saveState(updatedState, { entityType: 'activeShifts' }).catch(err => console.error('[pauseShift] Background save error:', err));
     }
 
@@ -849,7 +849,7 @@ export function useAttendanceEngine() {
       showToast(`تم استئناف وردية ${emp ? emp.name : ''}`);
     }
 
-    if (saveState) {
+    if (saveState && source !== 'kiosk') {
       saveState(updatedState, { entityType: 'activeShifts' }).catch(err => console.error('[resumeShift] Background save error:', err));
     }
 
@@ -1374,10 +1374,7 @@ export function useAttendanceEngine() {
         console.warn('[stopShift] Kiosk outbox enqueue warning:', err);
       });
 
-      // حفظ محلي فوري لمنع بقاء الوردية نشطة في الكشك عند إعادة تحميل الصفحة أو انقطاع النت
-      if (saveState) {
-        saveState(updatedState).catch(err => console.error('[stopShift] Kiosk state save error:', err));
-      }
+      // يتم الاعتماد حصرياً على enqueueKioskPunch لمزامنة الانصراف في الكشك دون إجهاد الشبكة
     } else {
       apiRecordPunch({
         employeeId: empActualId || empId,

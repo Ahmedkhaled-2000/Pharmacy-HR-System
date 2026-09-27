@@ -1407,7 +1407,58 @@ export default function DesktopLayout({
     }
   ];
 
-  const currentMenuItems = currentRole === 'branch' ? branchMenuItems : adminMenuItems;
+  const currentMenuItems = useMemo(() => {
+    if (currentRole === 'branch') return branchMenuItems;
+
+    // 1. إذا كان المالك: إدراج تبويب الصلاحيات السيادي في البداية
+    if (currentRole === 'owner') {
+      return [
+        {
+          id: 'owner-permissions',
+          label: '👑 صلاحيات الموظفين والهوية',
+          icon: '👑',
+          isSingle: true,
+          targetTab: 'owner-permissions'
+        },
+        ...adminMenuItems
+      ];
+    }
+
+    // 2. إذا كان مستخدماً بصلاحيات محددة في الإدارة العليا (Strict Module Isolation)
+    const allowedModules = userProfile?.allowedModules || userProfile?.unifiedAccess?.permissions?.topManagement?.allowedModules || null;
+    if (Array.isArray(allowedModules) && allowedModules.length > 0) {
+      return adminMenuItems.map(menu => {
+        if (menu.isSingle) {
+          if (allowedModules.includes(menu.targetTab)) return menu;
+          return null;
+        }
+        if (menu.children) {
+          const filteredChildren = menu.children.filter(child => {
+            const t = child.targetTab;
+            return allowedModules.includes(t) ||
+                   (t === 'employees' && allowedModules.includes('employees')) ||
+                   (t === 'branches' && allowedModules.includes('branches')) ||
+                   (t === 'roster' && allowedModules.includes('roster')) ||
+                   (t === 'payroll' && allowedModules.includes('payroll')) ||
+                   (t === 'requests' && allowedModules.includes('requests')) ||
+                   (t === 'leaves-tracking' && allowedModules.includes('requests')) ||
+                   (t === 'permissions-management' && allowedModules.includes('requests')) ||
+                   (t === 'bylaws' && allowedModules.includes('bylaws')) ||
+                   (t === 'financial-reports' && (allowedModules.includes('financial_reports') || allowedModules.includes('financial-reports'))) ||
+                   (t === 'income-expenses' && (allowedModules.includes('financial_reports') || allowedModules.includes('financial-reports'))) ||
+                   (t === 'whatsapp-center' && (allowedModules.includes('whatsapp_center') || allowedModules.includes('whatsapp-center'))) ||
+                   (t === 'settings' && allowedModules.includes('settings'));
+          });
+          if (filteredChildren.length > 0) {
+            return { ...menu, children: filteredChildren };
+          }
+        }
+        return null;
+      }).filter(Boolean);
+    }
+
+    return adminMenuItems;
+  }, [currentRole, branchMenuItems, adminMenuItems, userProfile]);
 
   // Helper to check if a main menu is active
   const isMenuGroupActive = (menu) => {
@@ -2230,6 +2281,58 @@ return (
               </span>
             </div>
           </div>
+
+          {/* زر التبديل السريع للمالك بين الأنظمة الأربعة */}
+          {(currentRole === 'owner' || userProfile?.isOwner) && (
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('app:open-owner-launchpad'))}
+              style={{
+                background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                color: '#ffffff',
+                border: 'none',
+                padding: '4px 10px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                boxShadow: '0 2px 6px rgba(245, 158, 11, 0.35)',
+                transition: 'transform 0.15s'
+              }}
+              title="فتح بوابة قيادة المالك للتبديل بين الأنظمة الأربعة"
+            >
+              <span>🔀</span>
+              <span>تبديل المنظومة</span>
+            </button>
+          )}
+
+          {/* زر تبديل مسار العمل للموظف متعدد الصلاحيات */}
+          {userProfile?.unifiedAccess?.isEnabled && (
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('app:open-workspace-switcher'))}
+              style={{
+                background: 'rgba(13, 148, 136, 0.12)',
+                color: 'var(--primary, #0d9488)',
+                border: '1px solid var(--primary, #0d9488)',
+                padding: '4px 10px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px'
+              }}
+              title="التبديل بين صفحاتك المعتمدة"
+            >
+              <span>🔄</span>
+              <span>تبديل صفحتي</span>
+            </button>
+          )}
 
           <span style={{ color: 'var(--border)', fontSize: '16px' }}>/</span>
 

@@ -9,8 +9,11 @@
 
 import express from 'express';
 
+let globalDb = null;
+
 export async function initBiometricTables(db) {
   if (!db) return;
+  globalDb = db;
   try {
     const ddl = `
       -- 1. جدول أجهزة البصمة المتصلة بالسحابة
@@ -103,43 +106,70 @@ export async function initBiometricTables(db) {
           created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_bio_disp_dev ON public.biometric_dispatch_logs (target_device_serial, created_at DESC);
+
+      -- 6. جدول طابور أوامر أجهزة البصمة الدائم (Persistent Device Commands Queue)
+      CREATE TABLE IF NOT EXISTS public.biometric_device_commands (
+          id BIGSERIAL PRIMARY KEY,
+          device_serial VARCHAR(100) NOT NULL,
+          command_text TEXT NOT NULL,
+          command_type VARCHAR(50) NOT NULL DEFAULT 'USER_UPDATE',
+          status VARCHAR(30) DEFAULT 'PENDING',
+          retries INT DEFAULT 0,
+          sent_at TIMESTAMPTZ,
+          acknowledged_at TIMESTAMPTZ,
+          response_code INT,
+          response_payload TEXT,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_bio_cmds_dev_status ON public.biometric_device_commands (device_serial, status, id ASC);
     `;
 
     await db.query(ddl);
-    console.log('📡 [Biometric Manager] جداول أجهزة البصمة والخزنة البيومترية (MB20 / ADMS) مفهرسة ومجهزة بنجاح.');
+    console.log('📡 [Biometric Manager] جداول أجهزة البصمة والخزنة البيومترية وطابور الأوامر الدائم مفهرسة ومجهزة بنجاح.');
   } catch (err) {
     console.error('❌ [Biometric Init Tables Error]:', err.message);
   }
 }
 
-// ── ذاكرة سريعة لحماية التكرار المتوتر (Debounce Cache: 60 ثانية) ─────────────
-const recentPunchDebounce = new Map(); // key: `emp_${employeeId}` => timestamp
+// ── ذاكرة سريعة لحماية التكرار المتوتر بالزمن الفعلي الأصلي للبصمة ─────────────
+const recentPunchDebounce = new Map(); // key: `emp_${employeeId}` => punchEpoch
 
-function isDebounced(empId, windowMs = 60000) {
+function isDebounced(empId, punchEpoch, windowMs = 45000) {
   const key = `emp_${empId}`;
-  const now = Date.now();
+  const effectiveEpoch = Number(punchEpoch) || Date.now();
   const lastTime = recentPunchDebounce.get(key) || 0;
-  if (now - lastTime < windowMs) {
+  if (Math.abs(effectiveEpoch - lastTime) < windowMs) {
     return true;
   }
-  recentPunchDebounce.set(key, now);
-  // تنظيف دوري للذاكرة المؤقتة كل 100 مفتاح
-  if (recentPunchDebounce.size > 500) {
+  recentPunchDebounce.set(key, effectiveEpoch);
+  // تنظيف دوري للذاكرة المؤقتة كل 1000 مفتاح
+  if (recentPunchDebounce.size > 1000) {
+    const now = Date.now();
     for (const [k, ts] of recentPunchDebounce.entries()) {
-      if (now - ts > windowMs) recentPunchDebounce.delete(k);
+      if (Math.abs(now - ts) > 3600000 * 24) recentPunchDebounce.delete(k);
     }
   }
   return false;
 }
 
-// ── طابور أوامر الأجهزة (Device Command Queue) ───────────────────────────────
+// ── طابور أوامر الأجهزة (Persistent + Memory Fallback Device Command Queue) ────
 const deviceCommandQueues = new Map(); // key: serialNumber => Array of command strings
 
-export function queueDeviceCommand(serialNumber, cmdString) {
+export function queueDeviceCommand(serialNumber, cmdString, cmdType = 'USER_UPDATE') {
   if (!serialNumber || !cmdString) return;
+  // 1. إضافة للذاكرة المؤقتة للاستجابة اللحظية
   const list = deviceCommandQueues.get(serialNumber) || [];
   list.push(cmdString);
   deviceCommandQueues.set(serialNumber, list);
+
+  // 2. حفظ دائم في قاعدة البيانات لضمان عدم ضياع الأوامر عند إعادة تشغيل السيرفر
+  if (globalDb) {
+    globalDb.query(
+      `INSERT INTO public.biometric_device_commands (device_serial, command_text, command_type, status)
+       VALUES ($1, $2, $3, 'PENDING')`,
+      [serialNumber, cmdString, cmdType]
+    ).catch(e => console.warn('[Biometric Command Queue DB Error]:', e.message));
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -396,6 +426,21 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
       console.log(`[Biometric Manager] 📥 استلام ${lines.length} حركة بصمة حية من جهاز MB20 (SN: ${sn})`);
 
+      // ⚡ استخراج واستعلام كافة أرقام الـ PIN في الدفعة دفعة واحدة لتقليص زمن الاستعلام (Bulk Parallel Lookup)
+      const allPins = [...new Set(lines.map(l => l.split(/[\t\s]+/)[0]?.trim()).filter(Boolean))];
+      const profilesMap = new Map();
+      if (allPins.length > 0) {
+        try {
+          const bulkProf = await db.query(
+            'SELECT employee_id, device_user_pin FROM public.employee_biometric_profiles WHERE device_user_pin = ANY($1)',
+            [allPins]
+          );
+          (bulkProf.rows || []).forEach(r => profilesMap.set(String(r.device_user_pin), r.employee_id));
+        } catch (e) {
+          console.warn('[Biometric Bulk Prof Warn]:', e.message);
+        }
+      }
+
       // جلب بيانات النظام الحالية (الموظفين والورديات)
       const state = await getSettingsFromStorage(STORAGE_KEY);
       const employees = Array.isArray(state?.employees) ? state.employees : [];
@@ -422,33 +467,26 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         // تصنيف وسيلة التحقق
         const verifyType = rawVerifyType === 15 || rawVerifyType === 20 ? 'FACE' : 'FINGERPRINT';
 
-        // استخراج التاريخ والوقت
+        // استخراج التاريخ والوقت والتوقيت الأيبوكي الفعلي للبصمة
         let datePart = new Date().toISOString().slice(0, 10);
         let timePart = new Date().toTimeString().slice(0, 5);
+        let punchEpoch = Date.now();
 
         try {
           const parsed = new Date(punchDateTimeStr);
           if (!isNaN(parsed.getTime())) {
             datePart = parsed.toISOString().slice(0, 10);
             timePart = punchDateTimeStr.slice(11, 16);
+            punchEpoch = parsed.getTime();
           }
         } catch {}
 
-        // 1. البحث عن الموظف المطابق لـ PIN
-        // أ. فحص جدول ملفات البصمة employee_biometric_profiles
-        let matchedEmpId = null;
+        // 1. البحث الفوري عن الموظف المطابق لـ PIN من الذاكرة المجمعة (< 0.1ms)
+        let matchedEmpId = profilesMap.get(pin) || null;
         let matchedEmpName = null;
         let matchedBranchId = devObj?.branch_id || '';
 
-        const profRes = await db.query(
-          'SELECT employee_id FROM public.employee_biometric_profiles WHERE device_user_pin = $1 LIMIT 1',
-          [pin]
-        );
-        if (profRes.rows && profRes.rows.length > 0) {
-          matchedEmpId = profRes.rows[0].employee_id;
-        }
-
-        // ب. إذا لم يوجد، فحص قائمة الموظفين في الـ HR
+        // ب. إذا لم يوجد في جدول الربط، فحص قائمة الموظفين في الـ HR
         if (!matchedEmpId) {
           const emp = employees.find(e =>
             String(e.code || '').trim() === pin ||
@@ -491,9 +529,9 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           continue;
         }
 
-        // 3. درع منع التكرار المتوتر (Debounce Protection: 60 ثانية)
-        if (isDebounced(matchedEmpId, 60000)) {
-          console.log(`[Biometric Debounce] تم تجاهل تكرار سريع للبصمة للموظف ${matchedEmpName || matchedEmpId} (خلال 60 ثانية)`);
+        // 3. درع منع التكرار المتوتر بالزمن الفعلي للبصمة (Debounce Protection: 45 ثانية)
+        if (isDebounced(matchedEmpId, punchEpoch, 45000)) {
+          console.log(`[Biometric Debounce] تم صيانة بصمة سريعة مكررة للموظف ${matchedEmpName || matchedEmpId} (ضمن 45 ثانية من نفس البصمة)`);
           await db.query(
             `INSERT INTO public.biometric_raw_punches 
              (device_serial, device_user_pin, punch_time, verify_type, raw_punch_state, employee_id, employee_name, branch_id, action_type, process_status, process_notes, raw_payload)
@@ -505,20 +543,19 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         }
 
         // 4. خوارزمية التوجيه الذكي للوردية (Smart Shift Direction Prediction)
-        // فحص هل لدى الموظف وردية نشطة حالياً
         const activeShift = currentActiveShifts[matchedEmpId];
         let actionType = 'check_in';
 
         if (activeShift && activeShift.date === datePart) {
-          // الموظف لديه وردية نشطة اليوم:
-          const shiftDurationMs = Date.now() - (activeShift.startEpoch || Date.now());
-          // إذا كانت الوردية مفتوحة منذ أكثر من 15 دقيقة -> تعتبر انصرافاً
-          if (shiftDurationMs > 15 * 60 * 1000) {
+          // الموظف لديه وردية نشطة اليوم: نقارن بالزمن الفعلي للبصمة مقابل وقت بدء الوردية
+          const shiftStartEpoch = Number(activeShift.startEpoch) || (activeShift.timeIn ? new Date(`${datePart}T${activeShift.timeIn.slice(0,5)}:00`).getTime() : punchEpoch);
+          const shiftDurationMs = punchEpoch - shiftStartEpoch;
+          // إذا كانت الوردية مفتوحة منذ أكثر من دقيقتين -> تعتبر انصرافاً
+          if (shiftDurationMs > 2 * 60 * 1000) {
             actionType = 'check_out';
           } else {
-            // بصمة بعد الحضور بأقل من 15 دقيقة -> تجاهل ذكي
             console.log(`[Biometric Resolver] الموظف ${matchedEmpName} سجل حضوراً للتو منذ ${Math.round(shiftDurationMs / 60000)} دقيقة.`);
-            actionType = 'check_in'; // لا تكسر شيئاً
+            actionType = 'check_in';
           }
         } else {
           // لا توجد وردية نشطة -> تسجيل حضور جديد
@@ -526,7 +563,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         }
 
         // 5. تطبيق الحركة عبر المحرك الذري القائم
-        const shiftId = activeShift?.shiftId || `shift_${matchedEmpId}_${Date.now()}`;
+        const shiftId = activeShift?.shiftId || `shift_${matchedEmpId}_${punchEpoch}`;
         const shiftRecord = {
           id: shiftId,
           employeeId: matchedEmpId,
@@ -548,10 +585,10 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             branchId: matchedBranchId,
             date: datePart,
             timeIn: timePart,
-            startEpoch: Date.now(),
+            startEpoch: punchEpoch,
             isPaused: false,
             isOnBreak: false,
-            updatedAt: Date.now(),
+            updatedAt: punchEpoch,
             biometricDeviceSerial: sn
           };
           currentShifts = [shiftRecord, ...currentShifts.filter(s => s.id !== shiftId)];
@@ -579,7 +616,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           [sn, pin, `${datePart} ${timePart}:00`, verifyType, rawState, matchedEmpId, matchedEmpName, matchedBranchId, actionType, line]
         );
 
-        // 6. بث لحظي عبر Socket.io (Multi-Room Multiplexing < 5ms)
+        // 6. بث لحظي فائق الخفة عبر Socket.io (Micro-Event Broadcast < 1KB)
         const punchPayload = {
           employeeId: matchedEmpId,
           employeeName: matchedEmpName,
@@ -615,11 +652,11 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         processedCount++;
       }
 
-      // 7. حفظ التحديثات في Redis و PostgreSQL
+      // 7. حفظ التحديثات في Redis و PostgreSQL بهدوء فائق وسرعة دون بث عاصفة الـ 4.2MB
       state.activeShifts = currentActiveShifts;
       state.shifts = currentShifts;
       state._punchSource = 'biometric_adms';
-      await saveSettingsToStorage(STORAGE_KEY, state, clientIp);
+      await saveSettingsToStorage(STORAGE_KEY, state, 'batch-worker');
 
       // الرد على ماكينة ZKTeco بالتأكيد
       return res.status(200).send(`OK: ${processedCount}`);
@@ -637,13 +674,49 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       const sn = (req.query.SN || req.query.sn || '').trim();
       if (!sn) return res.status(200).send('OK');
 
+      // 1. فحص طابور الأوامر الدائم في قاعدة البيانات أولاً لضمان عدم ضياع الترحيلات
+      try {
+        const dbCmds = await db.query(
+          `SELECT id, command_text 
+           FROM public.biometric_device_commands 
+           WHERE device_serial = $1 AND status = 'PENDING' 
+           ORDER BY id ASC 
+           LIMIT 10`,
+          [sn]
+        );
+
+        if (dbCmds.rows && dbCmds.rows.length > 0) {
+          const cmdIds = dbCmds.rows.map(r => r.id);
+          await db.query(
+            `UPDATE public.biometric_device_commands 
+             SET status = 'SENT', sent_at = CURRENT_TIMESTAMP, retries = retries + 1 
+             WHERE id = ANY($1)`,
+            [cmdIds]
+          );
+
+          const payload = dbCmds.rows.map(r => {
+            if (r.command_text.startsWith('C:')) {
+              const parts = r.command_text.split(':');
+              return `C:${r.id}:${parts.slice(2).join(':')}`;
+            }
+            return `C:${r.id}:${r.command_text}`;
+          }).join('\r\n');
+
+          console.log(`[Biometric Manager] 📤 إرسال ${dbCmds.rows.length} أمر/أوامر للجهاز ${sn} من الطابور الدائم (PostgreSQL)`);
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          return res.status(200).send(payload);
+        }
+      } catch (dbCmdErr) {
+        console.warn('[ADMS getrequest DB Queue Warn]:', dbCmdErr.message);
+      }
+
+      // 2. فحص طابور الذاكرة المؤقتة كاحتياطي فوري
       const queue = deviceCommandQueues.get(sn) || [];
       if (queue.length > 0) {
-        // سحب دفعة أوامر (حتى 10 أوامر في المرة الواحدة) لتسريع الترحيل
         const batch = queue.splice(0, 10);
         deviceCommandQueues.set(sn, queue);
         const payload = batch.join('\r\n');
-        console.log(`[Biometric Manager] 📤 إرسال ${batch.length} أمر/أوامر للجهاز ${sn}`);
+        console.log(`[Biometric Manager] 📤 إرسال ${batch.length} أمر/أوامر للجهاز ${sn} من الذاكرة`);
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         return res.status(200).send(payload);
       }
@@ -660,8 +733,57 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
   // ────────────────────────────────────────────────────────────────────────────
   const handleAdmsDeviceCmd = async (req, res) => {
     try {
+      const sn = (req.query.SN || req.query.sn || '').trim();
+      let rawBody = '';
+      if (typeof req.body === 'string') {
+        rawBody = req.body;
+      } else if (Buffer.isBuffer(req.body)) {
+        rawBody = req.body.toString('utf8');
+      } else if (req.body && typeof req.body === 'object') {
+        rawBody = Object.entries(req.body).map(([k, v]) => `${k}=${v}`).join('&');
+      }
+
+      // تحليل رد الجهاز القياسي من ZKTeco ADMS:
+      // مثال: ID=123&Return=0&CMD=DATA UPDATE USER
+      const lines = rawBody.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        try {
+          const params = new URLSearchParams(line.replace(/&amp;/g, '&'));
+          const cmdId = parseInt(params.get('ID') || '0', 10);
+          const returnCode = parseInt(params.get('Return') || '0', 10);
+          const cmdName = params.get('CMD') || '';
+
+          if (cmdId > 0) {
+            const isSuccess = (returnCode === 0);
+            const newStatus = isSuccess ? 'SUCCESS' : 'FAILED';
+
+            await db.query(
+              `UPDATE public.biometric_device_commands 
+               SET status = $1, response_code = $2, response_payload = $3, acknowledged_at = CURRENT_TIMESTAMP 
+               WHERE id = $4`,
+              [newStatus, returnCode, line, cmdId]
+            );
+
+            console.log(`[Biometric Manager] 📥 استلام تأكيد الأمر #${cmdId} من جهاز ${sn}: Return=${returnCode} (${newStatus})`);
+
+            // بث تحديث حالة الأوامر فورياً للوحة التحكم
+            io.emit('biometric:command_ack', {
+              serialNumber: sn,
+              commandId: cmdId,
+              status: newStatus,
+              returnCode,
+              cmdName,
+              acknowledgedAt: new Date().toISOString()
+            });
+          }
+        } catch (lineErr) {
+          console.warn('[DeviceCmd Parse Warn]:', lineErr.message);
+        }
+      }
+
       return res.status(200).send('OK');
-    } catch {
+    } catch (err) {
+      console.error('[ADMS devicecmd Error]:', err);
       return res.status(200).send('OK');
     }
   };

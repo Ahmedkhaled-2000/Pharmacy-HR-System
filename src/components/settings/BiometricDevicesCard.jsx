@@ -150,14 +150,22 @@ export default function BiometricDevicesCard({ state, showToast }) {
         fetchProfiles();
       };
 
+      const onCmdAck = (data) => {
+        if (data && data.status) {
+          fetchDispatchLogs();
+        }
+      };
+
       socket.on('biometric:device_status', onStatus);
       socket.on('punch:recorded', onPunch);
       socket.on('biometric:template_vaulted', onTemplateVaulted);
+      socket.on('biometric:command_ack', onCmdAck);
 
       return () => {
         socket.off('biometric:device_status', onStatus);
         socket.off('punch:recorded', onPunch);
         socket.off('biometric:template_vaulted', onTemplateVaulted);
+        socket.off('biometric:command_ack', onCmdAck);
       };
     }
   }, [fetchDevices, fetchLogs, fetchProfiles, fetchTemplates, fetchDispatchLogs, showToast]);
