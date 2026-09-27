@@ -541,7 +541,17 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
   app.get('/api/biometrics/devices', async (req, res) => {
     try {
       const q = await db.query('SELECT * FROM public.biometric_devices ORDER BY created_at DESC');
-      res.json({ success: true, devices: q.rows || [] });
+      const now = Date.now();
+      const devices = (q.rows || []).map(dev => {
+        const lastHb = dev.last_heartbeat ? new Date(dev.last_heartbeat).getTime() : 0;
+        // يعتبر الجهاز متصلاً إذا أرسل نبضاً خلال آخر 150 ثانية
+        const isOnline = (now - lastHb) < 150000;
+        return {
+          ...dev,
+          status: isOnline ? 'ONLINE' : 'OFFLINE'
+        };
+      });
+      res.json({ success: true, devices });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }

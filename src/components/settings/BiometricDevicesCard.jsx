@@ -528,6 +528,9 @@ export default function BiometricDevicesCard({ state, showToast }) {
                 const devBranch = branches.find(b => String(b.id) === String(dev.branch_id));
                 const branchNameDisplay = devBranch?.name || dev.branch_name || 'غير محدد';
 
+                const lastHbTime = dev.last_heartbeat ? new Date(dev.last_heartbeat).getTime() : 0;
+                const isDevOnline = dev.status === 'ONLINE' && (Date.now() - lastHbTime < 150000);
+
                 return (
                   <div
                     key={dev.serial_number}
@@ -559,12 +562,12 @@ export default function BiometricDevicesCard({ state, showToast }) {
                             borderRadius: '20px',
                             fontSize: '0.78rem',
                             fontWeight: 800,
-                            background: dev.status === 'ONLINE' ? '#ecfdf5' : '#fef2f2',
-                            color: dev.status === 'ONLINE' ? '#059669' : '#dc2626',
-                            border: `1px solid ${dev.status === 'ONLINE' ? '#a7f3d0' : '#fecaca'}`
+                            background: isDevOnline ? '#ecfdf5' : '#fef2f2',
+                            color: isDevOnline ? '#059669' : '#dc2626',
+                            border: `1px solid ${isDevOnline ? '#a7f3d0' : '#fecaca'}`
                           }}
                         >
-                          {dev.status === 'ONLINE' ? '🟢 متصل (Online)' : '🔴 غير متصل'}
+                          {isDevOnline ? '🟢 متصل (Online)' : '🔴 غير متصل (Offline)'}
                         </span>
                       </div>
 
@@ -572,7 +575,13 @@ export default function BiometricDevicesCard({ state, showToast }) {
                         <div>🏥 <strong>الفرع التابع له:</strong> <span style={{ color: '#0284c7', fontWeight: 800 }}>{branchNameDisplay}</span></div>
                         <div>🌐 <strong>عنوان الـ IP:</strong> {dev.ip_address || '127.0.0.1'}</div>
                         <div>📡 <strong>البروتوكول:</strong> {dev.protocol || 'ADMS'} ({dev.device_type || 'MB20'})</div>
-                        <div>⏱️ <strong>آخر نبض (Heartbeat):</strong> {dev.last_heartbeat ? new Date(dev.last_heartbeat).toLocaleTimeString('ar-EG') : 'الآن'}</div>
+                        <div>⏱️ <strong>آخر نبض (Heartbeat):</strong> {dev.last_heartbeat ? new Date(dev.last_heartbeat).toLocaleTimeString('ar-EG') : 'غير متوفر'}</div>
+
+                        {!isDevOnline && (
+                          <div style={{ marginTop: '8px', padding: '8px 10px', borderRadius: '8px', background: '#fffbeb', border: '1px solid #fef3c7', color: '#b45309', fontSize: '0.78rem', fontWeight: 700, lineHeight: '1.6' }}>
+                            ⚠️ الماكينة غير متصلة بالسحابة حالياً. اضبط إعداد Cloud Server في الماكينة على IP السيرفر: <strong style={{ color: '#0369a1' }}>63.183.147.199</strong> مع إغلاق البروكسي (Proxy OFF).
+                          </div>
+                        )}
                       </div>
                     </div>
 
