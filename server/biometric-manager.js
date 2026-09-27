@@ -66,10 +66,47 @@ export async function initBiometricTables(db) {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_emp_bio_pin ON public.employee_biometric_profiles (device_user_pin);
+
+      -- 4. جدول خزنة القوالب البيومترية السحابية (Fingerprint / Face Biometric Vault)
+      CREATE TABLE IF NOT EXISTS public.biometric_templates (
+          id VARCHAR(100) PRIMARY KEY,
+          employee_id VARCHAR(100) NULL,
+          device_user_pin VARCHAR(50) NOT NULL,
+          template_type VARCHAR(30) NOT NULL DEFAULT 'FINGERPRINT',
+          finger_id SMALLINT NOT NULL DEFAULT 0,
+          size INT DEFAULT 0,
+          valid SMALLINT DEFAULT 1,
+          major_ver VARCHAR(20) DEFAULT '10',
+          template_data TEXT NOT NULL,
+          source_device_sn VARCHAR(100) NULL,
+          source_branch_id VARCHAR(50) NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT uq_bio_tpl UNIQUE (device_user_pin, template_type, finger_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_bio_tpl_pin ON public.biometric_templates (device_user_pin);
+      CREATE INDEX IF NOT EXISTS idx_bio_tpl_emp ON public.biometric_templates (employee_id);
+
+      -- 5. جدول سجلات ترحيل وتوزيع البصمات بين الفروع (Cross-Branch Dispatch Logs)
+      CREATE TABLE IF NOT EXISTS public.biometric_dispatch_logs (
+          id BIGSERIAL PRIMARY KEY,
+          employee_id VARCHAR(100) NULL,
+          employee_name VARCHAR(255) NULL,
+          device_user_pin VARCHAR(50) NOT NULL,
+          target_device_serial VARCHAR(100) NOT NULL,
+          target_branch_id VARCHAR(50) NULL,
+          target_branch_name VARCHAR(100) NULL,
+          included_biometrics BOOLEAN DEFAULT TRUE,
+          templates_count INT DEFAULT 0,
+          status VARCHAR(30) DEFAULT 'QUEUED',
+          dispatched_by VARCHAR(100) DEFAULT 'ADMIN',
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_bio_disp_dev ON public.biometric_dispatch_logs (target_device_serial, created_at DESC);
     `;
 
     await db.query(ddl);
-    console.log('📡 [Biometric Manager] جداول أجهزة البصمة (MB20 / ADMS) مفهرسة ومجهزة بنجاح.');
+    console.log('📡 [Biometric Manager] جداول أجهزة البصمة والخزنة البيومترية (MB20 / ADMS) مفهرسة ومجهزة بنجاح.');
   } catch (err) {
     console.error('❌ [Biometric Init Tables Error]:', err.message);
   }
@@ -145,6 +182,126 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     }
   }
 
+  // ── التقاط وحفظ القوالب البيومترية السحابية (Biometric Vault Ingestion) ──────
+  async function parseAndStoreBiometricTemplate(sn, table, rawBody, devObj) {
+    const lines = rawBody.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    let savedCount = 0;
+
+    for (const line of lines) {
+      let pin = '';
+      let fingerId = 0;
+      let size = 0;
+      let valid = 1;
+      let type = 1; // 1 = Fingerprint, 9 = Face
+      let majorVer = '10';
+      let templateData = '';
+
+      if (line.includes('=')) {
+        const parts = line.split(/[\t\r\n\s]+/);
+        const kv = {};
+        parts.forEach(p => {
+          const eqIdx = p.indexOf('=');
+          if (eqIdx > 0) {
+            const k = p.slice(0, eqIdx).trim().toLowerCase();
+            const v = p.slice(eqIdx + 1).trim();
+            kv[k] = v;
+          }
+        });
+
+        pin = kv.pin || '';
+        fingerId = parseInt(kv.index || kv.fid || kv.fingerid || '0', 10);
+        size = parseInt(kv.size || '0', 10);
+        valid = parseInt(kv.valid || '1', 10);
+        type = parseInt(kv.type || '1', 10);
+        majorVer = kv.majorver || '10';
+        templateData = kv.tmp || kv.template || '';
+      } else {
+        const tokens = line.split(/[\t\s]+/);
+        if (tokens.length >= 5) {
+          pin = tokens[0];
+          fingerId = parseInt(tokens[1] || '0', 10);
+          size = parseInt(tokens[2] || '0', 10);
+          valid = parseInt(tokens[3] || '1', 10);
+          templateData = tokens[4];
+        }
+      }
+
+      if (!pin || !templateData) continue;
+
+      const templateType = (type === 9 || String(table).toUpperCase().includes('FACE')) ? 'FACE' : 'FINGERPRINT';
+      const tplId = `tpl_${pin}_${templateType}_${fingerId}`;
+
+      // البحث عن الموظف المطابق لهذا الـ PIN
+      let matchedEmpId = null;
+      let matchedEmpName = '';
+      const profRes = await db.query(
+        'SELECT employee_id FROM public.employee_biometric_profiles WHERE device_user_pin = $1 LIMIT 1',
+        [pin]
+      );
+      if (profRes.rows && profRes.rows.length > 0) {
+        matchedEmpId = profRes.rows[0].employee_id;
+      }
+
+      if (!matchedEmpId) {
+        const state = await getSettingsFromStorage(STORAGE_KEY);
+        const employees = Array.isArray(state?.employees) ? state.employees : [];
+        const emp = employees.find(e =>
+          String(e.code || '').trim() === pin ||
+          String(e.id || '').trim() === pin ||
+          String(e.enrollmentId || '').trim() === pin ||
+          String(e.biometricPin || '').trim() === pin
+        );
+        if (emp) {
+          matchedEmpId = emp.id;
+          matchedEmpName = emp.name;
+          await db.query(
+            `INSERT INTO public.employee_biometric_profiles (id, employee_id, device_user_pin, notes, updated_at)
+             VALUES ($1, $2, $3, 'ربط تلقائي عند التقاط البصمة', CURRENT_TIMESTAMP)
+             ON CONFLICT (employee_id) DO UPDATE SET device_user_pin = EXCLUDED.device_user_pin, updated_at = CURRENT_TIMESTAMP`,
+            [`map_${emp.id}_${Date.now()}`, String(emp.id), pin]
+          );
+        }
+      } else {
+        const state = await getSettingsFromStorage(STORAGE_KEY);
+        const emp = (state?.employees || []).find(e => String(e.id) === String(matchedEmpId));
+        if (emp) matchedEmpName = emp.name;
+      }
+
+      await db.query(
+        `INSERT INTO public.biometric_templates 
+         (id, employee_id, device_user_pin, template_type, finger_id, size, valid, major_ver, template_data, source_device_sn, source_branch_id, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP)
+         ON CONFLICT (device_user_pin, template_type, finger_id) DO UPDATE SET
+           template_data = EXCLUDED.template_data,
+           size = EXCLUDED.size,
+           valid = EXCLUDED.valid,
+           major_ver = EXCLUDED.major_ver,
+           source_device_sn = EXCLUDED.source_device_sn,
+           source_branch_id = EXCLUDED.source_branch_id,
+           employee_id = COALESCE(EXCLUDED.employee_id, biometric_templates.employee_id),
+           updated_at = CURRENT_TIMESTAMP`,
+        [tplId, matchedEmpId, pin, templateType, fingerId, size, valid, majorVer, templateData, sn, devObj?.branch_id || null]
+      );
+
+      savedCount++;
+
+      io.emit('biometric:template_vaulted', {
+        pin,
+        employeeId: matchedEmpId,
+        employeeName: matchedEmpName,
+        templateType,
+        fingerId,
+        sourceDeviceSn: sn,
+        sourceBranchName: devObj?.branch_name || 'الإدارة',
+        timestamp: new Date().toISOString()
+      });
+
+      console.log(`[Biometric Vault] 🧬 تم حفظ قالب بيومتري (${templateType} #${fingerId}) للموظف (${matchedEmpName || pin}) من جهاز ${sn}`);
+    }
+
+    return savedCount;
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
   // 1. معالج المصافحة والاستعلام (ADMS Handshake & Heartbeat: GET /iclock/cdata)
   // ────────────────────────────────────────────────────────────────────────────
@@ -218,6 +375,12 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         // في حال تم تحليله عبر form-urlencoded
         rawBody = Object.keys(req.body)[0] || '';
         if (typeof req.body.data === 'string') rawBody = req.body.data;
+      }
+
+      if (table === 'BIODATA' || table === 'FINGERTMP' || table === 'FACETMP') {
+        const count = await parseAndStoreBiometricTemplate(sn, table, rawBody, devObj);
+        console.log(`[Biometric Manager] 🧬 تم استلام وحفظ ${count} قالب بيومتري من جهاز (SN: ${sn})`);
+        return res.status(200).send(`OK: ${count}`);
       }
 
       if (table !== 'ATTLOG') {
@@ -664,6 +827,194 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       const cmd = `C:${Date.now()}:CLEAR LOG`;
       queueDeviceCommand(serialNumber, cmd);
       res.json({ success: true, message: 'تم إرسال أمر مسح سجلات الحركات القديمة من الجهاز' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.5 سحب قوالب البصمات من ذاكرة الجهاز إلى الخزنة السحابية (Pull Templates)
+  app.post('/api/biometrics/devices/:serialNumber/pull-templates', async (req, res) => {
+    try {
+      const { serialNumber } = req.params;
+      const cmd1 = `C:${Date.now()}:DATA QUERY USERINFO`;
+      const cmd2 = `C:${Date.now() + 1}:DATA QUERY FINGERTMP`;
+      const cmd3 = `C:${Date.now() + 2}:DATA QUERY BIODATA Type=1`;
+      queueDeviceCommand(serialNumber, cmd1);
+      queueDeviceCommand(serialNumber, cmd2);
+      queueDeviceCommand(serialNumber, cmd3);
+      res.json({
+        success: true,
+        message: `تم إرسال أمر سحب واستيراد كافة قوالب البصمات من جهاز (${serialNumber}) إلى الخزنة السحابية`
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.6 مركز ترحيل وتوزيع البصمات الشامل عبر الفروع (Enterprise Cross-Branch Dispatcher)
+  app.post('/api/biometrics/dispatch', async (req, res) => {
+    try {
+      const { employeeIds, targetDeviceSerials, includeBiometrics = true, targetBranchId } = req.body;
+      if (!targetDeviceSerials || !Array.isArray(targetDeviceSerials) || targetDeviceSerials.length === 0) {
+        return res.status(400).json({ success: false, error: 'يرجى تحديد جهاز بصمة مستهدف واحد على الأقل' });
+      }
+
+      const state = await getSettingsFromStorage(STORAGE_KEY);
+      const employees = Array.isArray(state?.employees) ? state.employees : [];
+
+      const profQ = await db.query('SELECT employee_id, device_user_pin FROM public.employee_biometric_profiles');
+      const profilesMap = new Map((profQ.rows || []).map(r => [String(r.employee_id), r.device_user_pin]));
+
+      let targetEmps = [];
+      if (employeeIds === 'ALL' || (Array.isArray(employeeIds) && employeeIds.includes('ALL'))) {
+        targetEmps = employees;
+      } else if (Array.isArray(employeeIds) && employeeIds.length > 0) {
+        targetEmps = employees.filter(e => employeeIds.includes(e.id));
+      } else {
+        return res.status(400).json({ success: false, error: 'يرجى اختيار موظف واحد على الأقل للترحيل' });
+      }
+
+      const tplQ = await db.query('SELECT * FROM public.biometric_templates');
+      const templatesByPin = new Map();
+      (tplQ.rows || []).forEach(t => {
+        const list = templatesByPin.get(t.device_user_pin) || [];
+        list.push(t);
+        templatesByPin.set(t.device_user_pin, list);
+      });
+
+      const devQ = await db.query('SELECT serial_number, device_name, branch_id, branch_name FROM public.biometric_devices WHERE serial_number = ANY($1)', [targetDeviceSerials]);
+      const devMap = new Map();
+      (devQ.rows || []).forEach(d => devMap.set(d.serial_number, d));
+
+      let totalDispatchedUsers = 0;
+      let totalDispatchedTemplates = 0;
+
+      for (const targetSn of targetDeviceSerials) {
+        const dev = devMap.get(targetSn);
+        for (let i = 0; i < targetEmps.length; i++) {
+          const emp = targetEmps[i];
+          const pin = profilesMap.get(String(emp.id)) || emp.code || emp.id;
+          if (!pin) continue;
+          const cleanName = (emp.name || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 24);
+
+          // 1. أمر إنشاء المستخدم على الماكينة المستهدفة
+          const cmdUser = `C:${Date.now() + i}:DATA UPDATE USER PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=`;
+          queueDeviceCommand(targetSn, cmdUser);
+          totalDispatchedUsers++;
+
+          // 2. إذا طُلب تضمين القوالب البيومترية
+          let tplCountForEmp = 0;
+          if (includeBiometrics) {
+            const empTemplates = templatesByPin.get(String(pin)) || [];
+            for (let j = 0; j < empTemplates.length; j++) {
+              const tpl = empTemplates[j];
+              const cmdId = Date.now() + 1000 + i * 10 + j;
+              if (tpl.template_type === 'FINGERPRINT') {
+                const cmdBio = `C:${cmdId}:DATA UPDATE BIODATA Pin=${pin}\tNo=0\tIndex=${tpl.finger_id}\tValid=1\tDuress=0\tType=1\tMajorVer=${tpl.major_ver || '10'}\tMinorVer=0\tFormat=0\tTmp=${tpl.template_data}`;
+                queueDeviceCommand(targetSn, cmdBio);
+                const cmdFp = `C:${cmdId + 1}:DATA UPDATE FINGERTMP PIN=${pin}\tFID=${tpl.finger_id}\tSize=${tpl.size || tpl.template_data.length}\tValid=1\tTMP=${tpl.template_data}`;
+                queueDeviceCommand(targetSn, cmdFp);
+                totalDispatchedTemplates++;
+                tplCountForEmp++;
+              } else if (tpl.template_type === 'FACE') {
+                const cmdFace = `C:${cmdId}:DATA UPDATE BIODATA Pin=${pin}\tNo=0\tIndex=0\tValid=1\tDuress=0\tType=9\tMajorVer=7\tMinorVer=0\tFormat=0\tTmp=${tpl.template_data}`;
+                queueDeviceCommand(targetSn, cmdFace);
+                totalDispatchedTemplates++;
+                tplCountForEmp++;
+              }
+            }
+          }
+
+          await db.query(
+            `INSERT INTO public.biometric_dispatch_logs 
+             (employee_id, employee_name, device_user_pin, target_device_serial, target_branch_id, target_branch_name, included_biometrics, templates_count, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'QUEUED')`,
+            [emp.id, emp.name, String(pin), targetSn, dev?.branch_id || targetBranchId || null, dev?.branch_name || 'غير محدد', includeBiometrics, tplCountForEmp]
+          );
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `تمت جدولة ترحيل ${totalDispatchedUsers} موظف بنجاح (مع ${totalDispatchedTemplates} قالب بصمة حيوي)`,
+        dispatchedEmployeesCount: totalDispatchedUsers,
+        dispatchedTemplatesCount: totalDispatchedTemplates,
+        targetDevices: targetDeviceSerials
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.7 تسجيل بصمة موظف جديد من ماكينة الإدارة المركزية (HQ Enrollment Assistant)
+  app.post('/api/biometrics/hq-enroll', async (req, res) => {
+    try {
+      const { employeeId, hqDeviceSerial } = req.body;
+      if (!employeeId || !hqDeviceSerial) {
+        return res.status(400).json({ success: false, error: 'يرجى تحديد الموظف وماكينة الإدارة' });
+      }
+
+      const state = await getSettingsFromStorage(STORAGE_KEY);
+      const employees = Array.isArray(state?.employees) ? state.employees : [];
+      const emp = employees.find(e => String(e.id) === String(employeeId));
+      if (!emp) {
+        return res.status(404).json({ success: false, error: 'الموظف غير موجود في النظام' });
+      }
+
+      const profQ = await db.query('SELECT device_user_pin FROM public.employee_biometric_profiles WHERE employee_id = $1', [employeeId]);
+      let pin = profQ.rows?.[0]?.device_user_pin || emp.code || emp.id;
+      
+      await db.query(
+        `INSERT INTO public.employee_biometric_profiles (id, employee_id, device_user_pin, notes, updated_at)
+         VALUES ($1, $2, $3, 'تسجيل مركزي من الإدارة', CURRENT_TIMESTAMP)
+         ON CONFLICT (employee_id) DO UPDATE SET device_user_pin = EXCLUDED.device_user_pin, updated_at = CURRENT_TIMESTAMP`,
+        [`map_${emp.id}_${Date.now()}`, String(emp.id), String(pin)]
+      );
+
+      const cleanName = (emp.name || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 24);
+
+      // 1. دفع المستخدم لماكينة الإدارة
+      const cmdUser = `C:${Date.now()}:DATA UPDATE USER PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=`;
+      queueDeviceCommand(hqDeviceSerial, cmdUser);
+
+      // 2. أمر تنشيط تسجيل البصمة على الماكينة
+      const cmdEnroll = `C:${Date.now() + 1}:ENROLL_FP PIN=${pin}\tFID=0`;
+      queueDeviceCommand(hqDeviceSerial, cmdEnroll);
+
+      res.json({
+        success: true,
+        message: `تم إرسال بيانات (${emp.name}) لماكينة الإدارة بنجاح برقم PIN (${pin}). يرجى توجيهه لوضع إصبعه 3 مرات على حساس الماكينة ليتم سحب قالبه البيومتري تلقائياً للسحابة!`,
+        pin,
+        employeeName: emp.name
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.8 استعلام قوالب البصمات الحيوية المحفوظة في الخزنة السحابية (Vaulted Templates)
+  app.get('/api/biometrics/templates', async (req, res) => {
+    try {
+      const q = await db.query(
+        `SELECT t.*, p.employee_id as profile_emp_id, 
+                d.device_name as source_device_name, d.branch_name as source_branch_name
+         FROM public.biometric_templates t
+         LEFT JOIN public.employee_biometric_profiles p ON p.device_user_pin = t.device_user_pin
+         LEFT JOIN public.biometric_devices d ON d.serial_number = t.source_device_sn
+         ORDER BY t.updated_at DESC`
+      );
+      res.json({ success: true, templates: q.rows || [] });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.9 سجلات عمليات الترحيل بين الفروع
+  app.get('/api/biometrics/dispatch-logs', async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit || '50', 10);
+      const q = await db.query('SELECT * FROM public.biometric_dispatch_logs ORDER BY created_at DESC LIMIT $1', [limit]);
+      res.json({ success: true, logs: q.rows || [] });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }

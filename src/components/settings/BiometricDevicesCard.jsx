@@ -2,12 +2,28 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { getSocket } from '../../utils/socketClient';
 
 export default function BiometricDevicesCard({ state, showToast }) {
-  const [activeSubTab, setActiveSubTab] = useState('devices'); // 'devices' | 'mapping' | 'logs' | 'guide'
+  const [activeSubTab, setActiveSubTab] = useState('devices'); // 'devices' | 'dispatch' | 'hqEnroll' | 'mapping' | 'logs' | 'guide'
   const [devices, setDevices] = useState([]);
   const [logs, setLogs] = useState([]);
   const [profiles, setProfiles] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [dispatchLogs, setDispatchLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
+
+  // حالة مركز الترحيل والتوزيع بين الفروع (Cross-Branch Dispatcher)
+  const [selectedDispatchEmps, setSelectedDispatchEmps] = useState([]);
+  const [dispatchTargetDevice, setDispatchTargetDevice] = useState('');
+  const [dispatchIncludeBiometrics, setDispatchIncludeBiometrics] = useState(true);
+  const [dispatchFilterBranch, setDispatchFilterBranch] = useState('ALL');
+  const [dispatchSearchTerm, setDispatchSearchTerm] = useState('');
+  const [dispatchFilterBioStatus, setDispatchFilterBioStatus] = useState('ALL'); // 'ALL' | 'HAS_TEMPLATE' | 'NO_TEMPLATE'
+  const [isDispatching, setIsDispatching] = useState(false);
+
+  // حالة التسجيل المركزي من الإدارة (HQ Enrollment Wizard)
+  const [hqEmpId, setHqEmpId] = useState('');
+  const [hqDevSerial, setHqDevSerial] = useState('');
+  const [isHqSubmitting, setIsHqSubmitting] = useState(false);
 
   // نصوص وأوضاع النوافذ المنبثقة (Modals)
   const [showAddDeviceModal, setShowAddDeviceModal] = useState(false);
@@ -67,10 +83,38 @@ export default function BiometricDevicesCard({ state, showToast }) {
     }
   }, []);
 
+  // جلب قوالب البصمات الحيوية المحفوظة في الخزنة السحابية
+  const fetchTemplates = useCallback(async () => {
+    try {
+      const res = await fetch('/api/biometrics/templates');
+      const data = await res.json();
+      if (data.success) {
+        setTemplates(data.templates || []);
+      }
+    } catch (e) {
+      console.warn('Error fetching biometric templates:', e.message);
+    }
+  }, []);
+
+  // جلب سجلات الترحيل والتوزيع السابقة
+  const fetchDispatchLogs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/biometrics/dispatch-logs?limit=30');
+      const data = await res.json();
+      if (data.success) {
+        setDispatchLogs(data.logs || []);
+      }
+    } catch (e) {
+      console.warn('Error fetching dispatch logs:', e.message);
+    }
+  }, []);
+
   useEffect(() => {
     fetchDevices();
     fetchLogs();
     fetchProfiles();
+    fetchTemplates();
+    fetchDispatchLogs();
 
     // الاستماع لنبض الجهاز ولحظية البصمات عبر Socket.io
     const socket = getSocket();
@@ -100,15 +144,23 @@ export default function BiometricDevicesCard({ state, showToast }) {
         fetchLogs();
       };
 
+      const onTemplateVaulted = (data) => {
+        showToast?.(`🧬 تم التقاط قالب بصمة حيوية للموظف (${data.employeeName || data.pin}) وحفظه في السحابة بنجاح!`);
+        fetchTemplates();
+        fetchProfiles();
+      };
+
       socket.on('biometric:device_status', onStatus);
       socket.on('punch:recorded', onPunch);
+      socket.on('biometric:template_vaulted', onTemplateVaulted);
 
       return () => {
         socket.off('biometric:device_status', onStatus);
         socket.off('punch:recorded', onPunch);
+        socket.off('biometric:template_vaulted', onTemplateVaulted);
       };
     }
-  }, [fetchDevices, fetchLogs, fetchProfiles]);
+  }, [fetchDevices, fetchLogs, fetchProfiles, fetchTemplates, fetchDispatchLogs, showToast]);
 
   const branches = state?.branches || [];
   const employees = state?.employees || [];
@@ -274,6 +326,97 @@ export default function BiometricDevicesCard({ state, showToast }) {
     }
   };
 
+  // سحب قوالب البصمات من الماكينة إلى الخزنة السحابية
+  const handlePullTemplates = async (serialNumber) => {
+    try {
+      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}/pull-templates`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.(`📥 ${data.message}`);
+      } else {
+        showToast?.(`⚠️ ${data.error || 'تعذر إرسال الأمر'}`);
+      }
+    } catch {
+      showToast?.('❌ فشل إرسال أمر سحب القوالب');
+    }
+  };
+
+  // ترحيل وتوزيع الموظفين وقوالب بصماتهم للأجهزة المستهدفة
+  const handleDispatchEmployees = async (overrideEmpIds = null, overrideTargetDev = null) => {
+    const targetEmps = overrideEmpIds || selectedDispatchEmps;
+    const targetDev = overrideTargetDev || dispatchTargetDevice;
+
+    if (!targetEmps || targetEmps.length === 0) {
+      showToast?.('⚠️ يرجى تحديد موظف واحد على الأقل للترحيل');
+      return;
+    }
+    if (!targetDev) {
+      showToast?.('⚠️ يرجى اختيار جهاز البصمة المستهدف');
+      return;
+    }
+
+    setIsDispatching(true);
+    try {
+      const res = await fetch('/api/biometrics/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employeeIds: targetEmps,
+          targetDeviceSerials: [targetDev],
+          includeBiometrics: dispatchIncludeBiometrics
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.(`🎉 ${data.message}`);
+        setSelectedDispatchEmps([]);
+        fetchDispatchLogs();
+      } else {
+        showToast?.(`⚠️ خطأ: ${data.error || 'تعذر الترحيل'}`);
+      }
+    } catch (e) {
+      showToast?.(`❌ فشل الترحيل: ${e.message}`);
+    } finally {
+      setIsDispatching(false);
+    }
+  };
+
+  // تسجيل بصمة موظف من الإدارة المركزية
+  const handleHqEnroll = async () => {
+    if (!hqEmpId) {
+      showToast?.('⚠️ يرجى اختيار الموظف أولاً');
+      return;
+    }
+    if (!hqDevSerial) {
+      showToast?.('⚠️ يرجى اختيار ماكينة الإدارة');
+      return;
+    }
+
+    setIsHqSubmitting(true);
+    try {
+      const res = await fetch('/api/biometrics/hq-enroll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employeeId: hqEmpId,
+          hqDeviceSerial: hqDevSerial
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.(`✨ ${data.message}`);
+      } else {
+        showToast?.(`⚠️ خطأ: ${data.error || 'تعذر إرسال الموظف'}`);
+      }
+    } catch (e) {
+      showToast?.(`❌ فشل الإرسال: ${e.message}`);
+    } finally {
+      setIsHqSubmitting(false);
+    }
+  };
+
   // ربط PIN موظف
   const handleMapPin = async (empId, pinVal) => {
     if (!pinVal) return;
@@ -397,6 +540,42 @@ export default function BiometricDevicesCard({ state, showToast }) {
             }}
           >
             🔌 الأجهزة المتصلة ({devices.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('dispatch')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '9px',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: '0.88rem',
+              fontFamily: 'Cairo',
+              background: activeSubTab === 'dispatch' ? '#ffffff' : 'transparent',
+              color: activeSubTab === 'dispatch' ? '#0284c7' : '#64748b',
+              boxShadow: activeSubTab === 'dispatch' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none'
+            }}
+          >
+            🌐 ترحيل وتوزيع البصمات للفروع
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('hqEnroll')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '9px',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: '0.88rem',
+              fontFamily: 'Cairo',
+              background: activeSubTab === 'hqEnroll' ? '#ffffff' : 'transparent',
+              color: activeSubTab === 'hqEnroll' ? '#0284c7' : '#64748b',
+              boxShadow: activeSubTab === 'hqEnroll' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none'
+            }}
+          >
+            🏢 التسجيل المركزي بالإدارة
           </button>
           <button
             type="button"
@@ -651,6 +830,655 @@ export default function BiometricDevicesCard({ state, showToast }) {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── التبويب الجديد 1: مركز ترحيل وتوزيع البصمات عبر الفروع (Enterprise Dispatcher) ── */}
+      {activeSubTab === 'dispatch' && (
+        <div>
+          {/* شريط الإحصائيات السريعة */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+            <div style={{ background: '#f8fafc', padding: '14px 18px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '24px' }}>👥</span>
+              <div>
+                <div style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600 }}>إجمالي الموظفين</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a' }}>{employees.length}</div>
+              </div>
+            </div>
+
+            <div style={{ background: '#f0fdf4', padding: '14px 18px', borderRadius: '12px', border: '1px solid #bbf7d0', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '24px' }}>🧬</span>
+              <div>
+                <div style={{ fontSize: '0.8rem', color: '#166534', fontWeight: 600 }}>قوالب بيومترية بالسحابة</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#15803d' }}>{templates.length}</div>
+              </div>
+            </div>
+
+            <div style={{ background: '#f0f9ff', padding: '14px 18px', borderRadius: '12px', border: '1px solid #bae6fd', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '24px' }}>📟</span>
+              <div>
+                <div style={{ fontSize: '0.8rem', color: '#0369a1', fontWeight: 600 }}>أجهزة البصمة المتاحة</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0284c7' }}>{devices.length}</div>
+              </div>
+            </div>
+
+            <div style={{ background: '#faf5ff', padding: '14px 18px', borderRadius: '12px', border: '1px solid #e9d5ff', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '24px' }}>🚀</span>
+              <div>
+                <div style={{ fontSize: '0.8rem', color: '#7e22ce', fontWeight: 600 }}>عمليات الترحيل المنفذة</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#9333ea' }}>{dispatchLogs.length}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* شريط الفلاتر والبحث */}
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center', background: '#ffffff', padding: '12px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+            <div style={{ flex: 1, minWidth: '220px' }}>
+              <input
+                type="text"
+                placeholder="🔍 بحث باسم الموظف أو الكود..."
+                value={dispatchSearchTerm}
+                onChange={(e) => setDispatchSearchTerm(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '0.88rem',
+                  fontFamily: 'Cairo'
+                }}
+              />
+            </div>
+
+            <div>
+              <select
+                value={dispatchFilterBranch}
+                onChange={(e) => setDispatchFilterBranch(e.target.value)}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '0.88rem',
+                  fontFamily: 'Cairo',
+                  background: '#f8fafc',
+                  color: '#334155'
+                }}
+              >
+                <option value="ALL">🏢 كل الفروع</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <select
+                value={dispatchFilterBioStatus}
+                onChange={(e) => setDispatchFilterBioStatus(e.target.value)}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '0.88rem',
+                  fontFamily: 'Cairo',
+                  background: '#f8fafc',
+                  color: '#334155'
+                }}
+              >
+                <option value="ALL">🧬 كل حالات البصمة</option>
+                <option value="HAS_TEMPLATE">🟢 مسجل له قالب بيومتري بالسحابة</option>
+                <option value="NO_TEMPLATE">⚪ غير مسجل له قالب بعد</option>
+              </select>
+            </div>
+          </div>
+
+          {/* شريط الإجراء الجماعي التفاعلي (Sticky Batch Action Bar) */}
+          <div
+            style={{
+              background: selectedDispatchEmps.length > 0 ? 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)' : '#f8fafc',
+              color: selectedDispatchEmps.length > 0 ? '#ffffff' : '#64748b',
+              padding: '14px 18px',
+              borderRadius: '14px',
+              marginBottom: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '14px',
+              border: '1px solid ' + (selectedDispatchEmps.length > 0 ? '#0f172a' : '#e2e8f0'),
+              boxShadow: selectedDispatchEmps.length > 0 ? '0 10px 25px rgba(15, 23, 42, 0.2)' : 'none',
+              transition: 'all 0.3s ease'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '20px' }}>{selectedDispatchEmps.length > 0 ? '🎯' : '💡'}</span>
+              <div>
+                <strong>
+                  {selectedDispatchEmps.length > 0
+                    ? `تم تحديد ${selectedDispatchEmps.length} موظف للترحيل`
+                    : 'حدد الموظفين المراد ترحيلهم لأي جهاز فرع آخر'}
+                </strong>
+                <div style={{ fontSize: '0.78rem', opacity: 0.85 }}>
+                  يمكن ترحيل أي موظف إلى ماكينة أي فرع بضغطة زر واحدة مع قالبه البيومتري الكامل
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <select
+                value={dispatchTargetDevice}
+                onChange={(e) => setDispatchTargetDevice(e.target.value)}
+                style={{
+                  padding: '9px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '0.88rem',
+                  fontFamily: 'Cairo',
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  fontWeight: 700
+                }}
+              >
+                <option value="">-- اختر ماكينة البصمة المستهدفة --</option>
+                {devices.map(d => (
+                  <option key={d.serial_number} value={d.serial_number}>
+                    {d.device_name || 'MB20'} ({d.branch_name || 'بدون فرع'}) [{d.serial_number}]
+                  </option>
+                ))}
+              </select>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', cursor: 'pointer', userSelect: 'none' }}>
+                <input
+                  type="checkbox"
+                  checked={dispatchIncludeBiometrics}
+                  onChange={(e) => setDispatchIncludeBiometrics(e.target.checked)}
+                />
+                <span>🧬 تضمين قوالب البصمة الحيوية (إصبع/وجه)</span>
+              </label>
+
+              <button
+                type="button"
+                disabled={isDispatching || selectedDispatchEmps.length === 0 || !dispatchTargetDevice}
+                onClick={() => handleDispatchEmployees()}
+                style={{
+                  padding: '9px 20px',
+                  borderRadius: '8px',
+                  background: (selectedDispatchEmps.length === 0 || !dispatchTargetDevice)
+                    ? '#94a3b8'
+                    : 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontWeight: 800,
+                  fontSize: '0.88rem',
+                  cursor: (isDispatching || selectedDispatchEmps.length === 0 || !dispatchTargetDevice) ? 'not-allowed' : 'pointer',
+                  fontFamily: 'Cairo',
+                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+                }}
+              >
+                {isDispatching ? '⏳ جاري الترحيل...' : '🚀 ترحيل الموظفين المحددين للجهاز'}
+              </button>
+            </div>
+          </div>
+
+          {/* جدول الموظفين وقوالبهم */}
+          <div style={{ overflowX: 'auto', background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+              <thead>
+                <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'right' }}>
+                  <th style={{ padding: '12px 14px', width: '40px' }}>
+                    <input
+                      type="checkbox"
+                      checked={
+                        selectedDispatchEmps.length > 0 &&
+                        selectedDispatchEmps.length === employees.length
+                      }
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedDispatchEmps(employees.map(emp => emp.id));
+                        } else {
+                          setSelectedDispatchEmps([]);
+                        }
+                      }}
+                    />
+                  </th>
+                  <th style={{ padding: '12px' }}>الموظف</th>
+                  <th style={{ padding: '12px' }}>الفرع الحالي</th>
+                  <th style={{ padding: '12px' }}>رقم PIN</th>
+                  <th style={{ padding: '12px' }}>القالب البيومتري السحابي</th>
+                  <th style={{ padding: '12px' }}>الإجراء المباشر</th>
+                </tr>
+              </thead>
+              <tbody>
+                {employees
+                  .filter(emp => {
+                    const prof = profiles.find(p => String(p.employee_id) === String(emp.id));
+                    const pin = prof?.device_user_pin || emp.code || emp.id || '';
+                    const hasTemplate = templates.some(t => String(t.device_user_pin) === String(pin) || String(t.employee_id) === String(emp.id));
+
+                    if (dispatchFilterBranch !== 'ALL' && String(emp.branchId) !== String(dispatchFilterBranch)) {
+                      return false;
+                    }
+                    if (dispatchFilterBioStatus === 'HAS_TEMPLATE' && !hasTemplate) return false;
+                    if (dispatchFilterBioStatus === 'NO_TEMPLATE' && hasTemplate) return false;
+
+                    if (dispatchSearchTerm.trim()) {
+                      const term = dispatchSearchTerm.toLowerCase();
+                      const matchName = (emp.name || '').toLowerCase().includes(term);
+                      const matchCode = (emp.code || '').toLowerCase().includes(term);
+                      const matchPin = String(pin).includes(term);
+                      return matchName || matchCode || matchPin;
+                    }
+                    return true;
+                  })
+                  .map(emp => {
+                    const prof = profiles.find(p => String(p.employee_id) === String(emp.id));
+                    const pin = prof?.device_user_pin || emp.code || emp.id || '';
+                    const branchObj = branches.find(b => String(b.id) === String(emp.branchId));
+                    const empTemplates = templates.filter(t => String(t.device_user_pin) === String(pin) || String(t.employee_id) === String(emp.id));
+                    const isSelected = selectedDispatchEmps.includes(emp.id);
+
+                    return (
+                      <tr
+                        key={emp.id}
+                        style={{
+                          borderBottom: '1px solid #f1f5f9',
+                          background: isSelected ? '#f0fdf4' : 'transparent',
+                          transition: 'background 0.2s ease'
+                        }}
+                      >
+                        <td style={{ padding: '12px 14px' }}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedDispatchEmps(prev => [...prev, emp.id]);
+                              } else {
+                                setSelectedDispatchEmps(prev => prev.filter(id => id !== emp.id));
+                              }
+                            }}
+                          />
+                        </td>
+                        <td style={{ padding: '12px' }}>
+                          <strong style={{ color: '#0f172a' }}>{emp.name}</strong>
+                          <div style={{ fontSize: '0.75rem', color: '#64748b' }}>كود: {emp.code || '—'} {emp.role ? `• ${emp.role}` : ''}</div>
+                        </td>
+                        <td style={{ padding: '12px', color: '#475569' }}>
+                          <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#f1f5f9', fontSize: '0.8rem' }}>
+                            {branchObj?.name || 'الفرع الرئيسي'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px', fontFamily: 'monospace', fontWeight: 800, color: '#0284c7' }}>
+                          {pin}
+                        </td>
+                        <td style={{ padding: '12px' }}>
+                          {empTemplates.length > 0 ? (
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              {empTemplates.map(t => (
+                                <span
+                                  key={t.id}
+                                  title={`المصدر: ${t.source_branch_name || t.source_device_sn || 'الإدارة'} • ${new Date(t.updated_at).toLocaleDateString('ar-EG')}`}
+                                  style={{
+                                    padding: '3px 8px',
+                                    borderRadius: '12px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    background: t.template_type === 'FACE' ? '#faf5ff' : '#ecfdf5',
+                                    color: t.template_type === 'FACE' ? '#7e22ce' : '#059669',
+                                    border: '1px solid ' + (t.template_type === 'FACE' ? '#e9d5ff' : '#a7f3d0')
+                                  }}
+                                >
+                                  {t.template_type === 'FACE' ? '🟣 بصمة وجه' : `🟢 بصمة إصبع #${t.finger_id || 0}`}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                              ⚪ لم يُسجل قالب بيومتري بعد
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '12px' }}>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              disabled={isDispatching || !dispatchTargetDevice}
+                              onClick={() => handleDispatchEmployees([emp.id])}
+                              style={{
+                                padding: '5px 10px',
+                                borderRadius: '6px',
+                                background: '#f0f9ff',
+                                color: '#0284c7',
+                                border: '1px solid #bae6fd',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                cursor: (isDispatching || !dispatchTargetDevice) ? 'not-allowed' : 'pointer',
+                                fontFamily: 'Cairo'
+                              }}
+                            >
+                              🚀 ترحيل للجهاز المختار
+                            </button>
+                            {empTemplates.length === 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setHqEmpId(emp.id);
+                                  setActiveSubTab('hqEnroll');
+                                }}
+                                style={{
+                                  padding: '5px 10px',
+                                  borderRadius: '6px',
+                                  background: '#faf5ff',
+                                  color: '#7e22ce',
+                                  border: '1px solid #e9d5ff',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  fontFamily: 'Cairo'
+                                }}
+                              >
+                                🏢 تسجيل بالإدارة
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* سجلات الترحيل والتوزيع السابقة */}
+          {dispatchLogs.length > 0 && (
+            <div style={{ marginTop: '24px', background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <strong style={{ fontSize: '0.9rem', color: '#334155' }}>📜 آخر عمليات الترحيل بين الفروع</strong>
+                <button
+                  type="button"
+                  onClick={fetchDispatchLogs}
+                  style={{ background: 'none', border: 'none', color: '#0284c7', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 700 }}
+                >
+                  🔄 تحديث السجل
+                </button>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', fontSize: '0.8rem', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: '#64748b', textAlign: 'right', borderBottom: '1px solid #cbd5e1' }}>
+                      <th style={{ padding: '6px' }}>الموظف</th>
+                      <th style={{ padding: '6px' }}>الجهاز المستهدف</th>
+                      <th style={{ padding: '6px' }}>الفرع</th>
+                      <th style={{ padding: '6px' }}>القوالب البيومترية</th>
+                      <th style={{ padding: '6px' }}>الحالة</th>
+                      <th style={{ padding: '6px' }}>الوقت</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dispatchLogs.slice(0, 10).map((log) => (
+                      <tr key={log.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '6px', fontWeight: 700 }}>{log.employee_name || log.device_user_pin}</td>
+                        <td style={{ padding: '6px', fontFamily: 'monospace' }}>{log.target_device_serial}</td>
+                        <td style={{ padding: '6px' }}>{log.target_branch_name || '—'}</td>
+                        <td style={{ padding: '6px' }}>{log.included_biometrics ? `🧬 ${log.templates_count || 1} قالب` : '📄 بيانات فقط'}</td>
+                        <td style={{ padding: '6px' }}>
+                          <span style={{ padding: '2px 6px', borderRadius: '10px', background: '#ecfdf5', color: '#059669', fontWeight: 800 }}>
+                            {log.status === 'QUEUED' ? '⏳ في طابور الجهاز' : '✅ تم الإرسال'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '6px', color: '#94a3b8' }}>{new Date(log.created_at).toLocaleTimeString('ar-EG')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── التبويب الجديد 2: التسجيل المركزي بالإدارة (HQ Central Enrollment) ──── */}
+      {activeSubTab === 'hqEnroll' && (
+        <div>
+          {/* بانر التعريف والشرح */}
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)',
+              color: '#ffffff',
+              padding: '20px 24px',
+              borderRadius: '16px',
+              marginBottom: '24px',
+              boxShadow: '0 8px 24px rgba(79, 70, 229, 0.25)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '8px' }}>
+              <span style={{ fontSize: '32px' }}>🏢</span>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800 }}>التسجيل المركزي لبصمات الموظفين من الإدارة</h3>
+                <p style={{ margin: '4px 0 0', fontSize: '0.88rem', opacity: 0.9 }}>
+                  سجّل بصمة الموظف لمرة واحدة فقط في مقر الإدارة أو أي فرع رئيسي، وسيقوم النظام بالتقاط القالب وحفظه في السحابة تلقائياً لتتمكن من تعميمه على كافة الفروع بنقرة زر واحدة!
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+            {/* قسم إرسال الموظف لماكينة الإدارة */}
+            <div style={{ background: '#ffffff', borderRadius: '14px', border: '1px solid #e2e8f0', padding: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
+              <h4 style={{ margin: '0 0 14px', fontSize: '1.05rem', color: '#0f172a', fontWeight: 800 }}>
+                1️⃣ تحديد الموظف وماكينة الإدارة:
+              </h4>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                    اختر الموظف المراد تسجيل بصمته:
+                  </label>
+                  <select
+                    value={hqEmpId}
+                    onChange={(e) => setHqEmpId(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '0.9rem',
+                      fontFamily: 'Cairo'
+                    }}
+                  >
+                    <option value="">-- اختر الموظف --</option>
+                    {employees.map(emp => {
+                      const branch = branches.find(b => String(b.id) === String(emp.branchId));
+                      const prof = profiles.find(p => String(p.employee_id) === String(emp.id));
+                      const pin = prof?.device_user_pin || emp.code || emp.id;
+                      const hasTpl = templates.some(t => String(t.device_user_pin) === String(pin) || String(t.employee_id) === String(emp.id));
+
+                      return (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.name} ({branch?.name || 'الرئيسي'}) {hasTpl ? '✅ (بصمته مسجلة بالسحابة)' : '⚪ (جديد بدون بصمة)'}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                    اختر ماكينة البصمة الموجودة بالإدارة:
+                  </label>
+                  <select
+                    value={hqDevSerial}
+                    onChange={(e) => setHqDevSerial(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '0.9rem',
+                      fontFamily: 'Cairo'
+                    }}
+                  >
+                    <option value="">-- اختر ماكينة التسجيل --</option>
+                    {devices.map(d => (
+                      <option key={d.serial_number} value={d.serial_number}>
+                        {d.device_name || 'MB20'} ({d.branch_name || 'الإدارة'}) [{d.serial_number}]
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isHqSubmitting || !hqEmpId || !hqDevSerial}
+                  onClick={handleHqEnroll}
+                  style={{
+                    padding: '12px',
+                    borderRadius: '10px',
+                    background: (!hqEmpId || !hqDevSerial)
+                      ? '#94a3b8'
+                      : 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontWeight: 800,
+                    fontSize: '0.95rem',
+                    cursor: (isHqSubmitting || !hqEmpId || !hqDevSerial) ? 'not-allowed' : 'pointer',
+                    fontFamily: 'Cairo',
+                    boxShadow: '0 4px 14px rgba(79, 70, 229, 0.3)',
+                    marginTop: '6px'
+                  }}
+                >
+                  {isHqSubmitting ? '⏳ جاري الإرسال للماكينة...' : '⚡ إرسال الموظف للماكينة للتسجيل الآن'}
+                </button>
+              </div>
+            </div>
+
+            {/* قسم الخطوات العملية لما بعد الإرسال */}
+            <div style={{ background: '#f8fafc', borderRadius: '14px', border: '1px solid #e2e8f0', padding: '20px' }}>
+              <h4 style={{ margin: '0 0 14px', fontSize: '1.05rem', color: '#0f172a', fontWeight: 800 }}>
+                2️⃣ الخطوات العملية على ماكينة البصمة:
+              </h4>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                  <span style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#4f46e5', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, flexShrink: 0 }}>
+                    1
+                  </span>
+                  <div style={{ fontSize: '0.85rem', color: '#334155', lineHeight: '1.6' }}>
+                    <strong>وضع الإصبع على الحساس:</strong><br />
+                    بمجرد ضغط الزر أعلاه، تم إرسال اسم الموظف ورقم الـ PIN للماكينة. اطلب من الموظف وضع إصبعه على حساس الماكينة 3 مرات متتالية.
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                  <span style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#059669', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, flexShrink: 0 }}>
+                    2
+                  </span>
+                  <div style={{ fontSize: '0.85rem', color: '#334155', lineHeight: '1.6' }}>
+                    <strong>الالتقاط التلقائي بالسحابة (Auto Vault):</strong><br />
+                    فور تأكيد الماكينة للبصمة، تقوم تلقائياً بضخ القالب البيومتري المشفر للسيرفر وحفظه في جدول القوالب السحابي الآمن.
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                  <span style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#0284c7', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, flexShrink: 0 }}>
+                    3
+                  </span>
+                  <div style={{ fontSize: '0.85rem', color: '#334155', lineHeight: '1.6' }}>
+                    <strong>التعميم على أي فرع بضغطة زر:</strong><br />
+                    ادخل على تبويب <strong>"ترحيل وتوزيع البصمات"</strong> واضغط "ترحيل للجهاز" لأي فرع ترغب فيه، وسيبصم الموظف هناك فوراً دون إعادة أخذ بصمته!
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* قائمة القوالب البيومترية المحفوظة في السحابة حالياً */}
+          <div style={{ marginTop: '24px', background: '#ffffff', borderRadius: '14px', border: '1px solid #e2e8f0', padding: '18px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '20px' }}>🧬</span>
+                <strong style={{ fontSize: '0.95rem', color: '#0f172a' }}>
+                  خزنة القوالب البيومترية السحابية المتاحة للتعميم ({templates.length} قالب)
+                </strong>
+              </div>
+              <button
+                type="button"
+                onClick={fetchTemplates}
+                style={{ background: 'none', border: 'none', color: '#0284c7', fontSize: '0.82rem', cursor: 'pointer', fontWeight: 700 }}
+              >
+                🔄 تحديث الخزنة
+              </button>
+            </div>
+
+            {templates.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '30px', color: '#94a3b8', fontSize: '0.9rem' }}>
+                لا توجد قوالب بصمات ملتقطة في الخزنة السحابية بعد. عند تسجيل أي موظف على الماكينة أو الضغط على "سحب القوالب من الماكينة"، ستظهر هنا فوراً.
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', color: '#475569', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>
+                      <th style={{ padding: '10px 12px' }}>الموظف</th>
+                      <th style={{ padding: '10px 12px' }}>رقم PIN</th>
+                      <th style={{ padding: '10px 12px' }}>نوع القالب</th>
+                      <th style={{ padding: '10px 12px' }}>ماكينة التسجيل المصدر</th>
+                      <th style={{ padding: '10px 12px' }}>تاريخ الحفظ</th>
+                      <th style={{ padding: '10px 12px' }}>إجراءات التعميم</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {templates.map(tpl => {
+                      const emp = employees.find(e => String(e.id) === String(tpl.employee_id) || String(e.code) === String(tpl.device_user_pin));
+                      const empName = emp?.name || tpl.employee_name || 'موظف PIN: ' + tpl.device_user_pin;
+
+                      return (
+                        <tr key={tpl.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '10px 12px', fontWeight: 700, color: '#0f172a' }}>{empName}</td>
+                          <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: '#0284c7', fontWeight: 800 }}>{tpl.device_user_pin}</td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <span style={{ padding: '3px 8px', borderRadius: '12px', background: tpl.template_type === 'FACE' ? '#faf5ff' : '#ecfdf5', color: tpl.template_type === 'FACE' ? '#7e22ce' : '#059669', fontWeight: 700, fontSize: '0.78rem' }}>
+                              {tpl.template_type === 'FACE' ? '🟣 بصمة وجه' : `🟢 بصمة إصبع #${tpl.finger_id || 0}`}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 12px', color: '#64748b' }}>
+                            {tpl.source_device_name || tpl.source_device_sn} ({tpl.source_branch_name || 'الإدارة'})
+                          </td>
+                          <td style={{ padding: '10px 12px', color: '#94a3b8' }}>
+                            {new Date(tpl.updated_at).toLocaleString('ar-EG')}
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (emp) {
+                                  setSelectedDispatchEmps([emp.id]);
+                                  setActiveSubTab('dispatch');
+                                }
+                              }}
+                              style={{
+                                padding: '5px 12px',
+                                borderRadius: '6px',
+                                background: '#f0fdf4',
+                                color: '#166534',
+                                border: '1px solid #bbf7d0',
+                                fontWeight: 700,
+                                fontSize: '0.78rem',
+                                cursor: 'pointer',
+                                fontFamily: 'Cairo'
+                              }}
+                            >
+                              🌐 تعميم على الفروع
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1307,6 +2135,25 @@ export default function BiometricDevicesCard({ state, showToast }) {
                   🌐 ترحيل كل الموظفين
                 </button>
               </div>
+
+              <button
+                type="button"
+                onClick={() => handlePullTemplates(selectedDeviceForManage.serial_number)}
+                style={{
+                  width: '100%',
+                  padding: '9px 12px',
+                  borderRadius: '8px',
+                  background: '#f5f3ff',
+                  color: '#7c3aed',
+                  border: '1px solid #ddd6fe',
+                  fontWeight: 700,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                  fontFamily: 'Cairo'
+                }}
+              >
+                📥 سحب كافة قوالب البصمات المسجلة من الماكينة للخزنة السحابية
+              </button>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 <button
