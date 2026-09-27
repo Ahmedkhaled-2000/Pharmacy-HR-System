@@ -15,10 +15,18 @@ export async function initBiometricTables(db) {
   if (!db) return;
   globalDb = db;
   try {
+    // الترقية التلقائية لحقول المعرفات لتجنب خطأ تجاوز الطول المسموح (Auto-Migration VARCHAR(255))
+    try {
+      await db.query(`
+        ALTER TABLE public.employee_biometric_profiles ALTER COLUMN id TYPE VARCHAR(255);
+        ALTER TABLE public.biometric_devices ALTER COLUMN id TYPE VARCHAR(255);
+      `);
+    } catch (_) {}
+
     const ddl = `
       -- 1. جدول أجهزة البصمة المتصلة بالسحابة
       CREATE TABLE IF NOT EXISTS public.biometric_devices (
-          id VARCHAR(36) PRIMARY KEY,
+          id VARCHAR(255) PRIMARY KEY,
           device_name VARCHAR(100) NOT NULL,
           serial_number VARCHAR(100) NOT NULL UNIQUE,
           branch_id VARCHAR(50) NULL,
@@ -59,7 +67,7 @@ export async function initBiometricTables(db) {
 
       -- 3. جدول ربط بصمات وأرقام PIN الموظفين بالأجهزة
       CREATE TABLE IF NOT EXISTS public.employee_biometric_profiles (
-          id VARCHAR(36) PRIMARY KEY,
+          id VARCHAR(255) PRIMARY KEY,
           employee_id VARCHAR(100) NOT NULL UNIQUE,
           device_user_pin VARCHAR(50) NOT NULL UNIQUE,
           card_rfid VARCHAR(50) NULL,
@@ -372,7 +380,34 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     const lines = rawBody.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     let count = 0;
 
-    for (const line of lines) {
+    let state = null;
+    try {
+      state = await getSettingsFromStorage(STORAGE_KEY);
+    } catch {}
+    const employees = Array.isArray(state?.employees) ? state.employees : [];
+
+    // جلب ملفات الـ profiles الحالية للربط السريع
+    let profilesMap = new Map();
+    try {
+      const profQ = await db.query('SELECT employee_id, device_user_pin FROM public.employee_biometric_profiles');
+      profilesMap = new Map((profQ.rows || []).map(r => [String(r.device_user_pin), r.employee_id]));
+    } catch (e) {
+      console.warn('[Profiles Map Warn]:', e.message);
+    }
+
+    // التحقق إن كان السطر الأول هو Header جدول
+    let headers = null;
+    let startIndex = 0;
+    if (lines.length > 0 && !lines[0].includes('=')) {
+      const firstLineTokens = lines[0].split(/[\t,]/).map(t => t.trim().toLowerCase());
+      if (firstLineTokens.some(t => t === 'pin' || t === 'userpin' || t === 'name')) {
+        headers = firstLineTokens;
+        startIndex = 1;
+      }
+    }
+
+    for (let i = startIndex; i < lines.length; i++) {
+      const line = lines[i];
       try {
         let pin = '';
         let name = '';
@@ -381,27 +416,94 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         let card = '';
         let verify = 0;
 
-        const pairs = line.split(/[\t\s]+/);
-        for (const pair of pairs) {
-          const [k, ...v] = pair.split('=');
-          if (!k) continue;
-          const keyUpper = k.toUpperCase().trim();
-          const val = v.join('=').trim();
-          if (keyUpper === 'PIN') pin = val;
-          else if (keyUpper === 'NAME') name = val;
-          else if (keyUpper === 'PRI') pri = parseInt(val, 10) || 0;
-          else if (keyUpper === 'PASSWD' || keyUpper === 'PASSWORD') passwd = val;
-          else if (keyUpper === 'CARD') card = val;
-          else if (keyUpper === 'VERIFY') verify = parseInt(val, 10) || 0;
+        if (line.includes('=')) {
+          // استخراج الحقول بدقة دون تكسير الأسماء ذات المسافات:
+          // نفصل أولاً بعلامة TAB (\t)
+          const pairs = line.split('\t');
+          for (const pair of pairs) {
+            const eqIdx = pair.indexOf('=');
+            if (eqIdx === -1) {
+              // محاولة ثانوية إذا كانت مفصولة بمسافات
+              const subPairs = pair.split(' ');
+              for (const sp of subPairs) {
+                const subEq = sp.indexOf('=');
+                if (subEq > 0) {
+                  const k = sp.slice(0, subEq).trim().toUpperCase();
+                  const v = sp.slice(subEq + 1).trim();
+                  if (k === 'PIN') pin = v;
+                  else if (k === 'PRI') pri = parseInt(v, 10) || 0;
+                  else if (k === 'CARD') card = v;
+                  else if (k === 'PASSWD' || k === 'PASSWORD') passwd = v;
+                  else if (k === 'VERIFY') verify = parseInt(v, 10) || 0;
+                }
+              }
+              continue;
+            }
+            let k = pair.slice(0, eqIdx).trim().toUpperCase();
+            if (k.startsWith('USER ')) k = k.replace(/^USER\s+/, '');
+            const v = pair.slice(eqIdx + 1).trim();
+
+            if (k === 'PIN') pin = v;
+            else if (k === 'NAME') name = v;
+            else if (k === 'PRI') pri = parseInt(v, 10) || 0;
+            else if (k === 'PASSWD' || k === 'PASSWORD') passwd = v;
+            else if (k === 'CARD') card = v;
+            else if (k === 'VERIFY') verify = parseInt(v, 10) || 0;
+          }
+        } else if (headers) {
+          const vals = line.split(/[\t,]/).map(v => v.trim());
+          headers.forEach((h, idx) => {
+            const val = vals[idx] || '';
+            if (h === 'pin' || h === 'userpin') pin = val;
+            else if (h === 'name') name = val;
+            else if (h === 'pri') pri = parseInt(val, 10) || 0;
+            else if (h === 'passwd' || h === 'password') passwd = val;
+            else if (h === 'card') card = val;
+            else if (h === 'verify') verify = parseInt(val, 10) || 0;
+          });
+        } else {
+          // سطر مجرد: pin \t name \t pri ...
+          const tokens = line.split(/[\t,]/).map(t => t.trim());
+          if (tokens.length >= 2) {
+            pin = tokens[0];
+            name = tokens[1];
+            if (tokens.length >= 3) pri = parseInt(tokens[2] || '0', 10) || 0;
+          }
         }
 
         if (!pin) continue;
 
-        const profQ = await db.query(
-          'SELECT employee_id FROM public.employee_biometric_profiles WHERE device_user_pin = $1 LIMIT 1',
-          [pin]
-        );
-        const matchedEmpId = profQ.rows?.[0]?.employee_id || null;
+        // مطابقة الموظف:
+        // 1. من profilesMap
+        let matchedEmpId = profilesMap.get(String(pin)) || null;
+
+        // 2. إذا لم يطابق، ابحث في قائمة الموظفين بـ (code, id, enrollmentId, biometricPin, name)
+        if (!matchedEmpId) {
+          const emp = employees.find(e =>
+            String(e.code || '').trim() === String(pin) ||
+            String(e.id || '').trim() === String(pin) ||
+            String(e.enrollmentId || '').trim() === String(pin) ||
+            String(e.biometricPin || '').trim() === String(pin) ||
+            (name && e.name && e.name.trim().toLowerCase() === name.trim().toLowerCase())
+          );
+          if (emp) {
+            matchedEmpId = emp.id;
+            if (!name) name = emp.name;
+            // حفظ الربط في employee_biometric_profiles تلقائياً
+            try {
+              await db.query(
+                `INSERT INTO public.employee_biometric_profiles (id, employee_id, device_user_pin, notes, updated_at)
+                 VALUES ($1, $2, $3, 'ربط تلقائي عند فحص ذاكرة الماكينة', CURRENT_TIMESTAMP)
+                 ON CONFLICT (employee_id) DO UPDATE SET device_user_pin = EXCLUDED.device_user_pin, updated_at = CURRENT_TIMESTAMP`,
+                [`map_${emp.id}_${Date.now()}`, String(emp.id), String(pin)]
+              );
+            } catch (errDb) {
+              console.warn('[Auto-map Profile DB Warn]:', errDb.message);
+            }
+          }
+        }
+
+        const displayName = (name || `مستخدم ${pin}`).replace(/[\r\n\t]/g, ' ').trim();
 
         await db.query(
           `INSERT INTO public.biometric_device_users 
@@ -417,7 +519,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
              sync_status = 'SYNCED',
              last_synced_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP`,
-          [sn, matchedEmpId, pin, name || `مستخدم ${pin}`, pri, verify, card, passwd]
+          [sn, matchedEmpId, String(pin), displayName, pri, verify, card, passwd]
         );
         count++;
       } catch (e) {
@@ -431,7 +533,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     return count;
   }
 
-  // ── إرسال إشعارات واتساب فورية للإدارة العليا عند التبصيم ──────────────────────
+  // ── إرسال إشعارات واتساب فورية للإدارة العليا وهاتف الموظف عند التبصيم ────────────
   async function sendBiometricWhatsAppAlert(punchPayload, state) {
     try {
       const org = state?.orgSettings || {};
@@ -442,6 +544,80 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       if (action === 'check_in' && alertConfig.notifyCheckIn === false) return;
       if (action === 'check_out' && alertConfig.notifyCheckOut === false) return;
 
+      const waUrls = [
+        'http://hr-whatsapp-server:3100/send',
+        'http://127.0.0.1:3100/send'
+      ];
+
+      const isCheckIn = action === 'check_in' || action === 'shift_start';
+      const actionIcon = isCheckIn ? '🟢' : '🔴';
+      const actionLabel = isCheckIn ? 'تسجيل حضور (Check-In)' : 'تسجيل انصراف (Check-Out)';
+      let verifyArabic = 'بصمة الإصبع الحيوية (MB20)';
+      const vt = String(punchPayload.verifyType || '').toUpperCase();
+      if (vt === 'FACE') verifyArabic = 'بصمة الوجه الذكية (Face)';
+      else if (vt === 'PASSWORD' || vt === 'PASS') verifyArabic = 'كلمة المرور (Password)';
+      else if (vt === 'CARD' || vt === 'RFID') verifyArabic = 'كارت ذكي (RFID)';
+      else if (vt === 'KIOSK' || punchPayload.punchSource === 'kiosk') verifyArabic = 'كشك البصمة الإلكترونية الذكي';
+
+      // ── 1. إرسال إشعار فوري لهاتف الموظف نفسه عند تبصيمه ─────────────────────────
+      if (alertConfig.notifyEmployee !== false && punchPayload.employeeId) {
+        const employees = Array.isArray(state?.employees) ? state.employees : [];
+        const emp = employees.find(e => String(e.id) === String(punchPayload.employeeId));
+        const rawEmpPhone = emp?.phone || emp?.mobile || emp?.phoneNumber || emp?.whatsApp || emp?.whatsapp || '';
+        let empPhone = String(rawEmpPhone).replace(/\D/g, '');
+        if (empPhone.startsWith('01') && empPhone.length === 11) {
+          empPhone = '2' + empPhone;
+        } else if (empPhone.startsWith('1') && empPhone.length === 10) {
+          empPhone = '20' + empPhone;
+        }
+
+        if (empPhone.length >= 9) {
+          const actionText = isCheckIn ? 'تسجيل الحضور' : 'تسجيل الانصراف';
+          const punchMethodDesc = punchPayload.punchSource === 'kiosk' || vt === 'KIOSK'
+            ? 'كشك البصمة الإلكترونية الذكي 📱'
+            : (vt === 'FACE' ? 'بصمة الوجه البيومترية 👤' : 'جهاز بصمة الإصبع الحيوي 🧬');
+
+          const greeting = isCheckIn 
+            ? '✨ نتمنى لك يوماً موفقاً ومثمراً مليئاً بالإنجاز والعطاء!' 
+            : '🌟 شكراً جزيلاً لجهودك وعطائك المتميز اليوم، ودمت بخير وسعادة!';
+
+          const empMsg = [
+            `👋 *مرحباً بك يا د/ ${emp?.name || punchPayload.employeeName}*`,
+            `━━━━━━━━━━━━━━━━━━━━━━`,
+            `✅ *تم تأكيد ${actionText} بنجاح*`,
+            `🏢 *الفرع:* ${punchPayload.branchName || 'فرع الصيدلية'}`,
+            `🕒 *الوقت:* ${punchPayload.time} | ${punchPayload.date}`,
+            `📌 *الحركة:* ${actionIcon} *${actionLabel}*`,
+            `🧬 *طريقة التبصيم:* ${punchMethodDesc}`,
+            `━━━━━━━━━━━━━━━━━━━━━━`,
+            `${greeting}`,
+            `🏛️ _نظام إدارة الصيدليات الموحد_`
+          ].join('\n');
+
+          for (const waUrl of waUrls) {
+            try {
+              const resp = await fetch(waUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId: 'hr_main',
+                  phone: empPhone,
+                  message: empMsg
+                }),
+                signal: AbortSignal.timeout(4000)
+              });
+              if (resp.ok) {
+                console.log(`[Biometric WhatsApp] 📲 تم إرسال إشعار التبصيم بنجاح إلى هاتف الموظف (${emp?.name} - ${empPhone})`);
+                break;
+              }
+            } catch (e) {
+              console.warn(`[Biometric WA to Employee Error (${waUrl})]:`, e.message);
+            }
+          }
+        }
+      }
+
+      // ── 2. إرسال إشعار لهواتف الإدارة العليا ──────────────────────────────────────
       const candidatePhones = [];
       if (Array.isArray(alertConfig.recipientPhones)) {
         candidatePhones.push(...alertConfig.recipientPhones);
@@ -454,55 +630,41 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       }
 
       const uniquePhones = [...new Set(candidatePhones.map(p => String(p || '').replace(/\D/g, '')).filter(p => p.length >= 9))];
-      if (uniquePhones.length === 0) return;
+      if (uniquePhones.length > 0) {
+        const adminMsg = [
+          `🔔 *إشعار حضور وانصراف بيومتري لحظي*`,
+          `━━━━━━━━━━━━━━━━━━━━━━`,
+          `👤 *الموظف:* ${punchPayload.employeeName || 'غير معرف'}`,
+          `🏢 *الفرع:* ${punchPayload.branchName || 'الإدارة العامة'}`,
+          `🕒 *الوقت:* ${punchPayload.time} | ${punchPayload.date}`,
+          `📌 *الحركة:* ${actionIcon} *${actionLabel}*`,
+          `🧬 *وسيلة التحقق:* ${verifyArabic}`,
+          `📟 *الماكينة:* ${punchPayload.deviceName || punchPayload.deviceSerial || 'MB20'}`,
+          `━━━━━━━━━━━━━━━━━━━━━━`,
+          `🏛️ _نظام إدارة الصيدليات الموحد_`
+        ].join('\n');
 
-      const isCheckIn = action === 'check_in' || action === 'shift_start';
-      const actionIcon = isCheckIn ? '🟢' : '🔴';
-      const actionLabel = isCheckIn ? 'تسجيل حضور (Check-In)' : 'تسجيل انصراف (Check-Out)';
-      let verifyArabic = 'بصمة الإصبع (MB20)';
-      const vt = String(punchPayload.verifyType || '').toUpperCase();
-      if (vt === 'FACE') verifyArabic = 'بصمة الوجه (Face)';
-      else if (vt === 'PASSWORD' || vt === 'PASS') verifyArabic = 'كلمة المرور (Password)';
-      else if (vt === 'CARD' || vt === 'RFID') verifyArabic = 'كارت ذكي (RFID)';
-
-      const msg = [
-        `🔔 *إشعار حضور وانصراف بيومتري لحظي*`,
-        `━━━━━━━━━━━━━━━━━━━━━━`,
-        `👤 *الموظف:* ${punchPayload.employeeName || 'غير معرف'}`,
-        `🏢 *الفرع:* ${punchPayload.branchName || 'الإدارة العامة'}`,
-        `🕒 *الوقت:* ${punchPayload.time} | ${punchPayload.date}`,
-        `📌 *الحركة:* ${actionIcon} *${actionLabel}*`,
-        `🧬 *وسيلة التحقق:* ${verifyArabic}`,
-        `📟 *الماكينة:* ${punchPayload.deviceName || punchPayload.deviceSerial || 'MB20'}`,
-        `━━━━━━━━━━━━━━━━━━━━━━`,
-        `🏛️ _نظام إدارة الصيدليات الموحد_`
-      ].join('\n');
-
-      const waUrls = [
-        'http://hr-whatsapp-server:3100/send',
-        'http://127.0.0.1:3100/send'
-      ];
-
-      for (const rawPhone of uniquePhones) {
-        let phone = rawPhone;
-        if (phone.startsWith('01') && phone.length === 11) phone = '2' + phone;
-        for (const waUrl of waUrls) {
-          try {
-            const resp = await fetch(waUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                sessionId: 'hr_main',
-                phone,
-                message: msg
-              }),
-              signal: AbortSignal.timeout(4000)
-            });
-            if (resp.ok) {
-              console.log(`[Biometric WhatsApp] 📲 تم إرسال إشعار التبصيم بنجاح إلى الإدارة العليا (${phone})`);
-              break;
-            }
-          } catch {}
+        for (const rawPhone of uniquePhones) {
+          let phone = rawPhone;
+          if (phone.startsWith('01') && phone.length === 11) phone = '2' + phone;
+          for (const waUrl of waUrls) {
+            try {
+              const resp = await fetch(waUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId: 'hr_main',
+                  phone,
+                  message: adminMsg
+                }),
+                signal: AbortSignal.timeout(4000)
+              });
+              if (resp.ok) {
+                console.log(`[Biometric WhatsApp] 📲 تم إرسال إشعار التبصيم بنجاح إلى الإدارة العليا (${phone})`);
+                break;
+              }
+            } catch {}
+          }
         }
       }
     } catch (waErr) {
@@ -1004,10 +1166,59 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     }
   };
 
+  // ────────────────────────────────────────────────────────────────────────────
+  // 5. معالج استلام بيانات الاستعلام من الجهاز (POST/GET /iclock/querydata)
+  // ────────────────────────────────────────────────────────────────────────────
+  const handleAdmsQueryData = async (req, res) => {
+    try {
+      const sn = (req.query.SN || req.query.sn || '').trim();
+      const tablename = (req.query.tablename || req.query.table || req.query.Table || '').toUpperCase();
+      const clientIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
+
+      if (!sn) {
+        return res.status(400).send('ERROR: Missing SN');
+      }
+
+      const devObj = await updateDeviceHeartbeat(sn, clientIp);
+
+      let rawBody = '';
+      if (typeof req.body === 'string') {
+        rawBody = req.body;
+      } else if (Buffer.isBuffer(req.body)) {
+        rawBody = req.body.toString('utf8');
+      } else if (req.body && typeof req.body === 'object') {
+        rawBody = Object.keys(req.body)[0] || '';
+        if (typeof req.body.data === 'string') rawBody = req.body.data;
+      }
+
+      console.log(`[Biometric Manager] 📥 [querydata] استلام بيانات الجدول (${tablename || 'DEFAULT'}) من جهاز ${sn} (حجم: ${rawBody.length} بايت)`);
+
+      // إذا كانت البيانات تخص المستخدمين
+      if (tablename.includes('USER') || tablename === 'USERINFO' || rawBody.includes('PIN=') || rawBody.includes('Pin=')) {
+        const count = await parseAndStoreDeviceUsers(sn, rawBody, devObj);
+        console.log(`[Biometric Manager] 👥 [querydata] تم استلام وحفظ ${count} مستخدم بنجاح من جهاز ${sn}`);
+        return res.status(200).send(`OK: ${count}`);
+      }
+
+      // إذا كانت البيانات تخص القوالب الحيوية
+      if (tablename.includes('TMP') || tablename.includes('TEMPLATE') || tablename.includes('BIODATA')) {
+        const count = await parseAndStoreBiometricTemplate(sn, tablename, rawBody, devObj);
+        console.log(`[Biometric Vault] 🧬 [querydata] تم استلام وحفظ ${count} قالب بيومتري من جهاز ${sn}`);
+        return res.status(200).send(`OK: ${count}`);
+      }
+
+      return res.status(200).send('OK');
+    } catch (err) {
+      console.error('[ADMS querydata Error]:', err);
+      return res.status(200).send('OK');
+    }
+  };
+
   // ── تسجيل مسارات ADMS لكافة احتمالات الروابط في الـ Firmware ────────────────
   const admsCDataRoutes = ['/iclock/cdata', '/cdata', '/api/biometrics/adms/cdata'];
   const admsGetRequestRoutes = ['/iclock/getrequest', '/getrequest', '/api/biometrics/adms/getrequest'];
   const admsDeviceCmdRoutes = ['/iclock/devicecmd', '/devicecmd', '/api/biometrics/adms/devicecmd'];
+  const admsQueryDataRoutes = ['/iclock/querydata', '/querydata', '/api/biometrics/adms/querydata'];
   const admsFDataRoutes = ['/iclock/fdata', '/fdata', '/api/biometrics/adms/fdata'];
   const admsPingRoutes = ['/iclock/ping', '/ping', '/api/biometrics/adms/ping'];
 
@@ -1023,6 +1234,11 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
   admsDeviceCmdRoutes.forEach(r => {
     app.post(r, handleAdmsDeviceCmd);
+  });
+
+  admsQueryDataRoutes.forEach(r => {
+    app.get(r, handleAdmsQueryData);
+    app.post(r, handleAdmsQueryData);
   });
 
   admsFDataRoutes.forEach(r => {
@@ -1122,18 +1338,35 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       }
 
       let count = 0;
-      targetEmps.forEach((emp, index) => {
+      for (let index = 0; index < targetEmps.length; index++) {
+        const emp = targetEmps[index];
         const pin = profilesMap.get(String(emp.id)) || emp.code || emp.id;
-        if (!pin) return;
+        if (!pin) continue;
         const cleanName = (emp.name || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 24);
 
         // أمر ZKTeco ADMS القياسي لتحديث مستخدم:
-        // C:seq:DATA UPDATE USER PIN=107\tName=Ahmed Khaled\tPri=0\tPasswd=\tCard=
+        // C:seq:DATA UPDATE USERINFO PIN=107\tName=Ahmed Khaled\tPri=0\tPasswd=\tCard=
         const cmdId = Date.now() + index;
-        const cmd = `C:${cmdId}:DATA UPDATE USER PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=`;
+        const cmd = `C:${cmdId}:DATA UPDATE USERINFO PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=\tGrp=1\tTZ=0000000100000000\tVerify=0`;
         queueDeviceCommand(serialNumber, cmd);
+
+        // إدراج فوري للمستخدم في جدول ذاكرة الجهاز
+        await db.query(
+          `INSERT INTO public.biometric_device_users 
+           (device_serial, employee_id, device_user_pin, display_name, privilege, verify_mode, is_active, sync_status, updated_at)
+           VALUES ($1, $2, $3, $4, 0, 0, TRUE, 'DISPATCHED', CURRENT_TIMESTAMP)
+           ON CONFLICT (device_serial, device_user_pin) DO UPDATE SET
+             employee_id = EXCLUDED.employee_id,
+             display_name = EXCLUDED.display_name,
+             is_active = TRUE,
+             updated_at = CURRENT_TIMESTAMP`,
+          [serialNumber, String(emp.id), String(pin), cleanName]
+        );
+
         count++;
-      });
+      }
+
+      io.emit('biometric:device_users_updated', { serialNumber, count });
 
       console.log(`[Biometric Manager] 📤 تم جدولة ترحيل ${count} موظف إلى جهاز البصمة ${serialNumber}`);
       res.json({
@@ -1236,9 +1469,22 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           const cleanName = (emp.name || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 24);
 
           // 1. أمر إنشاء المستخدم على الماكينة المستهدفة
-          const cmdUser = `C:${Date.now() + i}:DATA UPDATE USER PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=`;
+          const cmdUser = `C:${Date.now() + i}:DATA UPDATE USERINFO PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=\tGrp=1\tTZ=0000000100000000\tVerify=0`;
           queueDeviceCommand(targetSn, cmdUser);
           totalDispatchedUsers++;
+
+          // إدراج فوري في جدول مستخدمي الماكينة المستهدفة
+          await db.query(
+            `INSERT INTO public.biometric_device_users 
+             (device_serial, employee_id, device_user_pin, display_name, privilege, verify_mode, is_active, sync_status, updated_at)
+             VALUES ($1, $2, $3, $4, 0, 0, TRUE, 'DISPATCHED', CURRENT_TIMESTAMP)
+             ON CONFLICT (device_serial, device_user_pin) DO UPDATE SET
+               employee_id = EXCLUDED.employee_id,
+               display_name = EXCLUDED.display_name,
+               is_active = TRUE,
+               updated_at = CURRENT_TIMESTAMP`,
+            [targetSn, String(emp.id), String(pin), cleanName]
+          );
 
           // 2. إذا طُلب تضمين القوالب البيومترية
           let tplCountForEmp = 0;
@@ -1270,6 +1516,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             [emp.id, emp.name, String(pin), targetSn, dev?.branch_id || targetBranchId || null, dev?.branch_name || 'غير محدد', includeBiometrics, tplCountForEmp]
           );
         }
+
+        io.emit('biometric:device_users_updated', { serialNumber: targetSn });
       }
 
       res.json({
@@ -1311,13 +1559,32 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
       const cleanName = (emp.name || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 24);
 
-      // 1. دفع المستخدم لماكينة الإدارة
-      const cmdUser = `C:${Date.now()}:DATA UPDATE USER PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=`;
+      // 1. دفع المستخدم لماكينة الإدارة بصيغة ZKTeco ADMS المعتمدة (USERINFO)
+      const cmdUser = `C:${Date.now()}:DATA UPDATE USERINFO PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=\tGrp=1\tTZ=0000000100000000\tVerify=0`;
       queueDeviceCommand(hqDeviceSerial, cmdUser);
 
       // 2. أمر تنشيط تسجيل البصمة على الماكينة
       const cmdEnroll = `C:${Date.now() + 1}:ENROLL_FP PIN=${pin}\tFID=0`;
       queueDeviceCommand(hqDeviceSerial, cmdEnroll);
+
+      // 3. أمر بدء التسجيل الميداني المتوافق
+      const cmdEnrollAlt = `C:${Date.now() + 2}:START ENROLL PIN=${pin} FINGERID=0`;
+      queueDeviceCommand(hqDeviceSerial, cmdEnrollAlt);
+
+      // 4. إدراج الموظف فوراً في جدول مستخدمي الماكينة ليظهر بالجدول في الواجهة
+      await db.query(
+        `INSERT INTO public.biometric_device_users 
+         (device_serial, employee_id, device_user_pin, display_name, privilege, verify_mode, is_active, sync_status, updated_at)
+         VALUES ($1, $2, $3, $4, 0, 0, TRUE, 'ENROLLING', CURRENT_TIMESTAMP)
+         ON CONFLICT (device_serial, device_user_pin) DO UPDATE SET
+           employee_id = EXCLUDED.employee_id,
+           display_name = EXCLUDED.display_name,
+           is_active = TRUE,
+           updated_at = CURRENT_TIMESTAMP`,
+        [hqDeviceSerial, String(emp.id), String(pin), cleanName]
+      );
+
+      io.emit('biometric:device_users_updated', { serialNumber: hqDeviceSerial });
 
       res.json({
         success: true,
@@ -1496,7 +1763,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
   app.get('/api/biometrics/devices/:serialNumber/users', async (req, res) => {
     try {
       const { serialNumber } = req.params;
-      const usersQ = await db.query(
+      let usersQ = await db.query(
         `SELECT u.*, 
                 p.employee_id as profile_emp_id,
                 COUNT(t.id) as templates_count
@@ -1512,6 +1779,48 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       const state = await getSettingsFromStorage(STORAGE_KEY);
       const employees = Array.isArray(state?.employees) ? state.employees : [];
       const empMap = new Map(employees.map(e => [String(e.id), e]));
+
+      // إذا كان جدول مستخدمي الماكينة فارغاً بعد، نقوم بتجهيزه تلقائياً من البصمات الحية المسجلة أو ملفات الربط
+      if (!usersQ.rows || usersQ.rows.length === 0) {
+        try {
+          const rawKnown = await db.query(
+            `SELECT DISTINCT device_user_pin, employee_id, employee_name 
+             FROM public.biometric_raw_punches 
+             WHERE device_serial = $1 AND device_user_pin IS NOT NULL AND device_user_pin <> ''`,
+            [serialNumber]
+          );
+          if (rawKnown.rows && rawKnown.rows.length > 0) {
+            for (const r of rawKnown.rows) {
+              const emp = r.employee_id ? empMap.get(String(r.employee_id)) : null;
+              const cleanName = (emp?.name || r.employee_name || `مستخدم ${r.device_user_pin}`).replace(/[\r\n\t]/g, ' ').trim();
+              await db.query(
+                `INSERT INTO public.biometric_device_users 
+                 (device_serial, employee_id, device_user_pin, display_name, privilege, is_active, sync_status, updated_at)
+                 VALUES ($1, $2, $3, $4, 0, TRUE, 'SYNCED', CURRENT_TIMESTAMP)
+                 ON CONFLICT (device_serial, device_user_pin) DO UPDATE SET
+                   employee_id = COALESCE(EXCLUDED.employee_id, public.biometric_device_users.employee_id),
+                   display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), public.biometric_device_users.display_name),
+                   updated_at = CURRENT_TIMESTAMP`,
+                [serialNumber, r.employee_id || null, r.device_user_pin, cleanName]
+              );
+            }
+            usersQ = await db.query(
+              `SELECT u.*, 
+                      p.employee_id as profile_emp_id,
+                      COUNT(t.id) as templates_count
+               FROM public.biometric_device_users u
+               LEFT JOIN public.employee_biometric_profiles p ON p.device_user_pin = u.device_user_pin
+               LEFT JOIN public.biometric_templates t ON t.device_user_pin = u.device_user_pin
+               WHERE u.device_serial = $1
+               GROUP BY u.id, p.employee_id
+               ORDER BY u.id ASC`,
+              [serialNumber]
+            );
+          }
+        } catch (seedErr) {
+          console.warn('[Seed Device Users Warn]:', seedErr.message);
+        }
+      }
 
       const enriched = (usersQ.rows || []).map(u => {
         const empId = u.employee_id || u.profile_emp_id;
@@ -1537,10 +1846,18 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
   app.post('/api/biometrics/devices/:serialNumber/users/sync', async (req, res) => {
     try {
       const { serialNumber } = req.params;
-      queueDeviceCommand(serialNumber, `C:${Date.now()}:DATA QUERY USERINFO`, 'QUERY_USER');
-      queueDeviceCommand(serialNumber, `C:${Date.now() + 1}:DATA QUERY FINGERTMP`, 'QUERY_FP');
-      queueDeviceCommand(serialNumber, `C:${Date.now() + 2}:DATA QUERY BIODATA Type=1`, 'QUERY_BIO');
-      res.json({ success: true, message: 'تم إرسال أمر فحص وسحب مستخدمي الجهاز من الذاكرة بنجاح' });
+      const now = Date.now();
+      // أوامر ZKTeco Push ADMS القياسية للاستعلام الشامل عن المستخدمين والقوالب
+      queueDeviceCommand(serialNumber, `C:${now}:DATA QUERY USERINFO`, 'QUERY_USER');
+      queueDeviceCommand(serialNumber, `C:${now + 1}:DATA QUERY tablename=user,fielddesc=*,filter=*`, 'QUERY_USER_TABLE');
+      queueDeviceCommand(serialNumber, `C:${now + 2}:DATA QUERY FINGERTMP`, 'QUERY_FP');
+      queueDeviceCommand(serialNumber, `C:${now + 3}:DATA QUERY tablename=templatev10,fielddesc=*,filter=*`, 'QUERY_FP_TABLE');
+      queueDeviceCommand(serialNumber, `C:${now + 4}:DATA QUERY BIODATA Type=1`, 'QUERY_BIO');
+
+      res.json({ 
+        success: true, 
+        message: 'تم إرسال أمر فحص وسحب مستخدمي الجهاز وقوالبهم من الذاكرة بنجاح' 
+      });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -1564,7 +1881,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       if (!pin) return res.status(400).json({ success: false, error: 'رقم الـ PIN مطلوب' });
 
       const cleanName = (name || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 24);
-      const cmd = `C:${Date.now()}:DATA UPDATE USER PIN=${pin}\tName=${cleanName}\tPri=${privilege}\tPasswd=${password}\tCard=${card}\tGrp=1\tTZ=0000000100000000\tVerify=${verifyMode}`;
+      const cmd = `C:${Date.now()}:DATA UPDATE USERINFO PIN=${pin}\tName=${cleanName}\tPri=${privilege}\tPasswd=${password}\tCard=${card}\tGrp=1\tTZ=0000000100000000\tVerify=${verifyMode}`;
       queueDeviceCommand(serialNumber, cmd, 'USER_UPDATE');
 
       await db.query(
@@ -1596,7 +1913,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       const { pin } = parseReqBody(req);
       if (!pin) return res.status(400).json({ success: false, error: 'رقم الـ PIN مطلوب' });
 
-      queueDeviceCommand(serialNumber, `C:${Date.now()}:DATA DELETE USER PIN=${pin}`, 'USER_DELETE');
+      queueDeviceCommand(serialNumber, `C:${Date.now()}:DATA DELETE USERINFO PIN=${pin}`, 'USER_DELETE');
       queueDeviceCommand(serialNumber, `C:${Date.now() + 1}:DATA DELETE FINGERTMP PIN=${pin}`, 'FP_DELETE');
       queueDeviceCommand(serialNumber, `C:${Date.now() + 2}:DATA DELETE BIODATA Pin=${pin}`, 'BIO_DELETE');
 
@@ -1621,7 +1938,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
       if (isActive === false) {
         // إيقاف مؤقت: مسح من الماكينة الفيزيائية مع الاحتفاظ التام بالقوالب السحابية
-        queueDeviceCommand(serialNumber, `C:${Date.now()}:DATA DELETE USER PIN=${pin}`, 'USER_DISABLE');
+        queueDeviceCommand(serialNumber, `C:${Date.now()}:DATA DELETE USERINFO PIN=${pin}`, 'USER_DISABLE');
         queueDeviceCommand(serialNumber, `C:${Date.now() + 1}:DATA DELETE FINGERTMP PIN=${pin}`, 'FP_DISABLE');
         await db.query(
           `UPDATE public.biometric_device_users SET is_active = FALSE, sync_status = 'SUSPENDED', updated_at = CURRENT_TIMESTAMP
@@ -1635,7 +1952,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         const u = uQ.rows?.[0] || {};
         const cleanName = (u.display_name || `User ${pin}`).slice(0, 24);
 
-        queueDeviceCommand(serialNumber, `C:${Date.now()}:DATA UPDATE USER PIN=${pin}\tName=${cleanName}\tPri=${u.privilege || 0}\tPasswd=${u.device_password || ''}\tCard=${u.card_number || ''}\tGrp=1\tTZ=0000000100000000\tVerify=${u.verify_mode || 0}`, 'USER_ENABLE');
+        queueDeviceCommand(serialNumber, `C:${Date.now()}:DATA UPDATE USERINFO PIN=${pin}\tName=${cleanName}\tPri=${u.privilege || 0}\tPasswd=${u.device_password || ''}\tCard=${u.card_number || ''}\tGrp=1\tTZ=0000000100000000\tVerify=${u.verify_mode || 0}`, 'USER_ENABLE');
 
         // دفع القوالب
         const tplsQ = await db.query('SELECT * FROM public.biometric_templates WHERE device_user_pin = $1', [String(pin)]);
@@ -1698,7 +2015,20 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           const emp = employees.find(e => String(e.id) === String(employeeId));
           const cleanName = (emp?.name || `Emp ${pin}`).slice(0, 24);
 
-          queueDeviceCommand(devSn, `C:${Date.now()}:DATA UPDATE USER PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=`, 'USER_MULTI_BRANCH');
+          queueDeviceCommand(devSn, `C:${Date.now()}:DATA UPDATE USERINFO PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=\tGrp=1\tTZ=0000000100000000\tVerify=0`, 'USER_MULTI_BRANCH');
+
+          // إدراج في جدول مستخدمي الماكينة للفرع
+          await db.query(
+            `INSERT INTO public.biometric_device_users 
+             (device_serial, employee_id, device_user_pin, display_name, privilege, verify_mode, is_active, sync_status, updated_at)
+             VALUES ($1, $2, $3, $4, 0, 0, TRUE, 'DISPATCHED', CURRENT_TIMESTAMP)
+             ON CONFLICT (device_serial, device_user_pin) DO UPDATE SET
+               employee_id = EXCLUDED.employee_id,
+               display_name = EXCLUDED.display_name,
+               is_active = TRUE,
+               updated_at = CURRENT_TIMESTAMP`,
+            [devSn, String(employeeId), String(pin), cleanName]
+          );
 
           // سحب القوالب من الخزنة وربطها بالـ PIN الجديد
           const tplsQ = await db.query(
@@ -1712,6 +2042,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
               queueDeviceCommand(devSn, `C:${Date.now() + 50 + i}:DATA UPDATE FINGERTMP PIN=${pin}\tFID=${t.finger_id}\tSize=${t.size || t.template_data.length}\tValid=1\tTMP=${t.template_data}`);
             }
           });
+
+          io.emit('biometric:device_users_updated', { serialNumber: devSn });
         }
       }
 
@@ -1732,7 +2064,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     }
   });
 
-  // 17. استعلام إعدادات إشعارات واتساب للإدارة العليا
+  // 17. استعلام إعدادات إشعارات واتساب للإدارة العليا والموظفين
   app.get('/api/biometrics/whatsapp-config', async (req, res) => {
     try {
       const state = await getSettingsFromStorage(STORAGE_KEY);
@@ -1741,12 +2073,14 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         enabled: true,
         notifyCheckIn: true,
         notifyCheckOut: true,
+        notifyEmployee: true,
         recipientPhones: [
           org.generalManagerPhone,
           org.adminPhone,
           org.ownerPhone
         ].filter(Boolean)
       };
+      if (config.notifyEmployee === undefined) config.notifyEmployee = true;
       res.json({ success: true, config });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });

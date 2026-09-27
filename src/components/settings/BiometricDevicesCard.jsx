@@ -580,13 +580,28 @@ export default function BiometricDevicesCard({ state, showToast }) {
   // ── وظائف مستكشف مستخدمي الجهاز والتحكم بالذاكرة ─────────────────────────
   const handleSyncDeviceUsers = async () => {
     if (!selectedDeviceSnForUsers) return;
+    setIsLoadingDeviceUsers(true);
     try {
       const res = await fetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/users/sync`, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        showToast?.('🔄 تم إرسال أمر فحص ذاكرة الجهاز، ستظهر الأسماء فور استقبالها!');
+        showToast?.('🔄 تم إرسال أمر فحص ذاكرة الجهاز بنجاح. جاري قراءة وتحديث قائمة المستخدمين...');
+        // فحص تدريجي بعد إرسال الأمر كل 2.5 ثانية لتحديث الجدول تلقائياً فور استجابة الماكينة
+        let attempts = 0;
+        const intervalId = setInterval(async () => {
+          attempts++;
+          await fetchDeviceUsers(selectedDeviceSnForUsers);
+          if (attempts >= 5) {
+            clearInterval(intervalId);
+            setIsLoadingDeviceUsers(false);
+          }
+        }, 2500);
+      } else {
+        setIsLoadingDeviceUsers(false);
+        showToast?.(`⚠️ ${data.error || 'تعذر إرسال أمر الفحص'}`);
       }
     } catch {
+      setIsLoadingDeviceUsers(false);
       showToast?.('❌ تعذر إرسال أمر الفحص');
     }
   };
@@ -2436,6 +2451,19 @@ export default function BiometricDevicesCard({ state, showToast }) {
                   />
                   <span>🚪 إرسال إشعار فوري عند بصمة الانصراف (Check-Out)</span>
                 </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.88rem', fontWeight: 800, color: '#15803d', marginTop: '6px' }}>
+                  <input
+                    type="checkbox"
+                    checked={waConfig.notifyEmployee !== false}
+                    onChange={(e) => setWaConfig({ ...waConfig, notifyEmployee: e.target.checked })}
+                  />
+                  <span>📲 إرسال إشعار فوري إلى هاتف الموظف نفسه عند تبصيمه (على رقم الواتساب المسجل بملفه)</span>
+                </label>
+
+                <div style={{ background: '#f0fdf4', border: '1px dashed #86efac', borderRadius: '10px', padding: '8px 12px', fontSize: '0.82rem', color: '#166534', marginRight: '24px', lineHeight: '1.5' }}>
+                  🌟 <strong>التعرف اللحظي التلقائي:</strong> عند تبصيم أي موظف (حضور أو انصراف) بجهاز البصمة أو كشك البصمة، يتعرف النظام على هويته ويرسل له رسالة ترحيبية فورية مع توثيق وقت وبصمة الحضور/الانصراف والفرع.
+                </div>
               </div>
 
               {/* أرقام هواتف الإدارة المستلمة */}
