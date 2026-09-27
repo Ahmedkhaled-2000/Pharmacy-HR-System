@@ -829,7 +829,10 @@ export function getEffectiveShiftHours(shift, state) {
     (e) => e && (String(e.id) === String(shift.employeeId) || (shift.employeeCode && String(e.code) === String(shift.employeeCode)))
   );
   const empBreak = emp?.breakHours || emp?.defaultBreakHours || (emp?.branchesDetails && emp.branchesDetails[0]?.breakHours) || 0;
-  const breakHours = Math.max(0, parseFloat(shift.breakHours !== undefined && shift.breakHours !== null ? shift.breakHours : empBreak) || 0);
+
+  // لا يتم خصم البريك الافتراضي تلقائياً إلا إذا تم تسجيل وقت استراحة صريح، أو تجاوزت مدة الوردية 4.5 ساعة
+  const hasExplicitBreak = shift.breakHours !== undefined && shift.breakHours !== null && String(shift.breakHours).trim() !== '' && String(shift.breakHours).trim() !== '—';
+  const explicitBreakHours = hasExplicitBreak ? Math.max(0, parseFloat(shift.breakHours) || 0) : 0;
 
   // 1. حساب الساعات الفعلية المجردة من أوقات الدخول والخروج مع خصم ساعات البريك
   let rawHours = -1;
@@ -844,7 +847,14 @@ export function getEffectiveShiftHours(shift, state) {
       let end = outH * 60 + (outM || 0);
       if (end <= start) end += 24 * 60;
       const totalHours = (end - start) / 60;
-      rawHours = Math.max(0, Math.round((totalHours - breakHours) * 100) / 100);
+
+      // تحديد البريك الفعلي الواجب خصمه
+      let breakToDeduct = explicitBreakHours;
+      if (!hasExplicitBreak && empBreak > 0 && totalHours >= 4.5 && !emp?.noMonthlySchedule) {
+        breakToDeduct = Math.min(parseFloat(empBreak) || 0, Math.max(0, totalHours - 1));
+      }
+
+      rawHours = Math.max(0, Math.round((totalHours - breakToDeduct) * 100) / 100);
     }
   }
   
@@ -860,9 +870,10 @@ export function getEffectiveShiftHours(shift, state) {
         ? shift.hours
         : shift.workHours || 0
     ) || 0;
+    const breakToDeduct = hasExplicitBreak ? explicitBreakHours : (base >= 4.5 && !emp?.noMonthlySchedule ? Math.min(parseFloat(empBreak) || 0, Math.max(0, base - 1)) : 0);
     rawHours = (shift.actualWorkedHours !== undefined || shift.netHours !== undefined)
       ? Math.max(0, base)
-      : Math.max(0, Math.round((base - breakHours) * 100) / 100);
+      : Math.max(0, Math.round((base - breakToDeduct) * 100) / 100);
   }
 
   // 2. فحص الإذن المعتمد لهذا اليوم

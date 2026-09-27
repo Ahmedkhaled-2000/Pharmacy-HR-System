@@ -56,11 +56,32 @@ export function useAttendanceEngine() {
     const active = state.activeShifts?.[empId];
     if (!active) return '—';
     const accumulatedPauseMs = active.accumulatedPauseMs || 0;
+
+    // درع استخراج الطابع الزمني للبدء بدقة وحمايته من التوقيتات المستقبلية أو فروق المناطق الزمنية
+    let startEpoch = Number(active.startEpoch);
+    if (!startEpoch || isNaN(startEpoch) || startEpoch > now) {
+      if (active.timeIn) {
+        const [h, m] = String(active.timeIn).split(':').map(Number);
+        if (!isNaN(h) && !isNaN(m)) {
+          const t = new Date();
+          t.setHours(h, m, 0, 0);
+          if (t.getTime() <= now) {
+            startEpoch = t.getTime();
+          } else {
+            // وردية ليلية بدأت قبل منتصف الليل بالأمس
+            t.setDate(t.getDate() - 1);
+            startEpoch = t.getTime();
+          }
+        }
+      }
+    }
+    if (!startEpoch || isNaN(startEpoch)) startEpoch = now;
+
     let elapsedMs = 0;
     if (active.isPaused && active.pauseStartEpoch) {
-      elapsedMs = active.pauseStartEpoch - active.startEpoch - accumulatedPauseMs;
+      elapsedMs = active.pauseStartEpoch - startEpoch - accumulatedPauseMs;
     } else {
-      elapsedMs = now - active.startEpoch - accumulatedPauseMs;
+      elapsedMs = now - startEpoch - accumulatedPauseMs;
     }
     if (elapsedMs < 0) elapsedMs = 0;
     const h = Math.floor(elapsedMs / 3600000);
