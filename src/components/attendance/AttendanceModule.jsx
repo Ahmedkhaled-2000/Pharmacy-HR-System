@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
 import { recalculateEmployeeCycleLateness, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
-import { getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, getRealTodayStr } from '../../utils/formatters';
+import { getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, getRealTodayStr, getPunchMethodDetails } from '../../utils/formatters';
 
 export default function AttendanceModule({
   state,
@@ -487,11 +487,33 @@ export default function AttendanceModule({
                     <td style={{ fontWeight: '800' }}>
                       {getEmpDisplayName(emp)}
                       {hasLiveShift && (
-                        <span style={{ display: 'block', marginTop: '2px', fontSize: '11px', color: '#059669', fontWeight: '800' }}>
-                          {isOvernightActive
-                            ? `🟢 متواجد الآن 🌙 (وردية ليلية بدأت أمس ${activeShift.timeIn})`
-                            : `🟢 متواجد الآن (${activeShift.timeIn})`}
-                        </span>
+                        <div style={{ marginTop: '3px', display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '11px', color: '#059669', fontWeight: '800' }}>
+                            {isOvernightActive
+                              ? `🟢 متواجد الآن 🌙 (${activeShift.timeIn})`
+                              : `🟢 متواجد الآن (${activeShift.timeIn})`}
+                          </span>
+                          {(() => {
+                            const meth = getPunchMethodDetails(activeShift);
+                            return (
+                              <span style={{
+                                background: meth.bg,
+                                color: meth.color,
+                                border: `1px solid ${meth.border}`,
+                                padding: '1px 7px',
+                                borderRadius: '6px',
+                                fontSize: '10px',
+                                fontWeight: '800',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px'
+                              }}>
+                                <span>{meth.icon}</span>
+                                <span>{meth.shortLabel}</span>
+                              </span>
+                            );
+                          })()}
+                        </div>
                       )}
                     </td>
                     <td>{b?.name || 'المركز الرئيسي'}</td>

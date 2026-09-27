@@ -228,12 +228,21 @@ export async function exportBiometricPunchesExcel({
       const isCheckIn = action === 'check_in' || action === 'shift_start' || p.raw_punch_state === 0;
       const actionLabel = isCheckIn ? 'حضور (Check-In)' : 'انصراف (Check-Out)';
 
-      // وسيلة التحقق
-      let verifyLabel = 'بصمة إصبع (Fingerprint)';
-      const vt = String(p.verify_type || '').toUpperCase();
-      if (vt === 'FACE' || p.raw_verify_type === 15) verifyLabel = 'بصمة وجه (Face)';
-      else if (vt === 'PASSWORD' || vt === 'PASS') verifyLabel = 'كلمة مرور (Password)';
-      else if (vt === 'CARD' || vt === 'RFID') verifyLabel = 'كارت ذكي (RFID)';
+      // وسيلة وطريقة البصمة
+      let verifyLabel = '👆 جهاز بصمة الإصبع (ماكينة MB20)';
+      const vt = String(p.verify_type || p.verifyType || '').toUpperCase();
+      const pSrc = String(p.punchSource || p.source || '').toLowerCase();
+      if (pSrc === 'kiosk' || p.punchType === 'photo_attendance') {
+        verifyLabel = '📱 كشك البصمة الإلكتروني';
+      } else if (pSrc === 'manual' || p.isManual) {
+        verifyLabel = '🖐️ تسجيل يدوي إداري';
+      } else if (vt === 'FACE' || p.raw_verify_type === 15) {
+        verifyLabel = '👤 جهاز بصمة الوجه (ماكينة MB20)';
+      } else if (vt === 'PASSWORD' || vt === 'PASS') {
+        verifyLabel = '🔑 كلمة مرور (Password)';
+      } else if (vt === 'CARD' || vt === 'RFID') {
+        verifyLabel = '💳 كارت ذكي (RFID)';
+      }
 
       const notes = p.device_serial || p.deviceSerial || 'MB20 - ADMS';
 

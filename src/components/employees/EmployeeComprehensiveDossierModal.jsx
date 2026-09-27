@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { fmt, getRealTodayStr, getEmpDisplayName } from '../../utils/formatters';
+import { fmt, getRealTodayStr, getEmpDisplayName, getPunchMethodDetails } from '../../utils/formatters';
 import { getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { computeEmployeeFinalSettlement } from '../../utils/settlementHelper';
 import { triggerDirectPrint, generateClearanceSlipHTML } from '../../utils/printHelper';
@@ -646,6 +646,7 @@ export default function EmployeeComprehensiveDossierModal({
                   <tr style={{ background: 'var(--surface)', borderBottom: '2px solid var(--border)' }}>
                     <th style={{ padding: '8px' }}>التاريخ</th>
                     <th style={{ padding: '8px' }}>الفرع</th>
+                    <th style={{ padding: '8px' }}>طريقة البصمة</th>
                     <th style={{ padding: '8px' }}>وقت الحضور</th>
                     <th style={{ padding: '8px' }}>وقت الانصراف</th>
                     <th style={{ padding: '8px' }}>الساعات الأساسية</th>
@@ -654,11 +655,31 @@ export default function EmployeeComprehensiveDossierModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {empShifts.map((s, idx) => (
-                    <tr key={s.id || idx} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '8px', fontWeight: 'bold' }}>{s.date}</td>
-                      <td style={{ padding: '8px' }}>{getBranchName(s.branchId)}</td>
-                      <td style={{ padding: '8px' }}>{s.timeIn || '—'}</td>
+                  {empShifts.map((s, idx) => {
+                    const meth = getPunchMethodDetails(s);
+                    return (
+                      <tr key={s.id || idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '8px', fontWeight: 'bold' }}>{s.date}</td>
+                        <td style={{ padding: '8px' }}>{getBranchName(s.branchId)}</td>
+                        <td style={{ padding: '8px' }}>
+                          <span style={{
+                            background: meth.bg,
+                            color: meth.color,
+                            border: `1px solid ${meth.border}`,
+                            padding: '2px 8px',
+                            borderRadius: '8px',
+                            fontSize: '11px',
+                            fontWeight: 'bold',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            <span>{meth.icon}</span>
+                            <span>{meth.label}</span>
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px' }}>{s.timeIn || '—'}</td>
                       <td style={{ padding: '8px' }}>{s.timeOut || '—'}</td>
                       <td style={{ padding: '8px', color: 'var(--primary-dark)', fontWeight: 'bold' }}>{fmt(getEffectiveShiftHours(s, state))} س</td>
                       <td style={{ padding: '8px' }}>
@@ -674,7 +695,8 @@ export default function EmployeeComprehensiveDossierModal({
                         </span>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             )}

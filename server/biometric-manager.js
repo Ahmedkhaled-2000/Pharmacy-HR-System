@@ -779,6 +779,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           isLiveActive: actionType === 'check_in',
           status: actionType === 'check_in' ? 'active' : 'completed',
           punchSource: 'biometric_device',
+          source: 'biometric_device',
           biometricDeviceSerial: sn,
           verifyType
         };
@@ -793,6 +794,9 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             isPaused: false,
             isOnBreak: false,
             updatedAt: punchEpoch,
+            source: 'biometric_device',
+            punchSource: 'biometric_device',
+            verifyType,
             biometricDeviceSerial: sn
           };
           currentShifts = [shiftRecord, ...currentShifts.filter(s => s.id !== shiftId)];
@@ -805,6 +809,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
               timeOut: timePart,
               isLiveActive: false,
               status: 'completed',
+              punchOutSource: 'biometric_device',
+              punchOutDeviceSerial: sn,
               updatedAt: new Date().toISOString()
             };
           } else {

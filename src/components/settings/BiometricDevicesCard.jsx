@@ -2759,7 +2759,37 @@ export default function BiometricDevicesCard({ state, showToast }) {
                         </span>
                       </td>
                       <td style={{ padding: '10px' }}>
-                        {log.verify_type === 'FACE' ? '👤 بصمة وجه' : '👆 بصمة إصبع'}
+                        {log.verify_type === 'FACE' ? (
+                          <span style={{
+                            background: '#f0fdf4',
+                            color: '#166534',
+                            border: '1px solid #86efac',
+                            padding: '3px 9px',
+                            borderRadius: '8px',
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}>
+                            👤 جهاز بصمة الوجه (MB20)
+                          </span>
+                        ) : (
+                          <span style={{
+                            background: '#ecfdf5',
+                            color: '#065f46',
+                            border: '1px solid #a7f3d0',
+                            padding: '3px 9px',
+                            borderRadius: '8px',
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}>
+                            👆 جهاز بصمة الإصبع (MB20)
+                          </span>
+                        )}
                       </td>
                       <td style={{ padding: '10px', fontFamily: 'monospace', fontSize: '0.8rem', color: '#64748b' }}>
                         {log.device_serial}

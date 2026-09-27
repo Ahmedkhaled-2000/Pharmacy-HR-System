@@ -1381,4 +1381,97 @@ export function getEmployeeManualPunchesCount(empId, state, filterFn) {
   return shifts.length;
 }
 
+/**
+ * دالة قياسية ذكية لاستخراج وتحديد طريقة ونوع تسجيل البصمة:
+ * (جهاز بصمة الإصبع / كشك البصمة الإلكتروني / تسجيل يدوي إداري / جهاز بصمة الوجه)
+ */
+export function getPunchMethodDetails(p) {
+  if (!p) {
+    return {
+      label: 'كشك البصمة الإلكتروني',
+      shortLabel: 'كشك البصمة',
+      subText: 'كشك الفرع الذكي',
+      icon: '📱',
+      type: 'kiosk',
+      bg: '#eff6ff',
+      color: '#1d4ed8',
+      border: '#bfdbfe'
+    };
+  }
+
+  const src = String(p.punchSource || p.source || p.checkInSource || p.method || '').toLowerCase();
+  const verify = String(p.verifyType || p.verify_type || p.verificationType || '').toUpperCase();
+  const devSn = p.biometricDeviceSerial || p.deviceSerial || p.device_serial || '';
+
+  // 1. بصمة ماكينة البصمة الفعلية (Hardware Biometric Device ZKTeco MB20)
+  if (
+    src === 'biometric_device' ||
+    src === 'hardware' ||
+    src === 'device' ||
+    src === 'zkteco' ||
+    Boolean(devSn) ||
+    verify === 'FINGERPRINT' ||
+    (verify === 'FACE' && src !== 'kiosk')
+  ) {
+    if (verify === 'FACE') {
+      return {
+        label: 'جهاز بصمة الوجه',
+        shortLabel: 'جهاز الوجه',
+        subText: devSn ? `ماكينة MB20 (${devSn})` : 'ماكينة البصمة',
+        icon: '👤',
+        type: 'biometric_face',
+        bg: '#f0fdf4',
+        color: '#166534',
+        border: '#86efac'
+      };
+    }
+    return {
+      label: 'جهاز بصمة الإصبع',
+      shortLabel: 'جهاز البصمة',
+      subText: devSn ? `ماكينة MB20 (${devSn})` : 'ماكينة البصمة',
+      icon: '👆',
+      type: 'biometric_fingerprint',
+      bg: '#ecfdf5',
+      color: '#065f46',
+      border: '#a7f3d0'
+    };
+  }
+
+  // 2. تسجيل يدوي إداري
+  if (
+    src === 'manual' ||
+    src === 'admin' ||
+    p.isManual ||
+    p.manualPunch ||
+    (typeof p.note === 'string' && (p.note.includes('يدوي') || p.note.includes('يدوياً'))) ||
+    (typeof p.notes === 'string' && (p.notes.includes('يدوي') || p.notes.includes('يدوياً'))) ||
+    (typeof p.statusLabel === 'string' && p.statusLabel.includes('يدوي'))
+  ) {
+    return {
+      label: 'تسجيل يدوي إداري',
+      shortLabel: 'إداري يدوي',
+      subText: 'لوحة تحكم الإدارة',
+      icon: '🖐️',
+      type: 'manual',
+      bg: '#fffbeb',
+      color: '#b45309',
+      border: '#fde68a'
+    };
+  }
+
+  // 3. كشك البصمة الإلكتروني (Electronic Kiosk)
+  const isFaceKiosk = p.faceVerified || (verify === 'FACE' && src === 'kiosk') || (typeof p.note === 'string' && p.note.includes('وجه'));
+  return {
+    label: isFaceKiosk ? 'كشك البصمة (بصمة الوجه)' : 'كشك البصمة الإلكتروني',
+    shortLabel: 'كشك البصمة',
+    subText: p.branchName ? `كشك فرع ${p.branchName}` : 'كشك الفرع الذكي',
+    icon: '📱',
+    type: 'kiosk',
+    bg: '#eff6ff',
+    color: '#1d4ed8',
+    border: '#bfdbfe'
+  };
+}
+
+
 

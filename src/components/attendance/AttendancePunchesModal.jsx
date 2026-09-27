@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { isApprovedPermissionForDate, getEffectiveShiftHours, recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
-import { getEmployeeManualPunchesCount, isShiftManualPunch, arabicWeekday } from '../../utils/formatters';
+import { getEmployeeManualPunchesCount, isShiftManualPunch, arabicWeekday, getPunchMethodDetails } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
 import { isBranchMatch } from '../../utils/branchMatcher';
 
@@ -816,9 +816,33 @@ export default function AttendancePunchesModal({
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ background: '#10b981', color: '#fff', padding: '5px 14px', borderRadius: '20px', fontWeight: '800', fontSize: '12px' }}>
-                {(livePunch || unclosedShift)?.source === 'kiosk' ? 'بصمة كشك الفرع' : 'تسجيل حي'}
-              </span>
+              {(() => {
+                const liveObj = livePunch || unclosedShift;
+                const meth = getPunchMethodDetails(liveObj);
+                return (
+                  <span style={{
+                    background: meth.bg,
+                    color: meth.color,
+                    border: `1px solid ${meth.border}`,
+                    padding: '5px 14px',
+                    borderRadius: '20px',
+                    fontWeight: '800',
+                    fontSize: '12px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                  }}>
+                    <span>{meth.icon}</span>
+                    <span>{meth.label}</span>
+                    {meth.subText && (
+                      <span style={{ fontSize: '10.5px', opacity: 0.85, borderRight: `1px solid ${meth.border}`, paddingRight: '6px', marginRight: '2px' }}>
+                        {meth.subText}
+                      </span>
+                    )}
+                  </span>
+                );
+              })()}
               <button
                 className="btn btn-stop"
                 style={{
@@ -891,6 +915,7 @@ export default function AttendancePunchesModal({
                           <th style={{ textAlign: 'center' }}>#</th>
                           <th>التاريخ</th>
                           <th>اليوم</th>
+                          <th style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>طريقة البصمة</th>
                           <th style={{ textAlign: 'center' }}>وقت الدخول</th>
                           <th style={{ textAlign: 'center' }}>وقت الخروج</th>
                           <th style={{ textAlign: 'center' }}>ساعات البريك</th>
@@ -903,7 +928,7 @@ export default function AttendancePunchesModal({
                       <tbody>
                         {bPunches.length === 0 ? (
                           <tr>
-                            <td colSpan="10" style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px' }}>
+                            <td colSpan="11" style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px' }}>
                               لا توجد بصمات مسجلة بهذا الفرع في هذا الشهر.
                             </td>
                           </tr>
@@ -950,6 +975,36 @@ export default function AttendancePunchesModal({
                                   )}
                                 </td>
                                 <td style={{ fontWeight: '600' }}>{dayName}</td>
+                                <td style={{ textAlign: 'center' }}>
+                                  {(() => {
+                                    const meth = getPunchMethodDetails(p);
+                                    return (
+                                      <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                        <span style={{
+                                          background: meth.bg,
+                                          color: meth.color,
+                                          border: `1px solid ${meth.border}`,
+                                          padding: '3px 8px',
+                                          borderRadius: '8px',
+                                          fontWeight: '800',
+                                          fontSize: '11px',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px',
+                                          whiteSpace: 'nowrap'
+                                        }}>
+                                          <span>{meth.icon}</span>
+                                          <span>{meth.label}</span>
+                                        </span>
+                                        {meth.subText && (
+                                          <span style={{ fontSize: '9.5px', color: 'var(--muted)', opacity: 0.85, whiteSpace: 'nowrap' }}>
+                                            {meth.subText}
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                                </td>
                                 <td style={{ textAlign: 'center' }}>
                                   <span style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '12px', fontWeight: '800', fontSize: '12.5px', display: 'inline-block' }}>
                                     {p.timeIn || p.checkIn || p.inTime || '09:00'}
@@ -1120,7 +1175,7 @@ export default function AttendancePunchesModal({
                       {bPunches.length > 0 && (
                         <tfoot>
                           <tr style={{ background: '#f8fafc', fontWeight: '800', borderTop: '2px solid var(--border)' }}>
-                            <td colSpan="3" style={{ textAlign: 'right', padding: '12px 16px' }}>الإجمالي ({bShiftsCount} وردية)</td>
+                            <td colSpan="4" style={{ textAlign: 'right', padding: '12px 16px' }}>الإجمالي ({bShiftsCount} وردية)</td>
                             <td></td>
                             <td></td>
                             <td style={{ textAlign: 'center' }}><span style={{ background: '#fef3c7', color: '#b45309', padding: '4px 8px', borderRadius: '8px' }}>{bTotalBreak} س</span></td>
@@ -1148,6 +1203,7 @@ export default function AttendancePunchesModal({
                   <th style={{ textAlign: 'center' }}>#</th>
                   <th>التاريخ</th>
                   <th>اليوم</th>
+                  <th style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>طريقة البصمة</th>
                   <th style={{ textAlign: 'center' }}>وقت الدخول</th>
                   <th style={{ textAlign: 'center' }}>وقت الخروج</th>
                   <th style={{ textAlign: 'center' }}>ساعات البريك</th>
@@ -1160,7 +1216,7 @@ export default function AttendancePunchesModal({
               <tbody>
                 {monthPunches.length === 0 ? (
                   <tr>
-                    <td colSpan="10" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>
+                    <td colSpan="11" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>
                       لا توجد بصمات مسجلة لهذا الموظف في هذا الشهر.
                     </td>
                   </tr>
@@ -1209,6 +1265,38 @@ export default function AttendancePunchesModal({
                         </td>
                         <td style={{ fontWeight: '600' }}>{dayName}</td>
                         
+                        {/* Punch Method / Source Badge */}
+                        <td style={{ textAlign: 'center' }}>
+                          {(() => {
+                            const meth = getPunchMethodDetails(p);
+                            return (
+                              <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                <span style={{
+                                  background: meth.bg,
+                                  color: meth.color,
+                                  border: `1px solid ${meth.border}`,
+                                  padding: '3px 8px',
+                                  borderRadius: '8px',
+                                  fontWeight: '800',
+                                  fontSize: '11px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  <span>{meth.icon}</span>
+                                  <span>{meth.label}</span>
+                                </span>
+                                {meth.subText && (
+                                  <span style={{ fontSize: '9.5px', color: 'var(--muted)', opacity: 0.85, whiteSpace: 'nowrap' }}>
+                                    {meth.subText}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </td>
+
                         {/* Entry Time Pill */}
                         <td style={{ textAlign: 'center' }}>
                           <span style={{
@@ -1423,7 +1511,7 @@ export default function AttendancePunchesModal({
               {monthPunches.length > 0 && (
                 <tfoot>
                   <tr style={{ background: '#f8fafc', fontWeight: '800', borderTop: '2px solid var(--border)' }}>
-                    <td colSpan="3" style={{ textAlign: 'right', padding: '12px 16px' }}>
+                    <td colSpan="4" style={{ textAlign: 'right', padding: '12px 16px' }}>
                       الإجمالي ({shiftsCount} وردية)
                     </td>
                     <td></td>
