@@ -10,6 +10,7 @@
 import express from 'express';
 
 let globalDb = null;
+const hqPendingEnrollments = new Map();
 
 export async function initBiometricTables(db) {
   if (!db) return;
@@ -20,6 +21,8 @@ export async function initBiometricTables(db) {
       await db.query(`
         ALTER TABLE public.employee_biometric_profiles ALTER COLUMN id TYPE VARCHAR(255);
         ALTER TABLE public.biometric_devices ALTER COLUMN id TYPE VARCHAR(255);
+        ALTER TABLE public.biometric_templates ADD COLUMN IF NOT EXISTS employee_name VARCHAR(255) NULL;
+        ALTER TABLE public.biometric_devices ADD COLUMN IF NOT EXISTS is_hq_station BOOLEAN DEFAULT FALSE;
       `);
     } catch (_) {}
 
@@ -307,6 +310,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
   // ── التقاط وحفظ القوالب البيومترية السحابية (Biometric Vault Ingestion) ──────
   async function parseAndStoreBiometricTemplate(sn, table, rawBody, devObj) {
+    if (!rawBody) return 0;
     const lines = rawBody.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     let savedCount = 0;
 
@@ -319,19 +323,23 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       let majorVer = '10';
       let templateData = '';
 
-      if (line.includes('=')) {
-        const parts = line.split(/[\t\r\n\s]+/);
+      // تنظيف السطر من أي بادئات محتملة مثل FP أو USER FP أو FINGERTMP
+      const cleanLine = line.replace(/^(FP|USER\s+FP|FINGERTMP|BIODATA|TMP)\s+/i, '').trim();
+
+      if (cleanLine.includes('=')) {
+        // نجزئ أولاً بـ TAB (\t) أو الفاصلة للحفاظ على سلامة محتوى Base64
+        const parts = cleanLine.includes('\t') ? cleanLine.split('\t') : cleanLine.split(/\s+/);
         const kv = {};
-        parts.forEach(p => {
+        for (const p of parts) {
           const eqIdx = p.indexOf('=');
           if (eqIdx > 0) {
             const k = p.slice(0, eqIdx).trim().toLowerCase();
             const v = p.slice(eqIdx + 1).trim();
             kv[k] = v;
           }
-        });
+        }
 
-        pin = kv.pin || '';
+        pin = kv.pin || kv.userpin || '';
         fingerId = parseInt(kv.index || kv.fid || kv.fingerid || '0', 10);
         size = parseInt(kv.size || '0', 10);
         valid = parseInt(kv.valid || '1', 10);
@@ -339,17 +347,25 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         majorVer = kv.majorver || '10';
         templateData = kv.tmp || kv.template || '';
       } else {
-        const tokens = line.split(/[\t\s]+/);
+        const tokens = cleanLine.split(/[\t\s]+/);
         if (tokens.length >= 5) {
           pin = tokens[0];
           fingerId = parseInt(tokens[1] || '0', 10);
           size = parseInt(tokens[2] || '0', 10);
           valid = parseInt(tokens[3] || '1', 10);
           templateData = tokens[4];
+        } else if (tokens.length === 3 || tokens.length === 4) {
+          pin = tokens[0];
+          fingerId = parseInt(tokens[1] || '0', 10);
+          templateData = tokens[tokens.length - 1];
         }
       }
 
-      if (!pin || !templateData) continue;
+      pin = String(pin || '').trim();
+      // معالجة وحماية بيانات القالب
+      templateData = String(templateData || '').trim();
+
+      if (!pin || !templateData || templateData.length < 10) continue;
 
       const templateType = (type === 9 || String(table).toUpperCase().includes('FACE')) ? 'FACE' : 'FINGERPRINT';
       const tplId = `tpl_${pin}_${templateType}_${fingerId}`;
@@ -390,10 +406,26 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         if (emp) matchedEmpName = emp.name;
       }
 
+      // مطابقة إضافية مع جدول مستخدمي الجهاز إن لم يتطابق في ملفات الـ HR
+      if (!matchedEmpName) {
+        try {
+          const devUserQ = await db.query(
+            'SELECT display_name, employee_id FROM public.biometric_device_users WHERE device_user_pin = $1 LIMIT 1',
+            [pin]
+          );
+          if (devUserQ.rows?.[0]) {
+            matchedEmpName = devUserQ.rows[0].display_name;
+            if (!matchedEmpId && devUserQ.rows[0].employee_id) {
+              matchedEmpId = devUserQ.rows[0].employee_id;
+            }
+          }
+        } catch {}
+      }
+
       await db.query(
         `INSERT INTO public.biometric_templates 
-         (id, employee_id, device_user_pin, template_type, finger_id, size, valid, major_ver, template_data, source_device_sn, source_branch_id, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP)
+         (id, employee_id, employee_name, device_user_pin, template_type, finger_id, size, valid, major_ver, template_data, source_device_sn, source_branch_id, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP)
          ON CONFLICT (device_user_pin, template_type, finger_id) DO UPDATE SET
            template_data = EXCLUDED.template_data,
            size = EXCLUDED.size,
@@ -402,8 +434,9 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
            source_device_sn = EXCLUDED.source_device_sn,
            source_branch_id = EXCLUDED.source_branch_id,
            employee_id = COALESCE(EXCLUDED.employee_id, biometric_templates.employee_id),
+           employee_name = COALESCE(EXCLUDED.employee_name, biometric_templates.employee_name),
            updated_at = CURRENT_TIMESTAMP`,
-        [tplId, matchedEmpId, pin, templateType, fingerId, size, valid, majorVer, templateData, sn, devObj?.branch_id || null]
+        [tplId, matchedEmpId, matchedEmpName || null, pin, templateType, fingerId, size || templateData.length, valid, majorVer, templateData, sn, devObj?.branch_id || null]
       );
 
       savedCount++;
@@ -411,7 +444,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       io.emit('biometric:template_vaulted', {
         pin,
         employeeId: matchedEmpId,
-        employeeName: matchedEmpName,
+        employeeName: matchedEmpName || `مستخدم ${pin}`,
         templateType,
         fingerId,
         sourceDeviceSn: sn,
@@ -420,6 +453,36 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       });
 
       console.log(`[Biometric Vault] 🧬 تم حفظ قالب بيومتري (${templateType} #${fingerId}) للموظف (${matchedEmpName || pin}) من جهاز ${sn}`);
+
+      // 🏢 التحقق من محطة تسجيل الإدارة المركزية (HQ Enrollment Station):
+      // إذا كان الجهاز هو ماكينة الإدارة (أو كانت هناك عملية تسجيل مركزي معلقة)، يتم تفريغ بصمة الموظف فوراً
+      // من ذاكرة ماكينة الإدارة لتبقى الماكينة محطة تسجيل فقط ولا تحتفظ ببصمات الموظفين محلياً
+      const isHqStation = hqPendingEnrollments.has(`${sn}_${pin}`) || (devObj && (
+        devObj.is_hq_station ||
+        (devObj.branch_name && (devObj.branch_name.includes('إدارة') || devObj.branch_name.includes('رئيسي') || devObj.branch_name.toLowerCase().includes('hq'))) ||
+        (devObj.device_name && (devObj.device_name.includes('إدارة') || devObj.device_name.includes('تسجيل') || devObj.device_name.toLowerCase().includes('hq')))
+      ));
+
+      if (isHqStation) {
+        console.log(`[HQ Enrollment Station] 🧹 تم حفظ القالب بالسحابة بنجاح! جاري تفريغ ذاكرة ماكينة الإدارة (${sn}) للمستخدم (PIN: ${pin}) للحفاظ عليها كمحطة تسجيل فقط...`);
+        setTimeout(() => {
+          const purgeTime = Date.now();
+          queueDeviceCommand(sn, `C:${purgeTime}:DATA DELETE FINGERTMP PIN=${pin}`, 'HQ_PURGE_FP');
+          queueDeviceCommand(sn, `C:${purgeTime + 1}:DATA DELETE BIODATA PIN=${pin}`, 'HQ_PURGE_BIO');
+          queueDeviceCommand(sn, `C:${purgeTime + 2}:DATA DELETE USERINFO PIN=${pin}`, 'HQ_PURGE_USER');
+          hqPendingEnrollments.delete(`${sn}_${pin}`);
+          io.emit('biometric:hq_device_purged', {
+            serialNumber: sn,
+            pin,
+            employeeName: matchedEmpName,
+            message: `تم تفريغ الموظف (PIN: ${pin}) من ماكينة الإدارة بنجاح وبقيت البصمة في الخزنة السحابية للتعميم`
+          });
+        }, 3000);
+      }
+    }
+
+    if (savedCount > 0) {
+      io.emit('biometric:templates_updated', { count: savedCount, serialNumber: sn });
     }
 
     return savedCount;
@@ -693,18 +756,32 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
       const uniquePhones = [...new Set(candidatePhones.map(p => String(p || '').replace(/\D/g, '')).filter(p => p.length >= 9))];
       if (uniquePhones.length > 0) {
-        const adminMsg = [
-          `🔔 *إشعار حضور وانصراف بيومتري لحظي*`,
-          `━━━━━━━━━━━━━━━━━━━━━━`,
-          `👤 *الموظف:* ${punchPayload.employeeName || 'غير معرف'}`,
-          `🏢 *الفرع:* ${punchPayload.branchName || 'الإدارة العامة'}`,
-          `🕒 *الوقت:* ${punchPayload.time} | ${punchPayload.date}`,
-          `📌 *الحركة:* ${actionIcon} *${actionLabel}*`,
-          `🧬 *وسيلة التحقق:* ${verifyArabic}`,
-          `📟 *الماكينة:* ${punchPayload.deviceName || punchPayload.deviceSerial || 'MB20'}`,
-          `━━━━━━━━━━━━━━━━━━━━━━`,
-          `🏛️ _نظام إدارة الصيدليات الموحد_`
-        ].join('\n');
+        let adminMsg = '';
+        if (alertConfig.adminMessageTemplate && alertConfig.adminMessageTemplate.trim()) {
+          adminMsg = alertConfig.adminMessageTemplate
+            .replace(/{employee_name}/g, punchPayload.employeeName || 'غير معرف')
+            .replace(/{branch_name}/g, punchPayload.branchName || 'الإدارة العامة')
+            .replace(/{time}/g, punchPayload.time || '')
+            .replace(/{date}/g, punchPayload.date || '')
+            .replace(/{action}/g, actionLabel)
+            .replace(/{action_icon}/g, actionIcon)
+            .replace(/{verify_type}/g, verifyArabic)
+            .replace(/{device_name}/g, punchPayload.deviceName || punchPayload.deviceSerial || 'MB20')
+            .replace(/{company_name}/g, org.companyName || 'مجموعة الصيدليات');
+        } else {
+          adminMsg = [
+            `🔔 *إشعار حضور وانصراف بيومتري لحظي*`,
+            `━━━━━━━━━━━━━━━━━━━━━━`,
+            `👤 *الموظف:* ${punchPayload.employeeName || 'غير معرف'}`,
+            `🏢 *الفرع:* ${punchPayload.branchName || 'الإدارة العامة'}`,
+            `🕒 *الوقت:* ${punchPayload.time} | ${punchPayload.date}`,
+            `📌 *الحركة:* ${actionIcon} *${actionLabel}*`,
+            `🧬 *وسيلة التحقق:* ${verifyArabic}`,
+            `📟 *الماكينة:* ${punchPayload.deviceName || punchPayload.deviceSerial || 'MB20'}`,
+            `━━━━━━━━━━━━━━━━━━━━━━`,
+            `🏛️ _${org.companyName || 'نظام إدارة الصيدليات الموحد'}_`
+          ].join('\n');
+        }
 
         for (const rawPhone of uniquePhones) {
           let phone = rawPhone;
@@ -768,11 +845,14 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         `GET OPTION FROM: ${sn}`,
         'Stamp=9999',
         `OpStamp=${opStampVal}`,
-        'ErrorDelay=5',
-        'Delay=5',
+        'PhotoStamp=0',
+        'ErrorDelay=1',
+        'Delay=1',
+        'RequestDelay=1',
         'TransTimes=00:00;23:59',
         'TransInterval=1',
-        'TransFlag=1111111111',
+        'TransFlag=TransData AttLog OpLog AttPhoto EnrollUser ChgUser EnrollFP ChgFP FPImag FACE UserPic BioPhoto',
+        'PushOptionsFlag=1',
         'TimeZone=3',
         'Realtime=1',
         'Encrypt=0',
@@ -810,12 +890,29 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       } else if (Buffer.isBuffer(req.body)) {
         rawBody = req.body.toString('utf8');
       } else if (req.body && typeof req.body === 'object') {
-        // في حال تم تحليله عبر form-urlencoded
-        rawBody = Object.keys(req.body)[0] || '';
+        const entries = Object.entries(req.body);
+        if (entries.length === 1 && (!entries[0][1] || entries[0][1] === '')) {
+          rawBody = entries[0][0];
+        } else {
+          rawBody = entries.map(([k, v]) => (v !== undefined && v !== '') ? `${k}=${v}` : k).join('\t');
+          if (entries.some(([k]) => k.includes('\n'))) {
+            rawBody = entries.map(([k, v]) => `${k}=${v}`).join('\n');
+          }
+        }
         if (typeof req.body.data === 'string') rawBody = req.body.data;
       }
 
-      if (table === 'BIODATA' || table === 'FINGERTMP' || table === 'FACETMP') {
+      const isTemplateTable = table === 'BIODATA' || 
+                              table === 'FINGERTMP' || 
+                              table === 'FACETMP' || 
+                              table.includes('TMP') || 
+                              table.includes('TEMPLATE') || 
+                              table.includes('BIODATA') || 
+                              table.includes('USER_FP') ||
+                              rawBody.includes('TMP=') || 
+                              rawBody.includes('FID=');
+
+      if (isTemplateTable) {
         const count = await parseAndStoreBiometricTemplate(sn, table, rawBody, devObj);
         console.log(`[Biometric Manager] 🧬 تم استلام وحفظ ${count} قالب بيومتري من جهاز (SN: ${sn})`);
         return res.status(200).send(`OK: ${count}`);
@@ -828,13 +925,18 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       }
 
       if (table === 'OPERLOG' || table === 'OPLOG' || table === 'OPER_LOG') {
-        console.log(`[Biometric Manager] 📋 استلام سجل العمليات الإدارية (${table}) من جهاز (SN: ${sn})`);
+        const lines = rawBody.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        const count = lines.length || 1;
+        return res.status(200).send(`OK: ${count}`);
+      }
+
+      if (table.toLowerCase() === 'options') {
+        console.log(`[ADMS Options] Received hardware options from ${sn} (len=${rawBody.length})`);
         return res.status(200).send('OK');
       }
 
       if (table !== 'ATTLOG') {
-        // إذا كان جدول العمليات غير معروف
-        console.log(`[ADMS Info] Received table: ${table} from ${sn}`);
+        console.log(`[ADMS Info] Received table: ${table} from ${sn} (len=${rawBody.length})`);
         return res.status(200).send('OK');
       }
 
@@ -1174,6 +1276,9 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         );
 
         if (dbCmds.rows && dbCmds.rows.length > 0) {
+          // تفريغ أي أوامر متطابقة في الذاكرة لتجنب التكرار وتضارب الأوامر
+          deviceCommandQueues.delete(sn);
+
           const cmdIds = dbCmds.rows.map(r => r.id);
           await db.query(
             `UPDATE public.biometric_device_commands 
@@ -1297,23 +1402,41 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       } else if (Buffer.isBuffer(req.body)) {
         rawBody = req.body.toString('utf8');
       } else if (req.body && typeof req.body === 'object') {
-        rawBody = Object.keys(req.body)[0] || '';
+        const entries = Object.entries(req.body);
+        if (entries.length === 1 && (!entries[0][1] || entries[0][1] === '')) {
+          rawBody = entries[0][0];
+        } else {
+          rawBody = entries.map(([k, v]) => (v !== undefined && v !== '') ? `${k}=${v}` : k).join('\t');
+          if (entries.some(([k]) => k.includes('\n'))) {
+            rawBody = entries.map(([k, v]) => `${k}=${v}`).join('\n');
+          }
+        }
         if (typeof req.body.data === 'string') rawBody = req.body.data;
       }
 
       console.log(`[Biometric Manager] 📥 [querydata] استلام بيانات الجدول (${tablename || 'DEFAULT'}) من جهاز ${sn} (حجم: ${rawBody.length} بايت)`);
 
-      // إذا كانت البيانات تخص المستخدمين
-      if (tablename.includes('USER') || tablename === 'USERINFO' || rawBody.includes('PIN=') || rawBody.includes('Pin=')) {
-        const count = await parseAndStoreDeviceUsers(sn, rawBody, devObj);
-        console.log(`[Biometric Manager] 👥 [querydata] تم استلام وحفظ ${count} مستخدم بنجاح من جهاز ${sn}`);
+      // إذا كانت البيانات تخص القوالب الحيوية (فحص أولاً قبل المستخدمين لعدم تداخل PIN=)
+      const isTemplateData = tablename.includes('TMP') || 
+                             tablename.includes('TEMPLATE') || 
+                             tablename.includes('BIODATA') || 
+                             tablename.includes('FP') || 
+                             tablename.includes('FINGER') || 
+                             rawBody.includes('TMP=') || 
+                             rawBody.includes('Tmp=') || 
+                             rawBody.includes('FID=') || 
+                             rawBody.includes('FingerID=');
+
+      if (isTemplateData) {
+        const count = await parseAndStoreBiometricTemplate(sn, tablename || 'FINGERTMP', rawBody, devObj);
+        console.log(`[Biometric Vault] 🧬 [querydata] تم استلام وحفظ ${count} قالب بيومتري من جهاز ${sn}`);
         return res.status(200).send(`OK: ${count}`);
       }
 
-      // إذا كانت البيانات تخص القوالب الحيوية
-      if (tablename.includes('TMP') || tablename.includes('TEMPLATE') || tablename.includes('BIODATA')) {
-        const count = await parseAndStoreBiometricTemplate(sn, tablename, rawBody, devObj);
-        console.log(`[Biometric Vault] 🧬 [querydata] تم استلام وحفظ ${count} قالب بيومتري من جهاز ${sn}`);
+      // إذا كانت البيانات تخص المستخدمين
+      if (tablename.includes('USER') || tablename === 'USERINFO' || rawBody.includes('PIN=') || rawBody.includes('Pin=') || rawBody.includes('Name=')) {
+        const count = await parseAndStoreDeviceUsers(sn, rawBody, devObj);
+        console.log(`[Biometric Manager] 👥 [querydata] تم استلام وحفظ ${count} مستخدم بنجاح من جهاز ${sn}`);
         return res.status(200).send(`OK: ${count}`);
       }
 
@@ -1363,6 +1486,16 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
   // ══════════════════════════════════════════════════════════════════════════════
   // 🚀 مسارات التحكم البرمجي للواجهة الأمامية (Admin REST API)
   // ══════════════════════════════════════════════════════════════════════════════
+
+  // دالة مساعدة عامة لفك واستخراج محتوى الطلب بأمان سواء كان كائناً أو نصياً
+  function parseReqBody(req) {
+    if (!req.body) return {};
+    if (typeof req.body === 'object') return req.body;
+    if (typeof req.body === 'string') {
+      try { return JSON.parse(req.body); } catch { return {}; }
+    }
+    return {};
+  }
 
   // 1. قائمة الأجهزة وحالتها
   app.get('/api/biometrics/devices', async (req, res) => {
@@ -1513,19 +1646,131 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     }
   });
 
+  // 1.4.2 إلغاء وتفريغ الأوامر المعلقة وفك تعليق الماكينة (Cancel & Clear Pending / Stuck Commands)
+  app.post('/api/biometrics/devices/:serialNumber/clear-commands', async (req, res) => {
+    try {
+      const { serialNumber } = req.params;
+      const isAll = !serialNumber || serialNumber.toLowerCase() === 'all';
+
+      // 1. تحديث كافة الأوامر المعلقة أو العالقة أو التي واجهت أخطاء إلى CANCELLED
+      let cancelledCount = 0;
+      if (isAll) {
+        const updRes = await db.query(
+          `UPDATE public.biometric_device_commands 
+           SET status = 'CANCELLED', 
+               response_payload = COALESCE(response_payload, '') || ' [تم الإلغاء والأرشفة يدوياً وفك تعليق الجهاز]', 
+               acknowledged_at = CURRENT_TIMESTAMP 
+           WHERE status IN ('PENDING', 'SENT', 'FAILED')
+           RETURNING id, device_serial, command_type`
+        );
+        cancelledCount = (updRes.rows || []).length;
+        deviceCommandQueues.clear();
+        hqPendingEnrollments.clear();
+      } else {
+        const updRes = await db.query(
+          `UPDATE public.biometric_device_commands 
+           SET status = 'CANCELLED', 
+               response_payload = COALESCE(response_payload, '') || ' [تم الإلغاء والأرشفة يدوياً وفك تعليق الجهاز]', 
+               acknowledged_at = CURRENT_TIMESTAMP 
+           WHERE device_serial = $1 AND status IN ('PENDING', 'SENT', 'FAILED')
+           RETURNING id, device_serial, command_type`,
+          [serialNumber]
+        );
+        cancelledCount = (updRes.rows || []).length;
+        deviceCommandQueues.delete(serialNumber);
+        for (const key of hqPendingEnrollments.keys()) {
+          if (key.startsWith(`${serialNumber}_`)) hqPendingEnrollments.delete(key);
+        }
+      }
+
+      // 2. إرسال أمر إلغاء وتفريغ فيزيائي للماكينة (CANCEL + CHECK) لإخراجها من أي وضع تعليق
+      const now = Date.now();
+      if (!isAll) {
+        queueDeviceCommand(serialNumber, `C:${now}:CANCEL`, 'DEVICE_CANCEL');
+        queueDeviceCommand(serialNumber, `C:${now + 1}:CHECK`, 'DEVICE_CHECK');
+      } else {
+        const devsQ = await db.query('SELECT serial_number FROM public.biometric_devices WHERE is_active = TRUE');
+        (devsQ.rows || []).forEach((d, idx) => {
+          queueDeviceCommand(d.serial_number, `C:${now + (idx * 2)}:CANCEL`, 'DEVICE_CANCEL');
+          queueDeviceCommand(d.serial_number, `C:${now + (idx * 2) + 1}:CHECK`, 'DEVICE_CHECK');
+        });
+      }
+
+      // 3. بث التحديث عبر Socket.io
+      io.emit('biometric:commands_cleared', {
+        serialNumber: isAll ? 'ALL' : serialNumber,
+        cancelledCount,
+        timestamp: new Date().toISOString()
+      });
+
+      console.log(`[Biometric Manager] 🧹 تم إلغاء وتفريغ ${cancelledCount} أمر معلق/عالق للجهاز (${serialNumber}) وإرسال إشارة فك التعليق للماكينة.`);
+
+      res.json({
+        success: true,
+        message: `تم بنجاح إلغاء وتفريغ (${cancelledCount}) أمر معلق وفك تعليق ماكينة البصمة (${isAll ? 'كافة الأجهزة' : serialNumber})`,
+        cancelledCount
+      });
+    } catch (err) {
+      console.error('[Biometric Clear Commands Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.4.3 استعلام سجل أوامر الجهاز
+  app.get('/api/biometrics/devices/:serialNumber/commands', async (req, res) => {
+    try {
+      const { serialNumber } = req.params;
+      const isAll = !serialNumber || serialNumber.toLowerCase() === 'all';
+      let rows = [];
+      if (isAll) {
+        const q = await db.query(
+          `SELECT id, device_serial, command_type, status, command_text, response_code, response_payload, created_at, acknowledged_at 
+           FROM public.biometric_device_commands 
+           ORDER BY id DESC LIMIT 50`
+        );
+        rows = q.rows || [];
+      } else {
+        const q = await db.query(
+          `SELECT id, device_serial, command_type, status, command_text, response_code, response_payload, created_at, acknowledged_at 
+           FROM public.biometric_device_commands 
+           WHERE device_serial = $1 
+           ORDER BY id DESC LIMIT 50`,
+          [serialNumber]
+        );
+        rows = q.rows || [];
+      }
+      res.json({ success: true, commands: rows });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // 1.5 سحب قوالب البصمات من ذاكرة الجهاز إلى الخزنة السحابية (Pull Templates)
   app.post('/api/biometrics/devices/:serialNumber/pull-templates', async (req, res) => {
     try {
       const { serialNumber } = req.params;
-      const cmd1 = `C:${Date.now()}:DATA QUERY USERINFO`;
-      const cmd2 = `C:${Date.now() + 1}:DATA QUERY FINGERTMP`;
-      const cmd3 = `C:${Date.now() + 2}:DATA QUERY BIODATA Type=1`;
-      queueDeviceCommand(serialNumber, cmd1);
-      queueDeviceCommand(serialNumber, cmd2);
-      queueDeviceCommand(serialNumber, cmd3);
+      const body = parseReqBody(req);
+      const pin = (req.query.pin || body.pin || '').toString().trim();
+      const now = Date.now();
+
+      if (pin) {
+        // استعلام قوالب بصمة موظف محدد + بياناته
+        queueDeviceCommand(serialNumber, `C:${now}:DATA QUERY USERINFO PIN=${pin}`, 'QUERY_USER_PIN');
+        queueDeviceCommand(serialNumber, `C:${now + 1}:DATA QUERY FINGERTMP PIN=${pin}`, 'QUERY_FP_PIN');
+        queueDeviceCommand(serialNumber, `C:${now + 2}:DATA QUERY FINGERTMP`, 'QUERY_FP_ALL');
+        console.log(`[Biometric Manager] 📥 طلب سحب قوالب البصمة للموظف (PIN: ${pin}) من جهاز (${serialNumber})`);
+      } else {
+        // استعلام شامل لكافة القوالب والمستخدمين في الجهاز
+        queueDeviceCommand(serialNumber, `C:${now}:DATA QUERY USERINFO`, 'QUERY_USER_ALL');
+        queueDeviceCommand(serialNumber, `C:${now + 1}:DATA QUERY FINGERTMP`, 'QUERY_FP_ALL');
+        console.log(`[Biometric Manager] 📥 طلب سحب كافة قوالب البصمة من جهاز (${serialNumber})`);
+      }
+
       res.json({
         success: true,
-        message: `تم إرسال أمر سحب واستيراد كافة قوالب البصمات من جهاز (${serialNumber}) إلى الخزنة السحابية`
+        message: pin
+          ? `تم إرسال أمر سحب واستيراد قالب البصمة للمستخدم (${pin}) للخزنة السحابية بنجاح`
+          : `تم إرسال أوامر سحب كافة القوالب الحيوية من جهاز (${serialNumber}) للخزنة السحابية بنجاح`
       });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
@@ -1676,6 +1921,13 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       // نمط التحقق: إذا كان تسجيل وجه فقط (4) أو كلاهما/افتراضي (0)
       const verifyMode = enrollmentType === 'face' ? 4 : 0;
 
+      // تسجيل العملية في قائمة التسجيل المركزي المعلقة لتفريغ الماكينة تلقائياً فور وصول القالب
+      hqPendingEnrollments.set(`${hqDeviceSerial}_${pin}`, {
+        employeeId,
+        employeeName: emp.name,
+        createdAt: Date.now()
+      });
+
       // 1. دفع المستخدم لماكينة الإدارة
       const cmdUser = `C:${Date.now()}:DATA UPDATE USERINFO PIN=${pin}\tName=${screenName}\tPri=0\tPasswd=\tCard=\tGrp=1\tTZ=0000000100000000\tVerify=${verifyMode}`;
       queueDeviceCommand(hqDeviceSerial, cmdUser);
@@ -1741,7 +1993,258 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
          LEFT JOIN public.biometric_devices d ON d.serial_number = t.source_device_sn
          ORDER BY t.updated_at DESC`
       );
-      res.json({ success: true, templates: q.rows || [] });
+      const rows = q.rows || [];
+      let employees = [];
+      try {
+        const state = await getSettingsFromStorage(STORAGE_KEY);
+        employees = Array.isArray(state?.employees) ? state.employees : [];
+      } catch {}
+
+      const enriched = rows.map(t => {
+        const emp = employees.find(e => String(e.id) === String(t.employee_id || t.profile_emp_id) || String(e.code) === String(t.device_user_pin));
+        return {
+          ...t,
+          employee_name: t.employee_name || emp?.name || (t.device_user_pin ? `موظف PIN: ${t.device_user_pin}` : 'غير معروف'),
+          employee_id: t.employee_id || t.profile_emp_id || emp?.id || null
+        };
+      });
+
+      res.json({ success: true, templates: enriched });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.8.1 تعديل وتخصيص قالب بيومتري في الخزنة السحابية
+  app.put('/api/biometrics/templates/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { employeeId, employeeName, deviceUserPin } = parseReqBody(req);
+
+      const upd = await db.query(
+        `UPDATE public.biometric_templates 
+         SET employee_id = COALESCE($1, employee_id),
+             employee_name = COALESCE($2, employee_name),
+             device_user_pin = COALESCE($3, device_user_pin),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $4
+         RETURNING *`,
+        [employeeId || null, employeeName || null, deviceUserPin || null, id]
+      );
+
+      if (upd.rows?.length === 0) {
+        return res.status(404).json({ success: false, error: 'القالب غير موجود في الخزنة' });
+      }
+
+      if (employeeId && deviceUserPin) {
+        await db.query(
+          `INSERT INTO public.employee_biometric_profiles (id, employee_id, device_user_pin, notes, updated_at)
+           VALUES ($1, $2, $3, 'ربط من الخزنة السحابية', CURRENT_TIMESTAMP)
+           ON CONFLICT (employee_id) DO UPDATE SET device_user_pin = EXCLUDED.device_user_pin, updated_at = CURRENT_TIMESTAMP`,
+          [`prof_${employeeId}`, String(employeeId), String(deviceUserPin)]
+        );
+      }
+
+      io.emit('biometric:templates_updated', { count: 1 });
+      res.json({ success: true, message: 'تم تحديث بيانات القالب البيومتري بنجاح', template: upd.rows[0] });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.8.2 حذف قالب بيومتري من الخزنة السحابية
+  app.delete('/api/biometrics/templates/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const del = await db.query('DELETE FROM public.biometric_templates WHERE id = $1 RETURNING *', [id]);
+      if (del.rows?.length === 0) {
+        return res.status(404).json({ success: false, error: 'القالب غير موجود أو تم حذفه مسبقاً' });
+      }
+      io.emit('biometric:templates_updated', { count: 0 });
+      res.json({ success: true, message: 'تم حذف القالب من الخزنة السحابية بنجاح' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.8.3 إرسال وتوزيع قالب بيومتري محدد إلى جهاز فرع معين أو عدة أجهزة
+  app.post('/api/biometrics/templates/:id/dispatch', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { targetDeviceSerials } = parseReqBody(req);
+      if (!Array.isArray(targetDeviceSerials) || targetDeviceSerials.length === 0) {
+        return res.status(400).json({ success: false, error: 'يرجى تحديد جهاز أو فرع واحد على الأقل للترحيل' });
+      }
+
+      const tplQ = await db.query('SELECT * FROM public.biometric_templates WHERE id = $1', [id]);
+      if (tplQ.rows?.length === 0) {
+        return res.status(404).json({ success: false, error: 'القالب البيومتري غير موجود' });
+      }
+      const tpl = tplQ.rows[0];
+      const pin = tpl.device_user_pin;
+
+      let displayName = tpl.employee_name;
+      if (!displayName && tpl.employee_id) {
+        try {
+          const state = await getSettingsFromStorage(STORAGE_KEY);
+          const emp = (state?.employees || []).find(e => String(e.id) === String(tpl.employee_id));
+          if (emp) displayName = emp.name;
+        } catch {}
+      }
+      if (!displayName) displayName = `User ${pin}`;
+      const cleanName = displayName.replace(/[\r\n\t]/g, ' ').trim().slice(0, 24);
+
+      let dispatchedCount = 0;
+      for (const targetSn of targetDeviceSerials) {
+        const now = Date.now();
+        const cmdUser = `C:${now}:DATA UPDATE USERINFO PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=\tGrp=1\tTZ=0000000100000000\tVerify=0`;
+        queueDeviceCommand(targetSn, cmdUser, 'USER_DISPATCH_SINGLE');
+
+        if (tpl.template_type === 'FINGERPRINT') {
+          const cmdBio = `C:${now + 1}:DATA UPDATE BIODATA Pin=${pin}\tNo=0\tIndex=${tpl.finger_id}\tValid=1\tDuress=0\tType=1\tMajorVer=${tpl.major_ver || '10'}\tMinorVer=0\tFormat=0\tTmp=${tpl.template_data}`;
+          queueDeviceCommand(targetSn, cmdBio, 'BIO_DISPATCH_SINGLE');
+          const cmdFp = `C:${now + 2}:DATA UPDATE FINGERTMP PIN=${pin}\tFID=${tpl.finger_id}\tSize=${tpl.size || tpl.template_data.length}\tValid=1\tTMP=${tpl.template_data}`;
+          queueDeviceCommand(targetSn, cmdFp, 'FP_DISPATCH_SINGLE');
+        } else if (tpl.template_type === 'FACE') {
+          const cmdFace = `C:${now + 1}:DATA UPDATE BIODATA Pin=${pin}\tNo=0\tIndex=0\tValid=1\tDuress=0\tType=9\tMajorVer=7\tMinorVer=0\tFormat=0\tTmp=${tpl.template_data}`;
+          queueDeviceCommand(targetSn, cmdFace, 'FACE_DISPATCH_SINGLE');
+        }
+
+        await db.query(
+          `INSERT INTO public.biometric_device_users 
+           (device_serial, employee_id, device_user_pin, display_name, privilege, verify_mode, is_active, sync_status, updated_at)
+           VALUES ($1, $2, $3, $4, 0, 0, TRUE, 'DISPATCHED', CURRENT_TIMESTAMP)
+           ON CONFLICT (device_serial, device_user_pin) DO UPDATE SET
+             employee_id = EXCLUDED.employee_id,
+             display_name = EXCLUDED.display_name,
+             is_active = TRUE,
+             updated_at = CURRENT_TIMESTAMP`,
+          [targetSn, tpl.employee_id || null, String(pin), cleanName]
+        );
+
+        await db.query(
+          `INSERT INTO public.biometric_dispatch_logs
+           (employee_id, employee_name, device_user_pin, target_device_serial, included_biometrics, templates_count, status, dispatched_by)
+           VALUES ($1, $2, $3, $4, TRUE, 1, 'QUEUED', 'ADMIN')`,
+          [tpl.employee_id || null, cleanName, String(pin), targetSn]
+        );
+
+        dispatchedCount++;
+      }
+
+      res.json({
+        success: true,
+        message: `تم إرسال القالب البيومتري للموظف (${cleanName}) بنجاح إلى (${dispatchedCount}) جهاز/فرع`,
+        dispatchedCount
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.8.4 إعادة تسجيل القالب البيومتري على ماكينة معينة (مثل ماكينة الإدارة)
+  app.post('/api/biometrics/templates/:id/re-enroll', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { targetDeviceSerial, fingerId } = parseReqBody(req);
+      const tplQ = await db.query('SELECT * FROM public.biometric_templates WHERE id = $1', [id]);
+      if (tplQ.rows?.length === 0) {
+        return res.status(404).json({ success: false, error: 'القالب غير موجود' });
+      }
+      const tpl = tplQ.rows[0];
+      const sn = targetDeviceSerial || tpl.source_device_sn;
+      if (!sn) {
+        return res.status(400).json({ success: false, error: 'يرجى تحديد الماكينة المستهدفة لإعادة التسجيل' });
+      }
+
+      // إلغاء أي أوامر سابقة معلقة أو عالقة لنفس الجهاز لضمان نقاء طابور التنفيذ
+      await db.query(
+        `UPDATE public.biometric_device_commands 
+         SET status = 'CANCELLED', response_payload = 'تم التخطي لبدء أمر إعادة تسجيل جديد'
+         WHERE device_serial = $1 AND status IN ('PENDING', 'SENT')`,
+        [sn]
+      );
+      deviceCommandQueues.delete(sn);
+
+      // إرسال المستخدم للماكينة أولاً للتأكد من وجوده في ذاكرتها
+      const empQ = await db.query('SELECT * FROM public.employee_biometric_profiles WHERE employee_id = $1 OR device_user_pin = $2', [tpl.employee_id, tpl.device_user_pin]);
+      const prof = empQ.rows?.[0];
+      const displayName = tpl.employee_name || prof?.device_user_name || `User ${tpl.device_user_pin}`;
+      const cleanName = transliterateArabicToEnglish(displayName) || (displayName || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 24);
+
+      const now = Date.now();
+      const fid = (fingerId !== undefined && fingerId !== null && fingerId !== '') ? Number(fingerId) : (tpl.finger_id ?? 0);
+
+      // تسجيل في hqPendingEnrollments ليتم التقاط البصمة فور تسجيلها وحفظها بالخزنة السحابية
+      hqPendingEnrollments.set(`${sn}_${tpl.device_user_pin}`, {
+        employeeId: tpl.employee_id,
+        employeeName: cleanName,
+        fid,
+        templateType: tpl.template_type,
+        reEnroll: true,
+        timestamp: Date.now()
+      });
+
+      // 1. التأكد من حفظ وتحديث المستخدم في ذاكرة الماكينة
+      queueDeviceCommand(
+        sn,
+        `C:${now}:DATA UPDATE USERINFO PIN=${tpl.device_user_pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=\tGrp=1\tTZ=0000000100000000\tVerify=0`,
+        'RE_ENROLL_USER'
+      );
+
+      if (tpl.template_type === 'FACE') {
+        // حذف قالب الوجه السابق أولاً من ذاكرة الجهاز لتجنب رفض الماكينة
+        queueDeviceCommand(sn, `C:${now + 1}:DATA DELETE BIODATA PIN=${tpl.device_user_pin}\tType=9`, 'DELETE_OLD_FACE');
+        queueDeviceCommand(sn, `C:${now + 2}:DATA DELETE BIODATA PIN=${tpl.device_user_pin}\tType=2`, 'DELETE_OLD_FACE');
+        // إرسال أمر تفعيل كاميرا الوجه
+        queueDeviceCommand(sn, `C:${now + 3}:ENROLL_BIO PIN=${tpl.device_user_pin} TYPE=9 RETRY=3 OVERWRITE=1`, 'RE_ENROLL_FACE');
+      } else {
+        // حذف بصمة الإصبع الحالية من ذاكرة الماكينة لمنع خطأ Return=2 (بصمة مسجلة مسبقاً)
+        queueDeviceCommand(sn, `C:${now + 1}:DATA DELETE FINGERTMP PIN=${tpl.device_user_pin}\tFID=${fid}`, 'DELETE_OLD_FP');
+        queueDeviceCommand(sn, `C:${now + 2}:DATA DELETE BIODATA PIN=${tpl.device_user_pin}\tIndex=${fid}`, 'DELETE_OLD_BIO');
+        // أمر فتح الحساس بصيغة ZKTeco Push SDK المعتمدة (مسافات بين المعاملات)
+        queueDeviceCommand(sn, `C:${now + 3}:ENROLL_FP PIN=${tpl.device_user_pin} FID=${fid} RETRY=3 OVERWRITE=1`, 'RE_ENROLL_FP');
+      }
+
+      // بث حدث إعادة التسجيل عبر Socket.io
+      io.emit('biometric:re_enroll_started', {
+        serialNumber: sn,
+        pin: tpl.device_user_pin,
+        employeeName: cleanName,
+        fingerId: fid,
+        templateType: tpl.template_type
+      });
+
+      res.json({
+        success: true,
+        message: `تم بنجاح إرسال أمر فتح الحساس لإعادة تسجيل البصمة على الماكينة (${sn}) للموظف (${cleanName}). يرجى وضع الإصبع على الحساس 3 مرات للتسجيل.`
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.8.5 مزامنة وتحديث شامل للخزنة السحابية من كافة الأجهزة المتصلة
+  app.post('/api/biometrics/sync-vault', async (req, res) => {
+    try {
+      const devsQ = await db.query('SELECT serial_number FROM public.biometric_devices WHERE is_active = TRUE');
+      const serials = (devsQ.rows || []).map(r => r.serial_number);
+      const now = Date.now();
+
+      serials.forEach((sn, idx) => {
+        queueDeviceCommand(sn, `C:${now + (idx * 10)}:CHECK`, 'SYNC_CHECK');
+        queueDeviceCommand(sn, `C:${now + (idx * 10) + 1}:DATA QUERY FINGERTMP`, 'QUERY_FP');
+        queueDeviceCommand(sn, `C:${now + (idx * 10) + 2}:DATA QUERY USERINFO`, 'QUERY_USER');
+      });
+
+      const countQ = await db.query('SELECT COUNT(*) FROM public.biometric_templates');
+      const totalCount = parseInt(countQ.rows?.[0]?.count || '0', 10);
+
+      res.json({
+        success: true,
+        message: `تم إرسال أوامر تحديث ومزامنة البصمات لكافة الأجهزة (${serials.length} جهاز). جاري سحب وتحديث القوالب لحظياً...`,
+        totalVaultedTemplates: totalCount
+      });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -2039,16 +2542,6 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     }
   });
 
-  // دالة مساعدة لفك واستخراج محتوى الطلب بأمان سواء كان كائناً أو نصياً
-  const parseReqBody = (req) => {
-    if (!req.body) return {};
-    if (typeof req.body === 'object') return req.body;
-    if (typeof req.body === 'string') {
-      try { return JSON.parse(req.body); } catch { return {}; }
-    }
-    return {};
-  };
-
   // 11. تحديث مستخدم على جهاز البصمة (الاسم، الصلاحية، نمط التوثيق، الباسورد)
   app.post('/api/biometrics/devices/:serialNumber/users/update', async (req, res) => {
     try {
@@ -2086,31 +2579,64 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     }
   });
 
-  // 12. مسح مستخدم من ذاكرة جهاز البصمة ومن قاعدة البيانات
+  // 12. مسح مستخدم أو بصمة محددة من ذاكرة جهاز البصمة ومن قاعدة البيانات
   const handleDeleteDeviceUser = async (req, res) => {
     try {
       const { serialNumber } = req.params;
       const body = parseReqBody(req);
       const pin = body.pin || req.params.pin;
+      const { deleteScope = 'full_user', fingerId } = body;
       if (!pin) return res.status(400).json({ success: false, error: 'رقم الـ PIN مطلوب' });
 
-      // أوامر مسح شاملة لجميع صيغ ZKTeco في الماكينة
-      queueDeviceCommand(serialNumber, `C:${Date.now()}:DATA DELETE USERINFO PIN=${pin}`, 'USER_DELETE');
-      queueDeviceCommand(serialNumber, `C:${Date.now() + 1}:DATA DELETE FINGERTMP PIN=${pin}`, 'FP_DELETE');
-      queueDeviceCommand(serialNumber, `C:${Date.now() + 2}:DATA DELETE BIODATA Pin=${pin}`, 'BIO_DELETE');
-      queueDeviceCommand(serialNumber, `C:${Date.now() + 3}:DELETE USER ${pin}`, 'USER_DELETE_RAW');
+      const now = Date.now();
+      if (deleteScope === 'single_finger' && fingerId !== undefined && fingerId !== null && fingerId !== '') {
+        // حذف بصمة إصبع محدد فقط من ذاكرة الماكينة
+        queueDeviceCommand(serialNumber, `C:${now}:DATA DELETE FINGERTMP PIN=${pin}\tFID=${fingerId}`, 'FP_DELETE_SINGLE');
+        queueDeviceCommand(serialNumber, `C:${now + 1}:DATA DELETE BIODATA Pin=${pin}\tIndex=${fingerId}`, 'BIO_DELETE_SINGLE');
 
-      // مسح قطعي ونهائي من قاعدة البيانات لكي لا يظهر مجدداً في الشاشة أو الذاكرة
+        // حذف القالب المقابل من الخزنة
+        await db.query(
+          `DELETE FROM public.biometric_templates 
+           WHERE (device_user_pin = $1 OR trim(leading '0' from device_user_pin) = trim(leading '0' from $1)) 
+             AND finger_id = $2`,
+          [String(pin), Number(fingerId)]
+        );
+
+        io.emit('biometric:device_users_updated', { serialNumber, pin, deletedFingerId: fingerId });
+        return res.json({ success: true, message: `تم إرسال أمر مسح بصمة الإصبع #${fingerId} للموظف (${pin}) من الماكينة بنجاح` });
+      }
+
+      if (deleteScope === 'all_fingers') {
+        // حذف كافة بصمات الموظف فقط مع الإبقاء على اسمه وبياناته على الماكينة
+        queueDeviceCommand(serialNumber, `C:${now}:DATA DELETE FINGERTMP PIN=${pin}`, 'FP_DELETE_ALL');
+        queueDeviceCommand(serialNumber, `C:${now + 1}:DATA DELETE BIODATA Pin=${pin}`, 'BIO_DELETE_ALL');
+
+        // حذف قوالب الموظف من الخزنة
+        await db.query(
+          `DELETE FROM public.biometric_templates 
+           WHERE device_user_pin = $1 OR trim(leading '0' from device_user_pin) = trim(leading '0' from $1)`,
+          [String(pin)]
+        );
+
+        io.emit('biometric:device_users_updated', { serialNumber, pin, allFingersDeleted: true });
+        return res.json({ success: true, message: `تم إرسال أمر مسح كافة بصمات الأصابع للموظف (${pin}) مع الإبقاء على حسابه في الماكينة` });
+      }
+
+      // الحذف الشامل للمستخدم وبصماته بالكامل
+      queueDeviceCommand(serialNumber, `C:${now}:DATA DELETE USERINFO PIN=${pin}`, 'USER_DELETE');
+      queueDeviceCommand(serialNumber, `C:${now + 1}:DATA DELETE FINGERTMP PIN=${pin}`, 'FP_DELETE');
+      queueDeviceCommand(serialNumber, `C:${now + 2}:DATA DELETE BIODATA Pin=${pin}`, 'BIO_DELETE');
+      queueDeviceCommand(serialNumber, `C:${now + 3}:DELETE USER ${pin}`, 'USER_DELETE_RAW');
+
       await db.query(
         `DELETE FROM public.biometric_device_users 
          WHERE device_serial = $1 AND (device_user_pin = $2 OR trim(leading '0' from device_user_pin) = trim(leading '0' from $2))`,
         [serialNumber, String(pin)]
       );
 
-      // بث تحديث فوري عبر Socket.io لكافة شاشات الإدارة المفتوحة
       io.emit('biometric:device_users_updated', { serialNumber, deletedPin: pin });
 
-      res.json({ success: true, message: `تم مسح المستخدم (${pin}) بنجاح من الماكينة وقاعدة بيانات النظام` });
+      res.json({ success: true, message: `تم مسح المستخدم (${pin}) وكافة بصماته بنجاح من الماكينة وقاعدة بيانات النظام` });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -2257,16 +2783,54 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     try {
       const { serialNumber } = req.params;
       const { wallpaperType = 'custom', logoUrl = '' } = parseReqBody(req);
+      const now = Date.now();
 
-      // إرسال أوامر ZKTeco لتفعيل وتعيين الشعار والخلفية
-      queueDeviceCommand(serialNumber, `C:${Date.now()}:SET OPTIONS ~DeviceLogo=1\tDisplayLogo=1\t~ShowLogo=1\tPictureShow=1`, 'SET_WALLPAPER');
+      // خريطة التنسيقات لشاشة ماكينة ZKTeco TFT Color
+      let themeId = 2;
+      let brandName = 'Elite Pharmacy';
+      let picShow = 1;
+      let dispLogo = 1;
+
+      if (wallpaperType === 'luxury_pharmacy') {
+        themeId = 2;
+        brandName = 'Elite Pharmacy';
+        picShow = 1;
+        dispLogo = 1;
+      } else if (wallpaperType === 'medical_emblem') {
+        themeId = 1;
+        brandName = 'Medical Care';
+        picShow = 1;
+        dispLogo = 1;
+      } else if (wallpaperType === 'corporate_clean') {
+        themeId = 0;
+        brandName = 'Smart HR';
+        picShow = 0;
+        dispLogo = 1;
+      } else {
+        themeId = 2;
+        brandName = 'PharmaCare';
+        picShow = 1;
+        dispLogo = 1;
+      }
+
+      // إرسال أمر ضبط الإعدادات مع اسم الصيدلية وتحديث الثيم والشعار
+      queueDeviceCommand(
+        serialNumber,
+        `C:${now}:SET OPTIONS ~DeviceName=${brandName}\tTheme=${themeId}\tDisplayLogo=${dispLogo}\t~OSD=1\tPictureShow=${picShow}\t~DeviceLogo=1`,
+        'SET_WALLPAPER'
+      );
+      // أمر إعادة تحميل الإعدادات لإجبار شاشة TFT على تطبيق التغيير فوراً دون ريستارت
+      queueDeviceCommand(serialNumber, `C:${now + 1}:RELOAD OPTIONS`, 'RELOAD_OPTIONS');
       
       await db.query(
         `UPDATE public.biometric_devices SET updated_at = CURRENT_TIMESTAMP WHERE serial_number = $1`,
         [serialNumber]
       );
 
-      res.json({ success: true, message: 'تم إرسال أمر تحديث خلفية وشعار شاشة الماكينة بنجاح' });
+      res.json({ 
+        success: true, 
+        message: `تم إرسال أمر تطبيق المظهر (${brandName} - Theme ${themeId}) وتحديث شاشة الماكينة لحظياً بنجاح` 
+      });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -2277,24 +2841,29 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     try {
       const { serialNumber } = req.params;
       const { testType = 'voice', pin = '1' } = parseReqBody(req);
+      const now = Date.now();
 
-      if (testType === 'voice') {
-        // اختبار النطق الصوتي والسماعة (شكراً لك / حاول مرة أخرى)
-        queueDeviceCommand(serialNumber, `C:${Date.now()}:VOICE 1`, 'TEST_VOICE_1');
-        queueDeviceCommand(serialNumber, `C:${Date.now() + 1}:VOICE 2`, 'TEST_VOICE_2');
+      if (testType === 'voice' || testType === 'voice_thankyou') {
+        // فحص مكبر الصوت والسماعة (نغمة صوتية ترحيبية "شكراً لك" دون أي إعادة تشغيل عتادية)
+        queueDeviceCommand(serialNumber, `C:${now}:CONTROL DEVICE 030101`, 'TEST_VOICE');
       } else if (testType === 'sensor') {
-        // اختبار الحساس الحيوي للبصمة والوجه
-        queueDeviceCommand(serialNumber, `C:${Date.now()}:CHECK`, 'TEST_CHECK');
-        queueDeviceCommand(serialNumber, `C:${Date.now() + 1}:TEST_FP`, 'TEST_FP');
+        // فحص حساس البصمة (إضاءة الحساس الضوئي الأخضر وتفعيل قراءة الإصبع)
+        queueDeviceCommand(serialNumber, `C:${now}:CHECK`, 'TEST_CHECK');
+        queueDeviceCommand(serialNumber, `C:${now + 1}:ENROLL_FP PIN=${pin || '1'} FID=9`, 'TEST_SENSOR');
       } else if (testType === 'lcd') {
-        // اختبار إضاءة الشاشة والألوان
-        queueDeviceCommand(serialNumber, `C:${Date.now()}:TEST_LCD`, 'TEST_LCD');
+        // فحص وتحديث شاشة العرض والألوان LCD
+        queueDeviceCommand(serialNumber, `C:${now}:SET OPTIONS ~DeviceName=صيدلية النخبة\tTheme=2\tDisplayLogo=1\t~OSD=1`, 'TEST_LCD');
+        queueDeviceCommand(serialNumber, `C:${now + 1}:RELOAD OPTIONS`, 'TEST_LCD_RELOAD');
+      } else if (testType === 'ping') {
+        // فحص الاتصال الفوري ومزامنة التوقيت
+        queueDeviceCommand(serialNumber, `C:${now}:CHECK`, 'TEST_PING');
+        io.emit('biometric:device_ping', { serialNumber, timestamp: new Date().toISOString() });
       } else if (testType === 'verify') {
-        // اختبار التحقق الحي من البصمة
-        queueDeviceCommand(serialNumber, `C:${Date.now()}:CHECK PIN=${pin}`, 'TEST_VERIFY');
+        // فحص التحقق الحي
+        queueDeviceCommand(serialNumber, `C:${now}:CHECK PIN=${pin}`, 'TEST_VERIFY');
       }
 
-      res.json({ success: true, message: `تم إرسال أمر الاختبار التشخيصي (${testType}) بنجاح لماكينة البصمة` });
+      res.json({ success: true, message: `تم إرسال أمر الفحص الفيزيائي (${testType}) بنجاح وسينفذه الجهاز فوراً` });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -2332,13 +2901,12 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     try {
       const devsQ = await db.query('SELECT serial_number FROM public.biometric_devices WHERE is_active = TRUE');
       const serials = (devsQ.rows || []).map(r => r.serial_number);
-      serials.forEach(sn => {
-        queueDeviceCommand(sn, `C:${Date.now()}:DATA QUERY USERINFO`);
-        queueDeviceCommand(sn, `C:${Date.now() + 1}:DATA QUERY FINGERTMP`);
-        queueDeviceCommand(sn, `C:${Date.now() + 2}:DATA QUERY BIODATA Type=1`);
-        queueDeviceCommand(sn, `C:${Date.now() + 3}:DATA QUERY BIODATA Type=9`);
+      const now = Date.now();
+      serials.forEach((sn, i) => {
+        queueDeviceCommand(sn, `C:${now + (i * 10)}:DATA QUERY USERINFO`, 'QUERY_USER_ALL');
+        queueDeviceCommand(sn, `C:${now + (i * 10) + 1}:DATA QUERY FINGERTMP`, 'QUERY_FP_ALL');
       });
-      res.json({ success: true, message: `تم إرسال أمر سحب واستيراد كافة القوالب الحيوية من (${serials.length}) أجهزة إلى السحابة` });
+      res.json({ success: true, message: `تم إرسال أمر سحب واستيراد كافة القوالب الحيوية من (${serials.length}) أجهزة إلى الخزنة السحابية بنجاح` });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }

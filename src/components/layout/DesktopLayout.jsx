@@ -316,6 +316,20 @@ function DesktopNavDropdownItem({
                     }}>
                       {subChild.label}
                     </span>
+
+                    {Boolean(subChild.badge) && (
+                      <span style={{
+                        background: typeof subChild.badge === 'string' ? '#059669' : 'var(--danger, #ef4444)',
+                        color: '#ffffff',
+                        fontSize: '10px',
+                        fontWeight: 800,
+                        padding: '1px 6px',
+                        borderRadius: '99px',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.2)'
+                      }}>
+                        {subChild.badge}
+                      </span>
+                    )}
                   </div>
 
                   {subChild.desc && (
@@ -649,6 +663,281 @@ export default function DesktopLayout({
   const pendingFinancesCount = useMemo(() => {
     return (state?.finances || state?.transactions || []).filter(t => t && t.approvalStatus === 'pending').length;
   }, [state?.finances, state?.transactions]);
+
+  // حساب أعداد الطلبات قيد الاعتماد لحظياً لكل نوع من أنواع الطلبات
+  const pendingCountsByType = useMemo(() => {
+    const isPending = (r) => {
+      if (!r) return false;
+      if (r.adminApproved === true || r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.status === 'rejected' || r.status === 'cancelled') {
+        return false;
+      }
+      return !r.status || r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_target' || r.status === 'pending_local' || r.status === 'queued' || r.status === 'syncing';
+    };
+
+    const counts = {
+      all: 0,
+      leaves: 0,
+      schedule_deviations: 0,
+      manual_punches: 0,
+      overtimes: 0,
+      permissions: 0,
+      loans: 0,
+      meds: 0,
+      penalty_objections: 0,
+      swaps: 0,
+      shift_adjustments: 0,
+      roster_edits: 0,
+      biometrics: 0,
+      expenses: 0,
+      comp_offs: 0,
+      complaints: 0
+    };
+
+    const seenIds = new Set();
+    const registerCount = (id, key) => {
+      const sId = String(id || '');
+      if (sId && seenIds.has(sId)) return;
+      if (sId) seenIds.add(sId);
+      if (counts[key] !== undefined) counts[key]++;
+      counts.all++;
+    };
+
+    // 1. طلبات الإجازات (كافة أنواع الإجازات موحدة)
+    (state?.leaveRequests || []).forEach(lr => {
+      if (isPending(lr)) {
+        registerCount(lr.id || `leave_${lr.startDate}_${lr.employeeId}`, 'leaves');
+      }
+    });
+
+    // 2. السلف المالية
+    (state?.loans || []).forEach(ln => {
+      if (isPending(ln)) {
+        registerCount(ln.id || `loan_${ln.employeeId}_${ln.amount}`, 'loans');
+      }
+    });
+
+    // 3. تبديل الورديات
+    (state?.shiftSwaps || []).forEach(sw => {
+      if (isPending(sw)) {
+        registerCount(sw.id || `swap_${sw.fromEmployeeId}_${sw.date}`, 'swaps');
+      }
+    });
+
+    // 4. تظلمات الجزاءات من وقائع التأخير
+    (state?.lateIncidents || []).forEach(inc => {
+      if (inc && inc.objection && (inc.objection.status === 'pending' || inc.status === 'objection_pending')) {
+        registerCount(`obj_inc_${inc.id}`, 'penalty_objections');
+      }
+    });
+
+    // 5. تظلمات الخصومات المالية
+    (state?.adjustments || []).forEach(adj => {
+      if (adj && adj.objection && adj.objection.status === 'pending') {
+        registerCount(`obj_adj_${adj.id}`, 'penalty_objections');
+      }
+    });
+
+    // 6. فواتير ومصروفات الفروع
+    const allFin = [...(state?.finances || []), ...(state?.transactions || [])];
+    allFin.forEach(tx => {
+      if (tx && (tx.approvalStatus === 'pending' || (!tx.approvalStatus && (tx.createdByRole === 'branch' || tx.subType === 'invoice')))) {
+        const isExp = tx.type === 'expense' || !tx.type;
+        if (isExp) {
+          registerCount(tx.id || `fin_${tx.date}_${tx.amount}`, 'expenses');
+        }
+      }
+    });
+
+    // 7. جدول الطلبات العام
+    (state?.requests || []).forEach(r => {
+      if (!isPending(r)) return;
+      const type = r.type;
+
+      // فحص الإجازات بكافة أنواعها
+      if (type === 'long_leave' || type === 'leave' || type === 'annual_leave' || type === 'sick_leave' || type === 'unpaid_leave' || type === 'casual_leave' || r.leaveType) {
+        registerCount(r.id, 'leaves');
+      } else if (type === 'schedule_deviation' || type === 'deviation' || type === 'عدم الالتزام بالجدول' || (r.details && r.details.includes('عدم الالتزام بالجدول'))) {
+        registerCount(r.id, 'schedule_deviations');
+      } else if (r.submittedByBranchManager || r.subType === 'punch_correction' || r.subType === 'manual_punch_request' || String(r.id || '').startsWith('req_punch_') || type === 'branch_punch_edit' || type === 'manual_punch' || type === 'manual_punch_request') {
+        registerCount(r.id, 'manual_punches');
+      } else if (type === 'overtime' || type === 'extra_hours' || type === 'overtime_request' || (parseFloat(r.overtimeHours) > 0)) {
+        registerCount(r.id, 'overtimes');
+      } else if (type === 'permission' || type === 'perm') {
+        registerCount(r.id, 'permissions');
+      } else if (type === 'loan' || type === 'advance') {
+        registerCount(r.id, 'loans');
+      } else if (type === 'meds' || type === 'credit_medicine') {
+        registerCount(r.id, 'meds');
+      } else if (type === 'penalty_objection' || type === 'objection' || r.penaltyId) {
+        registerCount(r.id, 'penalty_objections');
+      } else if (type === 'swap' || type === 'shift_swap') {
+        registerCount(r.id, 'swaps');
+      } else if (type === 'shift_adjustment') {
+        registerCount(r.id, 'shift_adjustments');
+      } else if (type === 'roster_update' || type === 'roster_edit' || type === 'roster_edit_request') {
+        registerCount(r.id, 'roster_edits');
+      } else if (type === 'biometric_verification' || type === 'biometric_registration' || type === 'biometric_reset' || type === 'تأكيد بصمة الوجه' || type === 'تأكيد بصمة اليد') {
+        registerCount(r.id, 'biometrics');
+      } else if (type === 'expense' || type === 'financial_expense' || type === 'invoice') {
+        registerCount(r.id, 'expenses');
+      } else if (type === 'comp_off_grant' || type === 'leave_comp_off' || r.leaveType === 'comp_off') {
+        registerCount(r.id, 'comp_offs');
+      } else if (type === 'complaint' || type === 'eval_edit_request') {
+        registerCount(r.id, 'complaints');
+      }
+    });
+
+    return counts;
+  }, [state?.requests, state?.leaveRequests, state?.shiftSwaps, state?.loans, state?.lateIncidents, state?.adjustments, state?.finances, state?.transactions]);
+
+  // قائمة العناصر الفرعية المنبثقة لمركز إدارة واعتماد الطلبات
+  const requestSubChildren = useMemo(() => [
+    {
+      id: 'requests:all',
+      targetTab: 'requests',
+      filterType: 'all',
+      label: 'كافة أنواع الطلبات',
+      icon: '📋',
+      badge: pendingCountsByType.all,
+      desc: 'عرض كافة طلبات النظام في شاشة موحدة'
+    },
+    {
+      id: 'requests:leaves',
+      targetTab: 'requests',
+      filterType: 'leave',
+      label: '🏖️ طلبات الإجازات (كافة الأنواع)',
+      icon: '🏖️',
+      badge: pendingCountsByType.leaves,
+      desc: 'إجازات سنوية، اعتيادية، عارضة، مرضية، وطويلة'
+    },
+    {
+      id: 'requests:schedule_deviation',
+      targetTab: 'requests',
+      filterType: 'schedule_deviation',
+      label: '⚠️ عدم الالتزام بالجدول',
+      icon: '⚠️',
+      badge: pendingCountsByType.schedule_deviations,
+      desc: 'طلبات الحضور والانصراف المتأخر غير المتطابقة مع مواعيد العمل المقررة'
+    },
+    {
+      id: 'requests:manual_punch',
+      targetTab: 'requests',
+      filterType: 'manual_punch',
+      label: '🖐️ طلب تسجيل بصمة يدوي',
+      icon: '🖐️',
+      badge: pendingCountsByType.manual_punches,
+      desc: 'تسجيل وتعديل بصمات الحضور والانصراف اليدوية لمديري الفروع'
+    },
+    {
+      id: 'requests:overtime',
+      targetTab: 'requests',
+      filterType: 'overtime',
+      label: '⭐ ساعات إضافية',
+      icon: '⭐',
+      badge: pendingCountsByType.overtimes,
+      desc: 'طلبات اعتماد واحتساب ساعات العمل الإضافية'
+    },
+    {
+      id: 'requests:permissions',
+      targetTab: 'requests',
+      filterType: 'permission',
+      label: 'أذونات وساعات الاستئذان',
+      icon: '⏰',
+      badge: pendingCountsByType.permissions,
+      desc: 'أذونات التأخير والخروج المبكر وساعات العمل'
+    },
+    {
+      id: 'requests:loans',
+      targetTab: 'requests',
+      filterType: 'loan',
+      label: 'السلف المالية والنقدية',
+      icon: '💳',
+      badge: pendingCountsByType.loans,
+      desc: 'طلبات السلف المالية والأقساط الشهرية'
+    },
+    {
+      id: 'requests:meds',
+      targetTab: 'requests',
+      filterType: 'meds',
+      label: 'مشتريات الأدوية الآجلة',
+      icon: '💊',
+      badge: pendingCountsByType.meds,
+      desc: 'سحب أدوية الكادر الطبي وخصمها من الراتب'
+    },
+    {
+      id: 'requests:penalty_objections',
+      targetTab: 'requests',
+      filterType: 'penalty_objection',
+      label: 'تظلم على جزاء داخل النظام',
+      icon: '⚖️',
+      badge: pendingCountsByType.penalty_objections,
+      desc: 'تظلمات واعتراضات الموظفين على الخصومات والجزاءات'
+    },
+    {
+      id: 'requests:swaps',
+      targetTab: 'requests',
+      filterType: 'swap',
+      label: 'تبديل ومناوبة الورديات',
+      icon: '🔄',
+      badge: pendingCountsByType.swaps,
+      desc: 'تبديل الشفتات المتبادلة بين الموظفين'
+    },
+    {
+      id: 'requests:shift_adjustments',
+      targetTab: 'requests',
+      filterType: 'shift_adjustment',
+      label: 'تعديلات الشفتات والمواعيد',
+      icon: '⏱️',
+      badge: pendingCountsByType.shift_adjustments,
+      desc: 'تغيير مواعيد الحضور وتعديل فترات العمل'
+    },
+    {
+      id: 'requests:roster_edits',
+      targetTab: 'requests',
+      filterType: 'roster_edit',
+      label: 'تعديلات الجداول الشهرية',
+      icon: '📅',
+      badge: pendingCountsByType.roster_edits,
+      desc: 'تعديل الجدول التكليفي وجداول الورديات'
+    },
+    {
+      id: 'requests:biometrics',
+      targetTab: 'requests',
+      filterType: 'biometric',
+      label: 'اعتمادات البصمة والكشك (AI)',
+      icon: '📸',
+      badge: pendingCountsByType.biometrics,
+      desc: 'تأكيد بصمات الوجه واليد والعمليات الحيوية'
+    },
+    {
+      id: 'requests:expenses',
+      targetTab: 'requests',
+      filterType: 'expense',
+      label: 'فواتير ومصروفات الفروع',
+      icon: '📑',
+      badge: pendingCountsByType.expenses,
+      desc: 'فواتير ومصروفات مديري الصيدليات والفروع'
+    },
+    {
+      id: 'requests:comp_offs',
+      targetTab: 'requests',
+      filterType: 'comp_off',
+      label: 'إجازات بدل الراحة والتشغيل',
+      icon: '🛋️',
+      badge: pendingCountsByType.comp_offs,
+      desc: 'تعويضات العمل في العطلات الرسمية والراحات'
+    },
+    {
+      id: 'requests:complaints',
+      targetTab: 'requests',
+      filterType: 'complaint',
+      label: 'الشكاوى والتظلمات الإدارية',
+      icon: '📢',
+      badge: pendingCountsByType.complaints,
+      desc: 'شكاوى الكادر وملاحظات التقييم الإداري'
+    }
+  ], [pendingCountsByType]);
+
   const currentCycleRange = useMemo(() => {
     return getCycleDateRange(monthPicker, orgSettings);
   }, [monthPicker, orgSettings]);
@@ -867,15 +1156,16 @@ export default function DesktopLayout({
       id: 'requests-group',
       label: 'الطلبات والموافقات',
       icon: '📋',
-      badge: pendingCount + resignationCount,
+      badge: (pendingCountsByType.all || pendingCount) + resignationCount,
       children: [
         {
           id: 'requests',
           targetTab: 'requests',
           label: 'مركز إدارة واعتماد الطلبات',
           icon: '📋',
-          badge: pendingCount,
-          desc: 'مراجعة واعتماد طلبات الإجازات والأذونات والسلف'
+          badge: pendingCountsByType.all || pendingCount,
+          desc: 'مراجعة واعتماد طلبات الإجازات والأذونات والسلف',
+          subChildren: requestSubChildren
         },
         {
           id: 'leaves-tracking',
@@ -1294,15 +1584,16 @@ export default function DesktopLayout({
       id: 'branch-reqs',
       label: 'الطلبات والموافقات',
       icon: '📋',
-      badge: pendingCount + resignationCount,
+      badge: (pendingCountsByType.all || pendingCount) + resignationCount,
       children: [
         {
           id: 'requests',
           targetTab: 'requests',
           label: 'مركز موافقات الطلبات',
           icon: '📋',
-          badge: pendingCount,
-          desc: 'موافقة وتوقيع طلبات موظفي الفرع'
+          badge: pendingCountsByType.all || pendingCount,
+          desc: 'موافقة وتوقيع طلبات موظفي الفرع',
+          subChildren: requestSubChildren
         },
         {
           id: 'leaves',
@@ -1761,6 +2052,19 @@ if (subItem.openInNewTab || subItem.targetTab === 'pharmacy-archive') {
 setActiveTab(subItem.targetTab);
 if (subItem.targetSubTab && setActiveSubTab) {
   setActiveSubTab(subItem.targetSubTab);
+}
+if (subItem.targetTab === 'requests' && subItem.filterType) {
+  try {
+    window.__lastRequestsFilterType = subItem.filterType;
+  } catch {}
+  setTimeout(() => {
+    window.dispatchEvent(new CustomEvent('requests:set-filter-type', {
+      detail: {
+        filterType: subItem.filterType,
+        inboxTab: 'pending'
+      }
+    }));
+  }, 40);
 }
 setOpenDropdown(null);
 setHoveredFlyoutId(null);

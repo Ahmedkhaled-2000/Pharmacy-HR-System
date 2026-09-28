@@ -110,6 +110,29 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'If-None-Match', 'Cache-Control', 'Pragma'],
 }));
 
+// حماية واستقبال حزم بيانات أجهزة البصمة ADMS خام دون تشويه أو اعتراض من JSON Parser
+app.use((req, res, next) => {
+  const p = req.path.toLowerCase();
+  const isAdms = p.startsWith('/iclock/') || 
+                 p === '/cdata' || 
+                 p === '/getrequest' || 
+                 p === '/devicecmd' || 
+                 p === '/querydata' || 
+                 p === '/fdata' || 
+                 p === '/ping';
+  if (isAdms) {
+    let data = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => { data += chunk; });
+    req.on('end', () => {
+      req.body = data;
+      next();
+    });
+  } else {
+    next();
+  }
+});
+
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 app.use(express.text({ type: ['text/*', 'application/octet-stream', 'text/plain'], limit: '10mb' }));

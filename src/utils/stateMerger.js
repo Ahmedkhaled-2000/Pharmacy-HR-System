@@ -241,31 +241,49 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
     }
   }
 
-  // 2. دمج عناصر الجهاز المحلي (Local)
+  // 2. دمج عناصر الجهاز المحلي (Local) وحسم التعارضات
   for (const item of localList) {
     if (!item || typeof item !== 'object') continue;
     const key = getItemKey(item, options.prefix || 'loc');
     if (!key || isItemDeleted(item, key, deletedIds, options)) continue;
 
-    if (isRequestEntity) {
+    let targetKey = key;
+    let existingItem = null;
+
+    if (map.has(key)) {
+      existingItem = map.get(key);
+      targetKey = key;
+    } else if (isRequestEntity) {
       const empId = String(item.employeeId || item.employeeCode || '');
       const rType = String(item.type || item.requestType || options.prefix || '');
       const rDate = String(item.createdAt || item.date || item.timestamp || '').slice(0, 16);
       if (empId && rDate) {
         const sig = `${empId}_${rType}_${rDate}`;
-        if (seenSigMap.has(sig)) continue; // تخطي التكرار من المحلي
-        seenSigMap.set(sig, key);
+        if (seenSigMap.has(sig)) {
+          const sigKey = seenSigMap.get(sig);
+          if (map.has(sigKey)) {
+            existingItem = map.get(sigKey);
+            targetKey = sigKey;
+          }
+        }
       }
     }
 
-    if (!map.has(key)) {
+    if (existingItem) {
+      // العنصر موجود في الطرفين -> حسم التعارض بذكاء وحصانة القرارات الباتة (Terminal Decision Immunity)
+      const mergedItem = resolveItemConflict(item, existingItem, options);
+      map.set(targetKey, mergedItem);
+    } else {
       // عنصر جديد غير موجود في السحابة أضيف محلياً -> الحفاظ عليه
       map.set(key, item);
-    } else {
-      // العنصر موجود في الطرفين -> حسم التعارض بذكاء
-      const remoteItem = map.get(key);
-      const mergedItem = resolveItemConflict(item, remoteItem, options);
-      map.set(key, mergedItem);
+      if (isRequestEntity) {
+        const empId = String(item.employeeId || item.employeeCode || '');
+        const rType = String(item.type || item.requestType || options.prefix || '');
+        const rDate = String(item.createdAt || item.date || item.timestamp || '').slice(0, 16);
+        if (empId && rDate) {
+          seenSigMap.set(`${empId}_${rType}_${rDate}`, key);
+        }
+      }
     }
   }
 
@@ -496,15 +514,16 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
     const lStatus = normalizeStatus(localItem.status);
     const rStatus = normalizeStatus(remoteItem.status);
     
-    // الحالات الباتة / المعتمدة والنهائية التي لا يجوز ارتدادها لمعلق
+    // الحالات الباتة / المعتمدة والنهائية التي لا يجوز ارتدادها لمعلق (Terminal Immunity)
     const TERMINAL_STATUSES = ['approved', 'rejected', 'paid', 'partial', 'cancelled', 'waived', 'completed'];
-    const isLocalTerminal = TERMINAL_STATUSES.includes(lStatus);
-    const isRemoteTerminal = TERMINAL_STATUSES.includes(rStatus);
+    const isLocalTerminal = TERMINAL_STATUSES.includes(lStatus) || localItem.adminApproved === true;
+    const isRemoteTerminal = TERMINAL_STATUSES.includes(rStatus) || remoteItem.adminApproved === true;
 
     if (isLocalTerminal && !isRemoteTerminal) {
       // المحلي اتخذ قراراً نهائياً بينما السحابة ما زالت معلقة -> القرار المحلي يكسب دائماً
       mergedBase.status = localItem.status;
-      if (localItem.adminApproved !== undefined) mergedBase.adminApproved = localItem.adminApproved;
+      mergedBase.adminApproved = localItem.adminApproved !== undefined ? localItem.adminApproved : (lStatus === 'approved');
+      if (localItem.branchApproved !== undefined) mergedBase.branchApproved = localItem.branchApproved;
       if (localItem.rejectionReason) mergedBase.rejectionReason = localItem.rejectionReason;
       if (localItem.rejectedAt) mergedBase.rejectedAt = localItem.rejectedAt;
       if (localItem.rejectedBy) mergedBase.rejectedBy = localItem.rejectedBy;

@@ -12,6 +12,7 @@ import { emitLiveRequestUpdated } from '../utils/socketClient';
 import { broadcastStateChange } from '../utils/offlineSync';
 import { useData } from '../context/DataContext';
 import { useUI } from '../context/UIContext';
+import { sendEmployeeRequestDecisionWhatsApp } from '../utils/whatsappTemplates';
 
 export function useRequestsManager() {
   const { state, setState, saveState } = useData();
@@ -1019,6 +1020,16 @@ export function useRequestsManager() {
         branchId: target.branchId || target.branch_id
       }).catch(err => console.warn('Outbox enqueue decision error:', err));
 
+      if (isFullyApproved) {
+        sendEmployeeRequestDecisionWhatsApp({
+          state: updatedState,
+          request: target,
+          status: 'approved',
+          decisionNotes: target.reviewNotes || target.adminReply || '',
+          approverRole: role
+        }).catch(e => console.warn('WhatsApp decision dispatch error:', e));
+      }
+
       // بث لحظي فوري (< 5ms) لجميع الأجهزة وصفحة الموظف عبر الـ WebSocket والبث المحلي
       try {
         const finalApprovedReq = updatedRequests.find(r => r && String(r.id) === String(requestId)) || target;
@@ -1426,6 +1437,14 @@ export function useRequestsManager() {
         reviewer: { role },
         branchId: targetReq?.branchId || targetReq?.branch_id
       }).catch(err => console.warn('Outbox enqueue decision error:', err));
+
+      sendEmployeeRequestDecisionWhatsApp({
+        state: updatedState,
+        request: targetReq,
+        status: 'rejected',
+        decisionNotes: targetReq?.rejectReason || targetReq?.reason || '',
+        approverRole: role
+      }).catch(err => console.warn('WhatsApp decision dispatch error:', err));
 
       // بث لحظي فوري (< 5ms) لجميع الأجهزة وصفحة الموظف عبر الـ WebSocket والبث المحلي
       try {

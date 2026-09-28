@@ -5,9 +5,11 @@ import {
   READY_WHATSAPP_TEMPLATES,
   populateWhatsAppTemplate,
   generatePayslipPrintHtml,
-  generateSalaryIncreaseCertificateHtml
+  generateSalaryIncreaseCertificateHtml,
+  sendEmployeeRequestDecisionWhatsApp,
+  generateSampleDecisionMessage
 } from '../../utils/whatsappTemplates';
-import { Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck, LogOut, Globe, Network, Copy, Check, ExternalLink, Smartphone, Wifi, ShieldCheck, QrCode, Download } from 'lucide-react';
+import { Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck, LogOut, Globe, Network, Copy, Check, ExternalLink, Smartphone, Wifi, ShieldCheck, QrCode, Download, Bell } from 'lucide-react';
 import QRCode from 'qrcode';
 import { useUI } from '../../context/UIContext';
 
@@ -240,6 +242,100 @@ export default function WhatsAppCenterModule({
     }
     return filteredEmployees[0] || employees[0] || null;
   }, [targetEmpId, filteredEmployees, employees]);
+
+  // ── إعدادات إشعارات قرارات الطلبات التلقائية (قبول / رفض) ──
+  const isAutoNotifyOnDecision = state?.orgSettings?.whatsappAutoNotifyOnDecision !== false;
+  const [isUpdatingAutoNotify, setIsUpdatingAutoNotify] = useState(false);
+  const [decisionPreviewStatus, setDecisionPreviewStatus] = useState('approved');
+  const [testNotificationEmpId, setTestNotificationEmpId] = useState('');
+  const [isSendingTestDecision, setIsSendingTestDecision] = useState(false);
+
+  const handleToggleAutoNotify = async (enable) => {
+    setIsUpdatingAutoNotify(true);
+    try {
+      const updatedOrgSettings = {
+        ...(state?.orgSettings || {}),
+        whatsappAutoNotifyOnDecision: enable
+      };
+      const updatedState = {
+        ...state,
+        orgSettings: updatedOrgSettings
+      };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      if (enable) {
+        showToast?.('🔔 تم تفعيل إرسال إشعارات الواتساب للموظفين عند قبول أو رفض طلباتهم بنجاح');
+      } else {
+        showToast?.('⏸️ تم تعطيل إشعارات الواتساب لقرارات الطلبات');
+      }
+    } catch (err) {
+      console.error('Error toggling WhatsApp auto notify:', err);
+      showToast?.('تعذر حفظ الإعداد');
+    } finally {
+      setIsUpdatingAutoNotify(false);
+    }
+  };
+
+  const handleSendTestDecisionNotification = async () => {
+    const targetEmp = employees.find(e => e.id === testNotificationEmpId) || previewEmp;
+    if (!targetEmp) {
+      showToast?.('يرجى اختيار موظف أولاً');
+      return;
+    }
+    const phone = getEmpWhatsAppPhone(targetEmp) || targetEmp.phone;
+    if (!phone) {
+      showToast?.(`❌ الموظف (${getEmpDisplayName(targetEmp)}) ليس لديه رقم هاتف مسجل`);
+      return;
+    }
+    setIsSendingTestDecision(true);
+    try {
+      const dummyReq = {
+        id: 'test_req_' + Date.now(),
+        employeeId: targetEmp.id,
+        type: 'leave',
+        typeLabel: 'طلب إجازة اعتيادية (تجريبي)',
+        branchName: targetEmp.branchName || 'الفرع الرئيسي',
+        days: 3,
+        startDate: new Date().toISOString().slice(0, 10),
+        reason: 'فحص تجريبي لوصول إشعارات الواتساب التلقائية'
+      };
+      const ok = await sendEmployeeRequestDecisionWhatsApp({
+        state,
+        request: dummyReq,
+        status: decisionPreviewStatus,
+        decisionNotes: decisionPreviewStatus === 'approved' ? 'رسالة تجريبية: تمت الموافقة واعتماد الطلب' : 'رسالة تجريبية: تعذر قبول الطلب نظراً لظروف العمل',
+        approverRole: 'admin',
+        approverName: state.currentUser?.name || 'مدير النظام'
+      });
+      if (ok) {
+        showToast?.(`📲 تم إرسال رسالة الإشعار التجريبية بنجاح إلى ${getEmpDisplayName(targetEmp)} (+${phone})`);
+      } else {
+        showToast?.('⚠️ تعذر إرسال الإشعار، تأكد من تشغيل خادم الواتساب');
+      }
+    } catch {
+      showToast?.('حدث خطأ أثناء إرسال الرسالة التجريبية');
+    } finally {
+      setIsSendingTestDecision(false);
+    }
+  };
+
+  const sampleDecisionMessageText = useMemo(() => {
+    const emp = previewEmp || { name: 'د. أحمد محمود', code: '105' };
+    const empName = getEmpDisplayName(emp);
+    const branchName = emp.branchName || (branches[0]?.name) || 'الفرع الرئيسي';
+    const orgName = (state?.orgSettings?.name || state?.orgSettings?.pharmacyName || 'إدارة الصيدلية').trim();
+
+    return generateSampleDecisionMessage({
+      isApproved: decisionPreviewStatus === 'approved',
+      empName,
+      empCode: emp.code || 'EMP',
+      typeLabel: 'طلب إجازة اعتيادية',
+      branchName,
+      details: 'المدة: 3 أيام | التاريخ: ' + new Date().toISOString().slice(0, 10),
+      notes: decisionPreviewStatus === 'approved' ? 'مع أطيب التمنيات بإجازة سعيدة' : 'يرجى مراجعة إدارة الفرع للتنسيق',
+      orgName
+    });
+  }, [previewEmp, branches, state?.orgSettings, decisionPreviewStatus]);
 
   // حساب ملخص الموظف للمعاينة
   const getEmpSummaryData = useCallback((empId) => {
@@ -1727,6 +1823,294 @@ export default function WhatsAppCenterModule({
           </div>
         </div>
       )}
+
+      {/* ── بطاقة إعدادات الإشعارات التلقائية للطلبات الإدارية (قبول / رفض) ── */}
+      <div style={{
+        background: isAutoNotifyOnDecision
+          ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.06) 0%, rgba(5, 150, 105, 0.02) 100%)'
+          : 'linear-gradient(135deg, rgba(239, 68, 68, 0.05) 0%, rgba(185, 28, 28, 0.02) 100%)',
+        border: `1.5px solid ${isAutoNotifyOnDecision ? '#10b981' : 'rgba(239, 68, 68, 0.35)'}`,
+        borderRadius: '16px',
+        padding: '22px 24px',
+        marginBottom: '22px',
+        boxShadow: isAutoNotifyOnDecision
+          ? '0 6px 20px rgba(16, 185, 129, 0.08)'
+          : '0 6px 20px rgba(0, 0, 0, 0.04)',
+        transition: 'all 0.3s ease'
+      }}>
+        {/* رأس البطاقة ومفتاح التبديل الذكي */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '16px',
+          borderBottom: '1px solid var(--border)',
+          paddingBottom: '16px',
+          marginBottom: '18px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div style={{
+              width: '46px',
+              height: '46px',
+              borderRadius: '12px',
+              background: isAutoNotifyOnDecision
+                ? 'linear-gradient(135deg, #10b981, #059669)'
+                : 'linear-gradient(135deg, #94a3b8, #64748b)',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '22px',
+              boxShadow: isAutoNotifyOnDecision
+                ? '0 4px 14px rgba(16, 185, 129, 0.35)'
+                : 'none'
+            }}>
+              <Bell style={{ width: '22px', height: '22px' }} />
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: 'var(--text)' }}>
+                  إشعارات قرارات الطلبات التلقائية عبر الواتساب (قبول / رفض)
+                </h4>
+                {isAutoNotifyOnDecision ? (
+                  <span style={{
+                    fontSize: '11.5px',
+                    background: '#d1fae5',
+                    color: '#065f46',
+                    padding: '3px 10px',
+                    borderRadius: '20px',
+                    fontWeight: 800,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}>
+                    <CheckCircle2 style={{ width: '13px', height: '13px' }} />
+                    مفعّلة تلقائياً
+                  </span>
+                ) : (
+                  <span style={{
+                    fontSize: '11.5px',
+                    background: '#fee2e2',
+                    color: '#991b1b',
+                    padding: '3px 10px',
+                    borderRadius: '20px',
+                    fontWeight: 800,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}>
+                    <AlertCircle style={{ width: '13px', height: '13px' }} />
+                    معطّلة حالياً
+                  </span>
+                )}
+              </div>
+              <p style={{ margin: '4px 0 0 0', fontSize: '12.5px', color: 'var(--muted)', maxWidth: '650px', lineHeight: 1.5 }}>
+                عند تفعيل هذا الخيار، سيقوم النظام تلقائياً بإرسال رسالة واتساب رسمية وموثقة إلى هاتف الموظف فور قيام الإدارة باعتماد أو رفض أي طلب (إجازات، أذونات، سلف، تظلمات جزاءات، استقالات، تبديل ورديات، إلخ) دون أي تدخل يدوي.
+              </p>
+            </div>
+          </div>
+
+          {/* مفتاح التبديل (Switch Button) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{
+              fontSize: '13px',
+              fontWeight: 700,
+              color: isAutoNotifyOnDecision ? '#059669' : 'var(--muted)'
+            }}>
+              {isAutoNotifyOnDecision ? 'الإشعارات تعمل' : 'الإشعارات متوقفة'}
+            </span>
+            <button
+              type="button"
+              disabled={isUpdatingAutoNotify}
+              onClick={() => handleToggleAutoNotify(!isAutoNotifyOnDecision)}
+              aria-label="تفعيل أو تعطيل إشعارات الواتساب للطلبات"
+              style={{
+                width: '56px',
+                height: '30px',
+                borderRadius: '30px',
+                background: isAutoNotifyOnDecision ? '#10b981' : '#cbd5e1',
+                border: 'none',
+                position: 'relative',
+                cursor: isUpdatingAutoNotify ? 'not-allowed' : 'pointer',
+                transition: 'background 0.25s ease',
+                padding: '3px',
+                display: 'flex',
+                alignItems: 'center',
+                boxShadow: isAutoNotifyOnDecision ? '0 2px 8px rgba(16, 185, 129, 0.4)' : 'inset 0 1px 3px rgba(0,0,0,0.1)'
+              }}
+            >
+              <div style={{
+                width: '24px',
+                height: '24px',
+                borderRadius: '50%',
+                background: '#ffffff',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                transform: isAutoNotifyOnDecision ? 'translateX(-26px)' : 'translateX(0)',
+                transition: 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
+              }} />
+            </button>
+          </div>
+        </div>
+
+        {/* أنواع الطلبات المشمولة بالإشعار التلقائي */}
+        <div style={{
+          display: 'flex',
+          gap: '8px',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          marginBottom: '16px'
+        }}>
+          <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--muted)' }}>
+            📋 الطلبات المدعومة تلقائياً:
+          </span>
+          {[
+            { label: '🏖️ الإجازات', desc: 'عادية وعارضة ومرضية' },
+            { label: '⏰ أذونات الاستئذان', desc: 'تأخير وانصراف مبكر' },
+            { label: '💳 السلف والعهد', desc: 'اعتماد الخصم والأقساط' },
+            { label: '⚖️ تظلمات الجزاءات', desc: 'قبول أو رفض الاعتراض' },
+            { label: '🔄 تبديل الورديات', desc: 'تحديث جداول الدوام' },
+            { label: '🚪 طلبات الاستقالة', desc: 'موافقة إنهاء الخدمة' },
+            { label: '⏱️ البصمات الذكية', desc: 'اعتماد وتعديل البصمة' }
+          ].map((tag, idx) => (
+            <span
+              key={idx}
+              title={tag.desc}
+              style={{
+                fontSize: '11.5px',
+                fontWeight: 700,
+                padding: '4px 10px',
+                borderRadius: '8px',
+                background: isAutoNotifyOnDecision ? 'rgba(16, 185, 129, 0.1)' : 'rgba(0,0,0,0.04)',
+                border: isAutoNotifyOnDecision ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid var(--border)',
+                color: isAutoNotifyOnDecision ? '#065f46' : 'var(--muted)'
+              }}
+            >
+              {tag.label}
+            </span>
+          ))}
+        </div>
+
+        {/* قسم المعاينة الحية واختبار الإرسال التجريبي */}
+        <div style={{
+          background: 'var(--card-bg, rgba(255,255,255,0.7))',
+          border: '1px solid var(--border)',
+          borderRadius: '12px',
+          padding: '16px'
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px',
+            marginBottom: '12px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 800 }}>
+                📱 المعاينة الحية لرسالة الواتساب:
+              </span>
+              <div style={{ display: 'inline-flex', background: 'var(--bg, #f1f5f9)', padding: '2px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                <button
+                  type="button"
+                  onClick={() => setDecisionPreviewStatus('approved')}
+                  style={{
+                    border: 'none',
+                    padding: '5px 12px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    background: decisionPreviewStatus === 'approved' ? '#10b981' : 'transparent',
+                    color: decisionPreviewStatus === 'approved' ? '#ffffff' : 'var(--text)'
+                  }}
+                >
+                  ✅ حالة القبول والاعتماد
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDecisionPreviewStatus('rejected')}
+                  style={{
+                    border: 'none',
+                    padding: '5px 12px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    background: decisionPreviewStatus === 'rejected' ? '#dc2626' : 'transparent',
+                    color: decisionPreviewStatus === 'rejected' ? '#ffffff' : 'var(--text)'
+                  }}
+                >
+                  ❌ حالة الرفض
+                </button>
+              </div>
+            </div>
+
+            {/* أداة فحص وإرسال إشعار تجريبي */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <select
+                value={testNotificationEmpId}
+                onChange={(e) => setTestNotificationEmpId(e.target.value)}
+                style={{
+                  fontSize: '12px',
+                  padding: '6px 10px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface)',
+                  color: 'var(--text)'
+                }}
+              >
+                <option value="">-- اختر موظف للإرسال التجريبي --</option>
+                {employees.map(e => (
+                  <option key={e.id} value={e.id}>
+                    {getEmpDisplayName(e)} ({e.code || 'EMP'}) {getEmpWhatsAppPhone(e) ? `📞 +${getEmpWhatsAppPhone(e)}` : '⚠️ بلا هاتف'}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                className="btn"
+                disabled={isSendingTestDecision}
+                onClick={handleSendTestDecisionNotification}
+                style={{
+                  background: '#0284c7',
+                  color: '#ffffff',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  padding: '6px 14px',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: isSendingTestDecision ? 'not-allowed' : 'pointer'
+                }}
+              >
+                <Send style={{ width: '13px', height: '13px' }} className={isSendingTestDecision ? 'animate-spin' : ''} />
+                <span>{isSendingTestDecision ? 'جاري الإرسال...' : '🧪 إرسال إشعار تجريبي'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* فقاعة محاكاة واتساب الواقعية */}
+          <div style={{
+            background: 'rgba(217, 253, 211, 0.35)',
+            border: '1px solid rgba(16, 185, 129, 0.25)',
+            borderRadius: '12px',
+            padding: '14px 18px',
+            fontSize: '12.5px',
+            lineHeight: 1.6,
+            color: 'var(--text)',
+            whiteSpace: 'pre-wrap',
+            fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            direction: 'rtl',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)'
+          }}>
+            {sampleDecisionMessageText}
+          </div>
+        </div>
+      </div>
 
       {/* ── قسم اختيار القوالب الجاهزة والتخصيص ─────────────────────────────── */}
       <div style={{

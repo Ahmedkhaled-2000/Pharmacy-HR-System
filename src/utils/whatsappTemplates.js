@@ -7,7 +7,9 @@
  * - توليد كشف المرتب كـ HTML للتحويل إلى PDF
  */
 
-import { fmt } from './formatters';
+import { fmt, getEmpDisplayName, getEmpWhatsAppPhone } from './formatters';
+import { getResolvedWhatsAppServerUrl } from './systemUrlHelper';
+import { getRequestTypeArabicLabel } from './notificationEngine';
 
 export const WHATSAPP_TEMPLATE_CATEGORIES = [
   { id: 'payslips', name: '📄 كشوفات المرتبات والمستحقات', icon: '💰' },
@@ -1227,5 +1229,188 @@ export function generateSalaryIncreaseCertificateHtml(emp, increaseData = {}, or
 </body>
 </html>`;
 }
+
+/**
+ * إرسال إشعار فوري وتلقائي للموظف عبر الواتساب عند اتخاذ قرار (قبول / رفض) بخصوص طلبه
+ * يراعي إعدادات النظام (state.orgSettings.whatsappAutoNotifyOnDecision)
+ * ويعمل بشكل غير متزامن تماماً (Non-blocking) دون التأثير على سرعة الواجهة
+ */
+export async function sendEmployeeRequestDecisionWhatsApp({
+  state,
+  request,
+  status = 'approved', // 'approved' | 'rejected'
+  decisionNotes = '',
+  approverRole = 'admin',
+  approverName = ''
+}) {
+  try {
+    if (!state || !request) return false;
+
+    // 1. فحص هل ميزة إرسال إشعارات الواتساب للقرارات مفعلة في إعدادات المنظومة
+    const isNotifyEnabled = state?.orgSettings?.whatsappAutoNotifyOnDecision !== false;
+    if (!isNotifyEnabled) {
+      console.log('[WhatsAppNotify] ⏭️ Auto notification on decision is disabled in settings.');
+      return false;
+    }
+
+    // 2. استخراج بيانات الموظف ورقم هاتفه
+    const empId = request.employeeId || request.empId;
+    const employees = state.employees || [];
+    const emp = employees.find(e => e && String(e.id) === String(empId));
+    if (!emp) {
+      console.warn('[WhatsAppNotify] ⚠️ Target employee not found for request:', request.id);
+      return false;
+    }
+
+    const phone = getEmpWhatsAppPhone(emp) || emp.phone;
+    if (!phone) {
+      console.warn('[WhatsAppNotify] ⚠️ No valid phone number for employee:', emp.name || empId);
+      return false;
+    }
+
+    const isApproved = status === 'approved';
+    const orgName = (state?.orgSettings?.name || state?.orgSettings?.pharmacyName || 'إدارة الصيدلية').trim();
+    const empName = getEmpDisplayName(emp);
+    const branchName = request.branchName || emp.branchName || (state.branches || []).find(b => b && (b.id === request.branchId || b.id === emp.branchId))?.name || 'الفرع الرئيسي';
+
+    // 3. تحديد نوع الطلب بالعربية
+    let typeLabel = request.typeLabel || request.requestTypeLabel;
+    if (!typeLabel) {
+      const rawType = request.type || request.requestType || request.leaveType || 'طلب إداري';
+      if (rawType === 'penalty_objection') {
+        typeLabel = 'تظلم على جزاء إداري';
+      } else if (rawType === 'biometric_registration') {
+        typeLabel = 'تسجيل واعتماد بصمة ذكية';
+      } else if (rawType === 'biometric_reset') {
+        typeLabel = 'إعادة ضبط بصمة';
+      } else if (rawType === 'shift_swap' || rawType === 'swap') {
+        typeLabel = 'تبديل وردية عمل';
+      } else {
+        typeLabel = getRequestTypeArabicLabel(rawType);
+      }
+    }
+
+    // 4. استخراج تفاصيل الطلب الإضافية (مبالغ، تواريخ، فترات)
+    const detailsParts = [];
+    if (request.amount || request.loanAmount || request.totalAmount) {
+      const amt = request.amount || request.loanAmount || request.totalAmount;
+      detailsParts.push(`المبلغ: ${amt} ج.م`);
+    }
+    if (request.days || request.leaveDays) {
+      detailsParts.push(`المدة: ${request.days || request.leaveDays} يوم`);
+    }
+    if (request.duration || request.hours) {
+      detailsParts.push(`المدة: ${request.duration || request.hours} ساعة`);
+    }
+    if (request.startDate || request.date) {
+      detailsParts.push(`التاريخ: ${request.startDate || request.date}`);
+    }
+    if (request.reason && typeof request.reason === 'string' && request.reason.length < 80) {
+      detailsParts.push(`البيان: ${request.reason}`);
+    }
+    const detailsSummary = detailsParts.join(' | ');
+
+    // 5. بناء نص الرسالة الاحترافي المتناسق
+    const headerTitle = isApproved ? '✅ *إشعار اعتماد وموافقة على طلبكم الإداري*' : '❌ *إشعار بشأن نتيجة طلبكم الإداري*';
+    const decisionText = isApproved
+      ? `نحيطكم علماً بأنه قد تمت *الموافقة والاعتماد* رسمياً على طلبكم (${typeLabel}) بنجاح.`
+      : `نحيطكم علماً بأنه بعد المراجعة والدراسة قد تقرر *عدم الموافقة / رفض* طلبكم (${typeLabel}).`;
+
+    const notes = decisionNotes || request.adminReply || request.reviewNotes || '';
+
+    const message = `السلام عليكم ورحمة الله وبركاته،
+الزميل العزيز: *${empName}* 🌸
+(كود: ${emp.code || 'EMP'})
+
+${headerTitle}
+━━━━━━━━━━━━━━━━━━━━━
+${decisionText}
+
+📋 *تفاصيل الطلب:*
+• نوع الطلب: *${typeLabel}*
+• الفرع: ${branchName}
+${detailsSummary ? `• ملخص الطلب: ${detailsSummary}\n` : ''}${request.createdAt ? `• تاريخ تقديم الطلب: ${String(request.createdAt).slice(0, 10)}\n` : ''}━━━━━━━━━━━━━━━━━━━━━
+${notes ? `💬 *ملاحظات وقرار الإدارة:*\n${notes}\n━━━━━━━━━━━━━━━━━━━━━\n` : ''}${isApproved ? '⭐ تم تطبيق الأثر الإداري والمالي للطلب بنجاح في المنظومة.' : '📌 شاكرين تفهمكم وحسن تعاونكم، ويمكنكم مراجعة الإدارة لأي استفسار.'}
+
+مع خالص التقدير،
+إدارة: *${orgName}* ✨`;
+
+    // 6. استخراج رابط خادم الواتساب
+    const waServerUrl = getResolvedWhatsAppServerUrl(state);
+    if (!waServerUrl) {
+      console.warn('[WhatsAppNotify] ⚠️ WhatsApp server URL is not configured.');
+      return false;
+    }
+
+    const endpoint = `${waServerUrl.replace(/\/+$/, '')}/api/send`;
+
+    // 7. الإرسال في الخلفية دون تعطيل واجهة المستخدم
+    fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'bypass-tunnel-reminder': 'true'
+      },
+      body: JSON.stringify({
+        phone,
+        message
+      })
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          console.warn('[WhatsAppNotify] WhatsApp server returned error:', res.status, errData);
+        } else {
+          console.log(`[WhatsAppNotify] 📲 Decision notification successfully sent to ${empName} (${phone})`);
+        }
+      })
+      .catch((err) => {
+        console.warn('[WhatsAppNotify] Failed to dispatch WhatsApp message (server may be offline):', err.message);
+      });
+
+    return true;
+  } catch (err) {
+    console.warn('[WhatsAppNotify] Error in sendEmployeeRequestDecisionWhatsApp:', err);
+    return false;
+  }
+}
+
+/**
+ * توليد نص رسالة نموذجية للمعاينة الحية في لوحة تحكم الواتساب
+ */
+export function generateSampleDecisionMessage({
+  isApproved = true,
+  empName = 'د. أحمد محمود',
+  empCode = '105',
+  typeLabel = 'طلب إجازة اعتيادية',
+  branchName = 'فرع وسط البلد',
+  details = 'المدة: 3 أيام | التاريخ: 2026-10-01',
+  notes = 'مع أطيب التمنيات بإجازة سعيدة والتوفيق الدائم',
+  orgName = 'إدارة الصيدلية'
+} = {}) {
+  const headerTitle = isApproved ? '✅ *إشعار اعتماد وموافقة على طلبكم الإداري*' : '❌ *إشعار بشأن نتيجة طلبكم الإداري*';
+  const decisionText = isApproved
+    ? `نحيطكم علماً بأنه قد تمت *الموافقة والاعتماد* رسمياً على طلبكم (${typeLabel}) بنجاح.`
+    : `نحيطكم علماً بأنه بعد المراجعة والدراسة قد تقرر *عدم الموافقة / رفض* طلبكم (${typeLabel}).`;
+
+  return `السلام عليكم ورحمة الله وبركاته،
+الزميل العزيز: *${empName}* 🌸
+(كود: ${empCode})
+
+${headerTitle}
+━━━━━━━━━━━━━━━━━━━━━
+${decisionText}
+
+📋 *تفاصيل الطلب:*
+• نوع الطلب: *${typeLabel}*
+• الفرع: ${branchName}
+• ملخص الطلب: ${details}
+
+${notes ? `💬 *ملاحظات وقرار الإدارة:*\n${notes}\n━━━━━━━━━━━━━━━━━━━━━\n` : ''}${isApproved ? '⭐ تم تطبيق الأثر الإداري والمالي للطلب بنجاح في المنظومة.' : '📌 شاكرين تفهمكم وحسن تعاونكم، ويمكنكم مراجعة الإدارة لأي استفسار.'}
+
+مع خالص التقدير،
+إدارة: *${orgName}* ✨`;
+}
+
 
 

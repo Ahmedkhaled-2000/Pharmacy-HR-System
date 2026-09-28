@@ -12,6 +12,7 @@ import { useUI } from '../../context/UIContext';
 import { saveFaceDescriptor, saveHandDescriptor, deleteFaceDescriptor, deleteHandDescriptor } from '../../utils/faceStorage';
 import { enqueueRequestDecision, executeFullSync } from '../../utils/syncEngine';
 import { getLifecycleBadge, REQUEST_STATES } from '../../utils/requestLifecycle';
+import { sendEmployeeRequestDecisionWhatsApp } from '../../utils/whatsappTemplates';
 
 export function isPendingRequest(r) {
   if (!r) return false;
@@ -211,10 +212,17 @@ export default function RequestsModule({
 }) {
   const effectiveRole = currentRole || authRole || 'admin';
   const { showConfirm } = useUI();
-  const [inboxTab, setInboxTab] = useState('pending'); // 'all' | 'pending' | 'urgent' | 'completed' | 'rejected' | 'outbox'
-  const [filterType, setFilterType] = useState('all');
+  const [inboxTab, setInboxTab] = useState('pending'); // 'all' | 'pending' | 'approved' | 'rejected' | 'outbox'
+  const [filterType, setFilterType] = useState(() => {
+    try {
+      return window.__lastRequestsFilterType || 'all';
+    } catch {
+      return 'all';
+    }
+  });
   const [filterStatus, setFilterStatus] = useState('pending'); // افتراضي قيد الاعتماد بناءً على طلب الإدارة
   const [filterEmp, setFilterEmp] = useState('all');
+  const [filterBranch, setFilterBranch] = useState('all');
   const [filterDate, setFilterDate] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -556,6 +564,164 @@ export default function RequestsModule({
 
   const requests = visibleAdminRequests;
 
+  const REQUEST_TYPE_LABELS = {
+    all: 'كافة الطلبات',
+    leave: 'طلبات الإجازات (كافة الأنواع)',
+    long_leave: 'طلبات الإجازات',
+    schedule_deviation: 'عدم الالتزام بالجدول',
+    manual_punch: 'تسجيل البصمة اليدوية',
+    overtime: 'الساعات الإضافية',
+    permission: 'الأذونات وساعات الاستئذان',
+    loan: 'السلف المالية والنقدية',
+    meds: 'مشتريات الأدوية الآجلة',
+    swap: 'تبديل ومناوبة الورديات',
+    penalty_objection: 'تظلم على جزاء داخل النظام',
+    roster_edit: 'تعديلات الجداول الشهرية',
+    shift_adjustment: 'تعديلات الشفتات والمواعيد',
+    biometric: 'اعتمادات البصمة والكشك (AI)',
+    expense: 'فواتير ومصروفات الفروع',
+    comp_off: 'إجازات بدل الراحة',
+    complaint: 'الشكاوى والتظلمات الإدارية',
+    penalty: 'الجزاءات والمخالفات'
+  };
+
+  const REQUEST_PAGE_TITLES = {
+    all: {
+      title: '📋 مركز إدارة طلبات الموظفين الموحد',
+      desc: 'معاينة كافة الطلبات، الإجازات، الأذون، السلف، الأدوية، وتبديل الورديات واتخاذ قرارات الموافقة المزدوجة'
+    },
+    leave: {
+      title: '🏖️ إدارة طلبات الإجازات (كافة الأنواع)',
+      desc: 'معاينة واعتماد كافة طلبات الإجازات السنوية، الاعتيادية، العارضة، والمرضية مع فحص الرصيد'
+    },
+    long_leave: {
+      title: '🏖️ إدارة طلبات الإجازات (كافة الأنواع)',
+      desc: 'معاينة واعتماد كافة طلبات الإجازات السنوية، الاعتيادية، العارضة، والمرضية مع فحص الرصيد'
+    },
+    schedule_deviation: {
+      title: '⚠️ إدارة طلبات عدم الالتزام بالجدول',
+      desc: 'معاينة واعتماد حالات الحضور والانصراف المتأخر غير المتطابقة مع مواعيد العمل المقررة'
+    },
+    manual_punch: {
+      title: '🖐️ إدارة طلبات تسجيل البصمة اليدوية',
+      desc: 'معاينة واعتماد بصمات الحضور والانصراف وتصحيح تسجيلات الدخول والخروج لمديري الفروع'
+    },
+    overtime: {
+      title: '⭐ إدارة طلبات الساعات الإضافية',
+      desc: 'معاينة وتدقيق طلبات اعتماد ساعات العمل الإضافية المنجزة ومستحقاتها المالية'
+    },
+    permission: {
+      title: '⏰ إدارة أذونات وساعات الاستئذان',
+      desc: 'معاينة واعتماد أذونات التأخير والخروج المبكر وساعات الاستئذان الرسمية'
+    },
+    loan: {
+      title: '💳 إدارة السلف المالية والنقدية',
+      desc: 'معاينة واعتماد طلبات السلف الشهرية والتقسيط وجدولة الخصم من الرواتب'
+    },
+    meds: {
+      title: '💊 إدارة مشتريات الأدوية الآجلة',
+      desc: 'معاينة وتدقيق سحب أدوية الكادر الطبي وخصمها من الراتب الشهري'
+    },
+    penalty_objection: {
+      title: '⚖️ إدارة التظلمات والاعتراضات على الجزاءات',
+      desc: 'دراسة تظلمات الموظفين واعتراضاتهم على الخصومات والجزاءات التأديبية والبت فيها'
+    },
+    swap: {
+      title: '🔄 إدارة تبديل ومناوبة الورديات',
+      desc: 'معاينة وموافقة طلبات تبديل الشفتات بين الزملاء وتحديث الجداول التكليفية فوراً'
+    },
+    shift_adjustment: {
+      title: '⏱️ إدارة تعديلات الشفتات والمواعيد',
+      desc: 'تغيير ومواءمة مواعيد حضور وانصراف الورديات وتعديل الفترات التشغيلية'
+    },
+    roster_edit: {
+      title: '📅 إدارة تعديلات الجداول الشهرية',
+      desc: 'معاينة واعتماد تعديلات الجداول التكليفية للورديات والفروع الشهرية'
+    },
+    biometric: {
+      title: '📸 اعتمادات البصمة والكشك البيومتري (AI)',
+      desc: 'تدقيق واعتماد بصمات الوجه واليد والعمليات الحيوية الملتقطة ذاتياً'
+    },
+    expense: {
+      title: '📑 إدارة فواتير ومصروفات الفروع',
+      desc: 'معاينة وتدقيق فواتير المصروفات التشغيلية لمديري الفروع والصيدليات'
+    },
+    comp_off: {
+      title: '🛋️ إدارة إجازات بدل الراحة والتشغيل',
+      desc: 'اعتماد أيام التعويض وبدل الراحة مقابل العمل في الإجازات الرسمية'
+    },
+    complaint: {
+      title: '📢 إدارة الشكاوى والتظلمات الإدارية',
+      desc: 'متابعة شكاوى الكادر وملاحظات التقييم الإداري وسير العمل بالمنشأة'
+    },
+    penalty: {
+      title: '⚠️ إدارة الجزاءات والمخالفات اللائحية',
+      desc: 'متابعة وتدقيق الجزاءات والخصومات اللائحية المطبقة على المخالفات'
+    }
+  };
+
+  const isRequestMatchingFilterType = (r, type) => {
+    if (!r || !type || type === 'all') return true;
+    if (type === 'leave' || type === 'long_leave') {
+      return (
+        r.type === 'leave' ||
+        r.type === 'leave_request' ||
+        r.type === 'long_leave' ||
+        r.type === 'annual_leave' ||
+        r.type === 'sick_leave' ||
+        r.type === 'unpaid_leave' ||
+        r.type === 'casual_leave' ||
+        Boolean(r.leaveType) ||
+        Boolean(r.isLongLeave)
+      );
+    } else if (type === 'schedule_deviation') {
+      return (
+        r.type === 'schedule_deviation' ||
+        r.type === 'deviation' ||
+        r.type === 'عدم الالتزام بالجدول' ||
+        (typeof r.details === 'string' && r.details.includes('عدم الالتزام بالجدول'))
+      );
+    } else if (type === 'manual_punch') {
+      return Boolean(
+        r.submittedByBranchManager ||
+        r.subType === 'punch_correction' ||
+        r.subType === 'manual_punch_request' ||
+        String(r.id || '').startsWith('req_punch_') ||
+        r.type === 'branch_punch_edit' ||
+        r.type === 'manual_punch' ||
+        r.type === 'manual_punch_request'
+      );
+    } else if (type === 'overtime') {
+      return (
+        r.type === 'overtime' ||
+        r.type === 'extra_hours' ||
+        r.type === 'overtime_request' ||
+        (parseFloat(r.overtimeHours) > 0)
+      );
+    } else if (type === 'loan') {
+      return r.type === 'loan' || r.type === 'advance';
+    } else if (type === 'meds') {
+      return r.type === 'meds' || r.type === 'credit_medicine';
+    } else if (type === 'swap') {
+      return r.type === 'swap' || r.type === 'shift_swap';
+    } else if (type === 'roster_edit') {
+      return r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request';
+    } else if (type === 'complaint') {
+      return r.type === 'complaint' || r.type === 'eval_edit_request';
+    } else if (type === 'penalty_objection') {
+      return r.type === 'penalty_objection' || r.type === 'objection' || Boolean(r.penaltyId) || Boolean(r.objection);
+    } else if (type === 'biometric') {
+      return r.type === 'biometric_verification' || r.type === 'biometric_registration' || r.type === 'biometric_reset' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
+    } else if (type === 'shift_adjustment') {
+      return r.type === 'shift_adjustment';
+    } else if (type === 'comp_off') {
+      return r.type === 'comp_off_grant' || r.type === 'leave_comp_off' || r.leaveType === 'comp_off';
+    } else if (type === 'expense' || type === 'financial' || type === 'invoice') {
+      return r.type === 'expense' || r.type === 'financial_expense' || r.type === 'invoice' || r.type === 'financial_alert' || r.subType === 'invoice';
+    }
+    return r.type === type;
+  };
+
   const clearableAdminRequestsCount = useMemo(() => {
     return visibleAdminRequests.filter(r => !isPendingRequest(r)).length;
   }, [visibleAdminRequests]);
@@ -563,6 +729,16 @@ export default function RequestsModule({
   const clearableAllRequestsCount = useMemo(() => {
     return allRequests.filter(r => !isPendingRequest(r)).length;
   }, [allRequests]);
+
+  const clearableCurrentTypeRequests = useMemo(() => {
+    if (filterType === 'all') return [];
+    return visibleAdminRequests.filter(r => !isPendingRequest(r) && isRequestMatchingFilterType(r, filterType));
+  }, [visibleAdminRequests, filterType]);
+
+  const hiddenCurrentTypeCount = useMemo(() => {
+    if (filterType === 'all') return hiddenAdminCount;
+    return allRequests.filter(r => isHiddenFromAdmin(r) && isRequestMatchingFilterType(r, filterType)).length;
+  }, [allRequests, filterType, hiddenAdminCount, adminHiddenSet]);
 
   useEffect(() => {
     const handleSetFilter = (e) => {
@@ -687,49 +863,21 @@ export default function RequestsModule({
   const filteredRequests = requests.filter((r) => {
     if (!r) return false;
 
-    // Filter by Modern Inbox Tab
+    // Filter by Modern Inbox Tab (All, Pending, Approved, Rejected, Outbox)
     if (inboxTab !== 'all') {
       const isPending = !r.status || r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_target' || r.status === 'pending_local' || r.status === 'queued' || r.status === 'syncing';
       const isApproved = r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.adminApproved === true;
       const isRejected = r.status === 'rejected';
-      const isUrgent = r.type === 'complaint' || r.type === 'penalty_objection' || r.type === 'biometric_verification' || r.urgent;
       const isOutbox = r.status === 'pending_local' || r.status === 'queued' || r.status === 'syncing';
 
       if (inboxTab === 'pending' && !isPending) return false;
-      if (inboxTab === 'completed' && !isApproved) return false;
+      if ((inboxTab === 'approved' || inboxTab === 'completed') && !isApproved) return false;
       if (inboxTab === 'rejected' && !isRejected) return false;
-      if (inboxTab === 'urgent' && !isUrgent) return false;
       if (inboxTab === 'outbox' && !isOutbox) return false;
     }
 
     if (filterType !== 'all') {
-      if (filterType === 'long_leave') {
-        if (r.type !== 'long_leave' && !r.isLongLeave && parseFloat(r.daysCount || r.days || 0) <= 3) return false;
-      } else if (filterType === 'loan') {
-        if (r.type !== 'loan' && r.type !== 'advance') return false;
-      } else if (filterType === 'meds') {
-        if (r.type !== 'meds' && r.type !== 'credit_medicine') return false;
-      } else if (filterType === 'swap') {
-        if (r.type !== 'swap' && r.type !== 'shift_swap') return false;
-      } else if (filterType === 'roster_edit') {
-        if (r.type !== 'roster_update' && r.type !== 'roster_edit' && r.type !== 'roster_edit_request') return false;
-      } else if (filterType === 'complaint') {
-        if (r.type !== 'complaint' && r.type !== 'eval_edit_request') return false;
-      } else if (filterType === 'penalty_objection') {
-        if (r.type !== 'penalty_objection' && r.type !== 'objection' && !r.penaltyId && !r.objection) return false;
-      } else if (filterType === 'biometric') {
-        const isBio = r.type === 'biometric_verification' || r.type === 'biometric_registration' || r.type === 'biometric_reset' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
-        if (!isBio) return false;
-      } else if (filterType === 'shift_adjustment') {
-        if (r.type !== 'shift_adjustment') return false;
-      } else if (filterType === 'comp_off') {
-        if (r.type !== 'comp_off_grant' && r.type !== 'leave_comp_off' && r.leaveType !== 'comp_off') return false;
-      } else if (filterType === 'expense' || filterType === 'financial' || filterType === 'invoice') {
-        const isExp = r.type === 'expense' || r.type === 'financial_expense' || r.type === 'invoice' || r.type === 'financial_alert' || r.subType === 'invoice';
-        if (!isExp) return false;
-      } else if (r.type !== filterType) {
-        return false;
-      }
+      if (!isRequestMatchingFilterType(r, filterType)) return false;
     }
     if (filterStatus !== 'all') {
       if (filterStatus === 'pending') {
@@ -744,6 +892,17 @@ export default function RequestsModule({
     }
     if (filterEmp !== 'all') {
       if (String(r.employeeId) !== String(filterEmp)) return false;
+    }
+
+    // Filter by Branch
+    if (filterBranch !== 'all') {
+      const bId = String(filterBranch);
+      const emp = (state.employees || []).find(e => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
+      const matchesBranch =
+        String(r.branchId || '') === bId ||
+        String(emp?.branchId || '') === bId ||
+        (emp?.branchesDetails && emp.branchesDetails.some(bd => String(bd.branchId) === bId));
+      if (!matchesBranch) return false;
     }
 
     // Live Search across Employee Name, Code, Request ID, Branch, Details
@@ -778,7 +937,7 @@ export default function RequestsModule({
     return true;
   });
 
-  // Calculate Executive KPI Stats across visible requests (matching active scope and date cycle)
+  // Calculate Executive KPI Stats strictly scoped to active request type and filters
   const kpis = useMemo(() => {
     let pendingCount = 0;
     let biometricCount = 0;
@@ -811,8 +970,41 @@ export default function RequestsModule({
       return true;
     };
 
-    (requests || []).forEach((r) => {
-      if (!r) return;
+    const typeScopedRequests = (requests || []).filter((r) => {
+      if (!r) return false;
+      if (filterType !== 'all' && !isRequestMatchingFilterType(r, filterType)) return false;
+
+      // Filter by Employee if selected
+      if (filterEmp !== 'all' && String(r.employeeId) !== String(filterEmp)) return false;
+
+      // Filter by Branch if selected
+      if (filterBranch !== 'all') {
+        const bId = String(filterBranch);
+        const emp = (state.employees || []).find(e => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
+        const matchesBranch =
+          String(r.branchId || '') === bId ||
+          String(emp?.branchId || '') === bId ||
+          (emp?.branchesDetails && emp.branchesDetails.some(bd => String(bd.branchId) === bId));
+        if (!matchesBranch) return false;
+      }
+
+      // Live Search across Employee Name, Code, Request ID, Branch, Details
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        const emp = (state.employees || []).find(e => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
+        const empName = (emp ? getEmpDisplayName(emp) : (r.employeeName || '')).toLowerCase();
+        const empCode = String(r.employeeCode || emp?.code || '').toLowerCase();
+        const reqIdStr = String(r.id || '').toLowerCase();
+        const detailsStr = String(r.details || r.reason || r.typeLabel || r.type || '').toLowerCase();
+        const branchStr = String(r.branchName || emp?.branchName || '').toLowerCase();
+        const matchesSearch = empName.includes(q) || empCode.includes(q) || reqIdStr.includes(q) || detailsStr.includes(q) || branchStr.includes(q);
+        if (!matchesSearch) return false;
+      }
+
+      return true;
+    });
+
+    typeScopedRequests.forEach((r) => {
       const isPending = !r.status || r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_target' || r.status === 'pending_local' || r.status === 'queued' || r.status === 'syncing';
       const isApproved = r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.adminApproved;
       const isRejected = r.status === 'rejected';
@@ -833,7 +1025,7 @@ export default function RequestsModule({
       if ((r.type === 'loan' || r.type === 'advance' || r.type === 'meds') && isPending) pendingLoansCount++;
     });
 
-    const scopedTotal = (requests || []).filter(passDateScope).length;
+    const scopedTotal = typeScopedRequests.filter(passDateScope).length;
 
     return {
       pendingCount,
@@ -843,11 +1035,12 @@ export default function RequestsModule({
       pendingLoansCount,
       urgentCount,
       completedCount,
+      approvedCount: completedCount,
       rejectedCount,
       outboxCount,
       totalCount: scopedTotal
     };
-  }, [requests, filterDate, filterMode, customFrom, customTo, filterFn]);
+  }, [requests, filterType, filterEmp, filterBranch, searchQuery, state.employees, filterDate, filterMode, customFrom, customTo, filterFn]);
 
   // Bulk Selection Handlers
   const handleToggleSelectAll = () => {
@@ -1871,6 +2064,16 @@ export default function RequestsModule({
         branchId: approvedTargetReq.branchId || approvedTargetReq.branch_id
       }).catch(err => console.warn('Outbox enqueue decision error:', err));
 
+      // إشعار فوري وتلقائي للموظف عبر الواتساب باعتماد وقبول طلبه
+      sendEmployeeRequestDecisionWhatsApp({
+        state: updatedState,
+        request: approvedTargetReq,
+        status: 'approved',
+        decisionNotes: approvedTargetReq.reviewNotes || approvedTargetReq.adminReply || '',
+        approverRole: effectiveRole,
+        approverName: state.currentUser?.name || state.currentUser?.username || ''
+      }).catch(err => console.warn('WhatsApp request decision dispatch error:', err));
+
       // إشعار فوري عبر Gmail بتطبيق الجزاء / الخصم المعتمد
       const cleanReqType = String(approvedTargetReq.type || '').trim().toLowerCase();
       if (cleanReqType === 'penalty' || cleanReqType === 'early_exit' || cleanReqType === 'disciplinary_penalty' || cleanReqType === 'violation' || String(approvedTargetReq.id || '').startsWith('disc_')) {
@@ -2353,6 +2556,16 @@ export default function RequestsModule({
         reviewer: { role: effectiveRole, id: state.currentUser?.id || 'admin' },
         branchId: rejectedTargetReq?.branchId || rejectedTargetReq?.branch_id
       }).catch(err => console.warn('Outbox enqueue decision error:', err));
+
+      // إشعار فوري وتلقائي للموظف عبر الواتساب برفض طلبه
+      sendEmployeeRequestDecisionWhatsApp({
+        state: updatedState,
+        request: rejectedTargetReq || targetReq,
+        status: 'rejected',
+        decisionNotes: rejectedTargetReq?.rejectReason || rejectedTargetReq?.reviewNotes || rejectedTargetReq?.adminReply || '',
+        approverRole: effectiveRole,
+        approverName: state.currentUser?.name || state.currentUser?.username || ''
+      }).catch(err => console.warn('WhatsApp request decision dispatch error:', err));
       showToast?.('❌ تم رفض الطلب واستبعاد الإجراء');
     };
 
@@ -2516,6 +2729,17 @@ export default function RequestsModule({
       const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
+
+      const approvedObjectionReq = (requests || []).find(r => r.id === reqId);
+      if (approvedObjectionReq) {
+        sendEmployeeRequestDecisionWhatsApp({
+          state: updatedState,
+          request: { ...approvedObjectionReq, type: 'penalty_objection', typeLabel: 'تظلم على جزاء وإلغاء الخصم' },
+          status: 'approved',
+          decisionNotes: 'تم قبول تظلمك وإلغاء الجزاء والخصم المالي بالكامل.',
+          approverRole: 'admin'
+        }).catch(err => console.warn('WhatsApp objection approve dispatch error:', err));
+      }
       if (previewModalReq?.id === reqId) {
         setPreviewModalReq(prev => ({ ...prev, status: 'cancelled', isCancelled: true, objection: { ...prev.objection, status: 'approved' } }));
       }
@@ -2554,6 +2778,17 @@ export default function RequestsModule({
       const updatedState = { ...state, requests: updatedRequests };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
+
+      const rejectedObjectionReq = (requests || []).find(r => r.id === reqId);
+      if (rejectedObjectionReq) {
+        sendEmployeeRequestDecisionWhatsApp({
+          state: updatedState,
+          request: { ...rejectedObjectionReq, type: 'penalty_objection', typeLabel: 'تظلم على جزاء مالي' },
+          status: 'rejected',
+          decisionNotes: reply || 'تمت دراسة مبررات التظلم وتثبيت الجزاء المالي.',
+          approverRole: 'admin'
+        }).catch(err => console.warn('WhatsApp objection reject dispatch error:', err));
+      }
       if (previewModalReq?.id === reqId) {
         setPreviewModalReq(prev => ({ ...prev, objection: { ...prev.objection, status: 'rejected', adminReply: reply } }));
       }
@@ -2678,6 +2913,89 @@ export default function RequestsModule({
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.(`🧹 تم مسح وإخفاء (${clearableRequests.length}) طلب منجز مع الإبقاء على (${pendingCount}) طلب قيد الاعتماد.`);
+  };
+
+  // تفريغ ومسح شاشة نوع الطلب الحالي فقط على حدة (مع الحماية المطلقة للطلبات قيد الاعتماد)
+  const handleClearCurrentTypeScreen = async () => {
+    if (filterType === 'all') {
+      return handleClearAdminViewOnly();
+    }
+    const typeLabel = REQUEST_TYPE_LABELS[filterType] || filterType;
+    const clearableRequests = clearableCurrentTypeRequests;
+
+    if (clearableRequests.length === 0) {
+      showToast?.(`ℹ️ لا توجد طلبات منتهية أو مرفوضة في شاشة (${typeLabel}) لمسحها (كافة الطلبات قيد الاعتماد محمية).`);
+      return;
+    }
+
+    const isConfirmed = await showConfirm({
+      title: `تفريغ شاشة ${typeLabel}`,
+      message: `تأكيد تفريغ ومسح شاشة (${typeLabel}) فقط:\n\n` +
+        `• سيتم مسح وإخفاء (${clearableRequests.length}) طلب منجز ومرفوض خاص بـ (${typeLabel}) فقط لترتيب الشاشة.\n` +
+        `• 🛡️ أمان وحماية: كافة الطلبات قيد الاعتماد محمية بنسبة 100% ولن تتأثر أو تختفي إطلاقاً.\n` +
+        `• باقي أنواع الطلبات الأخرى في النظام لن تتأثر نهائياً.\n` +
+        `• لن يتم حذف أي بيانات، ويمكنك في أي وقت الضغط على "عرض المؤرشف" لاستعادتها.`,
+      confirmText: `تفريغ شاشة ${typeLabel} (${clearableRequests.length})`,
+      cancelText: 'إلغاء وتراجع',
+      type: 'info',
+      icon: '🧹'
+    });
+    if (!isConfirmed) return;
+
+    const targetIds = new Set();
+    clearableRequests.forEach(r => {
+      if (r && r.id) {
+        const s = String(r.id);
+        const raw = s.replace(/^(req_|leave_|swap_|res_|loan_|medreq_|perm_|lhist_|obj_inc_|obj_adj_|obj_|notif_)/, '');
+        targetIds.add(s);
+        if (raw) {
+          targetIds.add(raw);
+          targetIds.add(`loan_${raw}`);
+          targetIds.add(`medreq_${raw}`);
+          targetIds.add(`req_${raw}`);
+        }
+      }
+    });
+
+    const nowIso = new Date().toISOString();
+    const hideItem = (item) => {
+      if (item && isPendingRequest(item)) return item;
+      if (item && item.id) {
+        const s = String(item.id);
+        const raw = s.replace(/^(req_|leave_|swap_|res_|loan_|medreq_|perm_|lhist_|obj_inc_|obj_adj_|obj_|notif_)/, '');
+        if (targetIds.has(s) || (raw && targetIds.has(raw))) {
+          return { ...item, hiddenFromAdmin: true, updatedAt: nowIso };
+        }
+      }
+      return item;
+    };
+
+    const updatedRequests = (state.requests || []).map(hideItem);
+    const updatedLeaveRequests = (state.leaveRequests || []).map(hideItem);
+    const updatedShiftSwaps = (state.shiftSwaps || []).map(hideItem);
+    const updatedLoans = (state.loans || []).map(hideItem);
+    const updatedResignations = (state.resignationRequests || []).map(hideItem);
+
+    putRequestsBatch(updatedRequests).catch(() => {});
+
+    const updatedHiddenList = Array.from(new Set([
+      ...(state.adminHiddenRequestIds || []),
+      ...Array.from(targetIds)
+    ]));
+
+    const updatedState = {
+      ...state,
+      adminHiddenRequestIds: updatedHiddenList,
+      requests: updatedRequests,
+      leaveRequests: updatedLeaveRequests,
+      shiftSwaps: updatedShiftSwaps,
+      loans: updatedLoans,
+      resignationRequests: updatedResignations
+    };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.(`🧹 تم تفريغ شاشة (${typeLabel}) بنجاح (${clearableRequests.length} طلب) مع حماية الطلبات المعلقة.`);
   };
 
   // Restore Hidden Requests in Higher Management screen
@@ -3001,10 +3319,10 @@ export default function RequestsModule({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h2 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--text)' }}>
-            📋 مركز إدارة طلبات الموظفين الموحد
+            {REQUEST_PAGE_TITLES[filterType]?.title || `📋 إدارة طلبات ${REQUEST_TYPE_LABELS[filterType] || filterType}`}
           </h2>
           <p style={{ margin: '4px 0 0 0', color: 'var(--muted)', fontSize: '14px' }}>
-            معاينة كافة الطلبات، الإجازات، الأذون، السلف، الأدوية، وتبديل الورديات واتخاذ قرارات الموافقة المزدوجة
+            {REQUEST_PAGE_TITLES[filterType]?.desc || 'معاينة كافة الطلبات، الإجازات، الأذون، السلف، الأدوية، وتبديل الورديات واتخاذ قرارات الموافقة المزدوجة'}
           </p>
         </div>
 
@@ -3036,77 +3354,115 @@ export default function RequestsModule({
             <span>{isRefreshing ? 'جاري المزامنة...' : 'تحديث الطلبات'}</span>
           </button>
 
-          {/* Button 1: Clear Admin View Only (Blue) */}
-          <button
-            type="button"
-            className="btn"
-            onClick={handleClearAdminViewOnly}
-            disabled={clearableAdminRequestsCount === 0}
-            style={{
-              background: '#2563eb',
-              color: '#ffffff',
-              border: '1px solid #1d4ed8',
-              opacity: clearableAdminRequestsCount === 0 ? 0.75 : 1,
-              padding: '8px 14px',
-              fontSize: '12px',
-              fontWeight: '800',
-              borderRadius: '8px',
-              cursor: clearableAdminRequestsCount > 0 ? 'pointer' : 'default',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 2px 8px rgba(37, 99, 235, 0.25)',
-              transition: 'all 0.2s ease'
-            }}
-            title={clearableAdminRequestsCount > 0 ? "مسح وتفريغ الطلبات المنتهية فقط من شاشة الإدارة العليا (مع استثناء وحفظ الطلبات قيد الاعتماد)" : "لا توجد طلبات منتهية لمسحها (الطلبات قيد الاعتماد محمية)"}
-          >
-            <span>🧹 مسح شاشة الإدارة فقط</span>
-            <span style={{
-              background: 'rgba(0,0,0,0.25)',
-              padding: '2px 7px',
-              borderRadius: '99px',
-              fontSize: '11px'
-            }}>
-              {clearableAdminRequestsCount}
-            </span>
-          </button>
+          {/* Button 1: Clear Current Screen (Per-Type or All) */}
+          {filterType !== 'all' ? (
+            <button
+              type="button"
+              className="btn"
+              onClick={handleClearCurrentTypeScreen}
+              disabled={clearableCurrentTypeRequests.length === 0}
+              style={{
+                background: '#2563eb',
+                color: '#ffffff',
+                border: '1px solid #1d4ed8',
+                opacity: clearableCurrentTypeRequests.length === 0 ? 0.75 : 1,
+                padding: '8px 14px',
+                fontSize: '12px',
+                fontWeight: '800',
+                borderRadius: '8px',
+                cursor: clearableCurrentTypeRequests.length > 0 ? 'pointer' : 'default',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 2px 8px rgba(37, 99, 235, 0.25)',
+                transition: 'all 0.2s ease'
+              }}
+              title={clearableCurrentTypeRequests.length > 0 ? `مسح وتفريغ طلبات (${REQUEST_TYPE_LABELS[filterType] || filterType}) المنتهية فقط (مع حماية الطلبات المعلقة)` : "لا توجد طلبات منتهية لمسحها في هذه الشاشة"}
+            >
+              <span>🧹 مسح شاشة {REQUEST_TYPE_LABELS[filterType] || 'هذا الطلب'} فقط</span>
+              <span style={{
+                background: 'rgba(0,0,0,0.25)',
+                padding: '2px 7px',
+                borderRadius: '99px',
+                fontSize: '11px'
+              }}>
+                {clearableCurrentTypeRequests.length}
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn"
+              onClick={handleClearAdminViewOnly}
+              disabled={clearableAdminRequestsCount === 0}
+              style={{
+                background: '#2563eb',
+                color: '#ffffff',
+                border: '1px solid #1d4ed8',
+                opacity: clearableAdminRequestsCount === 0 ? 0.75 : 1,
+                padding: '8px 14px',
+                fontSize: '12px',
+                fontWeight: '800',
+                borderRadius: '8px',
+                cursor: clearableAdminRequestsCount > 0 ? 'pointer' : 'default',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 2px 8px rgba(37, 99, 235, 0.25)',
+                transition: 'all 0.2s ease'
+              }}
+              title={clearableAdminRequestsCount > 0 ? "مسح وتفريغ الطلبات المنتهية فقط من شاشة الإدارة العليا (مع استثناء وحفظ الطلبات قيد الاعتماد)" : "لا توجد طلبات منتهية لمسحها (الطلبات قيد الاعتماد محمية)"}
+            >
+              <span>🧹 مسح شاشة الإدارة فقط</span>
+              <span style={{
+                background: 'rgba(0,0,0,0.25)',
+                padding: '2px 7px',
+                borderRadius: '99px',
+                fontSize: '11px'
+              }}>
+                {clearableAdminRequestsCount}
+              </span>
+            </button>
+          )}
 
-          {/* Button 2: Clear Entire System Requests List (Red) */}
-          <button
-            type="button"
-            className="btn"
-            onClick={handleClearAllRequests}
-            disabled={clearableAllRequestsCount === 0}
-            style={{
-              background: '#ef4444',
-              color: '#ffffff',
-              border: '1px solid #dc2626',
-              opacity: clearableAllRequestsCount === 0 ? 0.75 : 1,
-              padding: '8px 14px',
-              fontSize: '12px',
-              fontWeight: '800',
-              borderRadius: '8px',
-              cursor: clearableAllRequestsCount > 0 ? 'pointer' : 'default',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 2px 8px rgba(239, 68, 68, 0.25)',
-              transition: 'all 0.2s ease'
-            }}
-            title={clearableAllRequestsCount > 0 ? "مسح وتفريغ سجل الطلبات المنتهية نهائياً من كافة شاشات النظام (مع استثناء وحفظ الطلبات قيد الاعتماد)" : "لا توجد طلبات منتهية لمسحها (الطلبات قيد الاعتماد محمية)"}
-          >
-            <span>🗑️ مسح السجل العام للطلبات</span>
-            <span style={{
-              background: 'rgba(0,0,0,0.25)',
-              padding: '2px 7px',
-              borderRadius: '99px',
-              fontSize: '11px'
-            }}>
-              {clearableAllRequestsCount}
-            </span>
-          </button>
+          {/* Button 2: Clear Entire System Requests List (Red) - Only appears in All Requests page */}
+          {filterType === 'all' && (
+            <button
+              type="button"
+              className="btn"
+              onClick={handleClearAllRequests}
+              disabled={clearableAllRequestsCount === 0}
+              style={{
+                background: '#ef4444',
+                color: '#ffffff',
+                border: '1px solid #dc2626',
+                opacity: clearableAllRequestsCount === 0 ? 0.75 : 1,
+                padding: '8px 14px',
+                fontSize: '12px',
+                fontWeight: '800',
+                borderRadius: '8px',
+                cursor: clearableAllRequestsCount > 0 ? 'pointer' : 'default',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 2px 8px rgba(239, 68, 68, 0.25)',
+                transition: 'all 0.2s ease'
+              }}
+              title={clearableAllRequestsCount > 0 ? "مسح وتفريغ سجل الطلبات المنتهية نهائياً من كافة شاشات النظام (مع استثناء وحفظ الطلبات قيد الاعتماد)" : "لا توجد طلبات منتهية لمسحها (الطلبات قيد الاعتماد محمية)"}
+            >
+              <span>🗑️ مسح السجل العام للطلبات</span>
+              <span style={{
+                background: 'rgba(0,0,0,0.25)',
+                padding: '2px 7px',
+                borderRadius: '99px',
+                fontSize: '11px'
+              }}>
+                {clearableAllRequestsCount}
+              </span>
+            </button>
+          )}
 
-          {/* Button: Toggle Hidden/Archived Requests (Placed after the 3 fixed main buttons) */}
+          {/* Button: Toggle Hidden/Archived Requests */}
           {hiddenAdminCount > 0 && (
             <button
               type="button"
@@ -3124,9 +3480,9 @@ export default function RequestsModule({
                 alignItems: 'center',
                 gap: '5px'
               }}
-              title="عرض أو إخفاء الطلبات التي تم مسحها من شاشة الإدارة سابقاً"
+              title="عرض أو إخفاء الطلبات التي تم مسحها من الشاشة سابقاً"
             >
-              <span>{showHiddenAdminRequests ? '👁️ إخفاء المؤرشف' : `👁️ عرض المؤرشف (${hiddenAdminCount})`}</span>
+              <span>{showHiddenAdminRequests ? '👁️ إخفاء المؤرشف' : `👁️ عرض المؤرشف (${filterType !== 'all' ? hiddenCurrentTypeCount : hiddenAdminCount})`}</span>
             </button>
           )}
 
@@ -3152,7 +3508,7 @@ export default function RequestsModule({
         </div>
       </div>
 
-      {/* ── Modern Inbox Tabs Navigation Bar ── */}
+      {/* ── Modern Inbox Tabs Navigation Bar (4 Main Tabs) ── */}
       <div
         style={{
           display: 'flex',
@@ -3166,12 +3522,11 @@ export default function RequestsModule({
         {[
           { id: 'all', label: 'كافة الطلبات', icon: '📋', count: kpis.totalCount, color: '#3b82f6' },
           { id: 'pending', label: 'قيد الاعتماد', icon: '⏳', count: kpis.pendingCount, color: '#f59e0b' },
-          { id: 'urgent', label: 'عاجل وتظلمات', icon: '🚨', count: kpis.urgentCount, color: '#ef4444' },
-          { id: 'completed', label: 'المعتمدة والمكتملة', icon: '✅', count: kpis.completedCount, color: '#10b981' },
-          { id: 'rejected', label: 'المرفوضة', icon: '❌', count: kpis.rejectedCount, color: '#6b7280' },
-          { id: 'outbox', label: 'طابور الأوفلاين والمزامنة', icon: '💾', count: kpis.outboxCount, color: '#8b5cf6' }
+          { id: 'approved', label: 'المعتمدة', icon: '🟢', count: kpis.approvedCount ?? kpis.completedCount, color: '#10b981' },
+          { id: 'rejected', label: 'المرفوضة', icon: '❌', count: kpis.rejectedCount, color: '#ef4444' },
+          ...(kpis.outboxCount > 0 ? [{ id: 'outbox', label: 'طابور الأوفلاين والمزامنة', icon: '💾', count: kpis.outboxCount, color: '#8b5cf6' }] : [])
         ].map((tab) => {
-          const isActive = inboxTab === tab.id;
+          const isActive = inboxTab === tab.id || (tab.id === 'approved' && inboxTab === 'completed');
           return (
             <button
               key={tab.id}
@@ -3179,7 +3534,7 @@ export default function RequestsModule({
               onClick={() => {
                 setInboxTab(tab.id);
                 if (tab.id === 'pending') setFilterStatus('pending');
-                else if (tab.id === 'completed') setFilterStatus('approved');
+                else if (tab.id === 'approved') setFilterStatus('approved');
                 else if (tab.id === 'rejected') setFilterStatus('rejected');
                 else setFilterStatus('all');
               }}
@@ -3243,6 +3598,21 @@ export default function RequestsModule({
           )}
         </div>
 
+        {/* Filter Branch */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <label style={{ fontSize: '13px', fontWeight: 'bold' }}>🏢 الفرع:</label>
+          <select
+            value={filterBranch}
+            onChange={(e) => setFilterBranch(e.target.value)}
+            style={{ padding: '7px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
+          >
+            <option value="all">-- جميع الفروع --</option>
+            {(state.branches || []).map((b) => (
+              <option key={b.id} value={b.id}>{b.name || b.branchName || `فرع ${b.id}`}</option>
+            ))}
+          </select>
+        </div>
+
         {/* Filter Employee */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <label style={{ fontSize: '13px', fontWeight: 'bold' }}>👤 الموظف:</label>
@@ -3273,19 +3643,21 @@ export default function RequestsModule({
           <label style={{ fontSize: '13px', fontWeight: 'bold' }}>نوع الطلب:</label>
           <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ padding: '7px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}>
             <option value="all">-- جميع أنواع الطلبات --</option>
+            <option value="leave">🏖️ طلبات الإجازات (كافة الأنواع)</option>
+            <option value="schedule_deviation">⚠️ عدم الالتزام بالجدول</option>
+            <option value="manual_punch">🖐️ طلب تسجيل بصمة يدوي</option>
+            <option value="overtime">⭐ ساعات إضافية</option>
+            <option value="permission">⏰ أذونات وساعات الاستئذان</option>
+            <option value="loan">💳 السلف المالية والنقدية</option>
+            <option value="meds">💊 مشتريات الأدوية الآجلة</option>
+            <option value="penalty_objection">⚖️ تظلم على جزاء داخل النظام</option>
+            <option value="swap">🔄 تبديل ومناوبة الورديات</option>
+            <option value="shift_adjustment">⏱️ تعديلات الشفتات والمواعيد</option>
+            <option value="roster_edit">📅 تعديلات الجداول الشهرية</option>
+            <option value="biometric">📸 اعتمادات البصمة والكشك (AI)</option>
             <option value="expense">📑 فواتير ومصروفات الفروع</option>
-            <option value="biometric">📸 اعتمادات البصمة والكشك</option>
-            <option value="leave">🏖️ إجازات (&lt;= 3 أيام)</option>
-            <option value="long_leave">🏖️ إجازات أكثر من 3 أيام</option>
-            <option value="permission">⏰ أذون خروج/دخول</option>
-            <option value="loan">💳 سلف مالية</option>
-            <option value="meds">💊 أدوية آجل</option>
-            <option value="swap">🔄 تبديل شفتات</option>
-            <option value="penalty_objection">✋ تظلمات الجزاءات واللائحة</option>
-            <option value="roster_edit">📅 تعديل جدول شهري</option>
-            <option value="shift_adjustment">🔄 طلبات تعديل الشيفت</option>
-            <option value="comp_off">🛋️ إجازات وبدل راحة</option>
-            <option value="complaint">📋 شكاوي وملاحظات</option>
+            <option value="comp_off">🛋️ إجازات بدل الراحة والتشغيل</option>
+            <option value="complaint">📢 الشكاوى والتظلمات الإدارية</option>
             <option value="penalty">⚠️ جزاءات ومخالفات لائحية</option>
           </select>
         </div>

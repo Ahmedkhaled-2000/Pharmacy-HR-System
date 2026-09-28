@@ -150,6 +150,31 @@ function detectEntityDeltas(prevState, nextState) {
     if (prevState.orgSettings !== nextState.orgSettings) {
       deltas.push({ entityType: 'settings', entityId: 'orgSettings', data: nextState.orgSettings, action: 'update' });
     }
+
+    // 8. الطلبات والإجازات والسلف وتظلمات الجزاءات (Instant Delta Broadcast < 5ms)
+    if (prevState.requests !== nextState.requests) {
+      const prevReqs = Array.isArray(prevState.requests) ? prevState.requests : [];
+      const nextReqs = Array.isArray(nextState.requests) ? nextState.requests : [];
+      const prevMap = new Map(prevReqs.map(r => [String(r.id), r]));
+      for (const nextR of nextReqs.slice(0, 50)) {
+        const id = String(nextR.id);
+        const prevR = prevMap.get(id);
+        if (!prevR) {
+          deltas.push({ entityType: 'request', entityId: id, data: nextR, action: 'create' });
+        } else if (prevR.status !== nextR.status || prevR.adminApproved !== nextR.adminApproved || prevR.updatedAt !== nextR.updatedAt) {
+          deltas.push({ entityType: 'request', entityId: id, data: nextR, action: 'update' });
+        }
+      }
+    }
+    if (prevState.leaveRequests !== nextState.leaveRequests) {
+      deltas.push({ entityType: 'leaveRequests', entityId: 'all', data: nextState.leaveRequests, action: 'update' });
+    }
+    if (prevState.loans !== nextState.loans) {
+      deltas.push({ entityType: 'loans', entityId: 'all', data: nextState.loans, action: 'update' });
+    }
+    if (prevState.lateIncidents !== nextState.lateIncidents) {
+      deltas.push({ entityType: 'lateIncidents', entityId: 'all', data: nextState.lateIncidents, action: 'update' });
+    }
   } catch (err) {
     console.warn('[detectEntityDeltas Warn]:', err);
   }
