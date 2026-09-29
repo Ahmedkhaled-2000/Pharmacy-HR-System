@@ -974,11 +974,11 @@ export default function BiometricDevicesCard({ state, showToast }) {
     try {
       const res = await fetch('/api/biometrics/repair-overnight-shifts', { method: 'POST' });
       const data = await res.json();
-      if (data.success) {
+      if (data.success || data.repairedCount !== undefined) {
         if (data.repairedCount > 0) {
           showToast?.(`✅ تم ترميم واستعادة ${data.repairedCount} وردية ليلية بنجاح!`);
         } else {
-          showToast?.('ℹ️ تم الفحص بنجاح: لا توجد ورديات بحاجة لترميم أو تم إصلاحها مسبقاً.');
+          showToast?.(data.message || 'ℹ️ تم الفحص بنجاح: لا توجد ورديات بحاجة لترميم أو تم إصلاحها مسبقاً.');
         }
       } else {
         showToast?.('⚠️ تعذر إتمام الترميم: ' + (data.error || 'خطأ غير معروف'));

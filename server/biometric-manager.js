@@ -9,7 +9,7 @@
 
 import express from 'express';
 
-const STORAGE_KEY = 'pharmacy_state_v1';
+const STORAGE_KEY = 'pharmacy-tracker-data';
 let globalDb = null;
 const hqPendingEnrollments = new Map();
 
@@ -3429,11 +3429,15 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
  * دالة فحص وترميم الورديات العابرة لمنتصف الليل المفقودة أو الممسوحة من واقع السجل الخام
  */
 export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorage, saveSettingsToStorage, io) {
-  if (!db || typeof getSettingsFromStorage !== 'function') return { repairedCount: 0 };
+  if (!db || typeof getSettingsFromStorage !== 'function') {
+    return { success: false, error: 'تعذر الوصول لقاعدة البيانات أو مخزن الإعدادات' };
+  }
   try {
     console.log('🔄 [Biometric Self-Healing] بدء فحص وترميم الورديات العابرة لمنتصف الليل من السجل الخام...');
     const state = await getSettingsFromStorage(STORAGE_KEY);
-    if (!state) return { repairedCount: 0 };
+    if (!state) {
+      return { success: false, error: 'لم يتم العثور على بيانات المنظومة في قاعدة البيانات' };
+    }
 
     const employees = Array.isArray(state.employees) ? state.employees : [];
     let currentShifts = Array.isArray(state.shifts) ? [...state.shifts] : [];
@@ -3450,7 +3454,9 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
     );
 
     const punches = rawQ.rows || [];
-    if (punches.length === 0) return { repairedCount: 0, message: 'لا توجد بصمات خام للفحص' };
+    if (punches.length === 0) {
+      return { success: true, repairedCount: 0, message: 'لا توجد بصمات خام مسجلة خلال آخر 14 يوماً للفحص' };
+    }
 
     // تجميع البصمات لكل موظف
     const empPunchesMap = new Map();
