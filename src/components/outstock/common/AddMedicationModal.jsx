@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X,
   Plus,
+  Trash2,
   Pill,
   DollarSign,
   Package,
@@ -10,14 +11,47 @@ import {
   AlertTriangle,
   Snowflake,
   Sparkles,
-  Check
+  Check,
+  Receipt,
+  Search
 } from 'lucide-react';
-import { outstockAddNewMedication } from '../../../utils/outstockApiClient';
+import {
+  outstockAddNewMedication,
+  outstockUpdateMedicationDetails,
+  outstockSearchActiveIngredients
+} from '../../../utils/outstockApiClient';
+
+/**
+ * خريطة الإعدادات المسبقة للشكل الدوائي (الاسم الافتراضي للوحدة وعدد الوحدات بالعبوة)
+ */
+const DOSAGE_PRESETS = {
+  'أقراص (Tablets)': { unit: 'شريط', packSize: 2 },
+  'كبسولات (Capsules)': { unit: 'شريط', packSize: 2 },
+  'شراب (Syrup)': { unit: 'زجاجة', packSize: 1 },
+  'معلق (Suspension)': { unit: 'زجاجة', packSize: 1 },
+  'حقن (Injection)': { unit: 'أمبول', packSize: 5 },
+  'أمبولات (Ampoules)': { unit: 'أمبول', packSize: 5 },
+  'فيال (Vials)': { unit: 'فيال', packSize: 1 },
+  'نقط (Drops)': { unit: 'قطارة', packSize: 1 },
+  'مرهم / كريم (Ointment/Cream)': { unit: 'أنبوبة', packSize: 1 },
+  'جل (Gel)': { unit: 'أنبوبة', packSize: 1 },
+  'فوار / أكياس (Sachets)': { unit: 'كيس', packSize: 10 },
+  'بخاخ (Inhaler/Spray)': { unit: 'بخاخ', packSize: 1 },
+  'لبوس (Suppositories)': { unit: 'شريط', packSize: 1 },
+  'محلول وريدي (IV Solution)': { unit: 'عبوة', packSize: 1 },
+  'شامبو / لوشن (Shampoo / Lotion)': { unit: 'عبوة', packSize: 1 },
+  'أخرى': { unit: 'علبة', packSize: 1 }
+};
 
 /**
  * AddMedicationModal.jsx
- * نافذة إضافة دواء جديد للكتالوج المركزي
- * تدعم الحساب اللحظي لسعر الشريط، والتصميم الحديث، ومشاركتها بين الفرع والمالك وطلب العميل
+ * نافذة احترافية لإضافة وتعديل الأدوية في الكتالوج المركزي
+ * تدعم:
+ * - حل مشكلة إعادة التهيئة أثناء الكتابة
+ * - المواد الفعالة المتعددة بزر (+) والإكمال التلقائي (Typeahead)
+ * - اسم الصنف المطبوع على الفاتورة (Invoice Display Name)
+ * - الملء التلقائي للوحدة والعبوة بحسب الشكل الدوائي
+ * - تعديل الصنف مباشرة في قاعدة البيانات
  */
 export default function AddMedicationModal({
   isOpen,
@@ -25,13 +59,16 @@ export default function AddMedicationModal({
   onClose,
   onSaveSuccess
 }) {
+  const isEditMode = Boolean(initialData?.id);
+  const prevIsOpenRef = useRef(false);
+
   const [form, setForm] = useState({
     trade_name_ar: '',
     trade_name_en: '',
-    generic_name: '',
+    invoice_display_name: '',
     dosage_form: 'أقراص (Tablets)',
     strength: '',
-    pack_size: 1,
+    pack_size: 2,
     unit_name: 'شريط',
     public_price: '',
     manufacturer: '',
@@ -41,33 +78,107 @@ export default function AddMedicationModal({
     is_refrigerated: false
   });
 
+  // قائمة المواد الفعالة
+  const [activeIngredients, setActiveIngredients] = useState(['']);
+  // اقتراحات المواد الفعالة
+  const [suggestions, setSuggestions] = useState({}); // { [index]: Array }
+  const [activeSugIndex, setActiveSugIndex] = useState(null);
+
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // تهيئة البيانات عند الفتح
+  // تهيئة البيانات فقط عند انتقال isOpen من false إلى true
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !prevIsOpenRef.current) {
       setErrorMsg('');
       const initName = initialData?.trade_name_ar || initialData?.name || '';
       const isEnglish = /^[a-zA-Z0-9\s\-+.]+$/.test(initName.trim());
 
+      const dForm = initialData?.dosage_form || 'أقراص (Tablets)';
+      const preset = DOSAGE_PRESETS[dForm] || { unit: 'شريط', packSize: 2 };
+
       setForm({
         trade_name_ar: isEnglish ? '' : initName,
         trade_name_en: isEnglish ? initName : (initialData?.trade_name_en || ''),
-        generic_name: initialData?.generic_name || '',
-        dosage_form: initialData?.dosage_form || 'أقراص (Tablets)',
+        invoice_display_name: initialData?.invoice_display_name || initialData?.invoiceDisplayName || '',
+        dosage_form: dForm,
         strength: initialData?.strength || '',
-        pack_size: initialData?.pack_size || 1,
-        unit_name: initialData?.unit_name || 'شريط',
-        public_price: initialData?.public_price ? String(initialData.public_price) : '',
-        manufacturer: initialData?.manufacturer || '',
+        pack_size: initialData?.pack_size || preset.packSize,
+        unit_name: initialData?.unit_name || preset.unit,
+        public_price: initialData?.public_price ? String(initialData.public_price) : (initialData?.current_price ? String(initialData.current_price) : ''),
+        manufacturer: initialData?.manufacturer || initialData?.company_name || '',
         category: initialData?.category || '',
-        gtin_barcode: initialData?.gtin_barcode || '',
+        gtin_barcode: initialData?.gtin_barcode || initialData?.barcode || '',
         is_table_drug: Boolean(initialData?.is_table_drug),
         is_refrigerated: Boolean(initialData?.is_refrigerated)
       });
+
+      // استخراج المواد الفعالة
+      let ings = [];
+      if (Array.isArray(initialData?.active_ingredients_list) && initialData.active_ingredients_list.length > 0) {
+        ings = initialData.active_ingredients_list;
+      } else if (Array.isArray(initialData?.active_ingredients) && initialData.active_ingredients.length > 0) {
+        ings = initialData.active_ingredients;
+      } else if (initialData?.generic_name || initialData?.active_ingredient) {
+        const raw = initialData.generic_name || initialData.active_ingredient;
+        ings = String(raw).split('+').map(s => s.trim()).filter(Boolean);
+      }
+      setActiveIngredients(ings.length > 0 ? ings : ['']);
     }
+    prevIsOpenRef.current = isOpen;
   }, [isOpen, initialData]);
+
+  // تغيير الشكل الدوائي وتحديث الوحدة وحجم العبوة تلقائياً
+  const handleDosageFormChange = (e) => {
+    const selectedForm = e.target.value;
+    const preset = DOSAGE_PRESETS[selectedForm];
+    setForm(prev => ({
+      ...prev,
+      dosage_form: selectedForm,
+      unit_name: preset ? preset.unit : prev.unit_name,
+      pack_size: preset ? preset.packSize : prev.pack_size
+    }));
+  };
+
+  // إدارة المواد الفعالة
+  const handleIngredientChange = async (index, val) => {
+    const updated = [...activeIngredients];
+    updated[index] = val;
+    setActiveIngredients(updated);
+
+    if (val.trim().length >= 2) {
+      try {
+        const res = await outstockSearchActiveIngredients(val.trim(), 8);
+        if (res?.success && Array.isArray(res.data)) {
+          setSuggestions(prev => ({ ...prev, [index]: res.data }));
+          setActiveSugIndex(index);
+          return;
+        }
+      } catch (err) {}
+    }
+    setSuggestions(prev => ({ ...prev, [index]: [] }));
+  };
+
+  const selectSuggestion = (index, sug) => {
+    const updated = [...activeIngredients];
+    updated[index] = sug.name || sug;
+    setActiveIngredients(updated);
+    setSuggestions(prev => ({ ...prev, [index]: [] }));
+    setActiveSugIndex(null);
+  };
+
+  const addIngredientField = () => {
+    setActiveIngredients([...activeIngredients, '']);
+  };
+
+  const removeIngredientField = (index) => {
+    if (activeIngredients.length <= 1) {
+      setActiveIngredients(['']);
+      return;
+    }
+    const updated = activeIngredients.filter((_, i) => i !== index);
+    setActiveIngredients(updated);
+  };
 
   // احتساب لحظي لسعر الشريط
   const calculatedUnitPrice = useMemo(() => {
@@ -98,31 +209,42 @@ export default function AddMedicationModal({
       return;
     }
 
+    const cleanIngredients = activeIngredients.map(s => s.trim()).filter(Boolean);
+
     setIsSaving(true);
     try {
       const payload = {
-        trade_name_ar: arName || enName,
-        trade_name_en: enName || arName,
-        generic_name: form.generic_name.trim(),
-        dosage_form: form.dosage_form,
+        tradeName: enName || arName,
+        arabicName: arName || enName,
+        invoiceDisplayName: form.invoice_display_name.trim() || null,
+        activeIngredients: cleanIngredients,
+        genericName: cleanIngredients.join(' + '),
+        dosageForm: form.dosage_form,
         strength: form.strength.trim(),
-        pack_size: parseInt(form.pack_size, 10) || 1,
-        unit_name: form.unit_name.trim() || 'شريط',
-        public_price: pubPrice,
-        unit_price: calculatedUnitPrice ? parseFloat(calculatedUnitPrice) : pubPrice,
-        manufacturer: form.manufacturer.trim(),
+        packSize: parseInt(form.pack_size, 10) || 1,
+        unitName: form.unit_name.trim() || 'شريط',
+        price: pubPrice,
+        unitPrice: calculatedUnitPrice ? parseFloat(calculatedUnitPrice) : pubPrice,
+        company: form.manufacturer.trim(),
         category: form.category.trim(),
-        gtin_barcode: form.gtin_barcode.trim(),
-        is_table_drug: form.is_table_drug,
-        is_refrigerated: form.is_refrigerated
+        barcode: form.gtin_barcode.trim(),
+        isTableDrug: form.is_table_drug,
+        isRefrigerated: form.is_refrigerated
       };
 
-      const res = await outstockAddNewMedication(payload);
-      if (res?.success && res.medication) {
+      let res;
+      if (isEditMode) {
+        res = await outstockUpdateMedicationDetails(initialData.id, payload);
+      } else {
+        res = await outstockAddNewMedication(payload);
+      }
+
+      if (res?.success) {
+        const savedMed = res.medication || { id: initialData.id, ...payload };
         if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('outstock:medication_added', { detail: res.medication }));
+          window.dispatchEvent(new CustomEvent('outstock:medication_added', { detail: savedMed }));
         }
-        onSaveSuccess?.(res.medication);
+        onSaveSuccess?.(savedMed);
         onClose();
       } else {
         setErrorMsg(res?.error || 'حدث خطأ أثناء حفظ الدواء بالكتالوج المركزي');
@@ -157,7 +279,7 @@ export default function AddMedicationModal({
           background: '#ffffff',
           borderRadius: '20px',
           width: '100%',
-          maxWidth: '680px',
+          maxWidth: '720px',
           maxHeight: '92vh',
           overflow: 'hidden',
           display: 'flex',
@@ -171,12 +293,14 @@ export default function AddMedicationModal({
         <div
           style={{
             padding: '18px 24px',
-            background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+            background: isEditMode
+              ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)'
+              : 'linear-gradient(135deg, #059669 0%, #047857 100%)',
             color: '#ffffff',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            boxShadow: '0 4px 12px rgba(5, 150, 105, 0.25)'
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -185,21 +309,21 @@ export default function AddMedicationModal({
                 width: '42px',
                 height: '42px',
                 borderRadius: '12px',
-                background: 'rgba(255, 255, 255, 0.18)',
+                background: 'rgba(255, 255, 255, 0.2)',
                 backdropFilter: 'blur(8px)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center'
               }}
             >
-              <Plus size={24} color="#ffffff" />
+              {isEditMode ? <Pill size={24} color="#ffffff" /> : <Plus size={24} color="#ffffff" />}
             </div>
             <div>
               <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '900' }}>
-                إضافة دواء جديد للكتالوج المركزي
+                {isEditMode ? 'تعديل بيانات الصنف في الكتالوج المركزي' : 'إضافة دواء جديد للكتالوج المركزي'}
               </h3>
               <p style={{ margin: 0, fontSize: '12.5px', opacity: 0.9, marginTop: '2px' }}>
-                يتم التحديث اللحظي ويظهر فوراً لكافة الفروع وإدارة المشتريات
+                يتم التحديث المباشر ويظهر فوراً لكافة الفروع وإدارة المشتريات
               </p>
             </div>
           </div>
@@ -288,85 +412,178 @@ export default function AddMedicationModal({
             </div>
           </div>
 
-          {/* المادة الفعالة والتركيز */}
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '14px' }}>
-            <div>
-              <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
-                المادة الفعالة (Generic Active Ingredient):
+          {/* الاسم المطبوع على الفاتورة */}
+          <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px' }}>
+              <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Receipt size={16} color="#0284c7" />
+                <span>الاسم المطبوع على الفاتورة (Invoice Display Name):</span>
               </label>
-              <input
-                type="text"
-                placeholder="e.g. Chymotrypsin + Trypsin"
-                value={form.generic_name}
-                onChange={(e) => setForm({ ...form, generic_name: e.target.value })}
+              <span style={{ fontSize: '11px', color: '#64748b' }}>يظهر على إيصال العميل المطبوع (اختياري)</span>
+            </div>
+            <input
+              type="text"
+              placeholder="مثال: ألفانترن أقراص (يُطبع بهذا الاسم في الفاتورة)"
+              value={form.invoice_display_name}
+              onChange={(e) => setForm({ ...form, invoice_display_name: e.target.value })}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: '10px',
+                border: '1.5px solid #cbd5e1',
+                fontSize: '13.5px',
+                boxSizing: 'border-box',
+                background: '#ffffff'
+              }}
+            />
+          </div>
+
+          {/* المواد الفعالة المتعددة مع زر (+) والإكمال التلقائي */}
+          <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#1e293b' }}>
+                المواد الفعالة (Active Ingredients) - يدعم الإكمال التلقائي:
+              </label>
+              <button
+                type="button"
+                onClick={addIngredientField}
                 style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  borderRadius: '10px',
-                  border: '1.5px solid #cbd5e1',
-                  fontSize: '13.5px',
-                  boxSizing: 'border-box',
-                  direction: 'ltr'
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  background: '#e0f2fe',
+                  color: '#0369a1',
+                  border: '1px solid #bae6fd',
+                  padding: '5px 10px',
+                  borderRadius: '8px',
+                  fontSize: '11.5px',
+                  fontWeight: '800',
+                  cursor: 'pointer'
                 }}
-              />
+              >
+                <Plus size={14} />
+                <span>إضافة مادة فعالة أخرى (+)</span>
+              </button>
             </div>
 
-            <div>
-              <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
-                التركيز (Strength):
-              </label>
-              <input
-                type="text"
-                placeholder="مثال: 500mg أو 1g"
-                value={form.strength}
-                onChange={(e) => setForm({ ...form, strength: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  borderRadius: '10px',
-                  border: '1.5px solid #cbd5e1',
-                  fontSize: '13.5px',
-                  boxSizing: 'border-box',
-                  direction: 'ltr'
-                }}
-              />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {activeIngredients.map((ing, idx) => (
+                <div key={idx} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <input
+                      type="text"
+                      placeholder="e.g. Paracetamol, Ibuprofen, Chymotrypsin..."
+                      value={ing}
+                      onChange={(e) => handleIngredientChange(idx, e.target.value)}
+                      onFocus={() => setActiveSugIndex(idx)}
+                      style={{
+                        width: '100%',
+                        padding: '9px 12px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #cbd5e1',
+                        fontSize: '13px',
+                        boxSizing: 'border-box',
+                        direction: 'ltr'
+                      }}
+                    />
+                    {/* قائمة الاقتراحات التلقائية */}
+                    {activeSugIndex === idx && Array.isArray(suggestions[idx]) && suggestions[idx].length > 0 && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: '100%',
+                          left: 0,
+                          right: 0,
+                          zIndex: 1000,
+                          background: '#ffffff',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '8px',
+                          boxShadow: '0 8px 16px rgba(0,0,0,0.12)',
+                          maxHeight: '160px',
+                          overflowY: 'auto',
+                          marginTop: '3px',
+                          direction: 'ltr'
+                        }}
+                      >
+                        {suggestions[idx].map((sug, sIdx) => {
+                          const sName = sug.name || sug;
+                          return (
+                            <div
+                              key={sIdx}
+                              onClick={() => selectSuggestion(idx, sug)}
+                              style={{
+                                padding: '8px 12px',
+                                fontSize: '12.5px',
+                                cursor: 'pointer',
+                                borderBottom: '1px solid #f1f5f9',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center'
+                              }}
+                              onMouseEnter={(e) => e.currentTarget.style.background = '#f0f9ff'}
+                              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                            >
+                              <span style={{ fontWeight: '600', color: '#0369a1' }}>{sName}</span>
+                              {sug.count && (
+                                <span style={{ fontSize: '11px', color: '#64748b' }}>({sug.count} أدوية)</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {activeIngredients.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeIngredientField(idx)}
+                      style={{
+                        background: '#fee2e2',
+                        border: 'none',
+                        color: '#dc2626',
+                        borderRadius: '8px',
+                        padding: '8px',
+                        cursor: 'pointer'
+                      }}
+                      title="حذف المادة"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* الشكل الدوائي وحجم العبوة */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+          {/* الشكل الدوائي، عدد الوحدات، واسم الوحدة (ملء تلقائي) */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
             <div>
               <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                الشكل الدوائي:
+                الشكل الدوائي (Dosage Form):
               </label>
               <select
                 value={form.dosage_form}
-                onChange={(e) => setForm({ ...form, dosage_form: e.target.value })}
+                onChange={handleDosageFormChange}
                 style={{
                   width: '100%',
                   padding: '10px 10px',
                   borderRadius: '10px',
                   border: '1.5px solid #cbd5e1',
                   fontSize: '13px',
-                  boxSizing: 'border-box'
+                  boxSizing: 'border-box',
+                  background: '#ffffff'
                 }}
               >
-                <option value="أقراص (Tablets)">أقراص (Tablets)</option>
-                <option value="كبسولات (Capsules)">كبسولات (Capsules)</option>
-                <option value="شراب (Syrup)">شراب (Syrup)</option>
-                <option value="معلق (Suspension)">معلق (Suspension)</option>
-                <option value="حقن (Injection)">حقن (Injection)</option>
-                <option value="مرهم / كريم (Ointment/Cream)">مرهم / كريم</option>
-                <option value="نقط (Drops)">نقط (Drops)</option>
-                <option value="فوار / أكياس (Sachets)">فوار / أكياس</option>
-                <option value="بخاخ (Inhaler/Spray)">بخاخ (Inhaler/Spray)</option>
-                <option value="أخرى">أخرى</option>
+                {Object.keys(DOSAGE_PRESETS).map(df => (
+                  <option key={df} value={df}>{df}</option>
+                ))}
               </select>
             </div>
 
             <div>
               <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                عدد الشرائط / الوحدات:
+                عدد الوحدات / الشرائط بالعلبة:
               </label>
               <input
                 type="number"
@@ -388,7 +605,7 @@ export default function AddMedicationModal({
 
             <div>
               <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                اسم الوحدة:
+                اسم الوحدة الصيدلانية:
               </label>
               <input
                 type="text"
@@ -402,6 +619,27 @@ export default function AddMedicationModal({
                   border: '1.5px solid #cbd5e1',
                   fontSize: '13px',
                   boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
+                التركيز (Strength):
+              </label>
+              <input
+                type="text"
+                placeholder="مثال: 500mg أو 1g"
+                value={form.strength}
+                onChange={(e) => setForm({ ...form, strength: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  border: '1.5px solid #cbd5e1',
+                  fontSize: '13px',
+                  boxSizing: 'border-box',
+                  direction: 'ltr'
                 }}
               />
             </div>
@@ -567,14 +805,18 @@ export default function AddMedicationModal({
               style={{
                 flex: 1,
                 padding: '13px',
-                background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                background: isEditMode
+                  ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)'
+                  : 'linear-gradient(135deg, #059669 0%, #047857 100%)',
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: '12px',
                 fontSize: '14.5px',
                 fontWeight: '900',
                 cursor: isSaving ? 'not-allowed' : 'pointer',
-                boxShadow: '0 4px 14px rgba(5, 150, 105, 0.3)',
+                boxShadow: isEditMode
+                  ? '0 4px 14px rgba(2, 132, 199, 0.35)'
+                  : '0 4px 14px rgba(5, 150, 105, 0.3)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -586,7 +828,7 @@ export default function AddMedicationModal({
               ) : (
                 <>
                   <Check size={18} />
-                  <span>حفظ وإضافة الصنف للكتالوج المركزي</span>
+                  <span>{isEditMode ? 'حفظ التعديلات في الكتالوج المركزي' : 'حفظ وإضافة الصنف للكتالوج المركزي'}</span>
                 </>
               )}
             </button>

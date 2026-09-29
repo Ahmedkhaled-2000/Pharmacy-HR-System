@@ -25,6 +25,7 @@ export default function OrderDeliverySettlementModal({
   order,
   branch,
   currentPharmacist = '',
+  deliveredBy = null, // { code: string, name: string }
   onClose,
   onDeliveredSuccess,
   onOpenReceiptPrint,
@@ -36,7 +37,7 @@ export default function OrderDeliverySettlementModal({
 
   const [collectedAmount, setCollectedAmount] = useState(String(initialRemaining > 0 ? initialRemaining : 0));
   const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' | 'card' | 'wallet' | 'credit'
-  const [cashierName, setCashierName] = useState(currentPharmacist || 'د. الصيدلي');
+  const [cashierName, setCashierName] = useState(deliveredBy?.name || currentPharmacist || 'د. الصيدلي');
   const [receiptNumber, setReceiptNumber] = useState(`REC-${order?.order_number || Date.now().toString().slice(-6)}`);
   const [notes, setNotes] = useState('');
   const [shouldPrintReceipt, setShouldPrintReceipt] = useState(true);
@@ -67,7 +68,9 @@ export default function OrderDeliverySettlementModal({
       const res = await outstockSettleAndDeliverOrder(order.id, {
         collectedAmount: currentCollectNum,
         paymentMethod,
-        cashierName,
+        cashierName: deliveredBy?.name || cashierName,
+        deliveredByCode: deliveredBy?.code || null,
+        deliveredByName: deliveredBy?.name || cashierName,
         receiptNumber,
         notes: notes.trim() || `تسليم طلب العميل ${order.customer_name || ''}`
       });
@@ -201,6 +204,29 @@ export default function OrderDeliverySettlementModal({
 
         {/* ── جسم النافذة القابل للتمرير ── */}
         <form onSubmit={handleSubmit} style={{ overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          {deliveredBy && (
+            <div
+              style={{
+                background: '#f0fdf4',
+                border: '1.5px solid #86efac',
+                borderRadius: '10px',
+                padding: '10px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}
+            >
+              <ShieldCheck size={18} color="#16a34a" />
+              <div style={{ fontSize: '12.5px' }}>
+                <span style={{ color: '#166534', fontWeight: '700' }}>الموظف المسلّم (موثق بالرمز الأمني 🔒): </span>
+                <strong style={{ color: '#14532d' }}>{deliveredBy.name}</strong>
+                <span style={{ marginRight: '6px', background: '#dcfce7', padding: '2px 8px', borderRadius: '6px', fontFamily: 'monospace', fontWeight: 'bold', color: '#15803d' }}>
+                  كود: {deliveredBy.code}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* كارت معلومات العميل والطلب */}
           <div
             style={{

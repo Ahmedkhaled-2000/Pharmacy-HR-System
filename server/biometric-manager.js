@@ -9,6 +9,7 @@
 
 import express from 'express';
 
+const STORAGE_KEY = 'pharmacy_state_v1';
 let globalDb = null;
 const hqPendingEnrollments = new Map();
 
@@ -267,6 +268,306 @@ export function queueDeviceCommand(serialNumber, cmdString, cmdType = 'USER_UPDA
     ).catch(e => console.warn('[Biometric Command Queue DB Error]:', e.message));
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 💬 قوالب ومحرك إشعارات واتساب الذكي الموحد (Universal Attendance WhatsApp Engine)
+// يدعم أجهزة البصمة MB20 وكشك البصمة الإلكترونية بمفاتيح تحكم وقوالب مستقلة
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const DEFAULT_ATTENDANCE_TEMPLATES = {
+  admin_check_in: `🔔 *إشعار تسجيل حضور لحظي* 🟢
+━━━━━━━━━━━━━━━━━━━━━━
+👤 *الموظف:* {employee_name}
+🏢 *الفرع:* {branch_name}
+🕒 *الوقت:* {time} | {date}
+📌 *الحركة:* {action_icon} {action}
+🧬 *وسيلة التحقق:* {verify_type}
+📟 *الجهاز / المصدر:* {device_name}
+━━━━━━━━━━━━━━━━━━━━━━
+🏛️ _{company_name}_`,
+
+  employee_check_in: `👋 *مرحباً بك يا د/ {employee_name}* 🌟
+━━━━━━━━━━━━━━━━━━━━━━
+✅ *تم تسجيل حضورك بنجاح* 🟢
+🏢 *الفرع:* {branch_name}
+🕒 *الوقت:* {time} | {date}
+🧬 *طريقة التبصيم:* {verify_type}
+━━━━━━━━━━━━━━━━━━━━━━
+✨ نتمنى لك يوماً موفقاً ومثمراً مليئاً بالإنجاز والعطاء!
+🏛️ _{company_name}_`,
+
+  admin_check_out: `🔔 *إشعار تسجيل انصراف لحظي* 🔴
+━━━━━━━━━━━━━━━━━━━━━━
+👤 *الموظف:* {employee_name}
+🏢 *الفرع:* {branch_name}
+🕒 *الوقت:* {time} | {date}
+📌 *الحركة:* {action_icon} {action}
+⏱️ *ساعات العمل:* {shift_hours}
+🧬 *وسيلة التحقق:* {verify_type}
+📟 *الجهاز / المصدر:* {device_name}
+━━━━━━━━━━━━━━━━━━━━━━
+🏛️ _{company_name}_`,
+
+  employee_check_out: `👋 *شكراً لك يا د/ {employee_name}* 🌟
+━━━━━━━━━━━━━━━━━━━━━━
+✅ *تم تسجيل انصرافك بنجاح* 🔴
+🏢 *الفرع:* {branch_name}
+🕒 *الوقت:* {time} | {date}
+⏱️ *إجمالي ساعات العمل:* {shift_hours}
+━━━━━━━━━━━━━━━━━━━━━━
+🌟 شكراً جزيلاً لجهودك وعطائك المتميز اليوم، ودمت بخير وسعادة!
+🏛️ _{company_name}_`,
+
+  admin_break_start: `☕ *إشعار بدء استراحة (Break Start)* 🟡
+━━━━━━━━━━━━━━━━━━━━━━
+👤 *الموظف:* {employee_name}
+🏢 *الفرع:* {branch_name}
+🕒 *وقت البدء:* {time} | {date}
+📌 *الحركة:* {action_icon} {action}
+📱 *المصدر:* كشك البصمة الإلكترونية الذكي
+━━━━━━━━━━━━━━━━━━━━━━
+🏛️ _{company_name}_`,
+
+  employee_break_start: `☕ *استراحة هنيئة يا د/ {employee_name}* 🌿
+━━━━━━━━━━━━━━━━━━━━━━
+⏸️ *تم تسجيل بدء استراحتك بنجاح*
+🏢 *الفرع:* {branch_name}
+🕒 *وقت الخروج للراحة:* {time}
+━━━━━━━━━━━━━━━━━━━━━━
+🌿 نرجو لك وقتاً طيباً لتجديد طاقتك والعودة بهمة ونشاط!
+🏛️ _{company_name}_`,
+
+  admin_break_end: `⚡ *إشعار انتهاء الاستراحة والعودة للعمل* 🟢
+━━━━━━━━━━━━━━━━━━━━━━
+👤 *الموظف:* {employee_name}
+🏢 *الفرع:* {branch_name}
+🕒 *وقت العودة:* {time} | {date}
+⏱️ *مدة الاستراحة:* {break_duration}
+📌 *الحركة:* {action_icon} {action}
+📱 *المصدر:* كشك البصمة الإلكترونية الذكي
+━━━━━━━━━━━━━━━━━━━━━━
+🏛️ _{company_name}_`,
+
+  employee_break_end: `👋 *أهلاً بك مجدداً يا د/ {employee_name}* ⚡
+━━━━━━━━━━━━━━━━━━━━━━
+▶️ *تم تسجيل العودة واستئناف العمل بنجاح*
+🏢 *الفرع:* {branch_name}
+🕒 *وقت استئناف العمل:* {time}
+⏱️ *مدة الاستراحة:* {break_duration}
+━━━━━━━━━━━━━━━━━━━━━━
+💪 طاقة متجددة وعمل موفق ومتميز بإذن الله!
+🏛️ _{company_name}_`
+};
+
+/**
+ * دالة مساعدة لاستبدال المتغيرات الذكية في نصوص قوالب واتساب
+ */
+export function formatAttendanceAlert(template, vars = {}) {
+  let text = String(template || '');
+  for (const [k, v] of Object.entries(vars)) {
+    const reg = new RegExp(`{${k}}`, 'g');
+    text = text.replace(reg, v !== undefined && v !== null ? String(v) : '');
+  }
+  return text;
+}
+
+/**
+ * دالة إرسال إشعارات واتساب الشاملة لحركات الحضور والانصراف والاستراحة
+ * تدعم:
+ * 1. مفتاح مستقل لماكينات البصمة MB20 (notifyBiometricDevices).
+ * 2. مفتاح مستقل لكشك البصمة الإلكترونية (notifyKioskPunches).
+ * 3. حارس أمني صارم: قوالب بدء الاستراحة وإنهاء الاستراحة تُرسل حصرياً وفقط إذا كانت البصمة من كشك البصمة!
+ */
+export async function sendUniversalAttendanceWhatsAppAlert(punchPayload, state) {
+  try {
+    if (!punchPayload || typeof punchPayload !== 'object') return;
+
+    const org = state?.orgSettings || {};
+    const alertConfig = org.biometricWhatsAppAlerts || {};
+    if (alertConfig.enabled === false) return;
+
+    // توحيد مسمى الحركة
+    let action = String(punchPayload.actionType || 'check_in').toLowerCase();
+    if (action === 'start_shift') action = 'check_in';
+    if (action === 'stop_shift' || action === 'shift_end') action = 'check_out';
+    if (action === 'pause_shift') action = 'break_start';
+    if (action === 'resume_shift') action = 'break_end';
+
+    // التحقق الدقيق مما إذا كانت البصمة صادرة من كشك البصمة الإلكترونية
+    const isKiosk = Boolean(
+      punchPayload.isKiosk ||
+      punchPayload.source === 'kiosk' ||
+      punchPayload.source === 'kiosk_photo' ||
+      punchPayload.source === 'kiosk_offline' ||
+      punchPayload.source === 'kiosk_biometric' ||
+      punchPayload.punchSource === 'kiosk' ||
+      punchPayload.punchSource === 'kiosk_photo' ||
+      punchPayload.punchSource === 'kiosk_offline' ||
+      punchPayload.punchSource === 'kiosk_biometric' ||
+      String(punchPayload.verifyType || '').toUpperCase() === 'KIOSK'
+    );
+
+    // 🛡️ [الشرط الحاسم 2]: قوالب بدء الاستراحة وإنهاء الاستراحة ترسل فقط في حالة كشك البصمة حصراً
+    if (action === 'break_start' || action === 'break_end') {
+      if (!isKiosk) {
+        console.log(`[WhatsApp Alert Guard] ⛔ تم حجب إشعار الاستراحة (${action}) لأن مصدر البصمة ليس كشك البصمة الإلكترونية (المصدر: ${punchPayload.source || punchPayload.punchSource || 'MB20'}).`);
+        return;
+      }
+    }
+
+    // 🧬 [الشرط الحاسم 1]: التحقق من مفتاح تفعيل ماكينات البصمة MB20 مقابل كشك البصمة
+    if (isKiosk) {
+      if (alertConfig.notifyKioskPunches === false) {
+        console.log(`[Attendance WhatsApp] ⏸️ تخطي الإشعار: إشعارات كشك البصمة الإلكترونية معطلة في الإعدادات.`);
+        return;
+      }
+    } else {
+      // ماكينة البصمة الفعلية ZKTeco MB20
+      if (alertConfig.notifyBiometricDevices === false) {
+        console.log(`[Attendance WhatsApp] ⏸️ تخطي الإشعار: إشعارات جهاز البصمة MB20 معطلة في الإعدادات.`);
+        return;
+      }
+    }
+
+    // التحقق من مفاتيح الحركات الفردية
+    if (action === 'check_in' && alertConfig.notifyCheckIn === false) return;
+    if (action === 'check_out' && alertConfig.notifyCheckOut === false) return;
+    if (action === 'break_start' && alertConfig.notifyBreakStart === false) return;
+    if (action === 'break_end' && alertConfig.notifyBreakEnd === false) return;
+
+    const waUrls = [
+      'http://hr-whatsapp-server:3100/send',
+      'http://127.0.0.1:3100/send'
+    ];
+
+    const actionIcons = {
+      check_in: '🟢',
+      check_out: '🔴',
+      break_start: '🟡',
+      break_end: '⚡'
+    };
+
+    const actionLabels = {
+      check_in: 'تسجيل حضور (Check-In)',
+      check_out: 'تسجيل انصراف (Check-Out)',
+      break_start: 'بدء استراحة (Break-Start)',
+      break_end: 'إنهاء استراحة وعودة للعمل (Break-End)'
+    };
+
+    let verifyArabic = isKiosk ? 'كشك البصمة الإلكترونية الذكي 📱' : 'بصمة الإصبع الحيوية (MB20) 🧬';
+    const vt = String(punchPayload.verifyType || '').toUpperCase();
+    if (vt === 'FACE') verifyArabic = 'بصمة الوجه الذكية (Face) 👤';
+    else if (vt === 'PASSWORD' || vt === 'PASS') verifyArabic = 'كلمة المرور (PIN) 🔑';
+    else if (vt === 'CARD' || vt === 'RFID') verifyArabic = 'كارت ذكي (RFID) 💳';
+    else if (vt.includes('PHOTO')) verifyArabic = 'صورة حية وتوثيق كشك البصمة 📸';
+
+    const customTemplates = alertConfig.templates || {};
+    const adminTemplate = customTemplates[`admin_${action}`] || (action === 'check_in' && alertConfig.adminMessageTemplate ? alertConfig.adminMessageTemplate : DEFAULT_ATTENDANCE_TEMPLATES[`admin_${action}`]);
+    const empTemplate = customTemplates[`employee_${action}`] || DEFAULT_ATTENDANCE_TEMPLATES[`employee_${action}`];
+
+    const templateVars = {
+      employee_name: punchPayload.employeeName || 'غير معرف',
+      branch_name: punchPayload.branchName || 'الفرع الرئيسي',
+      time: punchPayload.time || '',
+      date: punchPayload.date || '',
+      action: actionLabels[action] || action,
+      action_icon: actionIcons[action] || '📌',
+      verify_type: verifyArabic,
+      device_name: punchPayload.deviceName || punchPayload.deviceSerial || (isKiosk ? 'كشك البصمة الإلكترونية' : 'ZKTeco MB20'),
+      company_name: org.companyName || org.orgName || 'مجموعة الصيدليات',
+      shift_hours: punchPayload.shiftHours || '—',
+      break_duration: punchPayload.breakDuration || '—'
+    };
+
+    // ── 1. إرسال إشعار فوري لهاتف الموظف نفسه (إذا كان الخيار مفعلاً) ───────────
+    if (alertConfig.notifyEmployee !== false && punchPayload.employeeId) {
+      const employees = Array.isArray(state?.employees) ? state.employees : [];
+      const emp = employees.find(e => String(e.id) === String(punchPayload.employeeId) || (e.code && String(e.code) === String(punchPayload.employeeId)));
+      const rawEmpPhone = emp?.phone || emp?.mobile || emp?.phoneNumber || emp?.whatsApp || emp?.whatsapp || '';
+      let empPhone = String(rawEmpPhone).replace(/\D/g, '');
+      if (empPhone.startsWith('01') && empPhone.length === 11) {
+        empPhone = '2' + empPhone;
+      } else if (empPhone.startsWith('1') && empPhone.length === 10) {
+        empPhone = '20' + empPhone;
+      }
+
+      if (empPhone.length >= 9 && empTemplate) {
+        const empMsg = formatAttendanceAlert(empTemplate, {
+          ...templateVars,
+          employee_name: emp?.name || templateVars.employee_name
+        });
+
+        for (const waUrl of waUrls) {
+          try {
+            const resp = await fetch(waUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                sessionId: 'hr_main',
+                phone: empPhone,
+                message: empMsg
+              }),
+              signal: AbortSignal.timeout(4000)
+            });
+            if (resp.ok) {
+              console.log(`[Attendance WhatsApp] 📲 تم إرسال إشعار (${action}) بنجاح إلى هاتف الموظف (${emp?.name || templateVars.employee_name} - ${empPhone})`);
+              break;
+            }
+          } catch (e) {
+            console.warn(`[Attendance WA Employee Error (${waUrl})]:`, e.message);
+          }
+        }
+      }
+    }
+
+    // ── 2. إرسال إشعار لهواتف الإدارة العليا المسجلة ─────────────────────────────
+    const candidatePhones = [];
+    if (Array.isArray(alertConfig.recipientPhones)) {
+      candidatePhones.push(...alertConfig.recipientPhones);
+    }
+    if (org.generalManagerPhone) candidatePhones.push(org.generalManagerPhone);
+    if (org.adminPhone) candidatePhones.push(org.adminPhone);
+    if (org.ownerPhone) candidatePhones.push(org.ownerPhone);
+    if (Array.isArray(org.systemOwners)) {
+      org.systemOwners.forEach(o => { if (o?.phone) candidatePhones.push(o.phone); });
+    }
+
+    const uniquePhones = [...new Set(candidatePhones.map(p => String(p || '').replace(/\D/g, '')).filter(p => p.length >= 9))];
+    if (uniquePhones.length > 0 && adminTemplate) {
+      const adminMsg = formatAttendanceAlert(adminTemplate, templateVars);
+
+      for (const rawPhone of uniquePhones) {
+        let phone = rawPhone;
+        if (phone.startsWith('01') && phone.length === 11) phone = '2' + phone;
+        else if (phone.startsWith('1') && phone.length === 10) phone = '20' + phone;
+
+        for (const waUrl of waUrls) {
+          try {
+            const resp = await fetch(waUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                sessionId: 'hr_main',
+                phone,
+                message: adminMsg
+              }),
+              signal: AbortSignal.timeout(4000)
+            });
+            if (resp.ok) {
+              console.log(`[Attendance WhatsApp] 📲 تم إرسال إشعار (${action}) بنجاح إلى الإدارة العليا (${phone})`);
+              break;
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch (waErr) {
+    console.warn('[Attendance WhatsApp Alert Warning]:', waErr.message);
+  }
+}
+
+// الاسم المستعار للتوافق العكسي
+export const sendBiometricWhatsAppAlert = sendUniversalAttendanceWhatsAppAlert;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 🚀 تسجيل مسارات ADMS ومسارات الواجهة البرمجية (Routes Registration)
@@ -660,155 +961,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
   // ── إرسال إشعارات واتساب فورية للإدارة العليا وهاتف الموظف عند التبصيم ────────────
   async function sendBiometricWhatsAppAlert(punchPayload, state) {
-    try {
-      const org = state?.orgSettings || {};
-      const alertConfig = org.biometricWhatsAppAlerts || {};
-      if (alertConfig.enabled === false) return;
-
-      const action = punchPayload.actionType;
-      if (action === 'check_in' && alertConfig.notifyCheckIn === false) return;
-      if (action === 'check_out' && alertConfig.notifyCheckOut === false) return;
-
-      const waUrls = [
-        'http://hr-whatsapp-server:3100/send',
-        'http://127.0.0.1:3100/send'
-      ];
-
-      const isCheckIn = action === 'check_in' || action === 'shift_start';
-      const actionIcon = isCheckIn ? '🟢' : '🔴';
-      const actionLabel = isCheckIn ? 'تسجيل حضور (Check-In)' : 'تسجيل انصراف (Check-Out)';
-      let verifyArabic = 'بصمة الإصبع الحيوية (MB20)';
-      const vt = String(punchPayload.verifyType || '').toUpperCase();
-      if (vt === 'FACE') verifyArabic = 'بصمة الوجه الذكية (Face)';
-      else if (vt === 'PASSWORD' || vt === 'PASS') verifyArabic = 'كلمة المرور (Password)';
-      else if (vt === 'CARD' || vt === 'RFID') verifyArabic = 'كارت ذكي (RFID)';
-      else if (vt === 'KIOSK' || punchPayload.punchSource === 'kiosk') verifyArabic = 'كشك البصمة الإلكترونية الذكي';
-
-      // ── 1. إرسال إشعار فوري لهاتف الموظف نفسه عند تبصيمه ─────────────────────────
-      if (alertConfig.notifyEmployee !== false && punchPayload.employeeId) {
-        const employees = Array.isArray(state?.employees) ? state.employees : [];
-        const emp = employees.find(e => String(e.id) === String(punchPayload.employeeId));
-        const rawEmpPhone = emp?.phone || emp?.mobile || emp?.phoneNumber || emp?.whatsApp || emp?.whatsapp || '';
-        let empPhone = String(rawEmpPhone).replace(/\D/g, '');
-        if (empPhone.startsWith('01') && empPhone.length === 11) {
-          empPhone = '2' + empPhone;
-        } else if (empPhone.startsWith('1') && empPhone.length === 10) {
-          empPhone = '20' + empPhone;
-        }
-
-        if (empPhone.length >= 9) {
-          const actionText = isCheckIn ? 'تسجيل الحضور' : 'تسجيل الانصراف';
-          const punchMethodDesc = punchPayload.punchSource === 'kiosk' || vt === 'KIOSK'
-            ? 'كشك البصمة الإلكترونية الذكي 📱'
-            : (vt === 'FACE' ? 'بصمة الوجه البيومترية 👤' : 'جهاز بصمة الإصبع الحيوي 🧬');
-
-          const greeting = isCheckIn 
-            ? '✨ نتمنى لك يوماً موفقاً ومثمراً مليئاً بالإنجاز والعطاء!' 
-            : '🌟 شكراً جزيلاً لجهودك وعطائك المتميز اليوم، ودمت بخير وسعادة!';
-
-          const empMsg = [
-            `👋 *مرحباً بك يا د/ ${emp?.name || punchPayload.employeeName}*`,
-            `━━━━━━━━━━━━━━━━━━━━━━`,
-            `✅ *تم تأكيد ${actionText} بنجاح*`,
-            `🏢 *الفرع:* ${punchPayload.branchName || 'فرع الصيدلية'}`,
-            `🕒 *الوقت:* ${punchPayload.time} | ${punchPayload.date}`,
-            `📌 *الحركة:* ${actionIcon} *${actionLabel}*`,
-            `🧬 *طريقة التبصيم:* ${punchMethodDesc}`,
-            `━━━━━━━━━━━━━━━━━━━━━━`,
-            `${greeting}`,
-            `🏛️ _نظام إدارة الصيدليات الموحد_`
-          ].join('\n');
-
-          for (const waUrl of waUrls) {
-            try {
-              const resp = await fetch(waUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  sessionId: 'hr_main',
-                  phone: empPhone,
-                  message: empMsg
-                }),
-                signal: AbortSignal.timeout(4000)
-              });
-              if (resp.ok) {
-                console.log(`[Biometric WhatsApp] 📲 تم إرسال إشعار التبصيم بنجاح إلى هاتف الموظف (${emp?.name} - ${empPhone})`);
-                break;
-              }
-            } catch (e) {
-              console.warn(`[Biometric WA to Employee Error (${waUrl})]:`, e.message);
-            }
-          }
-        }
-      }
-
-      // ── 2. إرسال إشعار لهواتف الإدارة العليا ──────────────────────────────────────
-      const candidatePhones = [];
-      if (Array.isArray(alertConfig.recipientPhones)) {
-        candidatePhones.push(...alertConfig.recipientPhones);
-      }
-      if (org.generalManagerPhone) candidatePhones.push(org.generalManagerPhone);
-      if (org.adminPhone) candidatePhones.push(org.adminPhone);
-      if (org.ownerPhone) candidatePhones.push(org.ownerPhone);
-      if (Array.isArray(org.systemOwners)) {
-        org.systemOwners.forEach(o => { if (o?.phone) candidatePhones.push(o.phone); });
-      }
-
-      const uniquePhones = [...new Set(candidatePhones.map(p => String(p || '').replace(/\D/g, '')).filter(p => p.length >= 9))];
-      if (uniquePhones.length > 0) {
-        let adminMsg = '';
-        if (alertConfig.adminMessageTemplate && alertConfig.adminMessageTemplate.trim()) {
-          adminMsg = alertConfig.adminMessageTemplate
-            .replace(/{employee_name}/g, punchPayload.employeeName || 'غير معرف')
-            .replace(/{branch_name}/g, punchPayload.branchName || 'الإدارة العامة')
-            .replace(/{time}/g, punchPayload.time || '')
-            .replace(/{date}/g, punchPayload.date || '')
-            .replace(/{action}/g, actionLabel)
-            .replace(/{action_icon}/g, actionIcon)
-            .replace(/{verify_type}/g, verifyArabic)
-            .replace(/{device_name}/g, punchPayload.deviceName || punchPayload.deviceSerial || 'MB20')
-            .replace(/{company_name}/g, org.companyName || 'مجموعة الصيدليات');
-        } else {
-          adminMsg = [
-            `🔔 *إشعار حضور وانصراف بيومتري لحظي*`,
-            `━━━━━━━━━━━━━━━━━━━━━━`,
-            `👤 *الموظف:* ${punchPayload.employeeName || 'غير معرف'}`,
-            `🏢 *الفرع:* ${punchPayload.branchName || 'الإدارة العامة'}`,
-            `🕒 *الوقت:* ${punchPayload.time} | ${punchPayload.date}`,
-            `📌 *الحركة:* ${actionIcon} *${actionLabel}*`,
-            `🧬 *وسيلة التحقق:* ${verifyArabic}`,
-            `📟 *الماكينة:* ${punchPayload.deviceName || punchPayload.deviceSerial || 'MB20'}`,
-            `━━━━━━━━━━━━━━━━━━━━━━`,
-            `🏛️ _${org.companyName || 'نظام إدارة الصيدليات الموحد'}_`
-          ].join('\n');
-        }
-
-        for (const rawPhone of uniquePhones) {
-          let phone = rawPhone;
-          if (phone.startsWith('01') && phone.length === 11) phone = '2' + phone;
-          for (const waUrl of waUrls) {
-            try {
-              const resp = await fetch(waUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  sessionId: 'hr_main',
-                  phone,
-                  message: adminMsg
-                }),
-                signal: AbortSignal.timeout(4000)
-              });
-              if (resp.ok) {
-                console.log(`[Biometric WhatsApp] 📲 تم إرسال إشعار التبصيم بنجاح إلى الإدارة العليا (${phone})`);
-                break;
-              }
-            } catch {}
-          }
-        }
-      }
-    } catch (waErr) {
-      console.warn('[Biometric WhatsApp Alert Warn]:', waErr.message);
-    }
+    return sendUniversalAttendanceWhatsAppAlert(punchPayload, state);
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -971,36 +1124,59 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       let processedCount = 0;
 
       for (const line of lines) {
-        // صيغة السجل المعتمدة في ZKTeco:
-        // PIN \t DateTime \t Status \t VerifyType \t WorkCode \t Reserved
-        // مثال: 107 \t 2026-09-27 08:05:20 \t 0 \t 1 \t 0 \t 0
-        const tokens = line.split(/[\t\s]+/);
-        if (tokens.length < 2) continue;
+        // ── 1. تجزئة واستخراج بيانات سجل البصمة المعتمدة في ZKTeco ────────────────
+        // صيغة ZKTeco القياسية: PIN \t DateTime \t Status \t VerifyType \t WorkCode \t Reserved
+        // مثال: 107 \t 2026-09-29 18:15:20 \t 0 \t 1 \t 0 \t 0
+        // أو مفصولة بفراغات: 107 2026-09-30 00:43:20 0 1 0 0
+        let pin = '';
+        let punchDateTimeStr = '';
+        let rawState = 0;
+        let rawVerifyType = 1;
 
-        const pin = tokens[0].trim();
-        const punchDateTimeStr = tokens.length >= 3 && tokens[1].includes('-') && tokens[2].includes(':')
-          ? `${tokens[1]} ${tokens[2]}`
-          : tokens[1];
+        if (line.includes('\t')) {
+          const tabParts = line.split('\t').map(p => p.trim());
+          pin = tabParts[0] || '';
+          punchDateTimeStr = tabParts[1] || '';
+          rawState = parseInt(tabParts[2] || '0', 10);
+          rawVerifyType = parseInt(tabParts[3] || '1', 10);
+        } else {
+          const tokens = line.split(/[\t\s]+/).filter(Boolean);
+          if (tokens.length < 2) continue;
+          pin = tokens[0].trim();
+          if (tokens.length >= 3 && tokens[1].includes('-') && tokens[2].includes(':')) {
+            punchDateTimeStr = `${tokens[1]} ${tokens[2]}`;
+            rawState = parseInt(tokens[3] || '0', 10);
+            rawVerifyType = parseInt(tokens[4] || '1', 10);
+          } else {
+            punchDateTimeStr = tokens[1] || '';
+            rawState = parseInt(tokens[2] || '0', 10);
+            rawVerifyType = parseInt(tokens[3] || '1', 10);
+          }
+        }
 
-        const rawState = parseInt(tokens[2] || '0', 10);
-        const rawVerifyType = parseInt(tokens[3] || '1', 10);
+        if (!pin || !punchDateTimeStr) continue;
 
         // تصنيف وسيلة التحقق
         const verifyType = rawVerifyType === 15 || rawVerifyType === 20 ? 'FACE' : 'FINGERPRINT';
 
-        // استخراج التاريخ والوقت والتوقيت الأيبوكي الفعلي للبصمة
-        let datePart = new Date().toISOString().slice(0, 10);
-        let timePart = new Date().toTimeString().slice(0, 5);
+        // استخراج التاريخ والوقت المحلي الصريح مباشرة من نص البصمة لتفادي أي انحراف بسبب المنطقة الزمنية (Timezone)
+        let datePart = punchDateTimeStr.slice(0, 10);
+        let timePart = punchDateTimeStr.slice(11, 16);
         let punchEpoch = Date.now();
 
         try {
-          const parsed = new Date(punchDateTimeStr);
+          const parsed = new Date(punchDateTimeStr.replace(' ', 'T'));
           if (!isNaN(parsed.getTime())) {
-            datePart = parsed.toISOString().slice(0, 10);
-            timePart = punchDateTimeStr.slice(11, 16);
             punchEpoch = parsed.getTime();
           }
         } catch {}
+
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+          datePart = new Date().toISOString().slice(0, 10);
+        }
+        if (!/^\d{2}:\d{2}$/.test(timePart)) {
+          timePart = new Date().toTimeString().slice(0, 5);
+        }
 
         // ضمان عدم وجود أي طابع زمني مستقبلي بسبب فروق المنطقة الزمنية بين الماكينة والسيرفر
         const realCurrentNow = Date.now();
@@ -1065,6 +1241,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         }
 
         // 3. إذا لم يوجد في جدول الربط، فحص قائمة الموظفين في الـ HR
+        let matchedEmpObj = null;
         if (!matchedEmpId) {
           const emp = employees.find(e =>
             String(e.code || '').trim() === pin ||
@@ -1073,6 +1250,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             String(e.biometricPin || '').trim() === pin
           );
           if (emp) {
+            matchedEmpObj = emp;
             matchedEmpId = emp.id;
             matchedEmpName = emp.name;
             if (emp.branchId) matchedBranchId = emp.branchId;
@@ -1080,12 +1258,13 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         } else {
           const emp = employees.find(e => String(e.id) === String(matchedEmpId));
           if (emp) {
+            matchedEmpObj = emp;
             matchedEmpName = emp.name;
             if (emp.branchId && !matchedBranchId) matchedBranchId = emp.branchId;
           }
         }
 
-        // 2. إذا كان الموظف غير معرف بعد في النظام:
+        // إذا كان الموظف غير معرف بعد في النظام:
         if (!matchedEmpId) {
           await db.query(
             `INSERT INTO public.biometric_raw_punches 
@@ -1120,47 +1299,90 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           continue;
         }
 
-        // 4. خوارزمية التوجيه الذكي للوردية (Smart Shift Direction Prediction)
-        const activeShift = currentActiveShifts[matchedEmpId];
-        let actionType = 'check_in';
+        // 4. خوارزمية التوجيه الذكي للوردية (Smart Shift Direction Prediction) مع دعم الورديات الليلية العابرة لمنتصف الليل
+        const possibleEmpKeys = [
+          matchedEmpId,
+          String(matchedEmpId),
+          matchedEmpObj?.code ? String(matchedEmpObj.code) : null,
+          matchedEmpObj?.id ? String(matchedEmpObj.id) : null
+        ].filter(Boolean);
 
-        if (activeShift && activeShift.date === datePart) {
-          // الموظف لديه وردية نشطة اليوم: نقارن بالزمن الفعلي للبصمة مقابل وقت بدء الوردية
-          const shiftStartEpoch = Number(activeShift.startEpoch) || (activeShift.timeIn ? new Date(`${datePart}T${activeShift.timeIn.slice(0,5)}:00`).getTime() : punchEpoch);
+        let activeShiftKey = possibleEmpKeys.find(k => currentActiveShifts[k]);
+        let activeShift = activeShiftKey ? currentActiveShifts[activeShiftKey] : null;
+
+        // فحص الورديات المفتوحة في currentShifts كصمام أمان ثانٍ
+        const openShiftIdx = currentShifts.findIndex(s =>
+          possibleEmpKeys.some(k => String(s.employeeId) === String(k) || (s.employeeCode && String(s.employeeCode) === String(k))) &&
+          (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive)
+        );
+        const openShift = openShiftIdx >= 0 ? currentShifts[openShiftIdx] : null;
+
+        let actionType = 'check_in';
+        let isOvernightCheckOut = false;
+        const effectiveActive = activeShift || openShift;
+
+        if (effectiveActive) {
+          const shiftStartDate = effectiveActive.date || datePart;
+          const shiftStartTime = (effectiveActive.timeIn || '00:00').slice(0, 5);
+          const shiftStartEpoch = Number(effectiveActive.startEpoch) ||
+            new Date(`${shiftStartDate}T${shiftStartTime}:00`).getTime();
+
           const shiftDurationMs = punchEpoch - shiftStartEpoch;
-          // إذا كانت الوردية مفتوحة منذ أكثر من دقيقتين -> تعتبر انصرافاً
-          if (shiftDurationMs > 2 * 60 * 1000) {
+          const shiftDurationHours = shiftDurationMs / (1000 * 60 * 60);
+
+          // إذا ضغط الموظف على زر الانصراف (rawState === 1)، أو استمرت الوردية أكثر من دقيقتين وحتى 18 ساعة
+          if (rawState === 1 || (shiftDurationMs > 2 * 60 * 1000 && shiftDurationHours <= 18)) {
             actionType = 'check_out';
+            if (shiftStartDate !== datePart) {
+              isOvernightCheckOut = true;
+            }
+          } else if (shiftDurationHours > 18) {
+            // وردية قديمة مهملة منذ أكثر من 18 ساعة: تغلق كوردية غير مكتملة لمنع التضارب، ويبدأ حضور جديد
+            if (openShiftIdx >= 0) {
+              currentShifts[openShiftIdx] = {
+                ...currentShifts[openShiftIdx],
+                isLiveActive: false,
+                status: 'completed',
+                notes: (currentShifts[openShiftIdx].notes || '') + ' [أغلقت تلقائياً لتجاوز 18 ساعة]'
+              };
+            }
+            possibleEmpKeys.forEach(k => delete currentActiveShifts[k]);
+            activeShift = null;
+            actionType = 'check_in';
           } else {
             console.log(`[Biometric Resolver] الموظف ${matchedEmpName} سجل حضوراً للتو منذ ${Math.round(shiftDurationMs / 60000)} دقيقة.`);
             actionType = 'check_in';
           }
         } else {
-          // لا توجد وردية نشطة -> تسجيل حضور جديد
           actionType = 'check_in';
         }
 
-        // 5. تطبيق الحركة عبر المحرك الذري القائم
-        const shiftId = activeShift?.shiftId || `shift_${matchedEmpId}_${punchEpoch}`;
-        const shiftRecord = {
-          id: shiftId,
-          employeeId: matchedEmpId,
-          employeeName: matchedEmpName,
-          date: datePart,
-          timeIn: actionType === 'check_in' ? timePart : (activeShift?.timeIn || timePart),
-          timeOut: actionType === 'check_out' ? timePart : '',
-          branchId: matchedBranchId,
-          isLiveActive: actionType === 'check_in',
-          status: actionType === 'check_in' ? 'active' : 'completed',
-          punchSource: 'biometric_device',
-          source: 'biometric_device',
-          biometricDeviceSerial: sn,
-          verifyType
-        };
+        // 5. تطبيق الحركة عبر المحرك الذري مع حماية الورديات السابقة من المسح
+        let shiftRecord = null;
 
         if (actionType === 'check_in') {
-          currentActiveShifts[matchedEmpId] = {
-            shiftId,
+          // 🛡️ توليد معرف جديد فريد دائماً لعدم مسح أو استبدال أي وردية سابقة
+          const newShiftId = `shift_${matchedEmpId}_${punchEpoch}`;
+          shiftRecord = {
+            id: newShiftId,
+            employeeId: matchedEmpId,
+            employeeCode: matchedEmpObj?.code || '',
+            employeeName: matchedEmpName,
+            date: datePart,
+            timeIn: timePart,
+            timeOut: '',
+            branchId: matchedBranchId,
+            isLiveActive: true,
+            status: 'active',
+            punchSource: 'biometric_device',
+            source: 'biometric_device',
+            biometricDeviceSerial: sn,
+            verifyType,
+            startEpoch: safePunchEpoch
+          };
+
+          const activePayload = {
+            shiftId: newShiftId,
             branchId: matchedBranchId,
             date: datePart,
             timeIn: timePart,
@@ -1173,23 +1395,62 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             verifyType,
             biometricDeviceSerial: sn
           };
-          currentShifts = [shiftRecord, ...currentShifts.filter(s => s.id !== shiftId)];
+          possibleEmpKeys.forEach(k => {
+            currentActiveShifts[k] = activePayload;
+          });
+
+          // إضافة الوردية الجديدة بدون مسح الورديات السابقة
+          currentShifts = [shiftRecord, ...currentShifts.filter(s => s.id !== newShiftId)];
         } else {
-          delete currentActiveShifts[matchedEmpId];
-          const existIdx = currentShifts.findIndex(s => s.id === shiftId || (s.employeeId === matchedEmpId && s.date === datePart && (!s.timeOut || s.isLiveActive)));
-          if (existIdx >= 0) {
-            currentShifts[existIdx] = {
-              ...currentShifts[existIdx],
-              timeOut: timePart,
-              isLiveActive: false,
-              status: 'completed',
-              punchOutSource: 'biometric_device',
-              punchOutDeviceSerial: sn,
-              updatedAt: new Date().toISOString()
-            };
-          } else {
-            currentShifts = [shiftRecord, ...currentShifts];
+          // ── تسجيل انصراف ذكي وإغلاق الوردية العابرة لمنتصف الليل ──
+          possibleEmpKeys.forEach(k => delete currentActiveShifts[k]);
+
+          const targetShiftId = effectiveActive?.shiftId || effectiveActive?.id;
+          let existIdx = -1;
+          if (targetShiftId) {
+            existIdx = currentShifts.findIndex(s => s.id === targetShiftId);
           }
+          if (existIdx < 0 && openShiftIdx >= 0) {
+            existIdx = openShiftIdx;
+          }
+          if (existIdx < 0) {
+            existIdx = currentShifts.findIndex(s =>
+              possibleEmpKeys.some(k => String(s.employeeId) === String(k) || (s.employeeCode && String(s.employeeCode) === String(k))) &&
+              (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive)
+            );
+          }
+
+          const origShift = existIdx >= 0 ? currentShifts[existIdx] : null;
+          // الحفاظ على تاريخ بدء الوردية الأصلي (مثلاً 29-09-2026)
+          const effectiveDate = origShift?.date || effectiveActive?.date || datePart;
+          const isOvernight = Boolean(effectiveDate && effectiveDate !== datePart);
+
+          const closedRecord = {
+            ...(origShift || {}),
+            id: targetShiftId || origShift?.id || `shift_${matchedEmpId}_${punchEpoch}`,
+            employeeId: matchedEmpId,
+            employeeCode: matchedEmpObj?.code || origShift?.employeeCode || '',
+            employeeName: matchedEmpName,
+            branchId: matchedBranchId || origShift?.branchId || effectiveActive?.branchId,
+            date: effectiveDate,
+            timeIn: origShift?.timeIn || effectiveActive?.timeIn || timePart,
+            timeOut: timePart,
+            timeOutDate: datePart,
+            isOvernight,
+            isLiveActive: false,
+            status: 'completed',
+            punchOutSource: 'biometric_device',
+            punchOutDeviceSerial: sn,
+            punchOutVerifyType: verifyType,
+            updatedAt: new Date().toISOString()
+          };
+
+          if (existIdx >= 0) {
+            currentShifts[existIdx] = closedRecord;
+          } else {
+            currentShifts = [closedRecord, ...currentShifts];
+          }
+          shiftRecord = closedRecord;
         }
 
         // حفظ في الـ Raw Log
@@ -1208,6 +1469,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           actionType,
           date: datePart,
           time: timePart,
+          shiftDate: shiftRecord?.date || datePart,
+          isOvernight: Boolean(shiftRecord?.isOvernight),
           verifyType,
           source: 'biometric_device',
           deviceSerial: sn,
@@ -1232,13 +1495,16 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           timestamp: new Date().toISOString()
         });
 
-        console.log(`[Biometric Manager] ✅ تم تسجيل البصمة بنجاح: ${actionType} للموظف ${matchedEmpName} (${timePart} - ${verifyType})`);
+        console.log(`[Biometric Manager] ✅ تم تسجيل البصمة بنجاح: ${actionType} للموظف ${matchedEmpName} (${timePart} - ${verifyType}) [عابرة لمنتصف الليل: ${Boolean(shiftRecord?.isOvernight)}]`);
         processedCount++;
 
-        // ⚡ إشعار لحظي عبر واتساب للإدارة العليا فور التبصيم (Non-blocking async)
-        sendBiometricWhatsAppAlert({
+        // ⚡ إشعار لحظي عبر واتساب للإدارة العليا وهاتف الموظف فور التبصيم
+        sendUniversalAttendanceWhatsAppAlert({
           ...punchPayload,
-          branchName: devObj?.branch_name || (matchedBranchId ? `فرع (${matchedBranchId})` : 'الإدارة العامة')
+          branchName: devObj?.branch_name || (matchedBranchId ? `فرع (${matchedBranchId})` : 'الإدارة العامة'),
+          punchSource: 'biometric_device',
+          source: 'biometric_device',
+          isKiosk: false
         }, state).catch(e => console.warn('[Biometric WA Error]:', e.message));
       }
 
@@ -3006,18 +3272,32 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     try {
       const state = await getSettingsFromStorage(STORAGE_KEY);
       const org = state?.orgSettings || {};
-      const config = org.biometricWhatsAppAlerts || {
-        enabled: true,
-        notifyCheckIn: true,
-        notifyCheckOut: true,
-        notifyEmployee: true,
-        recipientPhones: [
+      const rawConfig = org.biometricWhatsAppAlerts || {};
+      const config = {
+        enabled: rawConfig.enabled !== false,
+        notifyBiometricDevices: rawConfig.notifyBiometricDevices !== false, // 🧬 مفتاح مستقل لماكينات البصمة MB20
+        notifyKioskPunches: rawConfig.notifyKioskPunches !== false,         // 📱 مفتاح مستقل لكشك البصمة الإلكترونية
+        notifyCheckIn: rawConfig.notifyCheckIn !== false,
+        notifyCheckOut: rawConfig.notifyCheckOut !== false,
+        notifyBreakStart: rawConfig.notifyBreakStart !== false,             // ☕ بدء الاستراحة (كشك البصمة فقط)
+        notifyBreakEnd: rawConfig.notifyBreakEnd !== false,                 // ⚡ إنهاء الاستراحة والعودة (كشك البصمة فقط)
+        notifyEmployee: rawConfig.notifyEmployee !== false,
+        recipientPhones: Array.isArray(rawConfig.recipientPhones) ? rawConfig.recipientPhones : [
           org.generalManagerPhone,
           org.adminPhone,
           org.ownerPhone
-        ].filter(Boolean)
+        ].filter(Boolean),
+        templates: {
+          ...DEFAULT_ATTENDANCE_TEMPLATES,
+          ...(rawConfig.templates || {})
+        }
       };
-      if (config.notifyEmployee === undefined) config.notifyEmployee = true;
+
+      // توافق عكسي مع القالب القديم
+      if (rawConfig.adminMessageTemplate && !rawConfig.templates?.admin_check_in) {
+        config.templates.admin_check_in = rawConfig.adminMessageTemplate;
+      }
+
       res.json({ success: true, config });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
@@ -3033,6 +3313,11 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       org.biometricWhatsAppAlerts = {
         ...(org.biometricWhatsAppAlerts || {}),
         ...config,
+        templates: {
+          ...DEFAULT_ATTENDANCE_TEMPLATES,
+          ...(org.biometricWhatsAppAlerts?.templates || {}),
+          ...(config?.templates || {})
+        },
         updatedAt: new Date().toISOString()
       };
       state.orgSettings = org;
@@ -3046,38 +3331,270 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
   // 19. إرسال إشعار تجريبي فوري للإدارة العليا عبر واتساب
   app.post('/api/biometrics/whatsapp-test', async (req, res) => {
     try {
-      const { testPhone } = parseReqBody(req);
+      const {
+        testPhone,
+        actionType = 'check_in',
+        target = 'admin',
+        source = 'biometric_device',
+        customTemplate
+      } = parseReqBody(req);
+
       const state = await getSettingsFromStorage(STORAGE_KEY);
+      const org = state?.orgSettings || {};
+      const isKiosk = source === 'kiosk' || actionType === 'break_start' || actionType === 'break_end';
+
       const payload = {
         employeeName: 'د. سيف الدين (تجربة إشعار)',
         employeeId: 'emp_test',
         branchName: 'الفرع الرئيسي',
-        actionType: 'check_in',
+        actionType,
         time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
         date: new Date().toISOString().slice(0, 10),
-        verifyType: 'FINGERPRINT',
-        deviceName: 'ZKTeco MB20 (تجريبي)'
+        verifyType: isKiosk ? 'KIOSK' : 'FINGERPRINT',
+        deviceName: isKiosk ? 'كشك البصمة الإلكترونية الذكي 📱' : 'ZKTeco MB20 (تجريبي) 🧬',
+        punchSource: isKiosk ? 'kiosk' : 'biometric_device',
+        source: isKiosk ? 'kiosk' : 'biometric_device',
+        isKiosk,
+        shiftHours: '8.5 ساعة',
+        breakDuration: '30 دقيقة'
       };
 
-      if (testPhone) {
-        const customState = JSON.parse(JSON.stringify(state));
-        customState.orgSettings = customState.orgSettings || {};
-        customState.orgSettings.biometricWhatsAppAlerts = {
-          enabled: true,
-          notifyCheckIn: true,
-          notifyCheckOut: true,
-          recipientPhones: [testPhone]
-        };
-        await sendBiometricWhatsAppAlert(payload, customState);
-      } else {
-        await sendBiometricWhatsAppAlert(payload, state);
+      const customState = JSON.parse(JSON.stringify(state || {}));
+      customState.orgSettings = customState.orgSettings || {};
+      const baseAlertConfig = customState.orgSettings.biometricWhatsAppAlerts || {};
+
+      const testConfig = {
+        ...baseAlertConfig,
+        enabled: true,
+        notifyBiometricDevices: true,
+        notifyKioskPunches: true,
+        notifyCheckIn: true,
+        notifyCheckOut: true,
+        notifyBreakStart: true,
+        notifyBreakEnd: true,
+        notifyEmployee: target === 'employee',
+        recipientPhones: testPhone ? [testPhone] : (baseAlertConfig.recipientPhones || [org.generalManagerPhone || org.adminPhone].filter(Boolean)),
+        templates: {
+          ...DEFAULT_ATTENDANCE_TEMPLATES,
+          ...(baseAlertConfig.templates || {})
+        }
+      };
+
+      if (customTemplate) {
+        testConfig.templates[`${target}_${actionType}`] = customTemplate;
       }
 
-      res.json({ success: true, message: 'تم إرسال إشعار تجريبي فوري عبر واتساب بنجاح' });
+      customState.orgSettings.biometricWhatsAppAlerts = testConfig;
+
+      // عند تجربة إشعار الموظف، نضيف بيانات الموظف التجريبي بالرقم المحدد
+      if (target === 'employee') {
+        const empTargetPhone = testPhone || (baseAlertConfig.recipientPhones?.[0]) || '01000000000';
+        customState.employees = [
+          ...(customState.employees || []),
+          { id: 'emp_test', name: 'د. سيف الدين (تجربة إشعار)', phone: empTargetPhone }
+        ];
+      }
+
+      await sendUniversalAttendanceWhatsAppAlert(payload, customState);
+
+      res.json({
+        success: true,
+        message: `تم إرسال إشعار تجريبي فوري (${actionType}) عبر واتساب بنجاح إلى الرقم المحدد!`
+      });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
+  // 20. مسار فحص وترميم الورديات الليلية المتضررة تلقائياً من السجل الخام
+  app.post('/api/biometrics/repair-overnight-shifts', async (req, res) => {
+    try {
+      const result = await repairOvernightShiftsFromRawLogs(db, getSettingsFromStorage, saveSettingsToStorage, io);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // تشغيل الفحص والترميم التلقائي للورديات في الخلفية عند الإقلاع
+  setTimeout(() => {
+    repairOvernightShiftsFromRawLogs(db, getSettingsFromStorage, saveSettingsToStorage, io)
+      .catch(e => console.warn('[Biometric Auto-Repair Init Warn]:', e.message));
+  }, 3000);
+
   console.log('📡 [Biometric Manager] مسارات ADMS ومسارات الواجهة البرمجية للأجهزة مسجلة بنجاح.');
 }
+
+/**
+ * دالة فحص وترميم الورديات العابرة لمنتصف الليل المفقودة أو الممسوحة من واقع السجل الخام
+ */
+export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorage, saveSettingsToStorage, io) {
+  if (!db || typeof getSettingsFromStorage !== 'function') return { repairedCount: 0 };
+  try {
+    console.log('🔄 [Biometric Self-Healing] بدء فحص وترميم الورديات العابرة لمنتصف الليل من السجل الخام...');
+    const state = await getSettingsFromStorage(STORAGE_KEY);
+    if (!state) return { repairedCount: 0 };
+
+    const employees = Array.isArray(state.employees) ? state.employees : [];
+    let currentShifts = Array.isArray(state.shifts) ? [...state.shifts] : [];
+    const currentActiveShifts = { ...(state.activeShifts || {}) };
+
+    // 1. جلب سجلات البصمات الخام خلال آخر 14 يوماً
+    const rawQ = await db.query(
+      `SELECT id, device_serial, device_user_pin, punch_time, verify_type, raw_punch_state,
+              employee_id, employee_name, branch_id, action_type, raw_payload
+       FROM public.biometric_raw_punches
+       WHERE employee_id IS NOT NULL 
+         AND punch_time >= CURRENT_DATE - INTERVAL '14 days'
+       ORDER BY employee_id ASC, punch_time ASC`
+    );
+
+    const punches = rawQ.rows || [];
+    if (punches.length === 0) return { repairedCount: 0, message: 'لا توجد بصمات خام للفحص' };
+
+    // تجميع البصمات لكل موظف
+    const empPunchesMap = new Map();
+    for (const p of punches) {
+      const empId = String(p.employee_id);
+      if (!empPunchesMap.has(empId)) empPunchesMap.set(empId, []);
+      empPunchesMap.get(empId).push(p);
+    }
+
+    let repairedCount = 0;
+    const repairedDetails = [];
+
+    for (const [empId, empPunches] of empPunchesMap.entries()) {
+      const empObj = employees.find(e => String(e.id) === empId || (e.code && String(e.code) === empId));
+      const possibleKeys = [empId, empObj?.id ? String(empObj.id) : null, empObj?.code ? String(empObj.code) : null].filter(Boolean);
+
+      for (let i = 0; i < empPunches.length; i++) {
+        const pA = empPunches[i];
+        const dtA = new Date(pA.punch_time);
+        const dateA = pA.raw_payload && pA.raw_payload.includes('-') 
+          ? (pA.raw_payload.split(/[\t\s]+/)[1] || dtA.toISOString().slice(0, 10))
+          : dtA.toISOString().slice(0, 10);
+        const timeA = pA.raw_payload && pA.raw_payload.includes(':')
+          ? (pA.raw_payload.split(/[\t\s]+/)[2]?.slice(0, 5) || `${String(dtA.getHours()).padStart(2, '0')}:${String(dtA.getMinutes()).padStart(2, '0')}`)
+          : `${String(dtA.getHours()).padStart(2, '0')}:${String(dtA.getMinutes()).padStart(2, '0')}`;
+
+        if (i + 1 < empPunches.length) {
+          const pB = empPunches[i + 1];
+          const dtB = new Date(pB.punch_time);
+          const dateB = pB.raw_payload && pB.raw_payload.includes('-')
+            ? (pB.raw_payload.split(/[\t\s]+/)[1] || dtB.toISOString().slice(0, 10))
+            : dtB.toISOString().slice(0, 10);
+          const timeB = pB.raw_payload && pB.raw_payload.includes(':')
+            ? (pB.raw_payload.split(/[\t\s]+/)[2]?.slice(0, 5) || `${String(dtB.getHours()).padStart(2, '0')}:${String(dtB.getMinutes()).padStart(2, '0')}`)
+            : `${String(dtB.getHours()).padStart(2, '0')}:${String(dtB.getMinutes()).padStart(2, '0')}`;
+
+          const diffHours = (dtB.getTime() - dtA.getTime()) / (1000 * 60 * 60);
+
+          // إذا كانت البصمة B بعد البصمة A بمدة بين دقيقتين و 18 ساعة، وتاريخ B هو اليوم التالي لـ A (عابرة لمنتصف الليل)
+          const isOvernightPair = dateB > dateA && diffHours > 0.033 && diffHours <= 18;
+
+          if (isOvernightPair) {
+            // فحص حالة الوردية في currentShifts
+            const alreadyFixed = currentShifts.some(s =>
+              possibleKeys.some(k => String(s.employeeId) === String(k)) &&
+              s.date === dateA &&
+              s.timeIn === timeA &&
+              s.timeOut === timeB
+            );
+
+            if (!alreadyFixed) {
+              console.log(`[Biometric Repair] 🩹 اكتشاف وردية ليلية تالفة أو ممسوحة للموظف ${pA.employee_name || empId}: (${dateA} ${timeA} -> ${dateB} ${timeB})`);
+
+              // تنظيف أي وردية وهمية غير مكتملة تم إنشاؤها بالخطأ في dateB بوقت timeB
+              currentShifts = currentShifts.filter(s => {
+                const isEmp = possibleKeys.some(k => String(s.employeeId) === String(k));
+                const isBogusMidnightCheckIn = isEmp && s.date === dateB && s.timeIn === timeB && (!s.timeOut || s.timeOut === '' || s.isLiveActive);
+                return !isBogusMidnightCheckIn;
+              });
+
+              // تنظيف activeShifts إذا كانت معلقة بهذه البصمة الوهمية
+              possibleKeys.forEach(k => {
+                const act = currentActiveShifts[k];
+                if (act && act.date === dateB && act.timeIn === timeB) {
+                  delete currentActiveShifts[k];
+                }
+              });
+
+              // إيجاد أو إنشاء سجل الوردية الصحيحة لـ dateA
+              const existingIdx = currentShifts.findIndex(s =>
+                possibleKeys.some(k => String(s.employeeId) === String(k)) &&
+                s.date === dateA
+              );
+
+              const restoredShift = {
+                ...(existingIdx >= 0 ? currentShifts[existingIdx] : {}),
+                id: (existingIdx >= 0 && currentShifts[existingIdx].id) || `shift_${empId}_${dtA.getTime()}`,
+                employeeId: empId,
+                employeeCode: empObj?.code || '',
+                employeeName: pA.employee_name || empObj?.name || 'موظف',
+                branchId: pA.branch_id || pB.branch_id || empObj?.branchId || '',
+                date: dateA,
+                timeIn: timeA,
+                timeOut: timeB,
+                timeOutDate: dateB,
+                isOvernight: true,
+                isLiveActive: false,
+                status: 'completed',
+                punchSource: 'biometric_device',
+                source: 'biometric_device',
+                punchOutSource: 'biometric_device',
+                repairNote: 'تم استعادة وترميم الوردية الليلية بنجاح من سجل البصمات الخام (Overnight Shift Restored)',
+                updatedAt: new Date().toISOString()
+              };
+
+              if (existingIdx >= 0) {
+                currentShifts[existingIdx] = restoredShift;
+              } else {
+                currentShifts = [restoredShift, ...currentShifts];
+              }
+
+              repairedCount++;
+              repairedDetails.push({
+                employeeId: empId,
+                employeeName: pA.employee_name || empObj?.name,
+                date: dateA,
+                timeIn: timeA,
+                timeOut: timeB,
+                timeOutDate: dateB
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (repairedCount > 0) {
+      state.shifts = currentShifts;
+      state.activeShifts = currentActiveShifts;
+      state._punchSource = 'biometric_overnight_repair';
+      await saveSettingsToStorage(STORAGE_KEY, state, 'system-repair');
+
+      if (io) {
+        io.emit('entity:changed', {
+          entityType: 'shifts',
+          action: 'repaired',
+          repairedCount,
+          timestamp: new Date().toISOString()
+        });
+        io.emit('entity:changed', {
+          entityType: 'activeShifts',
+          action: 'repaired',
+          timestamp: new Date().toISOString()
+        });
+      }
+      console.log(`[Biometric Self-Healing] ✅ تم ترميم وإصلاح ${repairedCount} وردية ليلية بنجاح!`);
+    } else {
+      console.log('[Biometric Self-Healing] ℹ️ تم فحص السجلات ولا توجد ورديات بحاجة لترميم.');
+    }
+
+    return { success: true, repairedCount, repairedDetails };
+  } catch (err) {
+    console.error('[Biometric Self-Healing Error]:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+

@@ -25,10 +25,10 @@ import {
   outstockSearchMedications,
   outstockGetMedicationMasterCard,
   outstockUpdateMedicationDetails,
-  outstockAddNewMedication
+  outstockAddNewMedication,
+  outstockGetBranchPermissions
 } from '../../../utils/outstockApiClient';
 import MedicationMasterCardModal from '../common/MedicationMasterCardModal';
-import AddMedicationModal from '../common/AddMedicationModal';
 
 /**
  * PharmacyMedicationSearchTab.jsx
@@ -61,10 +61,25 @@ export default function PharmacyMedicationSearchTab({
   const [newPackSize, setNewPackSize] = useState('1');
   const [priceEditReason, setPriceEditReason] = useState('تشغيلة جديدة بسعر أعلى من الشركة');
   const [priceEditDecree, setPriceEditDecree] = useState('');
-  const [isSavingPrice, setIsSavingPrice] = useState(false);
+  // صلاحيات تعديل الأسعار للفروع
+  const [branchPermissions, setBranchPermissions] = useState(null);
 
-  // إضافة صنف جديد
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  useEffect(() => {
+    outstockGetBranchPermissions().then((res) => {
+      if (res?.success && res.permissions) {
+        setBranchPermissions(res.permissions);
+      }
+    }).catch(() => {});
+  }, [branchId]);
+
+  const canEditPrices = useMemo(() => {
+    if (!branchPermissions) return true;
+    if (branchPermissions.globalPriceEditEnabled === false) return false;
+    if (branchId && branchPermissions.branches && branchPermissions.branches[branchId]) {
+      return branchPermissions.branches[branchId].can_edit_prices !== false;
+    }
+    return true;
+  }, [branchPermissions, branchId]);
 
   // تنفيذ البحث
   const handleSearch = async (term) => {
@@ -240,30 +255,7 @@ export default function PharmacyMedicationSearchTab({
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button
-              type="button"
-              onClick={() => setIsAddModalOpen(true)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '10px 18px',
-                borderRadius: '10px',
-                background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
-                color: '#ffffff',
-                border: 'none',
-                fontWeight: '700',
-                fontSize: '13.5px',
-                cursor: 'pointer',
-                boxShadow: '0 4px 12px rgba(5, 150, 105, 0.25)',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              <Plus size={18} />
-              <span>إضافة صنف جديد</span>
-            </button>
-          </div>
+          {/* تم إزالة زر إضافة صنف جديد بناءً على متطلبات النظام */}
         </div>
 
         {/* ── شريط البحث الفوري الذكي ── */}
@@ -556,27 +548,49 @@ export default function PharmacyMedicationSearchTab({
                       <span>كارتة الصنف والبدائل</span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => handleOpenPriceEdit(med)}
-                      style={{
-                        padding: '8px 10px',
-                        borderRadius: '8px',
-                        background: '#f0fdf4',
-                        color: '#15803d',
-                        border: '1px solid #bbf7d0',
-                        fontSize: '12.5px',
-                        fontWeight: '700',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <TrendingUp size={15} />
-                      <span>تعديل السعر (للأعلى)</span>
-                    </button>
+                    {!canEditPrices ? (
+                      <div
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          background: '#f1f5f9',
+                          color: '#64748b',
+                          border: '1px solid #cbd5e1',
+                          fontSize: '11.5px',
+                          fontWeight: '700',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px'
+                        }}
+                        title="تعديل الأسعار مقفل لهذا الفرع بقرار إدارة المشتريات"
+                      >
+                        <ShieldAlert size={14} color="#94a3b8" />
+                        <span>السعر مقفل 🔒</span>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPriceEdit(med)}
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          background: '#f0fdf4',
+                          color: '#15803d',
+                          border: '1px solid #bbf7d0',
+                          fontSize: '12.5px',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <TrendingUp size={15} />
+                        <span>تعديل السعر (للأعلى)</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               );

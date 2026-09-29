@@ -37,6 +37,8 @@ function doPost(e) {
       return handleUploadSystemBackup(data);
     } else if (action === 'list_system_backups') {
       return handleListSystemBackups(data);
+    } else if (action === 'create_or_get_supplier_folder') {
+      return handleCreateOrGetSupplierFolder(data);
     } else {
       return createJsonResponse({ success: false, error: 'إجراء غير معروف: ' + action });
     }
@@ -406,6 +408,61 @@ function handleListSystemBackups(data) {
     });
   } catch (err) {
     return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+/**
+ * 8. إنشاء أو جلب مجلد فواتير المورد (اسم المورد وكوده)
+ */
+function handleCreateOrGetSupplierFolder(data) {
+  try {
+    var parentFolderId = data.parentFolderId;
+    var supplierCode = data.supplierCode || data.code || 'SUP';
+    var supplierName = data.supplierName || data.name || 'مورد';
+    var folderName = '[' + supplierCode + '] ' + supplierName;
+
+    var rootFolder;
+    if (parentFolderId && parentFolderId.trim() !== '') {
+      rootFolder = DriveApp.getFolderById(parentFolderId.trim());
+    } else {
+      var rootFolders = DriveApp.getFoldersByName('HR_Employees_Archive');
+      if (rootFolders.hasNext()) {
+        rootFolder = rootFolders.next();
+      } else {
+        rootFolder = DriveApp.createFolder('HR_Employees_Archive');
+        rootFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      }
+    }
+
+    // 1. مجلد "فواتير_الموردين" الرئيسي
+    var invRootName = 'فواتير_الموردين';
+    var invFolders = rootFolder.getFoldersByName(invRootName);
+    var invoicesFolder = null;
+    if (invFolders.hasNext()) {
+      invoicesFolder = invFolders.next();
+    } else {
+      invoicesFolder = rootFolder.createFolder(invRootName);
+      invoicesFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    }
+
+    // 2. مجلد المورد الخاص
+    var sFolders = invoicesFolder.getFoldersByName(folderName);
+    var supplierFolder = null;
+    if (sFolders.hasNext()) {
+      supplierFolder = sFolders.next();
+    } else {
+      supplierFolder = invoicesFolder.createFolder(folderName);
+      supplierFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    }
+
+    return createJsonResponse({
+      success: true,
+      folderId: supplierFolder.getId(),
+      folderName: supplierFolder.getName(),
+      folderUrl: supplierFolder.getUrl()
+    });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: 'خطأ إنشاء مجلد المورد: ' + err.toString() });
   }
 }
 

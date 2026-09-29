@@ -27,7 +27,10 @@ import {
   Image as ImageIcon,
   MapPin,
   Key,
-  Check
+  Check,
+  Truck,
+  HelpCircle,
+  UserCheck
 } from 'lucide-react';
 import OutstockNotificationModal from './common/OutstockNotificationModal';
 import { outstockGetMe } from '../../utils/outstockApiClient';
@@ -61,6 +64,11 @@ import OwnerSettingsTab from './owner/OwnerSettingsTab';
 import OwnerMedicationsPricingTab from './owner/OwnerMedicationsPricingTab';
 import OwnerFinancialReportsTab from './owner/OwnerFinancialReportsTab';
 import PharmacyMedicationSearchTab from './pharmacy/PharmacyMedicationSearchTab';
+
+// أقسام النواقص والمشتريات المطورة
+import ItemInquiryAndCorrectionTab from './common/ItemInquiryAndCorrectionTab';
+import ProcurementSuppliersTab from './procurement/ProcurementSuppliersTab';
+import ProcurementTeamTab from './procurement/ProcurementTeamTab';
 
 /**
  * OutstockSystemView.jsx
@@ -670,6 +678,16 @@ export default function OutstockSystemView({
 
               <button
                 type="button"
+                className={`outstock-subnav-btn ${activeTab === 'inquiries' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('inquiries')}
+                title="الاستعلام عن الأسعار وتصحيح بيانات الأصناف واعتماد الأدوية الجديدة"
+              >
+                <HelpCircle size={16} />
+                <span>الاستعلام وتصحيح الأصناف</span>
+              </button>
+
+              <button
+                type="button"
                 className={`outstock-subnav-btn ${activeTab === 'whatsapp' ? 'is-active' : ''}`}
                 onClick={() => setActiveTab('whatsapp')}
                 title="اتصال الواتساب بالفرع وإرسال الرسائل التلقائية للعملاء"
@@ -680,7 +698,7 @@ export default function OutstockSystemView({
             </>
           )}
 
-          {/* 2. قوائم بوابة إدارة المشتريات (5 قوائم) */}
+          {/* 2. قوائم بوابة إدارة المشتريات */}
           {userRole === 'procurement' && (
             <>
               <button
@@ -690,6 +708,26 @@ export default function OutstockSystemView({
               >
                 <Building2 size={16} />
                 <span>طلبات الفروع المجمعة</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'procurement_suppliers' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('procurement_suppliers')}
+                title="حسابات الموردين وحدود الائتمان وفواتير الشراء وأرشيف Drive ومسحوبات الفروع"
+              >
+                <Truck size={16} />
+                <span>الموردين وفواتير الشراء</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'procurement_inquiries' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('procurement_inquiries')}
+                title="الرد على استعلامات الفروع وتصحيح بيانات وأسعار الأصناف واعتماد الأدوية الجديدة"
+              >
+                <HelpCircle size={16} />
+                <span>الاستعلام وتصحيح الأصناف</span>
               </button>
 
               <button
@@ -708,6 +746,16 @@ export default function OutstockSystemView({
               >
                 <AlertTriangle size={16} />
                 <span>أصناف غير متوفرة بالسوق</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'procurement_team' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('procurement_team')}
+                title="إدارة أعضاء فريق المشتريات وصلاحية التعديل على الأصناف وقفل وتفعيل أسعار الفروع"
+              >
+                <UserCheck size={16} />
+                <span>فريق المشتريات والصلاحيات</span>
               </button>
 
               <button
@@ -761,6 +809,36 @@ export default function OutstockSystemView({
               >
                 <TrendingUp size={16} />
                 <span>متابعة إدارة المشتريات</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'owner_suppliers' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('owner_suppliers')}
+                title="حسابات الموردين وفواتير الشراء والمسحوبات"
+              >
+                <Truck size={16} />
+                <span>الموردين وفواتير الشراء</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'owner_inquiries' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('owner_inquiries')}
+                title="استعلامات الفروع وتصحيح الأصناف"
+              >
+                <HelpCircle size={16} />
+                <span>استعلامات وتصحيح الأصناف</span>
+              </button>
+
+              <button
+                type="button"
+                className={`outstock-subnav-btn ${activeTab === 'owner_team' ? 'is-active' : ''}`}
+                onClick={() => setActiveTab('owner_team')}
+                title="فريق المشتريات والصلاحيات"
+              >
+                <UserCheck size={16} />
+                <span>فريق المشتريات والصلاحيات</span>
               </button>
 
               <button
@@ -871,6 +949,16 @@ export default function OutstockSystemView({
               />
             )}
 
+            {activeTab === 'inquiries' && (
+              <ItemInquiryAndCorrectionTab
+                userRole="branch"
+                branchId={effectiveBranchId}
+                currentBranch={activeBranch}
+                currentUser={currentUser}
+                showToast={triggerNotification}
+              />
+            )}
+
             {activeTab === 'whatsapp' && (
               <OutstockWhatsAppCenterTab
                 branchId={effectiveBranchId}
@@ -889,12 +977,33 @@ export default function OutstockSystemView({
               <ProcurementOrdersTab showToast={triggerNotification} />
             )}
 
+            {activeTab === 'procurement_suppliers' && (
+              <ProcurementSuppliersTab showToast={triggerNotification} />
+            )}
+
+            {activeTab === 'procurement_inquiries' && (
+              <ItemInquiryAndCorrectionTab
+                userRole={currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock' ? 'procurement_manager' : 'procurement_officer'}
+                branchId={effectiveBranchId}
+                currentBranch={activeBranch}
+                currentUser={currentUser}
+                showToast={triggerNotification}
+              />
+            )}
+
             {activeTab === 'delivery_tracking' && (
               <ProcurementDeliveryTrackingTab />
             )}
 
             {activeTab === 'unavailable_items' && (
               <ProcurementUnavailableTab showToast={triggerNotification} />
+            )}
+
+            {activeTab === 'procurement_team' && (
+              <ProcurementTeamTab
+                showToast={triggerNotification}
+                currentUser={currentUser}
+              />
             )}
 
             {activeTab === 'procurement_whatsapp' && (
@@ -923,6 +1032,27 @@ export default function OutstockSystemView({
 
             {activeTab === 'owner_procurement' && (
               <OwnerProcurementMonitoringTab />
+            )}
+
+            {activeTab === 'owner_suppliers' && (
+              <ProcurementSuppliersTab showToast={triggerNotification} />
+            )}
+
+            {activeTab === 'owner_inquiries' && (
+              <ItemInquiryAndCorrectionTab
+                userRole="owner"
+                branchId={effectiveBranchId}
+                currentBranch={activeBranch}
+                currentUser={currentUser}
+                showToast={triggerNotification}
+              />
+            )}
+
+            {activeTab === 'owner_team' && (
+              <ProcurementTeamTab
+                showToast={triggerNotification}
+                currentUser={currentUser}
+              />
             )}
 
             {activeTab === 'owner_medications' && (

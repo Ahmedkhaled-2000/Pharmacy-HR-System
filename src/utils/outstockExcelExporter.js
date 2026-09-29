@@ -676,3 +676,371 @@ export async function parseMedicationExcelFile(file) {
     warnings
   };
 }
+
+/**
+ * تصدير سجل مسحوبات المورد إلى ملف إكسل احترافي
+ */
+export async function exportSupplierWithdrawalsExcel(supplier = {}, withdrawals = [], options = {}) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'منظومة إدارة النواقص والمشتريات';
+  wb.created = new Date();
+
+  const ws = wb.addWorksheet(`مسحوبات ${supplier.name || 'المورد'}`, {
+    views: [{ rightToLeft: true, showGridLines: true, state: 'frozen', ySplit: 4 }]
+  });
+
+  // ترويسة رئيسية
+  ws.mergeCells('A1:J1');
+  const titleCell = ws.getCell('A1');
+  titleCell.value = `📦 كشف وسجل مسحوبات المورد: ${supplier.name || ''} (${supplier.code || 'بدون كود'})`;
+  titleCell.font = { name: 'Arial', bold: true, size: 14, color: { argb: THEME.white } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.headerBg } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(1).height = 36;
+
+  // سطر بيانات المورد
+  ws.mergeCells('A2:J2');
+  const infoCell = ws.getCell('A2');
+  infoCell.value = `نوع الحساب: ${supplier.payment_type === 'credit' ? 'أجل (ائتمان)' : 'نقدي'} | حد الائتمان: ${supplier.credit_limit || 0} ج.م | فترة السداد: ${supplier.credit_term_days || 0} يوم | الرصيد الحالي: ${supplier.current_balance || 0} ج.م | تاريخ الاستخراج: ${new Date().toLocaleDateString('ar-EG')}`;
+  infoCell.font = { name: 'Arial', size: 10.5, color: { argb: THEME.white } };
+  infoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.subHeaderBg } };
+  infoCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(2).height = 24;
+
+  // عناوين الأعمدة
+  const headers = [
+    'م',
+    'رقم الفاتورة',
+    'تاريخ الفاتورة',
+    'اسم الدواء / الصنف',
+    'حجم العبوة',
+    'الكمية',
+    'سعر الجمهور',
+    'نسبة الخصم %',
+    'سعر الشراء الصافي',
+    'إجمالي القيمة (ج.م)'
+  ];
+
+  const headRow = ws.getRow(4);
+  headRow.values = headers;
+  headRow.height = 28;
+  headRow.eachCell((cell) => {
+    cell.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: THEME.white } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1E3A8A' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = THIN_BORDER;
+  });
+
+  let rowIdx = 5;
+  let totalQty = 0;
+  let totalVal = 0;
+
+  withdrawals.forEach((item, idx) => {
+    const qty = Number(item.quantity || item.qty || 0);
+    const pubPrice = Number(item.public_price || item.unit_price || 0);
+    const disc = Number(item.discount_percent || item.discount || 0);
+    const buyPrice = Number(item.buy_price || (pubPrice * (1 - disc / 100)) || 0);
+    const itemTotal = Number(item.total_price || (qty * buyPrice) || 0);
+
+    totalQty += qty;
+    totalVal += itemTotal;
+
+    const row = ws.getRow(rowIdx);
+    row.values = [
+      idx + 1,
+      item.invoice_number || item.invoiceNumber || '-',
+      item.invoice_date || item.created_at ? new Date(item.invoice_date || item.created_at).toLocaleDateString('ar-EG') : '-',
+      item.medication_name || item.name || '-',
+      item.pack_size || 1,
+      qty,
+      pubPrice,
+      disc ? `${disc}%` : '0%',
+      buyPrice,
+      itemTotal
+    ];
+
+    const isEven = idx % 2 === 0;
+    row.eachCell((cell, cIdx) => {
+      cell.font = { name: 'Arial', size: 10, color: { argb: THEME.textDark } };
+      cell.border = THIN_BORDER;
+      cell.alignment = { vertical: 'middle', horizontal: cIdx === 4 ? 'right' : 'center' };
+      if (!isEven) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.altRowBg } };
+      }
+    });
+    row.height = 24;
+    rowIdx++;
+  });
+
+  // سطر الإجمالي
+  const totRow = ws.getRow(rowIdx);
+  totRow.values = ['الإجمالي', '', '', '', '', totalQty, '', '', '', totalVal];
+  totRow.height = 30;
+  ws.mergeCells(`A${rowIdx}:E${rowIdx}`);
+  totRow.eachCell((cell) => {
+    cell.font = { name: 'Arial', bold: true, size: 11, color: { argb: THEME.white } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.totalBg } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = THIN_BORDER;
+  });
+
+  ws.columns = [
+    { width: 6 },
+    { width: 14 },
+    { width: 14 },
+    { width: 32 },
+    { width: 12 },
+    { width: 10 },
+    { width: 13 },
+    { width: 13 },
+    { width: 16 },
+    { width: 18 }
+  ];
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `مسحوبات-${supplier.name || 'مورد'}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  return true;
+}
+
+/**
+ * تصدير مسحوبات الفروع الشهرية إلى ملف إكسل
+ */
+export async function exportBranchWithdrawalsExcel(monthPeriod = '', branchesData = [], extraWithdrawals = []) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'منظومة إدارة النواقص والمشتريات';
+  wb.created = new Date();
+
+  // الورقة 1: ملخص الفروع
+  const ws1 = wb.addWorksheet(`مسحوبات الفروع ${monthPeriod}`, {
+    views: [{ rightToLeft: true, showGridLines: true, state: 'frozen', ySplit: 3 }]
+  });
+
+  ws1.mergeCells('A1:F1');
+  const t1 = ws1.getCell('A1');
+  t1.value = `📊 تقرير مسحوبات الفروع والصيدليات لشهر: ${monthPeriod || new Date().toISOString().slice(0, 7)}`;
+  t1.font = { name: 'Arial', bold: true, size: 14, color: { argb: THEME.white } };
+  t1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.headerBg } };
+  t1.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws1.getRow(1).height = 36;
+
+  const h1 = ['م', 'الفرع / الصيدلية', 'عدد الأصناف المستلمة', 'إجمالي الكميات المسحوبة', 'إجمالي التكلفة (ج.م)', 'آخر عملية توريد'];
+  const hr1 = ws1.getRow(3);
+  hr1.values = h1;
+  hr1.height = 28;
+  hr1.eachCell((c) => {
+    c.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: THEME.white } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '0F766E' } };
+    c.alignment = { horizontal: 'center', vertical: 'middle' };
+    c.border = THIN_BORDER;
+  });
+
+  let r1Idx = 4;
+  let totalCostSum = 0;
+  let totalQtySum = 0;
+
+  branchesData.forEach((b, idx) => {
+    const cost = Number(b.total_cost || b.totalAmount || 0);
+    const qty = Number(b.total_quantity || b.itemsCount || 0);
+    totalCostSum += cost;
+    totalQtySum += qty;
+
+    const row = ws1.getRow(r1Idx);
+    row.values = [
+      idx + 1,
+      b.branch_name || b.name || '-',
+      b.items_count || b.distinctItems || 0,
+      qty,
+      cost,
+      b.last_withdrawal_date ? new Date(b.last_withdrawal_date).toLocaleDateString('ar-EG') : '-'
+    ];
+
+    row.eachCell((cell, cIdx) => {
+      cell.font = { name: 'Arial', size: 10, color: { argb: THEME.textDark } };
+      cell.border = THIN_BORDER;
+      cell.alignment = { vertical: 'middle', horizontal: cIdx === 2 ? 'right' : 'center' };
+      if (idx % 2 === 1) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.altRowBg } };
+      }
+    });
+    row.height = 24;
+    r1Idx++;
+  });
+
+  // سطر إجمالي الفروع
+  const tot1 = ws1.getRow(r1Idx);
+  tot1.values = ['الإجمالي العام', '', '', totalQtySum, totalCostSum, ''];
+  tot1.height = 30;
+  ws1.mergeCells(`A${r1Idx}:C${r1Idx}`);
+  tot1.eachCell((cell) => {
+    cell.font = { name: 'Arial', bold: true, size: 11, color: { argb: THEME.white } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.totalBg } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = THIN_BORDER;
+  });
+
+  ws1.columns = [{ width: 6 }, { width: 30 }, { width: 18 }, { width: 20 }, { width: 22 }, { width: 18 }];
+
+  // الورقة 2: المسحوبات الإضافية
+  if (extraWithdrawals.length > 0) {
+    const ws2 = wb.addWorksheet('المسحوبات الإضافية', {
+      views: [{ rightToLeft: true, showGridLines: true, state: 'frozen', ySplit: 2 }]
+    });
+
+    ws2.mergeCells('A1:G1');
+    const t2 = ws2.getCell('A1');
+    t2.value = '📋 كشف المسحوبات الإضافية والتوريدات الميدانية المباشرة';
+    t2.font = { name: 'Arial', bold: true, size: 12, color: { argb: THEME.white } };
+    t2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.accentRoyal } };
+    t2.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws2.getRow(1).height = 30;
+
+    const h2 = ['م', 'الفرع', 'التاريخ', 'اسم الصنف', 'الكمية', 'سعر التكلفة', 'سبب المسحوب'];
+    const hr2 = ws2.getRow(2);
+    hr2.values = h2;
+    hr2.height = 26;
+    hr2.eachCell((c) => {
+      c.font = { name: 'Arial', bold: true, size: 10, color: { argb: THEME.white } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1E3A8A' } };
+      c.alignment = { horizontal: 'center', vertical: 'middle' };
+      c.border = THIN_BORDER;
+    });
+
+    extraWithdrawals.forEach((ew, idx) => {
+      const r = ws2.getRow(idx + 3);
+      r.values = [
+        idx + 1,
+        ew.branch_name || ew.branchId || '-',
+        ew.withdrawal_date ? new Date(ew.withdrawal_date).toLocaleDateString('ar-EG') : '-',
+        ew.medication_name || ew.name || '-',
+        ew.quantity || 0,
+        ew.unit_cost || 0,
+        ew.notes || ew.reason || '-'
+      ];
+      r.eachCell((c) => {
+        c.font = { name: 'Arial', size: 9.5, color: { argb: THEME.textDark } };
+        c.border = THIN_BORDER;
+        c.alignment = { vertical: 'middle', horizontal: 'center' };
+      });
+      r.height = 22;
+    });
+
+    ws2.columns = [{ width: 6 }, { width: 22 }, { width: 14 }, { width: 28 }, { width: 10 }, { width: 14 }, { width: 28 }];
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `مسحوبات-الفروع-${monthPeriod || new Date().toISOString().slice(0, 7)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  return true;
+}
+
+/**
+ * تحليل واستخراج بنود فاتورة مورد من ملف Excel (.xlsx)
+ */
+export async function parseSupplierInvoiceExcel(file) {
+  try {
+    const buffer = await file.arrayBuffer();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer);
+    const ws = wb.worksheets[0];
+    if (!ws) {
+      return { success: false, error: 'الملف فارغ أو لا يحتوي على أوراق عمل' };
+    }
+
+    // استكشاف سطر الترويسة
+    let headerRowIdx = -1;
+    let nameCol = -1;
+    let qtyCol = -1;
+    let pubPriceCol = -1;
+    let discountCol = -1;
+    let buyPriceCol = -1;
+    let barcodeCol = -1;
+
+    for (let r = 1; r <= Math.min(15, ws.rowCount); r++) {
+      const row = ws.getRow(r);
+      for (let c = 1; c <= row.cellCount; c++) {
+        const val = String(row.getCell(c).value || '').trim().toLowerCase();
+        if (val.includes('صنف') || val.includes('دواء') || val.includes('item') || val.includes('product') || val.includes('name') || val.includes('بيان')) {
+          nameCol = c;
+          headerRowIdx = r;
+        }
+        if (val.includes('كمية') || val.includes('qty') || val.includes('quantity') || val.includes('العدد')) {
+          qtyCol = c;
+        }
+        if (val.includes('جمهور') || val.includes('public') || val.includes('سعر البيع') || val.includes('price')) {
+          pubPriceCol = c;
+        }
+        if (val.includes('خصم') || val.includes('discount') || val.includes('نسبة')) {
+          discountCol = c;
+        }
+        if (val.includes('شراء') || val.includes('صافي') || val.includes('cost') || val.includes('net') || val.includes('توليد')) {
+          buyPriceCol = c;
+        }
+        if (val.includes('باركود') || val.includes('barcode') || val.includes('gtin') || val.includes('كود')) {
+          barcodeCol = c;
+        }
+      }
+      if (nameCol !== -1 && qtyCol !== -1) break;
+    }
+
+    if (nameCol === -1) {
+      // افتراض أعمدة تلقائية
+      nameCol = 1;
+      qtyCol = 2;
+      pubPriceCol = 3;
+      discountCol = 4;
+      headerRowIdx = 1;
+    }
+
+    const items = [];
+    for (let r = headerRowIdx + 1; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      const name = String(row.getCell(nameCol).value || '').trim();
+      if (!name || name === 'الإجمالي' || name === 'Total') continue;
+
+      const rawQty = parseFloat(String(row.getCell(qtyCol).value || '0').replace(/[^\d.-]/g, '')) || 1;
+      const rawPub = pubPriceCol !== -1 ? parseFloat(String(row.getCell(pubPriceCol).value || '0').replace(/[^\d.-]/g, '')) || 0 : 0;
+      const rawDisc = discountCol !== -1 ? parseFloat(String(row.getCell(discountCol).value || '0').replace(/[^\d.-]/g, '')) || 0 : 0;
+      let rawBuy = buyPriceCol !== -1 ? parseFloat(String(row.getCell(buyPriceCol).value || '0').replace(/[^\d.-]/g, '')) || 0 : 0;
+      if (!rawBuy && rawPub > 0) {
+        rawBuy = rawPub * (1 - (rawDisc / 100));
+      }
+
+      items.push({
+        id: `inv_item_${r}_${Date.now()}`,
+        medication_name: name,
+        barcode: barcodeCol !== -1 ? String(row.getCell(barcodeCol).value || '').trim() : '',
+        pack_size: 1,
+        quantity: Math.max(1, rawQty),
+        public_price: Math.max(0, rawPub),
+        discount_percent: Math.max(0, rawDisc),
+        buy_price: Math.max(0, parseFloat(rawBuy.toFixed(2))),
+        total_price: parseFloat((rawQty * (rawBuy || rawPub)).toFixed(2))
+      });
+    }
+
+    return {
+      success: true,
+      items,
+      count: items.length
+    };
+  } catch (err) {
+    console.error('Error parsing supplier invoice excel:', err);
+    return { success: false, error: err.message || 'فشل قراءة ملف الإكسل' };
+  }
+}
+

@@ -465,5 +465,225 @@ export async function outstockGetFinancialReports({ branchId, fromDate, toDate }
   return await outstockRequest(`reports/financial?${qs.toString()}`, { method: 'GET' });
 }
 
+// ── 12. التحقق من كود الموظف السري (طلب العميل وتسليم الطلب) ───────────────────
+export async function outstockVerifyEmployeeCode(code) {
+  return await outstockRequest('verify-employee-code', {
+    method: 'POST',
+    body: JSON.stringify({ code })
+  });
+}
+
+// ── 13. البحث عن المواد الفعالة ──────────────────────────────────────────────
+export async function outstockSearchActiveIngredients(query, limit = 30) {
+  const qs = new URLSearchParams({ query: query || '', limit: String(limit) });
+  return await outstockRequest(`active-ingredients?${qs.toString()}`, { method: 'GET' });
+}
+
+// ── 14. فريق المشتريات وصلاحيات الأعضاء ───────────────────────────────────────
+export async function outstockGetProcurementTeam() {
+  return await outstockRequest('procurement-team', { method: 'GET' });
+}
+
+export async function outstockAddProcurementTeamMember(userData) {
+  return await outstockRequest('procurement-team', {
+    method: 'POST',
+    body: JSON.stringify(userData)
+  });
+}
+
+export async function outstockUpdateProcurementTeamMember(id, userData) {
+  return await outstockRequest(`procurement-team/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(userData)
+  });
+}
+
+export async function outstockDeleteProcurementTeamMember(id) {
+  return await outstockRequest(`procurement-team/${id}`, { method: 'DELETE' });
+}
+
+export async function outstockUpdateProcurementManagerProfile(profileData) {
+  return await outstockRequest('procurement-manager/profile', {
+    method: 'POST',
+    body: JSON.stringify(profileData)
+  });
+}
+
+// ── 15. صلاحيات الفروع (تعديل الأسعار والخصومات) ─────────────────────────────
+export async function outstockGetBranchPermissions() {
+  return await outstockRequest('settings/branch-permissions', { method: 'GET' });
+}
+
+export async function outstockSaveBranchPermissions(permissions) {
+  return await outstockRequest('settings/branch-permissions', {
+    method: 'POST',
+    body: JSON.stringify(permissions)
+  });
+}
+
+// ── 16. طلبات الاستعلام وتعديل وإضافة الأصناف ────────────────────────────────
+export async function outstockGetMedicationRequests(params = {}) {
+  const qs = new URLSearchParams();
+  if (params.branchId) qs.append('branchId', params.branchId);
+  if (params.status) qs.append('status', params.status);
+  if (params.requestType) qs.append('requestType', params.requestType);
+  return await outstockRequest(`medication-requests?${qs.toString()}`, { method: 'GET' });
+}
+
+export async function outstockCreateMedicationRequest(requestData) {
+  return await outstockRequest('medication-requests', {
+    method: 'POST',
+    body: JSON.stringify(requestData)
+  });
+}
+
+export async function outstockReplyMedicationRequest(id, replyData) {
+  return await outstockRequest(`medication-requests/${id}/reply`, {
+    method: 'PUT',
+    body: JSON.stringify(replyData)
+  });
+}
+
+export async function outstockApproveNewItemRequest(id, medicationData) {
+  return await outstockRequest(`medication-requests/${id}/approve-new-item`, {
+    method: 'POST',
+    body: JSON.stringify({ medicationData })
+  });
+}
+
+// ── 17. الموردين وحسابات الأجل ────────────────────────────────────────────────
+export async function outstockGetSuppliers() {
+  return await outstockRequest('suppliers', { method: 'GET' });
+}
+
+export async function outstockSaveSupplier(supplierData) {
+  return await outstockRequest('suppliers', {
+    method: 'POST',
+    body: JSON.stringify(supplierData)
+  });
+}
+
+export async function outstockUpdateSupplier(id, supplierData) {
+  return await outstockRequest(`suppliers/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(supplierData)
+  });
+}
+
+export async function outstockDeleteSupplier(id) {
+  return await outstockRequest(`suppliers/${id}`, { method: 'DELETE' });
+}
+
+export async function outstockGetSupplierWithdrawals(supplierId, params = {}) {
+  const qs = new URLSearchParams();
+  if (params.search) qs.append('search', params.search);
+  if (params.month) qs.append('month', params.month);
+  return await outstockRequest(`suppliers/${supplierId}/withdrawals?${qs.toString()}`, { method: 'GET' });
+}
+
+export async function outstockSettleSupplierClaim(supplierId, paymentData) {
+  return await outstockRequest(`suppliers/${supplierId}/settle`, {
+    method: 'POST',
+    body: JSON.stringify(paymentData)
+  });
+}
+
+export async function outstockGetSupplierPayments(supplierId) {
+  return await outstockRequest(`suppliers/${supplierId}/payments`, { method: 'GET' });
+}
+
+// ── 18. فواتير الموردين والربط مع Google Drive ────────────────────────────────
+export async function outstockGetSupplierInvoices(params = {}) {
+  const qs = new URLSearchParams();
+  if (params.supplierId) qs.append('supplierId', params.supplierId);
+  if (params.dateFrom) qs.append('dateFrom', params.dateFrom);
+  if (params.dateTo) qs.append('dateTo', params.dateTo);
+  if (params.paymentStatus) qs.append('paymentStatus', params.paymentStatus);
+  if (params.search) qs.append('search', params.search);
+  if (params.limit) qs.append('limit', String(params.limit));
+  return await outstockRequest(`supplier-invoices?${qs.toString()}`, { method: 'GET' });
+}
+
+export async function outstockGetSupplierInvoiceDetails(id) {
+  return await outstockRequest(`supplier-invoices/${id}`, { method: 'GET' });
+}
+
+export async function outstockSaveSupplierInvoice(invoiceData) {
+  return await outstockRequest('supplier-invoices', {
+    method: 'POST',
+    body: JSON.stringify(invoiceData)
+  });
+}
+
+export async function outstockUploadInvoiceToDrive(data) {
+  return await outstockRequest('supplier-invoices/upload-drive', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  });
+}
+
+// ── 19. مسحوبات الفروع الشهرية ────────────────────────────────────────────────
+export async function outstockGetBranchWithdrawals(params = {}) {
+  const qs = new URLSearchParams();
+  if (params.monthPeriod) qs.append('monthPeriod', params.monthPeriod);
+  if (params.branchId) qs.append('branchId', params.branchId);
+  return await outstockRequest(`branch-withdrawals?${qs.toString()}`, { method: 'GET' });
+}
+
+export async function outstockSaveBranchWithdrawal(withdrawalData) {
+  return await outstockRequest('branch-withdrawals', {
+    method: 'POST',
+    body: JSON.stringify(withdrawalData)
+  });
+}
+
+// ── 20. مقارنة خصومات الموردين المستخرجة من الفواتير ─────────────────────────
+export async function outstockGetSupplierDiscountsComparison({ limit = 25, search = '' } = {}) {
+  const qs = new URLSearchParams();
+  if (limit) qs.append('limit', String(limit));
+  if (search) qs.append('search', search);
+  return await outstockRequest(`suppliers/discounts-comparison?${qs.toString()}`, { method: 'GET' });
+}
+
+// ── 21. بوابة الصيدلية المستقلة لمنصة i'SUPPLY ─────────────────────────────────
+export async function outstockGetISupplyStatus() {
+  return await outstockRequest('isupply/status', { method: 'GET' });
+}
+
+export async function outstockSaveISupplyConfig(configData) {
+  return await outstockRequest('isupply/config', {
+    method: 'POST',
+    body: JSON.stringify(configData)
+  });
+}
+
+export async function outstockTestISupplySession(credentials) {
+  return await outstockRequest('isupply/test-session', {
+    method: 'POST',
+    body: JSON.stringify(credentials || {})
+  });
+}
+
+export async function outstockSyncISupplyNow() {
+  return await outstockRequest('isupply/sync-now', {
+    method: 'POST',
+    body: JSON.stringify({})
+  });
+}
+
+export async function outstockGetISupplyFeeds(params = {}) {
+  const qs = new URLSearchParams();
+  if (params.search) qs.append('search', params.search);
+  return await outstockRequest(`isupply/feeds?${qs.toString()}`, { method: 'GET' });
+}
+
+export async function outstockClearISupplySession() {
+  return await outstockRequest('isupply/clear', {
+    method: 'POST',
+    body: JSON.stringify({})
+  });
+}
+
+
 
 

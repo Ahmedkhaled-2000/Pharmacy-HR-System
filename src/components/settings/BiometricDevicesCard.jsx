@@ -62,29 +62,113 @@ export default function BiometricDevicesCard({ state, showToast }) {
   }, [excelDeviceSn, excelBranchId, employees, devices, branches, branchPins, templates]);
 
 
-  // القالب الافتراضي لإشعارات واتساب للإدارة
-  const DEFAULT_WA_ADMIN_TEMPLATE = `🔔 *إشعار حضور وانصراف بيومتري لحظي*
+  // القوالب الافتراضية الشاملة لإشعارات واتساب
+  const DEFAULT_ATTENDANCE_TEMPLATES = {
+    admin_check_in: `🔔 *إشعار تسجيل حضور لحظي* 🟢
 ━━━━━━━━━━━━━━━━━━━━━━
 👤 *الموظف:* {employee_name}
 🏢 *الفرع:* {branch_name}
 🕒 *الوقت:* {time} | {date}
-📌 *الحركة:* {action_icon} *{action}*
+📌 *الحركة:* {action_icon} {action}
 🧬 *وسيلة التحقق:* {verify_type}
-📟 *الماكينة:* {device_name}
+📟 *الجهاز / المصدر:* {device_name}
 ━━━━━━━━━━━━━━━━━━━━━━
-🏛️ _{company_name}_`;
+🏛️ _{company_name}_`,
 
-  // إعدادات إشعارات واتساب للإدارة العليا
+    employee_check_in: `👋 *مرحباً بك يا د/ {employee_name}* 🌟
+━━━━━━━━━━━━━━━━━━━━━━
+✅ *تم تسجيل حضورك بنجاح* 🟢
+🏢 *الفرع:* {branch_name}
+🕒 *الوقت:* {time} | {date}
+🧬 *طريقة التبصيم:* {verify_type}
+━━━━━━━━━━━━━━━━━━━━━━
+✨ نتمنى لك يوماً موفقاً ومثمراً مليئاً بالإنجاز والعطاء!
+🏛️ _{company_name}_`,
+
+    admin_check_out: `🔔 *إشعار تسجيل انصراف لحظي* 🔴
+━━━━━━━━━━━━━━━━━━━━━━
+👤 *الموظف:* {employee_name}
+🏢 *الفرع:* {branch_name}
+🕒 *الوقت:* {time} | {date}
+📌 *الحركة:* {action_icon} {action}
+⏱️ *ساعات العمل:* {shift_hours}
+🧬 *وسيلة التحقق:* {verify_type}
+📟 *الجهاز / المصدر:* {device_name}
+━━━━━━━━━━━━━━━━━━━━━━
+🏛️ _{company_name}_`,
+
+    employee_check_out: `👋 *شكراً لك يا د/ {employee_name}* 🌟
+━━━━━━━━━━━━━━━━━━━━━━
+✅ *تم تسجيل انصرافك بنجاح* 🔴
+🏢 *الفرع:* {branch_name}
+🕒 *الوقت:* {time} | {date}
+⏱️ *إجمالي ساعات العمل:* {shift_hours}
+━━━━━━━━━━━━━━━━━━━━━━
+🌟 شكراً جزيلاً لجهودك وعطائك المتميز اليوم، ودمت بخير وسعادة!
+🏛️ _{company_name}_`,
+
+    admin_break_start: `☕ *إشعار بدء استراحة (Break Start)* 🟡
+━━━━━━━━━━━━━━━━━━━━━━
+👤 *الموظف:* {employee_name}
+🏢 *الفرع:* {branch_name}
+🕒 *وقت البدء:* {time} | {date}
+📌 *الحركة:* {action_icon} {action}
+📱 *المصدر:* كشك البصمة الإلكترونية الذكي
+━━━━━━━━━━━━━━━━━━━━━━
+🏛️ _{company_name}_`,
+
+    employee_break_start: `☕ *استراحة هنيئة يا د/ {employee_name}* 🌿
+━━━━━━━━━━━━━━━━━━━━━━
+⏸️ *تم تسجيل بدء استراحتك بنجاح*
+🏢 *الفرع:* {branch_name}
+🕒 *وقت الخروج للراحة:* {time}
+━━━━━━━━━━━━━━━━━━━━━━
+🌿 نرجو لك وقتاً طيباً لتجديد طاقتك والعودة بهمة ونشاط!
+🏛️ _{company_name}_`,
+
+    admin_break_end: `⚡ *إشعار انتهاء الاستراحة والعودة للعمل* 🟢
+━━━━━━━━━━━━━━━━━━━━━━
+👤 *الموظف:* {employee_name}
+🏢 *الفرع:* {branch_name}
+🕒 *وقت العودة:* {time} | {date}
+⏱️ *مدة الاستراحة:* {break_duration}
+📌 *الحركة:* {action_icon} {action}
+📱 *المصدر:* كشك البصمة الإلكترونية الذكي
+━━━━━━━━━━━━━━━━━━━━━━
+🏛️ _{company_name}_`,
+
+    employee_break_end: `👋 *أهلاً بك مجدداً يا د/ {employee_name}* ⚡
+━━━━━━━━━━━━━━━━━━━━━━
+▶️ *تم تسجيل العودة واستئناف العمل بنجاح*
+🏢 *الفرع:* {branch_name}
+🕒 *وقت استئناف العمل:* {time}
+⏱️ *مدة الاستراحة:* {break_duration}
+━━━━━━━━━━━━━━━━━━━━━━
+💪 طاقة متجددة وعمل موفق ومتميز بإذن الله!
+🏛️ _{company_name}_`
+  };
+
+  const DEFAULT_WA_ADMIN_TEMPLATE = DEFAULT_ATTENDANCE_TEMPLATES.admin_check_in;
+
+  // إعدادات إشعارات واتساب للإدارة العليا وكشك البصمة
   const [waConfig, setWaConfig] = useState({
     enabled: true,
+    notifyBiometricDevices: true, // 🧬 مفتاح مستقل لماكينات البصمة MB20
+    notifyKioskPunches: true,     // 📱 مفتاح مستقل لكشك البصمة الإلكترونية
     notifyCheckIn: true,
     notifyCheckOut: true,
+    notifyBreakStart: true,       // ☕ خاص بكشك البصمة فقط
+    notifyBreakEnd: true,         // ⚡ خاص بكشك البصمة فقط
+    notifyEmployee: true,
     recipientPhones: [],
-    adminMessageTemplate: DEFAULT_WA_ADMIN_TEMPLATE
+    templates: { ...DEFAULT_ATTENDANCE_TEMPLATES },
+    adminMessageTemplate: DEFAULT_ATTENDANCE_TEMPLATES.admin_check_in
   });
   const [newWaPhone, setNewWaPhone] = useState('');
   const [isSavingWaConfig, setIsSavingWaConfig] = useState(false);
   const [isTestingWa, setIsTestingWa] = useState(false);
+  const [activeTemplateAction, setActiveTemplateAction] = useState('check_in'); // 'check_in' | 'check_out' | 'break_start' | 'break_end'
+  const [activeTemplateTarget, setActiveTemplateTarget] = useState('admin'); // 'admin' | 'employee'
 
   // حالة مركز الترحيل والتوزيع بين الفروع (Cross-Branch Dispatcher)
   const [selectedDispatchEmps, setSelectedDispatchEmps] = useState([]);
@@ -117,6 +201,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const [showTestModal, setShowTestModal] = useState(false);
   const [testDeviceSn, setTestDeviceSn] = useState('');
   const [isTestingDevice, setIsTestingDevice] = useState(false);
+  const [isRepairingShifts, setIsRepairingShifts] = useState(false);
 
   // نصوص وأوضاع النوافذ المنبثقة (Modals)
   const [showAddDeviceModal, setShowAddDeviceModal] = useState(false);
@@ -281,7 +366,14 @@ export default function BiometricDevicesCard({ state, showToast }) {
       const res = await fetch('/api/biometrics/whatsapp-config');
       const data = await res.json();
       if (data.success && data.config) {
-        setWaConfig(data.config);
+        setWaConfig(prev => ({
+          ...prev,
+          ...data.config,
+          templates: {
+            ...DEFAULT_ATTENDANCE_TEMPLATES,
+            ...(data.config.templates || {})
+          }
+        }));
       }
     } catch (e) {
       console.warn('Error fetching WhatsApp config:', e.message);
@@ -875,6 +967,29 @@ export default function BiometricDevicesCard({ state, showToast }) {
     }
   };
 
+  // فحص وترميم الورديات الليلية العابرة لمنتصف الليل تلقائياً
+  const handleRepairOvernightShifts = async () => {
+    setIsRepairingShifts(true);
+    showToast?.('🔍 جاري فحص سجل البصمات وترميم الورديات الليلية المتأثرة بعد منتصف الليل...');
+    try {
+      const res = await fetch('/api/biometrics/repair-overnight-shifts', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        if (data.repairedCount > 0) {
+          showToast?.(`✅ تم ترميم واستعادة ${data.repairedCount} وردية ليلية بنجاح!`);
+        } else {
+          showToast?.('ℹ️ تم الفحص بنجاح: لا توجد ورديات بحاجة لترميم أو تم إصلاحها مسبقاً.');
+        }
+      } else {
+        showToast?.('⚠️ تعذر إتمام الترميم: ' + (data.error || 'خطأ غير معروف'));
+      }
+    } catch (err) {
+      showToast?.('❌ خطأ في الاتصال: ' + err.message);
+    } finally {
+      setIsRepairingShifts(false);
+    }
+  };
+
   // إرسال أمر فحص واختبار تشخيصي للماكينة
   const handleSendTestCommand = async (testType, targetSn) => {
     const sn = targetSn || selectedDeviceSnForUsers || devices[0]?.serial_number;
@@ -1061,13 +1176,25 @@ export default function BiometricDevicesCard({ state, showToast }) {
     }
   };
 
-  const handleTestWaAlert = async (testPhone) => {
+  const handleTestWaAlert = async (testPhone, actionTypeOverride, targetOverride) => {
     setIsTestingWa(true);
     try {
+      const effAction = actionTypeOverride || activeTemplateAction;
+      const effTarget = targetOverride || activeTemplateTarget;
+      const isBreak = effAction.startsWith('break_');
+      const templateKey = `${effTarget}_${effAction}`;
+      const customTemplate = waConfig.templates?.[templateKey] || DEFAULT_ATTENDANCE_TEMPLATES[templateKey];
+
       const res = await fetch('/api/biometrics/whatsapp-test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ testPhone: testPhone || (waConfig.recipientPhones?.[0] || '') })
+        body: JSON.stringify({
+          testPhone: testPhone || (waConfig.recipientPhones?.[0] || ''),
+          actionType: effAction,
+          target: effTarget,
+          source: isBreak ? 'kiosk' : 'biometric_device',
+          customTemplate
+        })
       });
       const data = await res.json();
       if (data.success) {
@@ -1596,6 +1723,33 @@ export default function BiometricDevicesCard({ state, showToast }) {
                   {isPingingDevices ? '📡' : '🔄'}
                 </span>
                 {isPingingDevices ? 'جاري إرسال النبض...' : 'تحديث وفحص الاتصال (Ping)'}
+              </button>
+
+              <button
+                type="button"
+                disabled={isRepairingShifts}
+                onClick={handleRepairOvernightShifts}
+                style={{
+                  padding: '9px 16px',
+                  borderRadius: '10px',
+                  background: isRepairingShifts ? '#fdf4ff' : '#ffffff',
+                  color: isRepairingShifts ? '#9333ea' : '#7e22ce',
+                  border: `1px solid ${isRepairingShifts ? '#d8b4fe' : '#e9d5ff'}`,
+                  fontWeight: 800,
+                  fontSize: '0.85rem',
+                  cursor: isRepairingShifts ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontFamily: 'Cairo',
+                  boxShadow: '0 1px 4px rgba(126, 34, 206, 0.08)'
+                }}
+                title="فحص سجل البصمات الخام وترميم أي وردية ليلية عبرت منتصف الليل ومسحت بالخطأ"
+              >
+                <span style={{ display: 'inline-block', animation: isRepairingShifts ? 'spin 1s linear infinite' : 'none' }}>
+                  {isRepairingShifts ? '⏳' : '🌙'}
+                </span>
+                {isRepairingShifts ? 'جاري الفحص والترميم...' : 'ترميم الورديات الليلية (Overnight Fix)'}
               </button>
 
               <button
@@ -3271,74 +3425,224 @@ export default function BiometricDevicesCard({ state, showToast }) {
         </div>
       )}
 
-      {/* ── التبويب: إشعارات واتساب للإدارة العليا ── */}
-      {activeSubTab === 'whatsappAlerts' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
-          {/* إعدادات الإشعارات */}
-          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '20px' }}>
-            <h4 style={{ margin: '0 0 14px', color: '#0f172a', fontWeight: 800, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>💬</span> ربط إشعارات الحضور والانصراف بواتساب الإدارة العليا
-            </h4>
+      {/* ── التبويب: إشعارات واتساب للإدارة العليا وكشك البصمة ── */}
+      {activeSubTab === 'whatsappAlerts' && (() => {
+        const templateKey = `${activeTemplateTarget}_${activeTemplateAction}`;
+        const currentTemplateText = waConfig.templates?.[templateKey] !== undefined
+          ? waConfig.templates[templateKey]
+          : (DEFAULT_ATTENDANCE_TEMPLATES[templateKey] || '');
 
-            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '12px 14px', marginBottom: '16px', color: '#166534', fontSize: '0.85rem', lineHeight: '1.6' }}>
-              🟢 <strong>خادم واتساب نشط ومتصل:</strong> يتم إرسال الإشعار اللحظي إلى هواتف الإدارة العليا المسجلة بالأسفل بمجرد أن يضع الموظف إصبعه أو يمرر وجهه أمام جهاز البصمة في أي فرع.
-            </div>
+        const isBreakAction = activeTemplateAction === 'break_start' || activeTemplateAction === 'break_end';
+        const sampleMethodDesc = isBreakAction
+          ? 'كشك البصمة الإلكترونية الذكي 📱'
+          : (activeTemplateTarget === 'employee' ? 'بصمة الإصبع الحيوية (MB20) 🧬' : 'بصمة الإصبع (MB20)');
+        const sampleDeviceName = isBreakAction ? 'كشك البصمة - الفرع الرئيسي' : 'جهاز بصمة ZKTeco MB20';
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>
-                <input
-                  type="checkbox"
-                  checked={waConfig.enabled}
-                  onChange={(e) => setWaConfig({ ...waConfig, enabled: e.target.checked })}
-                />
-                <span>تفعيل نظام إشعارات واتساب اللحظية عند التبصيم</span>
-              </label>
+        const sampleVars = {
+          employee_name: activeTemplateTarget === 'employee' ? 'د. سيف الدين' : 'د. أحمد خالد',
+          branch_name: 'فرع المدينة الجامعية',
+          time: '09:15 ص',
+          date: new Date().toISOString().slice(0, 10),
+          action: activeTemplateAction === 'check_in'
+            ? 'تسجيل حضور'
+            : (activeTemplateAction === 'check_out'
+              ? 'تسجيل انصراف'
+              : (activeTemplateAction === 'break_start' ? 'بدء استراحة' : 'إنهاء استراحة وعودة للعمل')),
+          action_icon: activeTemplateAction === 'check_in'
+            ? '🟢'
+            : (activeTemplateAction === 'check_out'
+              ? '🔴'
+              : (activeTemplateAction === 'break_start' ? '☕' : '⚡')),
+          verify_type: sampleMethodDesc,
+          device_name: sampleDeviceName,
+          company_name: state?.orgSettings?.orgName || state?.orgSettings?.companyName || 'مجموعة صيدليات المروة ود/ سيف',
+          shift_hours: '8.5 ساعة',
+          break_duration: '35 دقيقة'
+        };
 
-              <div style={{ paddingRight: '26px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>
+        let livePreviewText = currentTemplateText;
+        for (const [k, v] of Object.entries(sampleVars)) {
+          livePreviewText = livePreviewText.replace(new RegExp(`{${k}}`, 'g'), v);
+        }
+
+        const actionTabs = [
+          { id: 'check_in', label: '🟢 بصمة الحضور', badge: 'MB20 + الكشك' },
+          { id: 'check_out', label: '🔴 بصمة الانصراف', badge: 'MB20 + الكشك' },
+          { id: 'break_start', label: '☕ بدء الاستراحة', badge: 'كشك البصمة فقط', isKioskOnly: true },
+          { id: 'break_end', label: '⚡ إنهاء الاستراحة والعودة', badge: 'كشك البصمة فقط', isKioskOnly: true }
+        ];
+
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '22px' }}>
+            {/* ── البطاقة 1: لوحة التحكم في مفاتيح الإشعارات والمصادر ── */}
+            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '18px', padding: '22px', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                <h4 style={{ margin: 0, color: '#0f172a', fontWeight: 800, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>💬</span> منظومة إشعارات واتساب اللحظية للبصمة
+                </h4>
+                <span style={{ fontSize: '0.78rem', background: '#dcfce7', color: '#15803d', padding: '3px 9px', borderRadius: '20px', fontWeight: 800 }}>
+                  🟢 خادم واتساب نشط (hr_main)
+                </span>
+              </div>
+
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '12px 14px', marginBottom: '16px', fontSize: '0.84rem', color: '#475569', lineHeight: '1.6' }}>
+                ✨ <strong>تنبيهات فورية متعددة القنوات:</strong> يتم إرسال الإشعارات لحظياً للإدارة العليا وهواتف الموظفين عند التبصيم مباشرة سواء عبر أجهزة بصمة الإصبع MB20 أو كشك البصمة الإلكترونية.
+              </div>
+
+              {/* 1. المفتاح العام للنظام */}
+              <div style={{
+                background: waConfig.enabled ? 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)' : '#f8fafc',
+                border: `1.5px solid ${waConfig.enabled ? '#86efac' : '#cbd5e1'}`,
+                borderRadius: '14px',
+                padding: '14px 16px',
+                marginBottom: '16px',
+                transition: 'all 0.2s'
+              }}>
+                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '1.3rem' }}>{waConfig.enabled ? '🔔' : '🔕'}</span>
+                    <div>
+                      <div style={{ fontSize: '0.95rem', fontWeight: 800, color: waConfig.enabled ? '#166534' : '#64748b' }}>
+                        تفعيل نظام إشعارات واتساب اللحظية الشامل
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '2px' }}>
+                        المفتاح الرئيسي لتشغيل إرسال رسائل الواتساب عند أي حركة تبصيم
+                      </div>
+                    </div>
+                  </div>
                   <input
                     type="checkbox"
-                    checked={waConfig.notifyCheckIn}
-                    onChange={(e) => setWaConfig({ ...waConfig, notifyCheckIn: e.target.checked })}
+                    checked={waConfig.enabled}
+                    onChange={(e) => setWaConfig({ ...waConfig, enabled: e.target.checked })}
+                    style={{ width: '22px', height: '22px', accentColor: '#16a34a', cursor: 'pointer' }}
                   />
-                  <span>🟢 إرسال إشعار فوري عند بصمة الحضور (Check-In)</span>
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>
-                  <input
-                    type="checkbox"
-                    checked={waConfig.notifyCheckOut}
-                    onChange={(e) => setWaConfig({ ...waConfig, notifyCheckOut: e.target.checked })}
-                  />
-                  <span>🚪 إرسال إشعار فوري عند بصمة الانصراف (Check-Out)</span>
-                </label>
+              </div>
 
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.88rem', fontWeight: 800, color: '#15803d', marginTop: '6px' }}>
-                  <input
-                    type="checkbox"
-                    checked={waConfig.notifyEmployee !== false}
-                    onChange={(e) => setWaConfig({ ...waConfig, notifyEmployee: e.target.checked })}
-                  />
-                  <span>📲 إرسال إشعار فوري إلى هاتف الموظف نفسه عند تبصيمه (على رقم الواتساب المسجل بملفه)</span>
-                </label>
+              {/* 2. المفاتيح المستقلة لمصادر التبصيم (MB20 مقابل كشك البصمة) */}
+              <div style={{ marginBottom: '16px' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#334155', display: 'block', marginBottom: '8px' }}>
+                  ⚙️ مفاتيح التحكم المستقلة بمصادر وأجهزة البصمة:
+                </span>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px' }}>
+                  {/* أ. مفتاح ماكينات البصمة الفعلية MB20 */}
+                  <div style={{
+                    background: waConfig.notifyBiometricDevices !== false ? '#f0fdf4' : '#f8fafc',
+                    border: `1.5px solid ${waConfig.notifyBiometricDevices !== false ? '#86efac' : '#e2e8f0'}`,
+                    borderRadius: '12px',
+                    padding: '12px 14px',
+                    transition: 'all 0.2s'
+                  }}>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={waConfig.notifyBiometricDevices !== false}
+                        onChange={(e) => setWaConfig({ ...waConfig, notifyBiometricDevices: e.target.checked })}
+                        style={{ marginTop: '3px', width: '18px', height: '18px', accentColor: '#16a34a' }}
+                      />
+                      <div>
+                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>وضع تفعيل إشعارات جهاز البصمة MB20 🧬</span>
+                        </div>
+                        <p style={{ margin: '3px 0 0', fontSize: '0.76rem', color: '#64748b', lineHeight: '1.4' }}>
+                          مفتاح مستقل لماكينات البصمة الفعلية (ZKTeco MB20) عبر خادم ADMS السحابي.
+                        </p>
+                      </div>
+                    </label>
+                  </div>
 
-                <div style={{ background: '#f0fdf4', border: '1px dashed #86efac', borderRadius: '10px', padding: '8px 12px', fontSize: '0.82rem', color: '#166534', marginRight: '24px', lineHeight: '1.5' }}>
-                  🌟 <strong>التعرف اللحظي التلقائي:</strong> عند تبصيم أي موظف (حضور أو انصراف) بجهاز البصمة أو كشك البصمة، يتعرف النظام على هويته ويرسل له رسالة ترحيبية فورية مع توثيق وقت وبصمة الحضور/الانصراف والفرع.
+                  {/* ب. مفتاح كشك البصمة الإلكترونية */}
+                  <div style={{
+                    background: waConfig.notifyKioskPunches !== false ? '#f0f9ff' : '#f8fafc',
+                    border: `1.5px solid ${waConfig.notifyKioskPunches !== false ? '#7dd3fc' : '#e2e8f0'}`,
+                    borderRadius: '12px',
+                    padding: '12px 14px',
+                    transition: 'all 0.2s'
+                  }}>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={waConfig.notifyKioskPunches !== false}
+                        onChange={(e) => setWaConfig({ ...waConfig, notifyKioskPunches: e.target.checked })}
+                        style={{ marginTop: '3px', width: '18px', height: '18px', accentColor: '#0284c7' }}
+                      />
+                      <div>
+                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>تفعيل إشعارات كشك البصمة الإلكترونية 📱</span>
+                        </div>
+                        <p style={{ margin: '3px 0 0', fontSize: '0.76rem', color: '#64748b', lineHeight: '1.4' }}>
+                          مفتاح مستقل للبصمات المسجلة من كشك البصمة الذكي وشاشات التابلت بالفروع.
+                        </p>
+                      </div>
+                    </label>
+                  </div>
                 </div>
               </div>
 
-              {/* أرقام هواتف الإدارة المستلمة */}
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
-                  📱 أرقام هواتف الإدارة العليا (بصيغة دولية مثال: 201080739315):
-                </label>
+              {/* 3. مفاتيح أنواع الحركات (Actions) */}
+              <div style={{ marginBottom: '16px', background: '#fafafa', border: '1px solid #f1f5f9', borderRadius: '14px', padding: '12px 14px' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#334155', display: 'block', marginBottom: '8px' }}>
+                  📌 تحديد الحركات المطلوب إرسال إشعارات لها:
+                </span>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.84rem', fontWeight: 700, color: '#334155' }}>
+                    <input
+                      type="checkbox"
+                      checked={waConfig.notifyCheckIn !== false}
+                      onChange={(e) => setWaConfig({ ...waConfig, notifyCheckIn: e.target.checked })}
+                    />
+                    <span>🟢 بصمة الحضور (Check-In)</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.84rem', fontWeight: 700, color: '#334155' }}>
+                    <input
+                      type="checkbox"
+                      checked={waConfig.notifyCheckOut !== false}
+                      onChange={(e) => setWaConfig({ ...waConfig, notifyCheckOut: e.target.checked })}
+                    />
+                    <span>🔴 بصمة الانصراف (Check-Out)</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.84rem', fontWeight: 700, color: '#334155' }}>
+                    <input
+                      type="checkbox"
+                      checked={waConfig.notifyBreakStart !== false}
+                      onChange={(e) => setWaConfig({ ...waConfig, notifyBreakStart: e.target.checked })}
+                    />
+                    <span>☕ بدء الاستراحة <span style={{ color: '#d97706', fontSize: '0.72rem', background: '#fef3c7', padding: '1px 5px', borderRadius: '4px' }}>كشك البصمة فقط</span></span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.84rem', fontWeight: 700, color: '#334155' }}>
+                    <input
+                      type="checkbox"
+                      checked={waConfig.notifyBreakEnd !== false}
+                      onChange={(e) => setWaConfig({ ...waConfig, notifyBreakEnd: e.target.checked })}
+                    />
+                    <span>⚡ إنهاء الاستراحة والعودة <span style={{ color: '#16a34a', fontSize: '0.72rem', background: '#dcfce7', padding: '1px 5px', borderRadius: '4px' }}>كشك البصمة فقط</span></span>
+                  </label>
+                </div>
 
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                <div style={{ marginTop: '12px', borderTop: '1px dashed #e2e8f0', paddingTop: '10px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.86rem', fontWeight: 800, color: '#15803d' }}>
+                    <input
+                      type="checkbox"
+                      checked={waConfig.notifyEmployee !== false}
+                      onChange={(e) => setWaConfig({ ...waConfig, notifyEmployee: e.target.checked })}
+                    />
+                    <span>📲 إرسال إشعار فوري إلى هاتف الموظف نفسه (على رقم الواتساب المسجل بملفه)</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 4. أرقام هواتف الإدارة العليا */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                  📱 أرقام هواتف الإدارة العليا المستلمة للإشعارات (مثال: 201080739315):
+                </label>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
                   <input
                     type="text"
                     value={newWaPhone}
                     onChange={(e) => setNewWaPhone(e.target.value)}
                     placeholder="مثال: 201080739315"
-                    style={{ flex: 1, padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.9rem', fontFamily: 'monospace' }}
+                    style={{ flex: 1, padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.88rem', fontFamily: 'monospace' }}
                   />
                   <button
                     type="button"
@@ -3362,10 +3666,9 @@ export default function BiometricDevicesCard({ state, showToast }) {
                   </button>
                 </div>
 
-                {/* قائمة الأرقام المضافة */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', minHeight: '40px', padding: '10px', background: '#ffffff', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', minHeight: '36px', padding: '10px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '14px' }}>
                   {(waConfig.recipientPhones || []).length === 0 ? (
-                    <span style={{ fontSize: '0.82rem', color: '#94a3b8' }}>
+                    <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
                       لم تُضف أرقام مخصصة بعد (سيتم استخدام هاتف الإدارة المسجل بإعدادات المنشأة تلقائياً).
                     </span>
                   ) : (
@@ -3376,7 +3679,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '6px',
-                          padding: '4px 10px',
+                          padding: '3px 10px',
                           borderRadius: '20px',
                           background: '#ecfdf5',
                           border: '1px solid #a7f3d0',
@@ -3405,7 +3708,8 @@ export default function BiometricDevicesCard({ state, showToast }) {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+              {/* أزرار الحفظ العام */}
+              <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
                 <button
                   type="button"
                   disabled={isSavingWaConfig}
@@ -3418,192 +3722,330 @@ export default function BiometricDevicesCard({ state, showToast }) {
                     color: '#ffffff',
                     border: 'none',
                     fontWeight: 800,
-                    fontSize: '0.9rem',
+                    fontSize: '0.92rem',
                     cursor: isSavingWaConfig ? 'not-allowed' : 'pointer',
                     fontFamily: 'Cairo',
                     boxShadow: '0 4px 12px rgba(22, 163, 74, 0.25)'
                   }}
                 >
-                  {isSavingWaConfig ? 'جاري الحفظ...' : '💾 حفظ إعدادات واتساب'}
+                  {isSavingWaConfig ? 'جاري الحفظ...' : '💾 حفظ كافة إعدادات وقوالب واتساب'}
                 </button>
+              </div>
+            </div>
 
+            {/* ── البطاقة 2: محرر القوالب المتقدم والمعاينة الحية لشات واتساب ── */}
+            <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '18px', padding: '22px', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                <h4 style={{ margin: 0, color: '#0f172a', fontWeight: 800, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>✏️</span> تخصيص ومعاينة قوالب رسائل الواتساب
+                </h4>
                 <button
                   type="button"
-                  disabled={isTestingWa}
-                  onClick={() => handleTestWaAlert()}
+                  onClick={() => {
+                    setWaConfig({
+                      ...waConfig,
+                      templates: {
+                        ...(waConfig.templates || DEFAULT_ATTENDANCE_TEMPLATES),
+                        [templateKey]: DEFAULT_ATTENDANCE_TEMPLATES[templateKey]
+                      }
+                    });
+                    showToast?.('🔄 تم استعادة القالب الافتراضي لهذه الحركة بنجاح');
+                  }}
                   style={{
-                    padding: '12px 18px',
-                    borderRadius: '10px',
+                    padding: '5px 12px',
+                    borderRadius: '8px',
                     background: '#f8fafc',
-                    color: '#0f172a',
                     border: '1px solid #cbd5e1',
-                    fontWeight: 800,
-                    fontSize: '0.88rem',
-                    cursor: isTestingWa ? 'not-allowed' : 'pointer',
+                    color: '#475569',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
                     fontFamily: 'Cairo'
                   }}
                 >
-                  {isTestingWa ? '⏳ جاري الاختبار...' : '📲 إرسال إشعار تجريبي فوري'}
+                  🔄 استعادة القالب الافتراضي
                 </button>
               </div>
-            </div>
-          </div>
 
-          {/* نموذج ومعاينة رسالة الإشعار الحية مع إمكانية التعديل الكامل */}
-          <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '22px', marginTop: '16px', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
-              <div>
-                <h4 style={{ margin: 0, color: '#0f172a', fontWeight: 800, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>✏️</span> تخصيص ومعاينة قالب رسالة إشعار الواتساب الحية
-                </h4>
-                <p style={{ margin: '3px 0 0', fontSize: '0.82rem', color: '#64748b' }}>
-                  يمكنك تعديل نص الرسالة وإضافة أو حذف المتغيرات الذكية، وستشاهد المعاينة الحية مباشرة أدناه:
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setWaConfig({ ...waConfig, adminMessageTemplate: DEFAULT_WA_ADMIN_TEMPLATE })}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '8px',
-                  background: '#f8fafc',
-                  border: '1px solid #cbd5e1',
-                  color: '#475569',
-                  fontSize: '0.8rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  fontFamily: 'Cairo'
-                }}
-              >
-                🔄 استعادة النموذج الافتراضي
-              </button>
-            </div>
-
-            {/* أزرار إدراج المتغيرات الذكية */}
-            <div style={{ marginBottom: '12px' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '6px' }}>
-                اضغط على أي متغير لإدراجه في نص الرسالة:
-              </span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {[
-                  { tag: '{employee_name}', label: '👤 اسم الموظف' },
-                  { tag: '{branch_name}', label: '🏢 الفرع' },
-                  { tag: '{action}', label: '📌 نوع الحركة (حضور/انصراف)' },
-                  { tag: '{action_icon}', label: '🟢 أيقونة الحركة' },
-                  { tag: '{time}', label: '🕒 الوقت' },
-                  { tag: '{date}', label: '📅 التاريخ' },
-                  { tag: '{verify_type}', label: '🧬 وسيلة التحقق' },
-                  { tag: '{device_name}', label: '📟 اسم الماكينة' },
-                  { tag: '{company_name}', label: '🏛️ اسم المؤسسة' }
-                ].map(item => (
+              {/* أزرار اختيار نوع الحركة (4 Actions Tabs) */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
+                {actionTabs.map(tab => (
                   <button
-                    key={item.tag}
+                    key={tab.id}
                     type="button"
-                    onClick={() => {
-                      const cur = waConfig.adminMessageTemplate || DEFAULT_WA_ADMIN_TEMPLATE;
-                      setWaConfig({
-                        ...waConfig,
-                        adminMessageTemplate: cur + '\n' + item.tag
-                      });
-                    }}
+                    onClick={() => setActiveTemplateAction(tab.id)}
                     style={{
-                      padding: '4px 10px',
-                      borderRadius: '16px',
-                      background: '#f0fdf4',
-                      border: '1px solid #bbf7d0',
-                      color: '#15803d',
-                      fontSize: '0.78rem',
-                      fontWeight: 700,
+                      padding: '7px 14px',
+                      borderRadius: '10px',
+                      border: activeTemplateAction === tab.id ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                      background: activeTemplateAction === tab.id ? '#f0f9ff' : '#ffffff',
+                      color: activeTemplateAction === tab.id ? '#0284c7' : '#475569',
+                      fontWeight: 800,
+                      fontSize: '0.82rem',
                       cursor: 'pointer',
-                      fontFamily: 'Cairo'
+                      fontFamily: 'Cairo',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'all 0.15s ease'
                     }}
-                    title={`إدراج ${item.tag}`}
                   >
-                    + {item.label}
+                    <span>{tab.label}</span>
+                    <span style={{
+                      fontSize: '0.7rem',
+                      padding: '1px 5px',
+                      borderRadius: '4px',
+                      background: tab.isKioskOnly ? '#fef3c7' : '#e2e8f0',
+                      color: tab.isKioskOnly ? '#92400e' : '#475569'
+                    }}>
+                      {tab.badge}
+                    </span>
                   </button>
                 ))}
               </div>
-            </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
-              {/* محرر نص القالب */}
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
-                  محرر نص القالب (Template Editor):
-                </label>
-                <textarea
-                  rows={10}
-                  value={waConfig.adminMessageTemplate !== undefined ? waConfig.adminMessageTemplate : DEFAULT_WA_ADMIN_TEMPLATE}
-                  onChange={(e) => setWaConfig({ ...waConfig, adminMessageTemplate: e.target.value })}
+              {/* اختيار المستهدف: رسالة الإدارة العليا أم رسالة الموظف */}
+              <div style={{ display: 'flex', gap: '6px', background: '#f1f5f9', padding: '4px', borderRadius: '10px', marginBottom: '12px' }}>
+                <button
+                  type="button"
+                  onClick={() => setActiveTemplateTarget('admin')}
                   style={{
-                    width: '100%',
-                    padding: '12px',
-                    borderRadius: '12px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '0.88rem',
+                    flex: 1,
+                    padding: '7px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: activeTemplateTarget === 'admin' ? '#ffffff' : 'transparent',
+                    color: activeTemplateTarget === 'admin' ? '#0f172a' : '#64748b',
+                    fontWeight: 800,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
                     fontFamily: 'Cairo',
-                    lineHeight: '1.6',
-                    direction: 'rtl',
-                    background: '#fafafa',
-                    boxSizing: 'border-box'
-                  }}
-                  placeholder="اكتب قالب رسالة الواتساب هنا..."
-                />
-              </div>
-
-              {/* المعاينة الحية لشات واتساب */}
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
-                  معاينة شات واتساب الحية (Live WhatsApp Preview):
-                </label>
-                <div
-                  style={{
-                    background: '#e5ddd5',
-                    padding: '16px',
-                    borderRadius: '14px',
-                    border: '1px solid #cbd5e1',
-                    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.06)',
-                    minHeight: '220px',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    justifyContent: 'flex-start'
+                    boxShadow: activeTemplateTarget === 'admin' ? '0 2px 4px rgba(0,0,0,0.06)' : 'none'
                   }}
                 >
-                  <div
-                    style={{
-                      background: '#ffffff',
-                      padding: '14px 16px',
-                      borderRadius: '10px',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
-                      maxWidth: '340px',
-                      width: '100%',
-                      marginRight: 'auto',
-                      borderTopRightRadius: '0',
-                      fontSize: '0.85rem',
-                      lineHeight: '1.7',
-                      color: '#111827',
-                      whiteSpace: 'pre-wrap',
-                      fontFamily: 'Cairo',
-                      wordBreak: 'break-word'
+                  👑 إشعار الإدارة العليا
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTemplateTarget('employee')}
+                  style={{
+                    flex: 1,
+                    padding: '7px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: activeTemplateTarget === 'employee' ? '#ffffff' : 'transparent',
+                    color: activeTemplateTarget === 'employee' ? '#0f172a' : '#64748b',
+                    fontWeight: 800,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    fontFamily: 'Cairo',
+                    boxShadow: activeTemplateTarget === 'employee' ? '0 2px 4px rgba(0,0,0,0.06)' : 'none'
+                  }}
+                >
+                  📱 إشعار هاتف الموظف (توثيق وترحيب)
+                </button>
+              </div>
+
+              {/* تنبيه خاص بحركات الاستراحة */}
+              {isBreakAction && (
+                <div style={{
+                  background: '#fffbeb',
+                  border: '1px solid #fde68a',
+                  borderRadius: '10px',
+                  padding: '10px 12px',
+                  marginBottom: '12px',
+                  fontSize: '0.8rem',
+                  color: '#92400e',
+                  lineHeight: '1.5'
+                }}>
+                  🔒 <strong>شرط حاسم:</strong> قوالب بدء الاستراحة وإنهاء الاستراحة يتم إرسالها حصرياً وفقط إذا كانت البصمة مسجلة من كشك البصمة الإلكترونية، ولا يتم إرسالها من ماكينات البصمة الفعلية MB20.
+                </div>
+              )}
+
+              {/* أزرار إدراج المتغيرات الذكية */}
+              <div style={{ marginBottom: '10px' }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: '5px' }}>
+                  اضغط لإدراج المتغير الذكي في نص القالب:
+                </span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                  {[
+                    { tag: '{employee_name}', label: '👤 الموظف' },
+                    { tag: '{branch_name}', label: '🏢 الفرع' },
+                    { tag: '{action}', label: '📌 الحركة' },
+                    { tag: '{action_icon}', label: '🟢 الأيقونة' },
+                    { tag: '{time}', label: '🕒 الوقت' },
+                    { tag: '{date}', label: '📅 التاريخ' },
+                    { tag: '{verify_type}', label: '🧬 الطريقة' },
+                    { tag: '{device_name}', label: '📟 الجهاز' },
+                    { tag: '{company_name}', label: '🏛️ المنشأة' },
+                    ...(activeTemplateAction === 'check_out' ? [{ tag: '{shift_hours}', label: '⏱️ ساعات العمل' }] : []),
+                    ...(activeTemplateAction === 'break_end' ? [{ tag: '{break_duration}', label: '⏱️ مدة الاستراحة' }] : [])
+                  ].map(item => (
+                    <button
+                      key={item.tag}
+                      type="button"
+                      onClick={() => {
+                        const cur = currentTemplateText;
+                        setWaConfig(prev => ({
+                          ...prev,
+                          templates: {
+                            ...(prev.templates || DEFAULT_ATTENDANCE_TEMPLATES),
+                            [templateKey]: (cur ? cur + ' ' : '') + item.tag
+                          }
+                        }));
+                      }}
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: '12px',
+                        background: '#f0fdf4',
+                        border: '1px solid #bbf7d0',
+                        color: '#15803d',
+                        fontSize: '0.74rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        fontFamily: 'Cairo'
+                      }}
+                      title={`إدراج ${item.tag}`}
+                    >
+                      + {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* المحرر والمعاينة جنباً إلى جنب */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', alignItems: 'flex-start' }}>
+                {/* محرر النص */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                    محرر نص القالب ({templateKey}):
+                  </label>
+                  <textarea
+                    rows={9}
+                    value={currentTemplateText}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setWaConfig(prev => ({
+                        ...prev,
+                        templates: {
+                          ...(prev.templates || DEFAULT_ATTENDANCE_TEMPLATES),
+                          [templateKey]: val
+                        }
+                      }));
                     }}
-                  >
-                    {(waConfig.adminMessageTemplate || DEFAULT_WA_ADMIN_TEMPLATE)
-                      .replace(/{employee_name}/g, 'د. أحمد خالد')
-                      .replace(/{branch_name}/g, 'فرع المدينة الجامعية')
-                      .replace(/{action}/g, 'تسجيل حضور')
-                      .replace(/{action_icon}/g, '🟢')
-                      .replace(/{time}/g, '09:15:30 ص')
-                      .replace(/{date}/g, '28/09/2026')
-                      .replace(/{verify_type}/g, 'بصمة إصبع (MB20)')
-                      .replace(/{device_name}/g, 'جهاز بصمة الإدارة')
-                      .replace(/{company_name}/g, state?.orgSettings?.orgName || 'مجموعة صيدليات المروة والدكتور سيف')}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '10px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '0.84rem',
+                      fontFamily: 'Cairo',
+                      lineHeight: '1.6',
+                      direction: 'rtl',
+                      background: '#fafafa',
+                      boxSizing: 'border-box'
+                    }}
+                    placeholder="اكتب قالب رسالة الواتساب هنا..."
+                  />
+                </div>
+
+                {/* المعاينة الحية بنمط شات واتساب الحقيقي */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                    المعاينة الحية لشات واتساب (WhatsApp Live Simulator):
+                  </label>
+                  <div style={{
+                    borderRadius: '14px',
+                    overflow: 'hidden',
+                    border: '1px solid #cbd5e1',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.06)'
+                  }}>
+                    {/* رأس شاشة واتساب */}
+                    <div style={{
+                      background: '#075e54',
+                      color: '#ffffff',
+                      padding: '10px 14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px'
+                    }}>
+                      <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#25d366', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.9rem' }}>
+                        {activeTemplateTarget === 'employee' ? '👤' : '🏛️'}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 800, fontSize: '0.84rem' }}>
+                          {activeTemplateTarget === 'employee' ? 'د. سيف الدين (الموظف)' : 'إدارة الصيدليات الموحدة'}
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: '#bbf7d0' }}>متصل الآن (online)</div>
+                      </div>
+                      <span style={{ fontSize: '1.1rem' }}>💬</span>
+                    </div>
+
+                    {/* جسم المحادثة بنمط خلفية واتساب */}
+                    <div style={{
+                      background: '#efeae2',
+                      padding: '14px',
+                      minHeight: '180px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'flex-start'
+                    }}>
+                      <div style={{
+                        background: '#ffffff',
+                        padding: '12px 14px',
+                        borderRadius: '10px',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
+                        maxWidth: '92%',
+                        fontSize: '0.82rem',
+                        lineHeight: '1.6',
+                        color: '#111827',
+                        whiteSpace: 'pre-wrap',
+                        fontFamily: 'Cairo',
+                        wordBreak: 'break-word',
+                        position: 'relative',
+                        borderTopRightRadius: '0'
+                      }}>
+                        {livePreviewText}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '3px', marginTop: '6px', fontSize: '0.68rem', color: '#64748b' }}>
+                          <span>09:15 ص</span>
+                          <span style={{ color: '#38bdf8', fontWeight: 900 }}>✓✓</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* زر إرسال تجريبي للقالب الحالي تحديداً */}
+                  <div style={{ marginTop: '10px' }}>
+                    <button
+                      type="button"
+                      disabled={isTestingWa}
+                      onClick={() => handleTestWaAlert(null, activeTemplateAction, activeTemplateTarget)}
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        borderRadius: '10px',
+                        background: '#f8fafc',
+                        color: '#0f172a',
+                        border: '1.5px solid #0284c7',
+                        fontWeight: 800,
+                        fontSize: '0.84rem',
+                        cursor: isTestingWa ? 'not-allowed' : 'pointer',
+                        fontFamily: 'Cairo',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      {isTestingWa ? '⏳ جاري إرسال التجربة...' : `📲 إرسال إشعار تجريبي لهذا القالب (${activeTemplateTarget === 'admin' ? 'للإدارة' : 'للموظف'})`}
+                    </button>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── التبويب 2: ربط أرقام الموظفين PIN ──────────────────────────────────── */}
       {activeSubTab === 'mapping' && (() => {

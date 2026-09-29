@@ -618,7 +618,10 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                         : '🏪 استلام من الفرع')}
                 </strong></div>
                 <div>التاريخ: {formattedDate}</div>
-                <div>الصيدلي المسؤول: {order.responsible_pharmacist || order.responsiblePharmacist || 'د. صيدلي'}</div>
+                {order.order_category === 'cosmetics' ? (
+                  <div style={{ color: '#be185d', fontWeight: 'bold' }}>التصنيف: 💄 مستحضرات تجميل وعناية</div>
+                ) : null}
+                <div>الصيدلي المستلم: <strong>{order.order_receiver_name || order.responsible_pharmacist || order.responsiblePharmacist || 'د. صيدلي'}</strong> {order.order_receiver_code ? `(كود: ${order.order_receiver_code})` : ''}</div>
               </div>
 
               <table className="receipt-table">
@@ -634,15 +637,25 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                 <tbody>
                   {(order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill).map((item, idx) => {
                     const qty = parseInt(item.quantity || 1, 10);
+                    const isEstimated = item.is_price_estimated || item.isPriceEstimated;
+                    const priceMin = parseFloat(item.price_min || item.priceMin || 0);
+                    const priceMax = parseFloat(item.price_max || item.priceMax || 0);
                     const price = parseFloat(item.unitPrice || item.unit_price || 0);
                     const total = qty * price;
                     return (
                       <tr key={idx}>
-                        <td><strong>{item.medicationName || item.medication_name}</strong></td>
+                        <td>
+                          <strong>{item.medicationName || item.medication_name}</strong>
+                          {isEstimated ? <small style={{ display: 'block', color: '#b45309', fontSize: '10px' }}>(سعر تقديري)</small> : null}
+                        </td>
                         <td>{item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة'}</td>
                         <td>{qty}</td>
-                        <td>{price.toFixed(2)}</td>
-                        <td>{total.toFixed(2)}</td>
+                        <td style={{ fontSize: isEstimated ? '10px' : undefined, fontWeight: isEstimated ? 'bold' : undefined }}>
+                          {isEstimated ? `من ${priceMin.toFixed(2)} إلى ${priceMax.toFixed(2)}` : price.toFixed(2)}
+                        </td>
+                        <td style={{ fontSize: isEstimated ? '10px' : undefined, fontWeight: 'bold', color: isEstimated ? '#b45309' : undefined }}>
+                          {isEstimated ? `من ${(priceMin * qty).toFixed(2)} إلى ${(priceMax * qty).toFixed(2)}` : total.toFixed(2)}
+                        </td>
                       </tr>
                     );
                   })}
@@ -650,28 +663,39 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
               </table>
 
               <div className="receipt-totals">
-                <div className="row">
-                  <span>إجمالي الأصناف:</span>
-                  <span>{parseFloat(order.total_amount || order.totalAmount || 0).toFixed(2)} ج.م</span>
-                </div>
-                {parseFloat(order.discount_value || order.discountValue || 0) > 0 && (
-                  <div className="row">
-                    <span>الخصم:</span>
-                    <span>{parseFloat(order.discount_value || order.discountValue || 0)} {order.discount_type === 'percentage' ? '%' : 'ج.م'}</span>
-                  </div>
-                )}
-                <div className="row grand-total">
-                  <span>الصافي المطلوب:</span>
-                  <span>{parseFloat(order.net_amount || order.netAmount || 0).toFixed(2)} ج.م</span>
-                </div>
-                <div className="row">
-                  <span>المبلغ المدفوع (مقدماً):</span>
-                  <span>{parseFloat(order.paid_amount || order.paidAmount || 0).toFixed(2)} ج.م</span>
-                </div>
-                <div className="row" style={{ fontWeight: 'bold', color: '#b91c1c' }}>
-                  <span>المتبقي عند الاستلام:</span>
-                  <span>{parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2)} ج.م</span>
-                </div>
+                {(() => {
+                  const hasEstimated = (order.items || []).some(i => i.is_price_estimated || i.isPriceEstimated) || order.is_price_estimated;
+                  const oMin = parseFloat(order.price_min || order.priceMin || 0);
+                  const oMax = parseFloat(order.price_max || order.priceMax || 0);
+                  const paid = parseFloat(order.paid_amount || order.paidAmount || 0);
+
+                  return (
+                    <>
+                      <div className="row">
+                        <span>إجمالي الأصناف:</span>
+                        <span>{hasEstimated && (oMin > 0 || oMax > 0) ? `من ${oMin.toFixed(2)} إلى ${oMax.toFixed(2)} ج.م` : `${parseFloat(order.total_amount || order.totalAmount || 0).toFixed(2)} ج.م`}</span>
+                      </div>
+                      {parseFloat(order.discount_value || order.discountValue || 0) > 0 && (
+                        <div className="row">
+                          <span>الخصم:</span>
+                          <span>{parseFloat(order.discount_value || order.discountValue || 0)} {order.discount_type === 'percentage' ? '%' : 'ج.م'}</span>
+                        </div>
+                      )}
+                      <div className="row grand-total">
+                        <span>الصافي المطلوب:</span>
+                        <span>{hasEstimated && (oMin > 0 || oMax > 0) ? `من ${oMin.toFixed(2)} إلى ${oMax.toFixed(2)} ج.م` : `${parseFloat(order.net_amount || order.netAmount || 0).toFixed(2)} ج.م`}</span>
+                      </div>
+                      <div className="row">
+                        <span>المبلغ المدفوع (مقدماً):</span>
+                        <span>{paid.toFixed(2)} ج.م</span>
+                      </div>
+                      <div className="row" style={{ fontWeight: 'bold', color: '#b91c1c' }}>
+                        <span>المتبقي عند الاستلام:</span>
+                        <span>{hasEstimated && (oMin > 0 || oMax > 0) ? `من ${Math.max(0, oMin - paid).toFixed(2)} إلى ${Math.max(0, oMax - paid).toFixed(2)} ج.م` : `${parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2)} ج.م`}</span>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {order.expected_pickup_date || order.expectedPickupDate ? (

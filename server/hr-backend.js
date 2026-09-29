@@ -18,7 +18,7 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { initSaasTables, registerSaasRoutes, DEFAULT_DEV_USER, DEFAULT_DEV_PASS } from './saas-manager.js';
 import { initOutstockTables, registerOutstockRoutes } from './outstock-manager.js';
-import { initBiometricTables, registerBiometricRoutes } from './biometric-manager.js';
+import { initBiometricTables, registerBiometricRoutes, sendUniversalAttendanceWhatsAppAlert } from './biometric-manager.js';
 
 dotenv.config();
 
@@ -906,6 +906,9 @@ app.post('/api/punches/record', async (req, res) => {
       empObj?.code ? String(empObj.code) : null
     ].filter(Boolean));
 
+    let closedRecord = null;
+    let addedPauseMs = 0;
+
     if (actionType === 'check_in' || actionType === 'start_shift') {
       // ── تسجيل حضور ذري ───────────────────────────────────────────
       // إذا كان الموظف لديه وردية نشطة بالفعل لليوم → نرجع خطأ للكشك
@@ -1004,7 +1007,7 @@ app.post('/api/punches/record', async (req, res) => {
         existingIdx = currentShifts.findIndex(s => isEmpShiftMatch(s) && (s.date === date || isShiftOpen(s)));
       }
 
-      const closedRecord = {
+      closedRecord = {
         ...(existingIdx >= 0 ? currentShifts[existingIdx] : {}),
         ...(shiftRecord || {}),
         employeeId: empObj?.id || employeeId,
@@ -1035,6 +1038,70 @@ app.post('/api/punches/record', async (req, res) => {
         }
         return s;
       });
+    } else if (actionType === 'break_start' || actionType === 'pause_shift') {
+      const punchEpoch = req.body?.deviceLocalEpoch || Date.now();
+      const punchTime = time || now.slice(11, 16);
+      possibleKeys.forEach(k => {
+        if (currentActiveShifts[k]) {
+          currentActiveShifts[k] = {
+            ...currentActiveShifts[k],
+            isPaused: true,
+            isOnBreak: true,
+            breakStartTime: punchTime,
+            pauseStartEpoch: punchEpoch,
+            updatedAt: punchEpoch
+          };
+        }
+      });
+
+      let targetIdx = currentShifts.findIndex(s => s && (s.id === shiftId || (possibleKeys.has(String(s.employeeId)) && s.date === date && (!s.timeOut || s.timeOut === '' || s.isLiveActive))));
+      if (targetIdx >= 0) {
+        currentShifts[targetIdx] = {
+          ...currentShifts[targetIdx],
+          isPaused: true,
+          isOnBreak: true,
+          breakStartTime: punchTime,
+          pauseStartEpoch: punchEpoch,
+          updatedAt: now
+        };
+      }
+    } else if (actionType === 'break_end' || actionType === 'resume_shift') {
+      const punchEpoch = req.body?.deviceLocalEpoch || Date.now();
+      const punchTime = time || now.slice(11, 16);
+      possibleKeys.forEach(k => {
+        const act = currentActiveShifts[k];
+        if (act) {
+          const pauseDuration = act.pauseStartEpoch ? Math.max(0, punchEpoch - act.pauseStartEpoch) : 0;
+          if (pauseDuration > addedPauseMs) addedPauseMs = pauseDuration;
+          currentActiveShifts[k] = {
+            ...act,
+            isPaused: false,
+            isOnBreak: false,
+            breakStartTime: null,
+            pauseStartEpoch: null,
+            accumulatedPauseMs: (act.accumulatedPauseMs || 0) + pauseDuration,
+            updatedAt: punchEpoch
+          };
+        }
+      });
+
+      let targetIdx = currentShifts.findIndex(s => s && (s.id === shiftId || (possibleKeys.has(String(s.employeeId)) && s.date === date && (!s.timeOut || s.timeOut === '' || s.isLiveActive))));
+      if (targetIdx >= 0) {
+        const prev = currentShifts[targetIdx];
+        const pauseDuration = prev.pauseStartEpoch ? Math.max(0, punchEpoch - prev.pauseStartEpoch) : addedPauseMs;
+        const totalPauseMs = (prev.accumulatedPauseMs || 0) + pauseDuration;
+        const trackedBreak = Math.round((totalPauseMs / 3600000) * 100) / 100;
+        currentShifts[targetIdx] = {
+          ...prev,
+          isPaused: false,
+          isOnBreak: false,
+          breakStartTime: null,
+          pauseStartEpoch: null,
+          accumulatedPauseMs: totalPauseMs,
+          breakHours: trackedBreak,
+          updatedAt: now
+        };
+      }
     } else {
       return res.status(400).json({ success: false, error: `Unknown actionType: ${actionType}` });
     }
@@ -1086,6 +1153,24 @@ app.post('/api/punches/record', async (req, res) => {
     });
 
     console.log(`[Atomic Punch] ✅ ${actionType} recorded for emp ${employeeId} (branch: ${branchId}) at ${time} on ${date}`);
+
+    // ⚡ إرسال إشعار واتساب اللحظي الموحد لكشك البصمة الإلكترونية
+    sendUniversalAttendanceWhatsAppAlert({
+      employeeId,
+      employeeName: empObj?.name || shiftRecord?.employeeName || `موظف #${employeeId}`,
+      branchId: branchId || '',
+      branchName: (existing.branches?.find(b => String(b.id) === String(branchId))?.name) || 'الفرع الرئيسي',
+      actionType,
+      date,
+      time: time || now.slice(11, 16),
+      verifyType: req.body?.verifyType || (req.body?.photo ? 'KIOSK_PHOTO' : 'KIOSK'),
+      deviceName: req.body?.kioskDeviceName || 'كشك البصمة الإلكترونية الذكي 📱',
+      punchSource: 'kiosk',
+      source: 'kiosk',
+      isKiosk: true,
+      shiftHours: (actionType === 'check_out' || actionType === 'stop_shift') && closedRecord?.hours ? `${closedRecord.hours} ساعة` : undefined,
+      breakDuration: (actionType === 'break_end' || actionType === 'resume_shift') && addedPauseMs > 0 ? `${Math.max(1, Math.round(addedPauseMs / 60000))} دقيقة` : undefined
+    }, existing).catch(e => console.warn('[Kiosk WA Punch Alert Error]:', e.message));
 
     res.json({
       success: true,
@@ -1537,6 +1622,39 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
       io.to(`room:branch:${bId}`).emit('punches:batch_synced', batchPayload);
     });
     io.to('room:admin:live').emit('punches:batch_synced', batchPayload);
+
+    // ⚡ إرسال إشعارات واتساب اللحظية الموحدة للبصمات الحديثة الواردة من الكشك
+    const twoHoursAgoEpoch = Date.now() - (2 * 60 * 60 * 1000);
+    for (const sp of sortedPunches) {
+      try {
+        const punchEpoch = sp.deviceLocalEpoch || (sp.date && (sp.punchTime || sp.time) ? new Date(`${sp.date}T${sp.punchTime || sp.time}:00`).getTime() : Date.now());
+        if (punchEpoch >= twoHoursAgoEpoch) {
+          const punchEmpId = sp.employeeId || sp.employeeCode;
+          const empObj = employeesList.find(e => String(e.id) === String(punchEmpId) || (e.code && String(e.code) === String(punchEmpId)));
+          const normAction = sp.actionType || 'check_in';
+          const recShift = currentShifts.find(s => String(s.employeeId) === String(punchEmpId) || (sp.employeeCode && String(s.employeeCode) === String(sp.employeeCode)));
+
+          sendUniversalAttendanceWhatsAppAlert({
+            employeeId: punchEmpId,
+            employeeName: empObj?.name || sp.employeeName || `موظف #${punchEmpId}`,
+            branchId: sp.branchId || '',
+            branchName: sp.branchName || (existing.branches?.find(b => String(b.id) === String(sp.branchId))?.name) || 'الفرع الرئيسي',
+            actionType: normAction,
+            date: sp.punchDate || sp.date || todayStr,
+            time: sp.punchTime || sp.time || now.slice(11, 16),
+            verifyType: sp.verifyType || 'KIOSK',
+            deviceName: sp.deviceName || 'كشك البصمة الإلكترونية الذكي 📱',
+            punchSource: 'kiosk',
+            source: 'kiosk',
+            isKiosk: true,
+            shiftHours: recShift?.hours ? `${recShift.hours} ساعة` : undefined,
+            breakDuration: recShift?.breakHours ? `${Math.round(recShift.breakHours * 60)} دقيقة` : undefined
+          }, existing).catch(e => console.warn('[Kiosk Batch Sync WA Alert Error]:', e.message));
+        }
+      } catch (waErr) {
+        console.warn('[Sync Outbox WA Trigger Error]:', waErr.message);
+      }
+    }
 
     console.log(`[Kiosk Outbox Sync] ✅ Successfully synced batch of ${syncedIds.length} offline punches (Zero Latency Delta Mode).`);
 

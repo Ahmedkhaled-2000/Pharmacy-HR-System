@@ -394,8 +394,8 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, 
       <div class="meta-item">التاريخ والوقت: <strong>${dateStr}</strong></div>
       <div class="meta-item">اسم العميل: <strong>${customerName}</strong></div>
       <div class="meta-item">رقم هاتف العميل: <strong>${customerPhone || 'غير مسجل'}</strong></div>
-      <div class="meta-item">الصيدلي المسؤول: <strong>${pharmacist}</strong></div>
-      <div class="meta-item">حالة الطلب: <strong>قيد المتابعة والتجهيز</strong></div>
+      <div class="meta-item">الصيدلي المستلم: <strong>${order.order_receiver_name || pharmacist}</strong> ${order.order_receiver_code ? `(كود: ${order.order_receiver_code})` : ''}</div>
+      <div class="meta-item">تصنيف الطلب: <strong>${order.order_category === 'cosmetics' ? '💄 مستحضرات تجميل وعناية' : '💊 طلب أدوية ونواقص'}</strong></div>
     </div>
 
     <table class="items-table">
@@ -405,24 +405,32 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, 
           <th>اسم الصنف الدوائي</th>
           <th style="width: 80px;">الوحدة</th>
           <th style="width: 60px;">الكمية</th>
-          <th style="width: 85px;">سعر الوحدة</th>
-          <th style="width: 95px;">الإجمالي</th>
+          <th style="width: 110px;">سعر الوحدة</th>
+          <th style="width: 120px;">الإجمالي</th>
         </tr>
       </thead>
       <tbody>
         ${activeItems.map((item, idx) => {
           const qty = parseInt(item.quantity || 1, 10);
+          const isEstimated = item.is_price_estimated || item.isPriceEstimated;
+          const pMin = parseFloat(item.price_min || item.priceMin || 0);
+          const pMax = parseFloat(item.price_max || item.priceMax || 0);
           const price = parseFloat(item.unitPrice || item.unit_price || 0);
           const total = qty * price;
           const unit = (item.unitType || item.unit_type) === 'strip' ? 'شريط' : 'علبة';
+          const priceDisplay = isEstimated ? `من ${pMin.toFixed(2)} إلى ${pMax.toFixed(2)} ج.م` : `${price.toFixed(2)} ج.م`;
+          const totalDisplay = isEstimated ? `من ${(pMin * qty).toFixed(2)} إلى ${(pMax * qty).toFixed(2)} ج.م` : `${total.toFixed(2)} ج.م`;
           return `
             <tr>
               <td style="text-align: center;">${idx + 1}</td>
-              <td><strong>${item.medicationName || item.medication_name}</strong></td>
+              <td>
+                <strong>${item.medicationName || item.medication_name}</strong>
+                ${isEstimated ? '<br><small style="color:#b45309;">(سعر تقديري غير مؤكد)</small>' : ''}
+              </td>
               <td>${unit}</td>
               <td style="text-align: center;"><strong>${qty}</strong></td>
-              <td>${price.toFixed(2)} ج.م</td>
-              <td><strong>${total.toFixed(2)} ج.م</strong></td>
+              <td style="font-size: ${isEstimated ? '11px' : '12.5px'};">${priceDisplay}</td>
+              <td style="font-size: ${isEstimated ? '11px' : '12.5px'}; font-weight: bold; color: ${isEstimated ? '#b45309' : '#0f172a'};">${totalDisplay}</td>
             </tr>
           `;
         }).join('')}
@@ -431,28 +439,41 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, 
 
     <div class="financials-container">
       <div class="totals-summary">
-        <div class="totals-row">
-          <span>إجمالي الأصناف:</span>
-          <span>${totalAmount} ج.م</span>
-        </div>
-        ${discountVal > 0 ? `
-          <div class="totals-row" style="color: #059669;">
-            <span>قيمة الخصم:</span>
-            <span>-${discountVal} ${isPercentDiscount ? '%' : 'ج.م'}</span>
-          </div>
-        ` : ''}
-        <div class="totals-row grand">
-          <span>الصافي المطلوب:</span>
-          <span>${netAmount} ج.م</span>
-        </div>
-        <div class="totals-row">
-          <span>الدفعة المقدمة (مدفوع):</span>
-          <span style="color: #059669; font-weight: bold;">${paidAmount} ج.م</span>
-        </div>
-        <div class="totals-row remaining">
-          <span>المتبقي عند الاستلام:</span>
-          <span>${remainingAmount} ج.م</span>
-        </div>
+        ${(() => {
+          const hasEstimated = activeItems.some(i => i.is_price_estimated || i.isPriceEstimated) || order.is_price_estimated;
+          const oMin = parseFloat(order.price_min || order.priceMin || 0);
+          const oMax = parseFloat(order.price_max || order.priceMax || 0);
+          const paidNum = parseFloat(paidAmount || 0);
+
+          const totDisplay = hasEstimated && (oMin > 0 || oMax > 0) ? `من ${oMin.toFixed(2)} إلى ${oMax.toFixed(2)} ج.م` : `${totalAmount} ج.م`;
+          const netDisplay = hasEstimated && (oMin > 0 || oMax > 0) ? `من ${oMin.toFixed(2)} إلى ${oMax.toFixed(2)} ج.م` : `${netAmount} ج.م`;
+          const remDisplay = hasEstimated && (oMin > 0 || oMax > 0) ? `من ${Math.max(0, oMin - paidNum).toFixed(2)} إلى ${Math.max(0, oMax - paidNum).toFixed(2)} ج.م` : `${remainingAmount} ج.م`;
+
+          return `
+            <div class="totals-row">
+              <span>إجمالي الأصناف:</span>
+              <span>${totDisplay}</span>
+            </div>
+            ${discountVal > 0 ? `
+              <div class="totals-row" style="color: #059669;">
+                <span>قيمة الخصم:</span>
+                <span>-${discountVal} ${isPercentDiscount ? '%' : 'ج.م'}</span>
+              </div>
+            ` : ''}
+            <div class="totals-row grand">
+              <span>الصافي المطلوب:</span>
+              <span>${netDisplay}</span>
+            </div>
+            <div class="totals-row">
+              <span>الدفعة المقدمة (مدفوع):</span>
+              <span style="color: #059669; font-weight: bold;">${paidAmount} ج.م</span>
+            </div>
+            <div class="totals-row remaining">
+              <span>المتبقي عند الاستلام:</span>
+              <span>${remDisplay}</span>
+            </div>
+          `;
+        })()}
       </div>
     </div>
 

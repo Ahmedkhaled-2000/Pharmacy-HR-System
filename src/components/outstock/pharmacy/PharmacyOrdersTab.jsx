@@ -4,11 +4,14 @@ import { outstockGetOrders, outstockDeliverOrder, outstockMarkWhatsappNotified }
 import NewCustomerOrderModal from './NewCustomerOrderModal';
 import DualCashierReceiptModal from './DualCashierReceiptModal';
 import OrderDeliverySettlementModal from './OrderDeliverySettlementModal';
+import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
 
 /**
  * PharmacyOrdersTab.jsx
  * شاشة طلبات العملاء بالصيدلية
  * - إنشاء طلبات جديدة، بحث بالباركود/الهاتف/الاسم
+ * - التحقق الإجباري من كود الموظف المستلم (مستور كباسورد) 🔒
+ * - التحقق الإجباري من كود الموظف المسلّم (مستور كباسورد) 🔒
  * - فلترة الطلبات المعلقة النشطة والتسليم بضغطة زر
  * - طباعة فاتورة الكاشير المزدوجة ومراسلة الواتساب
  */
@@ -18,6 +21,14 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
   const [searchQuery, setSearchQuery] = useState('');
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
   const [printingOrder, setPrintingOrder] = useState(null);
+
+  // 🔒 حالة التحقق من كود الموظف المستلم لإنشاء الطلب
+  const [isReceiverAuthOpen, setIsReceiverAuthOpen] = useState(false);
+  const [authenticatedReceiver, setAuthenticatedReceiver] = useState(null);
+
+  // 🔒 حالة التحقق من كود الموظف المسلّم لتسليم الطلب
+  const [deliveryAuthOrder, setDeliveryAuthOrder] = useState(null);
+  const [authenticatedDeliverer, setAuthenticatedDeliverer] = useState(null);
 
   // جلب الطلبات النشطة
   const fetchOrders = async () => {
@@ -64,9 +75,20 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     };
   }, [branchId]);
 
+  // فتح عملية إنشاء طلب جديد بطلب كود الموظف المستلم أولاً 🔒
+  const handleStartNewOrder = () => {
+    setIsReceiverAuthOpen(true);
+  };
+
+  const handleReceiverAuthSuccess = (emp) => {
+    setAuthenticatedReceiver(emp);
+    setIsReceiverAuthOpen(false);
+    setIsNewOrderModalOpen(true);
+  };
+
   // الاستماع لاختصارات لوحة المفاتيح التفاعلية (F2, F3, F8)
   useEffect(() => {
-    const handleShortcutNewOrder = () => setIsNewOrderModalOpen(true);
+    const handleShortcutNewOrder = () => setIsReceiverAuthOpen(true);
     const handleShortcutSearch = () => {
       const el = document.querySelector('.outstock-search-input');
       if (el) {
@@ -95,10 +117,17 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
   const [deliveryConfirmOrder, setDeliveryConfirmOrder] = useState(null);
   const [isDelivering, setIsDelivering] = useState(false);
 
-  // تسليم الطلب للعميل
+  // تسليم الطلب للعميل - طلب كود الموظف المسلّم أولاً 🔒
   const handleDeliver = (orderOrId) => {
     const targetOrder = typeof orderOrId === 'object' ? orderOrId : orders.find(o => o.id === orderOrId);
-    setDeliveryConfirmOrder(targetOrder || { id: orderOrId });
+    setDeliveryAuthOrder(targetOrder || { id: orderOrId });
+  };
+
+  const handleDeliverAuthSuccess = (emp) => {
+    const target = deliveryAuthOrder;
+    setDeliveryAuthOrder(null);
+    setAuthenticatedDeliverer(emp);
+    setDeliveryConfirmOrder(target);
   };
 
   const executeDeliver = async () => {
@@ -191,7 +220,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
             <button
               type="button"
               className="outstock-btn outstock-btn-primary"
-              onClick={() => setIsNewOrderModalOpen(true)}
+              onClick={handleStartNewOrder}
             >
               <Plus size={16} />
               <span>إنشاء طلب عميل جديد</span>
@@ -452,14 +481,43 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
         )}
       </div>
 
+      {/* 🔒 نافذة التحقق من كود الصيدلي المستلم للطلب (مستور كباسورد) */}
+      {isReceiverAuthOpen && (
+        <EmployeeCodeAuthModal
+          isOpen={isReceiverAuthOpen}
+          title="التحقق من هوية محرر ومستلم الطلب 🔒"
+          subtitle="يرجى إدخال كود الموظف السري (مستور كباسورد) لتوثيق هويتك كمحرر للطلب"
+          branchId={branchId}
+          onClose={() => setIsReceiverAuthOpen(false)}
+          onSuccess={handleReceiverAuthSuccess}
+        />
+      )}
+
+      {/* 🔒 نافذة التحقق من كود الصيدلي المسلّم للطلب (مستور كباسورد) */}
+      {deliveryAuthOrder && (
+        <EmployeeCodeAuthModal
+          isOpen={Boolean(deliveryAuthOrder)}
+          title="التحقق من هوية الموظف المسلّم للطلب 🔒"
+          subtitle="يرجى إدخال كود الموظف السري (مستور كباسورد) لتوثيق تسليم الطلب وتحصيل المبلغ"
+          branchId={branchId}
+          onClose={() => setDeliveryAuthOrder(null)}
+          onSuccess={handleDeliverAuthSuccess}
+        />
+      )}
+
       {/* نافذة تسجيل طلب جديد */}
       {isNewOrderModalOpen && (
         <NewCustomerOrderModal
           branchId={branchId}
           defaultPharmacist={currentPharmacist}
-          onClose={() => setIsNewOrderModalOpen(false)}
+          orderReceiver={authenticatedReceiver}
+          onClose={() => {
+            setIsNewOrderModalOpen(false);
+            setAuthenticatedReceiver(null);
+          }}
           onOrderCreated={(newOrder) => {
             setIsNewOrderModalOpen(false);
+            setAuthenticatedReceiver(null);
             showToast?.('✅ تم تسجيل الطلب وإرساله لإدارة المشتريات بنجاح');
             fetchOrders();
             // فتح نافذة الطباعة التلقائية المباشرة
@@ -483,9 +541,15 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
           order={deliveryConfirmOrder}
           branch={branch}
           currentPharmacist={currentPharmacist}
-          onClose={() => setDeliveryConfirmOrder(null)}
+          deliveredBy={authenticatedDeliverer}
+          onClose={() => {
+            setDeliveryConfirmOrder(null);
+            setAuthenticatedDeliverer(null);
+          }}
           onDeliveredSuccess={(deliveredOrder) => {
             setOrders(prev => prev.filter(o => o.id !== deliveredOrder.id));
+            setDeliveryConfirmOrder(null);
+            setAuthenticatedDeliverer(null);
           }}
           onOpenReceiptPrint={(receiptOrder) => {
             setPrintingOrder(receiptOrder);

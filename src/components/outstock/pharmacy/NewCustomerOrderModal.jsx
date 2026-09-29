@@ -20,7 +20,17 @@ import {
   ChevronDown,
   ChevronUp,
   Truck,
-  Building2
+  Building2,
+  Camera,
+  Image as ImageIcon,
+  Lock,
+  ShieldCheck,
+  AlertCircle,
+  Eye,
+  CreditCard,
+  Wallet,
+  Coins,
+  Tag
 } from 'lucide-react';
 import {
   outstockGetCustomers,
@@ -51,43 +61,31 @@ export const STANDARD_MED_UNITS = [
   'وحدة'
 ];
 
-// فحص هل الصنف عبوة واحدة غير قابلة للتجزئة (شراب، نقط، مرهم، إلخ)
-const isSingleUnitMed = (med) => {
-  if (!med) return false;
-  if (parseInt(med.pack_size || 1, 10) <= 1) return true;
-  return /(شراب|معلق|نقط|مرهم|كريم|بخاخ|زجاجة|شامبو|لوشن|susp|syrup|drop|cream|oint)/i.test(med.dosage_form || '');
-};
-
-const getUnitOptionLabel = (med) => {
-  if (!med) return 'شريط 💊';
-  const name = (med.unit_name || '').trim();
-  if (name) {
-    if (name === 'أمبول' || name === 'فيال' || name === 'سرنجة جاهزة') return `${name} 💉`;
-    if (name === 'كيس فوار' || name === 'كيس') return `${name} ✉️`;
-    if (name === 'بخاخة') return `${name} 💨`;
-    if (name === 'زجاجة' || name === 'نقط') return `${name} 🧴`;
-    if (name === 'أنبوبة') return `${name} 🧴`;
-    if (name === 'قلم إنسولين') return `${name} 🖊️`;
-    return `${name} 💊`;
-  }
-  if (/(حقن|أمبول|ampoule)/i.test(med.dosage_form || '')) return 'أمبول 💉';
-  if (/(فوار|أكياس|sachet)/i.test(med.dosage_form || '')) return 'كيس فوار ✉️';
-  return 'شريط 💊';
-};
-
 const DELIVERY_ROLE_REGEX = /(طيار|دليفري|توصيل|سائق|مندوب توصيل|delivery|driver)/i;
 
 /**
  * NewCustomerOrderModal.jsx
  * نافذة تسجيل طلب عميل جديد مع:
  * - تصميم فسيح وعصري (880px)
- * - إمكانية تعديل الصنف (العلبة والشرائط والسعر)
- * - إضافة دواء غير مسجل واختياره فوراً
+ * - كود الموظف المستلم مستور مثل الباسورد ومثبت في رأس الطلب 🔒
+ * - تصنيف الطلب: دوائي / مستحضرات تجميل
+ * - إمكانية رفع صورة للدواء أو الروشتة مع معاينة فورية 📷
+ * - إلغاء التعامل بالشريط: الوحدة هي العلبة كاملة فقط 📦
+ * - السعر التقديري (من ... إلى ... ج.م) دون حساب متوسط حسابي رياضي
+ * - طرق دفع متعددة ومقسمة (كاش، فيزا، محفظة إلكترونية/إنستاباي)
  * - تحديد المنطقة / الحي من إعدادات المالك
  * - تحديد الصيدلي المسؤول من موظفي الفرع باستثناء عمال الدليفري
- * - تركيز المؤشر تلقائياً على حقل البحث عند إضافة بند جديد
  */
-export default function NewCustomerOrderModal({ branchId, defaultPharmacist = '', onClose, onOrderCreated }) {
+export default function NewCustomerOrderModal({
+  branchId,
+  defaultPharmacist = '',
+  orderReceiver = null, // { code: string, name: string }
+  onClose,
+  onOrderCreated
+}) {
+  // ── 0. تصنيف الطلب وكود الموظف المستلم ──
+  const [orderCategory, setOrderCategory] = useState('medication'); // 'medication' | 'cosmetics'
+
   // ── 1. حالة العميل ──
   const [searchPhone, setSearchPhone] = useState('');
   const [isSearchingCustomer, setIsSearchingCustomer] = useState(false);
@@ -115,22 +113,37 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
   });
   const [selectedZone, setSelectedZone] = useState('');
 
-  // ── 3. بنود الأدوية ──
+  // ── 3. صورة الدواء / الروشتة ──
+  const [medicationImageUrl, setMedicationImageUrl] = useState('');
+  const [medicationImageName, setMedicationImageName] = useState('');
+  const [isPreviewImageOpen, setIsPreviewImageOpen] = useState(false);
+  const fileInputRef = useRef(null);
+
+  // ── 4. بنود الأدوية (العلبة كاملة فقط 📦 - مع دعم السعر التقديري من-إلى) ──
   const [items, setItems] = useState([
-    { medicationName: '', unitType: 'pack', quantity: 1, unitPrice: '', selectedMed: null }
+    {
+      medicationName: '',
+      unitType: 'pack', // إلغاء الشريط والتعامل بالعلبة كاملة فقط
+      quantity: 1,
+      unitPrice: '',
+      isPriceEstimated: false,
+      priceMin: '',
+      priceMax: '',
+      selectedMed: null
+    }
   ]);
   const [editingItemIndex, setEditingItemIndex] = useState(null);
-  const [inlineEditData, setInlineEditData] = useState({ pack_size: 1, unit_name: 'شريط', public_price: '' });
+  const [inlineEditData, setInlineEditData] = useState({ pack_size: 1, unit_name: 'علبة', public_price: '' });
 
   // مراجع حقول الإدخال للتركيز التلقائي
   const itemInputRefs = useRef([]);
 
-  // ── 4. إضافة دواء غير مسجل ──
+  // ── 5. إضافة دواء غير مسجل ──
   const [isAddMedModalOpen, setIsAddMedModalOpen] = useState(false);
   const [addMedTargetIndex, setAddMedTargetIndex] = useState(null);
   const [addMedInitialName, setAddMedInitialName] = useState('');
 
-  // ── 5. موظفو الفرع المستحقون (استبعاد عمال الدليفري والطيارين) ──
+  // ── 6. موظفو الفرع المستحقون (استبعاد عمال الدليفري والطيارين) ──
   const [serverEmployees, setServerEmployees] = useState([]);
   const [availableBranches, setAvailableBranches] = useState([]);
   const [deliveryType, setDeliveryType] = useState('branch_pickup'); // 'branch_pickup' | 'home_delivery' | 'other_branch_pickup'
@@ -297,55 +310,48 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
   const handleMedicationSelect = (index, displayName, medObj) => {
     setItems((prev) => {
       const next = [...prev];
-      const isSingle = isSingleUnitMed(medObj);
-      const targetUnitType = isSingle ? 'pack' : next[index]?.unitType || 'pack';
-
       let autoPrice = '';
       if (medObj) {
-        if (targetUnitType === 'strip') {
-          autoPrice = String(
-            medObj.unit_price ?? (medObj.public_price / (medObj.pack_size || 1)).toFixed(2)
-          );
-        } else {
-          autoPrice = String(medObj.public_price ?? '');
-        }
+        autoPrice = String(medObj.public_price ?? '');
       }
 
       next[index] = {
         ...next[index],
         medicationName: displayName,
-        unitType: targetUnitType,
+        unitType: 'pack', // إلغاء الشريط والتعامل بالعلبة كاملة فقط 📦
         unitPrice: autoPrice,
+        isPriceEstimated: false,
+        priceMin: '',
+        priceMax: '',
         selectedMed: medObj
       };
       return next;
     });
   };
 
-  // التبديل بين سعر العلبة والشريط
-  const handleUnitTypeChange = (index, newUnitType) => {
-    setItems((prev) => {
-      const next = [...prev];
-      const it = next[index];
-      let newPrice = it.unitPrice;
+  // رفع صورة الدواء / الروشتة
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMsg('حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 5 ميجابايت');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setMedicationImageUrl(event.target.result);
+      setMedicationImageName(file.name);
+    };
+    reader.onerror = () => {
+      setErrorMsg('تعذر قراءة ملف الصورة');
+    };
+    reader.readAsDataURL(file);
+  };
 
-      if (it.selectedMed) {
-        if (newUnitType === 'strip') {
-          newPrice = String(
-            it.selectedMed.unit_price ?? (it.selectedMed.public_price / (it.selectedMed.pack_size || 1)).toFixed(2)
-          );
-        } else {
-          newPrice = String(it.selectedMed.public_price ?? '');
-        }
-      }
-
-      next[index] = {
-        ...it,
-        unitType: newUnitType,
-        unitPrice: newPrice
-      };
-      return next;
-    });
+  const handleRemoveImage = () => {
+    setMedicationImageUrl('');
+    setMedicationImageName('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   // فتح درج تعديل بيانات الصنف (حجم العبوة والسعر)
@@ -356,7 +362,7 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
     } else {
       const it = items[idx];
       setEditingItemIndex(idx);
-      const uName = (it.selectedMed?.unit_name || 'شريط').trim();
+      const uName = (it.selectedMed?.unit_name || 'علبة').trim();
       setInlineEditData({
         pack_size: it.selectedMed?.pack_size || 1,
         unit_name: uName,
@@ -370,8 +376,7 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
   const handleSaveInlineEdit = (idx) => {
     const pub = parseFloat(inlineEditData.public_price);
     const pack = parseInt(inlineEditData.pack_size, 10) || 1;
-    const unitPrice = !isNaN(pub) && pack > 0 ? (pub / pack).toFixed(2) : '0.00';
-    const finalUnitName = (inlineEditData.unit_name || 'شريط').trim();
+    const finalUnitName = (inlineEditData.unit_name || 'علبة').trim();
 
     setItems((prev) => {
       const next = [...prev];
@@ -381,13 +386,14 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
         pack_size: pack,
         unit_name: finalUnitName,
         public_price: isNaN(pub) ? 0 : pub,
-        unit_price: parseFloat(unitPrice)
+        unit_price: isNaN(pub) ? 0 : pub
       };
 
       next[idx] = {
         ...current,
         selectedMed: updatedMed,
-        unitPrice: current.unitType === 'strip' ? unitPrice : String(isNaN(pub) ? current.unitPrice : pub)
+        unitType: 'pack',
+        unitPrice: String(isNaN(pub) ? current.unitPrice : pub)
       };
       return next;
     });
@@ -410,24 +416,60 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
     }
   };
 
-  // احتساب الإجماليات
-  const totalAmount = items.reduce((sum, it) => {
+  // ── طرق الدفع المتعددة والمقسمة ──
+  const [useSplitPayment, setUseSplitPayment] = useState(false);
+  const [paymentSplits, setPaymentSplits] = useState({
+    cash: '',
+    card: '',
+    wallet: ''
+  });
+
+  // ── الحسابات المالية الدقيقة مع دعم السعر التقديري (من ... إلى ... ج.م) دون متوسط حسابي ──
+  const hasEstimatedItems = items.some(
+    (it) => it.isPriceEstimated && (parseFloat(it.priceMin || 0) > 0 || parseFloat(it.priceMax || 0) > 0)
+  );
+
+  let totalMin = 0;
+  let totalMax = 0;
+
+  items.forEach((it) => {
     const qty = parseInt(it.quantity || 1, 10);
-    const price = parseFloat(it.unitPrice || 0);
-    return sum + qty * price;
-  }, 0);
+    if (it.isPriceEstimated) {
+      const pMin = parseFloat(it.priceMin || 0);
+      const pMax = parseFloat(it.priceMax || pMin || 0);
+      totalMin += qty * pMin;
+      totalMax += qty * pMax;
+    } else {
+      const price = parseFloat(it.unitPrice || 0);
+      totalMin += qty * price;
+      totalMax += qty * price;
+    }
+  });
 
   const discVal = parseFloat(discountValue || 0);
-  let discountAmount = 0;
+  let discountMin = 0;
+  let discountMax = 0;
   if (discountType === 'percentage') {
-    discountAmount = (totalAmount * discVal) / 100;
+    discountMin = (totalMin * discVal) / 100;
+    discountMax = (totalMax * discVal) / 100;
   } else if (discountType === 'amount') {
-    discountAmount = discVal;
+    discountMin = discVal;
+    discountMax = discVal;
   }
 
-  const netAmount = Math.max(0, totalAmount - discountAmount);
-  const paid = parseFloat(paidAmount || 0);
-  const remainingAmount = Math.max(0, netAmount - paid);
+  const netMin = Math.max(0, totalMin - discountMin);
+  const netMax = Math.max(0, totalMax - discountMax);
+
+  // احتساب إجمالي المدفوع
+  const totalSplitPaid =
+    parseFloat(paymentSplits.cash || 0) +
+    parseFloat(paymentSplits.card || 0) +
+    parseFloat(paymentSplits.wallet || 0);
+
+  const effectivePaid = useSplitPayment ? totalSplitPaid : parseFloat(paidAmount || 0);
+
+  const remainingMin = Math.max(0, netMin - effectivePaid);
+  const remainingMax = Math.max(0, netMax - effectivePaid);
 
   // إرسال الطلب
   const handleSubmit = async (e) => {
@@ -457,15 +499,33 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
       return;
     }
 
+    // التحقق من الأسعار التقديرية
+    for (const it of validItems) {
+      if (it.isPriceEstimated) {
+        const minP = parseFloat(it.priceMin || 0);
+        const maxP = parseFloat(it.priceMax || 0);
+        if (minP <= 0 && maxP <= 0) {
+          setErrorMsg(`يرجى إدخال نطاق السعر التقديري (من ... إلى) للصنف "${it.medicationName}"`);
+          return;
+        }
+      }
+    }
+
     const finalPharmacist =
-      responsiblePharmacist === '__custom__'
+      orderReceiver?.name ||
+      (responsiblePharmacist === '__custom__'
         ? customPharmacist.trim() || 'د. صيدلي الفرع'
-        : responsiblePharmacist;
+        : responsiblePharmacist);
 
     setIsSubmitting(true);
     try {
       const payload = {
         branchId,
+        orderCategory, // 'medication' | 'cosmetics'
+        orderReceiverCode: orderReceiver?.code || null,
+        orderReceiverName: orderReceiver?.name || finalPharmacist,
+        medicationImageUrl: medicationImageUrl || null,
+        paymentSplits: useSplitPayment ? paymentSplits : null,
         customer: {
           id: selectedCustomer?.id || null,
           fullName: finalName,
@@ -476,11 +536,14 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
         },
         items: validItems.map((it) => ({
           medicationName: String(it.medicationName).trim(),
-          unitType: it.unitType || 'pack',
+          unitType: 'pack', // إلغاء الشريط: العلبة كاملة دائماً 📦
           quantity: parseInt(it.quantity || 1, 10),
-          unitPrice: parseFloat(it.unitPrice || 0)
+          unitPrice: it.isPriceEstimated ? 0 : parseFloat(it.unitPrice || 0),
+          isPriceEstimated: Boolean(it.isPriceEstimated),
+          priceMin: it.isPriceEstimated ? parseFloat(it.priceMin || 0) : null,
+          priceMax: it.isPriceEstimated ? parseFloat(it.priceMax || 0) : null
         })),
-        paidAmount: paid,
+        paidAmount: effectivePaid,
         discountType,
         discountValue: discVal,
         expectedPickupDate,
@@ -605,21 +668,235 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
             gap: '18px'
           }}
         >
-          {errorMsg && (
+          {/* ── 0. كود الموظف المستلم + تصنيف الطلب + رفع صورة الروشتة/الدواء ── */}
+          <div
+            style={{
+              background: '#f8fafc',
+              border: '1.5px solid #e2e8f0',
+              borderRadius: '16px',
+              padding: '16px 18px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px'
+            }}
+          >
+            {/* شريط الموظف المستلم وتصنيف الطلب */}
             <div
               style={{
-                background: '#fef2f2',
-                border: '1.5px solid #fecaca',
-                borderRadius: '12px',
-                padding: '12px 16px',
-                color: '#b91c1c',
-                fontSize: '13px',
-                fontWeight: '800'
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px'
               }}
             >
-              ⚠️ {errorMsg}
+              {/* تصنيف الطلب (دوائي / مستحضرات تجميل) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '13px', fontWeight: '800', color: '#334155' }}>تصنيف الطلب:</span>
+                <div style={{ display: 'flex', gap: '6px', background: '#e2e8f0', padding: '3px', borderRadius: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setOrderCategory('medication')}
+                    style={{
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '6px 14px',
+                      fontSize: '13px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      background: orderCategory === 'medication' ? 'linear-gradient(135deg, #0d9488, #0f766e)' : 'transparent',
+                      color: orderCategory === 'medication' ? '#ffffff' : '#475569',
+                      boxShadow: orderCategory === 'medication' ? '0 2px 6px rgba(13, 148, 136, 0.25)' : 'none',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <Pill size={15} />
+                    <span>طلب دوائي 💊</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOrderCategory('cosmetics')}
+                    style={{
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '6px 14px',
+                      fontSize: '13px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      background: orderCategory === 'cosmetics' ? 'linear-gradient(135deg, #ec4899, #be185d)' : 'transparent',
+                      color: orderCategory === 'cosmetics' ? '#ffffff' : '#475569',
+                      boxShadow: orderCategory === 'cosmetics' ? '0 2px 6px rgba(236, 72, 153, 0.25)' : 'none',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <Sparkles size={15} />
+                    <span>مستحضرات تجميل وعناية 💄</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* شارة كود الموظف المستلم الموثق */}
+              {orderReceiver ? (
+                <div
+                  style={{
+                    background: '#f0fdf4',
+                    border: '1.5px solid #86efac',
+                    borderRadius: '10px',
+                    padding: '6px 14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  <ShieldCheck size={18} color="#16a34a" />
+                  <div style={{ fontSize: '12.5px' }}>
+                    <span style={{ color: '#166534', fontWeight: '700' }}>المحرر المستلم: </span>
+                    <strong style={{ color: '#14532d' }}>{orderReceiver.name}</strong>
+                    <span
+                      style={{
+                        marginRight: '6px',
+                        background: '#dcfce7',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        fontFamily: 'monospace',
+                        fontWeight: 'bold',
+                        color: '#15803d'
+                      }}
+                    >
+                      كود: {orderReceiver.code} 🔒
+                    </span>
+                  </div>
+                </div>
+              ) : null}
             </div>
-          )}
+
+            {/* رفع صورة الدواء أو الروشتة */}
+            <div
+              style={{
+                background: '#ffffff',
+                border: '1.5px dashed #cbd5e1',
+                borderRadius: '12px',
+                padding: '12px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '10px',
+                    background: medicationImageUrl ? '#f0fdf4' : '#f1f5f9',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  {medicationImageUrl ? (
+                    <ImageIcon size={20} color="#16a34a" />
+                  ) : (
+                    <Camera size={20} color="#64748b" />
+                  )}
+                </div>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: '800', color: '#1e293b' }}>
+                    صورة الدواء أو الروشتة (اختياري)
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>
+                    ارفع صورة علبة الدواء أو الروشتة لتسهيل توفير الصنف بدقة من المشتريات
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  ref={fileInputRef}
+                  onChange={handleImageChange}
+                  style={{ display: 'none' }}
+                />
+
+                {medicationImageUrl ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {/* مصغرة الصورة مع إمكانية المعاينة */}
+                    <div
+                      onClick={() => setIsPreviewImageOpen(true)}
+                      style={{
+                        position: 'relative',
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '8px',
+                        overflow: 'hidden',
+                        border: '2px solid #0d9488',
+                        cursor: 'pointer'
+                      }}
+                      title="اضغط لمعاينة الصورة بالحجم الكامل"
+                    >
+                      <img
+                        src={medicationImageUrl}
+                        alt="Medication"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                      <div
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          background: 'rgba(0,0,0,0.25)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        <Eye size={16} color="#ffffff" />
+                      </div>
+                    </div>
+
+                    <span style={{ fontSize: '12px', fontWeight: '700', color: '#059669' }}>
+                      تم إرفاق الصورة ✅
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={handleRemoveImage}
+                      className="outstock-btn"
+                      style={{
+                        background: '#fee2e2',
+                        color: '#b91c1c',
+                        border: '1px solid #fca5a5',
+                        padding: '5px 10px',
+                        fontSize: '11.5px',
+                        borderRadius: '6px'
+                      }}
+                    >
+                      <Trash2 size={13} />
+                      <span>حذف الصورة</span>
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="outstock-btn outstock-btn-secondary"
+                    style={{ fontSize: '12.5px', padding: '7px 16px', fontWeight: '800' }}
+                  >
+                    <Camera size={15} />
+                    <span>اختيار أو تصوير صورة 📷</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
 
           {/* ── 1. بيانات العميل والبحث الذكي ── */}
           <div
@@ -792,7 +1069,7 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
             </div>
           </div>
 
-          {/* ── 2. بنود الأدوية (الأدوية المطلوبة) ── */}
+          {/* ── 2. بنود الأدوية (العلبة كاملة فقط 📦 + السعر التقديري) ── */}
           <div>
             <div
               style={{
@@ -804,19 +1081,34 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                 gap: '8px'
               }}
             >
-              <label
-                style={{
-                  fontSize: '14.5px',
-                  fontWeight: '900',
-                  color: '#1e293b',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <Pill size={17} color="#0d9488" />
-                <span>الأدوية المطلوبة في هذا الطلب ({items.length})</span>
-              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <label
+                  style={{
+                    fontSize: '14.5px',
+                    fontWeight: '900',
+                    color: '#1e293b',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Pill size={17} color="#0d9488" />
+                  <span>الأصناف المطلوبة في هذا الطلب ({items.length})</span>
+                </label>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    background: '#e0f2fe',
+                    color: '#0369a1',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    fontWeight: '800'
+                  }}
+                >
+                  📦 الطلب بالعلبة كاملة حصراً
+                </span>
+              </div>
+
               <button
                 type="button"
                 onClick={handleAddItem}
@@ -824,14 +1116,12 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                 style={{ fontSize: '13px', padding: '7px 16px', fontWeight: '800' }}
               >
                 <Plus size={16} />
-                <span>إضافة دواء آخر</span>
+                <span>إضافة صنف آخر</span>
               </button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {items.map((it, idx) => {
-                const singleUnit = isSingleUnitMed(it.selectedMed);
-                const optionLabel = getUnitOptionLabel(it.selectedMed);
                 const isEditingThisItem = editingItemIndex === idx;
 
                 return (
@@ -840,7 +1130,7 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                     className="outstock-med-item-card"
                     style={{
                       background: '#ffffff',
-                      border: '1.5px solid #e2e8f0',
+                      border: it.isPriceEstimated ? '1.5px solid #f59e0b' : '1.5px solid #e2e8f0',
                       borderRadius: '14px',
                       padding: '14px',
                       boxShadow: '0 2px 6px rgba(0, 0, 0, 0.03)',
@@ -853,7 +1143,7 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                         <MedicationAutocompleteInput
                           inputRef={(el) => (itemInputRefs.current[idx] = el)}
                           value={it.medicationName}
-                          unitType={it.unitType}
+                          unitType="pack"
                           selectedMed={it.selectedMed}
                           onMedicationSelect={(displayName, medObj) => handleMedicationSelect(idx, displayName, medObj)}
                           onTextChange={(text) => handleItemChange(idx, 'medicationName', text)}
@@ -863,7 +1153,7 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                         />
                       </div>
 
-                      {/* زر تعديل بيانات الصنف السريع (تعديل السعر/الشرائط إذا كان الكتالوج به خطأ) */}
+                      {/* زر تعديل بيانات الصنف السريع */}
                       <button
                         type="button"
                         onClick={() => handleToggleInlineEdit(idx)}
@@ -880,7 +1170,7 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                           justifyContent: 'center',
                           flexShrink: 0
                         }}
-                        title="تعديل حجم العبوة أو السعر لهذا الصنف"
+                        title="تعديل بيانات الصنف والسعر الرسمي"
                       >
                         <Edit3 size={16} />
                       </button>
@@ -909,7 +1199,7 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                       </button>
                     </div>
 
-                    {/* درج التعديل السريع للصنف (إذا فتح الصيدلي زر التعديل) */}
+                    {/* درج التعديل السريع للصنف */}
                     {isEditingThisItem && (
                       <div
                         style={{
@@ -925,13 +1215,13 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                       >
                         <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <Edit3 size={14} />
-                          <span>تعديل مواصفات وتسعير هذا الصنف:</span>
+                          <span>تعديل مواصفات وتسعير العبوة:</span>
                         </div>
 
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
                           <div>
                             <label style={{ fontSize: '11px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
-                              عدد الشرائط/الوحدات:
+                              حجم العبوة:
                             </label>
                             <input
                               type="number"
@@ -941,51 +1231,6 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                               className="outstock-form-input"
                               style={{ minHeight: '36px', fontSize: '13px' }}
                             />
-                          </div>
-
-                          <div>
-                            <label style={{ fontSize: '11px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
-                              اسم الوحدة:
-                            </label>
-                            <select
-                              value={
-                                isCustomUnitSelected
-                                  ? '__custom__'
-                                  : STANDARD_MED_UNITS.includes(inlineEditData.unit_name)
-                                  ? inlineEditData.unit_name
-                                  : (inlineEditData.unit_name ? '__custom__' : 'شريط')
-                              }
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                if (val === '__custom__') {
-                                  setIsCustomUnitSelected(true);
-                                } else {
-                                  setIsCustomUnitSelected(false);
-                                  setInlineEditData({ ...inlineEditData, unit_name: val });
-                                }
-                              }}
-                              className="outstock-form-select"
-                              style={{ minHeight: '36px', fontSize: '13px', fontWeight: '700' }}
-                            >
-                              {STANDARD_MED_UNITS.map((unit) => (
-                                <option key={unit} value={unit}>
-                                  {unit}
-                                </option>
-                              ))}
-                              <option value="__custom__">-- وحدة أخرى (كتابة يدوية) --</option>
-                            </select>
-
-                            {isCustomUnitSelected && (
-                              <input
-                                type="text"
-                                placeholder="اكتب اسم الوحدة يدوياً..."
-                                value={inlineEditData.unit_name}
-                                onChange={(e) => setInlineEditData({ ...inlineEditData, unit_name: e.target.value })}
-                                className="outstock-form-input"
-                                style={{ minHeight: '34px', fontSize: '12px', marginTop: '5px' }}
-                                autoFocus
-                              />
-                            )}
                           </div>
 
                           <div>
@@ -1047,26 +1292,44 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                       </div>
                     )}
 
-                    {/* تفاصيل الوحدة والكمية والسعر */}
-                    <div className="outstock-med-sub-grid" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1.2fr', gap: '10px', marginTop: '10px' }}>
+                    {/* تفاصيل الوحدة والكمية والسعر / نطاق السعر التقديري */}
+                    <div
+                      style={{
+                        marginTop: '10px',
+                        display: 'grid',
+                        gridTemplateColumns: it.isPriceEstimated ? '1fr 1fr 1.3fr 1.3fr' : '1fr 1fr 1.5fr',
+                        gap: '10px',
+                        alignItems: 'flex-end'
+                      }}
+                    >
+                      {/* الوحدة - علبة كاملة حصراً */}
                       <div>
                         <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', marginBottom: '3px', display: 'block' }}>
                           الوحدة المطلوبة
                         </label>
-                        <select
-                          value={it.unitType}
-                          onChange={(e) => handleUnitTypeChange(idx, e.target.value)}
-                          className="outstock-form-select"
-                          style={{ minHeight: '40px', fontSize: '13px', fontWeight: '700' }}
+                        <div
+                          style={{
+                            height: '40px',
+                            background: '#f1f5f9',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '8px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: '800',
+                            fontSize: '13px',
+                            color: '#0f766e',
+                            gap: '6px'
+                          }}
                         >
-                          <option value="pack">علبة كاملة 📦</option>
-                          {!singleUnit && <option value="strip">{optionLabel}</option>}
-                        </select>
+                          <span>علبة كاملة 📦</span>
+                        </div>
                       </div>
 
+                      {/* الكمية */}
                       <div>
                         <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', marginBottom: '3px', display: 'block' }}>
-                          الكمية
+                          الكمية (بالعلبة)
                         </label>
                         <input
                           type="number"
@@ -1080,34 +1343,149 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
                         />
                       </div>
 
-                      <div>
-                        <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', marginBottom: '3px', display: 'block' }}>
-                          {it.selectedMed ? 'السعر الرسمي (تلقائي ⚡)' : 'سعر الوحدة (ج.م)'}
-                        </label>
-                        <input
-                          type="number"
-                          step="0.5"
-                          placeholder="السعر (ج.م)"
-                          value={it.unitPrice}
-                          onChange={(e) => handleItemChange(idx, 'unitPrice', e.target.value)}
-                          className="outstock-form-input"
-                          style={{
-                            minHeight: '40px',
-                            textAlign: 'center',
-                            fontWeight: 'bold',
-                            borderColor: it.selectedMed ? '#0d9488' : undefined,
-                            backgroundColor: it.selectedMed ? '#f0fdfa' : undefined
-                          }}
-                        />
-                      </div>
+                      {/* خيار السعر: إما سعر رسمي أو نطاق تقديري */}
+                      {!it.isPriceEstimated ? (
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                            <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
+                              {it.selectedMed ? 'السعر الرسمي (تلقائي ⚡)' : 'سعر العلبة (ج.م)'}
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleItemChange(idx, 'isPriceEstimated', true);
+                                handleItemChange(idx, 'priceMin', it.unitPrice || '');
+                                handleItemChange(idx, 'priceMax', it.unitPrice || '');
+                              }}
+                              style={{
+                                background: '#fef3c7',
+                                color: '#b45309',
+                                border: '1px solid #fde68a',
+                                borderRadius: '4px',
+                                fontSize: '10.5px',
+                                fontWeight: '800',
+                                padding: '1px 6px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              سعر غير مؤكد؟
+                            </button>
+                          </div>
+                          <input
+                            type="number"
+                            step="0.5"
+                            placeholder="السعر (ج.م)"
+                            value={it.unitPrice}
+                            onChange={(e) => handleItemChange(idx, 'unitPrice', e.target.value)}
+                            className="outstock-form-input"
+                            style={{
+                              minHeight: '40px',
+                              textAlign: 'center',
+                              fontWeight: 'bold',
+                              borderColor: it.selectedMed ? '#0d9488' : undefined,
+                              backgroundColor: it.selectedMed ? '#f0fdfa' : undefined
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          {/* من سعر */}
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                              <label style={{ fontSize: '11px', color: '#b45309', fontWeight: '800' }}>
+                                من سعر (ج.م):
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => handleItemChange(idx, 'isPriceEstimated', false)}
+                                style={{
+                                  background: '#e2e8f0',
+                                  color: '#475569',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  fontSize: '10px',
+                                  fontWeight: '700',
+                                  padding: '1px 6px',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                سعر محدد
+                              </button>
+                            </div>
+                            <input
+                              type="number"
+                              step="0.5"
+                              required
+                              placeholder="الحد الأدنى"
+                              value={it.priceMin}
+                              onChange={(e) => handleItemChange(idx, 'priceMin', e.target.value)}
+                              className="outstock-form-input"
+                              style={{
+                                minHeight: '40px',
+                                textAlign: 'center',
+                                fontWeight: 'bold',
+                                borderColor: '#f59e0b',
+                                backgroundColor: '#fffbeb'
+                              }}
+                            />
+                          </div>
+
+                          {/* إلى سعر */}
+                          <div>
+                            <label style={{ fontSize: '11px', color: '#b45309', fontWeight: '800', marginBottom: '3px', display: 'block' }}>
+                              إلى سعر (ج.م):
+                            </label>
+                            <input
+                              type="number"
+                              step="0.5"
+                              required
+                              placeholder="الحد الأقصى"
+                              value={it.priceMax}
+                              onChange={(e) => handleItemChange(idx, 'priceMax', e.target.value)}
+                              className="outstock-form-input"
+                              style={{
+                                minHeight: '40px',
+                                textAlign: 'center',
+                                fontWeight: 'bold',
+                                borderColor: '#f59e0b',
+                                backgroundColor: '#fffbeb'
+                              }}
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
+
+                    {/* مؤشر النطاق التقديري - يظهر بدون أي معادلة متوسط حسابي */}
+                    {it.isPriceEstimated && (
+                      <div
+                        style={{
+                          marginTop: '8px',
+                          background: '#fffbeb',
+                          border: '1px solid #fde68a',
+                          borderRadius: '8px',
+                          padding: '6px 12px',
+                          fontSize: '12px',
+                          color: '#92400e',
+                          fontWeight: '800',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between'
+                        }}
+                      >
+                        <span>⚠️ سعر تقديري (غير محسوب بمتوسط حسابي):</span>
+                        <strong style={{ color: '#b45309', fontSize: '13px' }}>
+                          من {parseFloat(it.priceMin || 0).toFixed(2)} إلى {parseFloat(it.priceMax || 0).toFixed(2)} ج.م للعلبة
+                        </strong>
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           </div>
 
-          {/* ── 3. الحسابات المالية والعربون ── */}
+          {/* ── 3. الحسابات المالية وطرق الدفع المقسمة ── */}
           <div
             style={{
               background: '#f8fafc',
@@ -1116,59 +1494,175 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
               padding: '16px 18px'
             }}
           >
-            <div style={{ fontSize: '14px', fontWeight: '900', color: '#334155', marginBottom: '12px' }}>
-              💰 الحساب المالي والعربون
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ fontSize: '14px', fontWeight: '900', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <DollarSign size={18} color="#0d9488" />
+                <span>الحساب المالي، الخصم، وطرق الدفع</span>
+              </div>
+
+              {/* تبديل طرق الدفع المقسمة */}
+              <button
+                type="button"
+                onClick={() => setUseSplitPayment(!useSplitPayment)}
+                style={{
+                  background: useSplitPayment ? '#dcfce7' : '#f1f5f9',
+                  border: useSplitPayment ? '1.5px solid #86efac' : '1px solid #cbd5e1',
+                  color: useSplitPayment ? '#15803d' : '#475569',
+                  padding: '5px 12px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <CreditCard size={14} />
+                <span>{useSplitPayment ? '✓ دفع مقسم (كاش + فيزا)' : 'تفعيل الدفع المقسم (Multi-tender)'}</span>
+              </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: '12px' }}>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                  المبلغ المدفوع (عربون العميل):
-                </label>
-                <input
-                  type="number"
-                  step="0.5"
-                  placeholder="0.00"
-                  value={paidAmount}
-                  onChange={(e) => setPaidAmount(e.target.value)}
-                  className="outstock-form-input"
-                  style={{ fontWeight: 'bold', color: '#059669', fontSize: '15px' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                  نوع الخصم:
-                </label>
-                <select
-                  value={discountType}
-                  onChange={(e) => setDiscountType(e.target.value)}
-                  className="outstock-form-select"
-                >
-                  <option value="none">بدون خصم</option>
-                  <option value="amount">مبلغ ثابت (ج.م)</option>
-                  <option value="percentage">نسبة مئوية (%)</option>
-                </select>
-              </div>
-
-              {discountType !== 'none' && (
+            {/* صف الدفع والمقدم */}
+            {!useSplitPayment ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: '12px' }}>
                 <div>
                   <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                    قيمة الخصم:
+                    المبلغ المدفوع (عربون العميل كاش):
                   </label>
                   <input
                     type="number"
                     step="0.5"
-                    placeholder="القيمة"
-                    value={discountValue}
-                    onChange={(e) => setDiscountValue(e.target.value)}
+                    placeholder="0.00"
+                    value={paidAmount}
+                    onChange={(e) => setPaidAmount(e.target.value)}
                     className="outstock-form-input"
+                    style={{ fontWeight: 'bold', color: '#059669', fontSize: '15px' }}
                   />
                 </div>
-              )}
-            </div>
 
-            {/* بطاقات ملخص الحسابات */}
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
+                    نوع الخصم:
+                  </label>
+                  <select
+                    value={discountType}
+                    onChange={(e) => setDiscountType(e.target.value)}
+                    className="outstock-form-select"
+                  >
+                    <option value="none">بدون خصم</option>
+                    <option value="amount">مبلغ ثابت (ج.م)</option>
+                    <option value="percentage">نسبة مئوية (%)</option>
+                  </select>
+                </div>
+
+                {discountType !== 'none' && (
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
+                      قيمة الخصم:
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      placeholder="القيمة"
+                      value={discountValue}
+                      onChange={(e) => setDiscountValue(e.target.value)}
+                      className="outstock-form-input"
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* حقول الدفع المقسم (كاش / فيزا / محفظة إلكترونية أو إنستاباي) */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#059669', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px' }}>
+                      <Coins size={13} />
+                      <span>مدفوع نقدي (كاش):</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      placeholder="0.00"
+                      value={paymentSplits.cash}
+                      onChange={(e) => setPaymentSplits({ ...paymentSplits, cash: e.target.value })}
+                      className="outstock-form-input"
+                      style={{ fontWeight: 'bold', color: '#059669' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#0284c7', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px' }}>
+                      <CreditCard size={13} />
+                      <span>فيزا / نقاط بيع:</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      placeholder="0.00"
+                      value={paymentSplits.card}
+                      onChange={(e) => setPaymentSplits({ ...paymentSplits, card: e.target.value })}
+                      className="outstock-form-input"
+                      style={{ fontWeight: 'bold', color: '#0284c7' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#7c3aed', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px' }}>
+                      <Wallet size={13} />
+                      <span>محفظة / إنستاباي:</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      placeholder="0.00"
+                      value={paymentSplits.wallet}
+                      onChange={(e) => setPaymentSplits({ ...paymentSplits, wallet: e.target.value })}
+                      className="outstock-form-input"
+                      style={{ fontWeight: 'bold', color: '#7c3aed' }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                      نوع الخصم:
+                    </label>
+                    <select
+                      value={discountType}
+                      onChange={(e) => setDiscountType(e.target.value)}
+                      className="outstock-form-select"
+                      style={{ minHeight: '36px' }}
+                    >
+                      <option value="none">بدون خصم</option>
+                      <option value="amount">مبلغ ثابت (ج.م)</option>
+                      <option value="percentage">نسبة مئوية (%)</option>
+                    </select>
+                  </div>
+
+                  {discountType !== 'none' && (
+                    <div>
+                      <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                        قيمة الخصم:
+                      </label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        placeholder="القيمة"
+                        value={discountValue}
+                        onChange={(e) => setDiscountValue(e.target.value)}
+                        className="outstock-form-input"
+                        style={{ minHeight: '36px' }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* بطاقات ملخص الحسابات (مع إظهار السعر من - إلى دون معادلة متوسط) */}
             <div
               style={{
                 display: 'grid',
@@ -1179,22 +1673,28 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
             >
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '10px 14px', textAlign: 'center' }}>
                 <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>إجمالي الأصناف</span>
-                <strong style={{ fontSize: '16px', color: '#1e293b' }}>{totalAmount.toFixed(2)} ج.م</strong>
+                <strong style={{ fontSize: '14px', color: '#1e293b' }}>
+                  {hasEstimatedItems ? `من ${totalMin.toFixed(2)} إلى ${totalMax.toFixed(2)} ج.م` : `${totalMin.toFixed(2)} ج.م`}
+                </strong>
               </div>
 
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '10px 14px', textAlign: 'center' }}>
                 <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>الصافي بعد الخصم</span>
-                <strong style={{ fontSize: '16px', color: '#0d9488' }}>{netAmount.toFixed(2)} ج.م</strong>
+                <strong style={{ fontSize: '14px', color: '#0d9488' }}>
+                  {hasEstimatedItems ? `من ${netMin.toFixed(2)} إلى ${netMax.toFixed(2)} ج.م` : `${netMin.toFixed(2)} ج.م`}
+                </strong>
               </div>
 
               <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '10px 14px', textAlign: 'center' }}>
                 <span style={{ fontSize: '11px', color: '#15803d', display: 'block' }}>المدفوع (عربون)</span>
-                <strong style={{ fontSize: '16px', color: '#059669' }}>{paid.toFixed(2)} ج.م</strong>
+                <strong style={{ fontSize: '15px', color: '#059669' }}>{effectivePaid.toFixed(2)} ج.م</strong>
               </div>
 
               <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '12px', padding: '10px 14px', textAlign: 'center' }}>
                 <span style={{ fontSize: '11px', color: '#b91c1c', display: 'block' }}>المتبقي عند الاستلام</span>
-                <strong style={{ fontSize: '17px', color: '#dc2626' }}>{remainingAmount.toFixed(2)} ج.م</strong>
+                <strong style={{ fontSize: '14px', color: '#dc2626' }}>
+                  {hasEstimatedItems ? `من ${remainingMin.toFixed(2)} إلى ${remainingMax.toFixed(2)} ج.م` : `${remainingMin.toFixed(2)} ج.م`}
+                </strong>
               </div>
             </div>
           </div>
@@ -1360,6 +1860,49 @@ export default function NewCustomerOrderModal({ branchId, defaultPharmacist = ''
         onClose={() => setIsAddMedModalOpen(false)}
         onSaveSuccess={handleMedicationAddedSuccess}
       />
+
+      {/* نافذة معاينة صورة الدواء بالحجم الكامل */}
+      {isPreviewImageOpen && medicationImageUrl && (
+        <div
+          className="outstock-modal-backdrop"
+          style={{ zIndex: 100000, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
+          onClick={() => setIsPreviewImageOpen(false)}
+        >
+          <div
+            style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setIsPreviewImageOpen(false)}
+              style={{
+                position: 'absolute',
+                top: '-14px',
+                left: '-14px',
+                background: '#ef4444',
+                color: '#ffffff',
+                border: '2px solid #ffffff',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.4)'
+              }}
+            >
+              <X size={18} />
+            </button>
+            <img
+              src={medicationImageUrl}
+              alt="Medication full size"
+              style={{ maxWidth: '100%', maxHeight: '85vh', borderRadius: '12px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', objectFit: 'contain' }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

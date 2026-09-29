@@ -1234,6 +1234,16 @@ export async function initEdaMedicationTables(db) {
 
     await db.query(ddl);
 
+    // التحقق من أعمدة الاسم المعروض بالفاتورة وقائمة المواد الفعالة
+    try {
+      await db.query(`
+        ALTER TABLE public.outstock_medications ADD COLUMN IF NOT EXISTS invoice_display_name VARCHAR(255) NULL;
+        ALTER TABLE public.outstock_medications ADD COLUMN IF NOT EXISTS active_ingredients_list JSONB NULL;
+      `);
+    } catch (colErr) {
+      console.warn('⚠️ [EDA Alter Column Warning]:', colErr.message);
+    }
+
     // التحقق من وجود بيانات وغرس الأدوية التأسيسية إن كانت فارغة
     const countRes = await db.query('SELECT COUNT(*) FROM public.outstock_medications');
     const count = parseInt(countRes.rows[0]?.count || 0, 10);
@@ -1302,7 +1312,8 @@ export async function searchEdaMedications(db, queryTerm, limit = 15) {
         id, eda_reg_no, trade_name_en, trade_name_ar, generic_name,
         dosage_form, strength, pack_size, unit_name, public_price,
         unit_price, manufacturer, category, is_table_drug, is_refrigerated,
-        gtin_barcode, market_status, updated_at, created_at
+        gtin_barcode, market_status, updated_at, created_at,
+        invoice_display_name, active_ingredients_list
       FROM public.outstock_medications
       ORDER BY trade_name_en ASC
       LIMIT $1
@@ -1314,6 +1325,8 @@ export async function searchEdaMedications(db, queryTerm, limit = 15) {
       unit_price: parseFloat(r.unit_price || 0),
       pack_size: parseInt(r.pack_size || 1, 10),
       displayName: `${r.trade_name_ar} (${r.trade_name_en})`,
+      invoice_display_name: r.invoice_display_name || '',
+      active_ingredients_list: r.active_ingredients_list || [],
       has_recent_update: r.updated_at && r.created_at && (new Date(r.updated_at).getTime() - new Date(r.created_at).getTime() > 1000)
     }));
   }
@@ -1336,7 +1349,8 @@ export async function searchEdaMedications(db, queryTerm, limit = 15) {
       id, eda_reg_no, trade_name_en, trade_name_ar, generic_name,
       dosage_form, strength, pack_size, unit_name, public_price,
       unit_price, manufacturer, category, is_table_drug, is_refrigerated,
-      gtin_barcode, market_status, updated_at, created_at
+      gtin_barcode, market_status, updated_at, created_at,
+      invoice_display_name, active_ingredients_list
     FROM public.outstock_medications
     WHERE
       search_normalized LIKE $1
@@ -1344,6 +1358,7 @@ export async function searchEdaMedications(db, queryTerm, limit = 15) {
       OR LOWER(trade_name_en) LIKE $2
       OR LOWER(trade_name_ar) LIKE $2
       OR LOWER(generic_name) LIKE $2
+      OR LOWER(COALESCE(invoice_display_name, '')) LIKE $2
       OR gtin_barcode = $3
       OR gtin_barcode LIKE $9
     ORDER BY
@@ -2088,11 +2103,16 @@ export async function addNewMedication(db, medData, userRole = 'branch', usernam
     throw new Error(`الصنف مسجل بالفعل بهذا الاسم والشكل الصيدلي: "${checkName.rows[0].trade_name_ar}"`);
   }
 
+  const invoiceDisplayName = String(medData.invoice_display_name || medData.invoiceDisplayName || '').trim() || null;
+  const activeIngredientsList = Array.isArray(medData.active_ingredients_list)
+    ? medData.active_ingredients_list
+    : (Array.isArray(medData.activeIngredients) ? medData.activeIngredients : null);
+
   const newId = `eg-add-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
   const edaRegNo = medData.eda_reg_no || `EDA-ADD-${Date.now().toString().slice(-6)}`;
 
   const normalized = normalizeDrugSearchText(
-    `${nameEn} ${nameAr} ${genericName} ${manufacturer} ${barcode || ''} ${dosageForm}`
+    `${nameEn} ${nameAr} ${genericName} ${invoiceDisplayName || ''} ${manufacturer} ${barcode || ''} ${dosageForm}`
   );
 
   await db.query(`
@@ -2100,14 +2120,15 @@ export async function addNewMedication(db, medData, userRole = 'branch', usernam
       id, eda_reg_no, trade_name_en, trade_name_ar, generic_name, dosage_form,
       strength, pack_size, unit_name, public_price, unit_price, manufacturer,
       category, is_table_drug, is_refrigerated, gtin_barcode, market_status,
-      search_normalized, updated_at, created_at
+      search_normalized, invoice_display_name, active_ingredients_list, updated_at, created_at
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'available', $17, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'available', $17, $18, $19, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
     )
   `, [
     newId, edaRegNo, nameEn, nameAr, genericName, dosageForm,
     medData.strength || '', packSize, unitName, publicPrice, unitPrice,
-    manufacturer, category, isTableDrug, isRefrigerated, barcode, normalized
+    manufacturer, category, isTableDrug, isRefrigerated, barcode, normalized,
+    invoiceDisplayName, activeIngredientsList ? JSON.stringify(activeIngredientsList) : null
   ]);
 
   // توثيق إضافة الصنف في سجل الرقابة
@@ -2118,7 +2139,7 @@ export async function addNewMedication(db, medData, userRole = 'branch', usernam
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
   `, [
     newId, `${nameAr} (${nameEn})`, 0.00, publicPrice, 0.00, unitPrice,
-    `إضافة دواء جديد بواسطة (${userRole === 'owner' ? 'المالك' : 'صيدلي الفرع'})`,
+    `إضافة دواء جديد بواسطة (${userRole === 'owner' ? 'المالك' : userRole === 'procurement_manager' ? 'مدير المشتريات' : 'صيدلي الفرع'})`,
     'NEW-REG', username
   ]);
 
@@ -2140,6 +2161,8 @@ export async function addNewMedication(db, medData, userRole = 'branch', usernam
       is_table_drug: isTableDrug,
       is_refrigerated: isRefrigerated,
       gtin_barcode: barcode,
+      invoice_display_name: invoiceDisplayName,
+      active_ingredients_list: activeIngredientsList || [],
       displayName: `${nameAr} (${nameEn})`
     }
   };
@@ -2163,9 +2186,12 @@ export async function updateMedicationDetails(db, medId, updateData, userRole = 
   const oldPublic = parseFloat(current.public_price || 0);
   const oldUnit = parseFloat(current.unit_price || 0);
 
-  // 🛡️ الضابط الحاسم للصيدلي بالفرع:
+  const isManagerOrOwner = ['owner', 'procurement_manager', 'procurement'].includes(userRole) ||
+    Boolean(updateData.can_edit_items || updateData.canEditItems);
+
+  // 🛡️ الضابط الحاسم للصيدلي بالفرع (بدون صلاحيات مدير):
   // "لا يمكنه التعديل على أي صنف مع إمكانية تعديل السعر فقط إلى سعر أعلى وليس أقل"
-  if (userRole === 'branch') {
+  if (userRole === 'branch' && !isManagerOrOwner) {
     const rawNewPrice = updateData.public_price ?? updateData.newPublicPrice ?? updateData.publicPrice;
     if (rawNewPrice === undefined || rawNewPrice === null) {
       throw new Error('الصيدلي بالفرع مصرح له فقط بتعديل السعر الرسمي عند وصول تشغيلة جديدة بسعر أعلى.');
@@ -2214,7 +2240,7 @@ export async function updateMedicationDetails(db, medId, updateData, userRole = 
     };
   }
 
-  // 👑 صلاحيات المالك / المشرف العام: تعديل كامل الحقول وتعديل السعر بحرية
+  // 👑 صلاحيات المالك / المشرف العام / مدير المشتريات / مسؤول مخول: تعديل كامل الحقول وتعديل السعر بحرية
   const newNameEn = String(updateData.trade_name_en || current.trade_name_en).trim();
   const newNameAr = String(updateData.trade_name_ar || current.trade_name_ar).trim();
   const newPublic = updateData.public_price !== undefined ? parseFloat(updateData.public_price) : oldPublic;
@@ -2228,9 +2254,15 @@ export async function updateMedicationDetails(db, medId, updateData, userRole = 
   const newBarcode = updateData.gtin_barcode !== undefined ? (String(updateData.gtin_barcode).trim() || null) : current.gtin_barcode;
   const isTableDrug = updateData.is_table_drug !== undefined ? Boolean(updateData.is_table_drug) : current.is_table_drug;
   const isRefrigerated = updateData.is_refrigerated !== undefined ? Boolean(updateData.is_refrigerated) : current.is_refrigerated;
+  const invoiceDisplayName = updateData.invoice_display_name !== undefined
+    ? (String(updateData.invoice_display_name).trim() || null)
+    : current.invoice_display_name;
+  const activeIngredientsList = updateData.active_ingredients_list !== undefined
+    ? updateData.active_ingredients_list
+    : current.active_ingredients_list;
 
   const normalized = normalizeDrugSearchText(
-    `${newNameEn} ${newNameAr} ${newGeneric} ${newManufacturer} ${newBarcode || ''} ${newDosage}`
+    `${newNameEn} ${newNameAr} ${newGeneric} ${invoiceDisplayName || ''} ${newManufacturer} ${newBarcode || ''} ${newDosage}`
   );
 
   await db.query(`
@@ -2239,12 +2271,15 @@ export async function updateMedicationDetails(db, medId, updateData, userRole = 
       trade_name_en = $1, trade_name_ar = $2, generic_name = $3, dosage_form = $4,
       pack_size = $5, unit_name = $6, public_price = $7, unit_price = $8,
       manufacturer = $9, category = $10, is_table_drug = $11, is_refrigerated = $12,
-      gtin_barcode = $13, search_normalized = $14, updated_at = CURRENT_TIMESTAMP
-    WHERE id = $15
+      gtin_barcode = $13, search_normalized = $14, invoice_display_name = $15,
+      active_ingredients_list = $16, updated_at = CURRENT_TIMESTAMP
+    WHERE id = $17
   `, [
     newNameEn, newNameAr, newGeneric, newDosage, newPackSize, newUnitName,
     newPublic, newUnitPrice, newManufacturer, newCategory, isTableDrug, isRefrigerated,
-    newBarcode, normalized, medId
+    newBarcode, normalized, invoiceDisplayName,
+    activeIngredientsList ? JSON.stringify(activeIngredientsList) : null,
+    medId
   ]);
 
   if (Math.abs(oldPublic - newPublic) > 0.05) {
@@ -2255,7 +2290,7 @@ export async function updateMedicationDetails(db, medId, updateData, userRole = 
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
     `, [
       medId, `${newNameAr} (${newNameEn})`, oldPublic, newPublic, oldUnit, newUnitPrice,
-      updateData.reason || 'تعديل شامل بواسطة الإدارة العامة', updateData.decreeNumber || null, username
+      updateData.reason || 'تعديل شامل لبيانات الصنف بالكتالوج', updateData.decreeNumber || null, username
     ]);
   }
 
@@ -2263,12 +2298,58 @@ export async function updateMedicationDetails(db, medId, updateData, userRole = 
     success: true,
     message: 'تم تحديث بيانات الصنف بنجاح',
     medicationId: medId,
-    new_public_price: newPublic,
-    new_unit_price: newUnitPrice
+    medication: {
+      id: medId,
+      trade_name_en: newNameEn,
+      trade_name_ar: newNameAr,
+      generic_name: newGeneric,
+      dosage_form: newDosage,
+      pack_size: newPackSize,
+      unit_name: newUnitName,
+      public_price: newPublic,
+      unit_price: newUnitPrice,
+      manufacturer: newManufacturer,
+      category: newCategory,
+      is_table_drug: isTableDrug,
+      is_refrigerated: isRefrigerated,
+      gtin_barcode: newBarcode,
+      invoice_display_name: invoiceDisplayName,
+      active_ingredients_list: activeIngredientsList || []
+    }
   };
 }
 
-// ── 14. كارتة الصنف الشاملة والبدائل وسجل الأسعار (Item Master Card) ────────────
+// ── 14. محرك البحث عن المواد الفعالة المسجلة (Active Ingredients Autocomplete) ──
+export async function searchActiveIngredients(db, queryTerm, limit = 20) {
+  const clean = String(queryTerm || '').trim();
+  if (!clean || clean.length < 2) return [];
+
+  const res = await db.query(`
+    SELECT DISTINCT generic_name
+    FROM public.outstock_medications
+    WHERE generic_name ILIKE $1
+    ORDER BY generic_name ASC
+    LIMIT $2
+  `, [`%${clean}%`, Math.min(50, Math.max(1, limit))]);
+
+  const list = [];
+  res.rows.forEach(r => {
+    if (!r.generic_name) return;
+    const parts = r.generic_name.split('+').map(p => p.trim());
+    parts.forEach(p => {
+      if (p.toLowerCase().includes(clean.toLowerCase()) && !list.includes(p)) {
+        list.push(p);
+      }
+    });
+    if (!list.includes(r.generic_name.trim())) {
+      list.push(r.generic_name.trim());
+    }
+  });
+
+  return list.slice(0, limit);
+}
+
+// ── 15. كارتة الصنف الشاملة والبدائل وسجل الأسعار (Item Master Card) ────────────
 export async function getMedicationMasterCard(db, medId) {
   if (!medId) throw new Error('معرف الدواء مطلوب');
 

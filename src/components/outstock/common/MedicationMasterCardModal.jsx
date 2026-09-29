@@ -16,8 +16,10 @@ import {
   RefreshCw,
   ExternalLink,
   Snowflake,
-  AlertTriangle
+  AlertTriangle,
+  Edit3
 } from 'lucide-react';
+import AddMedicationModal from './AddMedicationModal';
 
 /**
  * MedicationMasterCardModal.jsx
@@ -29,9 +31,11 @@ export default function MedicationMasterCardModal({
   masterCardData,
   isLoading = false,
   onClose,
-  onSelectSubstitute
+  onSelectSubstitute,
+  onMedicationUpdated
 }) {
   const [copiedBarcode, setCopiedBarcode] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   if (!medicationId) return null;
 
@@ -116,27 +120,56 @@ export default function MedicationMasterCardModal({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              background: 'rgba(255, 255, 255, 0.18)',
-              border: 'none',
-              borderRadius: '10px',
-              color: '#ffffff',
-              cursor: 'pointer',
-              padding: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'background 0.2s ease'
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)'; }}
-            title="إغلاق النافذة"
-          >
-            <X size={20} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {med && (
+              <button
+                type="button"
+                onClick={() => setIsEditModalOpen(true)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: 'rgba(255, 255, 255, 0.22)',
+                  border: '1px solid rgba(255, 255, 255, 0.4)',
+                  color: '#ffffff',
+                  borderRadius: '10px',
+                  padding: '7px 14px',
+                  fontSize: '12.5px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.35)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.22)'}
+                title="تعديل بيانات الصنف مباشرة بالكتالوج"
+              >
+                <Edit3 size={15} />
+                <span>تعديل الصنف</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                background: 'rgba(255, 255, 255, 0.18)',
+                border: 'none',
+                borderRadius: '10px',
+                color: '#ffffff',
+                cursor: 'pointer',
+                padding: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'background 0.2s ease'
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)'; }}
+              title="إغلاق النافذة"
+            >
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         {/* ── محتوى الكارتة ── */}
@@ -771,6 +804,38 @@ export default function MedicationMasterCardModal({
           </button>
         </div>
       </div>
+
+      {isEditModalOpen && (
+        <AddMedicationModal
+          isOpen={isEditModalOpen}
+          initialData={{
+            id: med?.id,
+            name: med?.trade_name_ar || med?.trade_name_en,
+            trade_name_ar: med?.trade_name_ar,
+            trade_name_en: med?.trade_name_en,
+            invoice_display_name: med?.invoice_display_name,
+            active_ingredients_list: med?.active_ingredients_list,
+            generic_name: med?.generic_name,
+            dosage_form: med?.dosage_form,
+            strength: med?.strength,
+            pack_size: med?.pack_size,
+            unit_name: med?.unit_name,
+            public_price: med?.current_price || med?.public_price,
+            manufacturer: med?.company_name || med?.manufacturer,
+            category: med?.category,
+            gtin_barcode: med?.barcode,
+            is_table_drug: med?.is_table_drug,
+            is_refrigerated: med?.is_refrigerated
+          }}
+          onClose={() => setIsEditModalOpen(false)}
+          onSaveSuccess={(updatedMed) => {
+            setIsEditModalOpen(false);
+            if (onMedicationUpdated) {
+              onMedicationUpdated(updatedMed);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
