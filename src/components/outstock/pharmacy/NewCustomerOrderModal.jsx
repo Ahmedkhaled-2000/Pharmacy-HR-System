@@ -1399,12 +1399,7 @@ export default function NewCustomerOrderModal({
                           title={it.isPriceEstimated ? 'سعر تقريبي بنطاق من - إلى' : 'السعر معتمد رسمياً من الكتالوج ومحمي من التعديل العشوائي داخل الفرع'}
                         >
                           {it.isPriceEstimated ? (
-                            <div style={{ textAlign: 'center', lineHeight: '1.2' }}>
-                              <span>من {Number(it.priceMin || 0).toFixed(2)} إلى {Number(it.priceMax || it.priceMin || 0).toFixed(2)} ج.م</span>
-                              <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 'bold' }}>
-                                (متوسط: {((Number(it.priceMin || 0) + Number(it.priceMax || it.priceMin || 0)) / 2).toFixed(2)} ج.م)
-                              </div>
-                            </div>
+                            <span>من {Number(it.priceMin || 0).toFixed(2)} إلى {Number(it.priceMax || it.priceMin || 0).toFixed(2)} ج.م</span>
                           ) : Number(it.unitPrice || it.selectedMed?.public_price || 0) > 0 ? (
                             <span>{Number(it.unitPrice || it.selectedMed?.public_price || 0).toFixed(2)} ج.م</span>
                           ) : (
@@ -1428,21 +1423,14 @@ export default function NewCustomerOrderModal({
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontWeight: '900',
-                            fontSize: it.isPriceEstimated ? '11px' : '13px',
+                            fontSize: it.isPriceEstimated ? '11.5px' : '13px',
                             color: '#0f172a',
                             padding: '0 4px'
                           }}
                         >
-                          {it.isPriceEstimated ? (
-                            <div style={{ textAlign: 'center', lineHeight: '1.2' }}>
-                              <span>من ${(Number(it.quantity || 1) * Number(it.priceMin || 0)).toFixed(2)} إلى ${(Number(it.quantity || 1) * Number(it.priceMax || it.priceMin || 0)).toFixed(2)} ج.م</span>
-                              <div style={{ fontSize: '10px', color: '#0f172a', fontWeight: 'bold' }}>
-                                (متوسط: {(Number(it.quantity || 1) * ((Number(it.priceMin || 0) + Number(it.priceMax || it.priceMin || 0)) / 2)).toFixed(2)} ج.م)
-                              </div>
-                            </div>
-                          ) : (
-                            `${((Number(it.quantity) || 1) * Number(it.unitPrice || it.selectedMed?.public_price || 0)).toFixed(2)} ج.م`
-                          )}
+                          {it.isPriceEstimated
+                            ? `من ${(Number(it.quantity || 1) * Number(it.priceMin || 0)).toFixed(2)} إلى ${(Number(it.quantity || 1) * Number(it.priceMax || it.priceMin || 0)).toFixed(2)} ج.م`
+                            : `${((Number(it.quantity) || 1) * Number(it.unitPrice || it.selectedMed?.public_price || 0)).toFixed(2)} ج.م`}
                         </div>
                       </div>
 
@@ -1781,26 +1769,16 @@ export default function NewCustomerOrderModal({
             >
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 14px', textAlign: 'center' }}>
                 <span style={{ fontSize: '11px', color: '#64748b', display: 'block', fontWeight: '600' }}>إجمالي الأصناف</span>
-                <strong className="tabular-nums" style={{ fontSize: '14px', color: '#1e293b', fontFamily: 'var(--outstock-font-mono)' }}>
+                <strong className="tabular-nums" style={{ fontSize: '14.5px', color: '#1e293b', fontFamily: 'var(--outstock-font-mono)' }}>
                   {hasEstimatedItems ? `من ${totalMin.toFixed(2)} إلى ${totalMax.toFixed(2)} ج.م` : `${totalMin.toFixed(2)} ج.م`}
                 </strong>
-                {hasEstimatedItems && (
-                  <span style={{ display: 'block', fontSize: '11px', color: '#b45309', fontWeight: 'bold', marginTop: '2px' }}>
-                    متوسط: {((totalMin + totalMax) / 2).toFixed(2)} ج.م
-                  </span>
-                )}
               </div>
 
               <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 14px', textAlign: 'center' }}>
                 <span style={{ fontSize: '11px', color: '#64748b', display: 'block', fontWeight: '600' }}>الصافي بعد الخصم</span>
-                <strong className="tabular-nums" style={{ fontSize: '14px', color: '#059669', fontFamily: 'var(--outstock-font-mono)' }}>
+                <strong className="tabular-nums" style={{ fontSize: '14.5px', color: '#059669', fontFamily: 'var(--outstock-font-mono)' }}>
                   {hasEstimatedItems ? `من ${netMin.toFixed(2)} إلى ${netMax.toFixed(2)} ج.م` : `${netMin.toFixed(2)} ج.م`}
                 </strong>
-                {hasEstimatedItems && (
-                  <span style={{ display: 'block', fontSize: '11px', color: '#047857', fontWeight: 'bold', marginTop: '2px' }}>
-                    متوسط: {((netMin + netMax) / 2).toFixed(2)} ج.م
-                  </span>
-                )}
               </div>
 
               <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '10px', padding: '10px 14px', textAlign: 'center' }}>
@@ -1810,14 +1788,9 @@ export default function NewCustomerOrderModal({
 
               <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '10px 14px', textAlign: 'center' }}>
                 <span style={{ fontSize: '11px', color: '#b91c1c', display: 'block', fontWeight: '600' }}>المتبقي عند الاستلام</span>
-                <strong className="tabular-nums" style={{ fontSize: '14px', color: '#dc2626', fontFamily: 'var(--outstock-font-mono)' }}>
+                <strong className="tabular-nums" style={{ fontSize: '14.5px', color: '#dc2626', fontFamily: 'var(--outstock-font-mono)' }}>
                   {hasEstimatedItems ? `من ${remainingMin.toFixed(2)} إلى ${remainingMax.toFixed(2)} ج.م` : `${remainingMin.toFixed(2)} ج.م`}
                 </strong>
-                {hasEstimatedItems && (
-                  <span style={{ display: 'block', fontSize: '11px', color: '#b91c1c', fontWeight: 'bold', marginTop: '2px' }}>
-                    متوسط: {((remainingMin + remainingMax) / 2).toFixed(2)} ج.م
-                  </span>
-                )}
               </div>
             </div>
           </div>

@@ -377,7 +377,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                             </span>
                             {isEst && (
                               <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', borderRadius: '4px', padding: '1px 5px', fontSize: '10.5px', fontWeight: 'bold' }}>
-                                ⚡ متوسط: {avgP.toFixed(2)} ج.م
+                                ({pMin.toFixed(0)} - {pMax.toFixed(0)} ج.م)
                               </span>
                             )}
                             {item.itemStatus === 'available_by_procurement' ? (
@@ -441,29 +441,23 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
 
                         const dVal = parseFloat(order.discount_value || order.discountValue || 0);
                         const isPct = (order.discount_type || order.discountType) === 'percentage';
-                        const dAvg = isPct ? (tAvg * dVal) / 100 : (dVal > 0 ? dVal : 0);
-                        const netAvg = Math.max(0, tAvg - dAvg);
                         const paid = parseFloat(order.paid_amount || order.paidAmount || 0);
-                        const rAvg = Math.max(0, netAvg - paid);
+                        const rMin = Math.max(0, tMin - (isPct ? (tMin * dVal) / 100 : dVal) - paid);
+                        const rMax = Math.max(0, tMax - (isPct ? (tMax * dVal) / 100 : dVal) - paid);
 
                         return (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                             <div>
                               الإجمالي: <strong>
-                                {hasEst ? `متوسط ${tAvg.toFixed(2)} ج.م` : `${parseFloat(order.total_amount || order.totalAmount || tAvg || 0).toFixed(2)} ج.م`}
+                                {hasEst ? `من ${tMin.toFixed(2)} إلى ${tMax.toFixed(2)} ج.م` : `${parseFloat(order.total_amount || order.totalAmount || tAvg || 0).toFixed(2)} ج.م`}
                               </strong>
-                              {hasEst && (
-                                <small style={{ color: '#b45309', marginRight: '4px', fontSize: '11px' }}>
-                                  ({tMin.toFixed(0)} - {tMax.toFixed(0)})
-                                </small>
-                              )}
                             </div>
                             <div>
                               المدفوع: <strong style={{ color: '#059669' }}>{paid.toFixed(2)} ج.م</strong>
                             </div>
                             <div style={{ fontSize: '14px' }}>
                               المتبقي: <strong style={{ color: '#dc2626' }}>
-                                {hasEst ? `متوسط ${rAvg.toFixed(2)} ج.م` : `${parseFloat(order.remaining_amount || order.remainingAmount || rAvg || 0).toFixed(2)} ج.م`}
+                                {hasEst ? `من ${rMin.toFixed(2)} إلى ${rMax.toFixed(2)} ج.م` : `${parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2)} ج.م`}
                               </strong>
                             </div>
                           </div>
@@ -472,7 +466,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                       {order.expected_pickup_date && (
                         <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
                           <Calendar size={13} />
-                          <span>الاستلام: {order.expected_pickup_date || order.expectedPickupDate}</span>
+                          <span>الاستلام: {String(order.expected_pickup_date || order.expectedPickupDate).split('T')[0]}</span>
                         </div>
                       )}
                     </div>

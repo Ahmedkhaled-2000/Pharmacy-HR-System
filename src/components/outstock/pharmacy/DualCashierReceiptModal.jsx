@@ -653,35 +653,17 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                           <strong>{item.medicationName || item.medication_name}</strong>
                           {isEstimated ? (
                             <small style={{ display: 'block', color: '#b45309', fontSize: '9.5px', marginTop: '1px' }}>
-                              ⚡ سعر تقريبي (متوسط: {avgPrice.toFixed(2)} ج.م)
+                              (سعر تقديري)
                             </small>
                           ) : null}
                         </td>
                         <td>{item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة'}</td>
                         <td>{qty}</td>
                         <td style={{ fontSize: isEstimated ? '10px' : undefined, fontWeight: isEstimated ? 'bold' : undefined }}>
-                          {isEstimated ? (
-                            <div>
-                              <div>متوسط {avgPrice.toFixed(2)}</div>
-                              <small style={{ display: 'block', color: '#b45309', fontSize: '8.5px', lineHeight: 1.1 }}>
-                                ({priceMin.toFixed(2)} - {priceMax.toFixed(2)})
-                              </small>
-                            </div>
-                          ) : (
-                            unitPrice.toFixed(2)
-                          )}
+                          {isEstimated ? `من ${priceMin.toFixed(2)} إلى ${priceMax.toFixed(2)}` : unitPrice.toFixed(2)}
                         </td>
                         <td style={{ fontSize: isEstimated ? '10px' : undefined, fontWeight: 'bold', color: isEstimated ? '#b45309' : undefined }}>
-                          {isEstimated ? (
-                            <div>
-                              <div>متوسط {total.toFixed(2)}</div>
-                              <small style={{ display: 'block', color: '#b45309', fontSize: '8.5px', lineHeight: 1.1 }}>
-                                ({(priceMin * qty).toFixed(2)} - {(priceMax * qty).toFixed(2)})
-                              </small>
-                            </div>
-                          ) : (
-                            total.toFixed(2)
-                          )}
+                          {isEstimated ? `من ${(priceMin * qty).toFixed(2)} إلى ${(priceMax * qty).toFixed(2)}` : total.toFixed(2)}
                         </td>
                       </tr>
                     );
@@ -750,12 +732,9 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                         <span>إجمالي الأصناف:</span>
                         <span>
                           {hasEstimated ? (
-                            <span style={{ textAlign: 'left', display: 'inline-block' }}>
-                              <strong>متوسط: {totalAvg.toFixed(2)} ج.م</strong>
-                              <small style={{ display: 'block', fontSize: '9px', color: '#b45309' }}>
-                                (من {totalMin.toFixed(2)} إلى {totalMax.toFixed(2)} ج.م)
-                              </small>
-                            </span>
+                            <strong style={{ color: '#b45309' }}>
+                              من {totalMin.toFixed(2)} إلى {totalMax.toFixed(2)} ج.م
+                            </strong>
                           ) : (
                             `${parseFloat(order.total_amount || order.totalAmount || totalAvg || 0).toFixed(2)} ج.م`
                           )}
@@ -771,12 +750,9 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                         <span>الصافي المطلوب:</span>
                         <span>
                           {hasEstimated ? (
-                            <span style={{ textAlign: 'left', display: 'inline-block' }}>
-                              <strong>متوسط: {netAvg.toFixed(2)} ج.م</strong>
-                              <small style={{ display: 'block', fontSize: '9px', color: '#0f766e' }}>
-                                (من {netMin.toFixed(2)} إلى {netMax.toFixed(2)} ج.م)
-                              </small>
-                            </span>
+                            <strong style={{ color: '#0f766e' }}>
+                              من {netMin.toFixed(2)} إلى {netMax.toFixed(2)} ج.م
+                            </strong>
                           ) : (
                             `${parseFloat(order.net_amount || order.netAmount || netAvg || 0).toFixed(2)} ج.م`
                           )}
@@ -790,12 +766,9 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                         <span>المتبقي عند الاستلام:</span>
                         <span>
                           {hasEstimated ? (
-                            <span style={{ textAlign: 'left', display: 'inline-block' }}>
-                              <strong>متوسط: {remAvg.toFixed(2)} ج.م</strong>
-                              <small style={{ display: 'block', fontSize: '9px', color: '#b91c1c' }}>
-                                (من {remMin.toFixed(2)} إلى {remMax.toFixed(2)} ج.م)
-                              </small>
-                            </span>
+                            <strong style={{ color: '#b91c1c' }}>
+                              من {remMin.toFixed(2)} إلى {remMax.toFixed(2)} ج.م
+                            </strong>
                           ) : (
                             `${parseFloat(order.remaining_amount || order.remainingAmount || remAvg || 0).toFixed(2)} ج.م`
                           )}
@@ -808,7 +781,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
 
               {order.expected_pickup_date || order.expectedPickupDate ? (
                 <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', fontSize: '11px', margin: '6px 0', border: '1px solid #e2e8f0' }}>
-                  📅 موعد الاستلام المتوقع: <strong>{order.expected_pickup_date || order.expectedPickupDate}</strong> {order.expected_pickup_time || order.expectedPickupTime ? ('(' + (order.expected_pickup_time || order.expectedPickupTime) + ')') : ''}
+                  📅 موعد الاستلام المتوقع: <strong>{String(order.expected_pickup_date || order.expectedPickupDate).split('T')[0]}</strong> {order.expected_pickup_time || order.expectedPickupTime ? ('(' + (order.expected_pickup_time || order.expectedPickupTime) + ')') : ''}
                 </div>
               ) : null}
 
@@ -890,7 +863,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                     const rAvg = Math.max(0, tAvg - dAvg - paid);
 
                     if (hasEst) {
-                      return `متوسط ${rAvg.toFixed(2)} ج.م (من ${rMin.toFixed(2)} إلى ${rMax.toFixed(2)})`;
+                      return `من ${rMin.toFixed(2)} إلى ${rMax.toFixed(2)} ج.م`;
                     }
                     return `${parseFloat(order.remaining_amount || order.remainingAmount || rAvg || 0).toFixed(2)} ج.م`;
                   })()}
@@ -917,7 +890,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                           <strong>{item.medicationName || item.medication_name}</strong>
                           {isEstimated ? (
                             <small style={{ display: 'block', color: '#b45309', fontSize: '9px' }}>
-                              ⚡ سعر تقريبي: متوسط {avgPrice.toFixed(2)} ج.م (من {priceMin.toFixed(2)} إلى {priceMax.toFixed(2)})
+                              (سعر تقديري: من ${priceMin.toFixed(2)} إلى ${priceMax.toFixed(2)} ج.م)
                             </small>
                           ) : null}
                         </td>

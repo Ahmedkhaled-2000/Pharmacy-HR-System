@@ -424,11 +424,11 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, 
           const unit = (item.unitType || item.unit_type) === 'strip' ? 'شريط' : 'علبة';
 
           const priceDisplay = isEstimated
-            ? `<div style="text-align:right;"><strong>متوسط: ${avgPrice.toFixed(2)} ج.م</strong><div style="font-size:10px; color:#b45309;">(من ${pMin.toFixed(2)} إلى ${pMax.toFixed(2)} ج.م)</div></div>`
+            ? `من ${pMin.toFixed(2)} إلى ${pMax.toFixed(2)} ج.م`
             : `<strong>${unitPrice.toFixed(2)} ج.م</strong>`;
 
           const totalDisplay = isEstimated
-            ? `<div style="text-align:right;"><strong>متوسط: ${total.toFixed(2)} ج.م</strong><div style="font-size:10px; color:#b45309;">(من ${(pMin * qty).toFixed(2)} إلى ${(pMax * qty).toFixed(2)} ج.م)</div></div>`
+            ? `من ${(pMin * qty).toFixed(2)} إلى ${(pMax * qty).toFixed(2)} ج.م`
             : `<strong>${total.toFixed(2)} ج.م</strong>`;
 
           return `
@@ -436,12 +436,12 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, 
               <td style="text-align: center;">${idx + 1}</td>
               <td>
                 <strong>${item.medicationName || item.medication_name}</strong>
-                ${isEstimated ? `<br><small style="color:#b45309; font-weight:700;">⚡ سعر تقريبي (متوسط: ${avgPrice.toFixed(2)} ج.م)</small>` : ''}
+                ${isEstimated ? `<br><small style="color:#b45309; font-weight:700;">(سعر تقديري غير مؤكد)</small>` : ''}
               </td>
               <td>${unit}</td>
               <td style="text-align: center;"><strong>${qty}</strong></td>
-              <td style="font-size: 12px;">${priceDisplay}</td>
-              <td style="font-size: 12px; color: ${isEstimated ? '#b45309' : '#0f172a'};">${totalDisplay}</td>
+              <td style="font-size: ${isEstimated ? '11px' : '12px'};">${priceDisplay}</td>
+              <td style="font-size: ${isEstimated ? '11px' : '12px'}; font-weight: bold; color: ${isEstimated ? '#b45309' : '#0f172a'};">${totalDisplay}</td>
             </tr>
           `;
         }).join('')}
@@ -504,15 +504,15 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, 
           const remAvg = Math.max(0, netAvg - paidNum);
 
           const totDisplay = hasEstimated
-            ? `<div style="text-align:left;"><strong>متوسط: ${totalAvg.toFixed(2)} ج.م</strong><small style="display:block; font-size:10px; color:#b45309;">(من ${totalMin.toFixed(2)} إلى ${totalMax.toFixed(2)} ج.م)</small></div>`
+            ? `<strong style="color:#b45309;">من ${totalMin.toFixed(2)} إلى ${totalMax.toFixed(2)} ج.م</strong>`
             : `${totalAmount} ج.م`;
 
           const netDisplay = hasEstimated
-            ? `<div style="text-align:left;"><strong>متوسط: ${netAvg.toFixed(2)} ج.م</strong><small style="display:block; font-size:10px; color:#0f766e;">(من ${netMin.toFixed(2)} إلى ${netMax.toFixed(2)} ج.م)</small></div>`
+            ? `<strong style="color:#0f766e;">من ${netMin.toFixed(2)} إلى ${netMax.toFixed(2)} ج.م</strong>`
             : `${netAmount} ج.م`;
 
           const remDisplay = hasEstimated
-            ? `<div style="text-align:left;"><strong>متوسط: ${remAvg.toFixed(2)} ج.م</strong><small style="display:block; font-size:10.5px; color:#b91c1c;">(من ${remMin.toFixed(2)} إلى ${remMax.toFixed(2)} ج.م)</small></div>`
+            ? `<strong style="color:#b91c1c;">من ${remMin.toFixed(2)} إلى ${remMax.toFixed(2)} ج.م</strong>`
             : `${remainingAmount} ج.م`;
 
           return `
@@ -545,7 +545,7 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, 
 
     ${pickupDate ? `
       <div class="pickup-highlight">
-        📅 موعد الاستلام المتوقع بالصيدلية: <strong>${pickupDate}</strong> ${pickupTime ? `(الساعة: ${pickupTime})` : ''}
+        📅 موعد الاستلام المتوقع بالصيدلية: <strong>${String(pickupDate).split('T')[0]}</strong> ${pickupTime ? `(الساعة: ${pickupTime})` : ''}
       </div>
     ` : ''}
 
@@ -617,10 +617,11 @@ export async function sendInvoicePdfViaWhatsApp({ order, branch, waServerUrl, cu
   const remMax = Math.max(0, totalMax - (isPercent ? (totalMax * discVal) / 100 : discVal) - paid);
 
   const remaining = hasEstimated
-    ? `متوسط ${remAvg.toFixed(2)} ج.م (من ${remMin.toFixed(2)} إلى ${remMax.toFixed(2)} ج.م تقريبي)`
+    ? `من ${remMin.toFixed(2)} إلى ${remMax.toFixed(2)} ج.م`
     : `${parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2)} ج.م`;
 
-  const pickupDate = order.expected_pickup_date || order.expectedPickupDate || '';
+  const rawDate = order.expected_pickup_date || order.expectedPickupDate || '';
+  const pickupDate = rawDate ? String(rawDate).split('T')[0] : '';
   const targetSessionId = sessionId || (branch?.id ? `branch_${branch.id}` : (order?.branch_id ? `branch_${order.branch_id}` : 'hr_main'));
 
   const caption = customMessage || `السلام عليكم ورحمة الله وبركاته،\nأهلاً بك أ/ *${cName}* 🌸\n\nمرفق لسيادتكم الفاتورة الرسمية / إيصال حجز وتوفير الدواء الخاص بكم من *${bName}* كملف PDF معتمد.\n\n📋 رقم الإيصال: *#${orderNo}*\n💵 المبلغ المتبقي عند الاستلام: *${remaining}*${pickupDate ? `\n📅 موعد الاستلام المتوقع: *${pickupDate}*` : ''}\n\nنسعد دائماً بخدمتكم وتوفير كافة احتياجاتكم الطبية ✨`;
