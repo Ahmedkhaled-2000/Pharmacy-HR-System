@@ -444,6 +444,8 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   const [isParsingExcel, setIsParsingExcel] = useState(false);
   const [isSavingInvoice, setIsSavingInvoice] = useState(false);
 
+  const medicationInputRef = useRef(null);
+
   // صنف مؤقت للإدخال اليدوي
   const [manualItem, setManualItem] = useState({
     medication_name: '',
@@ -480,6 +482,33 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       loadInvoices();
     }
   }, [activeSubTab, loadInvoices]);
+
+  const handleCloseInvoiceModal = () => {
+    setInvoiceForm({
+      supplier_id: '',
+      invoice_number: `INV-${Date.now().toString().slice(-6)}`,
+      invoice_date: new Date().toISOString().slice(0, 10),
+      payment_terms: 'credit',
+      due_date: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+      discount_amount: '0',
+      tax_amount: '0',
+      paid_amount: '0',
+      notes: '',
+      items: []
+    });
+    setManualItem({
+      medication_name: '',
+      barcode: '',
+      pack_size: 1,
+      quantity: 1,
+      public_price: '',
+      discount_percent: '',
+      buy_price: ''
+    });
+    setAttachedFile(null);
+    setAttachedFileBase64('');
+    setIsInvoiceModalOpen(false);
+  };
 
   const handleOpenAddInvoice = () => {
     const defaultSup = suppliers[0] || null;
@@ -597,7 +626,8 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   // إضافة صنف يدوي
   const handleAddManualItem = () => {
     if (!manualItem.medication_name?.trim()) {
-      showToast?.('يرجى كتابة اسم الصنف');
+      showToastRef.current?.('يرجى كتابة اسم الصنف');
+      medicationInputRef.current?.focus();
       return;
     }
     const qty = Number(manualItem.quantity) || 1;
@@ -607,7 +637,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
     if (!buy && pub > 0) {
       buy = pub * (1 - disc / 100);
     }
-    const tot = qty * buy;
+    const tot = qty * (buy || 0);
 
     const newItem = {
       id: `manual_${Date.now()}`,
@@ -617,7 +647,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       quantity: qty,
       public_price: pub,
       discount_percent: disc,
-      buy_price: parseFloat(buy.toFixed(2)),
+      buy_price: parseFloat((buy || 0).toFixed(2)),
       total_price: parseFloat(tot.toFixed(2))
     };
 
@@ -635,6 +665,10 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       discount_percent: '',
       buy_price: ''
     });
+
+    setTimeout(() => {
+      medicationInputRef.current?.focus();
+    }, 50);
   };
 
   const handleRemoveInvoiceItem = (id) => {
@@ -714,8 +748,8 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
 
       const res = await outstockSaveSupplierInvoice(payload);
       if (res?.success) {
-        showToast?.('تم تسجيل الفاتورة وأرشفتها بنجاح');
-        setIsInvoiceModalOpen(false);
+        showToastRef.current?.('تم تسجيل الفاتورة وأرشفتها بنجاح');
+        handleCloseInvoiceModal();
         loadInvoices();
         loadSuppliers();
       } else {
@@ -752,11 +786,14 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   const [extraWithdrawals, setExtraWithdrawals] = useState([]);
   const [isLoadingBranchWithdrawals, setIsLoadingBranchWithdrawals] = useState(false);
   const [isExtraWithdrawalModalOpen, setIsExtraWithdrawalModalOpen] = useState(false);
+  const [isBranchHistoryModalOpen, setIsBranchHistoryModalOpen] = useState(false);
+  const [selectedBranchForHistory, setSelectedBranchForHistory] = useState(null);
   const [branchesList, setBranchesList] = useState([]);
 
   const [extraForm, setExtraForm] = useState({
     branch_id: '',
     amount: '',
+    items_count: '1',
     withdrawal_date: new Date().toISOString().slice(0, 10),
     notes: ''
   });
@@ -767,7 +804,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       const res = await outstockGetBranchWithdrawals({ monthPeriod: selectedMonth });
       if (res?.success) {
         setBranchWithdrawalsData(res.branchesSummary || []);
-        setExtraWithdrawals(res.extraWithdrawals || []);
+        setExtraWithdrawals(res.withdrawals || res.extraWithdrawals || []);
       }
     } catch (err) {
       console.error(err);
@@ -799,20 +836,23 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       showToastRef.current?.('يرجى إدخال مبلغ مسحوبات صحيح أكبر من صفر');
       return;
     }
+    const itemsCount = parseInt(extraForm.items_count || 1);
 
     try {
       const res = await outstockSaveBranchWithdrawal({
         branch_id: extraForm.branch_id,
         amount: numAmount,
+        items_count: itemsCount,
         withdrawal_date: extraForm.withdrawal_date,
         notes: extraForm.notes
       });
       if (res?.success) {
-        showToastRef.current?.('تم تسجيل إجمالي مسحوبات الفرع بنجاح');
+        showToastRef.current?.('تم تسجيل مسحوبات الفرع بنجاح');
         setIsExtraWithdrawalModalOpen(false);
         setExtraForm({
           branch_id: '',
           amount: '',
+          items_count: '1',
           withdrawal_date: new Date().toISOString().slice(0, 10),
           notes: ''
         });
@@ -1604,16 +1644,17 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                     <th style={{ padding: '12px 14px' }}>إجمالي قيمة المسحوبات (ج.م)</th>
                     <th style={{ padding: '12px 14px' }}>نسبة مسحوبات الفرع</th>
                     <th style={{ padding: '12px 14px' }}>آخر عملية توريد</th>
+                    <th style={{ padding: '12px 14px', textAlign: 'center' }}>سجل المسحوبات</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(() => {
                     const totalNetworkCost = branchWithdrawalsData.reduce(
-                      (acc, b) => acc + Number(b.total_cost || b.totalAmount || 0),
+                      (acc, b) => acc + Number(b.total_amount || b.total_cost || b.totalAmount || 0),
                       0
                     );
                     return branchWithdrawalsData.map((b, idx) => {
-                      const cost = Number(b.total_cost || b.totalAmount || 0);
+                      const cost = Number(b.total_amount || b.total_cost || b.totalAmount || 0);
                       const percent = totalNetworkCost > 0 ? ((cost / totalNetworkCost) * 100).toFixed(1) : 0;
                       return (
                         <tr
@@ -1626,9 +1667,9 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                           <td style={{ padding: '12px 14px', fontWeight: 'bold', color: '#0f172a' }}>
                             {b.branch_name || b.name || `فرع ${b.branch_id}`}
                           </td>
-                          <td style={{ padding: '12px 14px' }}>{b.items_count || b.distinctItems || 0} صنف</td>
+                          <td style={{ padding: '12px 14px' }}>{b.items_count || b.itemsCount || b.distinctItems || 0} صنف</td>
                           <td style={{ padding: '12px 14px', fontWeight: 'bold' }}>
-                            {b.total_quantity || b.itemsCount || 0} وحدة
+                            {b.total_quantity || b.items_count || b.itemsCount || 0} وحدة
                           </td>
                           <td style={{ padding: '12px 14px', fontWeight: 'bold', color: '#0f766e' }}>
                             {cost.toLocaleString('ar-EG')} ج.م
@@ -1659,6 +1700,31 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                             {b.last_withdrawal_date
                               ? new Date(b.last_withdrawal_date).toLocaleDateString('ar-EG')
                               : '-'}
+                          </td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedBranchForHistory(b);
+                                setIsBranchHistoryModalOpen(true);
+                              }}
+                              className="outstock-btn"
+                              style={{
+                                padding: '4px 10px',
+                                fontSize: '12px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                border: '1px solid #bfdbfe',
+                                borderRadius: '6px'
+                              }}
+                              title="عرض سجل مسحوبات هذا الفرع"
+                            >
+                              <FileText size={14} />
+                              <span>سجل المسحوبات</span>
+                            </button>
                           </td>
                         </tr>
                       );
@@ -2260,7 +2326,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
               <button
                 type="button"
                 className="outstock-btn-close"
-                onClick={() => setIsInvoiceModalOpen(false)}
+                onClick={handleCloseInvoiceModal}
               >
                 <X size={18} />
               </button>
@@ -2411,15 +2477,30 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                 <div>
                   <label className="outstock-form-label" style={{ fontSize: '11px' }}>اسم الصنف / الدواء</label>
                   <MedicationAutocompleteInput
+                    inputRef={medicationInputRef}
                     value={manualItem.medication_name}
                     onChange={(val) => setManualItem((prev) => ({ ...prev, medication_name: val }))}
-                    onSelect={(med) => {
+                    onTextChange={(val) => setManualItem((prev) => ({ ...prev, medication_name: val }))}
+                    onMedicationSelect={(displayName, med) => {
                       const pub = Number(med.price || med.public_price || 0);
                       const disc = Number(manualItem.discount_percent || 0);
                       const buy = pub > 0 && disc > 0 ? parseFloat((pub * (1 - disc / 100)).toFixed(2)) : (pub || manualItem.buy_price);
                       setManualItem((prev) => ({
                         ...prev,
-                        medication_name: med.name || med.arabic_name,
+                        medication_name: displayName || med.name || med.arabic_name,
+                        public_price: pub || '',
+                        buy_price: buy || '',
+                        barcode: med.barcode || '',
+                        pack_size: Number(med.pack_size) || 1
+                      }));
+                    }}
+                    onSelect={(med, displayName) => {
+                      const pub = Number(med.price || med.public_price || 0);
+                      const disc = Number(manualItem.discount_percent || 0);
+                      const buy = pub > 0 && disc > 0 ? parseFloat((pub * (1 - disc / 100)).toFixed(2)) : (pub || manualItem.buy_price);
+                      setManualItem((prev) => ({
+                        ...prev,
+                        medication_name: displayName || med.name || med.arabic_name,
                         public_price: pub || '',
                         buy_price: buy || '',
                         barcode: med.barcode || '',
@@ -2614,7 +2695,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                 <button
                   type="button"
                   className="outstock-btn outstock-btn-secondary"
-                  onClick={() => setIsInvoiceModalOpen(false)}
+                  onClick={handleCloseInvoiceModal}
                 >
                   إلغاء
                 </button>
@@ -2797,6 +2878,18 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
               </div>
 
               <div style={{ marginBottom: '14px' }}>
+                <label className="outstock-form-label">عدد الأصناف المسحوبة</label>
+                <input
+                  type="number"
+                  min="1"
+                  className="outstock-form-input"
+                  placeholder="1"
+                  value={extraForm.items_count}
+                  onChange={(e) => setExtraForm({ ...extraForm, items_count: e.target.value })}
+                />
+              </div>
+
+              <div style={{ marginBottom: '14px' }}>
                 <label className="outstock-form-label">تاريخ المسحوب *</label>
                 <input
                   type="date"
@@ -2831,6 +2924,105 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════════
+          نافذة سجل مسحوبات الفرع
+      ══════════════════════════════════════════════════════════════════════════ */}
+      {isBranchHistoryModalOpen && selectedBranchForHistory && (
+        <div className="outstock-modal-overlay">
+          <div className="outstock-modal-card" style={{ maxWidth: '750px', width: '95%' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                borderBottom: '1px solid #e2e8f0',
+                paddingBottom: '12px',
+                marginBottom: '16px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Building2 size={20} style={{ color: '#0d9488' }} />
+                <h3 style={{ margin: 0, fontSize: '17px', color: '#0f172a' }}>
+                  سجل مسحوبات: {selectedBranchForHistory.branch_name || selectedBranchForHistory.name || `فرع ${selectedBranchForHistory.branch_id}`}
+                </h3>
+              </div>
+              <button
+                type="button"
+                className="outstock-btn-close"
+                onClick={() => {
+                  setIsBranchHistoryModalOpen(false);
+                  setSelectedBranchForHistory(null);
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ maxHeight: '420px', overflowY: 'auto' }}>
+              {(() => {
+                const branchHistory = extraWithdrawals.filter(
+                  (w) => String(w.branch_id) === String(selectedBranchForHistory.branch_id || selectedBranchForHistory.id)
+                );
+                if (branchHistory.length === 0) {
+                  return (
+                    <div style={{ textAlign: 'center', padding: '35px', color: '#64748b' }}>
+                      لا توجد مسحوبات مسجلة لهذا الفرع في هذا الشهر
+                    </div>
+                  );
+                }
+                return (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
+                        <th style={{ padding: '10px 12px' }}>التاريخ</th>
+                        <th style={{ padding: '10px 12px' }}>المبلغ</th>
+                        <th style={{ padding: '10px 12px' }}>عدد الأصناف</th>
+                        <th style={{ padding: '10px 12px' }}>ملاحظات / السبب</th>
+                        <th style={{ padding: '10px 12px' }}>المسؤول</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {branchHistory.map((item, i) => (
+                        <tr key={item.id || i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '10px 12px', fontWeight: 'bold' }}>
+                            {item.withdrawal_date ? new Date(item.withdrawal_date).toLocaleDateString('ar-EG') : '-'}
+                          </td>
+                          <td style={{ padding: '10px 12px', color: '#0f766e', fontWeight: 'bold' }}>
+                            {Number(item.amount || 0).toLocaleString('ar-EG')} ج.م
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>
+                            {item.items_count || 1} صنف
+                          </td>
+                          <td style={{ padding: '10px 12px', color: '#475569' }}>
+                            {item.notes || '-'}
+                          </td>
+                          <td style={{ padding: '10px 12px', color: '#64748b', fontSize: '12px' }}>
+                            {item.created_by_name || '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid #e2e8f0' }}>
+              <button
+                type="button"
+                className="outstock-btn outstock-btn-secondary"
+                onClick={() => {
+                  setIsBranchHistoryModalOpen(false);
+                  setSelectedBranchForHistory(null);
+                }}
+              >
+                إغلاق
+              </button>
+            </div>
           </div>
         </div>
       )}

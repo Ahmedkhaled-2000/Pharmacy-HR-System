@@ -406,7 +406,9 @@ export default function MedicationAutocompleteInput({
   unitType = 'pack',
   selectedMed = null,
   onMedicationSelect,
+  onSelect,
   onTextChange,
+  onChange,
   placeholder = 'اسم الدواء أو التركيز (مثل: أوجمنتين 1 جم)...',
   required = true,
   disabled = false,
@@ -510,6 +512,7 @@ export default function MedicationAutocompleteInput({
     const text = e.target.value;
     setInputValue(text);
     if (onTextChange) onTextChange(text);
+    if (onChange) onChange(text);
 
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -554,13 +557,22 @@ export default function MedicationAutocompleteInput({
 
   // اختيار صنف من القائمة
   const handleSelectMedication = (med) => {
-    const finalDisplayName = med.displayName || `${med.trade_name_ar} (${med.trade_name_en})`;
+    const finalDisplayName = med.displayName || `${med.trade_name_ar || ''} (${med.trade_name_en || ''})`.trim() || med.name || '';
     setInputValue(finalDisplayName);
     setIsOpen(false);
     setSuggestions([]);
 
     if (onMedicationSelect) {
       onMedicationSelect(finalDisplayName, med);
+    }
+    if (onSelect) {
+      onSelect(med, finalDisplayName);
+    }
+    if (onTextChange) {
+      onTextChange(finalDisplayName);
+    }
+    if (onChange) {
+      onChange(finalDisplayName);
     }
   };
 

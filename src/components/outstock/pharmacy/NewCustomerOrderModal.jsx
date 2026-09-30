@@ -30,7 +30,8 @@ import {
   CreditCard,
   Wallet,
   Coins,
-  Tag
+  Tag,
+  Link as LinkIcon
 } from 'lucide-react';
 import {
   outstockGetCustomers,
@@ -118,6 +119,9 @@ export default function NewCustomerOrderModal({
   const [medicationImageUrl, setMedicationImageUrl] = useState('');
   const [medicationImageName, setMedicationImageName] = useState('');
   const [isPreviewImageOpen, setIsPreviewImageOpen] = useState(false);
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const [showImageUrlInput, setShowImageUrlInput] = useState(false);
+  const [directImageUrl, setDirectImageUrl] = useState('');
   const fileInputRef = useRef(null);
 
   // ── 4. بنود الأدوية (العلبة كاملة فقط 📦 - مع دعم السعر التقديري من-إلى) ──
@@ -349,9 +353,8 @@ export default function NewCustomerOrderModal({
     });
   };
 
-  // رفع صورة الدواء / الروشتة
-  const handleImageChange = (e) => {
-    const file = e.target.files?.[0];
+  // معالجة ملف الصورة (من الرفع أو الإفلات أو اللصق)
+  const handleProcessImageFile = (file) => {
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
       setErrorMsg('حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 5 ميجابايت');
@@ -360,13 +363,50 @@ export default function NewCustomerOrderModal({
     const reader = new FileReader();
     reader.onload = (event) => {
       setMedicationImageUrl(event.target.result);
-      setMedicationImageName(file.name);
+      setMedicationImageName(file.name || 'prescription_image.png');
+      setErrorMsg('');
     };
     reader.onerror = () => {
       setErrorMsg('تعذر قراءة ملف الصورة');
     };
     reader.readAsDataURL(file);
   };
+
+  // رفع صورة الدواء / الروشتة عبر مربع الاختيار
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) handleProcessImageFile(file);
+  };
+
+  // تطبيق رابط صورة مباشر
+  const handleApplyDirectImageUrl = () => {
+    if (!directImageUrl || !directImageUrl.trim()) return;
+    setMedicationImageUrl(directImageUrl.trim());
+    setMedicationImageName('رابط صورة مباشر');
+    setShowImageUrlInput(false);
+    setDirectImageUrl('');
+    setErrorMsg('');
+  };
+
+  // دعم لصق الصورة مباشرة من الحافظة (Ctrl+V)
+  useEffect(() => {
+    const handlePaste = (e) => {
+      const clipboardItems = e.clipboardData?.items;
+      if (!clipboardItems) return;
+      for (let i = 0; i < clipboardItems.length; i++) {
+        if (clipboardItems[i].type.indexOf('image') !== -1) {
+          const file = clipboardItems[i].getAsFile();
+          if (file) {
+            handleProcessImageFile(file);
+            e.preventDefault();
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, []);
 
   const handleRemoveImage = () => {
     setMedicationImageUrl('');
@@ -531,11 +571,7 @@ export default function NewCustomerOrderModal({
       }
     }
 
-    const finalPharmacist =
-      orderReceiver?.name ||
-      (responsiblePharmacist === '__custom__'
-        ? customPharmacist.trim() || 'د. صيدلي الفرع'
-        : responsiblePharmacist);
+    const finalPharmacist = orderReceiver?.name || defaultPharmacist || 'د. صيدلي الفرع';
 
     setIsSubmitting(true);
     try {
@@ -800,125 +836,193 @@ export default function NewCustomerOrderModal({
               ) : null}
             </div>
 
-            {/* رفع صورة الدواء أو الروشتة */}
+            {/* رفع صورة الدواء أو الروشتة (رفع، إفلات، لصق، أو رابط) */}
             <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDraggingImage(true);
+              }}
+              onDragLeave={() => setIsDraggingImage(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDraggingImage(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file && file.type.startsWith('image/')) {
+                  handleProcessImageFile(file);
+                } else {
+                  setErrorMsg('الملف المُفلت ليس صورة صالحة');
+                }
+              }}
               style={{
-                background: '#ffffff',
-                border: '1.5px dashed #cbd5e1',
+                background: isDraggingImage ? '#ecfdf5' : '#ffffff',
+                border: isDraggingImage ? '2px dashed #0d9488' : '1.5px dashed #cbd5e1',
                 borderRadius: '12px',
                 padding: '12px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: '12px'
+                transition: 'all 0.2s ease'
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div
-                  style={{
-                    width: '38px',
-                    height: '38px',
-                    borderRadius: '10px',
-                    background: medicationImageUrl ? '#f0fdf4' : '#f1f5f9',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '12px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div
+                    style={{
+                      width: '38px',
+                      height: '38px',
+                      borderRadius: '10px',
+                      background: medicationImageUrl ? '#f0fdf4' : '#f1f5f9',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    {medicationImageUrl ? (
+                      <ImageIcon size={20} color="#16a34a" />
+                    ) : (
+                      <Camera size={20} color="#64748b" />
+                    )}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: '800', color: '#1e293b' }}>
+                      صورة الدواء أو الروشتة (اختياري)
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#64748b' }}>
+                      يمكنك <strong style={{ color: '#0f766e' }}>اختيار ملف</strong> أو <strong style={{ color: '#0f766e' }}>سحب وإفلات الصورة</strong> أو <strong style={{ color: '#0f766e' }}>لصقها (Ctrl+V)</strong> أو وضع رابط
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    ref={fileInputRef}
+                    onChange={handleImageChange}
+                    style={{ display: 'none' }}
+                  />
+
                   {medicationImageUrl ? (
-                    <ImageIcon size={20} color="#16a34a" />
-                  ) : (
-                    <Camera size={20} color="#64748b" />
-                  )}
-                </div>
-                <div>
-                  <div style={{ fontSize: '13px', fontWeight: '800', color: '#1e293b' }}>
-                    صورة الدواء أو الروشتة (اختياري)
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#64748b' }}>
-                    ارفع صورة علبة الدواء أو الروشتة لتسهيل توفير الصنف بدقة من المشتريات
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <input
-                  type="file"
-                  accept="image/*"
-                  ref={fileInputRef}
-                  onChange={handleImageChange}
-                  style={{ display: 'none' }}
-                />
-
-                {medicationImageUrl ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {/* مصغرة الصورة مع إمكانية المعاينة */}
-                    <div
-                      onClick={() => setIsPreviewImageOpen(true)}
-                      style={{
-                        position: 'relative',
-                        width: '42px',
-                        height: '42px',
-                        borderRadius: '8px',
-                        overflow: 'hidden',
-                        border: '2px solid #0d9488',
-                        cursor: 'pointer'
-                      }}
-                      title="اضغط لمعاينة الصورة بالحجم الكامل"
-                    >
-                      <img
-                        src={medicationImageUrl}
-                        alt="Medication"
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {/* مصغرة الصورة مع إمكانية المعاينة */}
                       <div
+                        onClick={() => setIsPreviewImageOpen(true)}
                         style={{
-                          position: 'absolute',
-                          inset: 0,
-                          background: 'rgba(0,0,0,0.25)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
+                          position: 'relative',
+                          width: '42px',
+                          height: '42px',
+                          borderRadius: '8px',
+                          overflow: 'hidden',
+                          border: '2px solid #0d9488',
+                          cursor: 'pointer'
+                        }}
+                        title="اضغط لمعاينة الصورة بالحجم الكامل"
+                      >
+                        <img
+                          src={medicationImageUrl}
+                          alt="Medication"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                        <div
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            background: 'rgba(0,0,0,0.25)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          <Eye size={16} color="#ffffff" />
+                        </div>
+                      </div>
+
+                      <span style={{ fontSize: '12px', fontWeight: '700', color: '#059669' }}>
+                        تم إرفاق الصورة ✅
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={handleRemoveImage}
+                        className="outstock-btn"
+                        style={{
+                          background: '#fee2e2',
+                          color: '#b91c1c',
+                          border: '1px solid #fca5a5',
+                          padding: '5px 10px',
+                          fontSize: '11.5px',
+                          borderRadius: '6px'
                         }}
                       >
-                        <Eye size={16} color="#ffffff" />
-                      </div>
+                        <Trash2 size={13} />
+                        <span>حذف الصورة</span>
+                      </button>
                     </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="outstock-btn outstock-btn-secondary"
+                        style={{ fontSize: '12px', padding: '6px 14px', fontWeight: '800' }}
+                      >
+                        <Camera size={14} />
+                        <span>اختيار صورة 📷</span>
+                      </button>
 
-                    <span style={{ fontSize: '12px', fontWeight: '700', color: '#059669' }}>
-                      تم إرفاق الصورة ✅
-                    </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowImageUrlInput(!showImageUrlInput)}
+                        className="outstock-btn outstock-btn-secondary"
+                        style={{ fontSize: '12px', padding: '6px 12px', fontWeight: '700' }}
+                        title="إضافة رابط صورة خارجي مباشر"
+                      >
+                        <LinkIcon size={14} />
+                        <span>رابط صورة 🔗</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
 
-                    <button
-                      type="button"
-                      onClick={handleRemoveImage}
-                      className="outstock-btn"
-                      style={{
-                        background: '#fee2e2',
-                        color: '#b91c1c',
-                        border: '1px solid #fca5a5',
-                        padding: '5px 10px',
-                        fontSize: '11.5px',
-                        borderRadius: '6px'
-                      }}
-                    >
-                      <Trash2 size={13} />
-                      <span>حذف الصورة</span>
-                    </button>
-                  </div>
-                ) : (
+              {/* حقل إدخال الرابط عند تفعيله */}
+              {showImageUrlInput && !medicationImageUrl && (
+                <div style={{ display: 'flex', gap: '8px', marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #e2e8f0' }}>
+                  <input
+                    type="url"
+                    className="outstock-form-input"
+                    placeholder="ضع رابط الصورة المباشر هنا (https://...)..."
+                    value={directImageUrl}
+                    onChange={(e) => setDirectImageUrl(e.target.value)}
+                    style={{ fontSize: '12.5px', height: '36px' }}
+                    dir="ltr"
+                  />
                   <button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="outstock-btn outstock-btn-secondary"
-                    style={{ fontSize: '12.5px', padding: '7px 16px', fontWeight: '800' }}
+                    onClick={handleApplyDirectImageUrl}
+                    className="outstock-btn outstock-btn-primary"
+                    style={{ fontSize: '12px', padding: '6px 14px', whiteSpace: 'nowrap' }}
                   >
-                    <Camera size={15} />
-                    <span>اختيار أو تصوير صورة 📷</span>
+                    تطبيق الرابط
                   </button>
-                )}
-              </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowImageUrlInput(false);
+                      setDirectImageUrl('');
+                    }}
+                    className="outstock-btn outstock-btn-secondary"
+                    style={{ fontSize: '12px', padding: '6px 10px' }}
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1162,56 +1266,35 @@ export default function NewCustomerOrderModal({
                       zIndex: items.length - idx
                     }}
                   >
-                    <div className="outstock-med-top-line" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <MedicationAutocompleteInput
-                          inputRef={(el) => (itemInputRefs.current[idx] = el)}
-                          value={it.medicationName}
-                          unitType="pack"
-                          selectedMed={it.selectedMed}
-                          onMedicationSelect={(displayName, medObj) => handleMedicationSelect(idx, displayName, medObj)}
-                          onTextChange={(text) => handleItemChange(idx, 'medicationName', text)}
-                          onAddNewMedication={(typedText) => handleOpenAddMedModal(idx, typedText)}
-                          placeholder="ابحث باسم الدواء، المادة الفعالة، أو الباركود..."
-                          required
-                        />
-                      </div>
-
-                      {/* زر حذف الصنف */}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveItem(idx)}
-                        disabled={items.length === 1}
-                        style={{
-                          width: '40px',
-                          height: '42px',
-                          borderRadius: '10px',
-                          border: '1px solid #fecaca',
-                          background: '#fef2f2',
-                          cursor: items.length === 1 ? 'not-allowed' : 'pointer',
-                          opacity: items.length === 1 ? 0.35 : 1,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0
-                        }}
-                        title="حذف هذا الصنف"
-                      >
-                        <Trash2 size={16} color="#ef4444" />
-                      </button>
+                    {/* الصف الأول: حقل اسم الصنف بعرض كامل وفسيح */}
+                    <div style={{ width: '100%', marginBottom: '12px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: '800', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                        <Pill size={14} />
+                        <span>اسم الصنف الدوائي / المستحضر * :</span>
+                      </label>
+                      <MedicationAutocompleteInput
+                        inputRef={(el) => (itemInputRefs.current[idx] = el)}
+                        value={it.medicationName}
+                        unitType="pack"
+                        selectedMed={it.selectedMed}
+                        onMedicationSelect={(displayName, medObj) => handleMedicationSelect(idx, displayName, medObj)}
+                        onTextChange={(text) => handleItemChange(idx, 'medicationName', text)}
+                        onAddNewMedication={(typedText) => handleOpenAddMedModal(idx, typedText)}
+                        placeholder="ابحث باسم الدواء، المادة الفعالة، أو الباركود..."
+                        required
+                      />
                     </div>
 
-                    {/* تفاصيل الوحدة والكمية والسعر الرسمي من الكتالوج المركزي دون تعديل يدوي */}
+                    {/* الصف الثاني: تفاصيل الصنف (الوحدة، الكمية، سعر العلبة، إجمالي الصنف، وزر الحذف) */}
                     <div
                       style={{
-                        marginTop: '12px',
                         display: 'grid',
-                        gridTemplateColumns: '1.2fr 1fr 1.5fr 1.5fr',
-                        gap: '12px',
-                        alignItems: 'center'
+                        gridTemplateColumns: '1.2fr 1fr 1.4fr 1.4fr auto',
+                        gap: '10px',
+                        alignItems: 'end'
                       }}
                     >
-                      {/* الوحدة - علبة كاملة حصراً */}
+                      {/* الوحدة المطلوبة */}
                       <div>
                         <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', marginBottom: '3px', display: 'block' }}>
                           الوحدة المطلوبة
@@ -1226,9 +1309,9 @@ export default function NewCustomerOrderModal({
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontWeight: '800',
-                            fontSize: '13px',
+                            fontSize: '12.5px',
                             color: '#0f766e',
-                            gap: '6px'
+                            gap: '4px'
                           }}
                         >
                           <span>علبة كاملة 📦</span>
@@ -1252,10 +1335,10 @@ export default function NewCustomerOrderModal({
                         />
                       </div>
 
-                      {/* السعر الرسمي للعلبة - محمي ومعتمد من الكتالوج المركزي */}
+                      {/* سعر العلبة الرسمي */}
                       <div>
                         <label style={{ fontSize: '11px', color: '#0369a1', fontWeight: '800', marginBottom: '3px', display: 'block' }}>
-                          سعر العلبة الرسمي (الكتالوج ⚡):
+                          سعر العلبة الرسمي:
                         </label>
                         <div
                           style={{
@@ -1267,7 +1350,7 @@ export default function NewCustomerOrderModal({
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontWeight: '900',
-                            fontSize: '13.5px',
+                            fontSize: '13px',
                             color: '#0f766e'
                           }}
                           title="السعر معتمد رسمياً من الكتالوج ومحمي من التعديل العشوائي داخل الفرع"
@@ -1275,7 +1358,7 @@ export default function NewCustomerOrderModal({
                           {Number(it.unitPrice || it.selectedMed?.public_price || 0) > 0 ? (
                             <span>{Number(it.unitPrice || it.selectedMed?.public_price || 0).toFixed(2)} ج.م</span>
                           ) : (
-                            <span style={{ color: '#d97706', fontSize: '11.5px' }}>بانتظار تسعير المشتريات</span>
+                            <span style={{ color: '#d97706', fontSize: '11px' }}>بانتظار تسعير المشتريات</span>
                           )}
                         </div>
                       </div>
@@ -1283,7 +1366,7 @@ export default function NewCustomerOrderModal({
                       {/* إجمالي الصنف */}
                       <div>
                         <label style={{ fontSize: '11px', color: '#475569', fontWeight: '700', marginBottom: '3px', display: 'block' }}>
-                          إجمالي الصنف (ج.م):
+                          إجمالي الصنف:
                         </label>
                         <div
                           style={{
@@ -1295,14 +1378,68 @@ export default function NewCustomerOrderModal({
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontWeight: '900',
-                            fontSize: '14px',
+                            fontSize: '13px',
                             color: '#0f172a'
                           }}
                         >
                           {((Number(it.quantity) || 1) * Number(it.unitPrice || it.selectedMed?.public_price || 0)).toFixed(2)} ج.م
                         </div>
                       </div>
+
+                      {/* زر حذف الصنف */}
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveItem(idx)}
+                          disabled={items.length === 1}
+                          style={{
+                            width: '40px',
+                            height: '40px',
+                            borderRadius: '8px',
+                            border: '1px solid #fecaca',
+                            background: '#fef2f2',
+                            cursor: items.length === 1 ? 'not-allowed' : 'pointer',
+                            opacity: items.length === 1 ? 0.35 : 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                          title="حذف هذا الصنف"
+                        >
+                          <Trash2 size={16} color="#ef4444" />
+                        </button>
+                      </div>
                     </div>
+
+                    {/* شارة متوسط ونطاق السعر كمعلومة استرشادية دون تعديل يدوي */}
+                    {(() => {
+                      const p = Number(it.unitPrice || it.selectedMed?.public_price || 0);
+                      if (p <= 0 && !it.priceMin && !it.priceMax) return null;
+                      const minP = it.priceMin ? Number(it.priceMin) : (it.selectedMed?.min_price ? Number(it.selectedMed.min_price) : Math.round(p * 0.95 * 10) / 10);
+                      const maxP = it.priceMax ? Number(it.priceMax) : (it.selectedMed?.max_price ? Number(it.selectedMed.max_price) : Math.round(p * 1.05 * 10) / 10);
+                      return (
+                        <div
+                          style={{
+                            marginTop: '10px',
+                            padding: '5px 12px',
+                            background: '#f0fdf4',
+                            border: '1px solid #bbf7d0',
+                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            fontSize: '11.5px',
+                            color: '#166534',
+                            fontWeight: '700'
+                          }}
+                        >
+                          <Sparkles size={13} color="#16a34a" />
+                          <span>
+                            متوسط سعر الصنف: من {minP.toFixed(2)} إلى {maxP.toFixed(2)} ج.م للعلبة (استرشادي)
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}
@@ -1610,50 +1747,17 @@ export default function NewCustomerOrderModal({
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '12px' }}>
-            <div>
-              <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f766e', display: 'block', marginBottom: '4px' }}>
-                <User size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> الصيدلي المسؤول متلقي الطلب * :
-              </label>
-              <select
-                value={responsiblePharmacist}
-                onChange={(e) => setResponsiblePharmacist(e.target.value)}
-                className="outstock-form-select"
-                style={{ fontWeight: '700' }}
-              >
-                {eligiblePharmacists.map((emp) => (
-                  <option key={emp.id} value={emp.name}>
-                    {emp.name} {emp.jobTitle ? `(${emp.jobTitle})` : ''}
-                  </option>
-                ))}
-                <option value="__custom__">-- صيدلي آخر (كتابة يدوية) --</option>
-              </select>
-
-              {responsiblePharmacist === '__custom__' && (
-                <input
-                  type="text"
-                  placeholder="اكتب اسم الصيدلي المسؤول هنا..."
-                  value={customPharmacist}
-                  onChange={(e) => setCustomPharmacist(e.target.value)}
-                  className="outstock-form-input"
-                  style={{ marginTop: '6px' }}
-                  required
-                />
-              )}
-            </div>
-
-            <div>
-              <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                ملاحظات العميل أو الطلب:
-              </label>
-              <input
-                type="text"
-                placeholder="أي توصيات خاصة بالجرعة أو الشركة"
-                value={customerNotes}
-                onChange={(e) => setCustomerNotes(e.target.value)}
-                className="outstock-form-input"
-              />
-            </div>
+          <div>
+            <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
+              ملاحظات العميل أو الطلب:
+            </label>
+            <input
+              type="text"
+              placeholder="أي توصيات خاصة بالجرعة، بدائل مقبولة، أو تعليمات التسليم..."
+              value={customerNotes}
+              onChange={(e) => setCustomerNotes(e.target.value)}
+              className="outstock-form-input"
+            />
           </div>
 
           {/* ذيل النافذة */}

@@ -337,6 +337,7 @@ export async function initOutstockTables(db) {
           created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_outstock_withd_branch ON public.outstock_branch_withdrawals (branch_id, month_period);
+      ALTER TABLE public.outstock_branch_withdrawals ADD COLUMN IF NOT EXISTS items_count INTEGER DEFAULT 1;
 
       -- 17. جدول طلبات الاستعلام وتعديل وإضافة الأصناف بين الفروع والمشتريات
       CREATE TABLE IF NOT EXISTS public.outstock_medication_requests (
@@ -3654,8 +3655,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       const summaryRes = await db.query(`
         SELECT w.branch_id, b.name as branch_name,
-               SUM(w.amount) as total_amount,
-               COUNT(w.id) as withdrawals_count
+               COALESCE(SUM(w.amount), 0) as total_amount,
+               COALESCE(SUM(w.amount), 0) as total_cost,
+               COALESCE(SUM(COALESCE(w.items_count, 1)), 0) as items_count,
+               COUNT(w.id) as withdrawals_count,
+               MAX(w.withdrawal_date) as last_withdrawal_date
         FROM public.outstock_branch_withdrawals w
         LEFT JOIN public.outstock_branches b ON w.branch_id = b.id
         WHERE w.month_period = $1
@@ -3666,6 +3670,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         success: true,
         monthPeriod,
         withdrawals: result.rows,
+        extraWithdrawals: result.rows,
         branchesSummary: summaryRes.rows
       });
     } catch (err) {
@@ -3682,6 +3687,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       const branchId = req.body.branchId || req.body.branch_id;
       const amount = req.body.amount;
+      const itemsCount = parseInt(req.body.itemsCount || req.body.items_count || 1);
       const withdrawalDate = req.body.withdrawalDate || req.body.withdrawal_date;
       const supplierId = req.body.supplierId || req.body.supplier_id || null;
       const invoiceId = req.body.invoiceId || req.body.invoice_id || null;
@@ -3699,9 +3705,9 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       await db.query(`
         INSERT INTO public.outstock_branch_withdrawals (
-          id, branch_id, supplier_id, invoice_id, month_period, withdrawal_date, amount, recorded_by, notes
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      `, [wId, branchId, supplierId, invoiceId, monthPeriod, wDate, numAmount, recorder, notes]);
+          id, branch_id, supplier_id, invoice_id, month_period, withdrawal_date, amount, items_count, recorded_by, notes
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `, [wId, branchId, supplierId, invoiceId, monthPeriod, wDate, numAmount, itemsCount, recorder, notes]);
 
       res.json({ success: true, message: 'تم تسجيل مسحوبات الفرع بنجاح' });
     } catch (err) {

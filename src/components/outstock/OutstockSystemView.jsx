@@ -928,12 +928,7 @@ export default function OutstockSystemView({
                 onClick={(e) => {
                   e.stopPropagation();
                   setSuppliersMenuCoords(calculateMenuCoords(suppliersButtonRef));
-                  if (activeTab !== 'procurement_suppliers') {
-                    setActiveTab('procurement_suppliers');
-                    setIsSuppliersMenuOpen(true);
-                  } else {
-                    setIsSuppliersMenuOpen(prev => !prev);
-                  }
+                  setIsSuppliersMenuOpen(prev => !prev);
                   if (isBranchOrdersMenuOpen) setIsBranchOrdersMenuOpen(false);
                 }}
                 title="حسابات الموردين وحدود الائتمان وفواتير الشراء ومسحوبات الفروع ومقارنة الخصومات و i'SUPPLY"
@@ -1023,12 +1018,7 @@ export default function OutstockSystemView({
                 onClick={(e) => {
                   e.stopPropagation();
                   setSuppliersMenuCoords(calculateMenuCoords(suppliersButtonRef));
-                  if (activeTab !== 'owner_suppliers') {
-                    setActiveTab('owner_suppliers');
-                    setIsSuppliersMenuOpen(true);
-                  } else {
-                    setIsSuppliersMenuOpen(prev => !prev);
-                  }
+                  setIsSuppliersMenuOpen(prev => !prev);
                   if (isSettingsMenuOpen) setIsSettingsMenuOpen(false);
                 }}
                 title="حسابات الموردين وفواتير الشراء والمسحوبات ومقارنة الخصومات و i'SUPPLY"
