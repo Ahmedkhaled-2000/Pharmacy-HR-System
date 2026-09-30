@@ -31,7 +31,10 @@ import {
   Truck,
   HelpCircle,
   UserCheck,
-  Layers
+  Layers,
+  CreditCard,
+  FileText,
+  Sparkles
 } from 'lucide-react';
 import OutstockNotificationModal from './common/OutstockNotificationModal';
 import OutstockCommandPalette from './common/OutstockCommandPalette';
