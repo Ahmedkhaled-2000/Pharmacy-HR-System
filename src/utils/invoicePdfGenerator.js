@@ -414,23 +414,34 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, 
           const qty = parseInt(item.quantity || 1, 10);
           const isEstimated = item.is_price_estimated || item.isPriceEstimated;
           const pMin = parseFloat(item.price_min || item.priceMin || 0);
-          const pMax = parseFloat(item.price_max || item.priceMax || 0);
-          const price = parseFloat(item.unitPrice || item.unit_price || 0);
-          const total = qty * price;
+          const pMax = parseFloat(item.price_max || item.priceMax || pMin || 0);
+          const rawPrice = parseFloat(item.unitPrice || item.unit_price || 0);
+          const avgPrice = isEstimated && (pMin > 0 || pMax > 0)
+            ? ((pMin + pMax) / 2)
+            : (rawPrice > 0 ? rawPrice : ((pMin + pMax) / 2));
+          const unitPrice = avgPrice;
+          const total = qty * unitPrice;
           const unit = (item.unitType || item.unit_type) === 'strip' ? 'شريط' : 'علبة';
-          const priceDisplay = isEstimated ? `من ${pMin.toFixed(2)} إلى ${pMax.toFixed(2)} ج.م` : `${price.toFixed(2)} ج.م`;
-          const totalDisplay = isEstimated ? `من ${(pMin * qty).toFixed(2)} إلى ${(pMax * qty).toFixed(2)} ج.م` : `${total.toFixed(2)} ج.م`;
+
+          const priceDisplay = isEstimated
+            ? `<div style="text-align:right;"><strong>متوسط: ${avgPrice.toFixed(2)} ج.م</strong><div style="font-size:10px; color:#b45309;">(من ${pMin.toFixed(2)} إلى ${pMax.toFixed(2)} ج.م)</div></div>`
+            : `<strong>${unitPrice.toFixed(2)} ج.م</strong>`;
+
+          const totalDisplay = isEstimated
+            ? `<div style="text-align:right;"><strong>متوسط: ${total.toFixed(2)} ج.م</strong><div style="font-size:10px; color:#b45309;">(من ${(pMin * qty).toFixed(2)} إلى ${(pMax * qty).toFixed(2)} ج.م)</div></div>`
+            : `<strong>${total.toFixed(2)} ج.م</strong>`;
+
           return `
             <tr>
               <td style="text-align: center;">${idx + 1}</td>
               <td>
                 <strong>${item.medicationName || item.medication_name}</strong>
-                ${isEstimated ? '<br><small style="color:#b45309;">(سعر تقديري غير مؤكد)</small>' : ''}
+                ${isEstimated ? `<br><small style="color:#b45309; font-weight:700;">⚡ سعر تقريبي (متوسط: ${avgPrice.toFixed(2)} ج.م)</small>` : ''}
               </td>
               <td>${unit}</td>
               <td style="text-align: center;"><strong>${qty}</strong></td>
-              <td style="font-size: ${isEstimated ? '11px' : '12.5px'};">${priceDisplay}</td>
-              <td style="font-size: ${isEstimated ? '11px' : '12.5px'}; font-weight: bold; color: ${isEstimated ? '#b45309' : '#0f172a'};">${totalDisplay}</td>
+              <td style="font-size: 12px;">${priceDisplay}</td>
+              <td style="font-size: 12px; color: ${isEstimated ? '#b45309' : '#0f172a'};">${totalDisplay}</td>
             </tr>
           `;
         }).join('')}
@@ -440,14 +451,69 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, 
     <div class="financials-container">
       <div class="totals-summary">
         ${(() => {
-          const hasEstimated = activeItems.some(i => i.is_price_estimated || i.isPriceEstimated) || order.is_price_estimated;
-          const oMin = parseFloat(order.price_min || order.priceMin || 0);
-          const oMax = parseFloat(order.price_max || order.priceMax || 0);
-          const paidNum = parseFloat(paidAmount || 0);
+          let totalMin = 0;
+          let totalMax = 0;
+          let totalAvg = 0;
+          let hasEstimated = false;
 
-          const totDisplay = hasEstimated && (oMin > 0 || oMax > 0) ? `من ${oMin.toFixed(2)} إلى ${oMax.toFixed(2)} ج.م` : `${totalAmount} ج.م`;
-          const netDisplay = hasEstimated && (oMin > 0 || oMax > 0) ? `من ${oMin.toFixed(2)} إلى ${oMax.toFixed(2)} ج.م` : `${netAmount} ج.م`;
-          const remDisplay = hasEstimated && (oMin > 0 || oMax > 0) ? `من ${Math.max(0, oMin - paidNum).toFixed(2)} إلى ${Math.max(0, oMax - paidNum).toFixed(2)} ج.م` : `${remainingAmount} ج.م`;
+          activeItems.forEach(it => {
+            const qty = parseInt(it.quantity || 1, 10);
+            const isEst = it.is_price_estimated || it.isPriceEstimated;
+            const pMin = parseFloat(it.price_min || it.priceMin || 0);
+            const pMax = parseFloat(it.price_max || it.priceMax || pMin || 0);
+            const p = parseFloat(it.unitPrice || it.unit_price || 0);
+
+            if (isEst && (pMin > 0 || pMax > 0)) {
+              hasEstimated = true;
+              totalMin += qty * pMin;
+              totalMax += qty * pMax;
+              totalAvg += qty * ((pMin + pMax) / 2);
+            } else {
+              totalMin += qty * p;
+              totalMax += qty * p;
+              totalAvg += qty * p;
+            }
+          });
+
+          if (!hasEstimated && (parseFloat(order.total_amount || order.totalAmount || 0) > 0)) {
+            totalAvg = parseFloat(order.total_amount || order.totalAmount || 0);
+            totalMin = totalAvg;
+            totalMax = totalAvg;
+          }
+
+          const discVal = parseFloat(order.discount_value || order.discountValue || 0);
+          const isPercent = (order.discount_type || order.discountType) === 'percentage';
+          let discMin = 0, discMax = 0, discAvg = 0;
+          if (isPercent) {
+            discMin = (totalMin * discVal) / 100;
+            discMax = (totalMax * discVal) / 100;
+            discAvg = (totalAvg * discVal) / 100;
+          } else if (discVal > 0) {
+            discMin = discVal;
+            discMax = discVal;
+            discAvg = discVal;
+          }
+
+          const netMin = Math.max(0, totalMin - discMin);
+          const netMax = Math.max(0, totalMax - discMax);
+          const netAvg = Math.max(0, totalAvg - discAvg);
+
+          const paidNum = parseFloat(paidAmount || 0);
+          const remMin = Math.max(0, netMin - paidNum);
+          const remMax = Math.max(0, netMax - paidNum);
+          const remAvg = Math.max(0, netAvg - paidNum);
+
+          const totDisplay = hasEstimated
+            ? `<div style="text-align:left;"><strong>متوسط: ${totalAvg.toFixed(2)} ج.م</strong><small style="display:block; font-size:10px; color:#b45309;">(من ${totalMin.toFixed(2)} إلى ${totalMax.toFixed(2)} ج.م)</small></div>`
+            : `${totalAmount} ج.م`;
+
+          const netDisplay = hasEstimated
+            ? `<div style="text-align:left;"><strong>متوسط: ${netAvg.toFixed(2)} ج.م</strong><small style="display:block; font-size:10px; color:#0f766e;">(من ${netMin.toFixed(2)} إلى ${netMax.toFixed(2)} ج.م)</small></div>`
+            : `${netAmount} ج.م`;
+
+          const remDisplay = hasEstimated
+            ? `<div style="text-align:left;"><strong>متوسط: ${remAvg.toFixed(2)} ج.م</strong><small style="display:block; font-size:10.5px; color:#b91c1c;">(من ${remMin.toFixed(2)} إلى ${remMax.toFixed(2)} ج.م)</small></div>`
+            : `${remainingAmount} ج.م`;
 
           return `
             <div class="totals-row">
@@ -520,11 +586,44 @@ export async function sendInvoicePdfViaWhatsApp({ order, branch, waServerUrl, cu
   const orderNo = order.order_number || order.orderNumber || '0000';
   const cName = order.customer_name || order.customerName || 'عميلنا العزيز';
   const bName = branch?.name || order.branch_name || 'الصيدلية';
-  const remaining = parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2);
+
+  const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill);
+  let totalMin = 0, totalMax = 0, totalAvg = 0, hasEstimated = false;
+  activeItems.forEach(it => {
+    const qty = parseInt(it.quantity || 1, 10);
+    const isEst = it.is_price_estimated || it.isPriceEstimated;
+    const pMin = parseFloat(it.price_min || it.priceMin || 0);
+    const pMax = parseFloat(it.price_max || it.priceMax || pMin || 0);
+    const p = parseFloat(it.unitPrice || it.unit_price || 0);
+    if (isEst && (pMin > 0 || pMax > 0)) {
+      hasEstimated = true;
+      totalMin += qty * pMin;
+      totalMax += qty * pMax;
+      totalAvg += qty * ((pMin + pMax) / 2);
+    } else {
+      totalMin += qty * p;
+      totalMax += qty * p;
+      totalAvg += qty * p;
+    }
+  });
+
+  const discVal = parseFloat(order.discount_value || order.discountValue || 0);
+  const isPercent = (order.discount_type || order.discountType) === 'percentage';
+  const discAvg = isPercent ? (totalAvg * discVal) / 100 : (discVal > 0 ? discVal : 0);
+  const netAvg = Math.max(0, totalAvg - discAvg);
+  const paid = parseFloat(order.paid_amount || order.paidAmount || 0);
+  const remAvg = Math.max(0, netAvg - paid);
+  const remMin = Math.max(0, totalMin - (isPercent ? (totalMin * discVal) / 100 : discVal) - paid);
+  const remMax = Math.max(0, totalMax - (isPercent ? (totalMax * discVal) / 100 : discVal) - paid);
+
+  const remaining = hasEstimated
+    ? `متوسط ${remAvg.toFixed(2)} ج.م (من ${remMin.toFixed(2)} إلى ${remMax.toFixed(2)} ج.م تقريبي)`
+    : `${parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2)} ج.م`;
+
   const pickupDate = order.expected_pickup_date || order.expectedPickupDate || '';
   const targetSessionId = sessionId || (branch?.id ? `branch_${branch.id}` : (order?.branch_id ? `branch_${order.branch_id}` : 'hr_main'));
 
-  const caption = customMessage || `السلام عليكم ورحمة الله وبركاته،\nأهلاً بك أ/ *${cName}* 🌸\n\nمرفق لسيادتكم الفاتورة الرسمية / إيصال حجز وتوفير الدواء الخاص بكم من *${bName}* كملف PDF معتمد.\n\n📋 رقم الإيصال: *#${orderNo}*\n💵 المبلغ المتبقي عند الاستلام: *${remaining} ج.م*${pickupDate ? `\n📅 موعد الاستلام المتوقع: *${pickupDate}*` : ''}\n\nنسعد دائماً بخدمتكم وتوفير كافة احتياجاتكم الطبية ✨`;
+  const caption = customMessage || `السلام عليكم ورحمة الله وبركاته،\nأهلاً بك أ/ *${cName}* 🌸\n\nمرفق لسيادتكم الفاتورة الرسمية / إيصال حجز وتوفير الدواء الخاص بكم من *${bName}* كملف PDF معتمد.\n\n📋 رقم الإيصال: *#${orderNo}*\n💵 المبلغ المتبقي عند الاستلام: *${remaining}*${pickupDate ? `\n📅 موعد الاستلام المتوقع: *${pickupDate}*` : ''}\n\nنسعد دائماً بخدمتكم وتوفير كافة احتياجاتكم الطبية ✨`;
 
   const pdfHtml = buildInvoicePdfHtml(order, branch, null, null, options);
 

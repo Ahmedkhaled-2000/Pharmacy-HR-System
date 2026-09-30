@@ -639,22 +639,49 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                     const qty = parseInt(item.quantity || 1, 10);
                     const isEstimated = item.is_price_estimated || item.isPriceEstimated;
                     const priceMin = parseFloat(item.price_min || item.priceMin || 0);
-                    const priceMax = parseFloat(item.price_max || item.priceMax || 0);
-                    const price = parseFloat(item.unitPrice || item.unit_price || 0);
-                    const total = qty * price;
+                    const priceMax = parseFloat(item.price_max || item.priceMax || priceMin || 0);
+                    const rawPrice = parseFloat(item.unitPrice || item.unit_price || 0);
+                    const avgPrice = isEstimated && (priceMin > 0 || priceMax > 0)
+                      ? ((priceMin + priceMax) / 2)
+                      : (rawPrice > 0 ? rawPrice : ((priceMin + priceMax) / 2));
+                    const unitPrice = avgPrice;
+                    const total = qty * unitPrice;
+
                     return (
                       <tr key={idx}>
                         <td>
                           <strong>{item.medicationName || item.medication_name}</strong>
-                          {isEstimated ? <small style={{ display: 'block', color: '#b45309', fontSize: '10px' }}>(سعر تقديري)</small> : null}
+                          {isEstimated ? (
+                            <small style={{ display: 'block', color: '#b45309', fontSize: '9.5px', marginTop: '1px' }}>
+                              ⚡ سعر تقريبي (متوسط: {avgPrice.toFixed(2)} ج.م)
+                            </small>
+                          ) : null}
                         </td>
                         <td>{item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة'}</td>
                         <td>{qty}</td>
                         <td style={{ fontSize: isEstimated ? '10px' : undefined, fontWeight: isEstimated ? 'bold' : undefined }}>
-                          {isEstimated ? `من ${priceMin.toFixed(2)} إلى ${priceMax.toFixed(2)}` : price.toFixed(2)}
+                          {isEstimated ? (
+                            <div>
+                              <div>متوسط {avgPrice.toFixed(2)}</div>
+                              <small style={{ display: 'block', color: '#b45309', fontSize: '8.5px', lineHeight: 1.1 }}>
+                                ({priceMin.toFixed(2)} - {priceMax.toFixed(2)})
+                              </small>
+                            </div>
+                          ) : (
+                            unitPrice.toFixed(2)
+                          )}
                         </td>
                         <td style={{ fontSize: isEstimated ? '10px' : undefined, fontWeight: 'bold', color: isEstimated ? '#b45309' : undefined }}>
-                          {isEstimated ? `من ${(priceMin * qty).toFixed(2)} إلى ${(priceMax * qty).toFixed(2)}` : total.toFixed(2)}
+                          {isEstimated ? (
+                            <div>
+                              <div>متوسط {total.toFixed(2)}</div>
+                              <small style={{ display: 'block', color: '#b45309', fontSize: '8.5px', lineHeight: 1.1 }}>
+                                ({(priceMin * qty).toFixed(2)} - {(priceMax * qty).toFixed(2)})
+                              </small>
+                            </div>
+                          ) : (
+                            total.toFixed(2)
+                          )}
                         </td>
                       </tr>
                     );
@@ -664,26 +691,96 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
 
               <div className="receipt-totals">
                 {(() => {
-                  const hasEstimated = (order.items || []).some(i => i.is_price_estimated || i.isPriceEstimated) || order.is_price_estimated;
-                  const oMin = parseFloat(order.price_min || order.priceMin || 0);
-                  const oMax = parseFloat(order.price_max || order.priceMax || 0);
+                  const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill);
+                  let totalMin = 0;
+                  let totalMax = 0;
+                  let totalAvg = 0;
+                  let hasEstimated = false;
+
+                  activeItems.forEach(it => {
+                    const qty = parseInt(it.quantity || 1, 10);
+                    const isEst = it.is_price_estimated || it.isPriceEstimated;
+                    const pMin = parseFloat(it.price_min || it.priceMin || 0);
+                    const pMax = parseFloat(it.price_max || it.priceMax || pMin || 0);
+                    const p = parseFloat(it.unitPrice || it.unit_price || 0);
+
+                    if (isEst && (pMin > 0 || pMax > 0)) {
+                      hasEstimated = true;
+                      totalMin += qty * pMin;
+                      totalMax += qty * pMax;
+                      totalAvg += qty * ((pMin + pMax) / 2);
+                    } else {
+                      totalMin += qty * p;
+                      totalMax += qty * p;
+                      totalAvg += qty * p;
+                    }
+                  });
+
+                  if (!hasEstimated && (parseFloat(order.total_amount || order.totalAmount || 0) > 0)) {
+                    totalAvg = parseFloat(order.total_amount || order.totalAmount || 0);
+                    totalMin = totalAvg;
+                    totalMax = totalAvg;
+                  }
+
+                  const discVal = parseFloat(order.discount_value || order.discountValue || 0);
+                  const isPercent = (order.discount_type || order.discountType) === 'percentage';
+                  let discMin = 0, discMax = 0, discAvg = 0;
+                  if (isPercent) {
+                    discMin = (totalMin * discVal) / 100;
+                    discMax = (totalMax * discVal) / 100;
+                    discAvg = (totalAvg * discVal) / 100;
+                  } else if (discVal > 0) {
+                    discMin = discVal;
+                    discMax = discVal;
+                    discAvg = discVal;
+                  }
+
+                  const netMin = Math.max(0, totalMin - discMin);
+                  const netMax = Math.max(0, totalMax - discMax);
+                  const netAvg = Math.max(0, totalAvg - discAvg);
+
                   const paid = parseFloat(order.paid_amount || order.paidAmount || 0);
+                  const remMin = Math.max(0, netMin - paid);
+                  const remMax = Math.max(0, netMax - paid);
+                  const remAvg = Math.max(0, netAvg - paid);
 
                   return (
                     <>
                       <div className="row">
                         <span>إجمالي الأصناف:</span>
-                        <span>{hasEstimated && (oMin > 0 || oMax > 0) ? `من ${oMin.toFixed(2)} إلى ${oMax.toFixed(2)} ج.م` : `${parseFloat(order.total_amount || order.totalAmount || 0).toFixed(2)} ج.م`}</span>
+                        <span>
+                          {hasEstimated ? (
+                            <span style={{ textAlign: 'left', display: 'inline-block' }}>
+                              <strong>متوسط: {totalAvg.toFixed(2)} ج.م</strong>
+                              <small style={{ display: 'block', fontSize: '9px', color: '#b45309' }}>
+                                (من {totalMin.toFixed(2)} إلى {totalMax.toFixed(2)} ج.م)
+                              </small>
+                            </span>
+                          ) : (
+                            `${parseFloat(order.total_amount || order.totalAmount || totalAvg || 0).toFixed(2)} ج.م`
+                          )}
+                        </span>
                       </div>
-                      {parseFloat(order.discount_value || order.discountValue || 0) > 0 && (
+                      {discVal > 0 && (
                         <div className="row">
                           <span>الخصم:</span>
-                          <span>{parseFloat(order.discount_value || order.discountValue || 0)} {order.discount_type === 'percentage' ? '%' : 'ج.م'}</span>
+                          <span>{discVal} {isPercent ? '%' : 'ج.م'}</span>
                         </div>
                       )}
                       <div className="row grand-total">
                         <span>الصافي المطلوب:</span>
-                        <span>{hasEstimated && (oMin > 0 || oMax > 0) ? `من ${oMin.toFixed(2)} إلى ${oMax.toFixed(2)} ج.م` : `${parseFloat(order.net_amount || order.netAmount || 0).toFixed(2)} ج.م`}</span>
+                        <span>
+                          {hasEstimated ? (
+                            <span style={{ textAlign: 'left', display: 'inline-block' }}>
+                              <strong>متوسط: {netAvg.toFixed(2)} ج.م</strong>
+                              <small style={{ display: 'block', fontSize: '9px', color: '#0f766e' }}>
+                                (من {netMin.toFixed(2)} إلى {netMax.toFixed(2)} ج.م)
+                              </small>
+                            </span>
+                          ) : (
+                            `${parseFloat(order.net_amount || order.netAmount || netAvg || 0).toFixed(2)} ج.م`
+                          )}
+                        </span>
                       </div>
                       <div className="row">
                         <span>المبلغ المدفوع (مقدماً):</span>
@@ -691,7 +788,18 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                       </div>
                       <div className="row" style={{ fontWeight: 'bold', color: '#b91c1c' }}>
                         <span>المتبقي عند الاستلام:</span>
-                        <span>{hasEstimated && (oMin > 0 || oMax > 0) ? `من ${Math.max(0, oMin - paid).toFixed(2)} إلى ${Math.max(0, oMax - paid).toFixed(2)} ج.م` : `${parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2)} ج.م`}</span>
+                        <span>
+                          {hasEstimated ? (
+                            <span style={{ textAlign: 'left', display: 'inline-block' }}>
+                              <strong>متوسط: {remAvg.toFixed(2)} ج.م</strong>
+                              <small style={{ display: 'block', fontSize: '9px', color: '#b91c1c' }}>
+                                (من {remMin.toFixed(2)} إلى {remMax.toFixed(2)} ج.م)
+                              </small>
+                            </span>
+                          ) : (
+                            `${parseFloat(order.remaining_amount || order.remainingAmount || remAvg || 0).toFixed(2)} ج.م`
+                          )}
+                        </span>
                       </div>
                     </>
                   );
@@ -750,7 +858,43 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                         ? `🔄 تحويل استلام لفرع: ${order.delivery_target_branch || order.deliveryTargetBranch || ''}`
                         : '🏪 استلام من الفرع')}
                 </strong></div>
-                <div>المتبقي تحصيله: <strong style={{ color: '#dc2626', fontSize: '13px' }}>{parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2)} ج.م</strong></div>
+                <div>المتبقي تحصيله: <strong style={{ color: '#dc2626', fontSize: '12.5px' }}>
+                  {(() => {
+                    const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill);
+                    let tMin = 0, tMax = 0, tAvg = 0, hasEst = false;
+                    activeItems.forEach(it => {
+                      const qty = parseInt(it.quantity || 1, 10);
+                      const isEst = it.is_price_estimated || it.isPriceEstimated;
+                      const pMin = parseFloat(it.price_min || it.priceMin || 0);
+                      const pMax = parseFloat(it.price_max || it.priceMax || pMin || 0);
+                      const p = parseFloat(it.unitPrice || it.unit_price || 0);
+                      if (isEst && (pMin > 0 || pMax > 0)) {
+                        hasEst = true;
+                        tMin += qty * pMin;
+                        tMax += qty * pMax;
+                        tAvg += qty * ((pMin + pMax) / 2);
+                      } else {
+                        tMin += qty * p;
+                        tMax += qty * p;
+                        tAvg += qty * p;
+                      }
+                    });
+                    const dVal = parseFloat(order.discount_value || order.discountValue || 0);
+                    const isPct = (order.discount_type || order.discountType) === 'percentage';
+                    let dMin = isPct ? (tMin * dVal) / 100 : (dVal > 0 ? dVal : 0);
+                    let dMax = isPct ? (tMax * dVal) / 100 : (dVal > 0 ? dVal : 0);
+                    let dAvg = isPct ? (tAvg * dVal) / 100 : (dVal > 0 ? dVal : 0);
+                    const paid = parseFloat(order.paid_amount || order.paidAmount || 0);
+                    const rMin = Math.max(0, tMin - dMin - paid);
+                    const rMax = Math.max(0, tMax - dMax - paid);
+                    const rAvg = Math.max(0, tAvg - dAvg - paid);
+
+                    if (hasEst) {
+                      return `متوسط ${rAvg.toFixed(2)} ج.م (من ${rMin.toFixed(2)} إلى ${rMax.toFixed(2)})`;
+                    }
+                    return `${parseFloat(order.remaining_amount || order.remainingAmount || rAvg || 0).toFixed(2)} ج.م`;
+                  })()}
+                </strong></div>
               </div>
 
               <table className="receipt-table">
@@ -758,13 +902,30 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                   <tr><th>الصنف</th><th>النوع</th><th>الكمية</th></tr>
                 </thead>
                 <tbody>
-                  {(order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill).map((item, idx) => (
-                    <tr key={idx}>
-                      <td>{item.medicationName || item.medication_name}</td>
-                      <td>{item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة'}</td>
-                      <td><strong>{item.quantity}</strong></td>
-                    </tr>
-                  ))}
+                  {(order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill).map((item, idx) => {
+                    const isEstimated = item.is_price_estimated || item.isPriceEstimated;
+                    const priceMin = parseFloat(item.price_min || item.priceMin || 0);
+                    const priceMax = parseFloat(item.price_max || item.priceMax || priceMin || 0);
+                    const rawPrice = parseFloat(item.unitPrice || item.unit_price || 0);
+                    const avgPrice = isEstimated && (priceMin > 0 || priceMax > 0)
+                      ? ((priceMin + priceMax) / 2)
+                      : (rawPrice > 0 ? rawPrice : ((priceMin + priceMax) / 2));
+
+                    return (
+                      <tr key={idx}>
+                        <td>
+                          <strong>{item.medicationName || item.medication_name}</strong>
+                          {isEstimated ? (
+                            <small style={{ display: 'block', color: '#b45309', fontSize: '9px' }}>
+                              ⚡ سعر تقريبي: متوسط {avgPrice.toFixed(2)} ج.م (من {priceMin.toFixed(2)} إلى {priceMax.toFixed(2)})
+                            </small>
+                          ) : null}
+                        </td>
+                        <td>{item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة'}</td>
+                        <td><strong>{item.quantity}</strong></td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
 

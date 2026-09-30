@@ -350,32 +350,44 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                     </div>
 
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                      {activeItems.map((item, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            background: '#ffffff',
-                            border: '1px solid',
-                            borderColor: item.itemStatus === 'available_by_procurement' ? '#86efac' : '#cbd5e1',
-                            borderRadius: '8px',
-                            padding: '6px 12px',
-                            fontSize: '12.5px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px'
-                          }}
-                        >
-                          <strong>{item.medicationName || item.medication_name}</strong>
-                          <span style={{ color: '#64748b' }}>
-                            ({item.quantity} {item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة'})
-                          </span>
-                          {item.itemStatus === 'available_by_procurement' ? (
-                            <span style={{ color: '#16a34a', fontWeight: '900', fontSize: '11px' }}>✓ متوفر</span>
-                          ) : (
-                            <span style={{ color: '#d97706', fontSize: '11px' }}>⏳ قيد الشراء</span>
-                          )}
-                        </div>
-                      ))}
+                      {activeItems.map((item, idx) => {
+                        const isEst = item.is_price_estimated || item.isPriceEstimated;
+                        const pMin = parseFloat(item.price_min || item.priceMin || 0);
+                        const pMax = parseFloat(item.price_max || item.priceMax || pMin || 0);
+                        const avgP = isEst && (pMin > 0 || pMax > 0) ? ((pMin + pMax) / 2) : 0;
+
+                        return (
+                          <div
+                            key={idx}
+                            style={{
+                              background: '#ffffff',
+                              border: '1px solid',
+                              borderColor: item.itemStatus === 'available_by_procurement' ? '#86efac' : (isEst ? '#fde68a' : '#cbd5e1'),
+                              borderRadius: '8px',
+                              padding: '6px 12px',
+                              fontSize: '12.5px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                          >
+                            <strong>{item.medicationName || item.medication_name}</strong>
+                            <span style={{ color: '#64748b' }}>
+                              ({item.quantity} {item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة'})
+                            </span>
+                            {isEst && (
+                              <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', borderRadius: '4px', padding: '1px 5px', fontSize: '10.5px', fontWeight: 'bold' }}>
+                                ⚡ متوسط: {avgP.toFixed(2)} ج.م
+                              </span>
+                            )}
+                            {item.itemStatus === 'available_by_procurement' ? (
+                              <span style={{ color: '#16a34a', fontWeight: '900', fontSize: '11px' }}>✓ متوفر</span>
+                            ) : (
+                              <span style={{ color: '#d97706', fontSize: '11px' }}>⏳ قيد الشراء</span>
+                            )}
+                          </div>
+                        );
+                      })}
 
                       {/* الأصناف المشطوبة لعدم التوفر */}
                       {prunedItems.map((item, idx) => (
@@ -407,17 +419,56 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                     paddingTop: '10px'
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', fontSize: '13px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                        <div>
-                          الإجمالي: <strong>{parseFloat(order.total_amount || order.totalAmount || 0).toFixed(2)} ج.م</strong>
-                        </div>
-                        <div>
-                          المدفوع: <strong style={{ color: '#059669' }}>{parseFloat(order.paid_amount || order.paidAmount || 0).toFixed(2)} ج.م</strong>
-                        </div>
-                        <div style={{ fontSize: '14px' }}>
-                          المتبقي: <strong style={{ color: '#dc2626' }}>{parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2)} ج.م</strong>
-                        </div>
-                      </div>
+                      {(() => {
+                        let tMin = 0, tMax = 0, tAvg = 0, hasEst = false;
+                        activeItems.forEach(it => {
+                          const qty = parseInt(it.quantity || 1, 10);
+                          const isE = it.is_price_estimated || it.isPriceEstimated;
+                          const pMin = parseFloat(it.price_min || it.priceMin || 0);
+                          const pMax = parseFloat(it.price_max || it.priceMax || pMin || 0);
+                          const p = parseFloat(it.unitPrice || it.unit_price || 0);
+                          if (isE && (pMin > 0 || pMax > 0)) {
+                            hasEst = true;
+                            tMin += qty * pMin;
+                            tMax += qty * pMax;
+                            tAvg += qty * ((pMin + pMax) / 2);
+                          } else {
+                            tMin += qty * p;
+                            tMax += qty * p;
+                            tAvg += qty * p;
+                          }
+                        });
+
+                        const dVal = parseFloat(order.discount_value || order.discountValue || 0);
+                        const isPct = (order.discount_type || order.discountType) === 'percentage';
+                        const dAvg = isPct ? (tAvg * dVal) / 100 : (dVal > 0 ? dVal : 0);
+                        const netAvg = Math.max(0, tAvg - dAvg);
+                        const paid = parseFloat(order.paid_amount || order.paidAmount || 0);
+                        const rAvg = Math.max(0, netAvg - paid);
+
+                        return (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                            <div>
+                              الإجمالي: <strong>
+                                {hasEst ? `متوسط ${tAvg.toFixed(2)} ج.م` : `${parseFloat(order.total_amount || order.totalAmount || tAvg || 0).toFixed(2)} ج.م`}
+                              </strong>
+                              {hasEst && (
+                                <small style={{ color: '#b45309', marginRight: '4px', fontSize: '11px' }}>
+                                  ({tMin.toFixed(0)} - {tMax.toFixed(0)})
+                                </small>
+                              )}
+                            </div>
+                            <div>
+                              المدفوع: <strong style={{ color: '#059669' }}>{paid.toFixed(2)} ج.م</strong>
+                            </div>
+                            <div style={{ fontSize: '14px' }}>
+                              المتبقي: <strong style={{ color: '#dc2626' }}>
+                                {hasEst ? `متوسط ${rAvg.toFixed(2)} ج.م` : `${parseFloat(order.remaining_amount || order.remainingAmount || rAvg || 0).toFixed(2)} ج.م`}
+                              </strong>
+                            </div>
+                          </div>
+                        );
+                      })()}
                       {order.expected_pickup_date && (
                         <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
                           <Calendar size={13} />

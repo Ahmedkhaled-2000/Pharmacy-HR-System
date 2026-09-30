@@ -1596,13 +1596,18 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         }
       }
 
-      // 2. احتساب إجمالي الأصناف
-      // ملاحظة معمارية: بناءً على توجيهات الإدارة وعدم احتساب متوسط السعر بالمعادلة الرياضية،
-      // يظل السعر المحدد من قبل الصيدلي أو 0 إذا كان تقريبياً، ويظهر في فاتورة العميل "من ... إلى ... ج.م" فقط.
+      // 2. احتساب إجمالي الأصناف (مع دعم متوسط السعر التقديري)
       let totalAmount = 0;
       items.forEach(item => {
         const qty = parseInt(item.quantity || 1, 10);
-        const price = parseFloat(item.unitPrice || 0);
+        let price = parseFloat(item.unitPrice || 0);
+        if (item.isPriceEstimated) {
+          const pMin = parseFloat(item.priceMin || 0);
+          const pMax = parseFloat(item.priceMax || pMin || 0);
+          if (pMin > 0 || pMax > 0) {
+            price = (pMin + pMax) / 2;
+          }
+        }
         totalAmount += qty * price;
       });
 
@@ -1651,11 +1656,14 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       for (const it of items) {
         const itemId = `item_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
         const qty = parseInt(it.quantity || 1, 10);
-        const price = parseFloat(it.unitPrice || 0);
-        const total = qty * price;
         const isEst = Boolean(it.isPriceEstimated);
         const pMin = (it.priceMin !== undefined && it.priceMin !== null && it.priceMin !== '') ? parseFloat(it.priceMin) : null;
         const pMax = (it.priceMax !== undefined && it.priceMax !== null && it.priceMax !== '') ? parseFloat(it.priceMax) : null;
+        let price = parseFloat(it.unitPrice || 0);
+        if (isEst && (pMin > 0 || pMax > 0)) {
+          price = (pMin + (pMax || pMin)) / 2;
+        }
+        const total = qty * price;
 
         await db.query(`
           INSERT INTO public.outstock_order_items (
