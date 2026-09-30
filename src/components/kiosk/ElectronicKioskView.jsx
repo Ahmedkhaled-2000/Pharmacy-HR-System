@@ -31,12 +31,13 @@ export default function ElectronicKioskView({
   resumeShift,
   stopShift,
   submitRequest,
+  onKioskDeviceRequest,
   kioskBranchId
 }) {
   const { setState, saveState, isOffline, isLoading, isSyncing } = useData() || {};
   const uiContext = useOptionalUI();
   const { kioskConfirmModal } = uiContext || {};
-  const { orgSettings, employees, ipRestrictions } = state;
+  const { orgSettings = {}, employees = [], ipRestrictions = {} } = state || {};
   const [now, setNow] = useState(() => getCalibratedNow().calibratedEpoch);
   const [isExecutingPunch, setIsExecutingPunch] = useState(false);
   const [currentIp, setCurrentIp] = useState('');
@@ -293,10 +294,10 @@ export default function ElectronicKioskView({
 
   const todayStr = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
   const rawActiveShift = matchedEmp ? (
-    state.activeShifts?.[matchedEmp.id] ||
-    state.activeShifts?.[String(matchedEmp.id)] ||
-    (matchedEmp.code && state.activeShifts?.[String(matchedEmp.code)]) ||
-    Object.values(state.activeShifts || {}).find(s => s && (
+    state?.activeShifts?.[matchedEmp.id] ||
+    state?.activeShifts?.[String(matchedEmp.id)] ||
+    (matchedEmp.code && state?.activeShifts?.[String(matchedEmp.code)]) ||
+    Object.values(state?.activeShifts || {}).find(s => s && (
       String(s.employeeId) === String(matchedEmp.id) ||
       (matchedEmp.code && String(s.employeeCode) === String(matchedEmp.code)) ||
       (matchedEmp.code && String(s.employeeId) === String(matchedEmp.code))
@@ -335,7 +336,7 @@ export default function ElectronicKioskView({
   // التحقق من الوردية في الذاكرة: يجب ألا تكون مغلقة في سجل الورديات
   let verifiedActiveShift = null;
   if (rawActiveShift && !isStaleActiveShift) {
-    const recordedMatch = (state.shifts || []).find(s =>
+    const recordedMatch = (state?.shifts || []).find(s =>
       (rawActiveShift.shiftId && String(s.id) === String(rawActiveShift.shiftId)) ||
       (String(s.employeeId) === String(matchedEmp.id) && s.date === rawActiveShift.date && s.timeIn === rawActiveShift.timeIn)
     );
@@ -349,7 +350,7 @@ export default function ElectronicKioskView({
   }
 
   // فحص سجلات الورديات لمعرفة ما إذا كانت هناك وردية مفتوحة حالياً (الأحدث أولاً لتجنب الورديات المتروكة القديمة)
-  const empOpenShift = matchedEmp ? (state.shifts || [])
+  const empOpenShift = matchedEmp ? (state?.shifts || [])
     .filter(s => {
       const isMatch = (String(s.employeeId) === String(matchedEmp.id) || (matchedEmp.code && String(s.employeeCode) === String(matchedEmp.code)));
       if (!isMatch || !isShiftTrulyOpen(s)) return false;

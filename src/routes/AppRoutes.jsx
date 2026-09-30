@@ -487,12 +487,13 @@ export default function AppRoutes() {
     };
   }, [authRole]);
 
-  // Auto-heal activeNavTab if it was previously set to 'kiosk'
+  // Auto-heal stale activeNavTab if it was previously saved to 'kiosk' on initial boot
   useEffect(() => {
     if (activeNavTab === 'kiosk') {
       setActiveNavTab('dashboard');
     }
-  }, [activeNavTab, setActiveNavTab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Guarantee null-safe arrays for all child components and modules
   const sanitizedState = useMemo(() => {
@@ -1391,8 +1392,8 @@ export default function AppRoutes() {
 
   return (
     <div className={`mode-${viewMode}`}>
-      {/* 0. Initial Loading Spinner with Organization Logo */}
-      {isLoading && (() => {
+      {/* 0. Initial Loading Spinner with Organization Logo (Exempt Kiosk view so it renders instantly) */}
+      {isLoading && viewMode !== 'kiosk' && (() => {
         const effectiveLogo = state?.orgSettings?.logoUrl ||
           (() => {
             try {
@@ -1594,7 +1595,7 @@ export default function AppRoutes() {
         <ErrorBoundary fallbackTitle="حدث خطأ في كشك البصمة والحضور">
           <Suspense fallback={<div className="loading-fallback">جاري تحميل كشك البصمة...</div>}>
             <ElectronicKioskView
-              orgSettings={state.orgSettings}
+              orgSettings={state?.orgSettings}
               state={state}
               startShift={startShift}
               pauseShift={pauseShift}
