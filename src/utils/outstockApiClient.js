@@ -587,6 +587,13 @@ export async function outstockGetSupplierWithdrawals(supplierId, params = {}) {
   return await outstockRequest(`suppliers/${supplierId}/withdrawals?${qs.toString()}`, { method: 'GET' });
 }
 
+export async function outstockAddSupplierWithdrawal(supplierId, withdrawalData) {
+  return await outstockRequest(`suppliers/${supplierId}/withdrawals`, {
+    method: 'POST',
+    body: JSON.stringify(withdrawalData)
+  });
+}
+
 export async function outstockSettleSupplierClaim(supplierId, paymentData) {
   return await outstockRequest(`suppliers/${supplierId}/settle`, {
     method: 'POST',

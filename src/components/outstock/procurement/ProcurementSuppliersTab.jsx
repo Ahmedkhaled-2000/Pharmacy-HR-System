@@ -38,6 +38,7 @@ import {
   outstockUpdateSupplier,
   outstockDeleteSupplier,
   outstockGetSupplierWithdrawals,
+  outstockAddSupplierWithdrawal,
   outstockSettleSupplierClaim,
   outstockGetSupplierPayments,
   outstockGetSupplierInvoices,
@@ -55,6 +56,8 @@ import {
   parseSupplierInvoiceExcel
 } from '../../../utils/outstockExcelExporter';
 import SupplierDiscountsComparisonTab from './SupplierDiscountsComparisonTab';
+import MedicationAutocompleteInput from '../pharmacy/MedicationAutocompleteInput';
+import { performSmartExtraction } from '../../../utils/archiveAiService';
 
 /**
  * ProcurementSuppliersTab.jsx
@@ -65,6 +68,11 @@ import SupplierDiscountsComparisonTab from './SupplierDiscountsComparisonTab';
  * 3. مسحوبات الفروع الشهرية والتوريدات الميدانية
  */
 export default function ProcurementSuppliersTab({ showToast = alert, initialSubTab = 'accounts' }) {
+  const showToastRef = useRef(showToast);
+  useEffect(() => {
+    showToastRef.current = showToast;
+  }, [showToast]);
+
   const [activeSubTab, setActiveSubTab] = useState(initialSubTab || 'accounts'); // 'accounts' | 'invoices' | 'withdrawals' | 'discounts_comparison'
   const [suppliers, setSuppliers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -88,11 +96,11 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       }
     } catch (err) {
       console.error('Error fetching suppliers:', err);
-      showToast?.('تعذر تحميل بيانات الموردين');
+      showToastRef.current?.('تعذر تحميل بيانات الموردين');
     } finally {
       setIsLoading(false);
     }
-  }, [showToast]);
+  }, []);
 
   useEffect(() => {
     loadSuppliers();
@@ -132,6 +140,20 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   const [supplierWithdrawals, setSupplierWithdrawals] = useState([]);
   const [withdrawalSearch, setWithdrawalSearch] = useState('');
   const [isLoadingWithdrawals, setIsLoadingWithdrawals] = useState(false);
+
+  // نافذة إضافة مسحوب يدوي للمورد
+  const [isManualWithdrawalModalOpen, setIsManualWithdrawalModalOpen] = useState(false);
+  const [manualWithdrawalForm, setManualWithdrawalForm] = useState({
+    medication_name: '',
+    quantity: '1',
+    public_price: '',
+    discount_percent: '',
+    buy_price: '',
+    barcode: '',
+    invoice_number: '',
+    notes: ''
+  });
+  const [isSubmittingManualWithdrawal, setIsSubmittingManualWithdrawal] = useState(false);
 
   // إحصائيات الموردين العامة
   const supplierStats = useMemo(() => {
@@ -325,10 +347,67 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
     if (!selectedSupplierForWithdrawals) return;
     try {
       await exportSupplierWithdrawalsExcel(selectedSupplierForWithdrawals, filteredSupplierWithdrawals);
-      showToast?.('تم تصدير كشف المسحوبات إلى Excel بنجاح');
+      showToastRef.current?.('تم تصدير كشف المسحوبات إلى Excel بنجاح');
     } catch (err) {
       console.error(err);
-      showToast?.('فشل تصدير ملف الإكسل');
+      showToastRef.current?.('فشل تصدير ملف الإكسل');
+    }
+  };
+
+  const handleSaveManualSupplierWithdrawal = async (e) => {
+    e.preventDefault();
+    if (!selectedSupplierForWithdrawals?.id) return;
+    if (!manualWithdrawalForm.medication_name?.trim()) {
+      showToastRef.current?.('يرجى كتابة أو اختيار اسم الصنف المسحوب');
+      return;
+    }
+    const qty = Number(manualWithdrawalForm.quantity) || 1;
+    const pub = Number(manualWithdrawalForm.public_price) || 0;
+    const disc = Number(manualWithdrawalForm.discount_percent) || 0;
+    let buy = Number(manualWithdrawalForm.buy_price);
+    if (!buy && pub > 0) {
+      buy = pub * (1 - disc / 100);
+    }
+    if (!buy || buy <= 0) {
+      showToastRef.current?.('يرجى إدخال سعر شراء صحيح أكبر من صفر');
+      return;
+    }
+
+    try {
+      setIsSubmittingManualWithdrawal(true);
+      const res = await outstockAddSupplierWithdrawal(selectedSupplierForWithdrawals.id, {
+        medication_name: manualWithdrawalForm.medication_name.trim(),
+        quantity: qty,
+        public_price: pub,
+        discount_percent: disc,
+        buy_price: buy,
+        barcode: manualWithdrawalForm.barcode || '',
+        invoice_number: manualWithdrawalForm.invoice_number?.trim() || `WITH-${Date.now().toString().slice(-5)}`,
+        notes: manualWithdrawalForm.notes || ''
+      });
+      if (res?.success) {
+        showToastRef.current?.('تم تسجيل المسحوب اليدوي وتحديث كشف حساب المورد بنجاح');
+        setIsManualWithdrawalModalOpen(false);
+        setManualWithdrawalForm({
+          medication_name: '',
+          quantity: '1',
+          public_price: '',
+          discount_percent: '',
+          buy_price: '',
+          barcode: '',
+          invoice_number: '',
+          notes: ''
+        });
+        handleOpenWithdrawals(selectedSupplierForWithdrawals);
+        loadSuppliers();
+      } else {
+        showToastRef.current?.(res?.error || 'فشل تسجيل المسحوب');
+      }
+    } catch (err) {
+      console.error(err);
+      showToastRef.current?.('حدث خطأ أثناء تسجيل المسحوب');
+    } finally {
+      setIsSubmittingManualWithdrawal(false);
     }
   };
 
@@ -390,11 +469,11 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       }
     } catch (err) {
       console.error(err);
-      showToast?.('تعذر تحميل فواتير الموردين');
+      showToastRef.current?.('تعذر تحميل فواتير الموردين');
     } finally {
       setIsLoadingInvoices(false);
     }
-  }, [invoiceSupplierFilter, invoiceStatusFilter, invoiceSearchQuery, showToast]);
+  }, [invoiceSupplierFilter, invoiceStatusFilter, invoiceSearchQuery]);
 
   useEffect(() => {
     if (activeSubTab === 'invoices') {
@@ -458,61 +537,58 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
     }
   };
 
-  // 2) محاكاة/استخراج بالذكاء الاصطناعي (AI OCR / Vision)
+  // 2) استخراج ذكي بالذكاء الاصطناعي (Groq Vision + Gemini Vision + Regex)
   const handleAIExtractInvoice = async () => {
     if (!attachedFileBase64) {
-      showToast?.('يرجى اختيار صورة الفاتورة أو المستند أولاً');
+      showToastRef.current?.('يرجى اختيار صورة الفاتورة أو المستند أولاً');
       return;
     }
     setIsExtractingAI(true);
     try {
-      // محاكاة معالجة بصرية ذكية بنموذج الرؤية واستخراج الأصناف
-      await new Promise((r) => setTimeout(r, 1600));
+      const extracted = await performSmartExtraction(
+        attachedFile,
+        attachedFileBase64,
+        {},
+        suppliers,
+        (msg) => console.log(msg)
+      );
 
-      const simulatedExtractedItems = [
-        {
-          id: `ai_item_1_${Date.now()}`,
-          medication_name: 'Panadol Extra 500mg 24 Tab',
-          barcode: '6221001234567',
-          pack_size: 1,
-          quantity: 20,
-          public_price: 45.0,
-          discount_percent: 18.0,
-          buy_price: 36.9,
-          total_price: 738.0
-        },
-        {
-          id: `ai_item_2_${Date.now()}`,
-          medication_name: 'Augmentin 1gm 14 Tab',
-          barcode: '6221007654321',
-          pack_size: 1,
-          quantity: 15,
-          public_price: 135.0,
-          discount_percent: 21.5,
-          buy_price: 105.97,
-          total_price: 1589.55
-        },
-        {
-          id: `ai_item_3_${Date.now()}`,
-          medication_name: 'Cataflam 50mg 20 Tab',
-          barcode: '6221009876543',
-          pack_size: 1,
-          quantity: 25,
-          public_price: 52.0,
-          discount_percent: 19.0,
-          buy_price: 42.12,
-          total_price: 1053.0
-        }
-      ];
-
-      setInvoiceForm((prev) => ({
-        ...prev,
-        items: [...prev.items, ...simulatedExtractedItems]
-      }));
-      showToast?.('تم استخراج وقراءة بيانات الفاتورة بالذكاء الاصطناعي بنجاح ✨');
+      if (extracted && (extracted.items?.length > 0 || extracted.totalAmount > 0)) {
+        setInvoiceForm((prev) => ({
+          ...prev,
+          supplier_id: extracted.supplierId || prev.supplier_id,
+          invoice_number: extracted.invoiceNumber || prev.invoice_number,
+          invoice_date: extracted.invoiceDate || prev.invoice_date,
+          discount_amount: extracted.discountAmount ? String(extracted.discountAmount) : prev.discount_amount,
+          items: extracted.items && extracted.items.length > 0
+            ? [...prev.items, ...extracted.items.map((it, idx) => {
+                const qty = Number(it.quantity) || 1;
+                const pub = Number(it.public_price) || 0;
+                const disc = Number(it.discount_percent) || 0;
+                let buy = Number(it.buy_price);
+                if (!buy && pub > 0) buy = pub * (1 - disc / 100);
+                const tot = Number(it.total_price) || (qty * buy);
+                return {
+                  id: `ai_item_${Date.now()}_${idx}`,
+                  medication_name: it.medication_name || it.name || '',
+                  barcode: it.barcode || '',
+                  pack_size: Number(it.pack_size) || 1,
+                  quantity: qty,
+                  public_price: pub,
+                  discount_percent: disc,
+                  buy_price: parseFloat(buy.toFixed(2)),
+                  total_price: parseFloat(tot.toFixed(2))
+                };
+              })]
+            : prev.items
+        }));
+        showToastRef.current?.(`تم استخراج بيانات الفاتورة و${extracted.items?.length || 0} صنف بنجاح ✨`);
+      } else {
+        showToastRef.current?.('لم يتمكن الذكاء الاصطناعي من قراءة الأصناف بوضوح، يرجى التدقيق أو الإدخال اليدوي');
+      }
     } catch (err) {
       console.error(err);
-      showToast?.('تعذر استخراج البيانات بالذكاء الاصطناعي');
+      showToastRef.current?.('تعذر استخراج البيانات بالذكاء الاصطناعي');
     } finally {
       setIsExtractingAI(false);
     }
@@ -680,9 +756,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
 
   const [extraForm, setExtraForm] = useState({
     branch_id: '',
-    medication_name: '',
-    quantity: '1',
-    unit_cost: '',
+    amount: '',
     withdrawal_date: new Date().toISOString().slice(0, 10),
     notes: ''
   });
@@ -697,11 +771,11 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       }
     } catch (err) {
       console.error(err);
-      showToast?.('تعذر تحميل مسحوبات الفروع');
+      showToastRef.current?.('تعذر تحميل مسحوبات الفروع');
     } finally {
       setIsLoadingBranchWithdrawals(false);
     }
-  }, [selectedMonth, showToast]);
+  }, [selectedMonth]);
 
   useEffect(() => {
     if (activeSubTab === 'withdrawals') {
@@ -717,33 +791,37 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   const handleSaveExtraWithdrawal = async (e) => {
     e.preventDefault();
     if (!extraForm.branch_id) {
-      showToast?.('يرجى اختيار الفرع');
+      showToastRef.current?.('يرجى اختيار الفرع');
       return;
     }
-    if (!extraForm.medication_name?.trim()) {
-      showToast?.('يرجى إدخال اسم الصنف');
+    const numAmount = parseFloat(extraForm.amount || 0);
+    if (!numAmount || numAmount <= 0) {
+      showToastRef.current?.('يرجى إدخال مبلغ مسحوبات صحيح أكبر من صفر');
       return;
     }
 
     try {
-      const res = await outstockSaveBranchWithdrawal(extraForm);
+      const res = await outstockSaveBranchWithdrawal({
+        branch_id: extraForm.branch_id,
+        amount: numAmount,
+        withdrawal_date: extraForm.withdrawal_date,
+        notes: extraForm.notes
+      });
       if (res?.success) {
-        showToast?.('تم تسجيل المسحوب الإضافي للفرع بنجاح');
+        showToastRef.current?.('تم تسجيل إجمالي مسحوبات الفرع بنجاح');
         setIsExtraWithdrawalModalOpen(false);
         setExtraForm({
           branch_id: '',
-          medication_name: '',
-          quantity: '1',
-          unit_cost: '',
+          amount: '',
           withdrawal_date: new Date().toISOString().slice(0, 10),
           notes: ''
         });
         loadBranchWithdrawals();
       } else {
-        showToast?.(res?.error || 'فشل التسجيل');
+        showToastRef.current?.(res?.error || 'فشل التسجيل');
       }
     } catch (err) {
-      showToast?.('حدث خطأ أثناء تسجيل المسحوب');
+      showToastRef.current?.('حدث خطأ أثناء تسجيل المسحوب');
     }
   };
 
@@ -1673,42 +1751,54 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: supplierFormData.payment_type === 'cash' ? '1fr' : '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
                 <div>
                   <label className="outstock-form-label">نوع الحساب</label>
                   <select
                     className="outstock-form-select"
                     value={supplierFormData.payment_type}
-                    onChange={(e) => setSupplierFormData({ ...supplierFormData, payment_type: e.target.value })}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSupplierFormData({
+                        ...supplierFormData,
+                        payment_type: val,
+                        credit_term_days: val === 'cash' ? '0' : (supplierFormData.credit_term_days || '30'),
+                        credit_limit: val === 'cash' ? '0' : supplierFormData.credit_limit
+                      });
+                    }}
                   >
                     <option value="credit">أجل (ائتمان)</option>
                     <option value="cash">نقدي (كاش)</option>
                   </select>
                 </div>
-                <div>
-                  <label className="outstock-form-label">حد الائتمان (ج.م)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    className="outstock-form-input"
-                    value={supplierFormData.credit_limit}
-                    onChange={(e) => setSupplierFormData({ ...supplierFormData, credit_limit: e.target.value })}
-                    placeholder="0 = بدون حد"
-                  />
-                </div>
+                {supplierFormData.payment_type !== 'cash' && (
+                  <div>
+                    <label className="outstock-form-label">حد الائتمان (ج.م)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      className="outstock-form-input"
+                      value={supplierFormData.credit_limit}
+                      onChange={(e) => setSupplierFormData({ ...supplierFormData, credit_limit: e.target.value })}
+                      placeholder="0 = بدون حد"
+                    />
+                  </div>
+                )}
               </div>
 
-              <div style={{ marginBottom: '14px' }}>
-                <label className="outstock-form-label">فترة السداد بالأيام</label>
-                <input
-                  type="number"
-                  min="1"
-                  className="outstock-form-input"
-                  value={supplierFormData.credit_term_days}
-                  onChange={(e) => setSupplierFormData({ ...supplierFormData, credit_term_days: e.target.value })}
-                  placeholder="30"
-                />
-              </div>
+              {supplierFormData.payment_type !== 'cash' && (
+                <div style={{ marginBottom: '14px' }}>
+                  <label className="outstock-form-label">فترة السداد بالأيام (فترة السماح)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    className="outstock-form-input"
+                    value={supplierFormData.credit_term_days}
+                    onChange={(e) => setSupplierFormData({ ...supplierFormData, credit_term_days: e.target.value })}
+                    placeholder="30"
+                  />
+                </div>
+              )}
 
               <div style={{ marginBottom: '18px' }}>
                 <label className="outstock-form-label">ملاحظات إضافية</label>
@@ -1891,6 +1981,15 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                   type="button"
+                  className="outstock-btn outstock-btn-primary"
+                  onClick={() => setIsManualWithdrawalModalOpen(true)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}
+                >
+                  <Plus size={15} />
+                  <span>إضافة مسحوب يدوي</span>
+                </button>
+                <button
+                  type="button"
                   className="outstock-btn outstock-btn-secondary"
                   onClick={handleExportSupplierWithdrawals}
                   style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#15803d' }}
@@ -1965,6 +2064,173 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                 </table>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── نافذة إضافة مسحوب يدوي للمورد ── */}
+      {isManualWithdrawalModalOpen && selectedSupplierForWithdrawals && (
+        <div className="outstock-modal-overlay" style={{ zIndex: 1100 }}>
+          <div className="outstock-modal-card" style={{ maxWidth: '520px', width: '92%' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                borderBottom: '1px solid #e2e8f0',
+                paddingBottom: '12px',
+                marginBottom: '16px'
+              }}
+            >
+              <div>
+                <h3 style={{ margin: 0, fontSize: '16px', color: '#0f172a' }}>تسجيل مسحوب يدوي للمورد</h3>
+                <span style={{ fontSize: '12px', color: '#0284c7' }}>
+                  {selectedSupplierForWithdrawals.name} ({selectedSupplierForWithdrawals.code})
+                </span>
+              </div>
+              <button
+                type="button"
+                className="outstock-btn-close"
+                onClick={() => setIsManualWithdrawalModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveManualSupplierWithdrawal}>
+              <div style={{ marginBottom: '12px' }}>
+                <label className="outstock-form-label">اسم الدواء / الصنف *</label>
+                <MedicationAutocompleteInput
+                  value={manualWithdrawalForm.medication_name}
+                  onChange={(val) => setManualWithdrawalForm((prev) => ({ ...prev, medication_name: val }))}
+                  onSelect={(med) => {
+                    const pub = Number(med.price || med.public_price || 0);
+                    const disc = Number(manualWithdrawalForm.discount_percent || 0);
+                    const buy = pub > 0 && disc > 0 ? parseFloat((pub * (1 - disc / 100)).toFixed(2)) : (pub || '');
+                    setManualWithdrawalForm((prev) => ({
+                      ...prev,
+                      medication_name: med.name || med.arabic_name,
+                      public_price: pub || '',
+                      buy_price: buy || prev.buy_price,
+                      barcode: med.barcode || ''
+                    }));
+                  }}
+                  placeholder="ابحث بالاسم أو الباركود..."
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                <div>
+                  <label className="outstock-form-label">الكمية المسحوبة *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    className="outstock-form-input"
+                    value={manualWithdrawalForm.quantity}
+                    onChange={(e) => setManualWithdrawalForm((prev) => ({ ...prev, quantity: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="outstock-form-label">سعر الجمهور (ج.م)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    className="outstock-form-input"
+                    value={manualWithdrawalForm.public_price}
+                    onChange={(e) => {
+                      const pub = Number(e.target.value) || 0;
+                      const disc = Number(manualWithdrawalForm.discount_percent || 0);
+                      const buy = pub > 0 && disc > 0 ? parseFloat((pub * (1 - disc / 100)).toFixed(2)) : manualWithdrawalForm.buy_price;
+                      setManualWithdrawalForm((prev) => ({ ...prev, public_price: e.target.value, buy_price: buy }));
+                    }}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                <div>
+                  <label className="outstock-form-label">نسبة الخصم %</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="100"
+                    className="outstock-form-input"
+                    value={manualWithdrawalForm.discount_percent}
+                    onChange={(e) => {
+                      const disc = Number(e.target.value) || 0;
+                      const pub = Number(manualWithdrawalForm.public_price || 0);
+                      const buy = pub > 0 ? parseFloat((pub * (1 - disc / 100)).toFixed(2)) : manualWithdrawalForm.buy_price;
+                      setManualWithdrawalForm((prev) => ({ ...prev, discount_percent: e.target.value, buy_price: buy }));
+                    }}
+                    placeholder="0%"
+                  />
+                </div>
+                <div>
+                  <label className="outstock-form-label">سعر الشراء الفعلي *</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.01"
+                    className="outstock-form-input"
+                    value={manualWithdrawalForm.buy_price}
+                    onChange={(e) => setManualWithdrawalForm((prev) => ({ ...prev, buy_price: e.target.value }))}
+                    required
+                    placeholder="صافي سعر الشراء"
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                <div>
+                  <label className="outstock-form-label">رقم الفاتورة / الإذن</label>
+                  <input
+                    type="text"
+                    className="outstock-form-input"
+                    value={manualWithdrawalForm.invoice_number}
+                    onChange={(e) => setManualWithdrawalForm((prev) => ({ ...prev, invoice_number: e.target.value }))}
+                    placeholder="اختياري"
+                  />
+                </div>
+                <div>
+                  <label className="outstock-form-label">إجمالي المسحوب</label>
+                  <div style={{ padding: '8px 10px', background: '#f8fafc', borderRadius: '6px', fontWeight: 'bold', color: '#0f766e', fontSize: '13px' }}>
+                    {(Number(manualWithdrawalForm.quantity || 0) * Number(manualWithdrawalForm.buy_price || 0)).toFixed(2)} ج.م
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label className="outstock-form-label">ملاحظات</label>
+                <textarea
+                  className="outstock-form-input"
+                  rows={2}
+                  value={manualWithdrawalForm.notes}
+                  onChange={(e) => setManualWithdrawalForm((prev) => ({ ...prev, notes: e.target.value }))}
+                  placeholder="ملاحظات إضافية حول التوريد أو المسحوب..."
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="outstock-btn outstock-btn-secondary"
+                  onClick={() => setIsManualWithdrawalModalOpen(false)}
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="outstock-btn outstock-btn-primary"
+                  disabled={isSubmittingManualWithdrawal}
+                >
+                  {isSubmittingManualWithdrawal ? 'جاري التسجيل...' : 'تسجيل المسحوب'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -2144,12 +2410,23 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
               >
                 <div>
                   <label className="outstock-form-label" style={{ fontSize: '11px' }}>اسم الصنف / الدواء</label>
-                  <input
-                    type="text"
-                    className="outstock-form-input"
-                    placeholder="اسم الدواء..."
+                  <MedicationAutocompleteInput
                     value={manualItem.medication_name}
-                    onChange={(e) => setManualItem({ ...manualItem, medication_name: e.target.value })}
+                    onChange={(val) => setManualItem((prev) => ({ ...prev, medication_name: val }))}
+                    onSelect={(med) => {
+                      const pub = Number(med.price || med.public_price || 0);
+                      const disc = Number(manualItem.discount_percent || 0);
+                      const buy = pub > 0 && disc > 0 ? parseFloat((pub * (1 - disc / 100)).toFixed(2)) : (pub || manualItem.buy_price);
+                      setManualItem((prev) => ({
+                        ...prev,
+                        medication_name: med.name || med.arabic_name,
+                        public_price: pub || '',
+                        buy_price: buy || '',
+                        barcode: med.barcode || '',
+                        pack_size: Number(med.pack_size) || 1
+                      }));
+                    }}
+                    placeholder="ابحث في دليل الأدوية..."
                   />
                 </div>
                 <div>
@@ -2170,7 +2447,12 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                     className="outstock-form-input"
                     placeholder="0.00"
                     value={manualItem.public_price}
-                    onChange={(e) => setManualItem({ ...manualItem, public_price: e.target.value })}
+                    onChange={(e) => {
+                      const pub = Number(e.target.value) || 0;
+                      const disc = Number(manualItem.discount_percent) || 0;
+                      const buy = pub > 0 && disc > 0 ? parseFloat((pub * (1 - disc / 100)).toFixed(2)) : manualItem.buy_price;
+                      setManualItem((prev) => ({ ...prev, public_price: e.target.value, buy_price: buy }));
+                    }}
                   />
                 </div>
                 <div>
@@ -2181,7 +2463,12 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                     className="outstock-form-input"
                     placeholder="0%"
                     value={manualItem.discount_percent}
-                    onChange={(e) => setManualItem({ ...manualItem, discount_percent: e.target.value })}
+                    onChange={(e) => {
+                      const disc = Number(e.target.value) || 0;
+                      const pub = Number(manualItem.public_price) || 0;
+                      const buy = pub > 0 ? parseFloat((pub * (1 - disc / 100)).toFixed(2)) : manualItem.buy_price;
+                      setManualItem((prev) => ({ ...prev, discount_percent: e.target.value, buy_price: buy }));
+                    }}
                   />
                 </div>
                 <div>
@@ -2479,7 +2766,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
 
             <form onSubmit={handleSaveExtraWithdrawal}>
               <div style={{ marginBottom: '14px' }}>
-                <label className="outstock-form-label">الفرع المستلم</label>
+                <label className="outstock-form-label">الفرع المستلم *</label>
                 <select
                   className="outstock-form-select"
                   value={extraForm.branch_id}
@@ -2496,44 +2783,21 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
               </div>
 
               <div style={{ marginBottom: '14px' }}>
-                <label className="outstock-form-label">اسم الصنف / الدواء المسحوب</label>
+                <label className="outstock-form-label">مبلغ المسحوبات الإجمالي (ج.م) *</label>
                 <input
-                  type="text"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
                   className="outstock-form-input"
-                  placeholder="مثال: أوجمنتين 1 جم أقراص"
-                  value={extraForm.medication_name}
-                  onChange={(e) => setExtraForm({ ...extraForm, medication_name: e.target.value })}
+                  placeholder="0.00"
+                  value={extraForm.amount}
+                  onChange={(e) => setExtraForm({ ...extraForm, amount: e.target.value })}
                   required
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-                <div>
-                  <label className="outstock-form-label">الكمية المسحوبة</label>
-                  <input
-                    type="number"
-                    min="1"
-                    className="outstock-form-input"
-                    value={extraForm.quantity}
-                    onChange={(e) => setExtraForm({ ...extraForm, quantity: e.target.value })}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="outstock-form-label">سعر التكلفة للوحدة (ج.م)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    className="outstock-form-input"
-                    value={extraForm.unit_cost}
-                    onChange={(e) => setExtraForm({ ...extraForm, unit_cost: e.target.value })}
-                  />
-                </div>
-              </div>
-
               <div style={{ marginBottom: '14px' }}>
-                <label className="outstock-form-label">تاريخ المسحوب</label>
+                <label className="outstock-form-label">تاريخ المسحوب *</label>
                 <input
                   type="date"
                   className="outstock-form-input"

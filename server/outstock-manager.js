@@ -2964,9 +2964,14 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       const result = await db.query(`
         SELECT s.*,
+               s.supplier_code as code,
+               s.account_type as payment_type,
+               s.credit_duration_days as credit_term_days,
                COALESCE(inv_stats.total_invoices_count, 0) as total_invoices_count,
+               COALESCE(inv_stats.total_purchases_amount, 0) as total_invoices_amount,
                COALESCE(inv_stats.total_purchases_amount, 0) as total_purchases_amount,
                COALESCE(inv_stats.total_paid_amount, 0) as total_paid_amount,
+               COALESCE(inv_stats.total_remaining_amount, 0) as current_balance,
                COALESCE(inv_stats.total_remaining_amount, 0) as total_remaining_amount,
                COALESCE(inv_stats.overdue_invoices_count, 0) as overdue_invoices_count
         FROM public.outstock_suppliers s
@@ -2997,17 +3002,16 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         return res.status(403).json({ success: false, error: 'غير مصرح' });
       }
 
-      const {
-        supplierCode: inputCode,
-        name,
-        phone,
-        address,
-        accountType = 'credit',
-        creditLimit = 0,
-        creditDurationDays = 30,
-        creditDurationText = '',
-        notes = ''
-      } = req.body || {};
+      const b = req.body || {};
+      const inputCode = b.supplierCode || b.supplier_code || b.code;
+      const name = b.name;
+      const phone = b.phone;
+      const address = b.address || b.contact_person || '';
+      const accountType = b.accountType || b.account_type || b.payment_type || 'credit';
+      const creditLimit = b.creditLimit !== undefined ? b.creditLimit : (b.credit_limit !== undefined ? b.credit_limit : 0);
+      const creditDurationDays = b.creditDurationDays !== undefined ? b.creditDurationDays : (b.credit_term_days !== undefined ? b.credit_term_days : 30);
+      const creditDurationText = b.creditDurationText || b.credit_duration_text || `${creditDurationDays} يوم`;
+      const notes = b.notes || '';
 
       if (!name || !name.trim()) {
         return res.status(400).json({ success: false, error: 'اسم المورد حقل إجباري' });
@@ -3033,8 +3037,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       try {
         const driveRes = await callGoogleDriveWebhook('create_or_get_supplier_folder', { folderName });
         if (driveRes && driveRes.success) {
-          driveFolderId = driveRes.folderId;
-          driveFolderUrl = driveRes.folderUrl;
+          driveFolderId = driveFolderId || driveRes.folderId;
+          driveFolderUrl = driveFolderUrl || driveRes.folderUrl;
         }
       } catch (dErr) {
         console.warn('⚠️ [Google Drive Supplier Folder Warning]:', dErr.message);
@@ -3057,10 +3061,13 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         supplier: {
           id: sId,
           supplier_code: sCode,
+          code: sCode,
           name: name.trim(),
           phone,
           account_type: accountType,
+          payment_type: accountType,
           credit_limit: parseFloat(creditLimit || 0),
+          credit_term_days: parseInt(creditDurationDays || 30, 10),
           google_drive_folder_url: driveFolderUrl
         },
         message: 'تم إضافة المورد وإنشاء مجلد الأرشفة في Google Drive بنجاح'
@@ -3078,7 +3085,15 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       }
 
       const sId = req.params.id;
-      const { name, phone, address, accountType, creditLimit, creditDurationDays, creditDurationText, notes } = req.body || {};
+      const b = req.body || {};
+      const name = b.name;
+      const phone = b.phone;
+      const address = b.address || b.contact_person;
+      const accountType = b.accountType || b.account_type || b.payment_type;
+      const creditLimit = b.creditLimit !== undefined ? b.creditLimit : b.credit_limit;
+      const creditDurationDays = b.creditDurationDays !== undefined ? b.creditDurationDays : b.credit_term_days;
+      const creditDurationText = b.creditDurationText || b.credit_duration_text;
+      const notes = b.notes;
 
       await db.query(`
         UPDATE public.outstock_suppliers
@@ -3166,7 +3181,86 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       query += ' GROUP BY i.id ORDER BY i.invoice_date DESC';
       const result = await db.query(query, params);
-      res.json({ success: true, invoices: result.rows });
+
+      // تسطيح بنود الفواتير في مصفوفة مسحوبات مباشرة للفرونت إند
+      const withdrawals = [];
+      result.rows.forEach((inv) => {
+        const items = Array.isArray(inv.items) ? inv.items : [];
+        if (items.length === 0) {
+          withdrawals.push({
+            id: inv.id,
+            invoice_number: inv.invoice_number,
+            invoice_date: inv.invoice_date,
+            medication_name: inv.notes || 'فاتورة توريد عامة',
+            quantity: 1,
+            public_price: parseFloat(inv.net_total_amount || 0),
+            discount_percent: 0,
+            buy_price: parseFloat(inv.net_total_amount || 0),
+            total_price: parseFloat(inv.net_total_amount || 0),
+            barcode: ''
+          });
+        } else {
+          items.forEach((itm) => {
+            withdrawals.push({
+              id: itm.id,
+              invoice_number: inv.invoice_number,
+              invoice_date: inv.invoice_date,
+              medication_name: itm.medicationName || 'صنف دوائي',
+              quantity: itm.quantity || 1,
+              public_price: itm.publicPrice || itm.unitPrice || 0,
+              discount_percent: itm.discountPercent || 0,
+              buy_price: itm.unitPrice || 0,
+              total_price: itm.totalPrice || ((itm.quantity || 1) * (itm.unitPrice || 0)),
+              barcode: itm.barcode || ''
+            });
+          });
+        }
+      });
+
+      res.json({ success: true, invoices: result.rows, withdrawals });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // إضافة مسحوب يدوي للمورد مباشرة
+  app.post('/api/outstock/suppliers/:id/withdrawals', authMiddleware, async (req, res) => {
+    try {
+      const canAccess = req.outstockUser.role === 'owner' || req.outstockUser.role === 'procurement_manager' || req.outstockUser.permissions?.can_access_suppliers;
+      if (!canAccess) {
+        return res.status(403).json({ success: false, error: 'غير مصرح' });
+      }
+
+      const sId = req.params.id;
+      const b = req.body || {};
+      const medicationName = b.medication_name || b.medicationName || 'مسحوب يدوي';
+      const quantity = parseInt(b.quantity || 1, 10);
+      const buyPrice = parseFloat(b.buy_price || b.unitPrice || b.amount || 0);
+      const publicPrice = parseFloat(b.public_price || b.publicPrice || buyPrice);
+      const discountPercent = parseFloat(b.discount_percent || 0);
+      const totalPrice = parseFloat((quantity * buyPrice).toFixed(2));
+      const invoiceNumber = b.invoice_number || `MAN-${Date.now().toString().slice(-6)}`;
+      const invoiceDate = b.invoice_date || new Date().toISOString().slice(0, 10);
+      const notes = b.notes || '';
+
+      const invId = `sinv_man_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const recorder = req.outstockUser.fullName || req.outstockUser.username || 'مسؤول المشتريات';
+
+      await db.query(`
+        INSERT INTO public.outstock_supplier_invoices (
+          id, supplier_id, invoice_number, invoice_date, gross_total_amount, net_total_amount,
+          paid_amount, remaining_amount, payment_status, recorded_by, notes
+        ) VALUES ($1, $2, $3, $4, $5, $6, 0, $6, 'unpaid', $7, $8)
+      `, [invId, sId, invoiceNumber, invoiceDate, totalPrice, totalPrice, recorder, notes]);
+
+      const itemId = `itm_man_${Date.now()}`;
+      await db.query(`
+        INSERT INTO public.outstock_supplier_invoice_items (
+          id, invoice_id, medication_name, quantity, unit_price, public_price, discount_percent, total_price
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `, [itemId, invId, medicationName, quantity, buyPrice, publicPrice, discountPercent, totalPrice]);
+
+      res.json({ success: true, message: 'تم تسجيل المسحوب اليدوي للمورد بنجاح' });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -3346,23 +3440,22 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         return res.status(403).json({ success: false, error: 'غير مصرح' });
       }
 
-      const {
-        invoiceNumber,
-        supplierId,
-        invoiceDate,
-        dueDate = null,
-        subtotalAmount = 0,
-        discountAmount = 0,
-        netTotalAmount = 0,
-        paidAmount = 0,
-        entryMode = 'manual',
-        fileBase64 = null,
-        fileName = null,
-        mimeType = null,
-        items = [],
-        branchId = null,
-        notes = ''
-      } = req.body || {};
+      const b = req.body || {};
+      const invoiceNumber = b.invoiceNumber || b.invoice_number;
+      const supplierId = b.supplierId || b.supplier_id;
+      const invoiceDate = b.invoiceDate || b.invoice_date;
+      const dueDate = b.dueDate || b.due_date || null;
+      const subtotalAmount = b.subtotalAmount || b.subtotal_amount || b.total_amount || 0;
+      const discountAmount = b.discountAmount || b.discount_amount || 0;
+      const netTotalAmount = b.netTotalAmount || b.net_total_amount || b.net_amount || (subtotalAmount - discountAmount);
+      const paidAmount = b.paidAmount || b.paid_amount || 0;
+      const entryMode = b.entryMode || b.entry_mode || 'manual';
+      const fileBase64 = b.fileBase64 || b.file_base64 || b.attachedFileBase64 || null;
+      const fileName = b.fileName || b.file_name || null;
+      const mimeType = b.mimeType || b.mime_type || null;
+      const items = Array.isArray(b.items) ? b.items : [];
+      const branchId = b.branchId || b.branch_id || null;
+      const notes = b.notes || '';
 
       if (!invoiceNumber || !supplierId || !invoiceDate) {
         return res.status(400).json({ success: false, error: 'رقم الفاتورة والمورد وتاريخ الفاتورة حقول إلزامية' });
@@ -3426,7 +3519,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           drive_file_id, drive_file_url, drive_file_name, recorded_by, notes
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       `, [
-        invId, invoiceNumber.trim(), supplierId, invoiceDate, dueDate,
+        invId, String(invoiceNumber).trim(), supplierId, invoiceDate, dueDate,
         parseFloat(subtotalAmount || 0), parseFloat(discountAmount || 0),
         net, paid, remaining, pStatus, entryMode,
         driveFileId, driveFileUrl, savedFileName, recorder, notes
@@ -3435,20 +3528,22 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       if (Array.isArray(items) && items.length > 0) {
         for (const item of items) {
           const itmId = `sitm_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+          const medName = item.medicationName || item.medication_name || item.name || 'صنف دوائي';
+          const qty = parseInt(item.quantity || 1, 10);
+          const uPrice = parseFloat(item.unitPrice || item.unit_price || item.buy_price || 0);
+          const disc = parseFloat(item.discountPercent || item.discount_percent || 0);
+          const tot = parseFloat(item.totalPrice || item.total_price || (qty * uPrice).toFixed(2));
+          const pub = item.publicPrice || item.public_price ? parseFloat(item.publicPrice || item.public_price) : null;
+
           await db.query(`
             INSERT INTO public.outstock_supplier_invoice_items (
               id, invoice_id, medication_name, quantity, unit_price, discount_percent, total_price,
               public_price, expiry_date, batch_number
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
           `, [
-            itmId, invId, item.medicationName || item.name,
-            parseInt(item.quantity || 1, 10),
-            parseFloat(item.unitPrice || 0),
-            parseFloat(item.discountPercent || 0),
-            parseFloat(item.totalPrice || 0),
-            item.publicPrice ? parseFloat(item.publicPrice) : null,
-            item.expiryDate || null,
-            item.batchNumber || null
+            itmId, invId, medName, qty, uPrice, disc, tot, pub,
+            item.expiryDate || item.expiry_date || null,
+            item.batchNumber || item.batch_number || null
           ]);
         }
       }
@@ -3585,7 +3680,12 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         return res.status(403).json({ success: false, error: 'غير مصرح' });
       }
 
-      const { branchId, amount, withdrawalDate, supplierId = null, invoiceId = null, notes = '' } = req.body || {};
+      const branchId = req.body.branchId || req.body.branch_id;
+      const amount = req.body.amount;
+      const withdrawalDate = req.body.withdrawalDate || req.body.withdrawal_date;
+      const supplierId = req.body.supplierId || req.body.supplier_id || null;
+      const invoiceId = req.body.invoiceId || req.body.invoice_id || null;
+      const notes = req.body.notes || '';
       const numAmount = parseFloat(amount || 0);
 
       if (!branchId || numAmount <= 0) {

@@ -1725,7 +1725,7 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
             <div
               style={{
                 padding: '16px 20px',
-                background: 'linear-gradient(135deg, #334155 0%, #1e293b 100%)',
+                background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
                 color: '#ffffff',
                 display: 'flex',
                 alignItems: 'center',
@@ -1876,7 +1876,7 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
                     flex: 1,
                     padding: '12px',
                     borderRadius: '10px',
-                    background: '#1e293b',
+                    background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
                     color: '#ffffff',
                     border: 'none',
                     fontWeight: '800',

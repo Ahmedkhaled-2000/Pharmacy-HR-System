@@ -260,5 +260,131 @@ export async function extractMedicationsWithAi(file, onProgress = () => {}) {
     }
   }
 
-  throw new Error(lastError?.message || 'تعذر استخراج بيانات الأدوية من الملف المرفق. تأكد من وضوح المستند ومفتاح Gemini API.');
+  // ── الحالة الثالثة: محرك الرؤية الاحتياطي الفوري Groq Vision (Llama 3.2 11B Vision) ──
+  try {
+    const groqKeys = await getEffectiveGroqKeys();
+    if (groqKeys.length > 0) {
+      for (const gKey of groqKeys) {
+        try {
+          onProgress('جاري التحليل عبر محرك الذكاء الاصطناعي الاحتياطي (Groq Vision Llama 3.2)...');
+          const dataUrl = `data:${mimeType.includes('pdf') ? 'image/jpeg' : mimeType};base64,${cleanBase64}`;
+          const gRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${gKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: 'llama-3.2-11b-vision-preview',
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: MEDICATION_AI_PROMPT },
+                    { type: 'image_url', image_url: { url: dataUrl } }
+                  ]
+                }
+              ],
+              temperature: 0.1,
+              max_tokens: 8192,
+              response_format: { type: 'json_object' }
+            })
+          });
+
+          if (gRes.ok) {
+            const gData = await gRes.json();
+            let rawText = gData.choices?.[0]?.message?.content || '';
+            rawText = rawText.replace(/^```json/i, '').replace(/^```/i, '').replace(/```$/i, '').trim();
+            const jsonStart = rawText.indexOf('[');
+            const jsonEnd = rawText.lastIndexOf(']');
+            let parsed = null;
+            if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+              parsed = JSON.parse(rawText.substring(jsonStart, jsonEnd + 1));
+            } else {
+              const obj = JSON.parse(rawText);
+              parsed = Array.isArray(obj) ? obj : (obj.medications || obj.items || []);
+            }
+
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              const seen = new Set();
+              const cleanItems = [];
+              let dupCount = 0;
+              parsed.forEach((med, i) => {
+                const nameAr = String(med.trade_name_ar || med.trade_name_en || '').trim();
+                const nameEn = String(med.trade_name_en || med.trade_name_ar || '').trim();
+                const barcode = String(med.gtin_barcode || '').replace(/\s+/g, '');
+                const price = parseFloat(med.public_price || 0);
+                if (!nameAr && !nameEn) return;
+                const key = barcode || `${nameAr.toLowerCase()}|${nameEn.toLowerCase()}`;
+                if (seen.has(key)) { dupCount++; return; }
+                seen.add(key);
+                const packSize = Math.max(1, parseInt(med.pack_size || 1, 10));
+                cleanItems.push({
+                  rowNumber: i + 1,
+                  gtin_barcode: barcode,
+                  trade_name_ar: nameAr,
+                  trade_name_en: nameEn,
+                  generic_name: String(med.generic_name || '').trim(),
+                  dosage_form: String(med.dosage_form || 'أقراص').trim(),
+                  strength: String(med.strength || '').trim(),
+                  pack_size: packSize,
+                  unit_name: String(med.unit_name || 'شريط').trim(),
+                  public_price: price,
+                  unit_price: parseFloat((price / packSize).toFixed(2)),
+                  manufacturer: String(med.manufacturer || '').trim(),
+                  is_table_drug: Boolean(med.is_table_drug),
+                  is_refrigerated: Boolean(med.is_refrigerated)
+                });
+              });
+
+              return {
+                success: true,
+                method: 'groq_vision_backup',
+                items: cleanItems,
+                duplicatesCount: dupCount,
+                warnings: []
+              };
+            }
+          }
+        } catch (gErr) {
+          console.warn('Groq Vision backup failed:', gErr.message);
+        }
+      }
+    }
+  } catch (outerGroqErr) {
+    console.warn('Groq check error:', outerGroqErr);
+  }
+
+  // ── الحالة الرابعة: إذا كان ملف إكسل ولم ينجح الذكاء الاصطناعي ──
+  if (isExcel) {
+    return await parseMedicationExcelFile(file);
+  }
+
+  throw new Error(lastError?.message || 'تعذر استخراج بيانات الأدوية من الملف المرفق. تم فحص كل من Google Gemini ومحرك Vision الاحتياطي. يرجى التأكد من وضوح الصورة وصلاحية مفاتيح الـ API.');
+}
+
+/**
+ * الحصول على مفاتيح Groq المتاحة كـ API احتياطي
+ */
+async function getEffectiveGroqKeys() {
+  const keys = [];
+  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GROQ_API_KEY) {
+    keys.push(import.meta.env.VITE_GROQ_API_KEY);
+  }
+  try {
+    const rawArchive = localStorage.getItem('archive_settings') || localStorage.getItem('app_archive_settings');
+    if (rawArchive) {
+      const parsed = JSON.parse(rawArchive);
+      if (parsed.GROQ_API_KEY) keys.push(parsed.GROQ_API_KEY);
+      if (parsed.groqApiKey) keys.push(parsed.groqApiKey);
+    }
+  } catch {}
+  try {
+    const rawOutstock = localStorage.getItem('outstock_settings');
+    if (rawOutstock) {
+      const parsed = JSON.parse(rawOutstock);
+      if (parsed.GROQ_API_KEY) keys.push(parsed.GROQ_API_KEY);
+    }
+  } catch {}
+  return Array.from(new Set(keys.map(k => String(k || '').trim()))).filter(Boolean);
 }

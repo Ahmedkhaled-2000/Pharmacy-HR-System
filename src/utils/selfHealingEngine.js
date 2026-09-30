@@ -48,7 +48,22 @@ class SelfHealingEngine {
       e.preventDefault();
     }, false);
 
-    // 4. تشغيل فحص أولي فوري لذاكرة التخزين
+    // 4. كبح وتفادي أخطاء ملحقات المتصفح والترجمة (مثل RegisterClientLocalizationsError)
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event?.reason;
+      const message = String(reason?.message || reason || '');
+      if (
+        message.includes('RegisterClientLocalizations') ||
+        message.includes('message channel closed') ||
+        message.includes('Extension context invalidated') ||
+        message.includes('Receiving end does not exist')
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation?.();
+      }
+    });
+
+    // 5. تشغيل فحص أولي فوري لذاكرة التخزين
     this.auditAndRepairLocalStorage();
   }
 

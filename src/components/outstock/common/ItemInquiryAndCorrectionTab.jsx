@@ -214,14 +214,16 @@ export default function ItemInquiryAndCorrectionTab({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', direction: 'rtl' }}>
-      {/* ── الرأس التعريفي ── */}
+      {/* ── الرأس التعريفي - مظهر فاتح مؤسسي راقي ── */}
       <div
         className="outstock-card"
         style={{
           padding: '20px 24px',
-          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-          color: '#ffffff',
-          borderRadius: '16px'
+          background: '#ffffff',
+          border: '1px solid #e2e8f0',
+          color: '#0f172a',
+          borderRadius: '16px',
+          boxShadow: '0 4px 20px -2px rgba(0, 0, 0, 0.05)'
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px' }}>
@@ -231,19 +233,20 @@ export default function ItemInquiryAndCorrectionTab({
                 width: '46px',
                 height: '46px',
                 borderRadius: '12px',
-                background: 'rgba(255,255,255,0.12)',
+                background: '#e0f2fe',
+                border: '1px solid #bae6fd',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center'
               }}
             >
-              <HelpCircle size={26} color="#38bdf8" />
+              <HelpCircle size={26} color="#0284c7" />
             </div>
             <div>
-              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '900' }}>
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '900', color: '#0f172a' }}>
                 مركز الاستعلامات، تصحيح الأصناف، واعتماد الأدوية
               </h2>
-              <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: '#94a3b8' }}>
+              <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: '#64748b' }}>
                 قناة تواصل فورية بين الصيدليات وإدارة المشتريات للتحقق من الأسعار وتحديث الكتالوج المركزي
               </p>
             </div>
@@ -254,7 +257,7 @@ export default function ItemInquiryAndCorrectionTab({
               type="button"
               onClick={fetchRequests}
               className="outstock-btn outstock-btn-secondary"
-              style={{ padding: '9px 16px', background: 'rgba(255,255,255,0.1)', color: '#ffffff', border: '1px solid rgba(255,255,255,0.2)' }}
+              style={{ padding: '9px 16px', background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1' }}
             >
               <RefreshCw size={15} />
               <span>تحديث</span>
@@ -279,7 +282,7 @@ export default function ItemInquiryAndCorrectionTab({
         </div>
 
         {/* التبويبات الفرعية */}
-        <div style={{ display: 'flex', gap: '8px', marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '16px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '8px', marginTop: '20px', borderTop: '1px solid #f1f5f9', paddingTop: '16px', flexWrap: 'wrap' }}>
           {[
             { id: 'all', label: 'كافة المعاملات', icon: FileText },
             { id: 'inquiry', label: 'استعلامات الأسعار والتوفر', icon: HelpCircle },
@@ -294,9 +297,9 @@ export default function ItemInquiryAndCorrectionTab({
                 type="button"
                 onClick={() => setActiveSubTab(tab.id)}
                 style={{
-                  background: active ? '#0284c7' : 'rgba(255,255,255,0.06)',
-                  color: active ? '#ffffff' : '#cbd5e1',
-                  border: 'none',
+                  background: active ? '#0284c7' : '#f8fafc',
+                  color: active ? '#ffffff' : '#475569',
+                  border: active ? '1px solid #0284c7' : '1px solid #e2e8f0',
                   borderRadius: '10px',
                   padding: '8px 16px',
                   fontSize: '13px',
@@ -554,9 +557,20 @@ export default function ItemInquiryAndCorrectionTab({
           <div
             className="outstock-modal-panel"
             onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: '640px', width: '100%', background: '#ffffff', borderRadius: '18px', overflow: 'hidden' }}
+            style={{
+              maxWidth: '820px',
+              width: '100%',
+              minHeight: '620px',
+              maxHeight: '92vh',
+              background: '#ffffff',
+              borderRadius: '18px',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.35)',
+              overflow: 'hidden'
+            }}
           >
-            <div style={{ padding: '16px 20px', background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ padding: '16px 20px', background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>
                 تقديم طلب / استعلام لإدارة المشتريات
               </h3>
@@ -569,7 +583,7 @@ export default function ItemInquiryAndCorrectionTab({
               </button>
             </div>
 
-            <form onSubmit={handleCreateRequest} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <form onSubmit={handleCreateRequest} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto', flex: 1, minHeight: '520px' }}>
               {/* اختيار نوع الطلب */}
               <div>
                 <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
@@ -603,7 +617,7 @@ export default function ItemInquiryAndCorrectionTab({
               </div>
 
               {/* اختيار أو كتابة اسم الصنف */}
-              <div>
+              <div style={{ position: 'relative', zIndex: 100 }}>
                 <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
                   اسم الصنف الدوائي * :
                 </label>

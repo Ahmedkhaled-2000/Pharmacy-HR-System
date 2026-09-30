@@ -223,14 +223,14 @@ export default function OutstockSystemView({
   // ── نظام الإشعارات المنبثقة الاحترافية داخل النظام ──
   const [activeNotification, setActiveNotification] = useState(null);
 
-  const triggerNotification = (msgOrObj) => {
+  const triggerNotification = useCallback((msgOrObj) => {
     if (!msgOrObj) return;
     if (typeof msgOrObj === 'string') {
       setActiveNotification({ message: msgOrObj });
     } else {
       setActiveNotification(msgOrObj);
     }
-  };
+  }, []);
 
   // استماع للحدث الموحد من أي مكان بالنظام
   useEffect(() => {
@@ -545,11 +545,84 @@ export default function OutstockSystemView({
         else if (userRole === 'owner') setActiveTab('owner_settings');
         return;
       }
+
+      // Esc: إغلاق النوافذ المنبثقة والقوائم المنسدلة
+      if (e.key === 'Escape') {
+        setIsBranchOrdersMenuOpen(false);
+        setIsSuppliersMenuOpen(false);
+        setIsSettingsMenuOpen(false);
+        setIsCommandPaletteOpen(false);
+        window.dispatchEvent(new CustomEvent('outstock:close_modal'));
+        const closeBtn = document.querySelector('.outstock-modal-card .outstock-btn-close, .outstock-modal-panel .outstock-btn-close, .outstock-btn-close');
+        if (closeBtn) closeBtn.click();
+        return;
+      }
+
+      // التنقل بالأسهم بين تبويبات الشريط العلوي والقوائم المنسدلة
+      const activeEl = document.activeElement;
+      const isInputFocused = activeEl && (
+        activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.tagName === 'SELECT' ||
+        activeEl.isContentEditable
+      );
+
+      if (!isInputFocused) {
+        // التنقل بالقوائم المنسدلة بالأسهم لأعلى ولأسفل
+        const isDropdownOpen = isBranchOrdersMenuOpen || isSuppliersMenuOpen || isSettingsMenuOpen;
+        if (isDropdownOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+          e.preventDefault();
+          const dropItems = Array.from(document.querySelectorAll('.outstock-dropdown-item:not([disabled])'));
+          if (dropItems.length > 0) {
+            const currentIdx = dropItems.findIndex(item => item === activeEl);
+            let nextIdx = 0;
+            if (e.key === 'ArrowDown') {
+              nextIdx = currentIdx < dropItems.length - 1 ? currentIdx + 1 : 0;
+            } else {
+              nextIdx = currentIdx > 0 ? currentIdx - 1 : dropItems.length - 1;
+            }
+            dropItems[nextIdx]?.focus();
+          }
+          return;
+        }
+
+        // إذا كان هناك زر قائمة منسدلة مفعل وضغط السهم لأسفل لفتح القائمة
+        if (e.key === 'ArrowDown') {
+          const focusedNavBtn = activeEl?.closest('.outstock-subnav-btn');
+          if (focusedNavBtn && focusedNavBtn.getAttribute('aria-haspopup') === 'true') {
+            e.preventDefault();
+            focusedNavBtn.click();
+            setTimeout(() => {
+              const firstDropItem = document.querySelector('.outstock-dropdown-item:not([disabled])');
+              firstDropItem?.focus();
+            }, 60);
+            return;
+          }
+        }
+
+        // التنقل بالأسهم يميناً ويساراً بين التبويبات العلوية
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          const navBtns = Array.from(document.querySelectorAll('.outstock-sub-navbar-container .outstock-subnav-btn:not([disabled])'));
+          if (navBtns.length > 0) {
+            e.preventDefault();
+            const currentIdx = navBtns.findIndex(b => b === activeEl || b.classList.contains('is-active'));
+            let nextIdx = 0;
+            // بنية RTL: السهم الأيسر يذهب للتبويب التالي والسهم الأيمن للتبويب السابق
+            if (e.key === 'ArrowLeft') {
+              nextIdx = currentIdx < navBtns.length - 1 ? currentIdx + 1 : 0;
+            } else {
+              nextIdx = currentIdx > 0 ? currentIdx - 1 : navBtns.length - 1;
+            }
+            navBtns[nextIdx]?.focus();
+            navBtns[nextIdx]?.click();
+          }
+        }
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [userRole, syncState]);
+  }, [userRole, syncState, isBranchOrdersMenuOpen, isSuppliersMenuOpen, isSettingsMenuOpen]);
 
   return (
     <div className={`outstock-root-shell ${themeMode === 'dark' ? 'dark-mode' : ''} ${isCompactDensity ? 'density-compact' : ''}`}>

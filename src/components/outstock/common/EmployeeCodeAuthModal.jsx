@@ -104,12 +104,13 @@ export default function EmployeeCodeAuthModal({
           animation: 'outstockFadeIn 0.2s ease-out'
         }}
       >
-        {/* رأس النافذة */}
+        {/* رأس النافذة - مظهر فاتح مؤسسي راقي */}
         <div
           style={{
             padding: '18px 20px',
-            background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-            color: '#ffffff',
+            background: '#ffffff',
+            borderBottom: '1px solid #e2e8f0',
+            color: '#0f172a',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between'
@@ -121,17 +122,18 @@ export default function EmployeeCodeAuthModal({
                 width: '38px',
                 height: '38px',
                 borderRadius: '10px',
-                background: 'rgba(255, 255, 255, 0.15)',
+                background: '#e0f2fe',
+                border: '1px solid #bae6fd',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center'
               }}
             >
-              <KeyRound size={20} color="#38bdf8" />
+              <KeyRound size={20} color="#0284c7" />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '900' }}>{title}</h3>
-              <p style={{ margin: 0, fontSize: '11.5px', color: '#94a3b8', marginTop: '2px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: '#0f172a' }}>{title}</h3>
+              <p style={{ margin: 0, fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
                 تسجيل حركة مؤكدة بالكود السري للموظف
               </p>
             </div>
@@ -142,10 +144,10 @@ export default function EmployeeCodeAuthModal({
             onClick={onClose}
             disabled={isVerifying}
             style={{
-              background: 'rgba(255, 255, 255, 0.12)',
-              border: 'none',
+              background: '#f1f5f9',
+              border: '1px solid #e2e8f0',
               borderRadius: '8px',
-              color: '#ffffff',
+              color: '#64748b',
               cursor: 'pointer',
               padding: '6px',
               display: 'flex'

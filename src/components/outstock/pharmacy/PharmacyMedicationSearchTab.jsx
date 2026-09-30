@@ -29,6 +29,7 @@ import {
   outstockGetBranchPermissions
 } from '../../../utils/outstockApiClient';
 import MedicationMasterCardModal from '../common/MedicationMasterCardModal';
+import AddMedicationModal from '../common/AddMedicationModal';
 
 /**
  * PharmacyMedicationSearchTab.jsx

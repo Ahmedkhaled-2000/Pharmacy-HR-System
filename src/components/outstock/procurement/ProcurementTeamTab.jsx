@@ -33,7 +33,8 @@ import {
   outstockUpdateProcurementManagerProfile,
   outstockGetBranchPermissions,
   outstockSaveBranchPermissions,
-  outstockGetBranches
+  outstockGetBranches,
+  outstockGetEmployees
 } from '../../../utils/outstockApiClient';
 
 /**
@@ -65,6 +66,15 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
     can_access_suppliers: true
   });
 
+  const [selectedBranchForEmp, setSelectedBranchForEmp] = useState('');
+  const [branchEmployees, setBranchEmployees] = useState([]);
+  const [isLoadingBranchEmps, setIsLoadingBranchEmps] = useState(false);
+
+  const showToastRef = React.useRef(showToast);
+  React.useEffect(() => {
+    showToastRef.current = showToast;
+  }, [showToast]);
+
   const loadTeam = useCallback(async () => {
     try {
       setIsLoadingTeam(true);
@@ -80,18 +90,49 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
       }
     } catch (err) {
       console.error('Error fetching procurement team:', err);
-      showToast?.('تعذر تحميل بيانات فريق المشتريات');
+      showToastRef.current?.('تعذر تحميل بيانات فريق المشتريات');
     } finally {
       setIsLoadingTeam(false);
     }
-  }, [showToast]);
+  }, []);
 
   useEffect(() => {
     loadTeam();
   }, [loadTeam]);
 
+  const handleBranchSelectForEmployee = async (branchId) => {
+    setSelectedBranchForEmp(branchId);
+    setBranchEmployees([]);
+    if (!branchId) return;
+    setIsLoadingBranchEmps(true);
+    try {
+      const res = await outstockGetEmployees(branchId);
+      if (res?.success && Array.isArray(res.employees)) {
+        setBranchEmployees(res.employees);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingBranchEmps(false);
+    }
+  };
+
+  const handleEmployeeChosen = (empId) => {
+    const emp = branchEmployees.find((e) => String(e.id || e._id) === String(empId));
+    if (!emp) return;
+    setMemberForm((prev) => ({
+      ...prev,
+      fullName: emp.name || emp.full_name || '',
+      phone: emp.phone || '',
+      username: emp.code ? `proc_${emp.code}` : (emp.username || prev.username),
+      allowed_branches: selectedBranchForEmp ? [selectedBranchForEmp] : prev.allowed_branches
+    }));
+  };
+
   const handleOpenAddMember = () => {
     setEditingMember(null);
+    setSelectedBranchForEmp('');
+    setBranchEmployees([]);
     setMemberForm({
       username: '',
       password: '',
@@ -229,11 +270,12 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
   };
 
   // ══════════════════════════════════════════════════════════════════════════════
-  // 3. ضبط صلاحيات تعديل الأسعار وبيانات الأدوية لفروع الصيدليات
+  // 3. ضبط صلاحيات تعديل الأسعار وبيانات الأدوية والخصومات لفروع الصيدليات
   // ══════════════════════════════════════════════════════════════════════════════
   const [branchPerms, setBranchPerms] = useState({
     allow_global_price_edit: true,
-    branch_overrides: {} // branchId -> { can_edit_price: bool, can_edit_data: bool }
+    allow_global_discounts: true,
+    branch_overrides: {} // branchId -> { can_edit_price: bool, can_edit_data: bool, can_apply_discount: bool }
   });
   const [isLoadingPerms, setIsLoadingPerms] = useState(false);
   const [isSavingPerms, setIsSavingPerms] = useState(false);
@@ -243,9 +285,11 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
       setIsLoadingPerms(true);
       const res = await outstockGetBranchPermissions();
       if (res?.success && res.permissions) {
+        const p = res.permissions;
         setBranchPerms({
-          allow_global_price_edit: res.permissions.allow_global_price_edit !== false,
-          branch_overrides: res.permissions.branch_overrides || {}
+          allow_global_price_edit: p.allow_global_price_edit !== false && !p.global_price_edit_disabled,
+          allow_global_discounts: !p.global_discounts_disabled,
+          branch_overrides: p.branch_overrides || p.branch_rules || {}
         });
       }
     } catch (err) {
@@ -268,10 +312,21 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
     }));
   };
 
+  const handleToggleGlobalDiscounts = () => {
+    setBranchPerms((prev) => ({
+      ...prev,
+      allow_global_discounts: !prev.allow_global_discounts
+    }));
+  };
+
   const handleToggleBranchPermission = (branchId, key) => {
     setBranchPerms((prev) => {
       const overrides = { ...(prev.branch_overrides || {}) };
-      const current = overrides[branchId] || { can_edit_price: prev.allow_global_price_edit, can_edit_data: true };
+      const current = overrides[branchId] || {
+        can_edit_price: prev.allow_global_price_edit,
+        can_edit_data: true,
+        can_apply_discount: prev.allow_global_discounts
+      };
       overrides[branchId] = {
         ...current,
         [key]: !current[key]
@@ -283,14 +338,22 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
   const handleSavePermissions = async () => {
     try {
       setIsSavingPerms(true);
-      const res = await outstockSaveBranchPermissions(branchPerms);
+      const payload = {
+        global_price_edit_disabled: !branchPerms.allow_global_price_edit,
+        global_discounts_disabled: !branchPerms.allow_global_discounts,
+        allow_global_price_edit: branchPerms.allow_global_price_edit,
+        allow_global_discounts: branchPerms.allow_global_discounts,
+        branch_rules: branchPerms.branch_overrides,
+        branch_overrides: branchPerms.branch_overrides
+      };
+      const res = await outstockSaveBranchPermissions(payload);
       if (res?.success) {
-        showToast?.('تم حفظ إعدادات صلاحيات تعديل الأسعار بالفروع بنجاح');
+        showToastRef.current?.('تم حفظ إعدادات صلاحيات الأسعار والخصومات بالفروع بنجاح');
       } else {
-        showToast?.(res?.error || 'فشل حفظ الإعدادات');
+        showToastRef.current?.(res?.error || 'فشل حفظ الإعدادات');
       }
     } catch (err) {
-      showToast?.('حدث خطأ أثناء حفظ الإعدادات');
+      showToastRef.current?.('حدث خطأ أثناء حفظ الإعدادات');
     } finally {
       setIsSavingPerms(false);
     }
@@ -617,6 +680,83 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
 
           {/* جدول الفروع والاستثناءات الخاصة */}
           <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
+            {/* بطاقات الضبط الشامل العام */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginBottom: '20px' }}>
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: '12px',
+                  padding: '14px 16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: '800', color: '#0f172a', fontSize: '13.5px' }}>
+                    تعديل أسعار الأدوية للأعلى بالصيدليات
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
+                    السماح للصيدلي بتحديث السعر الرسمي للأعلى فقط
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleToggleGlobalPriceEdit}
+                  style={{
+                    border: 'none',
+                    background: branchPerms.allow_global_price_edit ? '#dcfce7' : '#fee2e2',
+                    color: branchPerms.allow_global_price_edit ? '#15803d' : '#b91c1c',
+                    padding: '6px 14px',
+                    borderRadius: '20px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {branchPerms.allow_global_price_edit ? 'مفعل عام ✅' : 'معطل عام 🔒'}
+                </button>
+              </div>
+
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: '12px',
+                  padding: '14px 16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: '800', color: '#0f172a', fontSize: '13.5px' }}>
+                    منح الخصومات للعملاء في طلبات الصيدليات
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
+                    إقفال أو فتح إمكانية الخصم للصيدلي في نافذة الطلب
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleToggleGlobalDiscounts}
+                  style={{
+                    border: 'none',
+                    background: branchPerms.allow_global_discounts ? '#dcfce7' : '#fee2e2',
+                    color: branchPerms.allow_global_discounts ? '#15803d' : '#b91c1c',
+                    padding: '6px 14px',
+                    borderRadius: '20px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {branchPerms.allow_global_discounts ? 'الخصم متاح 🟢' : 'الخصم مقفل 🔒'}
+                </button>
+              </div>
+            </div>
+
             <h4 style={{ margin: '0 0 12px 0', fontSize: '14.5px', color: '#0f172a' }}>
               تخصيص الصلاحيات لكل فرع على حدة:
             </h4>
@@ -630,6 +770,7 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                     <th style={{ padding: '10px 12px' }}>الفرع</th>
                     <th style={{ padding: '10px 12px', textAlign: 'center' }}>تعديل سعر الدواء</th>
                     <th style={{ padding: '10px 12px', textAlign: 'center' }}>تعديل بيانات الصنف</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center' }}>صلاحية الخصم للعملاء</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -641,6 +782,9 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                     const canEditData = override?.can_edit_data !== undefined
                       ? override.can_edit_data
                       : true;
+                    const canApplyDiscount = override?.can_apply_discount !== undefined
+                      ? override.can_apply_discount
+                      : branchPerms.allow_global_discounts;
 
                     return (
                       <tr key={b.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -679,6 +823,24 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                             }}
                           >
                             {canEditData ? 'متاح ✅' : 'مقفل 🔒'}
+                          </button>
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleBranchPermission(b.id, 'can_apply_discount')}
+                            style={{
+                              border: 'none',
+                              background: canApplyDiscount ? '#dcfce7' : '#fee2e2',
+                              color: canApplyDiscount ? '#15803d' : '#b91c1c',
+                              padding: '4px 10px',
+                              borderRadius: '12px',
+                              fontSize: '11px',
+                              fontWeight: 'bold',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {canApplyDiscount ? 'الخصم متاح 🟢' : 'الخصم مقفل 🔒'}
                           </button>
                         </td>
                       </tr>
@@ -832,6 +994,54 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
             </div>
 
             <form onSubmit={handleSaveMember}>
+              {/* قسم اختيار موظف من فرع معين للربط التلقائي السريع */}
+              {!editingMember && (
+                <div
+                  style={{
+                    background: '#f0fdfa',
+                    border: '1px solid #99f6e4',
+                    borderRadius: '12px',
+                    padding: '12px 14px',
+                    marginBottom: '16px'
+                  }}
+                >
+                  <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                    <Building2 size={15} />
+                    <span>تحديد موظف من فرع معين للربط السريع (اختياري):</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div>
+                      <label className="outstock-form-label" style={{ fontSize: '11px' }}>اختر الفرع:</label>
+                      <select
+                        className="outstock-form-select"
+                        value={selectedBranchForEmp}
+                        onChange={(e) => handleBranchSelectForEmployee(e.target.value)}
+                      >
+                        <option value="">-- اختر الفرع --</option>
+                        {branches.map((b) => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="outstock-form-label" style={{ fontSize: '11px' }}>اختر الموظف:</label>
+                      <select
+                        className="outstock-form-select"
+                        disabled={!selectedBranchForEmp || isLoadingBranchEmps}
+                        onChange={(e) => handleEmployeeChosen(e.target.value)}
+                      >
+                        <option value="">{isLoadingBranchEmps ? 'جاري تحميل الموظفين...' : '-- اختر الموظف بالفرع --'}</option>
+                        {branchEmployees.map((emp) => (
+                          <option key={emp.id || emp._id} value={emp.id || emp._id}>
+                            {emp.name || emp.full_name} {emp.code ? `(${emp.code})` : ''} - {emp.jobTitle || 'موظف'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
                 <div>
                   <label className="outstock-form-label">اسم المستخدم (Login Username)</label>

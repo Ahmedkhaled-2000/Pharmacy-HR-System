@@ -36,7 +36,8 @@ import {
   outstockGetCustomers,
   outstockCreateOrder,
   outstockGetEmployees,
-  outstockGetBranches
+  outstockGetBranches,
+  outstockGetBranchPermissions
 } from '../../../utils/outstockApiClient';
 import MedicationAutocompleteInput from './MedicationAutocompleteInput';
 import AddMedicationModal from '../common/AddMedicationModal';
@@ -149,10 +150,29 @@ export default function NewCustomerOrderModal({
   const [deliveryType, setDeliveryType] = useState('branch_pickup'); // 'branch_pickup' | 'home_delivery' | 'other_branch_pickup'
   const [deliveryTargetBranch, setDeliveryTargetBranch] = useState('');
   const [isCustomUnitSelected, setIsCustomUnitSelected] = useState(false);
+  const [isDiscountAllowed, setIsDiscountAllowed] = useState(true);
 
-  // جلب موظفي الفرع المتاحين من الخادم والفروع النشطة
+  // جلب موظفي الفرع المتاحين من الخادم والفروع النشطة وصلاحيات الخصم
   useEffect(() => {
     let isMounted = true;
+
+    outstockGetBranchPermissions()
+      .then((res) => {
+        if (isMounted && res?.success && res.permissions) {
+          const p = res.permissions;
+          const isGloballyDisabled = Boolean(p.global_discounts_disabled);
+          const branchRule = p.branch_rules?.[branchId];
+          const isBranchDisabled = branchRule?.can_apply_discount === false;
+          if (isGloballyDisabled || isBranchDisabled) {
+            setIsDiscountAllowed(false);
+            setDiscountType('none');
+            setDiscountValue('');
+          } else {
+            setIsDiscountAllowed(true);
+          }
+        }
+      })
+      .catch(() => {});
     outstockGetEmployees(branchId)
       .then((res) => {
         if (isMounted && res?.success && Array.isArray(res.employees)) {
@@ -591,7 +611,7 @@ export default function NewCustomerOrderModal({
           background: '#ffffff',
           borderRadius: '16px',
           width: '100%',
-          maxWidth: '880px',
+          maxWidth: '1040px',
           maxHeight: '94vh',
           overflow: 'hidden',
           display: 'flex',
@@ -1142,7 +1162,7 @@ export default function NewCustomerOrderModal({
                       zIndex: items.length - idx
                     }}
                   >
-                    <div className="outstock-med-top-line" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                    <div className="outstock-med-top-line" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <MedicationAutocompleteInput
                           inputRef={(el) => (itemInputRefs.current[idx] = el)}
@@ -1157,36 +1177,14 @@ export default function NewCustomerOrderModal({
                         />
                       </div>
 
-                      {/* زر تعديل بيانات الصنف السريع */}
-                      <button
-                        type="button"
-                        onClick={() => handleToggleInlineEdit(idx)}
-                        style={{
-                          width: '38px',
-                          height: '40px',
-                          borderRadius: '10px',
-                          border: isEditingThisItem ? '1.5px solid #0d9488' : '1px solid #cbd5e1',
-                          background: isEditingThisItem ? '#f0fdfa' : '#f8fafc',
-                          color: isEditingThisItem ? '#0d9488' : '#475569',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0
-                        }}
-                        title="تعديل بيانات الصنف والسعر الرسمي"
-                      >
-                        <Edit3 size={16} />
-                      </button>
-
                       {/* زر حذف الصنف */}
                       <button
                         type="button"
                         onClick={() => handleRemoveItem(idx)}
                         disabled={items.length === 1}
                         style={{
-                          width: '38px',
-                          height: '40px',
+                          width: '40px',
+                          height: '42px',
                           borderRadius: '10px',
                           border: '1px solid #fecaca',
                           background: '#fef2f2',
@@ -1203,107 +1201,14 @@ export default function NewCustomerOrderModal({
                       </button>
                     </div>
 
-                    {/* درج التعديل السريع للصنف */}
-                    {isEditingThisItem && (
-                      <div
-                        style={{
-                          marginTop: '12px',
-                          padding: '12px 14px',
-                          background: '#f0fdfa',
-                          border: '1.5px dashed #0d9488',
-                          borderRadius: '10px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '10px'
-                        }}
-                      >
-                        <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <Edit3 size={14} />
-                          <span>تعديل مواصفات وتسعير العبوة:</span>
-                        </div>
-
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
-                          <div>
-                            <label style={{ fontSize: '11px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
-                              حجم العبوة:
-                            </label>
-                            <input
-                              type="number"
-                              min="1"
-                              value={inlineEditData.pack_size}
-                              onChange={(e) => setInlineEditData({ ...inlineEditData, pack_size: e.target.value })}
-                              className="outstock-form-input"
-                              style={{ minHeight: '36px', fontSize: '13px' }}
-                            />
-                          </div>
-
-                          <div>
-                            <label style={{ fontSize: '11px', color: '#047857', fontWeight: '800', display: 'block', marginBottom: '3px' }}>
-                              سعر العبوة الرسمي (ج.م):
-                            </label>
-                            <input
-                              type="number"
-                              step="0.25"
-                              value={inlineEditData.public_price}
-                              onChange={(e) => setInlineEditData({ ...inlineEditData, public_price: e.target.value })}
-                              className="outstock-form-input"
-                              style={{ minHeight: '36px', fontSize: '13px', fontWeight: 'bold' }}
-                            />
-                          </div>
-
-                          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '6px' }}>
-                            <button
-                              type="button"
-                              onClick={() => handleSaveInlineEdit(idx)}
-                              style={{
-                                flex: 1,
-                                height: '36px',
-                                background: '#059669',
-                                color: '#ffffff',
-                                border: 'none',
-                                borderRadius: '8px',
-                                fontWeight: '800',
-                                fontSize: '12px',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: '4px'
-                              }}
-                            >
-                              <Check size={14} />
-                              <span>تطبيق</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingItemIndex(null)}
-                              style={{
-                                height: '36px',
-                                padding: '0 12px',
-                                background: '#e2e8f0',
-                                color: '#334155',
-                                border: 'none',
-                                borderRadius: '8px',
-                                fontWeight: '700',
-                                fontSize: '12px',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              إلغاء
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* تفاصيل الوحدة والكمية والسعر / نطاق السعر التقديري */}
+                    {/* تفاصيل الوحدة والكمية والسعر الرسمي من الكتالوج المركزي دون تعديل يدوي */}
                     <div
                       style={{
-                        marginTop: '10px',
+                        marginTop: '12px',
                         display: 'grid',
-                        gridTemplateColumns: it.isPriceEstimated ? '1fr 1fr 1.3fr 1.3fr' : '1fr 1fr 1.5fr',
-                        gap: '10px',
-                        alignItems: 'flex-end'
+                        gridTemplateColumns: '1.2fr 1fr 1.5fr 1.5fr',
+                        gap: '12px',
+                        alignItems: 'center'
                       }}
                     >
                       {/* الوحدة - علبة كاملة حصراً */}
@@ -1314,7 +1219,7 @@ export default function NewCustomerOrderModal({
                         <div
                           style={{
                             height: '40px',
-                            background: '#f1f5f9',
+                            background: '#f8fafc',
                             border: '1px solid #cbd5e1',
                             borderRadius: '8px',
                             display: 'flex',
@@ -1347,142 +1252,57 @@ export default function NewCustomerOrderModal({
                         />
                       </div>
 
-                      {/* خيار السعر: إما سعر رسمي أو نطاق تقديري */}
-                      {!it.isPriceEstimated ? (
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
-                            <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
-                              {it.selectedMed ? 'السعر الرسمي (تلقائي ⚡)' : 'سعر العلبة (ج.م)'}
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleItemChange(idx, 'isPriceEstimated', true);
-                                handleItemChange(idx, 'priceMin', it.unitPrice || '');
-                                handleItemChange(idx, 'priceMax', it.unitPrice || '');
-                              }}
-                              style={{
-                                background: '#fef3c7',
-                                color: '#b45309',
-                                border: '1px solid #fde68a',
-                                borderRadius: '4px',
-                                fontSize: '10.5px',
-                                fontWeight: '800',
-                                padding: '1px 6px',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              سعر غير مؤكد؟
-                            </button>
-                          </div>
-                          <input
-                            type="number"
-                            step="0.5"
-                            placeholder="السعر (ج.م)"
-                            value={it.unitPrice}
-                            onChange={(e) => handleItemChange(idx, 'unitPrice', e.target.value)}
-                            className="outstock-form-input"
-                            style={{
-                              minHeight: '40px',
-                              textAlign: 'center',
-                              fontWeight: 'bold',
-                              borderColor: it.selectedMed ? '#0d9488' : undefined,
-                              backgroundColor: it.selectedMed ? '#f0fdfa' : undefined
-                            }}
-                          />
+                      {/* السعر الرسمي للعلبة - محمي ومعتمد من الكتالوج المركزي */}
+                      <div>
+                        <label style={{ fontSize: '11px', color: '#0369a1', fontWeight: '800', marginBottom: '3px', display: 'block' }}>
+                          سعر العلبة الرسمي (الكتالوج ⚡):
+                        </label>
+                        <div
+                          style={{
+                            height: '40px',
+                            background: '#f0fdfa',
+                            border: '1px solid #99f6e4',
+                            borderRadius: '8px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: '900',
+                            fontSize: '13.5px',
+                            color: '#0f766e'
+                          }}
+                          title="السعر معتمد رسمياً من الكتالوج ومحمي من التعديل العشوائي داخل الفرع"
+                        >
+                          {Number(it.unitPrice || it.selectedMed?.public_price || 0) > 0 ? (
+                            <span>{Number(it.unitPrice || it.selectedMed?.public_price || 0).toFixed(2)} ج.م</span>
+                          ) : (
+                            <span style={{ color: '#d97706', fontSize: '11.5px' }}>بانتظار تسعير المشتريات</span>
+                          )}
                         </div>
-                      ) : (
-                        <>
-                          {/* من سعر */}
-                          <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
-                              <label style={{ fontSize: '11px', color: '#b45309', fontWeight: '800' }}>
-                                من سعر (ج.م):
-                              </label>
-                              <button
-                                type="button"
-                                onClick={() => handleItemChange(idx, 'isPriceEstimated', false)}
-                                style={{
-                                  background: '#e2e8f0',
-                                  color: '#475569',
-                                  border: 'none',
-                                  borderRadius: '4px',
-                                  fontSize: '10px',
-                                  fontWeight: '700',
-                                  padding: '1px 6px',
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                سعر محدد
-                              </button>
-                            </div>
-                            <input
-                              type="number"
-                              step="0.5"
-                              required
-                              placeholder="الحد الأدنى"
-                              value={it.priceMin}
-                              onChange={(e) => handleItemChange(idx, 'priceMin', e.target.value)}
-                              className="outstock-form-input"
-                              style={{
-                                minHeight: '40px',
-                                textAlign: 'center',
-                                fontWeight: 'bold',
-                                borderColor: '#f59e0b',
-                                backgroundColor: '#fffbeb'
-                              }}
-                            />
-                          </div>
-
-                          {/* إلى سعر */}
-                          <div>
-                            <label style={{ fontSize: '11px', color: '#b45309', fontWeight: '800', marginBottom: '3px', display: 'block' }}>
-                              إلى سعر (ج.م):
-                            </label>
-                            <input
-                              type="number"
-                              step="0.5"
-                              required
-                              placeholder="الحد الأقصى"
-                              value={it.priceMax}
-                              onChange={(e) => handleItemChange(idx, 'priceMax', e.target.value)}
-                              className="outstock-form-input"
-                              style={{
-                                minHeight: '40px',
-                                textAlign: 'center',
-                                fontWeight: 'bold',
-                                borderColor: '#f59e0b',
-                                backgroundColor: '#fffbeb'
-                              }}
-                            />
-                          </div>
-                        </>
-                      )}
-                    </div>
-
-                    {/* مؤشر النطاق التقديري - يظهر بدون أي معادلة متوسط حسابي */}
-                    {it.isPriceEstimated && (
-                      <div
-                        style={{
-                          marginTop: '8px',
-                          background: '#fffbeb',
-                          border: '1px solid #fde68a',
-                          borderRadius: '8px',
-                          padding: '6px 12px',
-                          fontSize: '12px',
-                          color: '#92400e',
-                          fontWeight: '800',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between'
-                        }}
-                      >
-                        <span>⚠️ سعر تقديري (غير محسوب بمتوسط حسابي):</span>
-                        <strong style={{ color: '#b45309', fontSize: '13px' }}>
-                          من {parseFloat(it.priceMin || 0).toFixed(2)} إلى {parseFloat(it.priceMax || 0).toFixed(2)} ج.م للعلبة
-                        </strong>
                       </div>
-                    )}
+
+                      {/* إجمالي الصنف */}
+                      <div>
+                        <label style={{ fontSize: '11px', color: '#475569', fontWeight: '700', marginBottom: '3px', display: 'block' }}>
+                          إجمالي الصنف (ج.م):
+                        </label>
+                        <div
+                          style={{
+                            height: '40px',
+                            background: '#f8fafc',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '8px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: '900',
+                            fontSize: '14px',
+                            color: '#0f172a'
+                          }}
+                        >
+                          {((Number(it.quantity) || 1) * Number(it.unitPrice || it.selectedMed?.public_price || 0)).toFixed(2)} ج.م
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -1546,13 +1366,22 @@ export default function NewCustomerOrderModal({
                 </div>
 
                 <div>
-                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                    نوع الخصم:
-                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569' }}>
+                      نوع الخصم:
+                    </label>
+                    {!isDiscountAllowed && (
+                      <span style={{ fontSize: '10.5px', color: '#b91c1c', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                        <Lock size={11} /> مقفل للفرع
+                      </span>
+                    )}
+                  </div>
                   <select
                     value={discountType}
                     onChange={(e) => setDiscountType(e.target.value)}
+                    disabled={!isDiscountAllowed}
                     className="outstock-form-select"
+                    style={{ opacity: !isDiscountAllowed ? 0.65 : 1, cursor: !isDiscountAllowed ? 'not-allowed' : 'pointer' }}
                   >
                     <option value="none">بدون خصم</option>
                     <option value="amount">مبلغ ثابت (ج.م)</option>
@@ -1631,14 +1460,22 @@ export default function NewCustomerOrderModal({
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
-                      نوع الخصم:
-                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
+                      <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569' }}>
+                        نوع الخصم:
+                      </label>
+                      {!isDiscountAllowed && (
+                        <span style={{ fontSize: '10px', color: '#b91c1c', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                          <Lock size={10} /> مقفل
+                        </span>
+                      )}
+                    </div>
                     <select
                       value={discountType}
                       onChange={(e) => setDiscountType(e.target.value)}
+                      disabled={!isDiscountAllowed}
                       className="outstock-form-select"
-                      style={{ minHeight: '36px' }}
+                      style={{ minHeight: '36px', opacity: !isDiscountAllowed ? 0.65 : 1, cursor: !isDiscountAllowed ? 'not-allowed' : 'pointer' }}
                     >
                       <option value="none">بدون خصم</option>
                       <option value="amount">مبلغ ثابت (ج.م)</option>
