@@ -307,7 +307,16 @@ export default function NewCustomerOrderModal({
     const newIdx = items.length;
     setItems((prev) => [
       ...prev,
-      { medicationName: '', unitType: 'pack', quantity: 1, unitPrice: '', selectedMed: null }
+      {
+        medicationName: '',
+        unitType: 'pack',
+        quantity: 1,
+        unitPrice: '',
+        isPriceEstimated: false,
+        priceMin: '',
+        priceMax: '',
+        selectedMed: null
+      }
     ]);
     setTimeout(() => {
       if (itemInputRefs.current[newIdx]) {
@@ -326,6 +335,33 @@ export default function NewCustomerOrderModal({
     setItems((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  // تفعيل / إلغاء تفعيل السعر التقريبي
+  const handleToggleEstimatePrice = (idx) => {
+    setItems((prev) => {
+      const next = [...prev];
+      const it = next[idx];
+      const willBeEstimated = !it.isPriceEstimated;
+      let initialMin = it.priceMin;
+      let initialMax = it.priceMax;
+
+      if (willBeEstimated && (!initialMin || !initialMax)) {
+        const p = Number(it.unitPrice || it.selectedMed?.public_price || 0);
+        if (p > 0) {
+          initialMin = (Math.round(p * 0.95 * 10) / 10).toFixed(2);
+          initialMax = (Math.round(p * 1.05 * 10) / 10).toFixed(2);
+        }
+      }
+
+      next[idx] = {
+        ...it,
+        isPriceEstimated: willBeEstimated,
+        priceMin: willBeEstimated ? (initialMin || '') : '',
+        priceMax: willBeEstimated ? (initialMax || '') : ''
+      };
       return next;
     });
   };
@@ -1335,27 +1371,30 @@ export default function NewCustomerOrderModal({
                         />
                       </div>
 
-                      {/* سعر العلبة الرسمي */}
+                      {/* سعر العلبة */}
                       <div>
-                        <label style={{ fontSize: '11px', color: '#0369a1', fontWeight: '800', marginBottom: '3px', display: 'block' }}>
-                          سعر العلبة الرسمي:
+                        <label style={{ fontSize: '11px', color: it.isPriceEstimated ? '#b45309' : '#0369a1', fontWeight: '800', marginBottom: '3px', display: 'block' }}>
+                          {it.isPriceEstimated ? 'سعر العلبة (تقريبي ⚡):' : 'سعر العلبة الرسمي:'}
                         </label>
                         <div
                           style={{
                             height: '40px',
-                            background: '#f0fdfa',
-                            border: '1px solid #99f6e4',
+                            background: it.isPriceEstimated ? '#fffbeb' : '#f0fdfa',
+                            border: it.isPriceEstimated ? '1px solid #fde68a' : '1px solid #99f6e4',
                             borderRadius: '8px',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontWeight: '900',
-                            fontSize: '13px',
-                            color: '#0f766e'
+                            fontSize: it.isPriceEstimated ? '11.5px' : '13px',
+                            color: it.isPriceEstimated ? '#b45309' : '#0f766e',
+                            padding: '0 4px'
                           }}
-                          title="السعر معتمد رسمياً من الكتالوج ومحمي من التعديل العشوائي داخل الفرع"
+                          title={it.isPriceEstimated ? 'سعر تقريبي بنطاق من - إلى' : 'السعر معتمد رسمياً من الكتالوج ومحمي من التعديل العشوائي داخل الفرع'}
                         >
-                          {Number(it.unitPrice || it.selectedMed?.public_price || 0) > 0 ? (
+                          {it.isPriceEstimated ? (
+                            <span>من {Number(it.priceMin || 0).toFixed(2)} إلى {Number(it.priceMax || it.priceMin || 0).toFixed(2)} ج.م</span>
+                          ) : Number(it.unitPrice || it.selectedMed?.public_price || 0) > 0 ? (
                             <span>{Number(it.unitPrice || it.selectedMed?.public_price || 0).toFixed(2)} ج.م</span>
                           ) : (
                             <span style={{ color: '#d97706', fontSize: '11px' }}>بانتظار تسعير المشتريات</span>
@@ -1378,11 +1417,14 @@ export default function NewCustomerOrderModal({
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontWeight: '900',
-                            fontSize: '13px',
-                            color: '#0f172a'
+                            fontSize: it.isPriceEstimated ? '11.5px' : '13px',
+                            color: '#0f172a',
+                            padding: '0 4px'
                           }}
                         >
-                          {((Number(it.quantity) || 1) * Number(it.unitPrice || it.selectedMed?.public_price || 0)).toFixed(2)} ج.م
+                          {it.isPriceEstimated
+                            ? `من ${(Number(it.quantity || 1) * Number(it.priceMin || 0)).toFixed(2)} إلى ${(Number(it.quantity || 1) * Number(it.priceMax || it.priceMin || 0)).toFixed(2)} ج.م`
+                            : `${((Number(it.quantity) || 1) * Number(it.unitPrice || it.selectedMed?.public_price || 0)).toFixed(2)} ج.م`}
                         </div>
                       </div>
 
@@ -1411,35 +1453,105 @@ export default function NewCustomerOrderModal({
                       </div>
                     </div>
 
-                    {/* شارة متوسط ونطاق السعر كمعلومة استرشادية دون تعديل يدوي */}
-                    {(() => {
-                      const p = Number(it.unitPrice || it.selectedMed?.public_price || 0);
-                      if (p <= 0 && !it.priceMin && !it.priceMax) return null;
-                      const minP = it.priceMin ? Number(it.priceMin) : (it.selectedMed?.min_price ? Number(it.selectedMed.min_price) : Math.round(p * 0.95 * 10) / 10);
-                      const maxP = it.priceMax ? Number(it.priceMax) : (it.selectedMed?.max_price ? Number(it.selectedMed.max_price) : Math.round(p * 1.05 * 10) / 10);
-                      return (
+                    {/* شريط السعر التقريبي وزر التفعيل/الإلغاء */}
+                    <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      {/* زر تفعيل / إلغاء تفعيل السعر التقريبي */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleEstimatePrice(idx)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '6px 14px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          border: it.isPriceEstimated ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
+                          background: it.isPriceEstimated ? '#fef3c7' : '#f8fafc',
+                          color: it.isPriceEstimated ? '#92400e' : '#475569'
+                        }}
+                      >
+                        <Sparkles size={14} color={it.isPriceEstimated ? '#b45309' : '#64748b'} />
+                        <span>{it.isPriceEstimated ? '✓ إلغاء السعر التقريبي' : '+ تفعيل وضع سعر تقريبي (من - إلى)'}</span>
+                      </button>
+
+                      {/* حقول إدخال من سعر وإلى سعر تظهر عند التفعيل */}
+                      {it.isPriceEstimated ? (
                         <div
                           style={{
-                            marginTop: '10px',
-                            padding: '5px 12px',
-                            background: '#f0fdf4',
-                            border: '1px solid #bbf7d0',
-                            borderRadius: '6px',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: '6px',
-                            fontSize: '11.5px',
-                            color: '#166534',
-                            fontWeight: '700'
+                            gap: '8px',
+                            background: '#fffbeb',
+                            border: '1px solid #fde68a',
+                            borderRadius: '8px',
+                            padding: '4px 12px'
                           }}
                         >
-                          <Sparkles size={13} color="#16a34a" />
-                          <span>
-                            متوسط سعر الصنف: من {minP.toFixed(2)} إلى {maxP.toFixed(2)} ج.م للعلبة (استرشادي)
-                          </span>
+                          <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#92400e' }}>من:</span>
+                          <input
+                            type="number"
+                            step="0.5"
+                            min="0"
+                            placeholder="0.00"
+                            value={it.priceMin}
+                            onChange={(e) => handleItemChange(idx, 'priceMin', e.target.value)}
+                            className="outstock-form-input"
+                            style={{
+                              width: '85px',
+                              height: '32px',
+                              padding: '2px 6px',
+                              textAlign: 'center',
+                              fontWeight: '900',
+                              color: '#b45309',
+                              background: '#ffffff',
+                              border: '1px solid #fcd34d'
+                            }}
+                            required
+                          />
+                          <span style={{ fontSize: '11px', color: '#92400e', fontWeight: '700' }}>ج.م</span>
+
+                          <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#92400e', marginRight: '6px' }}>إلى:</span>
+                          <input
+                            type="number"
+                            step="0.5"
+                            min="0"
+                            placeholder="0.00"
+                            value={it.priceMax}
+                            onChange={(e) => handleItemChange(idx, 'priceMax', e.target.value)}
+                            className="outstock-form-input"
+                            style={{
+                              width: '85px',
+                              height: '32px',
+                              padding: '2px 6px',
+                              textAlign: 'center',
+                              fontWeight: '900',
+                              color: '#b45309',
+                              background: '#ffffff',
+                              border: '1px solid #fcd34d'
+                            }}
+                            required
+                          />
+                          <span style={{ fontSize: '11px', color: '#92400e', fontWeight: '700' }}>ج.م للعلبة</span>
                         </div>
-                      );
-                    })()}
+                      ) : (
+                        /* معلومة استرشادية عند عدم تفعيل السعر التقريبي */
+                        (() => {
+                          const p = Number(it.unitPrice || it.selectedMed?.public_price || 0);
+                          if (p <= 0) return null;
+                          const minP = Math.round(p * 0.95 * 10) / 10;
+                          const maxP = Math.round(p * 1.05 * 10) / 10;
+                          return (
+                            <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '600' }}>
+                              (متوسط النطاق التقديري: من {minP.toFixed(2)} إلى {maxP.toFixed(2)} ج.م)
+                            </span>
+                          );
+                        })()
+                      )}
+                    </div>
                   </div>
                 );
               })}
