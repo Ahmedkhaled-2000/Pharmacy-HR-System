@@ -763,7 +763,7 @@ export default function AppRoutes() {
     }
 
     // الدخول المباشر لنظام إدارة النواقص والمشتريات (OutStock Handling)
-    if (cleanUser === 'out' || cleanUser.startsWith('outstock')) {
+    if (cleanUser === 'out' || cleanUser.startsWith('outstock') || cleanUser === 'admin-stock') {
       try {
         const outRes = await outstockLogin(cleanUser, cleanPass);
         if (outRes?.success && outRes?.user) {

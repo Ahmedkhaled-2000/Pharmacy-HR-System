@@ -589,50 +589,51 @@ export default function NewCustomerOrderModal({
       <div
         style={{
           background: '#ffffff',
-          borderRadius: '22px',
+          borderRadius: '16px',
           width: '100%',
           maxWidth: '880px',
           maxHeight: '94vh',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.4)',
+          boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.3)',
           direction: 'rtl',
-          border: '1px solid rgba(226, 232, 240, 0.8)'
+          border: '1px solid var(--outstock-border-subtle, #e2e8f0)'
         }}
       >
-        {/* رأس النافذة العصري */}
+        {/* رأس النافذة العصري - تصميم مؤسسي فائق الأناقة */}
         <div
           style={{
-            padding: '18px 24px',
-            background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
-            color: '#ffffff',
+            padding: '16px 24px',
+            background: '#ffffff',
+            borderBottom: '1px solid var(--outstock-border-subtle, #e2e8f0)',
+            color: '#0f172a',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
-            boxShadow: '0 4px 14px rgba(13, 148, 136, 0.25)'
+            justifyContent: 'space-between'
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div
               style={{
-                width: '42px',
-                height: '42px',
-                borderRadius: '12px',
-                background: 'rgba(255, 255, 255, 0.18)',
-                backdropFilter: 'blur(8px)',
+                width: '40px',
+                height: '40px',
+                borderRadius: '10px',
+                background: '#ecfdf5',
+                border: '1px solid #a7f3d0',
+                color: '#059669',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center'
               }}
             >
-              <Pill size={22} color="#ffffff" />
+              <Pill size={22} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '900' }}>
+              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: '#0f172a' }}>
                 تسجيل طلب عميل جديد (نواقص أدوية)
               </h3>
-              <p style={{ margin: 0, fontSize: '12.5px', opacity: 0.9, marginTop: '2px' }}>
+              <p style={{ margin: 0, fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
                 ربط ذكي بكتالوج الأدوية، حسابات دقيقة للمقدم والمتبقي، وإرسال فوري للمشتريات
               </p>
             </div>
@@ -643,16 +644,19 @@ export default function NewCustomerOrderModal({
             onClick={onClose}
             disabled={isSubmitting}
             style={{
-              background: 'rgba(255, 255, 255, 0.18)',
-              border: 'none',
-              borderRadius: '10px',
-              color: '#ffffff',
+              background: '#f1f5f9',
+              border: '1px solid #e2e8f0',
+              borderRadius: '8px',
+              color: '#64748b',
               cursor: isSubmitting ? 'not-allowed' : 'pointer',
-              padding: '8px',
-              display: 'flex'
+              padding: '7px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.15s ease'
             }}
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
@@ -707,9 +711,9 @@ export default function NewCustomerOrderModal({
                       display: 'flex',
                       alignItems: 'center',
                       gap: '6px',
-                      background: orderCategory === 'medication' ? 'linear-gradient(135deg, #0d9488, #0f766e)' : 'transparent',
+                      background: orderCategory === 'medication' ? '#059669' : 'transparent',
                       color: orderCategory === 'medication' ? '#ffffff' : '#475569',
-                      boxShadow: orderCategory === 'medication' ? '0 2px 6px rgba(13, 148, 136, 0.25)' : 'none',
+                      boxShadow: orderCategory === 'medication' ? '0 1px 3px rgba(5, 150, 105, 0.2)' : 'none',
                       transition: 'all 0.15s ease'
                     }}
                   >
@@ -729,9 +733,9 @@ export default function NewCustomerOrderModal({
                       display: 'flex',
                       alignItems: 'center',
                       gap: '6px',
-                      background: orderCategory === 'cosmetics' ? 'linear-gradient(135deg, #ec4899, #be185d)' : 'transparent',
+                      background: orderCategory === 'cosmetics' ? '#db2777' : 'transparent',
                       color: orderCategory === 'cosmetics' ? '#ffffff' : '#475569',
-                      boxShadow: orderCategory === 'cosmetics' ? '0 2px 6px rgba(236, 72, 153, 0.25)' : 'none',
+                      boxShadow: orderCategory === 'cosmetics' ? '0 1px 3px rgba(219, 39, 119, 0.2)' : 'none',
                       transition: 'all 0.15s ease'
                     }}
                   >
@@ -1671,28 +1675,28 @@ export default function NewCustomerOrderModal({
                 marginTop: '14px'
               }}
             >
-              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '10px 14px', textAlign: 'center' }}>
-                <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>إجمالي الأصناف</span>
-                <strong style={{ fontSize: '14px', color: '#1e293b' }}>
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 14px', textAlign: 'center' }}>
+                <span style={{ fontSize: '11px', color: '#64748b', display: 'block', fontWeight: '600' }}>إجمالي الأصناف</span>
+                <strong className="tabular-nums" style={{ fontSize: '14.5px', color: '#1e293b', fontFamily: 'var(--outstock-font-mono)' }}>
                   {hasEstimatedItems ? `من ${totalMin.toFixed(2)} إلى ${totalMax.toFixed(2)} ج.م` : `${totalMin.toFixed(2)} ج.م`}
                 </strong>
               </div>
 
-              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '10px 14px', textAlign: 'center' }}>
-                <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>الصافي بعد الخصم</span>
-                <strong style={{ fontSize: '14px', color: '#0d9488' }}>
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 14px', textAlign: 'center' }}>
+                <span style={{ fontSize: '11px', color: '#64748b', display: 'block', fontWeight: '600' }}>الصافي بعد الخصم</span>
+                <strong className="tabular-nums" style={{ fontSize: '14.5px', color: '#059669', fontFamily: 'var(--outstock-font-mono)' }}>
                   {hasEstimatedItems ? `من ${netMin.toFixed(2)} إلى ${netMax.toFixed(2)} ج.م` : `${netMin.toFixed(2)} ج.م`}
                 </strong>
               </div>
 
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '10px 14px', textAlign: 'center' }}>
-                <span style={{ fontSize: '11px', color: '#15803d', display: 'block' }}>المدفوع (عربون)</span>
-                <strong style={{ fontSize: '15px', color: '#059669' }}>{effectivePaid.toFixed(2)} ج.م</strong>
+              <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '10px', padding: '10px 14px', textAlign: 'center' }}>
+                <span style={{ fontSize: '11px', color: '#047857', display: 'block', fontWeight: '600' }}>المدفوع (عربون)</span>
+                <strong className="tabular-nums" style={{ fontSize: '15.5px', color: '#059669', fontFamily: 'var(--outstock-font-mono)' }}>{effectivePaid.toFixed(2)} ج.م</strong>
               </div>
 
-              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '12px', padding: '10px 14px', textAlign: 'center' }}>
-                <span style={{ fontSize: '11px', color: '#b91c1c', display: 'block' }}>المتبقي عند الاستلام</span>
-                <strong style={{ fontSize: '14px', color: '#dc2626' }}>
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '10px 14px', textAlign: 'center' }}>
+                <span style={{ fontSize: '11px', color: '#b91c1c', display: 'block', fontWeight: '600' }}>المتبقي عند الاستلام</span>
+                <strong className="tabular-nums" style={{ fontSize: '14.5px', color: '#dc2626', fontFamily: 'var(--outstock-font-mono)' }}>
                   {hasEstimatedItems ? `من ${remainingMin.toFixed(2)} إلى ${remainingMax.toFixed(2)} ج.م` : `${remainingMin.toFixed(2)} ج.م`}
                 </strong>
               </div>
@@ -1841,10 +1845,13 @@ export default function NewCustomerOrderModal({
               className="outstock-btn outstock-btn-primary"
               style={{
                 padding: '12px 28px',
-                fontSize: '14.5px',
-                fontWeight: '900',
-                background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
-                boxShadow: '0 4px 14px rgba(13, 148, 136, 0.3)'
+                fontSize: '14px',
+                fontWeight: '800',
+                background: '#059669',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)'
               }}
             >
               <span>{isSubmitting ? 'جاري الإرسال...' : 'حفظ وإرسال للمشتريات وطباعة الإيصال 🖨️'}</span>

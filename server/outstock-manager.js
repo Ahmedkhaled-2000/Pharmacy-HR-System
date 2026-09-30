@@ -592,13 +592,26 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         payload.id = payload.userId || payload.username;
       }
 
-      // توحيد الأدوار العليا (المالك، الأدمن، المطور) لتعمل بصلاحيات المالك كاملة في النواقص
-      if (['owner', 'admin', 'developer'].includes(payload.role)) {
-        payload.role = 'owner';
+      // تنظيف وتوحيد الأدوار وإزالة البادئة إن وجدت
+      let cleanRole = String(payload.role || '').toLowerCase();
+      if (cleanRole.startsWith('outstock_')) {
+        cleanRole = cleanRole.replace('outstock_', '');
       }
 
-      // ضبط الصلاحيات الافتراضية أو قراءتها من قاعدة البيانات
-      if (payload.role === 'owner' || payload.role === 'procurement_manager') {
+      if (['owner', 'admin', 'developer'].includes(cleanRole)) {
+        payload.role = 'owner';
+      } else if (cleanRole === 'procurement_manager' || payload.username === 'admin-stock') {
+        payload.role = 'procurement_manager';
+      } else if (['procurement', 'procurement_officer'].includes(cleanRole)) {
+        payload.role = 'procurement_officer';
+      } else if (['branch', 'pharmacy'].includes(cleanRole)) {
+        payload.role = 'outstock_branch';
+      } else {
+        payload.role = cleanRole;
+      }
+
+      // إذا كان المستخدم admin-stock أو مدير مشتريات أو مالك، فله كافة الصلاحيات
+      if (payload.username === 'admin-stock' || payload.role === 'procurement_manager' || payload.role === 'owner') {
         payload.permissions = {
           can_edit_items: true,
           can_view_orders: true,
@@ -1010,6 +1023,68 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       res.json(result);
     } catch (err) {
       res.status(400).json({ success: false, error: err.message });
+    }
+  });
+
+  // حذف صنف من كتالوج وتسعير الأدوية نهائياً
+  app.delete('/api/outstock/medications/:id', authMiddleware, async (req, res) => {
+    try {
+      const canDelete = req.outstockUser?.role === 'owner' ||
+                        req.outstockUser?.role === 'procurement_manager' ||
+                        req.outstockUser?.username === 'admin-stock' ||
+                        Boolean(req.outstockUser?.permissions?.can_edit_items);
+      if (!canDelete) {
+        return res.status(403).json({ success: false, error: 'غير مصرح بحذف الأصناف من كتالوج الأدوية' });
+      }
+
+      const medId = req.params.id;
+      const medCheck = await db.query('SELECT * FROM public.outstock_medications WHERE id = $1', [medId]);
+      if (medCheck.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'الصنف المطلوب حذفه غير موجود بالكتالوج' });
+      }
+
+      const med = medCheck.rows[0];
+
+      // حذف الصنف من الكتالوج
+      await db.query('DELETE FROM public.outstock_medications WHERE id = $1', [medId]);
+
+      // توثيق الحذف في سجل التدقيق الرقابي
+      try {
+        await db.query(`
+          INSERT INTO public.outstock_audit_logs (
+            user_id, username, action_type, target_entity, target_id, details_json, created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+        `, [
+          req.outstockUser.id,
+          req.outstockUser.username,
+          'delete_medication',
+          'medication',
+          medId,
+          JSON.stringify({
+            trade_name_ar: med.trade_name_ar,
+            trade_name_en: med.trade_name_en,
+            generic_name: med.generic_name,
+            public_price: med.public_price,
+            deleted_by: req.outstockUser.username
+          })
+        ]);
+      } catch (logErr) {
+        console.warn('[Audit Log Delete Med Warning]:', logErr.message);
+      }
+
+      broadcastOutstock('outstock:medication_deleted', {
+        medicationId: medId,
+        trade_name_ar: med.trade_name_ar,
+        deletedBy: req.outstockUser.username
+      });
+
+      res.json({
+        success: true,
+        message: `تم حذف صنف (${med.trade_name_ar}) من كتالوج الأدوية بنجاح`
+      });
+    } catch (err) {
+      console.error('[Delete Medication Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 
@@ -2878,7 +2953,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   // ───────────────────────────────────────────────────────────────────────────
   app.get('/api/outstock/suppliers', authMiddleware, async (req, res) => {
     try {
-      const canAccess = req.outstockUser.role === 'owner' || req.outstockUser.role === 'procurement_manager' || req.outstockUser.permissions?.can_access_suppliers;
+      const canAccess = req.outstockUser?.role === 'owner' ||
+                        req.outstockUser?.role === 'procurement_manager' ||
+                        req.outstockUser?.role === 'procurement_officer' ||
+                        req.outstockUser?.username === 'admin-stock' ||
+                        Boolean(req.outstockUser?.permissions?.can_access_suppliers);
       if (!canAccess) {
         return res.status(403).json({ success: false, error: 'غير مصرح بالوصول لحسابات الموردين' });
       }
@@ -3533,11 +3612,12 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   // ── 12. محرك مقارنة خصومات الموردين المستخرج من الفواتير (Discounts Comparison Engine) ──
   app.get('/api/outstock/suppliers/discounts-comparison', authMiddleware, async (req, res) => {
     try {
-      const canAccess = req.outstockUser.role === 'owner' ||
-                        req.outstockUser.role === 'procurement_manager' ||
-                        req.outstockUser.role === 'procurement_officer' ||
-                        req.outstockUser.permissions?.can_access_suppliers ||
-                        req.outstockUser.permissions?.can_view_orders;
+      const canAccess = req.outstockUser?.role === 'owner' ||
+                        req.outstockUser?.role === 'procurement_manager' ||
+                        req.outstockUser?.role === 'procurement_officer' ||
+                        req.outstockUser?.username === 'admin-stock' ||
+                        Boolean(req.outstockUser?.permissions?.can_access_suppliers) ||
+                        Boolean(req.outstockUser?.permissions?.can_view_orders);
       if (!canAccess) {
         return res.status(403).json({ success: false, error: 'غير مصرح بالوصول لمقارنة الخصومات' });
       }
@@ -3807,7 +3887,9 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
   app.post('/api/outstock/isupply/config', authMiddleware, async (req, res) => {
     try {
-      const canAccess = req.outstockUser.role === 'owner' || req.outstockUser.role === 'procurement_manager';
+      const canAccess = req.outstockUser?.role === 'owner' ||
+                        req.outstockUser?.role === 'procurement_manager' ||
+                        req.outstockUser?.username === 'admin-stock';
       if (!canAccess) {
         return res.status(403).json({ success: false, error: 'صلاحية الإعدادات للمالك ومدير المشتريات فقط' });
       }

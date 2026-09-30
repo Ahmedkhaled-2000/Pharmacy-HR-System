@@ -120,7 +120,7 @@ export default function OrderDeliverySettlementModal({
         inset: 0,
         backgroundColor: 'rgba(15, 23, 42, 0.75)',
         backdropFilter: 'blur(5px)',
-        zIndex: 9999,
+        zIndex: 100000,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -147,12 +147,13 @@ export default function OrderDeliverySettlementModal({
           direction: 'rtl'
         }}
       >
-        {/* ── الرأس ── */}
+        {/* ── الرأس المؤسسي ── */}
         <div
           style={{
-            padding: '18px 24px',
-            background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
-            color: '#ffffff',
+            padding: '16px 24px',
+            background: '#ffffff',
+            borderBottom: '1px solid var(--outstock-border-subtle, #e2e8f0)',
+            color: '#0f172a',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between'
@@ -161,23 +162,25 @@ export default function OrderDeliverySettlementModal({
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div
               style={{
-                width: '42px',
-                height: '42px',
+                width: '40px',
+                height: '40px',
                 borderRadius: '10px',
-                background: 'rgba(255, 255, 255, 0.2)',
+                background: '#ecfdf5',
+                border: '1px solid #a7f3d0',
+                color: '#059669',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center'
               }}
             >
-              <PackageCheck size={24} />
+              <PackageCheck size={22} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>
+              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: '#0f172a' }}>
                 تسليم الطلب وتسوية الحساب
               </h3>
-              <p style={{ margin: 0, fontSize: '12.5px', opacity: 0.9, marginTop: '2px' }}>
-                رقم الإيصال: <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{order.order_number || order.orderNumber}</span>
+              <p style={{ margin: 0, fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                رقم الإيصال: <span className="tabular-nums" style={{ fontFamily: 'var(--outstock-font-mono)', fontWeight: 'bold' }}>{order.order_number || order.orderNumber}</span>
               </p>
             </div>
           </div>
@@ -186,19 +189,19 @@ export default function OrderDeliverySettlementModal({
             onClick={onClose}
             disabled={isSubmitting}
             style={{
-              background: 'rgba(255, 255, 255, 0.15)',
-              border: 'none',
+              background: '#f1f5f9',
+              border: '1px solid #e2e8f0',
               borderRadius: '8px',
-              color: '#ffffff',
+              color: '#64748b',
               cursor: 'pointer',
-              padding: '6px',
+              padding: '7px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'background 0.2s'
+              transition: 'all 0.15s ease'
             }}
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
@@ -341,7 +344,7 @@ export default function OrderDeliverySettlementModal({
                 <span style={{ fontSize: '11.5px', color: '#065f46', display: 'block', fontWeight: '600' }}>
                   إجمالي الفاتورة
                 </span>
-                <strong style={{ fontSize: '16px', color: '#047857' }}>
+                <strong className="tabular-nums" style={{ fontSize: '16px', color: '#047857', fontFamily: 'var(--outstock-font-mono)' }}>
                   {totalAmount.toFixed(2)} <span style={{ fontSize: '11px' }}>ج.م</span>
                 </strong>
               </div>
@@ -350,7 +353,7 @@ export default function OrderDeliverySettlementModal({
                 <span style={{ fontSize: '11.5px', color: '#065f46', display: 'block', fontWeight: '600' }}>
                   عربون مدفوع مسبقاً
                 </span>
-                <strong style={{ fontSize: '16px', color: '#0284c7' }}>
+                <strong className="tabular-nums" style={{ fontSize: '16px', color: '#0284c7', fontFamily: 'var(--outstock-font-mono)' }}>
                   {paidAdvance.toFixed(2)} <span style={{ fontSize: '11px' }}>ج.م</span>
                 </strong>
               </div>
@@ -359,7 +362,7 @@ export default function OrderDeliverySettlementModal({
                 <span style={{ fontSize: '11.5px', color: '#b91c1c', display: 'block', fontWeight: '600' }}>
                   المتبقي المطلوب
                 </span>
-                <strong style={{ fontSize: '16px', color: '#dc2626' }}>
+                <strong className="tabular-nums" style={{ fontSize: '16px', color: '#dc2626', fontFamily: 'var(--outstock-font-mono)' }}>
                   {initialRemaining.toFixed(2)} <span style={{ fontSize: '11px' }}>ج.م</span>
                 </strong>
               </div>
@@ -558,11 +561,11 @@ export default function OrderDeliverySettlementModal({
               style={{
                 flex: 1,
                 padding: '12px 18px',
-                background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                background: '#059669',
                 color: '#ffffff',
                 border: 'none',
-                borderRadius: '10px',
-                fontSize: '15px',
+                borderRadius: '8px',
+                fontSize: '14.5px',
                 fontWeight: '800',
                 cursor: isSubmitting ? 'not-allowed' : 'pointer',
                 opacity: isSubmitting ? 0.7 : 1,
@@ -570,8 +573,8 @@ export default function OrderDeliverySettlementModal({
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '8px',
-                boxShadow: '0 4px 12px rgba(5, 150, 105, 0.25)',
-                transition: 'all 0.2s ease'
+                boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)',
+                transition: 'all 0.15s ease'
               }}
             >
               {isSubmitting ? (
@@ -579,7 +582,7 @@ export default function OrderDeliverySettlementModal({
               ) : (
                 <>
                   <CheckCircle size={18} />
-                  <span>تأكيد التسليم وتحصيل {currentCollectNum.toFixed(2)} ج.م</span>
+                  <span>تأكيد التسليم وتحصيل <span className="tabular-nums" style={{ fontFamily: 'var(--outstock-font-mono)' }}>{currentCollectNum.toFixed(2)}</span> ج.م</span>
                 </>
               )}
             </button>

@@ -37,7 +37,8 @@ import {
   outstockSyncCloudCatalog,
   outstockGetPriceAuditLogs,
   outstockGetMedicationMasterCard,
-  outstockAddNewMedication
+  outstockAddNewMedication,
+  outstockDeleteMedication
 } from '../../../utils/outstockApiClient';
 import { generateBarcodeSvgString } from '../../../utils/invoicePdfGenerator';
 import {
@@ -101,6 +102,34 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
     is_refrigerated: false
   });
   const [isSavingNewMed, setIsSavingNewMed] = useState(false);
+
+  // ── 6.1 حالة وتأكيد حذف صنف من الكتالوج ──
+  const [medToDelete, setMedToDelete] = useState(null);
+  const [isDeletingMed, setIsDeletingMed] = useState(false);
+
+  const handleConfirmDeleteMedication = async () => {
+    if (!medToDelete) return;
+    try {
+      setIsDeletingMed(true);
+      const res = await outstockDeleteMedication(medToDelete.id);
+      if (res?.success) {
+        showToast?.(res.message || 'تم حذف الصنف من كتالوج الأدوية بنجاح');
+        setSearchResults(prev => prev.filter(m => m.id !== medToDelete.id));
+        setStats(prev => ({
+          ...prev,
+          total_medications: Math.max(0, (prev.total_medications || 0) - 1)
+        }));
+        setMedToDelete(null);
+      } else {
+        showToast?.(res?.error || 'تعذر حذف الصنف');
+      }
+    } catch (err) {
+      console.error('Delete medication error:', err);
+      showToast?.('حدث خطأ أثناء محاولة حذف الصنف');
+    } finally {
+      setIsDeletingMed(false);
+    }
+  };
 
   // ── 7. حالة سجل التدقيق التاريخي ──
   const [auditLogs, setAuditLogs] = useState([]);
@@ -479,34 +508,37 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
         gap: '14px'
       }}>
         <div style={{
-          background: 'linear-gradient(135deg, #0d9488, #0f766e)',
-          borderRadius: '16px',
-          padding: '18px 20px',
-          color: '#ffffff',
-          boxShadow: '0 10px 24px rgba(13, 148, 136, 0.22)',
+          background: '#ffffff',
+          borderRadius: '14px',
+          padding: '16px 20px',
+          border: '1px solid var(--outstock-border-subtle, #e2e8f0)',
+          borderTop: '3px solid #059669',
+          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between'
         }}>
           <div>
-            <div style={{ fontSize: '13px', opacity: 0.9, fontWeight: '700' }}>إجمالي الأدوية المسجلة</div>
-            <div style={{ fontSize: '28px', fontWeight: '900', marginTop: '4px' }}>
+            <div style={{ fontSize: '13px', color: '#64748b', fontWeight: '700' }}>إجمالي الأدوية المسجلة</div>
+            <div className="tabular-nums" style={{ fontSize: '26px', fontWeight: '900', color: '#0f172a', marginTop: '4px', fontFamily: 'var(--outstock-font-mono)' }}>
               {(stats.total_medications || 26633).toLocaleString('ar-EG')} صنف
             </div>
-            <div style={{ fontSize: '11px', opacity: 0.85, marginTop: '2px' }}>
+            <div style={{ fontSize: '11px', color: '#059669', fontWeight: '600', marginTop: '2px' }}>
               قاعدة بيانات هيئة الدواء المصرية ودراج آي
             </div>
           </div>
           <div style={{
-            width: '48px',
-            height: '48px',
-            borderRadius: '12px',
-            background: 'rgba(255, 255, 255, 0.2)',
+            width: '44px',
+            height: '44px',
+            borderRadius: '10px',
+            background: '#ecfdf5',
+            border: '1px solid #a7f3d0',
+            color: '#059669',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center'
           }}>
-            <Pill size={26} color="#ffffff" />
+            <Pill size={22} />
           </div>
         </div>
 
@@ -934,6 +966,26 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
                             >
                               <Edit3 size={13} />
                               <span>تعديل السعر</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setMedToDelete(med)}
+                              className="outstock-btn"
+                              style={{
+                                padding: '6px 10px',
+                                fontSize: '11.5px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                background: '#fef2f2',
+                                color: '#dc2626',
+                                border: '1px solid #fecaca'
+                              }}
+                              title="حذف هذا الصنف من كتالوج الأدوية نهائياً"
+                            >
+                              <Trash2 size={13} />
+                              <span>حذف</span>
                             </button>
                           </div>
                         </td>
@@ -1862,6 +1914,76 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
           handleSearch(searchTerm || '');
         }}
       />
+      {/* ── 8. نافذة تأكيد حذف الصنف من الكتالوج ── */}
+      {medToDelete && (
+        <div className="outstock-modal-backdrop" style={{ zIndex: 10005 }}>
+          <div className="outstock-modal-panel modal-sm" style={{ padding: '24px', maxWidth: '440px' }}>
+            <div style={{ textAlign: 'center', marginBottom: '18px' }}>
+              <div style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                background: '#fee2e2',
+                color: '#dc2626',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 12px'
+              }}>
+                <Trash2 size={28} />
+              </div>
+              <h3 style={{ margin: '0 0 8px', fontSize: '17px', fontWeight: '800', color: '#0f172a' }}>
+                تأكيد حذف الصنف من الكتالوج
+              </h3>
+              <p style={{ margin: 0, fontSize: '13.5px', color: '#64748b', lineHeight: '1.6' }}>
+                هل أنت متأكد من رغبتك في حذف صنف{' '}
+                <strong style={{ color: '#b91c1c' }}>{medToDelete.trade_name_ar || medToDelete.trade_name_en}</strong>{' '}
+                نهائياً من كتالوج الأدوية المركزي؟
+              </p>
+              <div style={{
+                marginTop: '12px',
+                background: '#f8fafc',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                border: '1px solid #e2e8f0',
+                fontSize: '12.5px',
+                color: '#475569',
+                textAlign: 'right'
+              }}>
+                <div>السعر الرسمي: <strong>{medToDelete.public_price} ج.م</strong></div>
+                {medToDelete.generic_name && <div style={{ marginTop: '4px' }}>المادة الفعالة: {medToDelete.generic_name}</div>}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button
+                type="button"
+                className="outstock-btn outstock-btn-secondary"
+                onClick={() => setMedToDelete(null)}
+                disabled={isDeletingMed}
+                style={{ flex: 1 }}
+              >
+                إلغاء التراجع
+              </button>
+              <button
+                type="button"
+                className="outstock-btn"
+                onClick={handleConfirmDeleteMedication}
+                disabled={isDeletingMed}
+                style={{
+                  flex: 1,
+                  background: '#dc2626',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontWeight: '800'
+                }}
+              >
+                {isDeletingMed ? 'جاري الحذف...' : 'نعم، حذف نهائي 🗑️'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2420,6 +2420,12 @@ app.post('/api/auth/login', async (req, res) => {
               }
             }
 
+            const ouPermissions = ou.permissions || (
+              ou.role === 'procurement_manager' || ou.username === 'admin-stock'
+                ? { can_edit_items: true, can_view_orders: true, can_change_status: true, can_access_suppliers: true, can_manage_team: true }
+                : {}
+            );
+
             targetUserObj = {
               id: ou.id,
               username: ou.username,
@@ -2427,6 +2433,7 @@ app.post('/api/auth/login', async (req, res) => {
               name: ou.full_name,
               role: userRole,
               branchId: ou.branch_id,
+              permissions: ouPermissions,
               ...(branchData ? branchData : {})
             };
           }
@@ -2573,6 +2580,7 @@ app.post('/api/auth/login', async (req, res) => {
       role: userRole,
       branchId: targetBranchId,
       branchData: targetUserObj?.branchData || (userRole === 'outstock_branch' ? targetUserObj : null),
+      permissions: targetUserObj?.permissions || {},
       sessionVersion: currentSessionVer,
       exp: Math.floor(Date.now() / 1000) + (86400 * 30)
     })).toString('base64url');

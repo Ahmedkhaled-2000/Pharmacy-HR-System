@@ -67,11 +67,18 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
     totalItemsCompared: 0
   });
   const [isLoadingComparison, setIsLoadingComparison] = useState(true);
+  const [comparisonError, setComparisonError] = useState(null);
   const [expandedItemId, setExpandedItemId] = useState(null);
+
+  const showToastRef = useRef(showToast);
+  useEffect(() => {
+    showToastRef.current = showToast;
+  }, [showToast]);
 
   const fetchComparison = useCallback(async () => {
     try {
       setIsLoadingComparison(true);
+      setComparisonError(null);
       const res = await outstockGetSupplierDiscountsComparison({
         limit: topItemsLimit,
         search: searchQuery
@@ -80,15 +87,18 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
         setComparisonData(res.itemsComparison || []);
         setKpis(res.kpis || {});
       } else {
-        showToast?.(res?.error || 'تعذر جلب بيانات مقارنة الخصومات');
+        const errMsg = res?.error || 'تعذر جلب بيانات مقارنة الخصومات';
+        setComparisonError(errMsg);
+        showToastRef.current?.(errMsg);
       }
     } catch (err) {
       console.error(err);
-      showToast?.('حدث خطأ أثناء جلب مقارنة الخصومات');
+      setComparisonError('حدث خطأ أثناء جلب مقارنة الخصومات');
+      showToastRef.current?.('حدث خطأ أثناء جلب مقارنة الخصومات');
     } finally {
       setIsLoadingComparison(false);
     }
-  }, [topItemsLimit, searchQuery, showToast]);
+  }, [topItemsLimit, searchQuery]);
 
   useEffect(() => {
     if (activeSubTab === 'invoices_comparison') {
@@ -175,33 +185,33 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
     try {
       const res = await outstockSaveISupplyConfig(sessionCredentials);
       if (res?.success) {
-        showToast?.('تم حفظ إعدادات جلسة iSupply بنجاح');
+        showToastRef.current?.('تم حفظ إعدادات جلسة iSupply بنجاح');
         loadISupplyData();
       } else {
-        showToast?.(res?.error || 'فشل حفظ الإعدادات');
+        showToastRef.current?.(res?.error || 'فشل حفظ الإعدادات');
       }
     } catch {
-      showToast?.('حدث خطأ أثناء حفظ الإعدادات');
+      showToastRef.current?.('حدث خطأ أثناء حفظ الإعدادات');
     }
   };
 
   // فحص واعتماد الجلسة (Handshake)
   const handleTestSession = async () => {
     if (!sessionCredentials.accountPhone) {
-      showToast?.('يرجى إدخال رقم هاتف حساب الصيدلية أولاً');
+      showToastRef.current?.('يرجى إدخال رقم هاتف حساب الصيدلية أولاً');
       return;
     }
     try {
       setIsConnectingSession(true);
       const res = await outstockTestISupplySession(sessionCredentials);
       if (res?.success) {
-        showToast?.('تم الاتصال واعتماد جلسة الربط مع منصة iSupply بنجاح 🟢');
+        showToastRef.current?.('تم الاتصال واعتماد جلسة الربط مع منصة iSupply بنجاح 🟢');
         loadISupplyData();
       } else {
-        showToast?.(res?.error || 'فشل الاتصال بالجلسة');
+        showToastRef.current?.(res?.error || 'فشل الاتصال بالجلسة');
       }
     } catch {
-      showToast?.('حدث خطأ أثناء فحص الجلسة');
+      showToastRef.current?.('حدث خطأ أثناء فحص الجلسة');
     } finally {
       setIsConnectingSession(false);
     }
@@ -213,15 +223,15 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
       setIsSyncingFeeds(true);
       const res = await outstockSyncISupplyNow();
       if (res?.success) {
-        showToast?.(res.message || 'تمت مزامنة عروض وخصومات الموزعين بنجاح ⚡');
+        showToastRef.current?.(res.message || 'تمت مزامنة عروض وخصومات الموزعين بنجاح ⚡');
         loadISupplyData();
         // تحديث جدول مقارنة الفواتير أيضاً لربط أسعار السوق اللحظية
         fetchComparison();
       } else {
-        showToast?.(res?.error || 'فشلت المزامنة');
+        showToastRef.current?.(res?.error || 'فشلت المزامنة');
       }
     } catch {
-      showToast?.('حدث خطأ أثناء المزامنة');
+      showToastRef.current?.('حدث خطأ أثناء المزامنة');
     } finally {
       setIsSyncingFeeds(false);
     }
@@ -232,10 +242,10 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
     if (!window.confirm('هل تريد قطع اتصال الجلسة وإعادة الضبط؟')) return;
     try {
       await outstockClearISupplySession();
-      showToast?.('تم قطع الاتصال بنجاح');
+      showToastRef.current?.('تم قطع الاتصال بنجاح');
       loadISupplyData();
     } catch {
-      showToast?.('حدث خطأ أثناء قطع الاتصال');
+      showToastRef.current?.('حدث خطأ أثناء قطع الاتصال');
     }
   };
 
@@ -321,7 +331,38 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
       ══════════════════════════════════════════════════════════════════════════ */}
       {activeSubTab === 'invoices_comparison' && (
         <div className="invoices-comparison-subview">
+          {/* تنبيه الخطأ مع زر إعادة المحاولة الفورية لمنع الحلقات المفرغة */}
+          {comparisonError && (
+            <div
+              style={{
+                background: '#fef2f2',
+                border: '1.5px solid #fca5a5',
+                borderRadius: '12px',
+                padding: '14px 18px',
+                marginBottom: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                color: '#b91c1c'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', fontWeight: '700' }}>
+                <AlertCircle size={20} />
+                <span>{comparisonError}</span>
+              </div>
+              <button
+                type="button"
+                className="outstock-btn outstock-btn-primary"
+                onClick={fetchComparison}
+                style={{ fontSize: '12px', padding: '6px 14px' }}
+              >
+                إعادة المحاولة 🔄
+              </button>
+            </div>
+          )}
+
           {/* البطاقات الاستبيانية والتحليلية الـ 4 */}
+          {/* البطاقات الاستبيانية والتحليلية الـ 4 - طابع مؤسسي عصري */}
           <div
             style={{
               display: 'grid',
@@ -333,40 +374,42 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
             {/* 1. ملك الخصومات */}
             <div
               style={{
-                background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
-                border: '1.5px solid #86efac',
+                background: '#ffffff',
+                border: '1px solid var(--outstock-border-subtle, #e2e8f0)',
+                borderTop: '3px solid #059669',
                 borderRadius: '12px',
-                padding: '14px',
+                padding: '14px 16px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '12px',
-                boxShadow: '0 2px 4px rgba(22, 163, 74, 0.05)'
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
               }}
             >
               <div
                 style={{
-                  width: '44px',
-                  height: '44px',
+                  width: '42px',
+                  height: '42px',
                   borderRadius: '10px',
-                  background: '#16a34a',
-                  color: '#fff',
+                  background: '#ecfdf5',
+                  border: '1px solid #a7f3d0',
+                  color: '#059669',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center'
                 }}
               >
-                <Crown size={24} />
+                <Crown size={22} />
               </div>
               <div>
-                <div style={{ fontSize: '11.5px', color: '#166534', fontWeight: 'bold' }}>
-                  🏆 ملك الخصومات (أعلى مورد منافسة)
+                <div style={{ fontSize: '11.5px', color: '#047857', fontWeight: 'bold' }}>
+                  👑 ملك الخصومات (أعلى مورد منافسة)
                 </div>
-                <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#14532d', marginTop: '2px' }}>
+                <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a', marginTop: '2px' }}>
                   {kpis.topDiscountSupplier ? kpis.topDiscountSupplier.name : 'قيد التحليل'}
                 </div>
                 {kpis.topDiscountSupplier && (
-                  <div style={{ fontSize: '11px', color: '#15803d', marginTop: '2px' }}>
-                    الأعلى خصماً في <strong>{kpis.topDiscountSupplier.winsCount}</strong> صنف (متوسط {kpis.topDiscountSupplier.avgDiscount}%)
+                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                    الأعلى خصماً في <strong style={{ color: '#059669' }}>{kpis.topDiscountSupplier.winsCount}</strong> صنف (متوسط {kpis.topDiscountSupplier.avgDiscount}%)
                   </div>
                 )}
               </div>
@@ -375,39 +418,41 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
             {/* 2. أعلى نسبة خصم مسجلة */}
             <div
               style={{
-                background: 'linear-gradient(135deg, #fefce8 0%, #fef08a 100%)',
-                border: '1.5px solid #fde047',
+                background: '#ffffff',
+                border: '1px solid var(--outstock-border-subtle, #e2e8f0)',
+                borderTop: '3px solid #d97706',
                 borderRadius: '12px',
-                padding: '14px',
+                padding: '14px 16px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '12px',
-                boxShadow: '0 2px 4px rgba(202, 138, 4, 0.05)'
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
               }}
             >
               <div
                 style={{
-                  width: '44px',
-                  height: '44px',
+                  width: '42px',
+                  height: '42px',
                   borderRadius: '10px',
-                  background: '#ca8a04',
-                  color: '#fff',
+                  background: '#fffbeb',
+                  border: '1px solid #fde68a',
+                  color: '#d97706',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center'
                 }}
               >
-                <Award size={24} />
+                <Award size={22} />
               </div>
               <div>
-                <div style={{ fontSize: '11.5px', color: '#854d0e', fontWeight: 'bold' }}>
+                <div style={{ fontSize: '11.5px', color: '#b45309', fontWeight: 'bold' }}>
                   🎯 أعلى نسبة خصم مسجلة
                 </div>
-                <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#713f12', marginTop: '2px' }}>
+                <div className="tabular-nums" style={{ fontSize: '18px', fontWeight: 'bold', color: '#d97706', marginTop: '2px', fontFamily: 'var(--outstock-font-mono)' }}>
                   {kpis.maxRecordedDiscount ? `${kpis.maxRecordedDiscount.discount_percent}%` : '0%'}
                 </div>
                 {kpis.maxRecordedDiscount && (
-                  <div style={{ fontSize: '11px', color: '#854d0e', marginTop: '2px' }}>
+                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
                     صنف: {kpis.maxRecordedDiscount.medication_name} ({kpis.maxRecordedDiscount.supplier_name})
                   </div>
                 )}
@@ -417,22 +462,25 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
             {/* 3. متوسط خصم السوق الفعلي */}
             <div
               style={{
-                background: '#f8fafc',
-                border: '1px solid #cbd5e1',
+                background: '#ffffff',
+                border: '1px solid var(--outstock-border-subtle, #e2e8f0)',
+                borderTop: '3px solid #0284c7',
                 borderRadius: '12px',
-                padding: '14px',
+                padding: '14px 16px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '12px'
+                gap: '12px',
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
               }}
             >
               <div
                 style={{
-                  width: '44px',
-                  height: '44px',
+                  width: '42px',
+                  height: '42px',
                   borderRadius: '10px',
-                  background: '#0284c7',
-                  color: '#fff',
+                  background: '#f0f9ff',
+                  border: '1px solid #bae6fd',
+                  color: '#0284c7',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center'
@@ -441,10 +489,10 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
                 <Percent size={22} />
               </div>
               <div>
-                <div style={{ fontSize: '11.5px', color: '#475569', fontWeight: 'bold' }}>
+                <div style={{ fontSize: '11.5px', color: '#0369a1', fontWeight: 'bold' }}>
                   📊 متوسط خصم المشتريات العام
                 </div>
-                <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#0369a1', marginTop: '2px' }}>
+                <div className="tabular-nums" style={{ fontSize: '18px', fontWeight: 'bold', color: '#0284c7', marginTop: '2px', fontFamily: 'var(--outstock-font-mono)' }}>
                   {kpis.marketAverageDiscount}%
                 </div>
                 <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
@@ -456,37 +504,40 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
             {/* 4. الوفر المالي التقديري المتوقع */}
             <div
               style={{
-                background: 'linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%)',
-                border: '1.5px solid #5eead4',
+                background: '#ffffff',
+                border: '1px solid var(--outstock-border-subtle, #e2e8f0)',
+                borderTop: '3px solid #0d9488',
                 borderRadius: '12px',
-                padding: '14px',
+                padding: '14px 16px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '12px'
+                gap: '12px',
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
               }}
             >
               <div
                 style={{
-                  width: '44px',
-                  height: '44px',
+                  width: '42px',
+                  height: '42px',
                   borderRadius: '10px',
-                  background: '#0d9488',
-                  color: '#fff',
+                  background: '#f0fdfa',
+                  border: '1px solid #99f6e4',
+                  color: '#0d9488',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center'
                 }}
               >
-                <DollarSign size={24} />
+                <DollarSign size={22} />
               </div>
               <div>
-                <div style={{ fontSize: '11.5px', color: '#115e59', fontWeight: 'bold' }}>
+                <div style={{ fontSize: '11.5px', color: '#0f766e', fontWeight: 'bold' }}>
                   💡 وفر مالي محتمل بالتحويل للأفضل
                 </div>
-                <div style={{ fontSize: '17px', fontWeight: 'bold', color: '#0f766e', marginTop: '2px' }}>
+                <div className="tabular-nums" style={{ fontSize: '17px', fontWeight: 'bold', color: '#0d9488', marginTop: '2px', fontFamily: 'var(--outstock-font-mono)' }}>
                   {Number(kpis.potentialMonthlySavings || 0).toLocaleString('ar-EG')} ج.م
                 </div>
-                <div style={{ fontSize: '11px', color: '#134e4a', marginTop: '2px' }}>
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
                   عند حصر سحب هذه الأصناف من أفضل مورد
                 </div>
               </div>
@@ -833,18 +884,18 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
           {/* شريط حالة الجلسة والاتصال */}
           <div
             style={{
-              background: isupplyStatus.is_connected
-                ? 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)'
-                : '#f8fafc',
-              border: isupplyStatus.is_connected ? '1.5px solid #86efac' : '1px solid #e2e8f0',
+              background: '#ffffff',
+              border: '1px solid var(--outstock-border-subtle, #e2e8f0)',
+              borderRight: isupplyStatus.is_connected ? '4px solid #059669' : '4px solid #94a3b8',
               borderRadius: '12px',
-              padding: '16px',
+              padding: '16px 20px',
               marginBottom: '20px',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
               flexWrap: 'wrap',
-              gap: '12px'
+              gap: '12px',
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -853,8 +904,9 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
                   width: '42px',
                   height: '42px',
                   borderRadius: '10px',
-                  background: isupplyStatus.is_connected ? '#16a34a' : '#94a3b8',
-                  color: '#fff',
+                  background: isupplyStatus.is_connected ? '#ecfdf5' : '#f1f5f9',
+                  border: isupplyStatus.is_connected ? '1px solid #a7f3d0' : '1px solid #cbd5e1',
+                  color: isupplyStatus.is_connected ? '#059669' : '#64748b',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center'
@@ -869,21 +921,26 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
                   </h4>
                   <span
                     style={{
-                      background: isupplyStatus.is_connected ? '#16a34a' : '#ef4444',
-                      color: '#fff',
+                      background: isupplyStatus.is_connected ? '#ecfdf5' : '#fef2f2',
+                      color: isupplyStatus.is_connected ? '#059669' : '#dc2626',
+                      border: isupplyStatus.is_connected ? '1px solid #a7f3d0' : '1px solid #fecaca',
                       padding: '2px 8px',
                       borderRadius: '12px',
                       fontSize: '11px',
-                      fontWeight: 'bold'
+                      fontWeight: 'bold',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
                     }}
                   >
-                    {isupplyStatus.is_connected ? 'متصل لحظياً 🟢' : 'غير متصل 🔴'}
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isupplyStatus.is_connected ? '#059669' : '#dc2626' }} />
+                    <span>{isupplyStatus.is_connected ? 'متصل لحظياً' : 'غير متصل'}</span>
                   </span>
                 </div>
-                <div style={{ fontSize: '11.5px', color: '#475569', marginTop: '3px' }}>
+                <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '3px' }}>
                   {isupplyStatus.last_sync_message || 'بانتظار التحقق من الجلسة وتحديث الأسعار اليومية'}
                   {isupplyStatus.last_sync_at && (
-                    <span style={{ color: '#0f766e', fontWeight: 'bold' }}>
+                    <span className="tabular-nums" style={{ color: '#0f766e', fontWeight: 'bold' }}>
                       {' '}(آخر مزامنة: {new Date(isupplyStatus.last_sync_at).toLocaleString('ar-EG')})
                     </span>
                   )}

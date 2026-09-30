@@ -450,6 +450,12 @@ export async function outstockAddNewMedication(medicationData) {
   });
 }
 
+export async function outstockDeleteMedication(medicationId) {
+  return await outstockRequest(`medications/${medicationId}`, {
+    method: 'DELETE'
+  });
+}
+
 export async function outstockUpdateMedicationDetails(medicationId, updateData) {
   return await outstockRequest(`medications/${medicationId}`, {
     method: 'PUT',

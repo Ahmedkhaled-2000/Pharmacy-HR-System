@@ -64,11 +64,17 @@ import SupplierDiscountsComparisonTab from './SupplierDiscountsComparisonTab';
  * 2. فواتير الموردين ومطابقتها والأرشفة على Google Drive
  * 3. مسحوبات الفروع الشهرية والتوريدات الميدانية
  */
-export default function ProcurementSuppliersTab({ showToast = alert }) {
-  const [activeSubTab, setActiveSubTab] = useState('accounts'); // 'accounts' | 'invoices' | 'withdrawals'
+export default function ProcurementSuppliersTab({ showToast = alert, initialSubTab = 'accounts' }) {
+  const [activeSubTab, setActiveSubTab] = useState(initialSubTab || 'accounts'); // 'accounts' | 'invoices' | 'withdrawals' | 'discounts_comparison'
   const [suppliers, setSuppliers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
 
   // ══════════════════════════════════════════════════════════════════════════════
   // تحميل قائمة الموردين
