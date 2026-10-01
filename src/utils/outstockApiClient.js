@@ -697,6 +697,9 @@ export async function outstockClearISupplySession() {
   });
 }
 
-
-
-
+// ── 22. ملخص الإشعارات والعدادات الحية ─────────────────────────────────────────
+export async function outstockGetNotificationsSummary(branchId = '') {
+  const qs = new URLSearchParams();
+  if (branchId) qs.append('branch_id', branchId);
+  return await outstockRequest(`notifications/summary?${qs.toString()}`, { method: 'GET' });
+}

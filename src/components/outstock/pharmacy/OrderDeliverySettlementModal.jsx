@@ -13,7 +13,8 @@ import {
   AlertCircle,
   PackageCheck,
   TrendingUp,
-  ShieldCheck
+  ShieldCheck,
+  Zap
 } from 'lucide-react';
 import { outstockSettleAndDeliverOrder } from '../../../utils/outstockApiClient';
 
@@ -409,11 +410,12 @@ export default function OrderDeliverySettlementModal({
             <label style={{ fontSize: '13px', fontWeight: '700', color: '#334155', display: 'block', marginBottom: '8px' }}>
               طريقة استلام المبلغ:
             </label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px' }}>
               {[
                 { id: 'cash', label: 'نقدي (كاش)', icon: DollarSign, color: '#16a34a' },
                 { id: 'card', label: 'فيزا / بطاقة', icon: CreditCard, color: '#2563eb' },
-                { id: 'wallet', label: 'محفظة / إنستاباي', icon: Smartphone, color: '#9333ea' },
+                { id: 'wallet', label: 'محفظة إلكترونية', icon: Smartphone, color: '#9333ea' },
+                { id: 'instapay', label: 'إنستاباي ⚡', icon: Zap, color: '#d97706' },
                 { id: 'credit', label: 'آجل / حساب', icon: Clock, color: '#ea580c' }
               ].map((m) => {
                 const Icon = m.icon;

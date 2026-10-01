@@ -228,6 +228,49 @@
   box-shadow: 0 1px 4px rgba(5, 150, 105, 0.1);
 }
 
+/* شارات العدادات التنبيهية في شريط التبويبات */
+.outstock-nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  min-width: 19px;
+  height: 19px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #ffffff;
+  box-shadow: 0 2px 5px rgba(220, 38, 38, 0.4);
+  animation: outstockBadgePulse 2.2s infinite ease-in-out;
+  margin-inline-start: 4px;
+}
+
+.outstock-nav-badge.warning {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  box-shadow: 0 2px 5px rgba(217, 119, 6, 0.4);
+}
+
+.outstock-nav-badge.success {
+  background: linear-gradient(135deg, #10b981, #059669);
+  box-shadow: 0 2px 5px rgba(5, 150, 105, 0.4);
+}
+
+.outstock-nav-badge.info {
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  box-shadow: 0 2px 5px rgba(2, 132, 199, 0.4);
+}
+
+@keyframes outstockBadgePulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
 /* تبويبات الشريط العلوي */
 .outstock-nav-tabs {
   display: flex;
@@ -1757,6 +1800,39 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+.outstock-dropdown-item-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecdd3;
+  margin-inline-start: auto;
+  flex-shrink: 0;
+}
+
+.outstock-dropdown-item-badge.warning {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fde68a;
+}
+
+.outstock-dropdown-item-badge.success {
+  background: #d1fae5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.outstock-dropdown-item-badge.info {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: #bae6fd;
 }
 
 /* التوافق التام مع الوضع الليلي Dark Mode */

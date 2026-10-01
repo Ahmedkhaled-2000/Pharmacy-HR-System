@@ -31,7 +31,9 @@ import {
   Wallet,
   Coins,
   Tag,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Zap,
+  Smartphone
 } from 'lucide-react';
 import {
   outstockGetCustomers,
@@ -86,7 +88,7 @@ export default function NewCustomerOrderModal({
   onOrderCreated
 }) {
   // ── 0. تصنيف الطلب وكود الموظف المستلم ──
-  const [orderCategory, setOrderCategory] = useState('medication'); // 'medication' | 'cosmetics'
+  const [orderCategory, setOrderCategory] = useState(null); // null | 'medication' | 'cosmetics'
 
   // ── 1. حالة العميل ──
   const [searchPhone, setSearchPhone] = useState('');
@@ -517,7 +519,8 @@ export default function NewCustomerOrderModal({
   const [paymentSplits, setPaymentSplits] = useState({
     cash: '',
     card: '',
-    wallet: ''
+    wallet: '',
+    instapay: ''
   });
 
   // ── الحسابات المالية الدقيقة مع دعم السعر التقديري (من ... إلى ... ج.م) دون متوسط حسابي ──
@@ -560,7 +563,8 @@ export default function NewCustomerOrderModal({
   const totalSplitPaid =
     parseFloat(paymentSplits.cash || 0) +
     parseFloat(paymentSplits.card || 0) +
-    parseFloat(paymentSplits.wallet || 0);
+    parseFloat(paymentSplits.wallet || 0) +
+    parseFloat(paymentSplits.instapay || 0);
 
   const effectivePaid = useSplitPayment ? totalSplitPaid : parseFloat(paidAmount || 0);
 
@@ -571,6 +575,11 @@ export default function NewCustomerOrderModal({
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
+
+    if (!orderCategory) {
+      setErrorMsg('⚠️ يرجى تحديد تصنيف الطلب أولاً (طلب دوائي 💊 أو مستحضرات تجميل 💄) للمتابعة');
+      return;
+    }
 
     const finalName = String(customerName || '').trim();
     const finalPhone = String(whatsappPhone || '').replace(/\D/g, '');
@@ -792,15 +801,17 @@ export default function NewCustomerOrderModal({
                 gap: '12px'
               }}
             >
-              {/* تصنيف الطلب (دوائي / مستحضرات تجميل) */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '13px', fontWeight: '800', color: '#334155' }}>تصنيف الطلب:</span>
-                <div style={{ display: 'flex', gap: '6px', background: '#e2e8f0', padding: '3px', borderRadius: '10px' }}>
+              {/* تصنيف الطلب (دوائي / مستحضرات تجميل) - إجباري وغير محدد افتراضياً */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '13px', fontWeight: '800', color: !orderCategory ? '#b91c1c' : '#334155' }}>
+                  تصنيف الطلب {!orderCategory ? <span style={{ color: '#dc2626', fontSize: '11.5px' }}>(مطلوب تحديد التصنيف *)</span> : ':'}
+                </span>
+                <div style={{ display: 'flex', gap: '6px', background: !orderCategory ? '#fee2e2' : '#e2e8f0', padding: '3px', borderRadius: '10px', border: !orderCategory ? '1px dashed #ef4444' : '1px solid transparent', transition: 'all 0.2s ease' }}>
                   <button
                     type="button"
                     onClick={() => setOrderCategory('medication')}
                     style={{
-                      border: 'none',
+                      border: orderCategory === 'medication' ? '2px solid #059669' : '1px solid #cbd5e1',
                       borderRadius: '8px',
                       padding: '6px 14px',
                       fontSize: '13px',
@@ -809,9 +820,9 @@ export default function NewCustomerOrderModal({
                       display: 'flex',
                       alignItems: 'center',
                       gap: '6px',
-                      background: orderCategory === 'medication' ? '#059669' : 'transparent',
+                      background: orderCategory === 'medication' ? '#059669' : '#ffffff',
                       color: orderCategory === 'medication' ? '#ffffff' : '#475569',
-                      boxShadow: orderCategory === 'medication' ? '0 1px 3px rgba(5, 150, 105, 0.2)' : 'none',
+                      boxShadow: orderCategory === 'medication' ? '0 2px 6px rgba(5, 150, 105, 0.3)' : 'none',
                       transition: 'all 0.15s ease'
                     }}
                   >
@@ -822,7 +833,7 @@ export default function NewCustomerOrderModal({
                     type="button"
                     onClick={() => setOrderCategory('cosmetics')}
                     style={{
-                      border: 'none',
+                      border: orderCategory === 'cosmetics' ? '2px solid #db2777' : '1px solid #cbd5e1',
                       borderRadius: '8px',
                       padding: '6px 14px',
                       fontSize: '13px',
@@ -831,9 +842,9 @@ export default function NewCustomerOrderModal({
                       display: 'flex',
                       alignItems: 'center',
                       gap: '6px',
-                      background: orderCategory === 'cosmetics' ? '#db2777' : 'transparent',
+                      background: orderCategory === 'cosmetics' ? '#db2777' : '#ffffff',
                       color: orderCategory === 'cosmetics' ? '#ffffff' : '#475569',
-                      boxShadow: orderCategory === 'cosmetics' ? '0 1px 3px rgba(219, 39, 119, 0.2)' : 'none',
+                      boxShadow: orderCategory === 'cosmetics' ? '0 2px 6px rgba(219, 39, 119, 0.3)' : 'none',
                       transition: 'all 0.15s ease'
                     }}
                   >
@@ -1327,11 +1338,11 @@ export default function NewCustomerOrderModal({
                       />
                     </div>
 
-                    {/* الصف الثاني: تفاصيل الصنف (الوحدة، الكمية، سعر العلبة، إجمالي الصنف، وزر الحذف) */}
+                    {/* الصف الثاني: تفاصيل الصنف (الوحدة، الكمية، سعر العلبة الرسمي (يُخفى بالسعر التقريبي لمنع التكرار)، إجمالي الصنف، وزر الحذف) */}
                     <div
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: '1.2fr 1fr 1.4fr 1.4fr auto',
+                        gridTemplateColumns: it.isPriceEstimated ? '1.2fr 1fr 1.6fr auto' : '1.2fr 1fr 1.4fr 1.4fr auto',
                         gap: '10px',
                         alignItems: 'end'
                       }}
@@ -1377,36 +1388,36 @@ export default function NewCustomerOrderModal({
                         />
                       </div>
 
-                      {/* سعر العلبة */}
-                      <div>
-                        <label style={{ fontSize: '11px', color: it.isPriceEstimated ? '#b45309' : '#0369a1', fontWeight: '800', marginBottom: '3px', display: 'block' }}>
-                          {it.isPriceEstimated ? 'سعر العلبة (تقريبي ⚡):' : 'سعر العلبة الرسمي:'}
-                        </label>
-                        <div
-                          style={{
-                            height: '40px',
-                            background: it.isPriceEstimated ? '#fffbeb' : '#f0fdfa',
-                            border: it.isPriceEstimated ? '1px solid #fde68a' : '1px solid #99f6e4',
-                            borderRadius: '8px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontWeight: '900',
-                            fontSize: it.isPriceEstimated ? '11.5px' : '13px',
-                            color: it.isPriceEstimated ? '#b45309' : '#0f766e',
-                            padding: '0 4px'
-                          }}
-                          title={it.isPriceEstimated ? 'سعر تقريبي بنطاق من - إلى' : 'السعر معتمد رسمياً من الكتالوج ومحمي من التعديل العشوائي داخل الفرع'}
-                        >
-                          {it.isPriceEstimated ? (
-                            <span>من {Number(it.priceMin || 0).toFixed(2)} إلى {Number(it.priceMax || it.priceMin || 0).toFixed(2)} ج.م</span>
-                          ) : Number(it.unitPrice || it.selectedMed?.public_price || 0) > 0 ? (
-                            <span>{Number(it.unitPrice || it.selectedMed?.public_price || 0).toFixed(2)} ج.م</span>
-                          ) : (
-                            <span style={{ color: '#d97706', fontSize: '11px' }}>بانتظار تسعير المشتريات</span>
-                          )}
+                      {/* سعر العلبة الرسمي (يُخفى عند تفعيل السعر التقريبي لمنع التكرار مع نطاق من-إلى) */}
+                      {!it.isPriceEstimated && (
+                        <div>
+                          <label style={{ fontSize: '11px', color: '#0369a1', fontWeight: '800', marginBottom: '3px', display: 'block' }}>
+                            سعر العلبة الرسمي:
+                          </label>
+                          <div
+                            style={{
+                              height: '40px',
+                              background: '#f0fdfa',
+                              border: '1px solid #99f6e4',
+                              borderRadius: '8px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: '900',
+                              fontSize: '13px',
+                              color: '#0f766e',
+                              padding: '0 4px'
+                            }}
+                            title="السعر معتمد رسمياً من الكتالوج ومحمي من التعديل العشوائي داخل الفرع"
+                          >
+                            {Number(it.unitPrice || it.selectedMed?.public_price || 0) > 0 ? (
+                              <span>{Number(it.unitPrice || it.selectedMed?.public_price || 0).toFixed(2)} ج.م</span>
+                            ) : (
+                              <span style={{ color: '#d97706', fontSize: '11px' }}>بانتظار تسعير المشتريات</span>
+                            )}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* إجمالي الصنف */}
                       <div>
@@ -1661,9 +1672,9 @@ export default function NewCustomerOrderModal({
                 )}
               </div>
             ) : (
-              /* حقول الدفع المقسم (كاش / فيزا / محفظة إلكترونية أو إنستاباي) */
+              /* حقول الدفع المقسم (كاش / فيزا / محفظة إلكترونية / إنستاباي) */
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
                   <div>
                     <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#059669', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px' }}>
                       <Coins size={13} />
@@ -1698,8 +1709,8 @@ export default function NewCustomerOrderModal({
 
                   <div>
                     <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#7c3aed', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px' }}>
-                      <Wallet size={13} />
-                      <span>محفظة / إنستاباي:</span>
+                      <Smartphone size={13} />
+                      <span>محفظة إلكترونية:</span>
                     </label>
                     <input
                       type="number"
@@ -1709,6 +1720,22 @@ export default function NewCustomerOrderModal({
                       onChange={(e) => setPaymentSplits({ ...paymentSplits, wallet: e.target.value })}
                       className="outstock-form-input"
                       style={{ fontWeight: 'bold', color: '#7c3aed' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#d97706', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px' }}>
+                      <Zap size={13} />
+                      <span>إنستاباي (InstaPay):</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      placeholder="0.00"
+                      value={paymentSplits.instapay}
+                      onChange={(e) => setPaymentSplits({ ...paymentSplits, instapay: e.target.value })}
+                      className="outstock-form-input"
+                      style={{ fontWeight: 'bold', color: '#d97706' }}
                     />
                   </div>
                 </div>

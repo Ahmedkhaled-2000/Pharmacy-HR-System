@@ -56,6 +56,7 @@ const DOSAGE_PRESETS = {
 export default function AddMedicationModal({
   isOpen,
   initialData = {},
+  creatorEmployee = null,
   onClose,
   onSaveSuccess
 }) {
@@ -229,7 +230,9 @@ export default function AddMedicationModal({
         category: form.category.trim(),
         barcode: form.gtin_barcode.trim(),
         isTableDrug: form.is_table_drug,
-        isRefrigerated: form.is_refrigerated
+        isRefrigerated: form.is_refrigerated,
+        employeeCode: creatorEmployee?.code || null,
+        employeeName: creatorEmployee?.name || null
       };
 
       let res;
@@ -325,6 +328,21 @@ export default function AddMedicationModal({
               <p style={{ margin: 0, fontSize: '12.5px', opacity: 0.9, marginTop: '2px' }}>
                 يتم التحديث المباشر ويظهر فوراً لكافة الفروع وإدارة المشتريات
               </p>
+              {creatorEmployee && (
+                <div style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: 'rgba(255, 255, 255, 0.25)',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  fontSize: '11.5px',
+                  fontWeight: '800',
+                  marginTop: '4px'
+                }}>
+                  <span>المسؤول: {creatorEmployee.name} (كود: {creatorEmployee.code}) 🔒</span>
+                </div>
+              )}
             </div>
           </div>
 

@@ -141,16 +141,17 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   const [withdrawalSearch, setWithdrawalSearch] = useState('');
   const [isLoadingWithdrawals, setIsLoadingWithdrawals] = useState(false);
 
-  // نافذة إضافة مسحوب يدوي للمورد
+  // نافذة إضافة مسحوب يدوي للمورد (مع دعم الفواتير المتعددة وعدد الأصناف وملف PDF)
   const [isManualWithdrawalModalOpen, setIsManualWithdrawalModalOpen] = useState(false);
+  const [returnToWithdrawalsAfterManual, setReturnToWithdrawalsAfterManual] = useState(false);
   const [manualWithdrawalForm, setManualWithdrawalForm] = useState({
-    medication_name: '',
-    quantity: '1',
-    public_price: '',
-    discount_percent: '',
-    buy_price: '',
-    barcode: '',
-    invoice_number: '',
+    item_count: '1',
+    invoices: [
+      { invoice_number: '', invoice_date: new Date().toISOString().slice(0, 10), amount: '' }
+    ],
+    pdf_file: null,
+    pdf_file_name: '',
+    pdf_file_base64: '',
     notes: ''
   });
   const [isSubmittingManualWithdrawal, setIsSubmittingManualWithdrawal] = useState(false);
@@ -354,58 +355,145 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
     }
   };
 
+  const manualWithdrawalTotalAmount = useMemo(() => {
+    return (manualWithdrawalForm.invoices || []).reduce((acc, inv) => acc + (parseFloat(inv.amount || 0) || 0), 0);
+  }, [manualWithdrawalForm.invoices]);
+
+  const handleOpenManualFromWithdrawals = () => {
+    setReturnToWithdrawalsAfterManual(true);
+    setIsWithdrawalModalOpen(false);
+    setIsManualWithdrawalModalOpen(true);
+  };
+
+  const handleCloseManualWithdrawal = () => {
+    setIsManualWithdrawalModalOpen(false);
+    if (returnToWithdrawalsAfterManual) {
+      setReturnToWithdrawalsAfterManual(false);
+      setIsWithdrawalModalOpen(true);
+    }
+  };
+
+  const handleAddManualInvoiceRow = () => {
+    setManualWithdrawalForm((prev) => ({
+      ...prev,
+      invoices: [
+        ...prev.invoices,
+        { invoice_number: '', invoice_date: new Date().toISOString().slice(0, 10), amount: '' }
+      ]
+    }));
+  };
+
+  const handleRemoveManualInvoiceRow = (index) => {
+    if (manualWithdrawalForm.invoices.length <= 1) return;
+    setManualWithdrawalForm((prev) => ({
+      ...prev,
+      invoices: prev.invoices.filter((_, idx) => idx !== index)
+    }));
+  };
+
+  const handleManualInvoiceRowChange = (index, field, value) => {
+    setManualWithdrawalForm((prev) => {
+      const nextInvoices = [...prev.invoices];
+      nextInvoices[index] = { ...nextInvoices[index], [field]: value };
+      return { ...prev, invoices: nextInvoices };
+    });
+  };
+
+  const handlePdfFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      showToastRef.current?.('⚠️ يرجى اختيار ملف بصيغة PDF فقط');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setManualWithdrawalForm((prev) => ({
+        ...prev,
+        pdf_file: file,
+        pdf_file_name: file.name,
+        pdf_file_base64: reader.result
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemovePdfFile = () => {
+    setManualWithdrawalForm((prev) => ({
+      ...prev,
+      pdf_file: null,
+      pdf_file_name: '',
+      pdf_file_base64: ''
+    }));
+  };
+
+  const handlePreviewPdf = () => {
+    if (!manualWithdrawalForm.pdf_file_base64) return;
+    const win = window.open();
+    if (win) {
+      win.document.write(`<iframe src="${manualWithdrawalForm.pdf_file_base64}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+    }
+  };
+
   const handleSaveManualSupplierWithdrawal = async (e) => {
     e.preventDefault();
     if (!selectedSupplierForWithdrawals?.id) return;
-    if (!manualWithdrawalForm.medication_name?.trim()) {
-      showToastRef.current?.('يرجى كتابة أو اختيار اسم الصنف المسحوب');
+
+    const itemCount = parseInt(manualWithdrawalForm.item_count || 1, 10);
+    if (isNaN(itemCount) || itemCount < 1) {
+      showToastRef.current?.('⚠️ يرجى إدخال عدد أصناف صحيح (1 على الأقل)');
       return;
     }
-    const qty = Number(manualWithdrawalForm.quantity) || 1;
-    const pub = Number(manualWithdrawalForm.public_price) || 0;
-    const disc = Number(manualWithdrawalForm.discount_percent) || 0;
-    let buy = Number(manualWithdrawalForm.buy_price);
-    if (!buy && pub > 0) {
-      buy = pub * (1 - disc / 100);
-    }
-    if (!buy || buy <= 0) {
-      showToastRef.current?.('يرجى إدخال سعر شراء صحيح أكبر من صفر');
+
+    const validInvoices = (manualWithdrawalForm.invoices || []).filter(
+      (inv) => parseFloat(inv.amount || 0) > 0
+    );
+
+    if (validInvoices.length === 0) {
+      showToastRef.current?.('⚠️ يرجى إدخال فاتورة واحدة على الأقل بمبلغ أكبر من صفر');
       return;
     }
 
     try {
       setIsSubmittingManualWithdrawal(true);
       const res = await outstockAddSupplierWithdrawal(selectedSupplierForWithdrawals.id, {
-        medication_name: manualWithdrawalForm.medication_name.trim(),
-        quantity: qty,
-        public_price: pub,
-        discount_percent: disc,
-        buy_price: buy,
-        barcode: manualWithdrawalForm.barcode || '',
-        invoice_number: manualWithdrawalForm.invoice_number?.trim() || `WITH-${Date.now().toString().slice(-5)}`,
+        items_count: itemCount,
+        invoices: validInvoices.map((inv, idx) => ({
+          invoice_number: inv.invoice_number?.trim() || `WITH-${Date.now().toString().slice(-4)}-${idx + 1}`,
+          invoice_date: inv.invoice_date || new Date().toISOString().slice(0, 10),
+          amount: parseFloat(inv.amount || 0)
+        })),
+        total_amount: manualWithdrawalTotalAmount,
+        file_base64: manualWithdrawalForm.pdf_file_base64 || null,
+        file_name: manualWithdrawalForm.pdf_file_name || null,
         notes: manualWithdrawalForm.notes || ''
       });
+
       if (res?.success) {
-        showToastRef.current?.('تم تسجيل المسحوب اليدوي وتحديث كشف حساب المورد بنجاح');
-        setIsManualWithdrawalModalOpen(false);
+        showToastRef.current?.('✅ تم تسجيل المسحوبات وتحديث كشف حساب المورد بنجاح');
         setManualWithdrawalForm({
-          medication_name: '',
-          quantity: '1',
-          public_price: '',
-          discount_percent: '',
-          buy_price: '',
-          barcode: '',
-          invoice_number: '',
+          item_count: '1',
+          invoices: [
+            { invoice_number: '', invoice_date: new Date().toISOString().slice(0, 10), amount: '' }
+          ],
+          pdf_file: null,
+          pdf_file_name: '',
+          pdf_file_base64: '',
           notes: ''
         });
-        handleOpenWithdrawals(selectedSupplierForWithdrawals);
+        setIsManualWithdrawalModalOpen(false);
+        if (returnToWithdrawalsAfterManual) {
+          setReturnToWithdrawalsAfterManual(false);
+          setIsWithdrawalModalOpen(true);
+          handleOpenWithdrawals(selectedSupplierForWithdrawals);
+        }
         loadSuppliers();
       } else {
-        showToastRef.current?.(res?.error || 'فشل تسجيل المسحوب');
+        showToastRef.current?.(`⚠️ ${res?.error || 'فشل تسجيل المسحوب'}`);
       }
     } catch (err) {
       console.error(err);
-      showToastRef.current?.('حدث خطأ أثناء تسجيل المسحوب');
+      showToastRef.current?.('❌ حدث خطأ أثناء تسجيل المسحوبات');
     } finally {
       setIsSubmittingManualWithdrawal(false);
     }
@@ -2048,7 +2136,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                 <button
                   type="button"
                   className="outstock-btn outstock-btn-primary"
-                  onClick={() => setIsManualWithdrawalModalOpen(true)}
+                  onClick={handleOpenManualFromWithdrawals}
                   style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}
                 >
                   <Plus size={15} />
@@ -2134,166 +2222,303 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
         </div>
       )}
 
-      {/* ── نافذة إضافة مسحوب يدوي للمورد ── */}
+      {/* ── نافذة إضافة مسحوب يدوي للمورد (تصميم تنفيذي متعدد الفواتير والأصناف والـ PDF) ── */}
       {isManualWithdrawalModalOpen && selectedSupplierForWithdrawals && (
         <div className="outstock-modal-overlay" style={{ zIndex: 1100 }}>
-          <div className="outstock-modal-card" style={{ maxWidth: '520px', width: '92%' }}>
+          <div
+            className="outstock-modal-card"
+            style={{
+              maxWidth: '720px',
+              width: '95%',
+              maxHeight: '92vh',
+              overflowY: 'auto',
+              borderRadius: '16px',
+              boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.35)'
+            }}
+          >
+            {/* رأس النافذة */}
             <div
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                borderBottom: '1px solid #e2e8f0',
-                paddingBottom: '12px',
-                marginBottom: '16px'
+                borderBottom: '1.5px solid #e2e8f0',
+                paddingBottom: '14px',
+                marginBottom: '18px'
               }}
             >
               <div>
-                <h3 style={{ margin: 0, fontSize: '16px', color: '#0f172a' }}>تسجيل مسحوب يدوي للمورد</h3>
-                <span style={{ fontSize: '12px', color: '#0284c7' }}>
-                  {selectedSupplierForWithdrawals.name} ({selectedSupplierForWithdrawals.code})
-                </span>
+                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '900', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Truck size={20} color="#0284c7" />
+                  <span>تسجيل مسحوبات وفواتير يدوية للمورد</span>
+                </h3>
+                <div style={{ fontSize: '12.5px', color: '#64748b', marginTop: '3px' }}>
+                  المورد: <strong style={{ color: '#0f172a' }}>{selectedSupplierForWithdrawals.name}</strong> (كود: <span style={{ fontFamily: 'monospace' }}>{selectedSupplierForWithdrawals.code}</span>) | الرصيد الحالي: <span style={{ color: '#dc2626', fontWeight: 'bold' }}>{parseFloat(selectedSupplierForWithdrawals.current_balance || 0).toFixed(2)} ج.م</span>
+                </div>
               </div>
               <button
                 type="button"
                 className="outstock-btn-close"
-                onClick={() => setIsManualWithdrawalModalOpen(false)}
+                onClick={handleCloseManualWithdrawal}
+                style={{ padding: '6px' }}
               >
                 <X size={18} />
               </button>
             </div>
 
             <form onSubmit={handleSaveManualSupplierWithdrawal}>
-              <div style={{ marginBottom: '12px' }}>
-                <label className="outstock-form-label">اسم الدواء / الصنف *</label>
-                <MedicationAutocompleteInput
-                  value={manualWithdrawalForm.medication_name}
-                  onChange={(val) => setManualWithdrawalForm((prev) => ({ ...prev, medication_name: val }))}
-                  onSelect={(med) => {
-                    const pub = Number(med.price || med.public_price || 0);
-                    const disc = Number(manualWithdrawalForm.discount_percent || 0);
-                    const buy = pub > 0 && disc > 0 ? parseFloat((pub * (1 - disc / 100)).toFixed(2)) : (pub || '');
-                    setManualWithdrawalForm((prev) => ({
-                      ...prev,
-                      medication_name: med.name || med.arabic_name,
-                      public_price: pub || '',
-                      buy_price: buy || prev.buy_price,
-                      barcode: med.barcode || ''
-                    }));
-                  }}
-                  placeholder="ابحث بالاسم أو الباركود..."
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
-                <div>
-                  <label className="outstock-form-label">الكمية المسحوبة *</label>
+              {/* القسم الأول: عدد الأصناف المسحوبة */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px', marginBottom: '16px' }}>
+                <label className="outstock-form-label" style={{ fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                  <Layers size={16} color="#0284c7" />
+                  <span>إجمالي عدد الأصناف المسحوبة (Item Count) *</span>
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <input
                     type="number"
                     min="1"
-                    className="outstock-form-input"
-                    value={manualWithdrawalForm.quantity}
-                    onChange={(e) => setManualWithdrawalForm((prev) => ({ ...prev, quantity: e.target.value }))}
                     required
-                  />
-                </div>
-                <div>
-                  <label className="outstock-form-label">سعر الجمهور (ج.م)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
                     className="outstock-form-input"
-                    value={manualWithdrawalForm.public_price}
-                    onChange={(e) => {
-                      const pub = Number(e.target.value) || 0;
-                      const disc = Number(manualWithdrawalForm.discount_percent || 0);
-                      const buy = pub > 0 && disc > 0 ? parseFloat((pub * (1 - disc / 100)).toFixed(2)) : manualWithdrawalForm.buy_price;
-                      setManualWithdrawalForm((prev) => ({ ...prev, public_price: e.target.value, buy_price: buy }));
-                    }}
-                    placeholder="0.00"
+                    value={manualWithdrawalForm.item_count}
+                    onChange={(e) => setManualWithdrawalForm((prev) => ({ ...prev, item_count: e.target.value }))}
+                    placeholder="مثال: 12 صنف"
+                    style={{ maxWidth: '220px', fontWeight: '900', fontSize: '15px', color: '#0f172a', textAlign: 'center' }}
                   />
+                  <span style={{ fontSize: '12.5px', color: '#64748b' }}>
+                    عدد الأصناف الدوائية المندرجة في هذه المسحوبات
+                  </span>
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
-                <div>
-                  <label className="outstock-form-label">نسبة الخصم %</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="100"
-                    className="outstock-form-input"
-                    value={manualWithdrawalForm.discount_percent}
-                    onChange={(e) => {
-                      const disc = Number(e.target.value) || 0;
-                      const pub = Number(manualWithdrawalForm.public_price || 0);
-                      const buy = pub > 0 ? parseFloat((pub * (1 - disc / 100)).toFixed(2)) : manualWithdrawalForm.buy_price;
-                      setManualWithdrawalForm((prev) => ({ ...prev, discount_percent: e.target.value, buy_price: buy }));
+              {/* القسم الثاني: جدول الفواتير المتعددة */}
+              <div style={{ background: '#ffffff', border: '1.5px solid #cbd5e1', borderRadius: '12px', padding: '14px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <label className="outstock-form-label" style={{ fontWeight: '900', color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <FileText size={16} color="#0d9488" />
+                    <span>فواتير ومستندات السحب ({manualWithdrawalForm.invoices.length})</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleAddManualInvoiceRow}
+                    className="outstock-btn"
+                    style={{
+                      background: '#e0f2fe',
+                      color: '#0369a1',
+                      border: '1px solid #7dd3fc',
+                      padding: '5px 12px',
+                      fontSize: '12px',
+                      fontWeight: '800',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      cursor: 'pointer'
                     }}
-                    placeholder="0%"
-                  />
+                  >
+                    <Plus size={14} />
+                    <span>إضافة فاتورة أخرى</span>
+                  </button>
                 </div>
-                <div>
-                  <label className="outstock-form-label">سعر الشراء الفعلي *</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0.01"
-                    className="outstock-form-input"
-                    value={manualWithdrawalForm.buy_price}
-                    onChange={(e) => setManualWithdrawalForm((prev) => ({ ...prev, buy_price: e.target.value }))}
-                    required
-                    placeholder="صافي سعر الشراء"
-                  />
+
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '12.5px' }}>
+                    <thead>
+                      <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #e2e8f0' }}>
+                        <th style={{ padding: '8px 10px', width: '35%' }}>رقم الفاتورة / الإذن</th>
+                        <th style={{ padding: '8px 10px', width: '30%' }}>تاريخ الفاتورة</th>
+                        <th style={{ padding: '8px 10px', width: '25%' }}>قيمة الفاتورة (ج.م) *</th>
+                        <th style={{ padding: '8px 10px', width: '10%', textAlign: 'center' }}>إجراء</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {manualWithdrawalForm.invoices.map((invRow, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '6px 8px' }}>
+                            <input
+                              type="text"
+                              required
+                              placeholder={`رقم الفاتورة #${idx + 1}`}
+                              className="outstock-form-input"
+                              value={invRow.invoice_number}
+                              onChange={(e) => handleManualInvoiceRowChange(idx, 'invoice_number', e.target.value)}
+                              style={{ padding: '6px 10px', fontSize: '12.5px', fontWeight: '700' }}
+                            />
+                          </td>
+                          <td style={{ padding: '6px 8px' }}>
+                            <input
+                              type="date"
+                              required
+                              className="outstock-form-input"
+                              value={invRow.invoice_date}
+                              onChange={(e) => handleManualInvoiceRowChange(idx, 'invoice_date', e.target.value)}
+                              style={{ padding: '6px 8px', fontSize: '12px' }}
+                            />
+                          </td>
+                          <td style={{ padding: '6px 8px' }}>
+                            <input
+                              type="number"
+                              step="0.5"
+                              min="0.1"
+                              required
+                              placeholder="0.00"
+                              className="outstock-form-input"
+                              value={invRow.amount}
+                              onChange={(e) => handleManualInvoiceRowChange(idx, 'amount', e.target.value)}
+                              style={{ padding: '6px 10px', fontSize: '13px', fontWeight: '900', color: '#0f766e', textAlign: 'center' }}
+                            />
+                          </td>
+                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveManualInvoiceRow(idx)}
+                              disabled={manualWithdrawalForm.invoices.length <= 1}
+                              style={{
+                                background: '#fef2f2',
+                                border: '1px solid #fecaca',
+                                color: '#dc2626',
+                                borderRadius: '6px',
+                                padding: '5px',
+                                cursor: manualWithdrawalForm.invoices.length <= 1 ? 'not-allowed' : 'pointer',
+                                opacity: manualWithdrawalForm.invoices.length <= 1 ? 0.35 : 1
+                              }}
+                              title="حذف هذا الصف"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* بطاقة الإجمالي التلقائي */}
+                <div
+                  style={{
+                    marginTop: '12px',
+                    padding: '10px 14px',
+                    background: '#f0fdf4',
+                    border: '1.5px solid #86efac',
+                    borderRadius: '10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                  }}
+                >
+                  <span style={{ fontSize: '13px', fontWeight: '800', color: '#166534' }}>
+                    المجموع الكلي لقيمة الفواتير المسحوبة:
+                  </span>
+                  <strong style={{ fontSize: '16px', color: '#15803d', fontFamily: 'monospace' }}>
+                    {manualWithdrawalTotalAmount.toFixed(2)} ج.م
+                  </strong>
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
-                <div>
-                  <label className="outstock-form-label">رقم الفاتورة / الإذن</label>
-                  <input
-                    type="text"
-                    className="outstock-form-input"
-                    value={manualWithdrawalForm.invoice_number}
-                    onChange={(e) => setManualWithdrawalForm((prev) => ({ ...prev, invoice_number: e.target.value }))}
-                    placeholder="اختياري"
-                  />
-                </div>
-                <div>
-                  <label className="outstock-form-label">إجمالي المسحوب</label>
-                  <div style={{ padding: '8px 10px', background: '#f8fafc', borderRadius: '6px', fontWeight: 'bold', color: '#0f766e', fontSize: '13px' }}>
-                    {(Number(manualWithdrawalForm.quantity || 0) * Number(manualWithdrawalForm.buy_price || 0)).toFixed(2)} ج.م
+              {/* القسم الثالث: إرفاق ملف الفاتورة PDF */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px', marginBottom: '16px' }}>
+                <label className="outstock-form-label" style={{ fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                  <FileUp size={16} color="#0284c7" />
+                  <span>إرفاق ملف الفاتورة / السند الممسوح ضوئياً (PDF)</span>
+                </label>
+
+                {manualWithdrawalForm.pdf_file_name ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#ffffff', border: '1.5px solid #0284c7', borderRadius: '10px', padding: '8px 14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <FileText size={18} color="#0284c7" />
+                      <div>
+                        <strong style={{ fontSize: '12.5px', color: '#0f172a' }}>{manualWithdrawalForm.pdf_file_name}</strong>
+                        <div style={{ fontSize: '11px', color: '#059669' }}>تم إرفاق الملف بنجاح ✅</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={handlePreviewPdf}
+                        className="outstock-btn"
+                        style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '4px 10px', fontSize: '11.5px', borderRadius: '6px' }}
+                      >
+                        <Eye size={13} style={{ marginLeft: '4px' }} />
+                        <span>معاينة</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRemovePdfFile}
+                        className="outstock-btn"
+                        style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '4px 10px', fontSize: '11.5px', borderRadius: '6px' }}
+                      >
+                        <Trash2 size={13} style={{ marginLeft: '4px' }} />
+                        <span>إزالة</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div>
+                    <input
+                      type="file"
+                      id="manual-withdrawal-pdf-input"
+                      accept="application/pdf,.pdf"
+                      onChange={handlePdfFileChange}
+                      style={{ display: 'none' }}
+                    />
+                    <label
+                      htmlFor="manual-withdrawal-pdf-input"
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        padding: '16px',
+                        border: '2px dashed #cbd5e1',
+                        borderRadius: '10px',
+                        background: '#ffffff',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <FileUp size={22} color="#64748b" />
+                      <span style={{ fontSize: '13px', fontWeight: '800', color: '#0284c7' }}>اضغط لاختيار ملف PDF للفاتورة</span>
+                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>يدعم ملفات PDF الممسوحة ضوئياً حتى 15 ميجابايت</span>
+                    </label>
+                  </div>
+                )}
               </div>
 
+              {/* القسم الرابع: الملاحظات */}
               <div style={{ marginBottom: '16px' }}>
-                <label className="outstock-form-label">ملاحظات</label>
+                <label className="outstock-form-label" style={{ fontWeight: '700', color: '#334155' }}>
+                  ملاحظات إضافية حول التوريد / المسحوب
+                </label>
                 <textarea
                   className="outstock-form-input"
                   rows={2}
                   value={manualWithdrawalForm.notes}
                   onChange={(e) => setManualWithdrawalForm((prev) => ({ ...prev, notes: e.target.value }))}
-                  placeholder="ملاحظات إضافية حول التوريد أو المسحوب..."
+                  placeholder="ملاحظات المشتريات، اسم المندوب المسلم، رقم أذن المخزن، إلخ..."
                 />
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              {/* أزرار الإجراءات */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '10px', borderTop: '1px solid #e2e8f0' }}>
                 <button
                   type="button"
                   className="outstock-btn outstock-btn-secondary"
-                  onClick={() => setIsManualWithdrawalModalOpen(false)}
+                  onClick={handleCloseManualWithdrawal}
                 >
                   إلغاء
                 </button>
                 <button
                   type="submit"
                   className="outstock-btn outstock-btn-primary"
-                  disabled={isSubmittingManualWithdrawal}
+                  disabled={isSubmittingManualWithdrawal || manualWithdrawalTotalAmount <= 0}
+                  style={{
+                    padding: '8px 20px',
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                    fontWeight: '800',
+                    fontSize: '13px'
+                  }}
                 >
-                  {isSubmittingManualWithdrawal ? 'جاري التسجيل...' : 'تسجيل المسحوب'}
+                  {isSubmittingManualWithdrawal ? 'جاري الحفظ...' : `حفظ المسحوبات (${manualWithdrawalTotalAmount.toFixed(2)} ج.م)`}
                 </button>
               </div>
             </form>

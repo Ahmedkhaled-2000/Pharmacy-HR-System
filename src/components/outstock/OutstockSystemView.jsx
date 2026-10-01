@@ -38,7 +38,7 @@ import {
 } from 'lucide-react';
 import OutstockNotificationModal from './common/OutstockNotificationModal';
 import OutstockCommandPalette from './common/OutstockCommandPalette';
-import { outstockGetMe } from '../../utils/outstockApiClient';
+import { outstockGetMe, outstockGetNotificationsSummary } from '../../utils/outstockApiClient';
 import {
   initOutstockSyncService,
   subscribeToSyncState,
@@ -383,16 +383,65 @@ export default function OutstockSystemView({
     };
   }, [isSettingsMenuOpen, isBranchOrdersMenuOpen, isSuppliersMenuOpen, calculateMenuCoords]);
 
-  // تحديث التبويب التلقائي عند تبديل الدور
+  // تحديث التبويب التلقائي عند تبديل الدور أو إذا كان التبويب الحالي غير متوافق
   useEffect(() => {
     if (userRole === 'branch') {
-      setActiveTab('orders');
+      const branchTabs = ['orders', 'customers', 'procurement_tracking', 'deficiencies', 'branch_medication_search', 'inquiries', 'whatsapp'];
+      if (!branchTabs.includes(activeTab)) {
+        setActiveTab('orders');
+      }
     } else if (userRole === 'procurement' || isProcurementRole) {
-      setActiveTab('branch_orders');
+      const procTabs = ['branch_orders', 'procurement_suppliers', 'procurement_inquiries', 'delivery_tracking', 'unavailable_items', 'procurement_team', 'procurement_whatsapp', 'procurement_medications'];
+      if (!procTabs.includes(activeTab)) {
+        setActiveTab('branch_orders');
+      }
     } else if (userRole === 'owner') {
-      setActiveTab('owner_branches');
+      const ownerTabs = ['owner_financial_reports', 'owner_branches', 'owner_procurement', 'owner_suppliers', 'owner_inquiries', 'owner_team', 'owner_medications', 'owner_customers', 'owner_whatsapp', 'owner_settings'];
+      if (!ownerTabs.includes(activeTab)) {
+        setActiveTab('owner_branches');
+      }
     }
-  }, [userRole, isProcurementRole]);
+  }, [userRole, isProcurementRole, activeTab]);
+
+  // ── العدادات التنبيهية الحية للنظام (Notification Badges) ──
+  const [notificationsSummary, setNotificationsSummary] = useState({
+    pendingBranchOrdersCount: 0,
+    pendingInquiriesCount: 0,
+    branchRepliedInquiriesCount: 0,
+    branchReadyOrdersCount: 0
+  });
+
+  const fetchNotificationsSummary = useCallback(async () => {
+    try {
+      const res = await outstockGetNotificationsSummary(effectiveBranchId);
+      if (res?.success && res.counts) {
+        setNotificationsSummary(res.counts);
+      }
+    } catch {
+      // quiet fail
+    }
+  }, [effectiveBranchId]);
+
+  useEffect(() => {
+    fetchNotificationsSummary();
+    const interval = setInterval(fetchNotificationsSummary, 25000);
+
+    const handleRefresh = () => fetchNotificationsSummary();
+    window.addEventListener('outstock:refresh_notifications', handleRefresh);
+    window.addEventListener('outstock:order_created', handleRefresh);
+    window.addEventListener('outstock:order_updated', handleRefresh);
+    window.addEventListener('outstock:medication_request_created', handleRefresh);
+    window.addEventListener('outstock:medication_request_replied', handleRefresh);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('outstock:refresh_notifications', handleRefresh);
+      window.removeEventListener('outstock:order_created', handleRefresh);
+      window.removeEventListener('outstock:order_updated', handleRefresh);
+      window.removeEventListener('outstock:medication_request_created', handleRefresh);
+      window.removeEventListener('outstock:medication_request_replied', handleRefresh);
+    };
+  }, [fetchNotificationsSummary]);
 
   // التحقق من صحة المستخدم
   useEffect(() => {
@@ -731,7 +780,13 @@ export default function OutstockSystemView({
           {initialRole === 'owner' && (
             <select
               value={userRole}
-              onChange={(e) => setUserRole(e.target.value)}
+              onChange={(e) => {
+                const nextRole = e.target.value;
+                setUserRole(nextRole);
+                if (nextRole === 'branch') setActiveTab('orders');
+                else if (nextRole === 'procurement') setActiveTab('branch_orders');
+                else if (nextRole === 'owner') setActiveTab('owner_branches');
+              }}
               className="outstock-form-select"
               style={{
                 height: '34px',
@@ -846,6 +901,11 @@ export default function OutstockSystemView({
               >
                 <Clock size={16} />
                 <span>متابعة طلبات المشتريات</span>
+                {notificationsSummary.branchReadyOrdersCount > 0 && (
+                  <span className="outstock-nav-badge success" title={`${notificationsSummary.branchReadyOrdersCount} طلب جاهز للتسليم بالفرع`}>
+                    {notificationsSummary.branchReadyOrdersCount}
+                  </span>
+                )}
               </button>
 
               <button
@@ -875,6 +935,11 @@ export default function OutstockSystemView({
               >
                 <HelpCircle size={16} />
                 <span>الاستعلام وتصحيح الأصناف</span>
+                {notificationsSummary.branchRepliedInquiriesCount > 0 && (
+                  <span className="outstock-nav-badge info" title={`${notificationsSummary.branchRepliedInquiriesCount} استعلام تم الرد عليه من المشتريات`}>
+                    {notificationsSummary.branchRepliedInquiriesCount}
+                  </span>
+                )}
               </button>
 
               <button
@@ -910,6 +975,11 @@ export default function OutstockSystemView({
               >
                 <Building2 size={16} />
                 <span>طلبات الفروع المجمعة</span>
+                {(notificationsSummary.pendingBranchOrdersCount + notificationsSummary.pendingInquiriesCount) > 0 && (
+                  <span className="outstock-nav-badge" title={`${notificationsSummary.pendingBranchOrdersCount} طلب فرع جديد و ${notificationsSummary.pendingInquiriesCount} استعلام معلق`}>
+                    {notificationsSummary.pendingBranchOrdersCount + notificationsSummary.pendingInquiriesCount}
+                  </span>
+                )}
                 <ChevronDown
                   size={14}
                   style={{
@@ -1000,6 +1070,11 @@ export default function OutstockSystemView({
               >
                 <Building2 size={16} />
                 <span>طلبات الفروع وأرصدتها</span>
+                {notificationsSummary.pendingBranchOrdersCount > 0 && (
+                  <span className="outstock-nav-badge" title={`${notificationsSummary.pendingBranchOrdersCount} طلب بانتظار التوريد`}>
+                    {notificationsSummary.pendingBranchOrdersCount}
+                  </span>
+                )}
               </button>
 
               <button
@@ -1046,6 +1121,11 @@ export default function OutstockSystemView({
               >
                 <HelpCircle size={16} />
                 <span>استعلامات وتصحيح الأصناف</span>
+                {notificationsSummary.pendingInquiriesCount > 0 && (
+                  <span className="outstock-nav-badge warning" title={`${notificationsSummary.pendingInquiriesCount} استعلام معلق`}>
+                    {notificationsSummary.pendingInquiriesCount}
+                  </span>
+                )}
               </button>
 
               <button
@@ -1405,6 +1485,12 @@ export default function OutstockSystemView({
               {PROCUREMENT_BRANCH_ORDERS_SUBSECTIONS.map((sub) => {
                 const isCurrent = activeTab === sub.id;
                 const IconComp = sub.icon;
+                const badgeCount = sub.id === 'branch_orders'
+                  ? notificationsSummary.pendingBranchOrdersCount
+                  : sub.id === 'procurement_inquiries'
+                  ? notificationsSummary.pendingInquiriesCount
+                  : 0;
+
                 return (
                   <button
                     key={sub.id}
@@ -1422,6 +1508,11 @@ export default function OutstockSystemView({
                       <span className="outstock-dropdown-item-title">{sub.title}</span>
                       <span className="outstock-dropdown-item-desc">{sub.desc}</span>
                     </div>
+                    {badgeCount > 0 && (
+                      <span className={`outstock-dropdown-item-badge ${sub.id === 'procurement_inquiries' ? 'warning' : ''}`}>
+                        {badgeCount} جديد
+                      </span>
+                    )}
                     {isCurrent && (
                       <div className="outstock-dropdown-item-check" title="القسم المعروض حالياً">
                         <Check size={14} />

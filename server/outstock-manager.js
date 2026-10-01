@@ -418,6 +418,14 @@ export async function initOutstockTables(db) {
 
         ALTER TABLE public.outstock_branch_sales ADD COLUMN IF NOT EXISTS payment_splits JSONB NULL;
         ALTER TABLE public.outstock_branch_sales ADD COLUMN IF NOT EXISTS collected_by_code VARCHAR(50) NULL;
+
+        ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS employee_code VARCHAR(50) NULL;
+        ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS employee_name VARCHAR(150) NULL;
+
+        ALTER TABLE public.outstock_supplier_invoices ADD COLUMN IF NOT EXISTS items_count INTEGER DEFAULT 1;
+        ALTER TABLE public.outstock_supplier_invoices ADD COLUMN IF NOT EXISTS invoice_file_data TEXT NULL;
+        ALTER TABLE public.outstock_branch_withdrawals ADD COLUMN IF NOT EXISTS items_count INTEGER DEFAULT 1;
+        ALTER TABLE public.outstock_branch_withdrawals ADD COLUMN IF NOT EXISTS invoice_file_data TEXT NULL;
       `);
     } catch (migErr) {
       console.warn('⚠️ [OutStock Schema Migrations Warning]:', migErr.message);
@@ -1899,6 +1907,71 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     }
   });
 
+  // ملخص عدادات الإشعارات اللحظية لشارات التبويبات (Notification Badges Summary)
+  app.get('/api/outstock/notifications/summary', authMiddleware, async (req, res) => {
+    try {
+      const user = req.outstockUser;
+      const branchId = req.query.branchId || user?.branchId || null;
+
+      // 1. عدد طلبات الفروع المجمعة التي لم يتم الرد عليها من المشتريات
+      const pendingOrdersRes = await db.query(`
+        SELECT COUNT(DISTINCT o.id) as count
+        FROM public.outstock_orders o
+        JOIN public.outstock_order_items i ON o.id = i.order_id
+        WHERE i.item_status = 'pending'
+          AND COALESCE(i.pruned_from_bill, false) = false
+          AND o.order_status NOT IN ('delivered', 'cancelled')
+      `);
+      const pendingBranchOrdersCount = parseInt(pendingOrdersRes.rows[0]?.count || 0, 10);
+
+      // 2. عدد الاستعلامات وتصحيح الأصناف المعلقة بانتظار رد المشتريات
+      const pendingInquiriesRes = await db.query(`
+        SELECT COUNT(*) as count
+        FROM public.outstock_medication_requests
+        WHERE status = 'pending'
+      `);
+      const pendingInquiriesCount = parseInt(pendingInquiriesRes.rows[0]?.count || 0, 10);
+
+      // 3. للفرع: الاستعلامات التي ردت عليها المشتريات خلال آخر 3 أيام
+      let branchRepliedInquiriesCount = 0;
+      if (branchId) {
+        const repliedRes = await db.query(`
+          SELECT COUNT(*) as count
+          FROM public.outstock_medication_requests
+          WHERE branch_id = $1 AND status IN ('resolved', 'approved')
+            AND updated_at >= NOW() - INTERVAL '3 days'
+        `, [branchId]);
+        branchRepliedInquiriesCount = parseInt(repliedRes.rows[0]?.count || 0, 10);
+      }
+
+      // 4. للفرع: طلبيات تم توفيرها من المشتريات وأصبحت جاهزة للتسليم
+      let branchReadyOrdersCount = 0;
+      if (branchId) {
+        const readyRes = await db.query(`
+          SELECT COUNT(DISTINCT o.id) as count
+          FROM public.outstock_orders o
+          JOIN public.outstock_order_items i ON o.id = i.order_id
+          WHERE o.branch_id = $1
+            AND i.item_status = 'available_by_procurement'
+            AND o.order_status NOT IN ('delivered', 'cancelled')
+        `, [branchId]);
+        branchReadyOrdersCount = parseInt(readyRes.rows[0]?.count || 0, 10);
+      }
+
+      res.json({
+        success: true,
+        summary: {
+          pendingBranchOrdersCount,
+          pendingInquiriesCount,
+          branchRepliedInquiriesCount,
+          branchReadyOrdersCount
+        }
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // ───────────────────────────────────────────────────────────────────────────
   // 6. إدارة المشتريات (تجميع الأصناف، قرار التوفير، شطب الصنف، والأصناف غير المتوفرة)
   // ───────────────────────────────────────────────────────────────────────────
@@ -1910,8 +1983,9 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       let branchFilter = '';
       const params = [];
 
-      // إذا كان مسؤول مشتريات مساعد وله فروع محددة
-      if ((user.role === 'procurement' || user.role === 'procurement_officer') && Array.isArray(user.allowedBranches) && user.allowedBranches.length > 0) {
+      // إذا كان مسؤول مشتريات مساعد وله فروع محددة (استثناء المالك ومدير المشتريات العام)
+      const isExecutiveProcurement = user.role === 'owner' || user.role === 'procurement_manager' || user.username === 'admin-stock';
+      if (!isExecutiveProcurement && (user.role === 'procurement' || user.role === 'procurement_officer') && Array.isArray(user.allowedBranches) && user.allowedBranches.length > 0) {
         params.push(user.allowedBranches);
         branchFilter = ` AND o.branch_id = ANY($1)`;
       }
@@ -1935,7 +2009,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         JOIN public.outstock_orders o ON i.order_id = o.id
         LEFT JOIN public.outstock_branches b ON o.branch_id = b.id
         LEFT JOIN public.outstock_customers c ON o.customer_id = c.id
-        WHERE i.item_status = 'pending' AND i.pruned_from_bill = false AND o.order_status <> 'delivered'
+        WHERE i.item_status = 'pending' AND COALESCE(i.pruned_from_bill, false) = false AND o.order_status NOT IN ('delivered', 'cancelled')
         ${branchFilter}
         GROUP BY i.medication_name, i.unit_type, o.branch_id, b.name
         ORDER BY total_requested_qty DESC
@@ -2838,8 +2912,13 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         medicationName,
         medicationId = null,
         requestedData = {},
+        proposedData = null,
         pharmacistNotes = '',
-        submittedBy = ''
+        notes = '',
+        submittedBy = '',
+        requestedBy = '',
+        employeeCode = null,
+        employeeName = null
       } = req.body || {};
 
       let branchId = bodyBranchId || req.outstockUser.branchId || req.outstockUser.id;
@@ -2847,14 +2926,19 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         return res.status(400).json({ success: false, error: 'الفرع ونوع الطلب واسم الصنف حقول إجبارية' });
       }
 
+      const finalEmployeeCode = employeeCode || req.body?.employee_code || null;
+      const finalEmployeeName = employeeName || req.body?.employee_name || null;
+      const finalNotes = pharmacistNotes || notes || '';
+      const finalRequestedData = proposedData || requestedData || {};
+      const submitter = submittedBy || requestedBy || finalEmployeeName || req.outstockUser.fullName || req.outstockUser.username || 'صيدلي الفرع';
+
       const reqId = `mreq_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-      const submitter = submittedBy || req.outstockUser.fullName || req.outstockUser.username || 'صيدلي الفرع';
 
       await db.query(`
         INSERT INTO public.outstock_medication_requests (
-          id, branch_id, request_type, medication_name, medication_id, requested_data, pharmacist_notes, submitted_by, status
-        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, 'pending')
-      `, [reqId, branchId, requestType, medicationName.trim(), medicationId, JSON.stringify(requestedData), pharmacistNotes, submitter]);
+          id, branch_id, request_type, medication_name, medication_id, requested_data, pharmacist_notes, submitted_by, status, employee_code, employee_name
+        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, 'pending', $9, $10)
+      `, [reqId, branchId, requestType, medicationName.trim(), medicationId, JSON.stringify(finalRequestedData), finalNotes, submitter, finalEmployeeCode, finalEmployeeName]);
 
       const newRecord = {
         id: reqId,
@@ -2862,9 +2946,12 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         requestType,
         medicationName: medicationName.trim(),
         medicationId,
-        requestedData,
-        pharmacistNotes,
+        requestedData: finalRequestedData,
+        proposedData: finalRequestedData,
+        pharmacistNotes: finalNotes,
         submittedBy: submitter,
+        employeeCode: finalEmployeeCode,
+        employeeName: finalEmployeeName,
         status: 'pending',
         createdAt: new Date().toISOString()
       };
@@ -3242,6 +3329,54 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       const sId = req.params.id;
       const b = req.body || {};
+      const recorder = req.outstockUser.fullName || req.outstockUser.username || 'مسؤول المشتريات';
+
+      // دعم الفواتير المتعددة وعدد الأصناف والملف المرفوع
+      if (Array.isArray(b.invoices) && b.invoices.length > 0) {
+        const itemsCount = parseInt(b.items_count || b.itemsCount || 1, 10);
+        const notes = b.notes || '';
+        const fileBase64 = b.file_base64 || b.fileBase64 || null;
+        const fileName = b.file_name || b.fileName || null;
+        let cumulativeTotal = 0;
+
+        for (const inv of b.invoices) {
+          const invNum = inv.invoice_number?.trim() || `MAN-${Date.now().toString().slice(-6)}`;
+          const invDate = inv.invoice_date || new Date().toISOString().slice(0, 10);
+          const invAmount = parseFloat(inv.amount || 0);
+          if (invAmount <= 0) continue;
+
+          cumulativeTotal += invAmount;
+          const invId = `sinv_man_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+          await db.query(`
+            INSERT INTO public.outstock_supplier_invoices (
+              id, supplier_id, invoice_number, invoice_date, gross_total_amount, net_total_amount,
+              paid_amount, remaining_amount, payment_status, recorded_by, notes, drive_file_name,
+              drive_file_url, items_count
+            ) VALUES ($1, $2, $3, $4, $5, $6, 0, $6, 'unpaid', $7, $8, $9, $10, $11)
+          `, [invId, sId, invNum, invDate, invAmount, invAmount, recorder, notes, fileName, fileBase64 ? 'attached_pdf' : null, itemsCount]);
+
+          const itemId = `itm_man_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+          await db.query(`
+            INSERT INTO public.outstock_supplier_invoice_items (
+              id, invoice_id, medication_name, quantity, unit_price, public_price, discount_percent, total_price
+            ) VALUES ($1, $2, $3, $4, $5, $6, 0, $7)
+          `, [itemId, invId, `مسحوب (${itemsCount} صنف)`, itemsCount, invAmount, invAmount, invAmount]);
+        }
+
+        // تحديث رصيد المورد التراكمي
+        if (cumulativeTotal > 0) {
+          await db.query(`
+            UPDATE public.outstock_suppliers
+            SET current_balance = COALESCE(current_balance, 0) + $1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $2
+          `, [cumulativeTotal, sId]);
+        }
+
+        return res.json({ success: true, message: 'تم تسجيل المسحوبات اليدوية وتحديث كشف حساب المورد بنجاح' });
+      }
+
+      // النمط الفردي القديم
       const medicationName = b.medication_name || b.medicationName || 'مسحوب يدوي';
       const quantity = parseInt(b.quantity || 1, 10);
       const buyPrice = parseFloat(b.buy_price || b.unitPrice || b.amount || 0);
@@ -3253,7 +3388,6 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const notes = b.notes || '';
 
       const invId = `sinv_man_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-      const recorder = req.outstockUser.fullName || req.outstockUser.username || 'مسؤول المشتريات';
 
       await db.query(`
         INSERT INTO public.outstock_supplier_invoices (
@@ -3268,6 +3402,14 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           id, invoice_id, medication_name, quantity, unit_price, public_price, discount_percent, total_price
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `, [itemId, invId, medicationName, quantity, buyPrice, publicPrice, discountPercent, totalPrice]);
+
+      if (totalPrice > 0) {
+        await db.query(`
+          UPDATE public.outstock_suppliers
+          SET current_balance = COALESCE(current_balance, 0) + $1, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2
+        `, [totalPrice, sId]);
+      }
 
       res.json({ success: true, message: 'تم تسجيل المسحوب اليدوي للمورد بنجاح' });
     } catch (err) {

@@ -29,6 +29,7 @@ import {
   outstockSearchMedications
 } from '../../../utils/outstockApiClient';
 import MedicationAutocompleteInput from '../pharmacy/MedicationAutocompleteInput';
+import EmployeeCodeAuthModal from './EmployeeCodeAuthModal';
 
 /**
  * ItemInquiryAndCorrectionTab.jsx
@@ -52,6 +53,10 @@ export default function ItemInquiryAndCorrectionTab({
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'pending' | 'resolved' | 'approved' | 'rejected'
+
+  // التحقق من كود الموظف قبل فتح الاستعلام أو التصحيح
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authenticatedEmployee, setAuthenticatedEmployee] = useState(null);
 
   // نافذة تقديم طلب جديد (للفرع)
   const [isNewRequestModalOpen, setIsNewRequestModalOpen] = useState(false);
@@ -106,6 +111,13 @@ export default function ItemInquiryAndCorrectionTab({
     fetchRequests();
   }, [activeSubTab, statusFilter, branchId]);
 
+  // عند نجاح التحقق من كود الموظف
+  const handleAuthSuccess = (emp) => {
+    setAuthenticatedEmployee(emp);
+    setIsAuthModalOpen(false);
+    setIsNewRequestModalOpen(true);
+  };
+
   // إرسال طلب جديد
   const handleCreateRequest = async (e) => {
     e.preventDefault();
@@ -123,13 +135,16 @@ export default function ItemInquiryAndCorrectionTab({
         medicationName: medicationName.trim(),
         proposedData: newRequestType !== 'inquiry' ? proposedData : null,
         notes: notes.trim(),
-        requestedBy: currentUser?.name || currentUser?.full_name || 'صيدلي الفرع'
+        requestedBy: authenticatedEmployee?.name || currentUser?.name || currentUser?.full_name || 'صيدلي الفرع',
+        employeeCode: authenticatedEmployee?.code || null,
+        employeeName: authenticatedEmployee?.name || null
       };
 
       const res = await outstockCreateMedicationRequest(payload);
       if (res?.success) {
         showToast('✅ تم إرسال الطلب لإدارة المشتريات بنجاح!');
         setIsNewRequestModalOpen(false);
+        setAuthenticatedEmployee(null);
         setMedicationName('');
         setSelectedMed(null);
         setNotes('');
@@ -266,7 +281,13 @@ export default function ItemInquiryAndCorrectionTab({
             {!isProcurement && (
               <button
                 type="button"
-                onClick={() => setIsNewRequestModalOpen(true)}
+                onClick={() => {
+                  if (authenticatedEmployee) {
+                    setIsNewRequestModalOpen(true);
+                  } else {
+                    setIsAuthModalOpen(true);
+                  }
+                }}
                 className="outstock-btn outstock-btn-primary"
                 style={{
                   padding: '9px 20px',
@@ -433,14 +454,20 @@ export default function ItemInquiryAndCorrectionTab({
                         )}
                       </td>
 
-                      {/* الفرع */}
+                      {/* الفرع ومقدم الطلب */}
                       <td style={{ padding: '12px 16px' }}>
                         <div style={{ fontWeight: '700', color: '#334155', fontSize: '12.5px' }}>
                           {reqItem.branch_name || 'فرع الصيدلية'}
                         </div>
-                        <div style={{ fontSize: '11.5px', color: '#64748b' }}>
-                          بواسطة: {reqItem.requested_by || 'الصيدلي'}
+                        <div style={{ fontSize: '11.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                          <User size={12} />
+                          <span>بواسطة: <strong>{reqItem.employee_name || reqItem.requested_by || 'الصيدلي'}</strong></span>
                         </div>
+                        {reqItem.employee_code && (
+                          <div style={{ fontSize: '11px', color: '#0284c7', fontWeight: 'bold', marginTop: '1px' }}>
+                            كود: {reqItem.employee_code}
+                          </div>
+                        )}
                       </td>
 
                       {/* البيانات المقترحة / الملاحظات */}
@@ -584,6 +611,16 @@ export default function ItemInquiryAndCorrectionTab({
             </div>
 
             <form onSubmit={handleCreateRequest} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto', flex: 1, minHeight: '520px' }}>
+              {/* شارة التحقق من الموظف */}
+              {authenticatedEmployee && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '10px', fontSize: '13px', color: '#065f46' }}>
+                  <ShieldCheck size={18} style={{ color: '#059669', flexShrink: 0 }} />
+                  <div>
+                    تم التحقق من هوية مقدم الطلب: <strong>{authenticatedEmployee.name}</strong> (كود: <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{authenticatedEmployee.code}</span>)
+                  </div>
+                </div>
+              )}
+
               {/* اختيار نوع الطلب */}
               <div>
                 <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
@@ -846,6 +883,19 @@ export default function ItemInquiryAndCorrectionTab({
           </div>
         </div>
       )}
+
+      {/* نافذة التحقق من كود الموظف */}
+      <EmployeeCodeAuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onSuccess={(emp) => {
+          setAuthenticatedEmployee(emp);
+          setIsAuthModalOpen(false);
+          setIsNewRequestModalOpen(true);
+        }}
+        title="التحقق من هوية الصيدلي / الموظف"
+        actionDescription="تقديم استفسار، تصحيح صنف، أو طلب إضافة دواء جديد للمشتريات"
+      />
     </div>
   );
 }

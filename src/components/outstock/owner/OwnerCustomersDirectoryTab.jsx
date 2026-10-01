@@ -283,7 +283,23 @@ export default function OwnerCustomersDirectoryTab() {
                           </span>
                         </div>
 
-                        <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: '800',
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              background: order.order_category === 'cosmetics' ? '#fdf2f8' : '#ecfdf5',
+                              color: order.order_category === 'cosmetics' ? '#db2777' : '#059669',
+                              border: order.order_category === 'cosmetics' ? '1px solid #fbcfe8' : '1px solid #a7f3d0',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            {order.order_category === 'cosmetics' ? '💄 مستحضرات تجميل' : '💊 طلب دوائي'}
+                          </span>
                           {order.order_status === 'delivered' ? (
                             <span className="outstock-badge ready">تم التسليم بنجاح ✓</span>
                           ) : (

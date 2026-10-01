@@ -30,6 +30,7 @@ import {
 } from '../../../utils/outstockApiClient';
 import MedicationMasterCardModal from '../common/MedicationMasterCardModal';
 import AddMedicationModal from '../common/AddMedicationModal';
+import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
 
 /**
  * PharmacyMedicationSearchTab.jsx
@@ -62,6 +63,14 @@ export default function PharmacyMedicationSearchTab({
   const [newPackSize, setNewPackSize] = useState('1');
   const [priceEditReason, setPriceEditReason] = useState('تشغيلة جديدة بسعر أعلى من الشركة');
   const [priceEditDecree, setPriceEditDecree] = useState('');
+  const [isSavingPrice, setIsSavingPrice] = useState(false);
+
+  // نافذة إضافة صنف جديد والتحقق من كود الموظف
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authAction, setAuthAction] = useState(null); // { type: 'price_edit' | 'add_med', data: any }
+  const [authenticatedEmployee, setAuthenticatedEmployee] = useState(null);
+
   // صلاحيات تعديل الأسعار للفروع
   const [branchPermissions, setBranchPermissions] = useState(null);
 
@@ -159,13 +168,33 @@ export default function PharmacyMedicationSearchTab({
     }
   };
 
-  // فتح نافذة تعديل السعر (تحريك لأعلى فقط)
+  // فتح نافذة تعديل السعر (تحريك لأعلى فقط) بعد التحقق من كود الموظف
   const handleOpenPriceEdit = (med) => {
-    setPriceEditMed(med);
-    setNewPublicPrice('');
-    setNewPackSize(String(med.pack_size || 1));
-    setPriceEditReason('تشغيلة جديدة بسعر أعلى من الشركة');
-    setPriceEditDecree('');
+    setAuthAction({ type: 'price_edit', data: med });
+    setIsAuthModalOpen(true);
+  };
+
+  // فتح نافذة إضافة صنف جديد بعد التحقق من كود الموظف
+  const handleOpenAddNewMed = () => {
+    setAuthAction({ type: 'add_med', data: null });
+    setIsAuthModalOpen(true);
+  };
+
+  // عند نجاح التحقق من كود الموظف
+  const handleAuthSuccess = (employee) => {
+    setAuthenticatedEmployee(employee);
+    setIsAuthModalOpen(false);
+    if (authAction?.type === 'price_edit') {
+      const med = authAction.data;
+      setPriceEditMed(med);
+      setNewPublicPrice('');
+      setNewPackSize(String(med.pack_size || 1));
+      setPriceEditReason('تشغيلة جديدة بسعر أعلى من الشركة');
+      setPriceEditDecree('');
+    } else if (authAction?.type === 'add_med') {
+      setIsAddModalOpen(true);
+    }
+    setAuthAction(null);
   };
 
   // حفظ السعر الجديد للأعلى فقط
@@ -194,7 +223,9 @@ export default function PharmacyMedicationSearchTab({
         public_price: enteredPrice,
         pack_size: parseInt(newPackSize || priceEditMed.pack_size || 1, 10),
         reason: priceEditReason,
-        decreeNumber: priceEditDecree
+        decreeNumber: priceEditDecree,
+        updatedByEmployeeCode: authenticatedEmployee?.code || null,
+        updatedByEmployeeName: authenticatedEmployee?.name || currentPharmacist || null
       });
 
       if (res?.success) {
@@ -256,7 +287,29 @@ export default function PharmacyMedicationSearchTab({
             </div>
           </div>
 
-          {/* تم إزالة زر إضافة صنف جديد بناءً على متطلبات النظام */}
+          {/* زر إضافة صنف جديد للكتالوج مع التحقق من كود الموظف الصيدلي */}
+          <button
+            type="button"
+            onClick={handleOpenAddNewMed}
+            style={{
+              padding: '9px 18px',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+              color: '#ffffff',
+              border: 'none',
+              fontWeight: '800',
+              fontSize: '13px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)',
+              transition: 'transform 0.15s ease'
+            }}
+          >
+            <Plus size={16} />
+            <span>إضافة صنف جديد للكتالوج</span>
+          </button>
         </div>
 
         {/* ── شريط البحث الفوري الذكي ── */}
@@ -1161,11 +1214,30 @@ export default function PharmacyMedicationSearchTab({
       {/* ─────────────────────────────────────────────────────────────────────── */}
       <AddMedicationModal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        creatorEmployee={authenticatedEmployee}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setAuthenticatedEmployee(null);
+        }}
         onSaveSuccess={(createdMed) => {
           showToast?.(`✅ تم إضافة صنف "${createdMed.trade_name_ar}" للكتالوج المركزي بنجاح`);
           handleSearch(searchTerm || '');
         }}
+      />
+
+      {/* ─────────────────────────────────────────────────────────────────────── */}
+      {/* ── 4. نافذة التحقق من كود الموظف الصيدلي المسؤول (Employee Auth) ── */}
+      {/* ─────────────────────────────────────────────────────────────────────── */}
+      <EmployeeCodeAuthModal
+        isOpen={isAuthModalOpen}
+        title={authAction?.type === 'price_edit' ? 'التحقق لتعديل سعر الصنف 🔒' : 'التحقق لإضافة صنف جديد 🔒'}
+        subtitle="يرجى إدخال كود الموظف الصيدلي المسؤول لتوثيق العملية"
+        actionLabel="تأكيد الهوية والمتابعة"
+        onClose={() => {
+          setIsAuthModalOpen(false);
+          setAuthAction(null);
+        }}
+        onSuccess={handleAuthSuccess}
       />
     </div>
   );
