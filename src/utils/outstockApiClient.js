@@ -558,8 +558,25 @@ export async function outstockApproveNewItemRequest(id, medicationData) {
 }
 
 // ── 17. الموردين وحسابات الأجل ────────────────────────────────────────────────
-export async function outstockGetSuppliers() {
-  return await outstockRequest('suppliers', { method: 'GET' });
+export async function outstockGetSuppliers(params = {}) {
+  const qs = new URLSearchParams();
+  if (params?.month) qs.append('month', params.month);
+  const qStr = qs.toString() ? `?${qs.toString()}` : '';
+  return await outstockRequest(`suppliers${qStr}`, { method: 'GET' });
+}
+
+export async function outstockRolloverSupplierLimits({ targetMonth, previousMonth, supplierId } = {}) {
+  return await outstockRequest('suppliers/rollover-credit-limits', {
+    method: 'POST',
+    body: JSON.stringify({ targetMonth, previousMonth, supplierId })
+  });
+}
+
+export async function outstockSaveSupplierMonthlyLimit(supplierId, limitData) {
+  return await outstockRequest(`suppliers/${supplierId}/monthly-limit`, {
+    method: 'PUT',
+    body: JSON.stringify(limitData)
+  });
 }
 
 export async function outstockSaveSupplier(supplierData) {
@@ -702,4 +719,38 @@ export async function outstockGetNotificationsSummary(branchId = '') {
   const qs = new URLSearchParams();
   if (branchId) qs.append('branch_id', branchId);
   return await outstockRequest(`notifications/summary?${qs.toString()}`, { method: 'GET' });
+}
+
+// ── 23. استلام الطلبيات من الموردين (Order Receipts Management) ─────────────────
+export async function outstockSaveOrderReceipt(receiptData) {
+  return await outstockRequest('order-receipts', {
+    method: 'POST',
+    body: JSON.stringify(receiptData)
+  });
+}
+
+export async function outstockGetSupplierOrderReceiptsSummary() {
+  return await outstockRequest('order-receipts/supplier-summary', { method: 'GET' });
+}
+
+export async function outstockGetOrderReceipts(params = {}) {
+  const qs = new URLSearchParams();
+  if (params.supplierId) qs.append('supplierId', params.supplierId);
+  if (params.search) qs.append('search', params.search);
+  if (params.medicationName) qs.append('medicationName', params.medicationName);
+  if (params.barcode) qs.append('barcode', params.barcode);
+  if (params.invoiceNumber) qs.append('invoiceNumber', params.invoiceNumber);
+  if (params.employeeCode) qs.append('employeeCode', params.employeeCode);
+  if (params.dateFrom) qs.append('dateFrom', params.dateFrom);
+  if (params.dateTo) qs.append('dateTo', params.dateTo);
+  if (params.limit) qs.append('limit', String(params.limit));
+  return await outstockRequest(`order-receipts?${qs.toString()}`, { method: 'GET' });
+}
+
+export async function outstockGetOrderReceiptDetails(id) {
+  return await outstockRequest(`order-receipts/${id}`, { method: 'GET' });
+}
+
+export async function outstockDeleteOrderReceipt(id) {
+  return await outstockRequest(`order-receipts/${id}`, { method: 'DELETE' });
 }

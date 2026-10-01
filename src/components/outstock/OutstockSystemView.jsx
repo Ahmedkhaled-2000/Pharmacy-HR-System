@@ -34,7 +34,8 @@ import {
   Layers,
   CreditCard,
   FileText,
-  Sparkles
+  Sparkles,
+  PackageCheck
 } from 'lucide-react';
 import OutstockNotificationModal from './common/OutstockNotificationModal';
 import OutstockCommandPalette from './common/OutstockCommandPalette';
@@ -159,6 +160,12 @@ export default function OutstockSystemView({
       title: 'حسابات الموردين وحدود الائتمان',
       desc: 'إدارة المديونيات وأرصدة الموردين وفترات السداد والتحصيلات',
       icon: CreditCard
+    },
+    {
+      id: 'order_receiving',
+      title: 'استلام الطلبات',
+      desc: 'تسجيل ومطابقة الأصناف والكميات المستلمة لكل فاتورة توريد',
+      icon: PackageCheck
     },
     {
       id: 'invoices',

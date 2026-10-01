@@ -1511,7 +1511,7 @@ export default function NewCustomerOrderModal({
                           <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#92400e' }}>من:</span>
                           <input
                             type="number"
-                            step="0.5"
+                            step="any"
                             min="0"
                             placeholder="0.00"
                             value={it.priceMin}
@@ -1534,7 +1534,7 @@ export default function NewCustomerOrderModal({
                           <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#92400e', marginRight: '6px' }}>إلى:</span>
                           <input
                             type="number"
-                            step="0.5"
+                            step="any"
                             min="0"
                             placeholder="0.00"
                             value={it.priceMax}
@@ -1622,7 +1622,7 @@ export default function NewCustomerOrderModal({
                   </label>
                   <input
                     type="number"
-                    step="0.5"
+                    step="any"
                     placeholder="0.00"
                     value={paidAmount}
                     onChange={(e) => setPaidAmount(e.target.value)}
@@ -1662,7 +1662,7 @@ export default function NewCustomerOrderModal({
                     </label>
                     <input
                       type="number"
-                      step="0.5"
+                      step="any"
                       placeholder="القيمة"
                       value={discountValue}
                       onChange={(e) => setDiscountValue(e.target.value)}
@@ -1682,7 +1682,7 @@ export default function NewCustomerOrderModal({
                     </label>
                     <input
                       type="number"
-                      step="0.5"
+                      step="any"
                       placeholder="0.00"
                       value={paymentSplits.cash}
                       onChange={(e) => setPaymentSplits({ ...paymentSplits, cash: e.target.value })}
@@ -1698,7 +1698,7 @@ export default function NewCustomerOrderModal({
                     </label>
                     <input
                       type="number"
-                      step="0.5"
+                      step="any"
                       placeholder="0.00"
                       value={paymentSplits.card}
                       onChange={(e) => setPaymentSplits({ ...paymentSplits, card: e.target.value })}
@@ -1714,7 +1714,7 @@ export default function NewCustomerOrderModal({
                     </label>
                     <input
                       type="number"
-                      step="0.5"
+                      step="any"
                       placeholder="0.00"
                       value={paymentSplits.wallet}
                       onChange={(e) => setPaymentSplits({ ...paymentSplits, wallet: e.target.value })}
@@ -1730,7 +1730,7 @@ export default function NewCustomerOrderModal({
                     </label>
                     <input
                       type="number"
-                      step="0.5"
+                      step="any"
                       placeholder="0.00"
                       value={paymentSplits.instapay}
                       onChange={(e) => setPaymentSplits({ ...paymentSplits, instapay: e.target.value })}
@@ -1772,7 +1772,7 @@ export default function NewCustomerOrderModal({
                       </label>
                       <input
                         type="number"
-                        step="0.5"
+                        step="any"
                         placeholder="القيمة"
                         value={discountValue}
                         onChange={(e) => setDiscountValue(e.target.value)}

@@ -391,10 +391,63 @@ export async function initOutstockTables(db) {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_isupply_feeds_med ON public.outstock_isupply_market_feeds (medication_name);
+
+      -- 20. جدول الحدود الائتمانية الشهرية للموردين
+      CREATE TABLE IF NOT EXISTS public.outstock_supplier_monthly_limits (
+          id VARCHAR(36) PRIMARY KEY,
+          supplier_id VARCHAR(36) NOT NULL REFERENCES public.outstock_suppliers(id) ON DELETE CASCADE,
+          month_period VARCHAR(7) NOT NULL, -- 'YYYY-MM'
+          credit_limit NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
+          credit_term_days INTEGER DEFAULT 30,
+          notes TEXT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT uq_supp_month UNIQUE (supplier_id, month_period)
+      );
+      CREATE INDEX IF NOT EXISTS idx_supp_month_period ON public.outstock_supplier_monthly_limits (month_period);
+
+      -- 21. جدول استلام الطلبيات من الموردين
+      CREATE TABLE IF NOT EXISTS public.outstock_order_receipts (
+          id VARCHAR(36) PRIMARY KEY,
+          supplier_id VARCHAR(36) NOT NULL REFERENCES public.outstock_suppliers(id) ON DELETE RESTRICT,
+          invoice_number VARCHAR(100) NOT NULL,
+          receipt_date DATE NOT NULL,
+          receiving_employee_code VARCHAR(50) NOT NULL,
+          receiving_employee_name VARCHAR(150) NOT NULL,
+          items_count INTEGER NOT NULL DEFAULT 0,
+          total_quantity INTEGER NOT NULL DEFAULT 0,
+          notes TEXT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_order_rec_supp ON public.outstock_order_receipts (supplier_id);
+      CREATE INDEX IF NOT EXISTS idx_order_rec_date ON public.outstock_order_receipts (receipt_date);
+      CREATE INDEX IF NOT EXISTS idx_order_rec_inv ON public.outstock_order_receipts (invoice_number);
+      CREATE INDEX IF NOT EXISTS idx_order_rec_emp ON public.outstock_order_receipts (receiving_employee_code);
+
+      -- 22. جدول أصناف الطلبيات المستلمة
+      CREATE TABLE IF NOT EXISTS public.outstock_order_receipt_items (
+          id VARCHAR(36) PRIMARY KEY,
+          order_receipt_id VARCHAR(36) NOT NULL REFERENCES public.outstock_order_receipts(id) ON DELETE CASCADE,
+          medication_id VARCHAR(100) NULL,
+          medication_name VARCHAR(255) NOT NULL,
+          trade_name_en VARCHAR(255) NULL,
+          barcode VARCHAR(100) NULL,
+          unit_name VARCHAR(50) DEFAULT 'علبة',
+          quantity_received INTEGER NOT NULL DEFAULT 1,
+          public_price NUMERIC(12, 2) NULL,
+          batch_number VARCHAR(50) NULL,
+          expiry_date VARCHAR(20) NULL,
+          notes TEXT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_order_rec_items_rec ON public.outstock_order_receipt_items (order_receipt_id);
+      CREATE INDEX IF NOT EXISTS idx_order_rec_items_med ON public.outstock_order_receipt_items (medication_name);
+      CREATE INDEX IF NOT EXISTS idx_order_rec_items_bar ON public.outstock_order_receipt_items (barcode);
     `;
 
     await db.query(schemaSql);
-    console.log('✅ [OutStock Engine] تم إنشاء والتحقق من جداول نظام النواقص والمشتريات و iSupply بنجاح.');
+    console.log('✅ [OutStock Engine] تم إنشاء والتحقق من جداول نظام النواقص والمشتريات و iSupply واستلام الطلبيات بنجاح.');
 
     // التحقق من أعمدة طريقة التسليم بالطلب
     try {
@@ -424,6 +477,7 @@ export async function initOutstockTables(db) {
 
         ALTER TABLE public.outstock_supplier_invoices ADD COLUMN IF NOT EXISTS items_count INTEGER DEFAULT 1;
         ALTER TABLE public.outstock_supplier_invoices ADD COLUMN IF NOT EXISTS invoice_file_data TEXT NULL;
+        ALTER TABLE public.outstock_supplier_invoices ADD COLUMN IF NOT EXISTS recorded_by_code VARCHAR(50) NULL;
         ALTER TABLE public.outstock_branch_withdrawals ADD COLUMN IF NOT EXISTS items_count INTEGER DEFAULT 1;
         ALTER TABLE public.outstock_branch_withdrawals ADD COLUMN IF NOT EXISTS invoice_file_data TEXT NULL;
       `);
@@ -3058,34 +3112,82 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         return res.status(403).json({ success: false, error: 'غير مصرح بالوصول لحسابات الموردين' });
       }
 
-      const result = await db.query(`
-        SELECT s.*,
-               s.supplier_code as code,
-               s.account_type as payment_type,
-               s.credit_duration_days as credit_term_days,
-               COALESCE(inv_stats.total_invoices_count, 0) as total_invoices_count,
-               COALESCE(inv_stats.total_purchases_amount, 0) as total_invoices_amount,
-               COALESCE(inv_stats.total_purchases_amount, 0) as total_purchases_amount,
-               COALESCE(inv_stats.total_paid_amount, 0) as total_paid_amount,
-               COALESCE(inv_stats.total_remaining_amount, 0) as current_balance,
-               COALESCE(inv_stats.total_remaining_amount, 0) as total_remaining_amount,
-               COALESCE(inv_stats.overdue_invoices_count, 0) as overdue_invoices_count
-        FROM public.outstock_suppliers s
-        LEFT JOIN (
-          SELECT supplier_id,
-                 COUNT(id) as total_invoices_count,
-                 SUM(net_total_amount) as total_purchases_amount,
-                 SUM(paid_amount) as total_paid_amount,
-                 SUM(remaining_amount) as total_remaining_amount,
-                 COUNT(id) FILTER (WHERE due_date < CURRENT_DATE AND remaining_amount > 0) as overdue_invoices_count
-          FROM public.outstock_supplier_invoices
-          GROUP BY supplier_id
-        ) inv_stats ON s.id = inv_stats.supplier_id
-        WHERE s.is_active = true
-        ORDER BY s.created_at DESC
-      `);
+      const month = req.query.month ? String(req.query.month).trim() : null;
 
-      res.json({ success: true, suppliers: result.rows });
+      let result;
+      if (month) {
+        // فلترة شهرية دقيقة: تصفير المسحوبات والمديونيات والحد الائتماني للشهر الجديد
+        result = await db.query(`
+          SELECT s.*,
+                 s.supplier_code as code,
+                 s.account_type as payment_type,
+                 COALESCE(ml.credit_limit, 0.00) as credit_limit,
+                 COALESCE(ml.credit_term_days, s.credit_duration_days) as credit_term_days,
+                 COALESCE(inv_stats.total_invoices_count, 0) as total_invoices_count,
+                 COALESCE(inv_stats.total_purchases_amount, 0) as total_invoices_amount,
+                 COALESCE(inv_stats.total_purchases_amount, 0) as total_purchases_amount,
+                 COALESCE(inv_stats.total_paid_amount, 0) as total_paid_amount,
+                 COALESCE(inv_stats.total_remaining_amount, 0) as current_balance,
+                 COALESCE(inv_stats.total_remaining_amount, 0) as total_remaining_amount,
+                 COALESCE(inv_stats.overdue_invoices_count, 0) as overdue_invoices_count,
+                 COALESCE(with_stats.total_withdrawals_amount, 0) as total_withdrawals_amount,
+                 COALESCE(with_stats.total_withdrawals_count, 0) as total_withdrawals_count,
+                 CASE WHEN ml.id IS NOT NULL THEN true ELSE false END as has_monthly_limit_set
+          FROM public.outstock_suppliers s
+          LEFT JOIN public.outstock_supplier_monthly_limits ml 
+            ON s.id = ml.supplier_id AND ml.month_period = $1
+          LEFT JOIN (
+            SELECT supplier_id,
+                   COUNT(id) as total_invoices_count,
+                   SUM(net_total_amount) as total_purchases_amount,
+                   SUM(paid_amount) as total_paid_amount,
+                   SUM(remaining_amount) as total_remaining_amount,
+                   COUNT(id) FILTER (WHERE due_date < CURRENT_DATE AND remaining_amount > 0) as overdue_invoices_count
+            FROM public.outstock_supplier_invoices
+            WHERE TO_CHAR(invoice_date, 'YYYY-MM') = $1
+            GROUP BY supplier_id
+          ) inv_stats ON s.id = inv_stats.supplier_id
+          LEFT JOIN (
+            SELECT supplier_id,
+                   SUM(amount) as total_withdrawals_amount,
+                   COUNT(id) as total_withdrawals_count
+            FROM public.outstock_branch_withdrawals
+            WHERE month_period = $1
+            GROUP BY supplier_id
+          ) with_stats ON s.id = with_stats.supplier_id
+          WHERE s.is_active = true
+          ORDER BY s.created_at DESC
+        `, [month]);
+      } else {
+        result = await db.query(`
+          SELECT s.*,
+                 s.supplier_code as code,
+                 s.account_type as payment_type,
+                 s.credit_duration_days as credit_term_days,
+                 COALESCE(inv_stats.total_invoices_count, 0) as total_invoices_count,
+                 COALESCE(inv_stats.total_purchases_amount, 0) as total_invoices_amount,
+                 COALESCE(inv_stats.total_purchases_amount, 0) as total_purchases_amount,
+                 COALESCE(inv_stats.total_paid_amount, 0) as total_paid_amount,
+                 COALESCE(inv_stats.total_remaining_amount, 0) as current_balance,
+                 COALESCE(inv_stats.total_remaining_amount, 0) as total_remaining_amount,
+                 COALESCE(inv_stats.overdue_invoices_count, 0) as overdue_invoices_count
+          FROM public.outstock_suppliers s
+          LEFT JOIN (
+            SELECT supplier_id,
+                   COUNT(id) as total_invoices_count,
+                   SUM(net_total_amount) as total_purchases_amount,
+                   SUM(paid_amount) as total_paid_amount,
+                   SUM(remaining_amount) as total_remaining_amount,
+                   COUNT(id) FILTER (WHERE due_date < CURRENT_DATE AND remaining_amount > 0) as overdue_invoices_count
+            FROM public.outstock_supplier_invoices
+            GROUP BY supplier_id
+          ) inv_stats ON s.id = inv_stats.supplier_id
+          WHERE s.is_active = true
+          ORDER BY s.created_at DESC
+        `);
+      }
+
+      res.json({ success: true, suppliers: result.rows, selectedMonth: month || null });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -3232,6 +3334,103 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       await db.query('DELETE FROM public.outstock_suppliers WHERE id = $1', [sId]);
       res.json({ success: true, message: 'تم حذف المورد بنجاح' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // تدوير واستعمال الحد الائتماني من الشهر السابق لجميع الموردين أو لمورد محدد
+  app.post('/api/outstock/suppliers/rollover-credit-limits', authMiddleware, async (req, res) => {
+    try {
+      const canAccess = req.outstockUser.role === 'owner' || req.outstockUser.role === 'procurement_manager' || req.outstockUser.permissions?.can_access_suppliers;
+      if (!canAccess) {
+        return res.status(403).json({ success: false, error: 'غير مصرح بتعديل الحدود الائتمانية' });
+      }
+
+      const { targetMonth, previousMonth, supplierId } = req.body || {};
+      if (!targetMonth || !previousMonth) {
+        return res.status(400).json({ success: false, error: 'يرجى تحديد الشهر الحالي والشهر السابق' });
+      }
+
+      let suppliersQuery = 'SELECT id, credit_limit, credit_duration_days FROM public.outstock_suppliers WHERE is_active = true';
+      const params = [];
+      if (supplierId) {
+        suppliersQuery += ' AND id = $1';
+        params.push(supplierId);
+      }
+      const supps = await db.query(suppliersQuery, params);
+
+      for (const sup of supps.rows) {
+        const prevRes = await db.query(
+          'SELECT credit_limit, credit_term_days FROM public.outstock_supplier_monthly_limits WHERE supplier_id = $1 AND month_period = $2',
+          [sup.id, previousMonth]
+        );
+        const limitToCopy = prevRes.rows.length > 0 ? parseFloat(prevRes.rows[0].credit_limit) : parseFloat(sup.credit_limit || 0);
+        const daysToCopy = prevRes.rows.length > 0 ? parseInt(prevRes.rows[0].credit_term_days, 10) : parseInt(sup.credit_duration_days || 30, 10);
+
+        await db.query(`
+          INSERT INTO public.outstock_supplier_monthly_limits (
+            id, supplier_id, month_period, credit_limit, credit_term_days, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+          ON CONFLICT (supplier_id, month_period)
+          DO UPDATE SET credit_limit = EXCLUDED.credit_limit,
+                        credit_term_days = EXCLUDED.credit_term_days,
+                        updated_at = CURRENT_TIMESTAMP
+        `, [
+          `sml_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+          sup.id,
+          targetMonth,
+          limitToCopy,
+          daysToCopy
+        ]);
+      }
+
+      res.json({
+        success: true,
+        message: `تم نسخ واعتماد الحد الائتماني من شهر ${previousMonth} إلى شهر ${targetMonth} بنجاح`
+      });
+    } catch (err) {
+      console.error('Error rolling over credit limits:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // تحديث أو تعيين الحد الائتماني الشهري لمورد معين
+  app.put('/api/outstock/suppliers/:id/monthly-limit', authMiddleware, async (req, res) => {
+    try {
+      const canAccess = req.outstockUser.role === 'owner' || req.outstockUser.role === 'procurement_manager' || req.outstockUser.permissions?.can_access_suppliers;
+      if (!canAccess) {
+        return res.status(403).json({ success: false, error: 'غير مصرح بتعديل الحدود الائتمانية' });
+      }
+
+      const sId = req.params.id;
+      const { monthPeriod, creditLimit, creditTermDays, notes } = req.body || {};
+      if (!monthPeriod) {
+        return res.status(400).json({ success: false, error: 'الشهر المحاسبي مطلوب' });
+      }
+
+      const cLimit = parseFloat(creditLimit || 0);
+      const cDays = parseInt(creditTermDays || 30, 10);
+
+      await db.query(`
+        INSERT INTO public.outstock_supplier_monthly_limits (
+          id, supplier_id, month_period, credit_limit, credit_term_days, notes, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+        ON CONFLICT (supplier_id, month_period)
+        DO UPDATE SET credit_limit = EXCLUDED.credit_limit,
+                      credit_term_days = EXCLUDED.credit_term_days,
+                      notes = EXCLUDED.notes,
+                      updated_at = CURRENT_TIMESTAMP
+      `, [
+        `sml_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        sId,
+        monthPeriod,
+        cLimit,
+        cDays,
+        notes || null
+      ]);
+
+      res.json({ success: true, message: 'تم تحديث الحد الائتماني الشهري للمورد' });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -3661,19 +3860,20 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       if (remaining === 0 && net > 0) pStatus = 'paid';
       else if (paid > 0 && remaining > 0) pStatus = 'partially_paid';
 
-      const recorder = req.outstockUser.fullName || req.outstockUser.username || 'مسؤول المشتريات';
+      const recorder = b.recorded_by || b.recorded_by_name || req.outstockUser.fullName || req.outstockUser.username || 'مسؤول المشتريات';
+      const recorderCode = b.recorded_by_code || b.created_by_employee_code || null;
 
       await db.query(`
         INSERT INTO public.outstock_supplier_invoices (
           id, invoice_number, supplier_id, invoice_date, due_date, subtotal_amount, discount_amount,
           net_total_amount, paid_amount, remaining_amount, payment_status, entry_mode,
-          drive_file_id, drive_file_url, drive_file_name, recorded_by, notes
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+          drive_file_id, drive_file_url, drive_file_name, recorded_by, recorded_by_code, notes
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       `, [
         invId, String(invoiceNumber).trim(), supplierId, invoiceDate, dueDate,
         parseFloat(subtotalAmount || 0), parseFloat(discountAmount || 0),
         net, paid, remaining, pStatus, entryMode,
-        driveFileId, driveFileUrl, savedFileName, recorder, notes
+        driveFileId, driveFileUrl, savedFileName, recorder, recorderCode, notes
       ]);
 
       if (Array.isArray(items) && items.length > 0) {
@@ -4388,6 +4588,280 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         WHERE id = 'default'
       `);
       res.json({ success: true, message: 'تم إعادة ضبط جلسة iSupply' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ── 23. استلام الطلبيات من الموردين (Order Receipts Management Portal) ──
+  app.post('/api/outstock/order-receipts', authMiddleware, async (req, res) => {
+    try {
+      const canAccess = req.outstockUser?.role === 'owner' ||
+                        req.outstockUser?.role === 'procurement_manager' ||
+                        req.outstockUser?.role === 'procurement_officer' ||
+                        req.outstockUser?.username === 'admin-stock' ||
+                        Boolean(req.outstockUser?.permissions?.can_access_suppliers);
+      if (!canAccess) {
+        return res.status(403).json({ success: false, error: 'غير مصرح باستلام طلبيات الموردين' });
+      }
+
+      const {
+        supplierId,
+        invoiceNumber,
+        receiptDate,
+        receivingEmployeeCode,
+        receivingEmployeeName,
+        notes,
+        items
+      } = req.body || {};
+
+      if (!supplierId || !invoiceNumber || !receivingEmployeeCode) {
+        return res.status(400).json({ success: false, error: 'المورد ورقم الفاتورة وكود الموظف المستلم حقول إلزامية' });
+      }
+
+      const validItems = Array.isArray(items) ? items.filter(it => it.medication_name && String(it.medication_name).trim()) : [];
+      if (validItems.length === 0) {
+        return res.status(400).json({ success: false, error: 'يرجى إدخال صنف واحد على الأقل في الطلبية' });
+      }
+
+      const receiptId = `rec_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      let totalQty = 0;
+      validItems.forEach(it => {
+        totalQty += parseInt(it.quantity_received || it.quantity || 1, 10);
+      });
+
+      // 1) حفظ سجل ترويسة الطلبية
+      await db.query(`
+        INSERT INTO public.outstock_order_receipts (
+          id, supplier_id, invoice_number, receipt_date,
+          receiving_employee_code, receiving_employee_name,
+          items_count, total_quantity, notes
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `, [
+        receiptId,
+        supplierId,
+        String(invoiceNumber).trim(),
+        receiptDate || new Date().toISOString().slice(0, 10),
+        String(receivingEmployeeCode).trim(),
+        String(receivingEmployeeName || 'الموظف المستلم').trim(),
+        validItems.length,
+        totalQty,
+        notes || null
+      ]);
+
+      // 2) حفظ بنود الطلبية المستلمة
+      for (const it of validItems) {
+        const itemId = `reci_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        await db.query(`
+          INSERT INTO public.outstock_order_receipt_items (
+            id, order_receipt_id, medication_id, medication_name, trade_name_en,
+            barcode, unit_name, quantity_received, public_price, batch_number, expiry_date, notes
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        `, [
+          itemId,
+          receiptId,
+          it.medication_id || it.id || null,
+          String(it.medication_name).trim(),
+          it.trade_name_en || null,
+          it.barcode || it.gtin_barcode || null,
+          it.unit_name || 'علبة',
+          parseInt(it.quantity_received || it.quantity || 1, 10),
+          it.public_price ? parseFloat(it.public_price) : null,
+          it.batch_number || null,
+          it.expiry_date || null,
+          it.notes || null
+        ]);
+      }
+
+      res.json({
+        success: true,
+        message: 'تم تسجيل استلام الطلبية بنجاح',
+        receiptId
+      });
+    } catch (err) {
+      console.error('Error saving order receipt:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ملخص بطاقات الموردين لاستلام الطلبيات
+  app.get('/api/outstock/order-receipts/supplier-summary', authMiddleware, async (req, res) => {
+    try {
+      const result = await db.query(`
+        SELECT s.id as supplier_id,
+               s.name as supplier_name,
+               s.supplier_code,
+               s.phone as supplier_phone,
+               COUNT(DISTINCT r.id) as total_receipts_count,
+               COALESCE(SUM(r.items_count), 0) as total_items_count,
+               COALESCE(SUM(r.total_quantity), 0) as total_quantity_received,
+               MAX(r.receipt_date) as last_receipt_date
+        FROM public.outstock_suppliers s
+        LEFT JOIN public.outstock_order_receipts r ON s.id = r.supplier_id
+        WHERE s.is_active = true
+        GROUP BY s.id, s.name, s.supplier_code, s.phone
+        ORDER BY total_receipts_count DESC, s.name ASC
+      `);
+      res.json({ success: true, summaries: result.rows });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // سجل الطلبيات المستلمة مع البحث متعدد الحقول
+  app.get('/api/outstock/order-receipts', authMiddleware, async (req, res) => {
+    try {
+      const {
+        supplierId,
+        search,
+        medicationName,
+        barcode,
+        invoiceNumber,
+        employeeCode,
+        dateFrom,
+        dateTo,
+        limit = 100
+      } = req.query;
+
+      let query = `
+        SELECT r.*,
+               s.name as supplier_name,
+               s.supplier_code,
+               COALESCE(
+                 json_agg(
+                   json_build_object(
+                     'id', itm.id,
+                     'medication_name', itm.medication_name,
+                     'trade_name_en', itm.trade_name_en,
+                     'barcode', itm.barcode,
+                     'unit_name', itm.unit_name,
+                     'quantity_received', itm.quantity_received,
+                     'public_price', itm.public_price,
+                     'batch_number', itm.batch_number,
+                     'expiry_date', itm.expiry_date
+                   )
+                 ) FILTER (WHERE itm.id IS NOT NULL), '[]'::json
+               ) as items
+        FROM public.outstock_order_receipts r
+        JOIN public.outstock_suppliers s ON r.supplier_id = s.id
+        LEFT JOIN public.outstock_order_receipt_items itm ON r.id = itm.order_receipt_id
+        WHERE 1=1
+      `;
+      const params = [];
+
+      if (supplierId && supplierId !== 'all') {
+        params.push(supplierId);
+        query += ` AND r.supplier_id = $${params.length}`;
+      }
+
+      if (dateFrom) {
+        params.push(dateFrom);
+        query += ` AND r.receipt_date >= $${params.length}`;
+      }
+
+      if (dateTo) {
+        params.push(dateTo);
+        query += ` AND r.receipt_date <= $${params.length}`;
+      }
+
+      if (invoiceNumber && String(invoiceNumber).trim()) {
+        params.push(`%${String(invoiceNumber).trim()}%`);
+        query += ` AND r.invoice_number ILIKE $${params.length}`;
+      }
+
+      if (employeeCode && String(employeeCode).trim()) {
+        params.push(`%${String(employeeCode).trim()}%`);
+        query += ` AND (r.receiving_employee_code ILIKE $${params.length} OR r.receiving_employee_name ILIKE $${params.length})`;
+      }
+
+      if (barcode && String(barcode).trim()) {
+        params.push(`%${String(barcode).trim()}%`);
+        query += ` AND EXISTS (
+          SELECT 1 FROM public.outstock_order_receipt_items itm2 
+          WHERE itm2.order_receipt_id = r.id AND itm2.barcode ILIKE $${params.length}
+        )`;
+      }
+
+      if (medicationName && String(medicationName).trim()) {
+        params.push(`%${String(medicationName).trim()}%`);
+        query += ` AND EXISTS (
+          SELECT 1 FROM public.outstock_order_receipt_items itm3 
+          WHERE itm3.order_receipt_id = r.id AND (itm3.medication_name ILIKE $${params.length} OR itm3.trade_name_en ILIKE $${params.length})
+        )`;
+      }
+
+      // بحث عام موحد يشمل كل الحقول
+      if (search && String(search).trim()) {
+        params.push(`%${String(search).trim()}%`);
+        query += ` AND (
+          r.invoice_number ILIKE $${params.length} OR
+          r.receiving_employee_code ILIKE $${params.length} OR
+          r.receiving_employee_name ILIKE $${params.length} OR
+          s.name ILIKE $${params.length} OR
+          s.supplier_code ILIKE $${params.length} OR
+          EXISTS (
+            SELECT 1 FROM public.outstock_order_receipt_items itm4 
+            WHERE itm4.order_receipt_id = r.id AND (
+              itm4.medication_name ILIKE $${params.length} OR
+              itm4.trade_name_en ILIKE $${params.length} OR
+              itm4.barcode ILIKE $${params.length}
+            )
+          )
+        )`;
+      }
+
+      query += ` GROUP BY r.id, s.name, s.supplier_code ORDER BY r.receipt_date DESC, r.created_at DESC LIMIT ${parseInt(limit, 10)}`;
+
+      const result = await db.query(query, params);
+      res.json({ success: true, receipts: result.rows });
+    } catch (err) {
+      console.error('Error fetching order receipts:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // تفاصيل طلبية استلام واحدة
+  app.get('/api/outstock/order-receipts/:id', authMiddleware, async (req, res) => {
+    try {
+      const recId = req.params.id;
+      const recRes = await db.query(`
+        SELECT r.*, s.name as supplier_name, s.supplier_code
+        FROM public.outstock_order_receipts r
+        JOIN public.outstock_suppliers s ON r.supplier_id = s.id
+        WHERE r.id = $1
+      `, [recId]);
+
+      if (recRes.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'الطلبية غير موجودة' });
+      }
+
+      const itemsRes = await db.query(
+        'SELECT * FROM public.outstock_order_receipt_items WHERE order_receipt_id = $1 ORDER BY id ASC',
+        [recId]
+      );
+
+      res.json({
+        success: true,
+        receipt: {
+          ...recRes.rows[0],
+          items: itemsRes.rows
+        }
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // حذف طلبية استلام
+  app.delete('/api/outstock/order-receipts/:id', authMiddleware, async (req, res) => {
+    try {
+      const canAccess = req.outstockUser?.role === 'owner' || req.outstockUser?.role === 'procurement_manager';
+      if (!canAccess) {
+        return res.status(403).json({ success: false, error: 'صلاحية الحذف لمدير المشتريات والمالك فقط' });
+      }
+      const recId = req.params.id;
+      await db.query('DELETE FROM public.outstock_order_receipts WHERE id = $1', [recId]);
+      res.json({ success: true, message: 'تم حذف سجل الطلبية المستلمة' });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }

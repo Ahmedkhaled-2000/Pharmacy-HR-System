@@ -30,7 +30,12 @@ import {
   ArrowUpDown,
   Trash2,
   Edit,
-  CheckSquare
+  CheckSquare,
+  Copy,
+  ChevronLeft,
+  ChevronRight,
+  PackageCheck,
+  UserCheck
 } from 'lucide-react';
 import {
   outstockGetSuppliers,
@@ -48,7 +53,9 @@ import {
   outstockGetBranchWithdrawals,
   outstockSaveBranchWithdrawal,
   outstockGetBranches,
-  outstockSearchMedications
+  outstockSearchMedications,
+  outstockRolloverSupplierLimits,
+  outstockSaveSupplierMonthlyLimit
 } from '../../../utils/outstockApiClient';
 import {
   exportSupplierWithdrawalsExcel,
@@ -57,15 +64,19 @@ import {
 } from '../../../utils/outstockExcelExporter';
 import SupplierDiscountsComparisonTab from './SupplierDiscountsComparisonTab';
 import MedicationAutocompleteInput from '../pharmacy/MedicationAutocompleteInput';
+import SelectRegisteredInvoicesModal from './SelectRegisteredInvoicesModal';
+import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
+import ProcurementOrderReceivingTab from './ProcurementOrderReceivingTab';
 import { performSmartExtraction } from '../../../utils/archiveAiService';
 
 /**
  * ProcurementSuppliersTab.jsx
  * الشاشة المركزية الشاملة لإدارة الموردين وفواتير الشراء ومسحوبات الفروع
- * تضم 3 أقسام رئيسية:
- * 1. حسابات الموردين وحدود الائتمان والمديونيات
- * 2. فواتير الموردين ومطابقتها والأرشفة على Google Drive
- * 3. مسحوبات الفروع الشهرية والتوريدات الميدانية
+ * تضم 4 أقسام رئيسية:
+ * 1. حسابات الموردين وحدود الائتمان والمديونيات مع الفلتر الشهري وتدوير الليمت
+ * 2. استلام الطلبات وتسجيل أصناف الشحنات والفواتير
+ * 3. فواتير الموردين ومطابقتها والأرشفة على Google Drive
+ * 4. مسحوبات الفروع الشهرية والتوريدات الميدانية
  */
 export default function ProcurementSuppliersTab({ showToast = alert, initialSubTab = 'accounts' }) {
   const showToastRef = useRef(showToast);
@@ -73,10 +84,13 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
     showToastRef.current = showToast;
   }, [showToast]);
 
-  const [activeSubTab, setActiveSubTab] = useState(initialSubTab || 'accounts'); // 'accounts' | 'invoices' | 'withdrawals' | 'discounts_comparison'
+  const [activeSubTab, setActiveSubTab] = useState(initialSubTab || 'accounts'); // 'accounts' | 'order_receiving' | 'invoices' | 'withdrawals' | 'discounts_comparison'
   const [suppliers, setSuppliers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // ── الفلترة الشهرية لحسابات الموردين وتدوير الحد الائتماني ────────────────────
+  const [supplierAccountsMonth, setSupplierAccountsMonth] = useState(() => new Date().toISOString().slice(0, 7));
 
   useEffect(() => {
     if (initialSubTab) {
@@ -85,12 +99,12 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   }, [initialSubTab]);
 
   // ══════════════════════════════════════════════════════════════════════════════
-  // تحميل قائمة الموردين
+  // تحميل قائمة الموردين بحسب الشهر المختار
   // ══════════════════════════════════════════════════════════════════════════════
   const loadSuppliers = useCallback(async () => {
     try {
       setIsLoading(true);
-      const res = await outstockGetSuppliers();
+      const res = await outstockGetSuppliers({ month: supplierAccountsMonth });
       if (res?.success) {
         setSuppliers(res.suppliers || []);
       }
@@ -100,11 +114,52 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [supplierAccountsMonth]);
 
   useEffect(() => {
     loadSuppliers();
   }, [loadSuppliers]);
+
+  // دوال التنقل بين الشهور وتدوير الحد الائتماني
+  const getPrevMonthStr = (ym) => {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m - 2, 1);
+    return d.toISOString().slice(0, 7);
+  };
+
+  const getNextMonthStr = (ym) => {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m, 1);
+    return d.toISOString().slice(0, 7);
+  };
+
+  const handlePrevMonth = () => setSupplierAccountsMonth(prev => getPrevMonthStr(prev));
+  const handleNextMonth = () => setSupplierAccountsMonth(prev => getNextMonthStr(prev));
+  const handleCurrentMonth = () => setSupplierAccountsMonth(new Date().toISOString().slice(0, 7));
+
+  const handleRolloverCreditLimits = async () => {
+    const prevMonth = getPrevMonthStr(supplierAccountsMonth);
+    const confirmMsg = `هل تريد بالتأكيد استعمال نفس الحدود الائتمانية من الشهر السابق (${prevMonth}) وتطبيقها على هذا الشهر (${supplierAccountsMonth})؟\nسيتم تحديث كافة الموردين بالحدود المسجلة سابقاً.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      setIsLoading(true);
+      const res = await outstockRolloverSupplierLimits({
+        targetMonth: supplierAccountsMonth,
+        previousMonth: prevMonth
+      });
+      if (res?.success) {
+        showToastRef.current?.(`✅ تم تطبيق الحدود الائتمانية من شهر (${prevMonth}) بنجاح`);
+        loadSuppliers();
+      } else {
+        showToastRef.current?.(res?.error || 'فشل نسخ الحدود الائتمانية');
+      }
+    } catch (err) {
+      showToastRef.current?.('حدث خطأ أثناء نسخ الحدود الائتمانية');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // ══════════════════════════════════════════════════════════════════════════════
   // 1. حسابات الموردين وحدود الائتمان
@@ -144,6 +199,12 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   // نافذة إضافة مسحوب يدوي للمورد (مع دعم الفواتير المتعددة وعدد الأصناف وملف PDF)
   const [isManualWithdrawalModalOpen, setIsManualWithdrawalModalOpen] = useState(false);
   const [returnToWithdrawalsAfterManual, setReturnToWithdrawalsAfterManual] = useState(false);
+  const [isSelectInvoicesModalOpen, setIsSelectInvoicesModalOpen] = useState(false);
+
+  // توثيق كود الموظف السري (المعامل كباسورد) عند تسجيل فاتورة جديدة
+  const [isInvoiceEmployeeAuthOpen, setIsInvoiceEmployeeAuthOpen] = useState(false);
+  const [verifiedInvoiceEmployee, setVerifiedInvoiceEmployee] = useState(null);
+
   const [manualWithdrawalForm, setManualWithdrawalForm] = useState({
     item_count: '1',
     invoices: [
@@ -155,6 +216,54 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
     notes: ''
   });
   const [isSubmittingManualWithdrawal, setIsSubmittingManualWithdrawal] = useState(false);
+
+  // إدراج الفواتير المسجلة المحددة إلى نموذج المسحوب اليدوي
+  const handleConfirmSelectedInvoices = (selectedInvs) => {
+    if (!selectedInvs || selectedInvs.length === 0) return;
+    const newRows = selectedInvs.map((inv) => ({
+      invoice_number: inv.invoice_number || '',
+      invoice_date: inv.invoice_date ? String(inv.invoice_date).slice(0, 10) : new Date().toISOString().slice(0, 10),
+      amount: String(Number(inv.total_amount || 0).toFixed(2))
+    }));
+
+    setManualWithdrawalForm((prev) => {
+      const isFirstRowEmpty =
+        prev.invoices.length === 1 &&
+        !prev.invoices[0].invoice_number &&
+        !prev.invoices[0].amount;
+      const combined = isFirstRowEmpty ? newRows : [...prev.invoices, ...newRows];
+      return {
+        ...prev,
+        invoices: combined,
+        item_count: Math.max(Number(prev.item_count) || 1, combined.length).toString()
+      };
+    });
+    setIsSelectInvoicesModalOpen(false);
+    showToastRef.current?.(`✅ تم إدراج ${selectedInvs.length} فاتورة مسجلة بنجاح`);
+  };
+
+  // بعد التحقق من كود الموظف كباسورد بنجاح
+  const handleInvoiceEmployeeVerified = (employee) => {
+    setVerifiedInvoiceEmployee(employee);
+    setIsInvoiceEmployeeAuthOpen(false);
+    const defaultSup = suppliers[0] || null;
+    setInvoiceForm({
+      supplier_id: defaultSup?.id || '',
+      invoice_number: `INV-${Date.now().toString().slice(-6)}`,
+      invoice_date: new Date().toISOString().slice(0, 10),
+      payment_terms: defaultSup?.payment_type || 'credit',
+      due_date: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+      discount_amount: '0',
+      tax_amount: '0',
+      paid_amount: '0',
+      notes: '',
+      items: []
+    });
+    setAttachedFile(null);
+    setAttachedFileBase64('');
+    setIsInvoiceModalOpen(true);
+    showToastRef.current?.(`✅ مرحباً ${employee.name}، تم توثيق كودك بنجاح`);
+  };
 
   // إحصائيات الموردين العامة
   const supplierStats = useMemo(() => {
@@ -599,22 +708,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   };
 
   const handleOpenAddInvoice = () => {
-    const defaultSup = suppliers[0] || null;
-    setInvoiceForm({
-      supplier_id: defaultSup?.id || '',
-      invoice_number: `INV-${Date.now().toString().slice(-6)}`,
-      invoice_date: new Date().toISOString().slice(0, 10),
-      payment_terms: defaultSup?.payment_type || 'credit',
-      due_date: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
-      discount_amount: '0',
-      tax_amount: '0',
-      paid_amount: '0',
-      notes: '',
-      items: []
-    });
-    setAttachedFile(null);
-    setAttachedFileBase64('');
-    setIsInvoiceModalOpen(true);
+    setIsInvoiceEmployeeAuthOpen(true);
   };
 
   // معالجة رفع الملف
@@ -826,6 +920,8 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
 
       const payload = {
         ...invoiceForm,
+        recorded_by: verifiedInvoiceEmployee?.name || 'مسؤول المشتريات',
+        recorded_by_code: verifiedInvoiceEmployee?.code || null,
         total_amount: invoiceTotals.subtotal,
         net_amount: invoiceTotals.net,
         remaining_balance: invoiceTotals.remaining,
@@ -1002,6 +1098,25 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
 
         <button
           type="button"
+          className={`outstock-btn ${activeSubTab === 'order_receiving' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
+          onClick={() => setActiveSubTab('order_receiving')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '9px 18px',
+            fontWeight: 'bold',
+            background: activeSubTab === 'order_receiving' ? '#0f766e' : '#f0fdfa',
+            color: activeSubTab === 'order_receiving' ? '#fff' : '#0f766e',
+            border: '1.5px solid #99f6e4'
+          }}
+        >
+          <PackageCheck size={17} />
+          <span>استلام الطلبات والشحنات</span>
+        </button>
+
+        <button
+          type="button"
           className={`outstock-btn ${activeSubTab === 'invoices' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
           onClick={() => setActiveSubTab('invoices')}
           style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 18px', fontWeight: 'bold' }}
@@ -1046,6 +1161,120 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       ══════════════════════════════════════════════════════════════════════════ */}
       {activeSubTab === 'accounts' && (
         <div className="suppliers-accounts-section">
+          {/* شريط الإدارة والفلترة الشهرية وتدوير الحدود الائتمانية */}
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+              border: '1.5px solid #cbd5e1',
+              borderRadius: '12px',
+              padding: '14px 18px',
+              marginBottom: '18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '14px',
+              flexWrap: 'wrap',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  background: '#0f766e',
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <Calendar size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>حسابات شهر:</span>
+                  <span style={{ color: '#0f766e', fontFamily: 'monospace', fontSize: '16px' }}>{supplierAccountsMonth}</span>
+                </div>
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                  يتم تصفير المسحوبات والمديونيات للشهر الجديد تلقائياً مع الاحتفاظ التام بسجلات الشهور السابقة
+                </div>
+              </div>
+
+              {/* عناصر اختيار الشهر */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: '10px' }}>
+                <button
+                  type="button"
+                  onClick={handlePrevMonth}
+                  className="outstock-btn outstock-btn-secondary"
+                  style={{ padding: '6px 10px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  title="الشهر السابق"
+                >
+                  <ChevronRight size={15} />
+                  <span>الشهر السابق</span>
+                </button>
+
+                <input
+                  type="month"
+                  className="outstock-form-input"
+                  value={supplierAccountsMonth}
+                  onChange={(e) => {
+                    if (e.target.value) setSupplierAccountsMonth(e.target.value);
+                  }}
+                  style={{ width: '150px', padding: '6px 10px', fontWeight: 'bold', fontSize: '13px', textAlign: 'center' }}
+                />
+
+                <button
+                  type="button"
+                  onClick={handleNextMonth}
+                  className="outstock-btn outstock-btn-secondary"
+                  style={{ padding: '6px 10px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  title="الشهر التالي"
+                >
+                  <span>الشهر التالي</span>
+                  <ChevronLeft size={15} />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCurrentMonth}
+                  className="outstock-btn outstock-btn-secondary"
+                  style={{ padding: '6px 10px', fontSize: '12px', fontWeight: 'bold', color: '#0f766e' }}
+                  title="الانتقال للشهر الحالي"
+                >
+                  الشهر الحالي
+                </button>
+              </div>
+            </div>
+
+            {/* زر استعمال نفس الحد الائتماني من الشهر السابق */}
+            <button
+              type="button"
+              onClick={handleRolloverCreditLimits}
+              disabled={isLoading}
+              className="outstock-btn"
+              style={{
+                background: '#047857',
+                color: '#fff',
+                border: 'none',
+                padding: '9px 16px',
+                fontSize: '13px',
+                fontWeight: '800',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                cursor: 'pointer',
+                boxShadow: '0 2px 4px rgba(4, 120, 87, 0.25)'
+              }}
+              title="نسخ الحدود الائتمانية من الشهر السابق وتطبيقها على هذا الشهر"
+            >
+              <RefreshCw size={15} className={isLoading ? 'outstock-spin' : ''} />
+              <span>استعمال نفس الحد الائتماني من الشهر السابق</span>
+            </button>
+          </div>
+
           {/* بطاقات المؤشرات الرقمية (KPIs) */}
           <div
             style={{
@@ -1409,6 +1638,13 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       )}
 
       {/* ══════════════════════════════════════════════════════════════════════════
+          القسم الجديد: استلام الطلبات والشحنات
+      ══════════════════════════════════════════════════════════════════════════ */}
+      {activeSubTab === 'order_receiving' && (
+        <ProcurementOrderReceivingTab showToast={showToastRef.current || showToast} />
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════════
           القسم الثاني: فواتير الموردين ومطابقتها والأرشفة على Google Drive
       ══════════════════════════════════════════════════════════════════════════ */}
       {activeSubTab === 'invoices' && (
@@ -1516,6 +1752,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                   <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
                     <th style={{ padding: '12px 14px' }}>رقم الفاتورة</th>
                     <th style={{ padding: '12px 14px' }}>المورد</th>
+                    <th style={{ padding: '12px 14px' }}>مسؤول الإدخال</th>
                     <th style={{ padding: '12px 14px' }}>التاريخ والاستحقاق</th>
                     <th style={{ padding: '12px 14px' }}>إجمالي الفاتورة</th>
                     <th style={{ padding: '12px 14px' }}>الصافي بعد الخصم</th>
@@ -1545,6 +1782,19 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                         <td style={{ padding: '12px 14px' }}>
                           <div style={{ fontWeight: 'bold' }}>{inv.supplier_name}</div>
                           <div style={{ fontSize: '11px', color: '#64748b' }}>{inv.supplier_code}</div>
+                        </td>
+                        <td style={{ padding: '12px 14px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <UserCheck size={14} color="#0f766e" />
+                            <span style={{ fontSize: '12px', fontWeight: '700', color: '#1e293b' }}>
+                              {inv.recorded_by || inv.recorded_by_name || 'مسؤول المشتريات'}
+                            </span>
+                          </div>
+                          {inv.recorded_by_code && (
+                            <div style={{ fontSize: '10.5px', color: '#64748b', fontFamily: 'monospace' }}>
+                              كود: ••••
+                            </div>
+                          )}
                         </td>
                         <td style={{ padding: '12px 14px', color: '#475569' }}>
                           <div>{new Date(inv.invoice_date).toLocaleDateString('ar-EG')}</div>
@@ -2031,8 +2281,8 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                 <label className="outstock-form-label">مبلغ السداد (ج.م)</label>
                 <input
                   type="number"
-                  step="0.5"
-                  min="0.5"
+                  step="any"
+                  min="0.01"
                   className="outstock-form-input"
                   value={settlementData.amount}
                   onChange={(e) => setSettlementData({ ...settlementData, amount: e.target.value })}
@@ -2297,27 +2547,52 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                     <FileText size={16} color="#0d9488" />
                     <span>فواتير ومستندات السحب ({manualWithdrawalForm.invoices.length})</span>
                   </label>
-                  <button
-                    type="button"
-                    onClick={handleAddManualInvoiceRow}
-                    className="outstock-btn"
-                    style={{
-                      background: '#e0f2fe',
-                      color: '#0369a1',
-                      border: '1px solid #7dd3fc',
-                      padding: '5px 12px',
-                      fontSize: '12px',
-                      fontWeight: '800',
-                      borderRadius: '8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <Plus size={14} />
-                    <span>إضافة فاتورة أخرى</span>
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsSelectInvoicesModalOpen(true)}
+                      className="outstock-btn"
+                      style={{
+                        background: '#ecfdf5',
+                        color: '#047857',
+                        border: '1px solid #6ee7b7',
+                        padding: '5px 12px',
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        borderRadius: '8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        cursor: 'pointer'
+                      }}
+                      title="استيراد وتحديد فواتير توريد مسجلة لهذا المورد لإدراجها تلقائياً"
+                    >
+                      <CheckSquare size={14} />
+                      <span>تحديد فواتير مسجلة</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleAddManualInvoiceRow}
+                      className="outstock-btn"
+                      style={{
+                        background: '#e0f2fe',
+                        color: '#0369a1',
+                        border: '1px solid #7dd3fc',
+                        padding: '5px 12px',
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        borderRadius: '8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <Plus size={14} />
+                      <span>إضافة فاتورة أخرى</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div style={{ overflowX: 'auto' }}>
@@ -2357,8 +2632,8 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                           <td style={{ padding: '6px 8px' }}>
                             <input
                               type="number"
-                              step="0.5"
-                              min="0.1"
+                              step="any"
+                              min="0.01"
                               required
                               placeholder="0.00"
                               className="outstock-form-input"
@@ -2558,6 +2833,43 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
             </div>
 
             <form onSubmit={handleSaveInvoice} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflowY: 'auto' }}>
+              {/* شارة توثيق الموظف المسؤول عن إدخال الفاتورة */}
+              {verifiedInvoiceEmployee && (
+                <div
+                  style={{
+                    background: '#f0fdf4',
+                    border: '1px solid #86efac',
+                    borderRadius: '8px',
+                    padding: '9px 14px',
+                    marginBottom: '14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '10px'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#166534', fontSize: '13px', fontWeight: 'bold' }}>
+                    <UserCheck size={18} color="#16a34a" />
+                    <span>الموظف الموثّق لتسجيل الفاتورة:</span>
+                    <span style={{ color: '#0f172a' }}>{verifiedInvoiceEmployee.name}</span>
+                  </div>
+                  <div
+                    style={{
+                      background: '#dcfce7',
+                      color: '#15803d',
+                      padding: '3px 10px',
+                      borderRadius: '6px',
+                      fontSize: '11.5px',
+                      fontWeight: '800',
+                      letterSpacing: '2px',
+                      fontFamily: 'monospace'
+                    }}
+                  >
+                    كود: ••••
+                  </div>
+                </div>
+              )}
+
               {/* بيانات الفاتورة الأساسية */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '14px' }}>
                 <div>
@@ -2749,7 +3061,8 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                   <label className="outstock-form-label" style={{ fontSize: '11px' }}>سعر الجمهور</label>
                   <input
                     type="number"
-                    step="0.1"
+                    step="any"
+                    min="0"
                     className="outstock-form-input"
                     placeholder="0.00"
                     value={manualItem.public_price}
@@ -2765,7 +3078,8 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                   <label className="outstock-form-label" style={{ fontSize: '11px' }}>خصم %</label>
                   <input
                     type="number"
-                    step="0.1"
+                    step="any"
+                    min="0"
                     className="outstock-form-input"
                     placeholder="0%"
                     value={manualItem.discount_percent}
@@ -2781,7 +3095,8 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                   <label className="outstock-form-label" style={{ fontSize: '11px' }}>سعر الشراء</label>
                   <input
                     type="number"
-                    step="0.1"
+                    step="any"
+                    min="0"
                     className="outstock-form-input"
                     placeholder="صافي"
                     value={manualItem.buy_price}
@@ -3251,6 +3566,25 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
           </div>
         </div>
       )}
+
+      {/* نافذة التحقق من كود الموظف كباسورد لتسجيل فاتورة جديدة */}
+      <EmployeeCodeAuthModal
+        isOpen={isInvoiceEmployeeAuthOpen}
+        title="التحقق من كود الموظف لإدخال الفاتورة"
+        subtitle="يرجى إدخال كود الموظف السري لتوثيق مسؤوليته عن إدخال فاتورة التوريد في النظام"
+        actionLabel="تأكيد ومتابعة إدخال الفاتورة"
+        onClose={() => setIsInvoiceEmployeeAuthOpen(false)}
+        onSuccess={handleInvoiceEmployeeVerified}
+      />
+
+      {/* نافذة تحديد فواتير مسجلة للمسحوبات اليدوية */}
+      <SelectRegisteredInvoicesModal
+        isOpen={isSelectInvoicesModalOpen}
+        suppliers={suppliers}
+        initialSupplierId={selectedSupplierForWithdrawals?.id}
+        onClose={() => setIsSelectInvoicesModalOpen(false)}
+        onConfirm={handleConfirmSelectedInvoices}
+      />
     </div>
   );
 }
