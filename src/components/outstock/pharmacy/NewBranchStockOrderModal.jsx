@@ -45,7 +45,7 @@ export default function NewBranchStockOrderModal({
       unitType: 'pack',
       quantity: 1,
       selectedMed: null,
-      itemType: 'medication',
+      itemType: '', // لا يوجد اختيار افتراضي - يجب تحديده مع كل صنف
       notes: ''
     }
   ]);
@@ -88,6 +88,15 @@ export default function NewBranchStockOrderModal({
   };
 
   const handleAddItem = () => {
+    // عدم إضافة صنف جديد إلا بعد تحديد نوع الصنف الحالي
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!it.itemType) {
+        setErrorMsg(`يرجى تحديد نوع الصنف #${i + 1} (${it.medicationName || 'الصنف الحالي'}) (دوائي 💊 أو مستحضرات 💄) أولاً قبل إضافة صنف جديد`);
+        return;
+      }
+    }
+    setErrorMsg('');
     const newIdx = items.length;
     setItems((prev) => [
       ...prev,
@@ -96,7 +105,7 @@ export default function NewBranchStockOrderModal({
         unitType: 'pack',
         quantity: 1,
         selectedMed: null,
-        itemType: 'medication',
+        itemType: '', // لا يوجد اختيار افتراضي
         notes: ''
       }
     ]);
@@ -157,13 +166,21 @@ export default function NewBranchStockOrderModal({
       return;
     }
 
+    // التحقق من تحديد نوع الصنف لكل صنف
+    for (const it of validItems) {
+      if (!it.itemType) {
+        setErrorMsg(`يرجى تحديد نوع الصنف (دوائي 💊 أو مستحضرات 💄) للصنف "${it.medicationName}"`);
+        return;
+      }
+    }
+
     if (!senderEmployee || !senderEmployee.code) {
       setErrorMsg('⚠️ يرجى إدخال وتأكيد كود الموظف مرسل الطلب أولاً قبل الإرسال');
       return;
     }
 
     const hasCosmetics = validItems.some((it) => it.itemType === 'cosmetics');
-    const hasMeds = validItems.some((it) => (it.itemType || 'medication') === 'medication');
+    const hasMeds = validItems.some((it) => it.itemType === 'medication');
     const computedCategory = hasCosmetics && hasMeds ? 'mixed' : (hasCosmetics ? 'cosmetics' : 'medication');
 
     setIsSubmitting(true);
@@ -181,7 +198,7 @@ export default function NewBranchStockOrderModal({
           unitType: 'pack',
           quantity: parseInt(it.quantity || 1, 10),
           unitPrice: 0,
-          itemType: it.itemType || 'medication',
+          itemType: it.itemType,
           notes: it.notes || null
         }))
       };
@@ -556,51 +573,65 @@ export default function NewBranchStockOrderModal({
                         <Pill size={14} />
                         <span>اسم الصنف / المستحضر * :</span>
                       </label>
-                      <div style={{ display: 'flex', gap: '4px', background: '#f1f5f9', padding: '2px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                        <button
-                          type="button"
-                          onClick={() => handleItemChange(idx, 'itemType', 'medication')}
-                          style={{
-                            padding: '3px 10px',
-                            borderRadius: '6px',
-                            fontSize: '11.5px',
-                            fontWeight: '800',
-                            cursor: 'pointer',
-                            border: 'none',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            background: (it.itemType || 'medication') === 'medication' ? '#059669' : 'transparent',
-                            color: (it.itemType || 'medication') === 'medication' ? '#ffffff' : '#64748b',
-                            boxShadow: (it.itemType || 'medication') === 'medication' ? '0 1px 3px rgba(5, 150, 105, 0.3)' : 'none',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          <Pill size={12} />
-                          <span>💊 دواء</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleItemChange(idx, 'itemType', 'cosmetics')}
-                          style={{
-                            padding: '3px 10px',
-                            borderRadius: '6px',
-                            fontSize: '11.5px',
-                            fontWeight: '800',
-                            cursor: 'pointer',
-                            border: 'none',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            background: it.itemType === 'cosmetics' ? '#db2777' : 'transparent',
-                            color: it.itemType === 'cosmetics' ? '#ffffff' : '#64748b',
-                            boxShadow: it.itemType === 'cosmetics' ? '0 1px 3px rgba(219, 39, 119, 0.3)' : 'none',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          <Sparkles size={12} />
-                          <span>💄 مستحضرات</span>
-                        </button>
+                      {/* تصنيف الصنف: دوائي أو مستحضرات تجميل (إلزامي بدون اختيار افتراضي) */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {!it.itemType && (
+                          <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: '800', background: '#fef2f2', padding: '2px 8px', borderRadius: '6px', border: '1px dashed #f87171' }}>
+                            ⚠️ حدد النوع *
+                          </span>
+                        )}
+                        <div style={{ display: 'flex', gap: '4px', background: !it.itemType ? '#fff7ed' : '#f1f5f9', padding: '2px', borderRadius: '8px', border: !it.itemType ? '1.5px dashed #f97316' : '1px solid #cbd5e1' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleItemChange(idx, 'itemType', 'medication');
+                              setErrorMsg('');
+                            }}
+                            style={{
+                              padding: '3px 10px',
+                              borderRadius: '6px',
+                              fontSize: '11.5px',
+                              fontWeight: '800',
+                              cursor: 'pointer',
+                              border: 'none',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: it.itemType === 'medication' ? '#059669' : 'transparent',
+                              color: it.itemType === 'medication' ? '#ffffff' : '#64748b',
+                              boxShadow: it.itemType === 'medication' ? '0 1px 3px rgba(5, 150, 105, 0.3)' : 'none',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <Pill size={12} />
+                            <span>💊 دواء</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleItemChange(idx, 'itemType', 'cosmetics');
+                              setErrorMsg('');
+                            }}
+                            style={{
+                              padding: '3px 10px',
+                              borderRadius: '6px',
+                              fontSize: '11.5px',
+                              fontWeight: '800',
+                              cursor: 'pointer',
+                              border: 'none',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: it.itemType === 'cosmetics' ? '#db2777' : 'transparent',
+                              color: it.itemType === 'cosmetics' ? '#ffffff' : '#64748b',
+                              boxShadow: it.itemType === 'cosmetics' ? '0 1px 3px rgba(219, 39, 119, 0.3)' : 'none',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <Sparkles size={12} />
+                            <span>💄 مستحضرات</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                     <MedicationAutocompleteInput

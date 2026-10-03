@@ -771,22 +771,35 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           can_access_discounts_comparison: true,
           can_manage_team: true
         };
-      } else if (!payload.permissions && (payload.role === 'procurement_officer' || payload.role === 'procurement')) {
+      } else if (!payload.permissions && (payload.role === 'procurement_officer' || payload.role === 'procurement' || payload.role === 'cosmetics_officer')) {
         try {
-          const uRow = await db.query('SELECT permissions FROM public.outstock_users WHERE id = $1', [payload.id]);
+          const uRow = await db.query('SELECT permissions, role FROM public.outstock_users WHERE id = $1', [payload.id]);
           payload.permissions = uRow.rows[0]?.permissions || {};
+          if (uRow.rows[0]?.role) payload.role = uRow.rows[0].role;
         } catch (e) {
           payload.permissions = {};
         }
       }
 
-      // إذا كان المستخدم يملك صلاحية الموردين العامة، تفعيل الصلاحيات الفرعية تلقائياً إذا لم تكن محددة
-      if (payload.permissions && payload.permissions.can_access_suppliers) {
-        if (payload.permissions.can_access_supplier_accounts === undefined) payload.permissions.can_access_supplier_accounts = true;
-        if (payload.permissions.can_access_order_receiving === undefined) payload.permissions.can_access_order_receiving = true;
-        if (payload.permissions.can_access_supplier_invoices === undefined) payload.permissions.can_access_supplier_invoices = true;
-        if (payload.permissions.can_access_branch_withdrawals === undefined) payload.permissions.can_access_branch_withdrawals = true;
-        if (payload.permissions.can_access_discounts_comparison === undefined) payload.permissions.can_access_discounts_comparison = true;
+      // إذا كان المستخدم مسؤول مستحضرات تجميل، تأكيد قفل كافة صلاحيات الموردين وعزل النطاق للمستحضرات فقط
+      if (payload.role === 'cosmetics_officer' || payload.permissions?.category_scope === 'cosmetics') {
+        payload.permissions = {
+          ...(payload.permissions || {}),
+          category_scope: 'cosmetics',
+          can_access_suppliers: false,
+          can_access_supplier_accounts: false,
+          can_access_order_receiving: false,
+          can_access_supplier_invoices: false,
+          can_access_branch_withdrawals: false,
+          can_access_discounts_comparison: false
+        };
+      } else if (payload.permissions && payload.permissions.can_access_suppliers) {
+        // إذا كان المستخدم يملك صلاحية الموردين العامة، تفعيل الصلاحيات الفرعية فقط إذا كانت ممنوحة صراحة
+        if (payload.permissions.can_access_supplier_accounts === undefined) payload.permissions.can_access_supplier_accounts = false;
+        if (payload.permissions.can_access_order_receiving === undefined) payload.permissions.can_access_order_receiving = false;
+        if (payload.permissions.can_access_supplier_invoices === undefined) payload.permissions.can_access_supplier_invoices = false;
+        if (payload.permissions.can_access_branch_withdrawals === undefined) payload.permissions.can_access_branch_withdrawals = false;
+        if (payload.permissions.can_access_discounts_comparison === undefined) payload.permissions.can_access_discounts_comparison = false;
       }
 
       // في حال كان المستخدم فرعاً ولم يتم تعيين branchId في التوكن
@@ -842,7 +855,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         const uPass = String(user.password || '').trim();
         if (cleanPass === uPass || (stdPass && toStdDigits(uPass) === stdPass)) {
           let allowedBranches = [];
-          if (user.role === 'procurement' || user.role === 'procurement_officer') {
+          if (user.role === 'procurement' || user.role === 'procurement_officer' || user.role === 'cosmetics_officer') {
             const accessRes = await db.query(
               'SELECT branch_id FROM public.outstock_user_branch_access WHERE user_id = $1',
               [user.id]
@@ -859,37 +872,47 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           }
 
           const targetRole = user.role === 'branch' ? 'outstock_branch' : user.role;
-          const userPermissions = user.permissions || (
+          let userPermissions = user.permissions || (
             user.role === 'procurement_manager' || user.role === 'owner'
               ? { can_edit_items: true, can_view_orders: true, can_change_status: true, can_access_suppliers: true, can_manage_team: true }
               : {}
           );
 
-          const token = generateToken({
+          const isCosmetics = user.role === 'cosmetics_officer' || userPermissions.category_scope === 'cosmetics';
+          const effectiveCategoryScope = isCosmetics ? 'cosmetics' : (userPermissions.category_scope || 'all');
+          if (isCosmetics) {
+            userPermissions = {
+              ...userPermissions,
+              category_scope: 'cosmetics',
+              can_access_suppliers: false,
+              can_access_supplier_accounts: false,
+              can_access_order_receiving: false,
+              can_access_supplier_invoices: false,
+              can_access_branch_withdrawals: false,
+              can_access_discounts_comparison: false
+            };
+          }
+
+          const userPayload = {
             id: user.id,
             username: user.username,
             fullName: user.full_name,
+            name: user.full_name,
             role: targetRole,
+            category_scope: effectiveCategoryScope,
             branchId: user.branch_id,
             allowedBranches,
             branchData,
-            permissions: userPermissions
-          }, JWT_SECRET);
+            permissions: userPermissions,
+            ...(userPermissions || {})
+          };
+
+          const token = generateToken(userPayload, JWT_SECRET);
 
           return res.json({
             success: true,
             token,
-            user: {
-              id: user.id,
-              username: user.username,
-              fullName: user.full_name,
-              name: user.full_name,
-              role: targetRole,
-              branchId: user.branch_id,
-              allowedBranches,
-              branchData,
-              permissions: userPermissions
-            }
+            user: userPayload
           });
         }
       }
@@ -2971,7 +2994,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
                COALESCE(json_agg(ba.branch_id) FILTER (WHERE ba.branch_id IS NOT NULL), '[]') as assigned_branches
         FROM public.outstock_users u
         LEFT JOIN public.outstock_user_branch_access ba ON u.id = ba.user_id
-        WHERE u.role IN ('procurement_manager', 'procurement_officer', 'procurement') AND u.username <> 'admin-stock'
+        WHERE u.role IN ('procurement_manager', 'procurement_officer', 'cosmetics_officer', 'procurement') AND u.username <> 'admin-stock'
         GROUP BY u.id, u.username, u.full_name, u.role, u.phone, u.is_active, u.permissions, u.created_at
         ORDER BY u.created_at ASC
       `);
@@ -2988,7 +3011,17 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         return res.status(403).json({ success: false, error: 'غير مصرح - إضافة موظف مشتريات متاحة للمدير والمالك فقط' });
       }
 
-      const { username, password, fullName, phone, permissions, assignedBranches } = req.body || {};
+      const {
+        username,
+        password,
+        fullName,
+        phone,
+        role: rawRole,
+        category_scope: rawCategoryScope,
+        permissions,
+        assignedBranches,
+        allowed_branches
+      } = req.body || {};
       const cleanUser = String(username || '').trim().toLowerCase();
       const cleanPass = String(password || '').trim();
 
@@ -3006,26 +3039,33 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         return res.status(400).json({ success: false, error: 'اسم المستخدم مسجل بالفعل في نظام النواقص' });
       }
 
-      const newId = `proc_emp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const isCosmetics = rawRole === 'cosmetics_officer' || rawCategoryScope === 'cosmetics' || permissions?.category_scope === 'cosmetics' || req.body?.category_scope === 'cosmetics';
+      const effectiveRole = isCosmetics ? 'cosmetics_officer' : (rawRole || 'procurement_officer');
+      const effectiveCategoryScope = isCosmetics ? 'cosmetics' : (rawCategoryScope || permissions?.category_scope || 'all');
+
+      const permsSource = (permissions && typeof permissions === 'object') ? permissions : req.body || {};
       const defaultPerms = {
-        can_edit_items: Boolean(permissions?.can_edit_items),
-        can_view_orders: permissions?.can_view_orders !== false,
-        can_change_status: Boolean(permissions?.can_change_status),
-        can_access_suppliers: Boolean(permissions?.can_access_suppliers),
-        can_access_supplier_accounts: permissions?.can_access_supplier_accounts !== undefined ? Boolean(permissions.can_access_supplier_accounts) : Boolean(permissions?.can_access_suppliers),
-        can_access_order_receiving: permissions?.can_access_order_receiving !== undefined ? Boolean(permissions.can_access_order_receiving) : Boolean(permissions?.can_access_suppliers),
-        can_access_supplier_invoices: permissions?.can_access_supplier_invoices !== undefined ? Boolean(permissions.can_access_supplier_invoices) : Boolean(permissions?.can_access_suppliers),
-        can_access_branch_withdrawals: permissions?.can_access_branch_withdrawals !== undefined ? Boolean(permissions.can_access_branch_withdrawals) : Boolean(permissions?.can_access_suppliers),
-        can_access_discounts_comparison: permissions?.can_access_discounts_comparison !== undefined ? Boolean(permissions.can_access_discounts_comparison) : Boolean(permissions?.can_access_suppliers)
+        can_edit_items: Boolean(permsSource.can_edit_items),
+        can_view_orders: permsSource.can_view_orders !== false,
+        can_change_status: Boolean(permsSource.can_change_status),
+        can_access_suppliers: isCosmetics ? false : Boolean(permsSource.can_access_suppliers),
+        can_access_supplier_accounts: isCosmetics ? false : Boolean(permsSource.can_access_supplier_accounts),
+        can_access_order_receiving: isCosmetics ? false : Boolean(permsSource.can_access_order_receiving),
+        can_access_supplier_invoices: isCosmetics ? false : Boolean(permsSource.can_access_supplier_invoices),
+        can_access_branch_withdrawals: isCosmetics ? false : Boolean(permsSource.can_access_branch_withdrawals),
+        can_access_discounts_comparison: isCosmetics ? false : Boolean(permsSource.can_access_discounts_comparison),
+        category_scope: effectiveCategoryScope
       };
 
+      const newId = `proc_emp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
       await db.query(`
         INSERT INTO public.outstock_users (id, username, password, full_name, role, phone, permissions, created_by, is_active)
-        VALUES ($1, $2, $3, $4, 'procurement_officer', $5, $6::jsonb, $7, true)
-      `, [newId, cleanUser, cleanPass, fullName.trim(), phone || null, JSON.stringify(defaultPerms), req.outstockUser.id]);
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, true)
+      `, [newId, cleanUser, cleanPass, fullName.trim(), effectiveRole, phone || null, JSON.stringify(defaultPerms), req.outstockUser.id]);
 
-      if (Array.isArray(assignedBranches) && assignedBranches.length > 0) {
-        for (const bId of assignedBranches) {
+      const branchesList = Array.isArray(assignedBranches) ? assignedBranches : (Array.isArray(allowed_branches) ? allowed_branches : []);
+      if (branchesList.length > 0) {
+        for (const bId of branchesList) {
           if (!bId) continue;
           await db.query(`
             INSERT INTO public.outstock_user_branch_access (id, user_id, branch_id)
@@ -3038,7 +3078,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       res.json({
         success: true,
         message: 'تم إضافة عضو فريق المشتريات وتحديد صلاحياته بنجاح',
-        user: { id: newId, username: cleanUser, fullName: fullName.trim(), role: 'procurement_officer', permissions: defaultPerms, assignedBranches: assignedBranches || [] }
+        user: { id: newId, username: cleanUser, fullName: fullName.trim(), role: effectiveRole, permissions: defaultPerms, assignedBranches: branchesList }
       });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
@@ -3052,7 +3092,17 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       }
 
       const targetId = req.params.id;
-      const { fullName, phone, password, permissions, assignedBranches, isActive } = req.body || {};
+      const {
+        fullName,
+        phone,
+        password,
+        role: rawRole,
+        category_scope: rawCategoryScope,
+        permissions,
+        assignedBranches,
+        allowed_branches,
+        isActive
+      } = req.body || {};
 
       const userRes = await db.query('SELECT * FROM public.outstock_users WHERE id = $1', [targetId]);
       if (userRes.rows.length === 0) {
@@ -3065,9 +3115,27 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         updatedPass = String(password).trim();
       }
 
+      const isCosmetics = rawRole === 'cosmetics_officer' ||
+        rawCategoryScope === 'cosmetics' ||
+        permissions?.category_scope === 'cosmetics' ||
+        req.body?.category_scope === 'cosmetics' ||
+        req.body?.role === 'cosmetics_officer';
+      const effectiveRole = isCosmetics ? 'cosmetics_officer' : (rawRole || existingUser.role || 'procurement_officer');
+      const effectiveCategoryScope = isCosmetics ? 'cosmetics' : (rawCategoryScope || 'all');
+
+      const permsSource = (permissions && typeof permissions === 'object') ? permissions : req.body || {};
       const mergedPerms = {
         ...(existingUser.permissions || {}),
-        ...(permissions || {})
+        can_edit_items: permsSource.can_edit_items !== undefined ? Boolean(permsSource.can_edit_items) : Boolean(existingUser.permissions?.can_edit_items),
+        can_view_orders: permsSource.can_view_orders !== undefined ? Boolean(permsSource.can_view_orders) : (existingUser.permissions?.can_view_orders !== false),
+        can_change_status: permsSource.can_change_status !== undefined ? Boolean(permsSource.can_change_status) : Boolean(existingUser.permissions?.can_change_status),
+        can_access_suppliers: isCosmetics ? false : (permsSource.can_access_suppliers !== undefined ? Boolean(permsSource.can_access_suppliers) : Boolean(existingUser.permissions?.can_access_suppliers)),
+        can_access_supplier_accounts: isCosmetics ? false : (permsSource.can_access_supplier_accounts !== undefined ? Boolean(permsSource.can_access_supplier_accounts) : Boolean(existingUser.permissions?.can_access_supplier_accounts)),
+        can_access_order_receiving: isCosmetics ? false : (permsSource.can_access_order_receiving !== undefined ? Boolean(permsSource.can_access_order_receiving) : Boolean(existingUser.permissions?.can_access_order_receiving)),
+        can_access_supplier_invoices: isCosmetics ? false : (permsSource.can_access_supplier_invoices !== undefined ? Boolean(permsSource.can_access_supplier_invoices) : Boolean(existingUser.permissions?.can_access_supplier_invoices)),
+        can_access_branch_withdrawals: isCosmetics ? false : (permsSource.can_access_branch_withdrawals !== undefined ? Boolean(permsSource.can_access_branch_withdrawals) : Boolean(existingUser.permissions?.can_access_branch_withdrawals)),
+        can_access_discounts_comparison: isCosmetics ? false : (permsSource.can_access_discounts_comparison !== undefined ? Boolean(permsSource.can_access_discounts_comparison) : Boolean(existingUser.permissions?.can_access_discounts_comparison)),
+        category_scope: effectiveCategoryScope
       };
 
       await db.query(`
@@ -3075,15 +3143,17 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         SET full_name = COALESCE($1, full_name),
             phone = COALESCE($2, phone),
             password = $3,
-            permissions = $4::jsonb,
-            is_active = COALESCE($5, is_active),
+            role = $4,
+            permissions = $5::jsonb,
+            is_active = COALESCE($6, is_active),
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = $6
-      `, [fullName ? fullName.trim() : null, phone || null, updatedPass, JSON.stringify(mergedPerms), isActive !== undefined ? Boolean(isActive) : null, targetId]);
+        WHERE id = $7
+      `, [fullName ? fullName.trim() : null, phone || null, updatedPass, effectiveRole, JSON.stringify(mergedPerms), isActive !== undefined ? Boolean(isActive) : null, targetId]);
 
-      if (Array.isArray(assignedBranches)) {
+      const branchesList = Array.isArray(assignedBranches) ? assignedBranches : (Array.isArray(allowed_branches) ? allowed_branches : null);
+      if (branchesList !== null) {
         await db.query('DELETE FROM public.outstock_user_branch_access WHERE user_id = $1', [targetId]);
-        for (const bId of assignedBranches) {
+        for (const bId of branchesList) {
           if (!bId) continue;
           await db.query(`
             INSERT INTO public.outstock_user_branch_access (id, user_id, branch_id)

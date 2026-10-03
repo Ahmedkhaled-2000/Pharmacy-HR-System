@@ -194,12 +194,16 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   const [searchQuery, setSearchQuery] = useState('');
 
   // ── الصلاحيات الدقيقة للأقسام الفرعية لإدارة الموردين والربط ──────────────────────────────
-  const canAccessAccounts = !currentUser || currentUser.role === 'owner' || currentUser.role === 'procurement_manager' || currentUser.username === 'admin-stock' || currentUser.permissions?.can_access_supplier_accounts !== false;
-  const canAccessReceiving = !currentUser || currentUser.role === 'owner' || currentUser.role === 'procurement_manager' || currentUser.username === 'admin-stock' || currentUser.permissions?.can_access_order_receiving !== false;
-  const canAccessInvoices = !currentUser || currentUser.role === 'owner' || currentUser.role === 'procurement_manager' || currentUser.username === 'admin-stock' || currentUser.permissions?.can_access_supplier_invoices !== false;
-  const canAccessWithdrawals = !currentUser || currentUser.role === 'owner' || currentUser.role === 'procurement_manager' || currentUser.username === 'admin-stock' || currentUser.permissions?.can_access_branch_withdrawals !== false;
-  const canAccessDiscounts = !currentUser || currentUser.role === 'owner' || currentUser.role === 'procurement_manager' || currentUser.username === 'admin-stock' || currentUser.permissions?.can_access_discounts_comparison !== false;
-  const canAccessPharmafly = !currentUser || currentUser.role === 'owner' || currentUser.role === 'procurement_manager' || currentUser.username === 'admin-stock' || currentUser.permissions?.can_access_pharmafly !== false;
+  const isMasterAdmin = !currentUser || currentUser.role === 'owner' || currentUser.role === 'procurement_manager' || currentUser.username === 'admin-stock';
+  const perms = currentUser?.permissions || {};
+  const isCosmetics = currentUser?.role === 'cosmetics_officer' || perms.category_scope === 'cosmetics' || currentUser?.category_scope === 'cosmetics';
+
+  const canAccessAccounts = !isCosmetics && (isMasterAdmin || perms.can_access_supplier_accounts === true || currentUser?.can_access_supplier_accounts === true);
+  const canAccessReceiving = !isCosmetics && (isMasterAdmin || perms.can_access_order_receiving === true || currentUser?.can_access_order_receiving === true);
+  const canAccessInvoices = !isCosmetics && (isMasterAdmin || perms.can_access_supplier_invoices === true || currentUser?.can_access_supplier_invoices === true);
+  const canAccessWithdrawals = !isCosmetics && (isMasterAdmin || perms.can_access_branch_withdrawals === true || currentUser?.can_access_branch_withdrawals === true);
+  const canAccessDiscounts = !isCosmetics && (isMasterAdmin || perms.can_access_discounts_comparison === true || currentUser?.can_access_discounts_comparison === true);
+  const canAccessPharmafly = !isCosmetics && (isMasterAdmin || perms.can_access_pharmafly === true || currentUser?.can_access_pharmafly === true);
 
   useEffect(() => {
     if (activeSubTab === 'accounts' && !canAccessAccounts) {
