@@ -509,6 +509,8 @@ export async function initOutstockTables(db) {
       await db.query(`
         ALTER TABLE public.outstock_orders ADD COLUMN IF NOT EXISTS delivery_type VARCHAR(50) DEFAULT 'branch_pickup';
         ALTER TABLE public.outstock_orders ADD COLUMN IF NOT EXISTS delivery_target_branch VARCHAR(100) NULL;
+        ALTER TABLE public.outstock_orders ADD COLUMN IF NOT EXISTS delivery_target_branch_id VARCHAR(50) NULL;
+        CREATE INDEX IF NOT EXISTS idx_outstock_orders_delivery_target ON public.outstock_orders (delivery_target_branch_id, delivery_type);
         ALTER TABLE public.outstock_orders ADD COLUMN IF NOT EXISTS order_category VARCHAR(30) DEFAULT 'medication';
         ALTER TABLE public.outstock_orders ADD COLUMN IF NOT EXISTS order_receiver_code VARCHAR(50) NULL;
         ALTER TABLE public.outstock_orders ADD COLUMN IF NOT EXISTS order_receiver_name VARCHAR(150) NULL;
@@ -1720,10 +1722,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   // ───────────────────────────────────────────────────────────────────────────
   app.get('/api/outstock/orders', authMiddleware, async (req, res) => {
     try {
-      const { branchId, status, search, limit, orderType, dateFrom, dateTo } = req.query;
+      const { branchId, status, search, limit, orderType, dateFrom, dateTo, transferredOnly, transferDirection } = req.query;
       let query = `
         SELECT o.*, c.full_name as customer_name, c.whatsapp_phone as customer_phone, c.address as customer_address,
                b.name as branch_name,
+               COALESCE(tb.name, o.delivery_target_branch) as target_branch_name,
                COALESCE(json_agg(
                  json_build_object(
                    'id', i.id,
@@ -1749,22 +1752,66 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         FROM public.outstock_orders o
         LEFT JOIN public.outstock_customers c ON o.customer_id = c.id
         LEFT JOIN public.outstock_branches b ON o.branch_id = b.id
+        LEFT JOIN public.outstock_branches tb ON o.delivery_target_branch_id = tb.id
         LEFT JOIN public.outstock_order_items i ON o.id = i.order_id
         WHERE 1=1
       `;
       const params = [];
 
-      // إذا كان المستخدم فرع صيدلية فيرى طلبات فرعه فقط
-      if (req.outstockUser.role === 'outstock_branch' || req.outstockUser.role === 'branch') {
-        params.push(req.outstockUser.branchId || req.outstockUser.id);
-        query += ` AND o.branch_id = $${params.length}`;
-      } else if ((req.outstockUser.role === 'procurement_officer' || req.outstockUser.role === 'procurement') && Array.isArray(req.outstockUser.allowedBranches) && req.outstockUser.allowedBranches.length > 0) {
-        // موظف مشتريات محدد بفروع معينة
-        params.push(req.outstockUser.allowedBranches);
-        query += ` AND o.branch_id = ANY($${params.length}::text[])`;
-      } else if (branchId) {
-        params.push(branchId);
-        query += ` AND o.branch_id = $${params.length}`;
+      const isTransferredQuery = transferredOnly === 'true' || transferredOnly === true;
+      const targetBranchParam = branchId || (req.outstockUser.role === 'outstock_branch' || req.outstockUser.role === 'branch' ? (req.outstockUser.branchId || req.outstockUser.id) : null);
+
+      if (isTransferredQuery) {
+        query += ` AND o.delivery_type = 'other_branch_pickup'`;
+        if (targetBranchParam) {
+          // جلب اسم الفرع إن وجد للمطابقة بالمعرف أو الاسم
+          let targetBranchName = null;
+          try {
+            const bLook = await db.query('SELECT name FROM public.outstock_branches WHERE id = $1', [targetBranchParam]);
+            if (bLook.rows.length > 0) targetBranchName = bLook.rows[0].name;
+          } catch (_) {}
+
+          if (transferDirection === 'to') {
+            // محولة إلى هذا الفرع (واردة للاستلام لدينا)
+            params.push(targetBranchParam);
+            const pId = params.length;
+            if (targetBranchName) {
+              params.push(targetBranchName);
+              const pName = params.length;
+              query += ` AND (o.delivery_target_branch_id = $${pId} OR o.delivery_target_branch = $${pName}) AND o.branch_id <> $${pId}`;
+            } else {
+              query += ` AND o.delivery_target_branch_id = $${pId} AND o.branch_id <> $${pId}`;
+            }
+          } else if (transferDirection === 'from') {
+            // محولة من هذا الفرع (صادرة لفرع آخر)
+            params.push(targetBranchParam);
+            query += ` AND o.branch_id = $${params.length}`;
+          } else {
+            // كلاهما (الكل)
+            params.push(targetBranchParam);
+            const pId = params.length;
+            if (targetBranchName) {
+              params.push(targetBranchName);
+              const pName = params.length;
+              query += ` AND (o.branch_id = $${pId} OR o.delivery_target_branch_id = $${pId} OR o.delivery_target_branch = $${pName})`;
+            } else {
+              query += ` AND (o.branch_id = $${pId} OR o.delivery_target_branch_id = $${pId})`;
+            }
+          }
+        }
+      } else {
+        // إذا كان المستخدم فرع صيدلية فيرى طلبات فرعه فقط
+        if (req.outstockUser.role === 'outstock_branch' || req.outstockUser.role === 'branch') {
+          params.push(req.outstockUser.branchId || req.outstockUser.id);
+          query += ` AND o.branch_id = $${params.length}`;
+        } else if ((req.outstockUser.role === 'procurement_officer' || req.outstockUser.role === 'procurement') && Array.isArray(req.outstockUser.allowedBranches) && req.outstockUser.allowedBranches.length > 0) {
+          // موظف مشتريات محدد بفروع معينة
+          params.push(req.outstockUser.allowedBranches);
+          query += ` AND o.branch_id = ANY($${params.length}::text[])`;
+        } else if (branchId) {
+          params.push(branchId);
+          query += ` AND o.branch_id = $${params.length}`;
+        }
       }
 
       if (orderType) {
@@ -1796,7 +1843,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         query += ` AND (o.order_number ILIKE $${params.length} OR o.barcode_data ILIKE $${params.length} OR c.full_name ILIKE $${params.length} OR c.whatsapp_phone ILIKE $${params.length})`;
       }
 
-      query += ` GROUP BY o.id, c.full_name, c.whatsapp_phone, c.address, b.name ORDER BY o.created_at DESC LIMIT ${parseInt(limit || 200, 10)}`;
+      query += ` GROUP BY o.id, c.full_name, c.whatsapp_phone, c.address, b.name, tb.name ORDER BY o.created_at DESC LIMIT ${parseInt(limit || 200, 10)}`;
 
       const result = await db.query(query, params);
       res.json({ success: true, orders: result.rows });
@@ -1821,6 +1868,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         customerNotes,
         deliveryType = 'branch_pickup',
         deliveryTargetBranch = null,
+        deliveryTargetBranchId = null,
         orderCategory = 'medication', // 'medication' (دوائي) أو 'cosmetics' (تجميل)
         orderType = 'customer',       // 'customer' (طلب عميل) أو 'branch' (طلب نواقص رصيد الفرع)
         branchRequestReason = null,
@@ -1934,22 +1982,40 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const orderNumber = `${prefix}-${branchId.slice(0, 4).toUpperCase()}-${todayStr}-${Math.floor(1000 + Math.random() * 9000)}`;
       const barcodeData = cleanPhone ? `${cleanPhone}-${orderNumber.slice(-4)}` : orderNumber;
 
+      // حل اسم ومعرف الفرع المحول إليه بدقة في حال اختيار الاستلام من فرع آخر
+      let finalTargetBranchId = deliveryTargetBranchId || null;
+      let finalTargetBranchName = deliveryTargetBranch || null;
+
+      if (deliveryType === 'other_branch_pickup') {
+        if (finalTargetBranchId && !finalTargetBranchName) {
+          try {
+            const bRes = await db.query('SELECT name FROM public.outstock_branches WHERE id = $1', [finalTargetBranchId]);
+            if (bRes.rows.length > 0) finalTargetBranchName = bRes.rows[0].name;
+          } catch (_) {}
+        } else if (!finalTargetBranchId && finalTargetBranchName) {
+          try {
+            const bRes = await db.query('SELECT id FROM public.outstock_branches WHERE LOWER(name) = LOWER($1)', [finalTargetBranchName.trim()]);
+            if (bRes.rows.length > 0) finalTargetBranchId = bRes.rows[0].id;
+          } catch (_) {}
+        }
+      }
+
       // إدراج رأس الطلب مع التصنيف ونوع الطلب والتوقيت
       await db.query(`
         INSERT INTO public.outstock_orders (
           id, order_number, branch_id, customer_id, total_amount, paid_amount, remaining_amount,
           discount_type, discount_value, net_amount, order_status, expected_pickup_date,
           expected_pickup_time, responsible_pharmacist, customer_notes, barcode_data,
-          delivery_type, delivery_target_branch, order_category, order_receiver_code,
+          delivery_type, delivery_target_branch, delivery_target_branch_id, order_category, order_receiver_code,
           order_receiver_name, payment_splits, medication_image_url,
           order_type, branch_request_reason, sent_to_procurement_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending_procurement', $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21::jsonb, $22, $23, $24, CURRENT_TIMESTAMP)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending_procurement', $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22::jsonb, $23, $24, $25, CURRENT_TIMESTAMP)
       `, [
         orderId, orderNumber, branchId, customerId, totalAmount, paid, remaining,
         discountType || 'none', discVal, netAmount,
         expectedPickupDate || null, expectedPickupTime || null,
         responsiblePharmacist || 'الصيدلي المسؤول', customerNotes || null, barcodeData,
-        deliveryType || 'branch_pickup', deliveryTargetBranch || null,
+        deliveryType || 'branch_pickup', finalTargetBranchName, finalTargetBranchId,
         orderCategory || 'medication',
         orderReceiverCode || null,
         orderReceiverName || null,
@@ -2026,7 +2092,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         responsiblePharmacist,
         barcodeData,
         deliveryType: deliveryType || 'branch_pickup',
-        deliveryTargetBranch: deliveryTargetBranch || null,
+        deliveryTargetBranch: finalTargetBranchName,
+        deliveryTargetBranchId: finalTargetBranchId,
         orderCategory: orderCategory || 'medication',
         orderReceiverCode,
         orderReceiverName,
@@ -2038,7 +2105,29 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       };
 
       // ⚡ بث فوري عبر الـ Socket.io لإدارة المشتريات والمالك والفروع
-      broadcastOutstock('outstock:order_created', { order: fullOrder, branchId });
+      broadcastOutstock('outstock:order_created', { order: fullOrder, branchId, targetBranchId: finalTargetBranchId });
+
+      // إذا كان الطلب محولاً إلى فرع آخر، يتم بث إشعار مخصص للفرع المحول إليه والفرع المصدر
+      if (deliveryType === 'other_branch_pickup') {
+        let srcBranchName = branchId;
+        try {
+          const srcRes = await db.query('SELECT name FROM public.outstock_branches WHERE id = $1', [branchId]);
+          if (srcRes.rows.length > 0) srcBranchName = srcRes.rows[0].name;
+        } catch (_) {}
+
+        broadcastOutstock('outstock:order_transferred', {
+          order: fullOrder,
+          orderId,
+          orderNumber,
+          fromBranchId: branchId,
+          fromBranchName: srcBranchName,
+          toBranchId: finalTargetBranchId,
+          toBranchName: finalTargetBranchName,
+          customerName: customer?.fullName,
+          customerPhone: cleanPhone,
+          timestamp: new Date().toISOString()
+        });
+      }
 
       res.json({
         success: true,
@@ -2178,6 +2267,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       broadcastOutstock('outstock:order_delivered', {
         orderId,
         branchId: order.branch_id,
+        targetBranchId: order.delivery_target_branch_id,
         collectedAmount: nowCollected,
         netTotal,
         paymentMethod
@@ -2563,10 +2653,10 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const isExecutiveProcurement = user.role === 'owner' || user.role === 'procurement_manager' || user.username === 'admin-stock';
       if (!isExecutiveProcurement && (user.role === 'procurement' || user.role === 'procurement_officer') && Array.isArray(user.allowedBranches) && user.allowedBranches.length > 0) {
         params.push(user.allowedBranches);
-        branchFilter = ` AND o.branch_id = ANY($1)`;
+        branchFilter = ` AND (CASE WHEN o.delivery_type = 'other_branch_pickup' AND o.delivery_target_branch_id IS NOT NULL THEN o.delivery_target_branch_id ELSE o.branch_id END) = ANY($1)`;
       } else if (req.query.branchId && req.query.branchId !== 'all') {
         params.push(req.query.branchId);
-        branchFilter = ` AND o.branch_id = $${params.length}`;
+        branchFilter = ` AND (CASE WHEN o.delivery_type = 'other_branch_pickup' AND o.delivery_target_branch_id IS NOT NULL THEN o.delivery_target_branch_id ELSE o.branch_id END) = $${params.length}`;
       }
 
       // فلترة نوع الصنف (دوائي / مستحضرات تجميل)
@@ -2584,7 +2674,16 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       const query = `
         SELECT i.medication_name, i.unit_type, COALESCE(i.item_type, 'medication') as item_type,
-               o.branch_id, b.name as branch_name,
+               CASE 
+                 WHEN o.delivery_type = 'other_branch_pickup' AND o.delivery_target_branch_id IS NOT NULL 
+                 THEN o.delivery_target_branch_id 
+                 ELSE o.branch_id 
+               END as branch_id,
+               CASE 
+                 WHEN o.delivery_type = 'other_branch_pickup' 
+                 THEN COALESCE(tb.name, o.delivery_target_branch, b.name) 
+                 ELSE b.name 
+               END as branch_name,
                SUM(i.quantity) as total_requested_qty,
                COUNT(DISTINCT o.id) as orders_count,
                MAX(NULLIF(o.medication_image_url, '')) as medication_image_url,
@@ -2593,6 +2692,12 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
                  'orderId', o.id,
                  'orderNumber', o.order_number,
                  'orderType', COALESCE(o.order_type, 'customer'),
+                 'deliveryType', o.delivery_type,
+                 'isTransferred', CASE WHEN o.delivery_type = 'other_branch_pickup' THEN true ELSE false END,
+                 'sourceBranchId', o.branch_id,
+                 'sourceBranchName', b.name,
+                 'targetBranchId', o.delivery_target_branch_id,
+                 'targetBranchName', COALESCE(tb.name, o.delivery_target_branch),
                  'branchRequestReason', o.branch_request_reason,
                  'quantity', i.quantity,
                  'unitPrice', i.unit_price,
@@ -2607,11 +2712,22 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         FROM public.outstock_order_items i
         JOIN public.outstock_orders o ON i.order_id = o.id
         LEFT JOIN public.outstock_branches b ON o.branch_id = b.id
+        LEFT JOIN public.outstock_branches tb ON o.delivery_target_branch_id = tb.id
         LEFT JOIN public.outstock_customers c ON o.customer_id = c.id
         WHERE i.item_status = 'pending' AND COALESCE(i.pruned_from_bill, false) = false AND o.order_status NOT IN ('delivered', 'cancelled')
         ${branchFilter}
         ${categoryFilter}
-        GROUP BY i.medication_name, i.unit_type, COALESCE(i.item_type, 'medication'), o.branch_id, b.name
+        GROUP BY i.medication_name, i.unit_type, COALESCE(i.item_type, 'medication'),
+                 CASE 
+                   WHEN o.delivery_type = 'other_branch_pickup' AND o.delivery_target_branch_id IS NOT NULL 
+                   THEN o.delivery_target_branch_id 
+                   ELSE o.branch_id 
+                 END,
+                 CASE 
+                   WHEN o.delivery_type = 'other_branch_pickup' 
+                   THEN COALESCE(tb.name, o.delivery_target_branch, b.name) 
+                   ELSE b.name 
+                 END
         ORDER BY total_requested_qty DESC
       `;
 
@@ -2639,11 +2755,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       const replierName = req.outstockUser.full_name || req.outstockUser.username || 'مسؤول المشتريات';
 
-      // جلب جميع البنود المعلقة المطابقة
+      // جلب جميع البنود المعلقة المطابقة مع بيانات الفرع المستهدف والمصدر
       let itemsToUpdate = [];
       if (Array.isArray(itemIds) && itemIds.length > 0) {
         const itmRes = await db.query(
-          `SELECT i.*, o.branch_id, o.customer_id, o.total_amount, o.paid_amount, o.discount_type, o.discount_value, o.net_amount
+          `SELECT i.*, o.branch_id, o.delivery_type, o.delivery_target_branch_id, o.customer_id, o.total_amount, o.paid_amount, o.discount_type, o.discount_value, o.net_amount
            FROM public.outstock_order_items i
            JOIN public.outstock_orders o ON i.order_id = o.id
            WHERE i.id = ANY($1)`,
@@ -2652,10 +2768,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         itemsToUpdate = itmRes.rows;
       } else {
         const itmRes = await db.query(
-          `SELECT i.*, o.branch_id, o.customer_id, o.total_amount, o.paid_amount, o.discount_type, o.discount_value, o.net_amount
+          `SELECT i.*, o.branch_id, o.delivery_type, o.delivery_target_branch_id, o.customer_id, o.total_amount, o.paid_amount, o.discount_type, o.discount_value, o.net_amount
            FROM public.outstock_order_items i
            JOIN public.outstock_orders o ON i.order_id = o.id
-           WHERE o.branch_id = $1 AND LOWER(i.medication_name) = LOWER($2) AND i.unit_type = $3 AND i.item_status = 'pending'`,
+           WHERE (CASE WHEN o.delivery_type = 'other_branch_pickup' AND o.delivery_target_branch_id IS NOT NULL THEN o.delivery_target_branch_id ELSE o.branch_id END) = $1
+             AND LOWER(i.medication_name) = LOWER($2) AND i.unit_type = $3 AND i.item_status = 'pending'`,
           [branchId, medicationName, unitType || 'pack']
         );
         itemsToUpdate = itmRes.rows;
@@ -2718,13 +2835,17 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           // ب) إعادة احتساب إجمالي الفاتورة والمتبقي
           await recalculateOrderTotals(db, item.order_id);
 
-          // ج) إدراج الصنف في جدول أدوية النواقص
+          // ج) إدراج الصنف في جدول أدوية النواقص للفرع المستهدف
           const defId = `def_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+          const defBranchId = (item.delivery_type === 'other_branch_pickup' && item.delivery_target_branch_id)
+            ? item.delivery_target_branch_id
+            : item.branch_id;
+
           await db.query(`
             INSERT INTO public.outstock_deficiencies (
               id, branch_id, medication_name, unit_type, customer_id, original_order_id, original_item_id, requested_quantity, status
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'market_shortage')
-          `, [defId, item.branch_id, item.medication_name, item.unit_type, item.customer_id, item.order_id, item.id, item.quantity]);
+          `, [defId, defBranchId, item.medication_name, item.unit_type, item.customer_id, item.order_id, item.id, item.quantity]);
         }
       }
 
@@ -2742,20 +2863,29 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         `, [stockId, branchId, medicationName, unitType || 'pack', totalProcuredQty]);
       }
 
-      // ⚡ بث فوري عبر Socket.io للفرع والمالك والمشتريات
-      const itemUpdatePayload = {
-        branchId,
-        medicationName,
-        unitType,
-        action,
-        count: itemsToUpdate.length,
-        repliedBy: replierName,
-        repliedAt: new Date().toISOString()
-      };
-      broadcastOutstock('outstock:item_status_updated', itemUpdatePayload);
-      broadcastOutstock('outstock:items_status_updated', itemUpdatePayload);
-      broadcastOutstock('outstock:branch_order_replied', itemUpdatePayload);
-      broadcastOutstock('outstock:refresh_notifications', { branchId });
+      // ⚡ بث فوري عبر Socket.io لكافة الفروع المتأثرة (المصدر والمحول إليه) والمالك والمشتريات
+      const affectedBranchIds = new Set();
+      affectedBranchIds.add(branchId);
+      for (const item of itemsToUpdate) {
+        if (item.branch_id) affectedBranchIds.add(item.branch_id);
+        if (item.delivery_target_branch_id) affectedBranchIds.add(item.delivery_target_branch_id);
+      }
+
+      for (const bId of affectedBranchIds) {
+        const itemUpdatePayload = {
+          branchId: bId,
+          medicationName,
+          unitType,
+          action,
+          count: itemsToUpdate.length,
+          repliedBy: replierName,
+          repliedAt: new Date().toISOString()
+        };
+        broadcastOutstock('outstock:item_status_updated', itemUpdatePayload);
+        broadcastOutstock('outstock:items_status_updated', itemUpdatePayload);
+        broadcastOutstock('outstock:branch_order_replied', itemUpdatePayload);
+        broadcastOutstock('outstock:refresh_notifications', { branchId: bId });
+      }
 
       res.json({
         success: true,
@@ -2832,7 +2962,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
                  'itemType', COALESCE(i.item_type, 'medication')
                )) FILTER (WHERE o.id IS NOT NULL AND i.id IS NOT NULL), '[]') as items
         FROM public.outstock_branches b
-        LEFT JOIN public.outstock_orders o ON b.id = o.branch_id AND o.order_status <> 'cancelled'
+        LEFT JOIN public.outstock_orders o ON b.id = (CASE WHEN o.delivery_type = 'other_branch_pickup' AND o.delivery_target_branch_id IS NOT NULL THEN o.delivery_target_branch_id ELSE o.branch_id END) AND o.order_status <> 'cancelled'
         LEFT JOIN public.outstock_order_items i ON o.id = i.order_id AND ${itemStatusCondition}
         LEFT JOIN public.outstock_customers c ON o.customer_id = c.id
         WHERE 1=1 ${extraWhere}

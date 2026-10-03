@@ -158,11 +158,25 @@ export default function NewCustomerOrderModal({
 
   // ── 6. موظفو الفرع المستحقون (استبعاد عمال الدليفري والطيارين) ──
   const [serverEmployees, setServerEmployees] = useState([]);
-  const [availableBranches, setAvailableBranches] = useState([]);
   const [deliveryType, setDeliveryType] = useState('branch_pickup'); // 'branch_pickup' | 'home_delivery' | 'other_branch_pickup'
   const [deliveryTargetBranch, setDeliveryTargetBranch] = useState('');
+  const [deliveryTargetBranchId, setDeliveryTargetBranchId] = useState('');
   const [isCustomUnitSelected, setIsCustomUnitSelected] = useState(false);
   const [isDiscountAllowed, setIsDiscountAllowed] = useState(true);
+
+  // قائمة الفروع المستبعد منها الفرع الحالي لضمان عدم التحويل لنفس الفرع
+  const targetBranchesList = useMemo(() => {
+    return availableBranches.filter(b => {
+      const bId = String(b.id || b.branchId || '');
+      const bName = String(b.name || b.branch_name || '').trim().toLowerCase();
+      const curId = String(branchId || '');
+      const curName = String(branch?.name || '').trim().toLowerCase();
+
+      if (curId && bId && curId === bId) return false;
+      if (curName && bName && curName === bName) return false;
+      return true;
+    });
+  }, [availableBranches, branchId, branch]);
 
   // جلب موظفي الفرع المتاحين من الخادم والفروع النشطة وصلاحيات الخصم
   useEffect(() => {
@@ -695,7 +709,8 @@ export default function NewCustomerOrderModal({
         customerNotes,
         zone: selectedZone || null,
         deliveryType,
-        deliveryTargetBranch: deliveryType === 'other_branch_pickup' ? deliveryTargetBranch : null
+        deliveryTargetBranch: deliveryType === 'other_branch_pickup' ? deliveryTargetBranch : null,
+        deliveryTargetBranchId: deliveryType === 'other_branch_pickup' ? deliveryTargetBranchId : null
       };
 
       const res = await outstockCreateOrder(payload);
@@ -1971,29 +1986,58 @@ export default function NewCustomerOrderModal({
                 >
                   <option value="branch_pickup">🏪 استلام العميل من هذا الفرع</option>
                   <option value="home_delivery">🛵 توصيل دليفري للعميل (منزل/مقر العمل)</option>
-                  <option value="other_branch_pickup">🔄 استلام من فرع آخر للصيدلية</option>
+                  <option value="other_branch_pickup">🔄 استلام من فرع آخر للصيدلية (تحويل طلب)</option>
                 </select>
               </div>
 
               {deliveryType === 'other_branch_pickup' && (
                 <div>
                   <select
-                    value={deliveryTargetBranch}
-                    onChange={(e) => setDeliveryTargetBranch(e.target.value)}
+                    value={deliveryTargetBranchId || deliveryTargetBranch}
+                    onChange={(e) => {
+                      const selectedVal = e.target.value;
+                      const selectedObj = availableBranches.find(
+                        (b) => String(b.id || b.branchId) === String(selectedVal) || b.name === selectedVal
+                      );
+                      setDeliveryTargetBranchId(selectedObj ? String(selectedObj.id || selectedObj.branchId || '') : selectedVal);
+                      setDeliveryTargetBranch(selectedObj ? (selectedObj.name || selectedObj.branch_name) : selectedVal);
+                    }}
                     className="outstock-form-select"
-                    style={{ fontWeight: '700', borderColor: !deliveryTargetBranch ? '#f59e0b' : '#0d9488' }}
+                    style={{ fontWeight: '700', borderColor: (!deliveryTargetBranch && !deliveryTargetBranchId) ? '#f59e0b' : '#0d9488' }}
                     required
                   >
                     <option value="">-- اختر الفرع المراد تحويل الاستلام إليه --</option>
-                    {availableBranches.map((b) => (
-                      <option key={b.id || b.name} value={b.name}>
-                        {b.name} {b.address ? `(${b.address})` : ''}
+                    {targetBranchesList.map((b) => (
+                      <option key={b.id || b.name} value={b.id || b.name}>
+                        🏢 {b.name || b.branch_name} {b.address ? `(${b.address})` : ''}
                       </option>
                     ))}
                   </select>
                 </div>
               )}
             </div>
+
+            {deliveryType === 'other_branch_pickup' && (deliveryTargetBranch || deliveryTargetBranchId) && (
+              <div
+                style={{
+                  marginTop: '10px',
+                  background: '#eff6ff',
+                  border: '1px solid #bfdbfe',
+                  borderRadius: '10px',
+                  padding: '9px 14px',
+                  fontSize: '12.5px',
+                  color: '#1e40af',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                <Sparkles size={16} color="#2563eb" style={{ flexShrink: 0 }} />
+                <span>
+                  🔄 سيتم إرسال هذا الطلب تلقائياً إلى فرع <strong>({deliveryTargetBranch})</strong>، وسيظهر في تبويبة <strong>"طلبات محولة من وإلى"</strong> في كلا الفرعين للمتابعة والتسليم للعميل.
+                </span>
+              </div>
+            )}
           </div>
 
           {/* ── 5. موعد الاستلام ومسؤول الطلب (الصيادلة باستثناء الدليفري) ── */}

@@ -607,9 +607,15 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
                             <div style={{ fontWeight: '800', color: 'var(--text, #0f172a)' }}>
                               {item.branch_name || item.branch_id}
                             </div>
-                            <small style={{ color: 'var(--muted, #64748b)', fontSize: '11px' }}>
-                              فرع صيدلية معتمد
-                            </small>
+                            {(item.item_details || []).some(d => d.isTransferred) ? (
+                              <small style={{ color: '#7c3aed', fontSize: '11px', fontWeight: '800' }}>
+                                فرع الاستلام (محول إليه) 🔄
+                              </small>
+                            ) : (
+                              <small style={{ color: 'var(--muted, #64748b)', fontSize: '11px' }}>
+                                فرع صيدلية معتمد
+                              </small>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -632,6 +638,25 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
                           {Boolean(item.order_type === 'branch' || (item.item_details || []).some(d => d.orderType === 'branch')) && (
                             <span style={{ fontSize: '11px', background: '#fef3c7', color: '#92400e', padding: '2px 7px', borderRadius: '6px', fontWeight: '800' }}>
                               🏢 طلب فرع
+                            </span>
+                          )}
+                          {Boolean((item.item_details || []).some(d => d.isTransferred)) && (
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                background: '#f5f3ff',
+                                color: '#6d28d9',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                fontWeight: '800',
+                                border: '1px solid #ddd6fe'
+                              }}
+                              title={(item.item_details || [])
+                                .filter(d => d.isTransferred)
+                                .map(d => `طلب #${d.orderNumber}: محرر بفرع [${d.sourceBranchName || 'آخر'}] ومحول للاستلام بهذا الفرع`)
+                                .join(' | ')}
+                            >
+                              🔄 محول للاستلام بهذا الفرع
                             </span>
                           )}
                           {(() => {

@@ -181,10 +181,12 @@ export async function outstockGetOrders(params = {}) {
   if (params.dateFrom) qs.append('dateFrom', params.dateFrom);
   if (params.dateTo) qs.append('dateTo', params.dateTo);
   if (params.limit) qs.append('limit', String(params.limit));
+  if (params.transferredOnly) qs.append('transferredOnly', String(params.transferredOnly));
+  if (params.transferDirection) qs.append('transferDirection', params.transferDirection);
 
   const res = await outstockRequest(`orders?${qs.toString()}`, { method: 'GET' });
   if (res?.success && Array.isArray(res.orders)) {
-    if (params.branchId && !params.orderType && !params.dateFrom) {
+    if (params.branchId && !params.orderType && !params.dateFrom && !params.transferredOnly) {
       cacheOrders(params.branchId, res.orders);
       return { success: true, orders: getCachedOrders(params.branchId) };
     }
@@ -219,6 +221,13 @@ export async function outstockGetOrders(params = {}) {
   }
 
   return res;
+}
+
+export async function outstockGetTransferredOrders(params = {}) {
+  return outstockGetOrders({
+    ...params,
+    transferredOnly: true
+  });
 }
 
 export async function outstockCreateOrder(orderData) {
