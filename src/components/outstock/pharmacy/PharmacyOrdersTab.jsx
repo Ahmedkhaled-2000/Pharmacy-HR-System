@@ -234,7 +234,14 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     let result = orders;
 
     // فلتر الحالة الفرعي
-    if (activeSubFilter === 'replied') {
+    if (activeSubFilter === 'waiting_procurement') {
+      result = result.filter((o) => {
+        if (o.procurement_replied_at) return false;
+        const items = o.items || [];
+        const hasReplied = items.some((it) => it.status === 'available' || it.status === 'unavailable' || it.itemStatus === 'available_by_procurement');
+        return !hasReplied;
+      });
+    } else if (activeSubFilter === 'replied') {
       result = result.filter((o) => {
         if (o.procurement_replied_at) return true;
         const items = o.items || [];
@@ -288,19 +295,22 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
 
   // إحصائيات سريعة للطلبات النشطة
   const activeStats = useMemo(() => {
+    let waitingCount = 0;
     let repliedCount = 0;
     let readyCount = 0;
 
     orders.forEach((o) => {
       const items = o.items || [];
-      const hasReplied = o.procurement_replied_at || items.some((it) => it.status === 'available' || it.status === 'unavailable' || it.itemStatus === 'available_by_procurement');
+      const hasReplied = Boolean(o.procurement_replied_at) || items.some((it) => it.status === 'available' || it.status === 'unavailable' || it.itemStatus === 'available_by_procurement');
       const hasReady = items.some((it) => it.status === 'available' || it.itemStatus === 'available_by_procurement');
+      if (!hasReplied) waitingCount++;
       if (hasReplied) repliedCount++;
       if (hasReady) readyCount++;
     });
 
     return {
       total: orders.length,
+      waiting: waitingCount,
       replied: repliedCount,
       ready: readyCount
     };
@@ -434,6 +444,30 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                 }}
               >
                 كافة الطلبات النشطة ({activeStats.total})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSubFilter('waiting_procurement')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  border: activeSubFilter === 'waiting_procurement' ? '2px solid #f59e0b' : '1px solid #cbd5e1',
+                  background: activeSubFilter === 'waiting_procurement' ? '#fffbeb' : '#ffffff',
+                  color: activeSubFilter === 'waiting_procurement' ? '#b45309' : '#64748b',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <Clock size={13} color={activeSubFilter === 'waiting_procurement' ? '#f59e0b' : '#64748b'} />
+                <span>قيد انتظار المشتريات ⏳</span>
+                <span style={{ background: '#f59e0b', color: '#ffffff', fontSize: '10.5px', padding: '1px 6px', borderRadius: '8px' }}>
+                  {activeStats.waiting}
+                </span>
               </button>
 
               <button

@@ -14,10 +14,12 @@ import {
 } from 'lucide-react';
 import {
   outstockCreateOrder,
-  broadcastOutstockLocalMessage
+  broadcastOutstockLocalMessage,
+  outstockVerifyEmployeeCode
 } from '../../../utils/outstockApiClient';
 import MedicationAutocompleteInput from './MedicationAutocompleteInput';
 import AddMedicationModal from '../common/AddMedicationModal';
+import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
 
 /**
  * NewBranchStockOrderModal.jsx
@@ -48,6 +50,12 @@ export default function NewBranchStockOrderModal({
     }
   ]);
 
+  const [senderEmployee, setSenderEmployee] = useState(orderReceiver || null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [inlineCode, setInlineCode] = useState('');
+  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
+  const [codeError, setCodeError] = useState('');
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [isAddMedModalOpen, setIsAddMedModalOpen] = useState(false);
@@ -55,6 +63,29 @@ export default function NewBranchStockOrderModal({
   const [addMedInitialName, setAddMedInitialName] = useState('');
 
   const itemInputRefs = useRef([]);
+
+  const handleVerifyInlineCode = async () => {
+    const clean = String(inlineCode || '').trim();
+    if (!clean) {
+      setCodeError('يرجى إدخال كود الموظف');
+      return;
+    }
+    setIsVerifyingCode(true);
+    setCodeError('');
+    try {
+      const res = await outstockVerifyEmployeeCode(clean);
+      if (res?.success && res.employee) {
+        setSenderEmployee(res.employee);
+        setInlineCode('');
+      } else {
+        setCodeError(res?.error || 'كود الموظف غير مسجل');
+      }
+    } catch (err) {
+      setCodeError(err.message || 'خطأ في التحقق من كود الموظف');
+    } finally {
+      setIsVerifyingCode(false);
+    }
+  };
 
   const handleAddItem = () => {
     const newIdx = items.length;
@@ -126,6 +157,11 @@ export default function NewBranchStockOrderModal({
       return;
     }
 
+    if (!senderEmployee || !senderEmployee.code) {
+      setErrorMsg('⚠️ يرجى إدخال وتأكيد كود الموظف مرسل الطلب أولاً قبل الإرسال');
+      return;
+    }
+
     const hasCosmetics = validItems.some((it) => it.itemType === 'cosmetics');
     const hasMeds = validItems.some((it) => (it.itemType || 'medication') === 'medication');
     const computedCategory = hasCosmetics && hasMeds ? 'mixed' : (hasCosmetics ? 'cosmetics' : 'medication');
@@ -136,8 +172,8 @@ export default function NewBranchStockOrderModal({
         branchId,
         orderType: 'branch',
         orderCategory: computedCategory,
-        orderReceiverCode: orderReceiver?.code || null,
-        orderReceiverName: orderReceiver?.name || 'صيدلي الفرع',
+        orderReceiverCode: senderEmployee.code,
+        orderReceiverName: senderEmployee.name || 'صيدلي الفرع',
         branchRequestReason: requestReason,
         customerNotes: [urgencyLevel === 'urgent' ? '⚡ طلب عاجل جداً' : '', generalNotes].filter(Boolean).join(' - '),
         items: validItems.map((it) => ({
@@ -301,7 +337,7 @@ export default function NewBranchStockOrderModal({
             </div>
           )}
 
-          {/* شريط معلومات الفرع والمحرر */}
+          {/* شريط معلومات الفرع والمحرر مرسل الطلب */}
           <div
             style={{
               background: '#f8fafc',
@@ -323,22 +359,67 @@ export default function NewBranchStockOrderModal({
               </span>
             </div>
 
-            {orderReceiver && (
+            {senderEmployee ? (
               <div
                 style={{
                   background: '#f0fdf4',
                   border: '1px solid #86efac',
-                  borderRadius: '8px',
-                  padding: '4px 12px',
+                  borderRadius: '10px',
+                  padding: '6px 14px',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px'
+                  gap: '8px'
                 }}
               >
                 <ShieldCheck size={16} color="#16a34a" />
-                <span style={{ fontSize: '12px', color: '#166534', fontWeight: '700' }}>
-                  الصيدلي المحرر: <strong>{orderReceiver.name}</strong> (كود: {orderReceiver.code} 🔒)
+                <span style={{ fontSize: '12.5px', color: '#166534', fontWeight: '800' }}>
+                  الموظف مرسل الطلب: <strong>{senderEmployee.name}</strong> (كود: {senderEmployee.code} 🔒)
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setIsAuthModalOpen(true)}
+                  style={{
+                    background: '#e0f2fe',
+                    border: '1px solid #bae6fd',
+                    borderRadius: '6px',
+                    color: '#0369a1',
+                    padding: '2px 8px',
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    cursor: 'pointer'
+                  }}
+                >
+                  تغيير
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                <input
+                  type="password"
+                  placeholder="أدخل كود الموظف مرسل الطلب..."
+                  value={inlineCode}
+                  onChange={(e) => setInlineCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleVerifyInlineCode();
+                    }
+                  }}
+                  className="outstock-form-input"
+                  style={{ height: '32px', width: '190px', fontSize: '12px' }}
+                />
+                <button
+                  type="button"
+                  onClick={handleVerifyInlineCode}
+                  disabled={isVerifyingCode}
+                  className="outstock-btn outstock-btn-primary"
+                  style={{ padding: '5px 12px', fontSize: '11.5px', height: '32px', fontWeight: '800' }}
+                >
+                  {isVerifyingCode ? 'جاري التحقق...' : 'تأكيد الكود 🔒'}
+                </button>
+                {codeError && (
+                  <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: '800' }}>{codeError}</span>
+                )}
               </div>
             )}
           </div>
@@ -691,6 +772,22 @@ export default function NewBranchStockOrderModal({
             setAddMedInitialName('');
           }}
           onMedicationAdded={handleMedicationAdded}
+        />
+      )}
+
+      {/* نافذة التحقق من كود الموظف مرسل الطلب */}
+      {isAuthModalOpen && (
+        <EmployeeCodeAuthModal
+          isOpen={isAuthModalOpen}
+          title="التحقق من كود الموظف مرسل الطلب 🔒"
+          subtitle="يرجى إدخال كود الموظف المسجل بنظام الموارد البشرية لتوثيق إرسال طلب بضاعة الفرع"
+          actionLabel="تأكيد الكود والمتابعة"
+          branchId={branchId}
+          onClose={() => setIsAuthModalOpen(false)}
+          onSuccess={(emp) => {
+            setSenderEmployee(emp);
+            setIsAuthModalOpen(false);
+          }}
         />
       )}
     </div>

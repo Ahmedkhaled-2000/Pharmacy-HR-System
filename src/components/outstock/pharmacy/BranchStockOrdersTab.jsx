@@ -560,9 +560,12 @@ export default function BranchStockOrdersTab({
                       </span>
                     )}
 
-                    {order.order_receiver_name && (
-                      <span style={{ color: '#334155' }}>
-                        الصيدلي: <strong>{order.order_receiver_name}</strong>
+                    {(order.order_receiver_name || order.orderReceiverName) && (
+                      <span style={{ color: '#334155', background: '#f1f5f9', padding: '2px 8px', borderRadius: '6px' }}>
+                        مرسل الطلب: <strong>{order.order_receiver_name || order.orderReceiverName}</strong>
+                        {(order.order_receiver_code || order.orderReceiverCode) && (
+                          <span style={{ color: '#64748b', marginRight: '4px' }}>(كود: {order.order_receiver_code || order.orderReceiverCode} 🔒)</span>
+                        )}
                       </span>
                     )}
                   </div>
@@ -687,11 +690,14 @@ export default function BranchStockOrdersTab({
         </div>
       )}
 
-      {/* نافذة التحقق من كود الموظف المستلم */}
+      {/* 🔒 نافذة التحقق من كود الموظف مرسل الطلب */}
       {isReceiverAuthOpen && (
         <EmployeeCodeAuthModal
+          isOpen={isReceiverAuthOpen}
+          title="التحقق من كود الموظف مرسل الطلب 🔒"
+          subtitle="يرجى إدخال كود الموظف المسجل بنظام الموارد البشرية لتوثيق إرسال طلب بضاعة للفرع"
+          actionLabel="تأكيد الكود والمتابعة"
           branchId={branchId}
-          actionTitle="التحقق من كود الصيدلي لإنشاء طلب بضاعة للفرع 🔒"
           onClose={() => setIsReceiverAuthOpen(false)}
           onSuccess={handleReceiverAuthSuccess}
         />
