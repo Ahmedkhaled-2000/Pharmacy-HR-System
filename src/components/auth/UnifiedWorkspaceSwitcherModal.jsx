@@ -67,7 +67,7 @@ export default function UnifiedWorkspaceSwitcherModal({
     const role = perms.outstockHandling.role || 'branch';
     const bId = perms.outstockHandling.assignedBranchId;
     const bObj = branches.find(b => String(b.id) === String(bId));
-    const roleLabel = role === 'procurement_manager' ? 'مدير مشتريات' : role === 'procurement_team' ? 'فريق مشتريات' : `صيدلية (${bObj?.name || 'الفرع'})`;
+    const roleLabel = role === 'procurement_manager' ? 'مدير مشتريات' : role === 'cosmetics_officer' ? 'مسؤول مستحضرات تجميل 💄' : role === 'procurement_team' ? 'فريق مشتريات' : `صيدلية (${bObj?.name || 'الفرع'})`;
 
     availableWorkspaces.push({
       id: 'outstock',

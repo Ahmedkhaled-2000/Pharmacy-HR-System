@@ -764,7 +764,7 @@ export default function OwnerAccessAndIdentityModule({
                                 )}
                                 {u.permissions?.outstockHandling?.enabled && (
                                   <span style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '2px 7px', borderRadius: '5px', fontSize: '10.5px', fontWeight: 800 }}>
-                                    💊 OutStock ({u.permissions?.outstockHandling?.role === 'procurement_manager' ? 'مدير مشتريات' : u.permissions?.outstockHandling?.role === 'procurement_team' ? 'فريق مشتريات' : 'صيدلية'})
+                                    💊 OutStock ({u.permissions?.outstockHandling?.role === 'procurement_manager' ? 'مدير مشتريات' : u.permissions?.outstockHandling?.role === 'cosmetics_officer' ? 'مسؤول مستحضرات تجميل 💄' : u.permissions?.outstockHandling?.role === 'procurement_team' ? 'فريق مشتريات' : 'صيدلية'})
                                   </span>
                                 )}
                                 {u.permissions?.accountsSystem?.enabled && (
@@ -1492,7 +1492,24 @@ export default function OwnerAccessAndIdentityModule({
                           }
                         }))}
                       />
-                      <span>🤝 فريق المشتريات</span>
+                      <span>🤝 فريق المشتريات (عام)</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', cursor: 'pointer' }}>
+                      <input
+                        type="radio"
+                        name="outstock_role"
+                        value="cosmetics_officer"
+                        checked={empAccessForm.permissions?.outstockHandling?.role === 'cosmetics_officer'}
+                        onChange={() => setEmpAccessForm(prev => ({
+                          ...prev,
+                          permissions: {
+                            ...prev.permissions,
+                            outstockHandling: { ...prev.permissions?.outstockHandling, role: 'cosmetics_officer' }
+                          }
+                        }))}
+                      />
+                      <span style={{ color: '#db2777', fontWeight: 'bold' }}>💄 مسؤول مستحضرات تجميل</span>
                     </label>
                   </div>
 

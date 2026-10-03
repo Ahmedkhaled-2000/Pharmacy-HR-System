@@ -2432,8 +2432,11 @@ app.post('/api/auth/login', async (req, res) => {
               fullName: ou.full_name,
               name: ou.full_name,
               role: userRole,
+              originalRole: ou.role,
+              category_scope: ouPermissions?.category_scope || (ou.role === 'cosmetics_officer' ? 'cosmetics' : 'all'),
               branchId: ou.branch_id,
               permissions: ouPermissions,
+              ...(ouPermissions || {}),
               ...(branchData ? branchData : {})
             };
           }

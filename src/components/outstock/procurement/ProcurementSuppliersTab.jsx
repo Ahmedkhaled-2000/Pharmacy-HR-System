@@ -198,12 +198,12 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   const perms = currentUser?.permissions || {};
   const isCosmetics = currentUser?.role === 'cosmetics_officer' || perms.category_scope === 'cosmetics' || currentUser?.category_scope === 'cosmetics';
 
-  const canAccessAccounts = !isCosmetics && (isMasterAdmin || perms.can_access_supplier_accounts === true || currentUser?.can_access_supplier_accounts === true);
-  const canAccessReceiving = !isCosmetics && (isMasterAdmin || perms.can_access_order_receiving === true || currentUser?.can_access_order_receiving === true);
-  const canAccessInvoices = !isCosmetics && (isMasterAdmin || perms.can_access_supplier_invoices === true || currentUser?.can_access_supplier_invoices === true);
-  const canAccessWithdrawals = !isCosmetics && (isMasterAdmin || perms.can_access_branch_withdrawals === true || currentUser?.can_access_branch_withdrawals === true);
-  const canAccessDiscounts = !isCosmetics && (isMasterAdmin || perms.can_access_discounts_comparison === true || currentUser?.can_access_discounts_comparison === true);
-  const canAccessPharmafly = !isCosmetics && (isMasterAdmin || perms.can_access_pharmafly === true || currentUser?.can_access_pharmafly === true);
+  const canAccessAccounts = isMasterAdmin || perms.can_access_supplier_accounts === true || currentUser?.can_access_supplier_accounts === true;
+  const canAccessReceiving = isMasterAdmin || perms.can_access_order_receiving === true || currentUser?.can_access_order_receiving === true;
+  const canAccessInvoices = isMasterAdmin || perms.can_access_supplier_invoices === true || currentUser?.can_access_supplier_invoices === true;
+  const canAccessWithdrawals = isMasterAdmin || perms.can_access_branch_withdrawals === true || currentUser?.can_access_branch_withdrawals === true;
+  const canAccessDiscounts = isMasterAdmin || perms.can_access_discounts_comparison === true || currentUser?.can_access_discounts_comparison === true;
+  const canAccessPharmafly = isMasterAdmin || perms.can_access_pharmafly === true || currentUser?.can_access_pharmafly === true;
 
   useEffect(() => {
     if (activeSubTab === 'accounts' && !canAccessAccounts) {

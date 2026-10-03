@@ -104,12 +104,12 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
               can_edit_items: p.can_edit_items === true,
               can_view_orders: p.can_view_orders !== false,
               can_change_status: p.can_change_status === true,
-              can_access_suppliers: isCosmetics ? false : (p.can_access_suppliers === true),
-              can_access_supplier_accounts: isCosmetics ? false : (p.can_access_supplier_accounts === true),
-              can_access_order_receiving: isCosmetics ? false : (p.can_access_order_receiving === true),
-              can_access_supplier_invoices: isCosmetics ? false : (p.can_access_supplier_invoices === true),
-              can_access_branch_withdrawals: isCosmetics ? false : (p.can_access_branch_withdrawals === true),
-              can_access_discounts_comparison: isCosmetics ? false : (p.can_access_discounts_comparison === true)
+              can_access_suppliers: p.can_access_suppliers === true,
+              can_access_supplier_accounts: p.can_access_supplier_accounts === true,
+              can_access_order_receiving: p.can_access_order_receiving === true,
+              can_access_supplier_invoices: p.can_access_supplier_invoices === true,
+              can_access_branch_withdrawals: p.can_access_branch_withdrawals === true,
+              can_access_discounts_comparison: p.can_access_discounts_comparison === true
             };
           });
         setTeamMembers(normalized);
@@ -199,12 +199,12 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
       can_edit_items: member.can_edit_items === true || p.can_edit_items === true,
       can_view_orders: member.can_view_orders !== false && p.can_view_orders !== false,
       can_change_status: member.can_change_status === true || p.can_change_status === true,
-      can_access_suppliers: isCosmetics ? false : (member.can_access_suppliers === true || p.can_access_suppliers === true),
-      can_access_supplier_accounts: isCosmetics ? false : (member.can_access_supplier_accounts === true || p.can_access_supplier_accounts === true),
-      can_access_order_receiving: isCosmetics ? false : (member.can_access_order_receiving === true || p.can_access_order_receiving === true),
-      can_access_supplier_invoices: isCosmetics ? false : (member.can_access_supplier_invoices === true || p.can_access_supplier_invoices === true),
-      can_access_branch_withdrawals: isCosmetics ? false : (member.can_access_branch_withdrawals === true || p.can_access_branch_withdrawals === true),
-      can_access_discounts_comparison: isCosmetics ? false : (member.can_access_discounts_comparison === true || p.can_access_discounts_comparison === true)
+      can_access_suppliers: member.can_access_suppliers === true || p.can_access_suppliers === true,
+      can_access_supplier_accounts: member.can_access_supplier_accounts === true || p.can_access_supplier_accounts === true,
+      can_access_order_receiving: member.can_access_order_receiving === true || p.can_access_order_receiving === true,
+      can_access_supplier_invoices: member.can_access_supplier_invoices === true || p.can_access_supplier_invoices === true,
+      can_access_branch_withdrawals: member.can_access_branch_withdrawals === true || p.can_access_branch_withdrawals === true,
+      can_access_discounts_comparison: member.can_access_discounts_comparison === true || p.can_access_discounts_comparison === true
     });
     setIsMemberModalOpen(true);
   };
@@ -236,12 +236,13 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
       can_edit_items: Boolean(memberForm.can_edit_items),
       can_view_orders: memberForm.can_view_orders !== false,
       can_change_status: Boolean(memberForm.can_change_status),
-      can_access_suppliers: isCosmetics ? false : Boolean(memberForm.can_access_suppliers),
-      can_access_supplier_accounts: isCosmetics ? false : Boolean(memberForm.can_access_supplier_accounts),
-      can_access_order_receiving: isCosmetics ? false : Boolean(memberForm.can_access_order_receiving),
-      can_access_supplier_invoices: isCosmetics ? false : Boolean(memberForm.can_access_supplier_invoices),
-      can_access_branch_withdrawals: isCosmetics ? false : Boolean(memberForm.can_access_branch_withdrawals),
-      can_access_discounts_comparison: isCosmetics ? false : Boolean(memberForm.can_access_discounts_comparison),
+      can_access_suppliers: Boolean(memberForm.can_access_suppliers),
+      can_access_supplier_accounts: Boolean(memberForm.can_access_supplier_accounts),
+      can_order_receiving: Boolean(memberForm.can_access_order_receiving),
+      can_access_order_receiving: Boolean(memberForm.can_access_order_receiving),
+      can_access_supplier_invoices: Boolean(memberForm.can_access_supplier_invoices),
+      can_access_branch_withdrawals: Boolean(memberForm.can_access_branch_withdrawals),
+      can_access_discounts_comparison: Boolean(memberForm.can_access_discounts_comparison),
       category_scope: isCosmetics ? 'cosmetics' : 'all'
     };
 
@@ -1249,13 +1250,7 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                     onClick={() => setMemberForm((prev) => ({
                       ...prev,
                       role: 'cosmetics_officer',
-                      category_scope: 'cosmetics',
-                      can_access_suppliers: false,
-                      can_access_supplier_accounts: false,
-                      can_access_order_receiving: false,
-                      can_access_supplier_invoices: false,
-                      can_access_branch_withdrawals: false,
-                      can_access_discounts_comparison: false
+                      category_scope: 'cosmetics'
                     }))}
                     style={{
                       padding: '10px 12px',
@@ -1275,7 +1270,7 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                       <span>مسؤول مستحضرات تجميل 💄</span>
                     </div>
                     <div style={{ fontSize: '11px', fontWeight: 'normal', color: '#831843', marginTop: '3px', lineHeight: 1.3 }}>
-                      يظهر له فقط: الطلبات المجمعة للمستحضرات وتتبع تسليمها (معزول عن الأدوية والموردين)
+                      نطاق مخصص لمستحضرات التجميل والعناية، وتعمل معه كافة الصلاحيات الممنوحة أدناه
                     </div>
                   </button>
                 </div>
@@ -1346,14 +1341,14 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                     <span>صلاحية توريد وشحن الطلبات وتغيير الحالات</span>
                   </label>
 
-                  {memberForm.role === 'cosmetics_officer' ? (
-                    <div style={{ marginTop: '8px', padding: '10px 12px', background: '#fdf2f8', border: '1.5px dashed #f472b6', borderRadius: '8px', fontSize: '12px', color: '#be185d', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {memberForm.role === 'cosmetics_officer' && (
+                    <div style={{ marginTop: '8px', marginBottom: '8px', padding: '10px 12px', background: '#fdf2f8', border: '1.5px dashed #f472b6', borderRadius: '8px', fontSize: '12px', color: '#be185d', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <Sparkles size={16} />
-                      <span>🔒 مسؤول التجميل معزول تلقائياً عن حسابات الموردين والعمليات المالية، ويقتصر على مستحضرات التجميل فقط</span>
+                      <span>💄 مسؤول مستحضرات التجميل: يختص بإدارة وتوريد مستحضرات التجميل، ويمكنك تفعيل أو تقييد صلاحيات الموردين والعمليات له حسب رغبتك:</span>
                     </div>
-                  ) : (
-                    <>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', cursor: 'pointer' }}>
+                  )}
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', cursor: 'pointer' }}>
                         <input
                           type="checkbox"
                           checked={memberForm.can_access_suppliers}
@@ -1429,8 +1424,6 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                           </div>
                         </div>
                       )}
-                    </>
-                  )}
                 </div>
               </div>
 

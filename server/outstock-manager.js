@@ -899,7 +899,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
             }
           }
 
-          const targetRole = user.role === 'branch' ? 'outstock_branch' : user.role;
+          const targetRole = user.role === 'branch' ? 'outstock_branch' : (
+            ['procurement', 'procurement_officer', 'cosmetics_officer', 'procurement_manager'].includes(user.role)
+              ? `outstock_${user.role}`
+              : user.role
+          );
           let userPermissions = user.permissions || (
             user.role === 'procurement_manager' || user.role === 'owner'
               ? { can_edit_items: true, can_view_orders: true, can_change_status: true, can_access_suppliers: true, can_manage_team: true }
@@ -911,13 +915,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           if (isCosmetics) {
             userPermissions = {
               ...userPermissions,
-              category_scope: 'cosmetics',
-              can_access_suppliers: false,
-              can_access_supplier_accounts: false,
-              can_access_order_receiving: false,
-              can_access_supplier_invoices: false,
-              can_access_branch_withdrawals: false,
-              can_access_discounts_comparison: false
+              category_scope: 'cosmetics'
             };
           }
 
@@ -2566,7 +2564,10 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       // فلترة نوع الصنف (دوائي / مستحضرات تجميل)
       const categoryParam = req.query.category || req.query.itemType || null;
-      const isCosmeticsOfficer = user.permissions?.category_scope === 'cosmetics' || user.role === 'procurement_cosmetics';
+      const isCosmeticsOfficer = user.permissions?.category_scope === 'cosmetics' ||
+        user.category_scope === 'cosmetics' ||
+        user.role === 'cosmetics_officer' ||
+        user.role === 'procurement_cosmetics';
       let categoryFilter = '';
       if (isCosmeticsOfficer || categoryParam === 'cosmetics') {
         categoryFilter = ` AND i.item_type = 'cosmetics'`;
@@ -3363,12 +3364,12 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         can_edit_items: Boolean(permsSource.can_edit_items),
         can_view_orders: permsSource.can_view_orders !== false,
         can_change_status: Boolean(permsSource.can_change_status),
-        can_access_suppliers: isCosmetics ? false : Boolean(permsSource.can_access_suppliers),
-        can_access_supplier_accounts: isCosmetics ? false : Boolean(permsSource.can_access_supplier_accounts),
-        can_access_order_receiving: isCosmetics ? false : Boolean(permsSource.can_access_order_receiving),
-        can_access_supplier_invoices: isCosmetics ? false : Boolean(permsSource.can_access_supplier_invoices),
-        can_access_branch_withdrawals: isCosmetics ? false : Boolean(permsSource.can_access_branch_withdrawals),
-        can_access_discounts_comparison: isCosmetics ? false : Boolean(permsSource.can_access_discounts_comparison),
+        can_access_suppliers: Boolean(permsSource.can_access_suppliers),
+        can_access_supplier_accounts: Boolean(permsSource.can_access_supplier_accounts),
+        can_access_order_receiving: Boolean(permsSource.can_access_order_receiving),
+        can_access_supplier_invoices: Boolean(permsSource.can_access_supplier_invoices),
+        can_access_branch_withdrawals: Boolean(permsSource.can_access_branch_withdrawals),
+        can_access_discounts_comparison: Boolean(permsSource.can_access_discounts_comparison),
         category_scope: effectiveCategoryScope
       };
 
@@ -3444,12 +3445,12 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         can_edit_items: permsSource.can_edit_items !== undefined ? Boolean(permsSource.can_edit_items) : Boolean(existingUser.permissions?.can_edit_items),
         can_view_orders: permsSource.can_view_orders !== undefined ? Boolean(permsSource.can_view_orders) : (existingUser.permissions?.can_view_orders !== false),
         can_change_status: permsSource.can_change_status !== undefined ? Boolean(permsSource.can_change_status) : Boolean(existingUser.permissions?.can_change_status),
-        can_access_suppliers: isCosmetics ? false : (permsSource.can_access_suppliers !== undefined ? Boolean(permsSource.can_access_suppliers) : Boolean(existingUser.permissions?.can_access_suppliers)),
-        can_access_supplier_accounts: isCosmetics ? false : (permsSource.can_access_supplier_accounts !== undefined ? Boolean(permsSource.can_access_supplier_accounts) : Boolean(existingUser.permissions?.can_access_supplier_accounts)),
-        can_access_order_receiving: isCosmetics ? false : (permsSource.can_access_order_receiving !== undefined ? Boolean(permsSource.can_access_order_receiving) : Boolean(existingUser.permissions?.can_access_order_receiving)),
-        can_access_supplier_invoices: isCosmetics ? false : (permsSource.can_access_supplier_invoices !== undefined ? Boolean(permsSource.can_access_supplier_invoices) : Boolean(existingUser.permissions?.can_access_supplier_invoices)),
-        can_access_branch_withdrawals: isCosmetics ? false : (permsSource.can_access_branch_withdrawals !== undefined ? Boolean(permsSource.can_access_branch_withdrawals) : Boolean(existingUser.permissions?.can_access_branch_withdrawals)),
-        can_access_discounts_comparison: isCosmetics ? false : (permsSource.can_access_discounts_comparison !== undefined ? Boolean(permsSource.can_access_discounts_comparison) : Boolean(existingUser.permissions?.can_access_discounts_comparison)),
+        can_access_suppliers: permsSource.can_access_suppliers !== undefined ? Boolean(permsSource.can_access_suppliers) : Boolean(existingUser.permissions?.can_access_suppliers),
+        can_access_supplier_accounts: permsSource.can_access_supplier_accounts !== undefined ? Boolean(permsSource.can_access_supplier_accounts) : Boolean(existingUser.permissions?.can_access_supplier_accounts),
+        can_access_order_receiving: permsSource.can_access_order_receiving !== undefined ? Boolean(permsSource.can_access_order_receiving) : Boolean(existingUser.permissions?.can_access_order_receiving),
+        can_access_supplier_invoices: permsSource.can_access_supplier_invoices !== undefined ? Boolean(permsSource.can_access_supplier_invoices) : Boolean(existingUser.permissions?.can_access_supplier_invoices),
+        can_access_branch_withdrawals: permsSource.can_access_branch_withdrawals !== undefined ? Boolean(permsSource.can_access_branch_withdrawals) : Boolean(existingUser.permissions?.can_access_branch_withdrawals),
+        can_access_discounts_comparison: permsSource.can_access_discounts_comparison !== undefined ? Boolean(permsSource.can_access_discounts_comparison) : Boolean(existingUser.permissions?.can_access_discounts_comparison),
         category_scope: effectiveCategoryScope
       };
 
