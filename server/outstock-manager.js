@@ -573,6 +573,13 @@ export async function initOutstockTables(db) {
         ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS contacted_customer_at TIMESTAMPTZ NULL;
         ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS contacted_by VARCHAR(100) NULL;
         ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS contact_notes TEXT NULL;
+        ALTER TABLE public.outstock_deficiencies ALTER COLUMN customer_id DROP NOT NULL;
+        ALTER TABLE public.outstock_deficiencies ALTER COLUMN original_order_id DROP NOT NULL;
+        ALTER TABLE public.outstock_deficiencies ALTER COLUMN original_item_id DROP NOT NULL;
+        ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS barcode VARCHAR(100) NULL;
+        ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS notes TEXT NULL;
+        ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS registered_by VARCHAR(100) NULL;
+        ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'order';
 
         CREATE TABLE IF NOT EXISTS public.outstock_order_complaints (
           id VARCHAR(64) PRIMARY KEY,
@@ -2842,28 +2849,165 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   // شاشة الأصناف غير المتوفرة وإشعار الفرع عند توفرها مع استرجاع العملاء
   app.get('/api/outstock/procurement/unavailable-items', authMiddleware, async (req, res) => {
     try {
+      const { search = '', branchId = '' } = req.query || {};
+
+      let whereClause = `WHERE d.status = 'market_shortage'`;
+      const queryParams = [];
+
+      if (branchId && branchId !== 'all') {
+        queryParams.push(branchId);
+        whereClause += ` AND (d.branch_id = $${queryParams.length} OR d.branch_id = 'all')`;
+      }
+
+      if (search && String(search).trim()) {
+        queryParams.push(`%${String(search).trim()}%`);
+        whereClause += ` AND (d.medication_name ILIKE $${queryParams.length} OR COALESCE(b.name, '') ILIKE $${queryParams.length} OR COALESCE(d.barcode, '') ILIKE $${queryParams.length})`;
+      }
+
       const result = await db.query(`
-        SELECT d.medication_name, d.unit_type, d.branch_id, b.name as branch_name,
-               COUNT(d.id) as customers_waiting_count,
-               SUM(d.requested_quantity) as total_wanted_qty,
-               json_agg(json_build_object(
-                 'deficiencyId', d.id,
-                 'customerId', c.id,
-                 'customerName', c.full_name,
-                 'customerPhone', c.whatsapp_phone,
-                 'customerAddress', c.address,
-                 'requestedQuantity', d.requested_quantity,
-                 'createdAt', d.created_at
-               )) as waiting_customers
+        SELECT d.medication_name,
+               d.unit_type,
+               d.branch_id,
+               COALESCE(b.name, CASE WHEN d.branch_id = 'all' THEN 'كافة الفروع / الإدارة العامة' ELSE 'الفرع الرئيسي' END) as branch_name,
+               MAX(d.barcode) as barcode,
+               MAX(d.notes) as notes,
+               MAX(d.source) as source,
+               MAX(d.created_at) as created_at,
+               COUNT(c.id) as customers_waiting_count,
+               SUM(COALESCE(d.requested_quantity, 1)) as total_wanted_qty,
+               COALESCE(
+                 json_agg(
+                   json_build_object(
+                     'deficiencyId', d.id,
+                     'customerId', c.id,
+                     'customerName', c.full_name,
+                     'customerPhone', c.whatsapp_phone,
+                     'customerAddress', c.address,
+                     'requestedQuantity', d.requested_quantity,
+                     'createdAt', d.created_at,
+                     'notes', d.notes
+                   )
+                 ) FILTER (WHERE c.id IS NOT NULL),
+                 '[]'::json
+               ) as waiting_customers
         FROM public.outstock_deficiencies d
         LEFT JOIN public.outstock_branches b ON d.branch_id = b.id
         LEFT JOIN public.outstock_customers c ON d.customer_id = c.id
-        WHERE d.status = 'market_shortage'
+        ${whereClause}
         GROUP BY d.medication_name, d.unit_type, d.branch_id, b.name
-        ORDER BY customers_waiting_count DESC
-      `);
+        ORDER BY customers_waiting_count DESC, total_wanted_qty DESC
+      `, queryParams);
+
       res.json({ success: true, unavailableItems: result.rows });
     } catch (err) {
+      console.error('Fetch unavailable items error:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // تسجيل صنف ناقص يدوياً من إدارة المشتريات
+  app.post('/api/outstock/procurement/unavailable-items', authMiddleware, async (req, res) => {
+    try {
+      const {
+        medicationName,
+        barcode = null,
+        unitType = 'pack',
+        requestedQuantity = 1,
+        branchId = 'all',
+        notes = null
+      } = req.body || {};
+
+      if (!medicationName || !String(medicationName).trim()) {
+        return res.status(400).json({ success: false, error: 'اسم الصنف أو الدواء مطلوب' });
+      }
+
+      const cleanMedName = String(medicationName).trim();
+      const cleanQty = Math.max(1, parseInt(requestedQuantity, 10) || 1);
+      const cleanUnit = unitType === 'strip' ? 'strip' : 'pack';
+      const cleanBranch = branchId && String(branchId).trim() ? String(branchId).trim() : 'all';
+      const cleanBarcode = barcode && String(barcode).trim() ? String(barcode).trim() : null;
+      const cleanNotes = notes && String(notes).trim() ? String(notes).trim() : null;
+      const registeredBy = req.user?.full_name || req.user?.name || req.user?.username || 'مسؤول المشتريات';
+
+      const defId = 'def_man_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+
+      await db.query(`
+        INSERT INTO public.outstock_deficiencies (
+          id, branch_id, medication_name, unit_type, requested_quantity,
+          status, barcode, notes, registered_by, source, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5,
+          'market_shortage', $6, $7, $8, 'manual', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+      `, [defId, cleanBranch, cleanMedName, cleanUnit, cleanQty, cleanBarcode, cleanNotes, registeredBy]);
+
+      // بث عبر السوكيت لإشعار شاشات المشتريات والفروع
+      broadcastOutstock('outstock:unavailable_items_updated', {
+        medicationName: cleanMedName,
+        branchId: cleanBranch,
+        unitType: cleanUnit,
+        requestedQuantity: cleanQty
+      });
+
+      res.json({
+        success: true,
+        message: 'تم تسجيل الصنف الناقص بالسوق بنجاح',
+        deficiencyId: defId
+      });
+    } catch (err) {
+      console.error('Error adding manual unavailable item:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // استيراد مجمع لأصناف نواقص السوق من شيت إكسل
+  app.post('/api/outstock/procurement/unavailable-items/import', authMiddleware, async (req, res) => {
+    try {
+      const { items = [], defaultBranchId = 'all' } = req.body || {};
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ success: false, error: 'لم يتم توفير أصناف للاستيراد' });
+      }
+
+      const registeredBy = req.user?.full_name || req.user?.name || req.user?.username || 'استيراد إكسل';
+      let insertedCount = 0;
+
+      for (const it of items) {
+        const medName = String(it.medicationName || it.name || it.item_name || '').trim();
+        if (!medName) continue;
+
+        const branchId = it.branchId || defaultBranchId || 'all';
+        const unitType = it.unitType === 'strip' ? 'strip' : 'pack';
+        const qty = Math.max(1, parseInt(it.requestedQuantity || it.qty || 1, 10) || 1);
+        const barcode = it.barcode ? String(it.barcode).trim() : null;
+        const notes = it.notes ? String(it.notes).trim() : (it.reason || null);
+
+        const defId = 'def_imp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7) + '_' + insertedCount;
+
+        await db.query(`
+          INSERT INTO public.outstock_deficiencies (
+            id, branch_id, medication_name, unit_type, requested_quantity,
+            status, barcode, notes, registered_by, source, created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5,
+            'market_shortage', $6, $7, $8, 'excel_import', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          )
+        `, [defId, branchId, medName, unitType, qty, barcode, notes, registeredBy]);
+
+        insertedCount++;
+      }
+
+      broadcastOutstock('outstock:unavailable_items_updated', {
+        importedCount: insertedCount
+      });
+
+      res.json({
+        success: true,
+        message: `تم استيراد ${insertedCount} صنف ناقص بنجاح`,
+        insertedCount
+      });
+    } catch (err) {
+      console.error('Error importing unavailable items:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -2881,14 +3025,14 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         SELECT d.id, c.id as customer_id, c.full_name, c.whatsapp_phone, d.requested_quantity
         FROM public.outstock_deficiencies d
         JOIN public.outstock_customers c ON d.customer_id = c.id
-        WHERE d.branch_id = $1 AND LOWER(d.medication_name) = LOWER($2) AND d.unit_type = $3 AND d.status = 'market_shortage'
+        WHERE (d.branch_id = $1 OR d.branch_id = 'all') AND LOWER(d.medication_name) = LOWER($2) AND d.unit_type = $3 AND d.status = 'market_shortage'
       `, [branchId, medicationName, unitType || 'pack']);
 
       // تحديث حالة النواقص
       await db.query(`
         UPDATE public.outstock_deficiencies
         SET status = 'restocked_available', restocked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        WHERE branch_id = $1 AND LOWER(medication_name) = LOWER($2) AND unit_type = $3 AND status = 'market_shortage'
+        WHERE (branch_id = $1 OR branch_id = 'all') AND LOWER(medication_name) = LOWER($2) AND unit_type = $3 AND status = 'market_shortage'
       `, [branchId, medicationName, unitType || 'pack']);
 
       const waitingCustomers = defRes.rows;
@@ -2903,6 +3047,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       };
       broadcastOutstock('outstock:restocked_alert', restockPayload);
       broadcastOutstock('outstock:item_restocked', restockPayload);
+      broadcastOutstock('outstock:unavailable_items_updated', restockPayload);
 
       res.json({
         success: true,

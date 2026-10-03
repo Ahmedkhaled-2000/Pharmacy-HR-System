@@ -1280,3 +1280,365 @@ export async function exportISupplyMarketFeedsExcel(feeds = [], options = {}) {
   window.URL.revokeObjectURL(url);
 }
 
+/**
+ * تصدير كشف أصناف الأدوية غير المتوفرة بالسوق (نواقص معلقة) إلى شيت إكسل احترافي
+ * @param {Array} items - قائمة الأصناف غير المتوفرة
+ * @param {Object} options - خيارات إضافية (orgName, exportTitle)
+ */
+export async function exportUnavailableItemsExcel(items = [], options = {}) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'منظومة إدارة النواقص والمشتريات';
+  wb.lastModifiedBy = 'إدارة المشتريات والتوريدات';
+  wb.created = new Date();
+  wb.modified = new Date();
+
+  const exportDateStr = new Date().toLocaleDateString('ar-EG', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+  const exportTimeStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+
+  const ws = wb.addWorksheet('نواقص السوق المعلقة', {
+    views: [{ rightToLeft: true, showGridLines: true, state: 'frozen', ySplit: 6 }]
+  });
+
+  const headerColor = '991B1B';     // أحمر قرمزي داكن للنواقص
+  const subHeaderColor = '7F1D1D';  // قرمزي أعمق
+
+  // 1. ترويسة التقرير الرئيسية
+  ws.mergeCells('A1:I1');
+  const titleCell = ws.getCell('A1');
+  titleCell.value = '❌ كشف أصناف الأدوية غير المتوفرة بالسوق (عجز سوقي معلق) — إدارة المشتريات والتوريدات';
+  titleCell.font = { name: 'Arial', bold: true, size: 14, color: { argb: THEME.white } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerColor } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(1).height = 40;
+
+  // 2. سطر الميتاداتا
+  ws.mergeCells('A2:I2');
+  const metaCell = ws.getCell('A2');
+  metaCell.value = `تاريخ وتوقيت الاستخراج: ${exportDateStr} - ${exportTimeStr}  |  المصدر: منظومة النواقص والمشتريات السحابية`;
+  metaCell.font = { name: 'Arial', bold: true, size: 10, color: { argb: THEME.white } };
+  metaCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: subHeaderColor } };
+  metaCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(2).height = 24;
+
+  // 3. بطاقات إحصائية سريعة
+  const totalItemsCount = items.length;
+  const totalWantedQty = items.reduce((sum, it) => sum + (Number(it.total_wanted_qty || it.requested_quantity || 1) || 0), 0);
+  const totalWaitingCust = items.reduce((sum, it) => sum + (Number(it.customers_waiting_count || it.waiting_customers?.length || 0) || 0), 0);
+  const affectedBranchesCount = new Set(items.map(it => it.branch_id || it.branch_name)).size;
+
+  ws.mergeCells('A4:B4');
+  const kpi1 = ws.getCell('A4');
+  kpi1.value = `إجمالي الأصناف: ${totalItemsCount} صنف`;
+  kpi1.font = { name: 'Arial', bold: true, size: 11, color: { argb: '991B1B' } };
+  kpi1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FEE2E2' } };
+  kpi1.alignment = { horizontal: 'center', vertical: 'middle' };
+  kpi1.border = THIN_BORDER;
+
+  ws.mergeCells('C4:D4');
+  const kpi2 = ws.getCell('C4');
+  kpi2.value = `إجمالي الكميات المطلوبة: ${totalWantedQty}`;
+  kpi2.font = { name: 'Arial', bold: true, size: 11, color: { argb: '1E3A8A' } };
+  kpi2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'EFF6FF' } };
+  kpi2.alignment = { horizontal: 'center', vertical: 'middle' };
+  kpi2.border = THIN_BORDER;
+
+  ws.mergeCells('E4:F4');
+  const kpi3 = ws.getCell('E4');
+  kpi3.value = `العملاء المنتظرين: ${totalWaitingCust} عميل`;
+  kpi3.font = { name: 'Arial', bold: true, size: 11, color: { argb: '92400E' } };
+  kpi3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FEF3C7' } };
+  kpi3.alignment = { horizontal: 'center', vertical: 'middle' };
+  kpi3.border = THIN_BORDER;
+
+  ws.mergeCells('G4:I4');
+  const kpi4 = ws.getCell('G4');
+  kpi4.value = `الفروع المتأثرة بالعجز: ${affectedBranchesCount} فرع`;
+  kpi4.font = { name: 'Arial', bold: true, size: 11, color: { argb: '065F46' } };
+  kpi4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'ECFDF5' } };
+  kpi4.alignment = { horizontal: 'center', vertical: 'middle' };
+  kpi4.border = THIN_BORDER;
+
+  ws.getRow(4).height = 28;
+
+  // 4. ترويسة الجدول
+  const headers = [
+    'م',
+    'باركود الصنف الدولي',
+    'اسم الدواء / الصنف الناقص بالسوق',
+    'الفرع الطالب / النطاق',
+    'نوع الوحدة',
+    'إجمالي الكمية المطلوبة',
+    'عدد العملاء المنتظرين',
+    'أسماء وهواتف العملاء المنتظرين',
+    'ملاحظات الصنف وسبب النقص'
+  ];
+
+  const headerRow = ws.getRow(6);
+  headers.forEach((h, idx) => {
+    const cell = headerRow.getCell(idx + 1);
+    cell.value = h;
+    cell.font = { name: 'Arial', bold: true, size: 11, color: { argb: THEME.white } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerColor } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    cell.border = THIN_BORDER;
+  });
+  headerRow.height = 32;
+
+  // 5. تعبئة الصفوف
+  let rIdx = 7;
+  items.forEach((it, idx) => {
+    const row = ws.getRow(rIdx);
+    const isAlt = idx % 2 === 1;
+    const bg = isAlt ? 'FFF5F5' : THEME.white;
+
+    const customersText = Array.isArray(it.waiting_customers) && it.waiting_customers.length > 0
+      ? it.waiting_customers.map(c => `${c.customerName || c.name || ''} (${c.customerPhone || ''})`).join(' | ')
+      : '—';
+
+    const unitLabel = it.unit_type === 'strip' ? 'شريط' : 'علبة';
+
+    row.getCell(1).value = idx + 1;
+    row.getCell(2).value = it.barcode || '—';
+    row.getCell(3).value = it.medication_name || '—';
+    row.getCell(4).value = it.branch_name || 'كافة الفروع / الإدارة العامة';
+    row.getCell(5).value = unitLabel;
+    row.getCell(6).value = Number(it.total_wanted_qty || it.requested_quantity || 1) || 1;
+    row.getCell(7).value = Number(it.customers_waiting_count || it.waiting_customers?.length || 0) || 0;
+    row.getCell(8).value = customersText;
+    row.getCell(9).value = it.notes || (it.source === 'manual' ? 'تسجيل يدوي من المشتريات' : it.source === 'excel_import' ? 'استيراد إكسل' : 'عجز طلبات الفروع');
+
+    row.height = 26;
+    for (let c = 1; c <= 9; c++) {
+      const cell = row.getCell(c);
+      cell.font = { name: 'Arial', size: 10, bold: c === 3 };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+      cell.border = THIN_BORDER;
+      if (c === 1 || c === 5 || c === 6 || c === 7) {
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (c === 2) {
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else {
+        cell.alignment = { horizontal: 'right', vertical: 'middle', wrapText: c === 8 || c === 9 };
+      }
+    }
+
+    rIdx++;
+  });
+
+  // 6. صف الإجمالي
+  if (items.length > 0) {
+    const totRow = ws.getRow(rIdx);
+    ws.mergeCells(`A${rIdx}:E${rIdx}`);
+    totRow.getCell(1).value = `الإجمالي العام (${items.length} أصناف)`;
+    totRow.getCell(6).value = { formula: `SUM(F7:F${rIdx - 1})` };
+    totRow.getCell(7).value = { formula: `SUM(G7:G${rIdx - 1})` };
+    totRow.getCell(8).value = '';
+    totRow.getCell(9).value = '';
+
+    totRow.height = 28;
+    for (let c = 1; c <= 9; c++) {
+      const cell = totRow.getCell(c);
+      cell.font = { name: 'Arial', bold: true, size: 11, color: { argb: THEME.white } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerColor } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = THIN_BORDER;
+    }
+  }
+
+  // 7. ضبط عرض الأعمدة
+  const colWidths = [6, 18, 36, 26, 12, 16, 16, 36, 28];
+  colWidths.forEach((w, i) => {
+    ws.getColumn(i + 1).width = w;
+  });
+
+  // 8. تحميل الملف
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `أصناف_غير_متوفرة_بالسوق_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}
+
+/**
+ * تحميل نموذج شيت إكسل فارغ لاستيراد أصناف النواقص
+ */
+export async function downloadUnavailableItemsTemplateExcel() {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'منظومة إدارة النواقص والمشتريات';
+  const ws = wb.addWorksheet('قالب استيراد النواقص', {
+    views: [{ rightToLeft: true, showGridLines: true }]
+  });
+
+  // ترويسة القالب
+  ws.mergeCells('A1:F1');
+  const tCell = ws.getCell('A1');
+  tCell.value = '📋 قالب استيراد أصناف الأدوية غير المتوفرة بالسوق (املأ البيانات وارفع الملف)';
+  tCell.font = { name: 'Arial', bold: true, size: 13, color: { argb: 'FFFFFF' } };
+  tCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '0F766E' } };
+  tCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(1).height = 36;
+
+  const headers = [
+    'اسم الدواء / الصنف * (إلزامي)',
+    'الباركود الدولي (اختياري)',
+    'نوع الوحدة (علبة أو شريط)',
+    'الكمية المطلوبة (افتراضي 1)',
+    'اسم الفرع أو الكود (اختياري)',
+    'سبب النقص أو ملاحظات المشتريات (اختياري)'
+  ];
+
+  const hRow = ws.getRow(2);
+  headers.forEach((h, i) => {
+    const c = hRow.getCell(i + 1);
+    c.value = h;
+    c.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FFFFFF' } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '134E4A' } };
+    c.alignment = { horizontal: 'center', vertical: 'middle' };
+    c.border = THIN_BORDER;
+  });
+  hRow.height = 30;
+
+  // صفوف تجريبية توضيحية
+  const sampleRows = [
+    ['Panadol Extra 500mg Tab', '622100000001', 'علبة', 10, 'كافة الفروع', 'شحيح لدى الموزعين'],
+    ['Augmentin 1gm 14 Tab', '622100000002', 'علبة', 5, 'فرع المعادي', 'نقص إنتاج بالشركة'],
+    ['Cataflam 50mg 20 Tab', '622100000003', 'شريط', 15, 'الفرع الرئيسي', 'متوقع توريده الأسبوع القادم']
+  ];
+
+  sampleRows.forEach((r, idx) => {
+    const row = ws.getRow(3 + idx);
+    r.forEach((val, cIdx) => {
+      const cell = row.getCell(cIdx + 1);
+      cell.value = val;
+      cell.font = { name: 'Arial', size: 10 };
+      cell.alignment = { horizontal: cIdx === 0 || cIdx === 5 ? 'right' : 'center', vertical: 'middle' };
+      cell.border = THIN_BORDER;
+    });
+    row.height = 24;
+  });
+
+  ws.getColumn(1).width = 34;
+  ws.getColumn(2).width = 20;
+  ws.getColumn(3).width = 16;
+  ws.getColumn(4).width = 16;
+  ws.getColumn(5).width = 24;
+  ws.getColumn(6).width = 34;
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `قالب_استيراد_نواقص_السوق.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}
+
+/**
+ * تحليل ملف إكسل لاستيراد أصناف النواقص
+ * @param {File} file - ملف الإكسل
+ * @returns {Promise<{success: boolean, items: Array, error?: string}>}
+ */
+export async function parseUnavailableItemsExcel(file) {
+  try {
+    const buffer = await file.arrayBuffer();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer);
+    const ws = wb.worksheets[0];
+    if (!ws) {
+      return { success: false, error: 'الملف فارغ أو لا يحتوي على أوراق عمل' };
+    }
+
+    let nameCol = -1;
+    let barcodeCol = -1;
+    let unitCol = -1;
+    let qtyCol = -1;
+    let branchCol = -1;
+    let notesCol = -1;
+    let headerRowIdx = 1;
+
+    // البحث عن سطر العناوين
+    for (let r = 1; r <= Math.min(10, ws.rowCount); r++) {
+      const row = ws.getRow(r);
+      for (let c = 1; c <= row.cellCount; c++) {
+        const val = String(row.getCell(c).value || '').trim().toLowerCase();
+        if (val.includes('صنف') || val.includes('دواء') || val.includes('medication') || val.includes('item') || val.includes('name') || val.includes('product')) {
+          nameCol = c;
+          headerRowIdx = r;
+        }
+        if (val.includes('باركود') || val.includes('barcode') || val.includes('gtin') || val.includes('كود')) {
+          barcodeCol = c;
+        }
+        if (val.includes('وحدة') || val.includes('unit') || val.includes('نوع الوحدة')) {
+          unitCol = c;
+        }
+        if (val.includes('كمية') || val.includes('qty') || val.includes('quantity') || val.includes('العدد') || val.includes('المطلوب')) {
+          qtyCol = c;
+        }
+        if (val.includes('فرع') || val.includes('branch') || val.includes('صيدلية')) {
+          branchCol = c;
+        }
+        if (val.includes('ملاحظ') || val.includes('note') || val.includes('سبب') || val.includes('reason')) {
+          notesCol = c;
+        }
+      }
+      if (nameCol !== -1) break;
+    }
+
+    if (nameCol === -1) {
+      nameCol = 1;
+      barcodeCol = 2;
+      unitCol = 3;
+      qtyCol = 4;
+      branchCol = 5;
+      notesCol = 6;
+    }
+
+    const items = [];
+    for (let r = headerRowIdx + 1; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      const nameVal = String(row.getCell(nameCol).value || '').trim();
+      if (!nameVal || nameVal.startsWith('الإجمالي') || nameVal.startsWith('المجموع') || nameVal === 'م') {
+        continue;
+      }
+
+      const barcodeVal = barcodeCol !== -1 ? String(row.getCell(barcodeCol).value || '').trim() : '';
+      const unitValRaw = unitCol !== -1 ? String(row.getCell(unitCol).value || '').trim() : '';
+      const unitType = unitValRaw.includes('شريط') || unitValRaw.toLowerCase().includes('strip') ? 'strip' : 'pack';
+      const qtyVal = qtyCol !== -1 ? parseInt(row.getCell(qtyCol).value, 10) : 1;
+      const branchVal = branchCol !== -1 ? String(row.getCell(branchCol).value || '').trim() : '';
+      const notesVal = notesCol !== -1 ? String(row.getCell(notesCol).value || '').trim() : '';
+
+      items.push({
+        medicationName: nameVal,
+        barcode: barcodeVal || null,
+        unitType,
+        requestedQuantity: Math.max(1, isNaN(qtyVal) ? 1 : qtyVal),
+        branchName: branchVal || null,
+        notes: notesVal || null
+      });
+    }
+
+    if (items.length === 0) {
+      return { success: false, error: 'لم يتم العثور على أي أصناف صالحة في الملف، تأكد من وجود عمود اسم الدواء' };
+    }
+
+    return { success: true, items };
+  } catch (err) {
+    console.error('Parse unavailable items error:', err);
+    return { success: false, error: `حدث خطأ أثناء قراءة ملف الإكسل: ${err.message}` };
+  }
+}
+

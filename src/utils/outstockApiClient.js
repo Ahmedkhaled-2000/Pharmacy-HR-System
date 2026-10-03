@@ -311,6 +311,20 @@ export async function outstockNotifyRestocked(payload) {
   });
 }
 
+export async function outstockAddManualUnavailableItem(payload) {
+  return await outstockRequest('procurement/unavailable-items', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function outstockImportUnavailableItems(payload) {
+  return await outstockRequest('procurement/unavailable-items/import', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
 // ── 7. أدوية النواقص والرصيد ────────────────────────────────────────────────
 export async function outstockGetDeficiencies(params = {}) {
   const qs = new URLSearchParams();
@@ -874,6 +888,11 @@ export function listenToOutstockLocalMessages(callback) {
     window.removeEventListener('storage', storageListener);
     window.removeEventListener('outstock:sync_event', customEventListener);
   };
+}
+
+export const outstockListenBroadcast = listenToOutstockLocalMessages;
+if (typeof window !== 'undefined') {
+  window.outstockListenBroadcast = listenToOutstockLocalMessages;
 }
 
 // ==========================================

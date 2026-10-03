@@ -18,8 +18,11 @@ import {
 } from 'lucide-react';
 import {
   outstockGetRestockedItems,
-  outstockMarkRestockedContacted
+  outstockMarkRestockedContacted,
+  outstockListenBroadcast,
+  listenToOutstockLocalMessages
 } from '../../../utils/outstockApiClient';
+import { getSocket } from '../../../utils/socketClient';
 import NewCustomerOrderModal from './NewCustomerOrderModal';
 
 /**
@@ -77,18 +80,39 @@ export default function PharmacyRestockedItemsTab({
     fetchItems();
   }, [fetchItems]);
 
-  // استماع للتحديثات اللحظية عبر السوكيت
+  // استماع للتحديثات اللحظية عبر السوكيت وقناة المزامنة المحلية
   useEffect(() => {
-    const unsub = outstockListenBroadcast((event, data) => {
+    const socket = getSocket();
+    const handleLiveUpdate = () => {
+      fetchItems();
+    };
+
+    if (socket) {
+      socket.on('outstock:restocked_alert', handleLiveUpdate);
+      socket.on('outstock:item_restocked', handleLiveUpdate);
+      socket.on('outstock:restocked_contacted', handleLiveUpdate);
+    }
+
+    const unsubLocal = (typeof outstockListenBroadcast === 'function' ? outstockListenBroadcast : listenToOutstockLocalMessages)((data) => {
+      const event = data?.type || data?.event;
       if (
         event === 'outstock:restocked_alert' ||
         event === 'outstock:item_restocked' ||
-        event === 'outstock:restocked_contacted'
+        event === 'outstock:restocked_contacted' ||
+        String(event || '').startsWith('outstock:')
       ) {
         fetchItems();
       }
     });
-    return () => unsub?.();
+
+    return () => {
+      if (socket) {
+        socket.off('outstock:restocked_alert', handleLiveUpdate);
+        socket.off('outstock:item_restocked', handleLiveUpdate);
+        socket.off('outstock:restocked_contacted', handleLiveUpdate);
+      }
+      unsubLocal?.();
+    };
   }, [fetchItems]);
 
   // فلترة الأصناف محلياً
