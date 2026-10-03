@@ -83,24 +83,29 @@ const DELIVERY_ROLE_REGEX = /(طيار|دليفري|توصيل|سائق|مندو
  */
 export default function NewCustomerOrderModal({
   branchId,
+  branch,
   defaultPharmacist = '',
   orderReceiver = null, // { code: string, name: string }
+  initialCustomerPhone = '',
   onClose,
-  onOrderCreated
+  onOrderCreated,
+  onSuccess,
+  showToast
 }) {
   // ── 0. كود الموظف المستلم ──
 
   // ── 1. حالة العميل ──
-  const [searchPhone, setSearchPhone] = useState('');
+  const [searchPhone, setSearchPhone] = useState(initialCustomerPhone || '');
   const [isSearchingCustomer, setIsSearchingCustomer] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [isNewCustomer, setIsNewCustomer] = useState(false);
 
   // حقول العميل الجديد
   const [customerName, setCustomerName] = useState('');
-  const [whatsappPhone, setWhatsappPhone] = useState('');
+  const [whatsappPhone, setWhatsappPhone] = useState(initialCustomerPhone || '');
   const [landlinePhone, setLandlinePhone] = useState('');
   const [address, setAddress] = useState('');
+  const [customerPermanentNotes, setCustomerPermanentNotes] = useState('');
 
   // ── 2. قائمة المناطق / الأحياء المعتمدة من إعدادات المالك ──
   const [deliveryZones] = useState(() => {
@@ -288,10 +293,12 @@ export default function NewCustomerOrderModal({
         setLandlinePhone(found.landline_phone || '');
         setAddress(found.address || '');
         if (found.zone) setSelectedZone(found.zone);
+        setCustomerPermanentNotes(found.notes || '');
         setIsNewCustomer(false);
       } else {
         setSelectedCustomer(null);
         setIsNewCustomer(true);
+        setCustomerPermanentNotes('');
         if (/^\d+$/.test(clean)) {
           setWhatsappPhone(clean);
         } else {
@@ -304,6 +311,14 @@ export default function NewCustomerOrderModal({
       setIsSearchingCustomer(false);
     }
   };
+
+  // بحث تلقائي برقم العميل الممرر عند الفتح
+  useEffect(() => {
+    if (initialCustomerPhone) {
+      setSearchPhone(initialCustomerPhone);
+      handleSearchCustomer(initialCustomerPhone);
+    }
+  }, [initialCustomerPhone]);
 
   // التحكم في قائمة الأصناف مع التركيز التلقائي
   const handleAddItem = () => {
@@ -652,7 +667,8 @@ export default function NewCustomerOrderModal({
           whatsappPhone: finalPhone,
           landlinePhone: landlinePhone ? String(landlinePhone).trim() : null,
           address: address ? String(address).trim() : null,
-          zone: selectedZone || null
+          zone: selectedZone || null,
+          notes: customerPermanentNotes ? String(customerPermanentNotes).trim() : null
         },
         items: validItems.map((it) => {
           const isEst = Boolean(it.isPriceEstimated);
@@ -693,7 +709,11 @@ export default function NewCustomerOrderModal({
           });
           window.dispatchEvent(new CustomEvent('outstock:order_created', { detail: res.order }));
         } catch (_) {}
-        onOrderCreated(res.order);
+        if (typeof onOrderCreated === 'function') {
+          onOrderCreated(res.order);
+        } else if (typeof onSuccess === 'function') {
+          onSuccess(res.order);
+        }
       } else {
         setErrorMsg(res?.error || 'حدث خطأ أثناء حفظ الطلب، يرجى المحاولة ثانية');
       }
@@ -1136,6 +1156,47 @@ export default function NewCustomerOrderModal({
               )}
             </div>
 
+            {/* تنبيه ملحوظة العميل المسجلة مسبقاً */}
+            {selectedCustomer?.notes && (
+              <div
+                style={{
+                  marginBottom: '14px',
+                  background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
+                  border: '2px solid #f59e0b',
+                  borderRadius: '12px',
+                  padding: '12px 16px',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  boxShadow: '0 4px 12px rgba(245, 158, 11, 0.15)'
+                }}
+              >
+                <div
+                  style={{
+                    background: '#fef3c7',
+                    border: '1.5px solid #f59e0b',
+                    borderRadius: '50%',
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}
+                >
+                  <AlertCircle size={20} color="#b45309" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '13px', fontWeight: '900', color: '#92400e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>⚠️ تنبيه: ملحوظة هامة مسجلة مسبقاً على هذا العميل:</span>
+                  </div>
+                  <div style={{ fontSize: '13.5px', fontWeight: '700', color: '#78350f', marginTop: '4px', lineHeight: 1.5, background: 'rgba(255,255,255,0.85)', padding: '6px 12px', borderRadius: '8px', border: '1px dashed #d97706' }}>
+                    "{selectedCustomer.notes}"
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* مربع البحث السريع */}
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
               <input
@@ -1240,6 +1301,22 @@ export default function NewCustomerOrderModal({
                   className="outstock-form-input"
                 />
               </div>
+            </div>
+
+            {/* ملحوظة العميل الدائمة */}
+            <div style={{ marginTop: '12px' }}>
+              <label style={{ fontSize: '12px', fontWeight: '800', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                <Tag size={13} color="#0d9488" />
+                <span>ملحوظة خاصة بالعميل (تُحفظ في ملفه وتظهر كتنبيه عند أي طلب جديد له):</span>
+              </label>
+              <textarea
+                rows={2}
+                placeholder="اكتب أي ملاحظة تخص هذا العميل (مثلاً: حساس للبنسلين، يفضل الاستلام مساءً، عميل VIP، لا يقبل بدائل...)"
+                value={customerPermanentNotes}
+                onChange={(e) => setCustomerPermanentNotes(e.target.value)}
+                className="outstock-form-input"
+                style={{ resize: 'vertical', borderColor: customerPermanentNotes ? '#0d9488' : undefined }}
+              />
             </div>
           </div>
 

@@ -912,3 +912,47 @@ export async function outstockGetPharmaflyLogs(params = {}) {
   if (params.limit) query.set('limit', params.limit);
   return outstockRequest(`pharmafly/logs?${query.toString()}`);
 }
+
+// ── 10. العملاء والشكاوى والأصناف التي أعيد توافرها ─────────────────────────────
+export async function outstockDeleteCustomer(customerId) {
+  return outstockRequest(`customers/${encodeURIComponent(customerId)}`, {
+    method: 'DELETE'
+  });
+}
+
+export async function outstockSendOrderComplaint(orderId, payload) {
+  return outstockRequest(`orders/${encodeURIComponent(orderId)}/complaint`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function outstockGetOwnerComplaints(params = {}) {
+  const query = new URLSearchParams();
+  if (params.status) query.set('status', params.status);
+  if (params.branchId) query.set('branchId', params.branchId);
+  return outstockRequest(`owner/complaints?${query.toString()}`);
+}
+
+export async function outstockUpdateComplaintStatus(complaintId, payload) {
+  return outstockRequest(`owner/complaints/${encodeURIComponent(complaintId)}/status`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function outstockGetRestockedItems(params = {}) {
+  const query = new URLSearchParams();
+  if (params.branchId) query.set('branchId', params.branchId);
+  if (params.search) query.set('search', params.search);
+  if (params.status) query.set('status', params.status);
+  return outstockRequest(`pharmacy/restocked-items?${query.toString()}`);
+}
+
+export async function outstockMarkRestockedContacted(deficiencyId, payload = {}) {
+  return outstockRequest(`pharmacy/restocked-items/${encodeURIComponent(deficiencyId)}/contacted`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+

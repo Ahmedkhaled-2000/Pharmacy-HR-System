@@ -564,6 +564,34 @@ export async function initOutstockTables(db) {
 
         ALTER TABLE public.outstock_branch_withdrawals ADD COLUMN IF NOT EXISTS items_count INTEGER DEFAULT 1;
         ALTER TABLE public.outstock_branch_withdrawals ADD COLUMN IF NOT EXISTS invoice_file_data TEXT NULL;
+
+        ALTER TABLE public.outstock_customers ADD COLUMN IF NOT EXISTS zone VARCHAR(100) NULL;
+        ALTER TABLE public.outstock_orders ADD COLUMN IF NOT EXISTS has_complaint BOOLEAN DEFAULT false;
+        ALTER TABLE public.outstock_orders ADD COLUMN IF NOT EXISTS complaint_notes TEXT NULL;
+        ALTER TABLE public.outstock_orders ALTER COLUMN customer_id DROP NOT NULL;
+
+        ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS contacted_customer_at TIMESTAMPTZ NULL;
+        ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS contacted_by VARCHAR(100) NULL;
+        ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS contact_notes TEXT NULL;
+
+        CREATE TABLE IF NOT EXISTS public.outstock_order_complaints (
+          id VARCHAR(64) PRIMARY KEY,
+          order_id VARCHAR(64) NOT NULL,
+          order_number VARCHAR(50),
+          branch_id VARCHAR(64) NOT NULL,
+          branch_name VARCHAR(150),
+          complaint_type VARCHAR(64) NOT NULL,
+          pharmacist_name VARCHAR(128),
+          notes TEXT,
+          order_created_at TIMESTAMPTZ,
+          procurement_replied_at TIMESTAMPTZ,
+          status VARCHAR(32) DEFAULT 'pending',
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_outstock_complaints_order ON public.outstock_order_complaints (order_id);
+        CREATE INDEX IF NOT EXISTS idx_outstock_complaints_branch ON public.outstock_order_complaints (branch_id);
+        CREATE INDEX IF NOT EXISTS idx_outstock_complaints_status ON public.outstock_order_complaints (status);
       `);
     } catch (migErr) {
       console.warn('⚠️ [OutStock Schema Migrations Warning]:', migErr.message);
@@ -1604,10 +1632,10 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     }
   });
 
-  // إضافة أو تعديل عميل مع فرض فرادة رقم الواتساب
+  // إضافة أو تعديل عميل مع فرض فرادة رقم الواتساب وحفظ المنطقة والملاحظات
   app.post('/api/outstock/customers', authMiddleware, async (req, res) => {
     try {
-      const { id, fullName, whatsappPhone, landlinePhone, address, branchId, notes } = req.body || {};
+      const { id, fullName, whatsappPhone, landlinePhone, address, branchId, notes, zone } = req.body || {};
       if (!fullName || !whatsappPhone) {
         return res.status(400).json({ success: false, error: 'اسم العميل ورقم الواتساب مطلوبان' });
       }
@@ -1635,23 +1663,49 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const custCode = `CUST-${cleanPhone.slice(-4)}-${Math.floor(100 + Math.random() * 900)}`;
 
       const insertRes = await db.query(`
-        INSERT INTO public.outstock_customers (id, customer_code, full_name, whatsapp_phone, landline_phone, address, primary_branch_id, notes, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+        INSERT INTO public.outstock_customers (id, customer_code, full_name, whatsapp_phone, landline_phone, address, primary_branch_id, notes, zone, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
         ON CONFLICT (id) DO UPDATE SET
           full_name = EXCLUDED.full_name,
           whatsapp_phone = EXCLUDED.whatsapp_phone,
           landline_phone = EXCLUDED.landline_phone,
           address = EXCLUDED.address,
           notes = EXCLUDED.notes,
+          zone = EXCLUDED.zone,
           updated_at = CURRENT_TIMESTAMP
         RETURNING *
-      `, [targetId, custCode, fullName, cleanPhone, landlinePhone || null, address || null, branchId || 'main', notes || null]);
+      `, [targetId, custCode, fullName, cleanPhone, landlinePhone || null, address || null, branchId || 'main', notes || null, zone || null]);
 
       // ⚡ بث فوري لتحديث بيانات العملاء
       broadcastOutstock('outstock:customer_updated', { customer: insertRes.rows[0], branchId });
 
       res.json({ success: true, customer: insertRes.rows[0], message: 'تم حفظ بيانات العميل بنجاح' });
     } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // حذف عميل مسجل مع فك ارتباط الطلبات التاريخية بأمان
+  app.delete('/api/outstock/customers/:id', authMiddleware, async (req, res) => {
+    try {
+      const customerId = req.params.id;
+
+      // 1. فك ارتباط الطلبات التاريخية للعميل حتى لا تتأثر الحسابات أو تقارير المبيعات
+      await db.query('UPDATE public.outstock_orders SET customer_id = NULL WHERE customer_id = $1', [customerId]);
+
+      // 2. فك ارتباط أو حذف النواقص المرتبطة بهذا العميل
+      await db.query('DELETE FROM public.outstock_deficiencies WHERE customer_id = $1', [customerId]);
+
+      // 3. حذف سجل العميل
+      const delRes = await db.query('DELETE FROM public.outstock_customers WHERE id = $1 RETURNING *', [customerId]);
+      if (delRes.rowCount === 0) {
+        return res.status(404).json({ success: false, error: 'العميل غير موجود' });
+      }
+
+      broadcastOutstock('outstock:customer_deleted', { customerId, deletedCustomer: delRes.rows[0] });
+      res.json({ success: true, message: 'تم حذف العميل بنجاح' });
+    } catch (err) {
+      console.error('[Delete Customer Error]:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -1814,9 +1868,9 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           customerId = `cust_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
           const custCode = `CUST-${cleanPhone.slice(-4)}-${Math.floor(100 + Math.random() * 900)}`;
           await db.query(`
-            INSERT INTO public.outstock_customers (id, customer_code, full_name, whatsapp_phone, landline_phone, address, primary_branch_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-          `, [customerId, custCode, customer.fullName, cleanPhone, customer.landlinePhone || null, customer.address || null, branchId]);
+            INSERT INTO public.outstock_customers (id, customer_code, full_name, whatsapp_phone, landline_phone, address, primary_branch_id, zone, notes)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          `, [customerId, custCode, customer.fullName, cleanPhone, customer.landlinePhone || null, customer.address || null, branchId, customer.zone || null, customer.notes || null]);
         }
       }
 
@@ -1827,12 +1881,16 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           SET full_name = COALESCE($1, full_name),
               landline_phone = COALESCE($2, landline_phone),
               address = COALESCE($3, address),
+              zone = COALESCE($4, zone),
+              notes = COALESCE($5, notes),
               updated_at = CURRENT_TIMESTAMP
-          WHERE id = $4
+          WHERE id = $6
         `, [
           customer.fullName ? String(customer.fullName).trim() : null,
           customer.landlinePhone ? String(customer.landlinePhone).trim() : null,
           customer.address ? String(customer.address).trim() : null,
+          customer.zone ? String(customer.zone).trim() : null,
+          customer.notes ? String(customer.notes).trim() : null,
           customerId
         ]);
       }
@@ -2152,6 +2210,242 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     }
   });
 
+  // ── 6. تصعيد شكوى تأخير الرد أو الصنف لم يتوفر للمالك مباشرة (Req 6) ──
+  app.post('/api/outstock/orders/:id/complaint', authMiddleware, async (req, res) => {
+    try {
+      const orderId = req.params.id;
+      const { complaintType, notes, pharmacistName } = req.body || {};
+
+      if (!complaintType) {
+        return res.status(400).json({ success: false, error: 'نوع الشكوى مطلوب' });
+      }
+
+      // جلب تفاصيل الطلب مع الفرع والعميل
+      const orderRes = await db.query(`
+        SELECT o.*, b.name as branch_name, c.full_name as customer_name, c.whatsapp_phone as customer_phone
+        FROM public.outstock_orders o
+        LEFT JOIN public.outstock_branches b ON o.branch_id = b.id
+        LEFT JOIN public.outstock_customers c ON o.customer_id = c.id
+        WHERE o.id = $1
+      `, [orderId]);
+
+      if (orderRes.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'الطلب غير موجود' });
+      }
+
+      const order = orderRes.rows[0];
+      const complaintId = `comp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const reporter = pharmacistName || req.user?.fullName || req.user?.username || 'الصيدلي بالفرع';
+
+      // جلب أصناف الطلب لإرفاقها في الشكوى
+      const itemsRes = await db.query(`
+        SELECT medication_name, unit_type, quantity, item_status, procurement_notes
+        FROM public.outstock_order_items
+        WHERE order_id = $1
+      `, [orderId]);
+
+      // إدراج الشكوى
+      await db.query(`
+        INSERT INTO public.outstock_order_complaints (
+          id, order_id, order_number, branch_id, branch_name, complaint_type, pharmacist_name,
+          notes, order_created_at, procurement_replied_at, status, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `, [
+        complaintId,
+        orderId,
+        order.order_number,
+        order.branch_id,
+        order.branch_name,
+        complaintType,
+        reporter,
+        notes || null,
+        order.created_at,
+        order.procurement_replied_at || null
+      ]);
+
+      // تحديث حالة الطلب بأن عليه شكوى
+      await db.query(`
+        UPDATE public.outstock_orders
+        SET has_complaint = true, complaint_notes = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+      `, [notes || 'تم تصعيد شكوى للمالك بخصوص هذا الطلب', orderId]);
+
+      const complaintData = {
+        id: complaintId,
+        orderId,
+        orderNumber: order.order_number,
+        branchId: order.branch_id,
+        branchName: order.branch_name,
+        customerName: order.customer_name,
+        customerPhone: order.customer_phone,
+        complaintType,
+        pharmacistName: reporter,
+        notes,
+        orderCreatedAt: order.created_at,
+        procurementRepliedAt: order.procurement_replied_at,
+        items: itemsRes.rows,
+        createdAt: new Date().toISOString()
+      };
+
+      // 1. ⚡ بث فوري للمالك
+      broadcastOutstock('outstock:owner_complaint_escalation', {
+        ...complaintData,
+        message: `🚨 شكوى عاجلة من فرع "${order.branch_name}": ${complaintType === 'delayed_response' ? 'تأخر الرد على الطلب' : 'الصنف لم يتوفر بالرغم من موافقة المشتريات'} (طلب #${order.order_number})`
+      });
+
+      // 2. ⚡ بث تنبيه فوري لإدارة المشتريات
+      broadcastOutstock('outstock:procurement_alert', {
+        type: 'complaint_alert',
+        orderId,
+        orderNumber: order.order_number,
+        branchId: order.branch_id,
+        branchName: order.branch_name,
+        complaintType,
+        message: `⚠️ تنبيه عاجل من فرع [${order.branch_name}]: الصنف لم يتوفر بالرغم أنك وافقت على توفيره! (طلب رقم #${order.order_number})`
+      });
+
+      broadcastOutstock('outstock:refresh_notifications', { branchId: order.branch_id });
+
+      res.json({
+        success: true,
+        message: 'تم إرسال الشكوى للمالك مباشرة وتنبيه إدارة المشتريات بنجاح',
+        complaintId
+      });
+    } catch (err) {
+      console.error('[Order Complaint Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ── جلب الشكاوى المرفوعة للمالك ──
+  app.get('/api/outstock/owner/complaints', authMiddleware, async (req, res) => {
+    try {
+      const { status, branchId } = req.query;
+      let query = `
+        SELECT c.*, o.customer_notes, o.total_amount, o.net_amount, o.paid_amount,
+               cust.full_name as customer_name, cust.whatsapp_phone as customer_phone
+        FROM public.outstock_order_complaints c
+        LEFT JOIN public.outstock_orders o ON c.order_id = o.id
+        LEFT JOIN public.outstock_customers cust ON o.customer_id = cust.id
+        WHERE 1=1
+      `;
+      const params = [];
+      if (status) {
+        params.push(status);
+        query += ` AND c.status = $${params.length}`;
+      }
+      if (branchId) {
+        params.push(branchId);
+        query += ` AND c.branch_id = $${params.length}`;
+      }
+      query += ` ORDER BY c.created_at DESC LIMIT 100`;
+
+      const result = await db.query(query, params);
+      res.json({ success: true, complaints: result.rows });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ── تحديث حالة الشكوى (مراجعة / حل) من قبل المالك ──
+  app.put('/api/outstock/owner/complaints/:id/status', authMiddleware, async (req, res) => {
+    try {
+      const complaintId = req.params.id;
+      const { status, ownerNotes } = req.body || {};
+      const updated = await db.query(`
+        UPDATE public.outstock_order_complaints
+        SET status = $1, notes = COALESCE($2, notes), updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        RETURNING *
+      `, [status || 'resolved', ownerNotes, complaintId]);
+
+      if (updated.rowCount === 0) {
+        return res.status(404).json({ success: false, error: 'الشكوى غير موجودة' });
+      }
+
+      broadcastOutstock('outstock:complaint_updated', { complaint: updated.rows[0] });
+      res.json({ success: true, complaint: updated.rows[0], message: 'تم تحديث حالة الشكوى' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ── 7. جلب الأصناف التي أُعيد توافرها للفرع (Req 7) ──
+  app.get('/api/outstock/pharmacy/restocked-items', authMiddleware, async (req, res) => {
+    try {
+      const { branchId, search, status } = req.query;
+      let query = `
+        SELECT d.*,
+               c.full_name as customer_name,
+               c.whatsapp_phone as customer_phone,
+               c.landline_phone as customer_landline,
+               c.address as customer_address,
+               c.zone as customer_zone,
+               c.notes as customer_notes,
+               o.order_number,
+               o.created_at as order_created_at,
+               o.responsible_pharmacist,
+               b.name as branch_name
+        FROM public.outstock_deficiencies d
+        LEFT JOIN public.outstock_customers c ON d.customer_id = c.id
+        LEFT JOIN public.outstock_orders o ON d.original_order_id = o.id
+        LEFT JOIN public.outstock_branches b ON d.branch_id = b.id
+        WHERE d.status IN ('restocked_available', 'contacted')
+      `;
+      const params = [];
+
+      if (branchId) {
+        params.push(branchId);
+        query += ` AND d.branch_id = $${params.length}`;
+      }
+
+      if (status) {
+        params.push(status);
+        query += ` AND d.status = $${params.length}`;
+      }
+
+      if (search && String(search).trim()) {
+        params.push(`%${String(search).trim()}%`);
+        query += ` AND (d.medication_name ILIKE $${params.length} OR c.full_name ILIKE $${params.length} OR c.whatsapp_phone ILIKE $${params.length} OR o.order_number ILIKE $${params.length})`;
+      }
+
+      query += ` ORDER BY d.restocked_at DESC NULLS LAST, d.created_at DESC LIMIT 200`;
+
+      const result = await db.query(query, params);
+      res.json({ success: true, items: result.rows });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ── تسجيل التواصل مع العميل بخصوص صنف أُعيد توفره ──
+  app.post('/api/outstock/pharmacy/restocked-items/:id/contacted', authMiddleware, async (req, res) => {
+    try {
+      const deficiencyId = req.params.id;
+      const { pharmacistName, notes } = req.body || {};
+
+      const updated = await db.query(`
+        UPDATE public.outstock_deficiencies
+        SET status = 'contacted',
+            contacted_customer_at = CURRENT_TIMESTAMP,
+            contacted_by = $1,
+            contact_notes = $2,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        RETURNING *
+      `, [pharmacistName || req.user?.fullName || req.user?.username || 'الصيدلي', notes || null, deficiencyId]);
+
+      if (updated.rowCount === 0) {
+        return res.status(404).json({ success: false, error: 'البند غير موجود' });
+      }
+
+      broadcastOutstock('outstock:restocked_contacted', { item: updated.rows[0] });
+      res.json({ success: true, item: updated.rows[0], message: 'تم تسجيل التواصل مع العميل بنجاح' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // ملخص عدادات الإشعارات اللحظية لشارات التبويبات (Notification Badges Summary)
   app.get('/api/outstock/notifications/summary', authMiddleware, async (req, res) => {
     try {
@@ -2211,11 +2505,32 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         branchReadyOrdersCount = parseInt(readyRes.rows[0]?.count || 0, 10);
       }
 
+      // 5. للفرع: أصناف أُعيد توافرها وبانتظار التواصل مع العملاء
+      let branchRestockedItemsCount = 0;
+      if (branchId) {
+        const restockedRes = await db.query(`
+          SELECT COUNT(*) as count
+          FROM public.outstock_deficiencies
+          WHERE branch_id = $1 AND status = 'restocked_available'
+        `, [branchId]);
+        branchRestockedItemsCount = parseInt(restockedRes.rows[0]?.count || 0, 10);
+      }
+
+      // 6. للمالك: عدد الشكاوى المعلقة المصعدة من الفروع
+      const complaintsRes = await db.query(`
+        SELECT COUNT(*) as count
+        FROM public.outstock_order_complaints
+        WHERE status = 'pending'
+      `);
+      const ownerPendingComplaintsCount = parseInt(complaintsRes.rows[0]?.count || 0, 10);
+
       const summaryData = {
         pendingBranchOrdersCount,
         pendingInquiriesCount,
         branchRepliedInquiriesCount,
-        branchReadyOrdersCount
+        branchReadyOrdersCount,
+        branchRestockedItemsCount,
+        ownerPendingComplaintsCount
       };
 
       res.json({

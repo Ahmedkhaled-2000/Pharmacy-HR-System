@@ -77,6 +77,8 @@ import PharmacyMedicationSearchTab from './pharmacy/PharmacyMedicationSearchTab'
 import ItemInquiryAndCorrectionTab from './common/ItemInquiryAndCorrectionTab';
 import ProcurementSuppliersTab from './procurement/ProcurementSuppliersTab';
 import ProcurementTeamTab from './procurement/ProcurementTeamTab';
+import PharmacyRestockedItemsTab from './pharmacy/PharmacyRestockedItemsTab';
+import OwnerComplaintsModal from './owner/OwnerComplaintsModal';
 
 /**
  * OutstockSystemView.jsx
@@ -190,6 +192,18 @@ export default function OutstockSystemView({
       title: 'متابعة طلبات المشتريات',
       desc: 'متابعة الأصناف المتوفرة وجاهزية الاستلام والتوريد بالفرع',
       icon: Clock
+    },
+    {
+      id: 'inquiries',
+      title: 'الاستعلام وتصحيح الأصناف',
+      desc: 'الاستعلام عن أسعار وتصحيح بيانات الأصناف واعتماد الأدوية الجديدة',
+      icon: HelpCircle
+    },
+    {
+      id: 'restocked_items',
+      title: 'أصناف أُعيد توافرها',
+      desc: 'الأصناف التي كانت ناقصة وتم توفيرها من المشتريات للتواصل مع العملاء لحجزها',
+      icon: RefreshCw
     }
   ];
 
@@ -609,8 +623,13 @@ export default function OutstockSystemView({
     pendingBranchOrdersCount: 0,
     pendingInquiriesCount: 0,
     branchRepliedInquiriesCount: 0,
-    branchReadyOrdersCount: 0
+    branchReadyOrdersCount: 0,
+    branchRestockedItemsCount: 0,
+    ownerPendingComplaintsCount: 0
   });
+
+  // نافذة شكاوى الفروع المصعدة للمالك
+  const [isOwnerComplaintsModalOpen, setIsOwnerComplaintsModalOpen] = useState(false);
 
   const fetchNotificationsSummary = useCallback(async () => {
     try {
@@ -1097,26 +1116,26 @@ export default function OutstockSystemView({
           {/* 1. قوائم بوابة الصيدلية */}
           {userRole === 'branch' && (
             <>
-              {/* قائمة طلبات الصيدلية المنسدلة (طلبات العملاء، طلبات الفرع، متابعة طلبات المشتريات) */}
+              {/* قائمة طلبات الصيدلية المنسدلة (طلبات العملاء، طلبات الفرع، متابعة طلبات المشتريات، الاستعلامات، أصناف أعيد توفرها) */}
               <button
                 ref={pharmacyOrdersButtonRef}
                 type="button"
-                className={`outstock-subnav-btn ${['orders', 'branch_orders', 'procurement_tracking'].includes(activeTab) ? 'is-active' : ''}`}
+                className={`outstock-subnav-btn ${['orders', 'branch_orders', 'procurement_tracking', 'inquiries', 'restocked_items'].includes(activeTab) ? 'is-active' : ''}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   setPharmacyOrdersMenuCoords(calculateMenuCoords(pharmacyOrdersButtonRef));
                   setIsPharmacyOrdersMenuOpen(prev => !prev);
                 }}
-                title="طلبات العملاء، طلبات الفرع، ومتابعة طلبات المشتريات"
+                title="طلبات العملاء، طلبات الفرع، متابعة المشتريات، الاستعلامات، والأصناف التي أعيد توافرها"
                 aria-haspopup="true"
                 aria-expanded={isPharmacyOrdersMenuOpen}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
               >
                 <Package size={16} />
                 <span>طلبات</span>
-                {notificationsSummary.branchReadyOrdersCount > 0 && (
-                  <span className="outstock-nav-badge success" title={`${notificationsSummary.branchReadyOrdersCount} طلب جاهز للتسليم بالفرع`}>
-                    {notificationsSummary.branchReadyOrdersCount}
+                {(notificationsSummary.branchReadyOrdersCount + (notificationsSummary.branchRestockedItemsCount || 0) + (notificationsSummary.branchRepliedInquiriesCount || 0)) > 0 && (
+                  <span className="outstock-nav-badge success" title={`${notificationsSummary.branchReadyOrdersCount} جاهز، ${notificationsSummary.branchRestockedItemsCount || 0} صنف متوفر، ${notificationsSummary.branchRepliedInquiriesCount || 0} رد استعلام`}>
+                    {notificationsSummary.branchReadyOrdersCount + (notificationsSummary.branchRestockedItemsCount || 0) + (notificationsSummary.branchRepliedInquiriesCount || 0)}
                   </span>
                 )}
                 <ChevronDown
@@ -1385,6 +1404,26 @@ export default function OutstockSystemView({
 
               <button
                 type="button"
+                className={`outstock-subnav-btn`}
+                style={{
+                  background: notificationsSummary.ownerPendingComplaintsCount > 0 ? '#fef2f2' : undefined,
+                  color: notificationsSummary.ownerPendingComplaintsCount > 0 ? '#b91c1c' : undefined,
+                  border: notificationsSummary.ownerPendingComplaintsCount > 0 ? '1.5px solid #fca5a5' : undefined
+                }}
+                onClick={() => setIsOwnerComplaintsModalOpen(true)}
+                title="استعراض ومتابعة شكاوى الفروع المصعدة للمالك بخصوص تأخر الرد أو عدم توفر الصنف"
+              >
+                <AlertTriangle size={16} color={notificationsSummary.ownerPendingComplaintsCount > 0 ? '#dc2626' : undefined} />
+                <span>شكاوى الفروع المصعدة</span>
+                {notificationsSummary.ownerPendingComplaintsCount > 0 && (
+                  <span className="outstock-nav-badge warning" style={{ background: '#dc2626' }} title={`${notificationsSummary.ownerPendingComplaintsCount} شكوى معلقة`}>
+                    {notificationsSummary.ownerPendingComplaintsCount}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
                 className={`outstock-subnav-btn ${activeTab === 'owner_inquiries' ? 'is-active' : ''}`}
                 onClick={() => setActiveTab('owner_inquiries')}
                 title="استعلامات الفروع وتصحيح الأصناف"
@@ -1531,6 +1570,15 @@ export default function OutstockSystemView({
                 branchId={effectiveBranchId}
                 currentBranch={activeBranch}
                 currentUser={currentUser}
+                showToast={triggerNotification}
+              />
+            )}
+
+            {activeTab === 'restocked_items' && (
+              <PharmacyRestockedItemsTab
+                branchId={effectiveBranchId}
+                branch={activeBranch}
+                currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
                 showToast={triggerNotification}
               />
             )}
@@ -1771,7 +1819,18 @@ export default function OutstockSystemView({
                 const IconComp = sub.icon;
                 const badgeCount = sub.id === 'procurement_tracking'
                   ? notificationsSummary.branchReadyOrdersCount
+                  : sub.id === 'inquiries'
+                  ? notificationsSummary.branchRepliedInquiriesCount
+                  : sub.id === 'restocked_items'
+                  ? (notificationsSummary.branchRestockedItemsCount || 0)
                   : 0;
+
+                const badgeType = sub.id === 'inquiries' ? 'info' : 'success';
+                const badgeSuffix = sub.id === 'procurement_tracking'
+                  ? 'جاهز'
+                  : sub.id === 'inquiries'
+                  ? 'رد جديد'
+                  : 'متوفر';
 
                 return (
                   <button
@@ -1791,8 +1850,8 @@ export default function OutstockSystemView({
                       <span className="outstock-dropdown-item-desc">{sub.desc}</span>
                     </div>
                     {badgeCount > 0 && (
-                      <span className="outstock-dropdown-item-badge success">
-                        {badgeCount} جاهز
+                      <span className={`outstock-dropdown-item-badge ${badgeType}`}>
+                        {badgeCount} {badgeSuffix}
                       </span>
                     )}
                     {isCurrent && (
@@ -1975,6 +2034,17 @@ export default function OutstockSystemView({
         <OutstockNotificationModal
           notification={activeNotification}
           onClose={() => setActiveNotification(null)}
+        />
+      )}
+
+      {/* ── نافذة شكاوى الفروع المصعدة للمالك ── */}
+      {isOwnerComplaintsModalOpen && (
+        <OwnerComplaintsModal
+          onClose={() => {
+            setIsOwnerComplaintsModalOpen(false);
+            fetchNotificationsSummary();
+          }}
+          showToast={triggerNotification}
         />
       )}
     </div>

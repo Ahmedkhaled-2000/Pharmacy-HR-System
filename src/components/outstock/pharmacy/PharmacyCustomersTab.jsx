@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Phone, MapPin, Calendar, Clock, Edit2, History, X, User, CheckCircle } from 'lucide-react';
-import { outstockGetCustomers, outstockSaveCustomer, outstockGetCustomerHistory } from '../../../utils/outstockApiClient';
+import { Search, Plus, Phone, MapPin, Calendar, Clock, Edit2, History, X, User, CheckCircle, Trash2, AlertTriangle } from 'lucide-react';
+import { outstockGetCustomers, outstockSaveCustomer, outstockGetCustomerHistory, outstockDeleteCustomer } from '../../../utils/outstockApiClient';
 
 /**
  * PharmacyCustomersTab.jsx
@@ -8,11 +8,28 @@ import { outstockGetCustomers, outstockSaveCustomer, outstockGetCustomerHistory 
  * - استعراض كافة العملاء المسجلين وسجل طلباتهم
  * - البحث بالرقم، أو باسم صنف الدواء، وفلترة التاريخ
  * - إضافة وتعديل عميل مع فرض فرادة رقم الهاتف
+ * - اختيار المنطقة من قائمة منسدلة
+ * - حذف العميل مع الحفاظ على الفواتير التاريخية بأمان
+ * - حفظ واستعراض ملاحظات هامة على العميل
  */
 export default function PharmacyCustomersTab({ branchId, showToast }) {
   const [customers, setCustomers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // ── قائمة المناطق / الأحياء المعتمدة من إعدادات المالك ──
+  const [deliveryZones] = useState(() => {
+    try {
+      const saved = localStorage.getItem('outstock_delivery_zones');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((z) => (typeof z === 'string' ? z : z.name)).filter(Boolean);
+        }
+      }
+    } catch (e) {}
+    return ['وسط البلد', 'حي الجامعة', 'المنطقة الأولى', 'المنطقة الثانية', 'حي النزهة', 'أخرى / خارج النطاق'];
+  });
 
   // نافذة إضافة/تعديل عميل
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -20,10 +37,15 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
   const [formName, setFormName] = useState('');
   const [formPhone, setFormPhone] = useState('');
   const [formLandline, setFormLandline] = useState('');
+  const [formZone, setFormZone] = useState('');
   const [formAddress, setFormAddress] = useState('');
   const [formNotes, setFormNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+
+  // نافذة تأكيد حذف عميل
+  const [deletingCustomer, setDeletingCustomer] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // نافذة استعراض سجل العميل السابق
   const [historyCustomer, setHistoryCustomer] = useState(null);
@@ -55,6 +77,7 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
     setFormName('');
     setFormPhone('');
     setFormLandline('');
+    setFormZone(deliveryZones[0] || '');
     setFormAddress('');
     setFormNotes('');
     setFormError('');
@@ -67,10 +90,31 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
     setFormName(cust.full_name || '');
     setFormPhone(cust.whatsapp_phone || '');
     setFormLandline(cust.landline_phone || '');
+    setFormZone(cust.zone || deliveryZones[0] || '');
     setFormAddress(cust.address || '');
     setFormNotes(cust.notes || '');
     setFormError('');
     setIsEditModalOpen(true);
+  };
+
+  // حذف العميل
+  const handleDeleteCustomer = async () => {
+    if (!deletingCustomer) return;
+    setIsDeleting(true);
+    try {
+      const res = await outstockDeleteCustomer(deletingCustomer.id);
+      if (res?.success) {
+        showToast?.('✅ تم حذف العميل بنجاح مع الحفاظ على الفواتير التاريخية');
+        setDeletingCustomer(null);
+        fetchCustomers();
+      } else {
+        showToast?.('❌ ' + (res?.error || 'تعذر حذف العميل'));
+      }
+    } catch {
+      showToast?.('❌ حدث خطأ أثناء حذف العميل');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // فتح سجل طلبات العميل
@@ -115,6 +159,7 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
         fullName: cleanName,
         whatsappPhone: cleanPhone,
         landlinePhone: formLandline ? String(formLandline).trim() : null,
+        zone: formZone ? String(formZone).trim() : null,
         address: formAddress ? String(formAddress).trim() : null,
         branchId,
         notes: formNotes ? String(formNotes).trim() : null
@@ -203,7 +248,8 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                   <th>اسم العميل</th>
                   <th>رقم الواتساب</th>
                   <th>الهاتف الأرضي</th>
-                  <th>العنوان</th>
+                  <th>المنطقة والعنوان</th>
+                  <th>ملاحظات العميل</th>
                   <th>إجمالي الطلبات</th>
                   <th>تاريخ التسجيل</th>
                   <th>الإجراءات</th>
@@ -226,7 +272,40 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                       </span>
                     </td>
                     <td>{cust.landline_phone || '—'}</td>
-                    <td>{cust.address || '—'}</td>
+                    <td>
+                      <div>
+                        {cust.zone && (
+                          <span style={{ background: '#f0fdfa', color: '#0f766e', border: '1px solid #ccfbf1', padding: '1px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: '800', display: 'inline-block', marginBottom: '2px' }}>
+                            📍 {cust.zone}
+                          </span>
+                        )}
+                        <div style={{ fontSize: '12px' }}>{cust.address || '—'}</div>
+                      </div>
+                    </td>
+                    <td>
+                      {cust.notes ? (
+                        <div
+                          style={{
+                            background: '#fffbeb',
+                            border: '1px solid #fde68a',
+                            color: '#92400e',
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontSize: '11.5px',
+                            maxWidth: '180px',
+                            fontWeight: '700',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}
+                          title={cust.notes}
+                        >
+                          ⚠️ {cust.notes}
+                        </div>
+                      ) : (
+                        <span style={{ color: '#94a3b8' }}>—</span>
+                      )}
+                    </td>
                     <td>
                       <span className="outstock-badge partial">
                         {cust.real_orders_count || cust.total_orders_count || 0} طلب
@@ -236,27 +315,44 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                       {new Date(cust.created_at).toLocaleDateString('ar-EG')}
                     </td>
                     <td>
-                      <div style={{ display: 'flex', gap: '6px' }}>
+                      <div style={{ display: 'flex', gap: '5px' }}>
                         <button
                           type="button"
                           className="outstock-btn outstock-btn-secondary"
-                          style={{ padding: '5px 10px', fontSize: '12px' }}
+                          style={{ padding: '5px 8px', fontSize: '11.5px' }}
                           onClick={() => handleOpenHistory(cust)}
                           title="استعراض سجل الطلبات الكامل"
                         >
-                          <History size={13} />
+                          <History size={12} />
                           <span>السجل</span>
                         </button>
 
                         <button
                           type="button"
                           className="outstock-btn outstock-btn-secondary"
-                          style={{ padding: '5px 10px', fontSize: '12px' }}
+                          style={{ padding: '5px 8px', fontSize: '11.5px' }}
                           onClick={() => handleOpenEdit(cust)}
                           title="تعديل بيانات العميل"
                         >
-                          <Edit2 size={13} />
+                          <Edit2 size={12} />
                           <span>تعديل</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="outstock-btn"
+                          style={{
+                            padding: '5px 8px',
+                            fontSize: '11.5px',
+                            background: '#fee2e2',
+                            color: '#b91c1c',
+                            border: '1px solid #fca5a5',
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => setDeletingCustomer(cust)}
+                          title="حذف العميل مع الحفاظ على فواتير المبيعات السابقة"
+                        >
+                          <Trash2 size={12} />
                         </button>
                       </div>
                     </td>
@@ -330,10 +426,27 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                 </div>
 
                 <div className="outstock-form-group">
-                  <label>عنوان السكن</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12.5px', fontWeight: '800', color: '#0f766e', marginBottom: '4px' }}>
+                    <MapPin size={13} />
+                    <span>المنطقة / الحي * :</span>
+                  </label>
+                  <select
+                    value={formZone}
+                    onChange={(e) => setFormZone(e.target.value)}
+                    className="outstock-form-select"
+                    style={{ fontWeight: '700' }}
+                  >
+                    {deliveryZones.map((z) => (
+                      <option key={z} value={z}>{z}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="outstock-form-group">
+                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', marginBottom: '4px', display: 'block' }}>عنوان السكن التفصيلي</label>
                   <input
                     type="text"
-                    placeholder="المنطقة، الشارع، علامة مميزة"
+                    placeholder="الشارع، رقم العمارة، علامة مميزة"
                     value={formAddress}
                     onChange={(e) => setFormAddress(e.target.value)}
                     className="outstock-form-input"
@@ -341,10 +454,13 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                 </div>
 
                 <div className="outstock-form-group">
-                  <label>ملاحظات إضافية</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12.5px', fontWeight: '800', color: '#c2410c', marginBottom: '4px' }}>
+                    <AlertTriangle size={13} />
+                    <span>ملاحظة هامة على العميل (تظهر تلقائياً عند أي طلب جديد له):</span>
+                  </label>
                   <textarea
-                    rows="2"
-                    placeholder="أي ملاحظات حول تفضيلات العميل أو أدوية مزمنة"
+                    rows={2}
+                    placeholder="مثال: يفضل الاتصال قبل التوصيل، عميل دائم يطلب كذا، إلخ..."
                     value={formNotes}
                     onChange={(e) => setFormNotes(e.target.value)}
                     className="outstock-form-textarea"
@@ -466,6 +582,82 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
             <div className="outstock-modal-footer">
               <button type="button" className="outstock-btn outstock-btn-secondary" onClick={() => setHistoryCustomer(null)}>
                 إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── نافذة تأكيد حذف عميل ── */}
+      {deletingCustomer && (
+        <div className="outstock-modal-backdrop" onClick={() => setDeletingCustomer(null)}>
+          <div
+            className="outstock-modal-panel"
+            style={{ maxWidth: '460px', width: '90%' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="outstock-modal-drag-handle" />
+            <div className="outstock-modal-header" style={{ background: '#fef2f2', borderBottom: '1px solid #fee2e2' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Trash2 size={18} color="#dc2626" />
+                <h3 style={{ margin: 0, color: '#991b1b', fontSize: '15px', fontWeight: '800' }}>
+                  تأكيد حذف العميل ⚠️
+                </h3>
+              </div>
+              <button
+                type="button"
+                className="outstock-modal-close"
+                onClick={() => setDeletingCustomer(null)}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="outstock-modal-body" style={{ padding: '16px 20px', fontSize: '13px' }}>
+              <p style={{ margin: '0 0 12px', color: '#1e293b' }}>
+                هل أنت متأكد من رغبتك في حذف العميل:
+                <strong style={{ display: 'block', margin: '6px 0', fontSize: '14.5px', color: '#dc2626' }}>
+                  {deletingCustomer.full_name} ({deletingCustomer.whatsapp_phone})
+                </strong>
+              </p>
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  padding: '10px 12px',
+                  color: '#64748b',
+                  fontSize: '12px'
+                }}
+              >
+                ℹ️ <strong>ملاحظة أمان:</strong> سيتم حذف بيانات العميل مع الحفاظ التام على أرقام وفواتير الطلبات السابقة في سجلات مبيعات الفرع دون أي تأثر بالحسابات المالية.
+              </div>
+            </div>
+
+            <div className="outstock-modal-footer" style={{ padding: '12px 20px', display: 'flex', justifyContent: 'space-between' }}>
+              <button
+                type="button"
+                className="outstock-btn outstock-btn-secondary"
+                onClick={() => setDeletingCustomer(null)}
+                disabled={isDeleting}
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteCustomer}
+                disabled={isDeleting}
+                className="outstock-btn"
+                style={{
+                  background: '#dc2626',
+                  color: '#ffffff',
+                  border: 'none',
+                  padding: '8px 18px',
+                  fontWeight: '800',
+                  borderRadius: '8px'
+                }}
+              >
+                <span>{isDeleting ? 'جاري الحذف...' : 'تأكيد الحذف 🗑️'}</span>
               </button>
             </div>
           </div>

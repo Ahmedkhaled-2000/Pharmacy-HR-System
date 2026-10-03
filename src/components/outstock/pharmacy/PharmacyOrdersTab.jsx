@@ -20,20 +20,23 @@ import {
   X,
   Send,
   Sparkles,
-  Archive
+  Archive,
+  AlertTriangle
 } from 'lucide-react';
 import { outstockGetOrders, outstockDeliverOrder, outstockMarkWhatsappNotified } from '../../../utils/outstockApiClient';
 import NewCustomerOrderModal from './NewCustomerOrderModal';
 import DualCashierReceiptModal from './DualCashierReceiptModal';
 import OrderDeliverySettlementModal from './OrderDeliverySettlementModal';
 import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
+import OrderComplaintModal from './OrderComplaintModal';
 
 /**
  * PharmacyOrdersTab.jsx
  * شاشة طلبات العملاء بالصيدلية
  * - إنشاء طلبات جديدة، بحث بالباركود/الهاتف/الاسم
+ * - فلتر الطلبات قيد انتظار المشتريات
  * - فلتر الطلبات التي تم الرد عليها من قبل المشتريات
- * - فلتر الطلبات قيد التسليم / جاهزة للاستلام
+ * - زر تصعيد شكوى للمالك: تأخير الرد أو الصنف لم يتوفر ⚠️
  * - فلتر التاريخ (من تاريخ ... إلى تاريخ)
  * - تبويبة داخلية لأرشيف الطلبات المسلمة
  * - تسجيل وعرض تاريخ ووقت إرسال الطلب للمشتريات
@@ -44,7 +47,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
   // التبويبة الداخلية: 'active' (النشطة والمعلقة) | 'delivered' (المسلمة)
   const [activeInnerTab, setActiveInnerTab] = useState('active');
 
-  // فلاتر التبويبة النشطة: 'all' | 'replied' | 'in_delivery'
+  // فلاتر التبويبة النشطة: 'all' | 'waiting_procurement' | 'replied'
   const [activeSubFilter, setActiveSubFilter] = useState('all');
 
   // فلتر التاريخ
@@ -58,6 +61,9 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
   const [searchQuery, setSearchQuery] = useState('');
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
   const [printingOrder, setPrintingOrder] = useState(null);
+
+  // ⚠️ نافذة شكوى تأخير الرد أو عدم توفر الصنف المصعدة للمالك
+  const [complaintOrder, setComplaintOrder] = useState(null);
 
   // 🔒 حالة التحقق من كود الموظف المستلم لإنشاء الطلب
   const [isReceiverAuthOpen, setIsReceiverAuthOpen] = useState(false);
@@ -246,11 +252,6 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
         if (o.procurement_replied_at) return true;
         const items = o.items || [];
         return items.some((it) => it.status === 'available' || it.status === 'unavailable' || it.itemStatus === 'available_by_procurement');
-      });
-    } else if (activeSubFilter === 'in_delivery') {
-      result = result.filter((o) => {
-        const items = o.items || [];
-        return items.some((it) => it.status === 'available' || it.itemStatus === 'available_by_procurement');
       });
     }
 
@@ -493,30 +494,6 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                   {activeStats.replied}
                 </span>
               </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveSubFilter('in_delivery')}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                  fontWeight: '800',
-                  cursor: 'pointer',
-                  border: activeSubFilter === 'in_delivery' ? '2px solid #16a34a' : '1px solid #cbd5e1',
-                  background: activeSubFilter === 'in_delivery' ? '#f0fdf4' : '#ffffff',
-                  color: activeSubFilter === 'in_delivery' ? '#15803d' : '#64748b',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px'
-                }}
-              >
-                <Truck size={13} color={activeSubFilter === 'in_delivery' ? '#16a34a' : '#64748b'} />
-                <span>قيد التسليم / جاهزة للاستلام 🚚</span>
-                <span style={{ background: '#16a34a', color: '#ffffff', fontSize: '10.5px', padding: '1px 6px', borderRadius: '8px' }}>
-                  {activeStats.ready}
-                </span>
-              </button>
             </div>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#166534', fontWeight: '800', fontSize: '13px' }}>
@@ -662,6 +639,17 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        {order.has_complaint && (
+                          <span
+                            className="outstock-badge"
+                            style={{ background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5' }}
+                            title={order.complaint_notes ? `تفاصيل الشكوى: ${order.complaint_notes}` : 'تم تصعيد شكوى للمالك'}
+                          >
+                            <AlertTriangle size={13} color="#b91c1c" />
+                            <span>شكوى مرفوعة للمالك ⚠️</span>
+                          </span>
+                        )}
+
                         {allAvailable ? (
                           <span className="outstock-badge ready">
                             <CheckCircle size={13} />
@@ -915,6 +903,27 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                         </button>
 
                         <div className="outstock-order-sub-actions">
+                          <button
+                            type="button"
+                            onClick={() => setComplaintOrder(order)}
+                            className="outstock-btn"
+                            style={{
+                              padding: '7px 11px',
+                              fontSize: '12px',
+                              fontWeight: '800',
+                              background: order.has_complaint ? '#fee2e2' : '#fff7ed',
+                              color: order.has_complaint ? '#b91c1c' : '#c2410c',
+                              border: order.has_complaint ? '1.5px solid #f87171' : '1px solid #fed7aa',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                            title="تصعيد شكوى للمالك مباشرة في حال تأخر رد المشتريات أو لم يتوفر الصنف بالرغم من موافقتهم"
+                          >
+                            <AlertTriangle size={14} color={order.has_complaint ? '#b91c1c' : '#ea580c'} />
+                            <span>{order.has_complaint ? 'تم رفع شكوى للمالك ⚠️' : 'تأخير الرد أو الصنف لم يتوفر ⚠️'}</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => setPrintingOrder(order)}
@@ -1193,6 +1202,26 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
           }}
           onOpenReceiptPrint={(receiptOrder) => {
             setPrintingOrder(receiptOrder);
+          }}
+          showToast={showToast}
+        />
+      )}
+
+      {/* ── نافذة تصعيد شكوى للمالك مباشرة: تأخير الرد أو عدم توفر الصنف ── */}
+      {complaintOrder && (
+        <OrderComplaintModal
+          order={complaintOrder}
+          branch={branch}
+          currentPharmacist={currentPharmacist}
+          onClose={() => setComplaintOrder(null)}
+          onSuccess={(orderId, notes) => {
+            setOrders((prev) =>
+              prev.map((o) =>
+                o.id === orderId
+                  ? { ...o, has_complaint: true, complaint_notes: notes }
+                  : o
+              )
+            );
           }}
           showToast={showToast}
         />
