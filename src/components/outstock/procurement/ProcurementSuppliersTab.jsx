@@ -35,7 +35,8 @@ import {
   ChevronLeft,
   ChevronRight,
   PackageCheck,
-  UserCheck
+  UserCheck,
+  Server
 } from 'lucide-react';
 import {
   outstockGetSuppliers,
@@ -49,9 +50,15 @@ import {
   outstockGetSupplierInvoices,
   outstockGetSupplierInvoiceDetails,
   outstockSaveSupplierInvoice,
+  outstockUpdateSupplierInvoice,
+  outstockGetOrderReceipts,
+  outstockGetOrderReceiptDetails,
   outstockUploadInvoiceToDrive,
   outstockGetBranchWithdrawals,
   outstockSaveBranchWithdrawal,
+  outstockUpdateBranchWithdrawal,
+  outstockDeleteBranchWithdrawal,
+  outstockGetMedicationByBarcode,
   outstockGetBranches,
   outstockSearchMedications,
   outstockRolloverSupplierLimits,
@@ -67,7 +74,104 @@ import MedicationAutocompleteInput from '../pharmacy/MedicationAutocompleteInput
 import SelectRegisteredInvoicesModal from './SelectRegisteredInvoicesModal';
 import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
 import ProcurementOrderReceivingTab from './ProcurementOrderReceivingTab';
+import PharmaFlyIntegrationTab from './PharmaFlyIntegrationTab';
 import { performSmartExtraction } from '../../../utils/archiveAiService';
+
+/**
+ * 💊 تحليل وتنسيق تاريخ صلاحية الدواء
+ * يدعم الصِيغ: MM/YY أو MM/YYYY أو YYYY-MM أو YYYY-MM-DD
+ */
+export function parseExpiryDate(inputStr) {
+  if (!inputStr) return null;
+  const clean = String(inputStr).trim().replace(/[\\-]/g, '/');
+  // MM/YY أو MM/YYYY
+  const mmyyMatch = clean.match(/^(\d{1,2})\/(\d{2,4})$/);
+  if (mmyyMatch) {
+    let m = parseInt(mmyyMatch[1], 10);
+    let y = parseInt(mmyyMatch[2], 10);
+    if (y < 100) y += 2000;
+    if (m >= 1 && m <= 12) {
+      return {
+        month: m,
+        year: y,
+        formatted: `${String(m).padStart(2, '0')}/${String(y).slice(-2)}`,
+        iso: `${y}-${String(m).padStart(2, '0')}`
+      };
+    }
+  }
+  // YYYY/MM
+  const yymmMatch = clean.match(/^(\d{4})\/(\d{1,2})$/);
+  if (yymmMatch) {
+    let y = parseInt(yymmMatch[1], 10);
+    let m = parseInt(yymmMatch[2], 10);
+    if (m >= 1 && m <= 12) {
+      return {
+        month: m,
+        year: y,
+        formatted: `${String(m).padStart(2, '0')}/${String(y).slice(-2)}`,
+        iso: `${y}-${String(m).padStart(2, '0')}`
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * تقييم حالة الصلاحية وحساب المدة المتبقية
+ * يعيد شارة ذكية ملونة حسب درجة خطورة أو أمان الصلاحية
+ */
+export function getExpiryAnalysis(expiryStr) {
+  if (!expiryStr) {
+    return { status: 'empty', label: '—', color: '#94a3b8', bg: '#f8fafc', border: '#e2e8f0' };
+  }
+  const parsed = parseExpiryDate(expiryStr);
+  if (!parsed) {
+    return { status: 'unknown', label: String(expiryStr).trim(), color: '#64748b', bg: '#f1f5f9', border: '#cbd5e1' };
+  }
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const monthsRemaining = (parsed.year - currentYear) * 12 + (parsed.month - currentMonth);
+
+  if (monthsRemaining < 0) {
+    return {
+      status: 'expired',
+      label: `${parsed.formatted} (منتهي ⛔)`,
+      monthsRemaining,
+      color: '#b91c1c',
+      bg: '#fee2e2',
+      border: '#fca5a5'
+    };
+  } else if (monthsRemaining <= 6) {
+    return {
+      status: 'critical',
+      label: `${parsed.formatted} (وشيك: ${monthsRemaining} ش ⚠️)`,
+      monthsRemaining,
+      color: '#c2410c',
+      bg: '#ffedd5',
+      border: '#fdba74'
+    };
+  } else if (monthsRemaining <= 12) {
+    return {
+      status: 'warning',
+      label: `${parsed.formatted} (باقي ${monthsRemaining} شهر)`,
+      monthsRemaining,
+      color: '#b45309',
+      bg: '#fef3c7',
+      border: '#fde68a'
+    };
+  } else {
+    const years = (monthsRemaining / 12).toFixed(1);
+    return {
+      status: 'healthy',
+      label: `${parsed.formatted} (ساري: ${years} سنة)`,
+      monthsRemaining,
+      color: '#15803d',
+      bg: '#dcfce7',
+      border: '#86efac'
+    };
+  }
+}
 
 /**
  * ProcurementSuppliersTab.jsx
@@ -78,7 +182,7 @@ import { performSmartExtraction } from '../../../utils/archiveAiService';
  * 3. فواتير الموردين ومطابقتها والأرشفة على Google Drive
  * 4. مسحوبات الفروع الشهرية والتوريدات الميدانية
  */
-export default function ProcurementSuppliersTab({ showToast = alert, initialSubTab = 'accounts' }) {
+export default function ProcurementSuppliersTab({ showToast = alert, initialSubTab = 'accounts', currentUser = null }) {
   const showToastRef = useRef(showToast);
   useEffect(() => {
     showToastRef.current = showToast;
@@ -88,6 +192,24 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   const [suppliers, setSuppliers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // ── الصلاحيات الدقيقة للأقسام الفرعية لإدارة الموردين والربط ──────────────────────────────
+  const canAccessAccounts = !currentUser || currentUser.role === 'owner' || currentUser.role === 'procurement_manager' || currentUser.username === 'admin-stock' || currentUser.permissions?.can_access_supplier_accounts !== false;
+  const canAccessReceiving = !currentUser || currentUser.role === 'owner' || currentUser.role === 'procurement_manager' || currentUser.username === 'admin-stock' || currentUser.permissions?.can_access_order_receiving !== false;
+  const canAccessInvoices = !currentUser || currentUser.role === 'owner' || currentUser.role === 'procurement_manager' || currentUser.username === 'admin-stock' || currentUser.permissions?.can_access_supplier_invoices !== false;
+  const canAccessWithdrawals = !currentUser || currentUser.role === 'owner' || currentUser.role === 'procurement_manager' || currentUser.username === 'admin-stock' || currentUser.permissions?.can_access_branch_withdrawals !== false;
+  const canAccessDiscounts = !currentUser || currentUser.role === 'owner' || currentUser.role === 'procurement_manager' || currentUser.username === 'admin-stock' || currentUser.permissions?.can_access_discounts_comparison !== false;
+  const canAccessPharmafly = !currentUser || currentUser.role === 'owner' || currentUser.role === 'procurement_manager' || currentUser.username === 'admin-stock' || currentUser.permissions?.can_access_pharmafly !== false;
+
+  useEffect(() => {
+    if (activeSubTab === 'accounts' && !canAccessAccounts) {
+      if (canAccessReceiving) setActiveSubTab('order_receiving');
+      else if (canAccessInvoices) setActiveSubTab('invoices');
+      else if (canAccessWithdrawals) setActiveSubTab('withdrawals');
+      else if (canAccessDiscounts) setActiveSubTab('discounts_comparison');
+      else if (canAccessPharmafly) setActiveSubTab('pharmafly_sync');
+    }
+  }, [activeSubTab, canAccessAccounts, canAccessReceiving, canAccessInvoices, canAccessWithdrawals, canAccessDiscounts, canAccessPharmafly]);
 
   // ── الفلترة الشهرية لحسابات الموردين وتدوير الحد الائتماني ────────────────────
   const [supplierAccountsMonth, setSupplierAccountsMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -120,17 +242,25 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
     loadSuppliers();
   }, [loadSuppliers]);
 
-  // دوال التنقل بين الشهور وتدوير الحد الائتماني
+  // دوال التنقل بين الشهور بحسابات رقمية سليمة بدون مشاكل فرق التوقيت UTC
   const getPrevMonthStr = (ym) => {
-    const [y, m] = ym.split('-').map(Number);
-    const d = new Date(y, m - 2, 1);
-    return d.toISOString().slice(0, 7);
+    let [y, m] = ym.split('-').map(Number);
+    m -= 1;
+    if (m < 1) {
+      m = 12;
+      y -= 1;
+    }
+    return `${y}-${String(m).padStart(2, '0')}`;
   };
 
   const getNextMonthStr = (ym) => {
-    const [y, m] = ym.split('-').map(Number);
-    const d = new Date(y, m, 1);
-    return d.toISOString().slice(0, 7);
+    let [y, m] = ym.split('-').map(Number);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+    return `${y}-${String(m).padStart(2, '0')}`;
   };
 
   const handlePrevMonth = () => setSupplierAccountsMonth(prev => getPrevMonthStr(prev));
@@ -342,48 +472,54 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   const handleSaveSupplier = async (e) => {
     e.preventDefault();
     if (!supplierFormData.name?.trim()) {
-      showToast?.('يرجى إدخال اسم المورد');
+      showToastRef.current?.('يرجى إدخال اسم المورد');
       return;
     }
 
     try {
+      const payload = {
+        ...supplierFormData,
+        month: supplierAccountsMonth // ربط الحد الائتماني بالشهر النشط وتحديث السجل الشهري
+      };
+
       if (editingSupplier) {
-        const res = await outstockUpdateSupplier(editingSupplier.id, supplierFormData);
+        const res = await outstockUpdateSupplier(editingSupplier.id, payload);
         if (res?.success) {
-          showToast?.('تم تحديث بيانات المورد بنجاح');
+          showToastRef.current?.('تم تحديث بيانات المورد والحد الائتماني بنجاح');
           setIsSupplierModalOpen(false);
           loadSuppliers();
         } else {
-          showToast?.(res?.error || 'فشل التحديث');
+          showToastRef.current?.(res?.error || 'فشل التحديث');
         }
       } else {
-        const res = await outstockSaveSupplier(supplierFormData);
+        const res = await outstockSaveSupplier(payload);
         if (res?.success) {
-          showToast?.('تم إضافة المورد الجديد بنجاح');
+          showToastRef.current?.('تم إضافة المورد الجديد وحفظ حده الائتماني بنجاح');
           setIsSupplierModalOpen(false);
           loadSuppliers();
         } else {
-          showToast?.(res?.error || 'فشل الإضافة');
+          showToastRef.current?.(res?.error || 'فشل الإضافة');
         }
       }
     } catch (err) {
       console.error(err);
-      showToast?.('حدث خطأ أثناء حفظ بيانات المورد');
+      showToastRef.current?.('حدث خطأ أثناء حفظ بيانات المورد');
     }
   };
 
   const handleDeleteSupplier = async (supplier) => {
-    if (!window.confirm(`هل أنت متأكد من حذف المورد "${supplier.name}"؟`)) return;
+    const confirmMsg = `هل أنت متأكد من حذف أو أرشفة المورد "${supplier.name}"؟\n\n🛡️ ملاحظة الأمان المالي: إذا كان للمورد سجل فواتير أو طلبيات سابقة، سيتم إيقاف حسابه وأرشفته بأمان دون حذف سجلاته المالية السابقة لحماية العمليات المحاسبية.`;
+    if (!window.confirm(confirmMsg)) return;
     try {
       const res = await outstockDeleteSupplier(supplier.id);
       if (res?.success) {
-        showToast?.('تم حذف المورد بنجاح');
+        showToastRef.current?.(res.message || 'تم حذف / إيقاف حساب المورد بنجاح');
         loadSuppliers();
       } else {
-        showToast?.(res?.error || 'فشل الحذف');
+        showToastRef.current?.(res?.error || 'تعذر إتمام عملية حذف المورد');
       }
     } catch (err) {
-      showToast?.('حدث خطأ أثناء الحذف');
+      showToastRef.current?.('حدث خطأ أثناء حذف المورد');
     }
   };
 
@@ -618,8 +754,23 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState('all');
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [viewingInvoice, setViewingInvoice] = useState(null);
+  const [editingInvoiceId, setEditingInvoiceId] = useState(null);
 
-  // حالة نموذج الفاتورة الجديدة
+  // حالة حفظ المسودة المؤقتة محلياً
+  const [hasInvoiceDraft, setHasInvoiceDraft] = useState(() => {
+    try {
+      return Boolean(localStorage.getItem('outstock_supplier_invoice_draft'));
+    } catch (e) {
+      return false;
+    }
+  });
+
+  // مطابقة الأمان: طلبيات وأذون استلام اليوم لنفس المورد
+  const [sameDayReceipts, setSameDayReceipts] = useState([]);
+  const [selectedReceiptForMatching, setSelectedReceiptForMatching] = useState(null);
+  const [isLoadingReceiptsForMatching, setIsLoadingReceiptsForMatching] = useState(false);
+
+  // حالة نموذج الفاتورة الجديدة / المعدلة
   const [invoiceForm, setInvoiceForm] = useState({
     supplier_id: '',
     invoice_number: '',
@@ -633,6 +784,213 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
     items: []
   });
 
+  // فحص أذون الاستلام الموثقة لنفس المورد بنفس التاريخ لمطابقة الأمان
+  useEffect(() => {
+    if (isInvoiceModalOpen && invoiceForm.supplier_id && invoiceForm.invoice_date) {
+      setIsLoadingReceiptsForMatching(true);
+      outstockGetOrderReceipts({
+        supplierId: invoiceForm.supplier_id,
+        dateFrom: invoiceForm.invoice_date,
+        dateTo: invoiceForm.invoice_date
+      })
+        .then((res) => {
+          if (res?.success && Array.isArray(res.receipts)) {
+            setSameDayReceipts(res.receipts);
+          } else {
+            setSameDayReceipts([]);
+          }
+        })
+        .catch(() => setSameDayReceipts([]))
+        .finally(() => setIsLoadingReceiptsForMatching(false));
+    } else {
+      setSameDayReceipts([]);
+      setSelectedReceiptForMatching(null);
+    }
+  }, [isInvoiceModalOpen, invoiceForm.supplier_id, invoiceForm.invoice_date]);
+
+  // اختيار إذن استلام معين لربطه وتدقيقه
+  const handleSelectMatchingReceipt = async (receiptId) => {
+    if (!receiptId) {
+      setSelectedReceiptForMatching(null);
+      return;
+    }
+    const found = sameDayReceipts.find(r => String(r.id) === String(receiptId));
+    if (found) {
+      let detailed = found;
+      if (!found.items || found.items.length === 0) {
+        try {
+          const res = await outstockGetOrderReceiptDetails(found.id);
+          if (res?.success && res.receipt) detailed = res.receipt;
+        } catch (e) {}
+      }
+      setSelectedReceiptForMatching(detailed);
+    }
+  };
+
+  // تفريغ أصناف إذن الاستلام الموثقة داخل الفاتورة
+  const handleApplyReceiptItemsToInvoice = () => {
+    if (!selectedReceiptForMatching || !selectedReceiptForMatching.items) return;
+    const newItems = selectedReceiptForMatching.items.map((it, idx) => {
+      const qty = Number(it.quantity_received) || 1;
+      const pub = Number(it.public_price) || 0;
+      return {
+        id: `rec_item_${Date.now()}_${idx}`,
+        medication_name: it.medication_name || '',
+        barcode: it.barcode || '',
+        pack_size: 1,
+        quantity: qty,
+        public_price: pub || '',
+        catalog_price: pub || null,
+        discount_percent: '',
+        buy_price: pub || '',
+        total_price: parseFloat((qty * (pub || 0)).toFixed(2)),
+        expiry_date: it.expiry_date || '',
+        batch_number: it.batch_number || ''
+      };
+    });
+
+    setInvoiceForm((prev) => ({
+      ...prev,
+      invoice_number: prev.invoice_number || selectedReceiptForMatching.invoice_number || '',
+      items: newItems
+    }));
+    showToastRef.current?.(`✅ تم تحميل ${newItems.length} صنف من إذن الاستلام بنجاح`);
+  };
+
+  // حساب عدم التطابق الأمني بين بنود الفاتورة وإذن الاستلام
+  const matchingDiscrepancies = useMemo(() => {
+    if (!selectedReceiptForMatching || !selectedReceiptForMatching.items || selectedReceiptForMatching.items.length === 0) {
+      return [];
+    }
+    const receiptItems = selectedReceiptForMatching.items;
+    const discrepancies = [];
+
+    // فحص الأصناف المستلمة ومقارنة كمياتها مع الفاتورة
+    receiptItems.forEach(rit => {
+      const rName = (rit.medication_name || '').trim().toLowerCase();
+      const rQty = Number(rit.quantity_received || 0);
+      const matchedInv = invoiceForm.items.find(i => (i.medication_name || '').trim().toLowerCase() === rName);
+      if (!matchedInv) {
+        discrepancies.push({
+          type: 'missing_in_invoice',
+          medicationName: rit.medication_name,
+          message: `الصنف "${rit.medication_name}" مسجل بإذن الاستلام (${rQty} وحدة) وغير موجود بالفاتورة`
+        });
+      } else if (Number(matchedInv.quantity) !== rQty) {
+        discrepancies.push({
+          type: 'qty_mismatch',
+          medicationName: rit.medication_name,
+          message: `اختلاف كمية "${rit.medication_name}": المستلم (${rQty}) ≠ بالفاتورة (${matchedInv.quantity})`
+        });
+      }
+    });
+
+    // فحص الأصناف الموجودة بالفاتورة وغير مسجلة بإذن الاستلام
+    invoiceForm.items.forEach(invItem => {
+      const invName = (invItem.medication_name || '').trim().toLowerCase();
+      const matchedReceipt = receiptItems.find(r => (r.medication_name || '').trim().toLowerCase() === invName);
+      if (!matchedReceipt) {
+        discrepancies.push({
+          type: 'extra_in_invoice',
+          medicationName: invItem.medication_name,
+          message: `الصنف "${invItem.medication_name}" مضاف بالفاتورة ولكن لم يُسجل بإذن استلام الشحنة`
+        });
+      }
+    });
+
+    return discrepancies;
+  }, [selectedReceiptForMatching, invoiceForm.items]);
+
+  // حفظ مسودة الفاتورة مؤقتاً في المتصفح
+  const handleSaveInvoiceDraft = () => {
+    try {
+      const draftData = {
+        invoiceForm,
+        verifiedInvoiceEmployee,
+        timestamp: new Date().toISOString()
+      };
+      localStorage.setItem('outstock_supplier_invoice_draft', JSON.stringify(draftData));
+      setHasInvoiceDraft(true);
+      showToastRef.current?.('💾 تم حفظ مسودة الفاتورة مؤقتاً بنجاح');
+    } catch (e) {
+      showToastRef.current?.('تعذر حفظ المسودة');
+    }
+  };
+
+  // استعادة مسودة الفاتورة المحفوظة مؤقتاً
+  const handleRestoreInvoiceDraft = () => {
+    try {
+      const raw = localStorage.getItem('outstock_supplier_invoice_draft');
+      if (!raw) {
+        showToastRef.current?.('لا توجد مسودة محفوظة مسبقاً');
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (parsed.invoiceForm) {
+        setInvoiceForm(parsed.invoiceForm);
+      }
+      if (parsed.verifiedInvoiceEmployee) {
+        setVerifiedInvoiceEmployee(parsed.verifiedInvoiceEmployee);
+      }
+      setEditingInvoiceId(null);
+      setIsInvoiceModalOpen(true);
+      showToastRef.current?.('✅ تم استعادة مسودة الفاتورة المحفوظة بنجاح');
+    } catch (e) {
+      showToastRef.current?.('تعذر استعادة المسودة');
+    }
+  };
+
+  // فتح نافذة تعديل فاتورة مسجلة مسبقاً
+  const handleOpenEditInvoice = async (inv) => {
+    try {
+      let fullInv = inv;
+      if (!inv.items || inv.items.length === 0) {
+        const res = await outstockGetSupplierInvoiceDetails(inv.id);
+        if (res?.success && res.invoice) {
+          fullInv = res.invoice;
+        }
+      }
+
+      setEditingInvoiceId(fullInv.id);
+      setVerifiedInvoiceEmployee({
+        name: fullInv.recorded_by || fullInv.recorded_by_name || 'مسؤول المشتريات',
+        code: fullInv.recorded_by_code || 'EMP'
+      });
+
+      setInvoiceForm({
+        supplier_id: fullInv.supplier_id || '',
+        invoice_number: fullInv.invoice_number || '',
+        invoice_date: fullInv.invoice_date ? String(fullInv.invoice_date).slice(0, 10) : new Date().toISOString().slice(0, 10),
+        payment_terms: fullInv.payment_terms || 'credit',
+        due_date: fullInv.due_date ? String(fullInv.due_date).slice(0, 10) : '',
+        discount_amount: String(fullInv.discount_amount || '0'),
+        tax_amount: String(fullInv.tax_amount || '0'),
+        paid_amount: String(fullInv.paid_amount || '0'),
+        notes: fullInv.notes || '',
+        items: (fullInv.items || []).map((it, idx) => ({
+          id: it.id || `inv_item_${idx}`,
+          medication_name: it.medication_name || '',
+          barcode: it.barcode || '',
+          pack_size: Number(it.pack_size) || 1,
+          quantity: Number(it.quantity) || 1,
+          public_price: it.public_price || '',
+          catalog_price: it.public_price || null,
+          discount_percent: it.discount_percent || '',
+          buy_price: it.buy_price || '',
+          total_price: it.total_price || (Number(it.quantity || 1) * Number(it.buy_price || 0)),
+          expiry_date: it.expiry_date || it.expiryDate || '',
+          batch_number: it.batch_number || it.batchNumber || ''
+        }))
+      });
+
+      setViewingInvoice(null);
+      setIsInvoiceModalOpen(true);
+    } catch (err) {
+      console.error(err);
+      showToastRef.current?.('تعذر فتح الفاتورة للتعديل');
+    }
+  };
+
   // ملف الفاتورة المرفوع
   const [attachedFile, setAttachedFile] = useState(null);
   const [attachedFileBase64, setAttachedFileBase64] = useState('');
@@ -642,6 +1000,9 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   const [isSavingInvoice, setIsSavingInvoice] = useState(false);
 
   const medicationInputRef = useRef(null);
+  const quantityInputRef = useRef(null);
+  const barcodeInputRef = useRef(null);
+  const [editingInvoiceItemIndex, setEditingInvoiceItemIndex] = useState(null);
 
   // صنف مؤقت للإدخال اليدوي
   const [manualItem, setManualItem] = useState({
@@ -651,7 +1012,10 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
     quantity: 1,
     public_price: '',
     discount_percent: '',
-    buy_price: ''
+    buy_price: '',
+    expiry_date: '',
+    batch_number: '',
+    catalog_price: null
   });
 
   const loadInvoices = useCallback(async () => {
@@ -700,14 +1064,20 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       quantity: 1,
       public_price: '',
       discount_percent: '',
-      buy_price: ''
+      buy_price: '',
+      expiry_date: '',
+      batch_number: '',
+      catalog_price: null
     });
     setAttachedFile(null);
     setAttachedFileBase64('');
+    setEditingInvoiceId(null);
+    setSelectedReceiptForMatching(null);
     setIsInvoiceModalOpen(false);
   };
 
   const handleOpenAddInvoice = () => {
+    setEditingInvoiceId(null);
     setIsInvoiceEmployeeAuthOpen(true);
   };
 
@@ -779,6 +1149,9 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                 let buy = Number(it.buy_price);
                 if (!buy && pub > 0) buy = pub * (1 - disc / 100);
                 const tot = Number(it.total_price) || (qty * buy);
+                let rawExp = it.expiry_date || it.expiry || it.exp || '';
+                const parsedExp = parseExpiryDate(rawExp);
+                if (parsedExp) rawExp = parsedExp.formatted;
                 return {
                   id: `ai_item_${Date.now()}_${idx}`,
                   medication_name: it.medication_name || it.name || '',
@@ -786,9 +1159,12 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                   pack_size: Number(it.pack_size) || 1,
                   quantity: qty,
                   public_price: pub,
+                  catalog_price: pub || null,
                   discount_percent: disc,
                   buy_price: parseFloat(buy.toFixed(2)),
-                  total_price: parseFloat(tot.toFixed(2))
+                  total_price: parseFloat(tot.toFixed(2)),
+                  expiry_date: rawExp,
+                  batch_number: it.batch_number || it.batch || it.lot || ''
                 };
               })]
             : prev.items
@@ -805,7 +1181,82 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
     }
   };
 
-  // إضافة صنف يدوي
+  // البحث عن الصنف بالباركود العالمي GTIN مباشرة
+  const handleBarcodeLookup = async (code) => {
+    const cleanCode = String(code || '').trim();
+    if (!cleanCode) return;
+    try {
+      const res = await outstockGetMedicationByBarcode(cleanCode);
+      if (res?.success && res.medication) {
+        const med = res.medication;
+        const pub = Number(med.price || med.public_price || 0);
+        const supplierObj = suppliers.find((s) => s.id === invoiceForm.supplier_id);
+        const defaultDisc = supplierObj ? Number(supplierObj.default_discount || 0) : 0;
+        const disc = Number(manualItem.discount_percent) || defaultDisc || 0;
+        const buy = pub > 0 && disc > 0 ? parseFloat((pub * (1 - disc / 100)).toFixed(2)) : (pub || '');
+
+        setManualItem((prev) => ({
+          ...prev,
+          medication_name: med.trade_name_ar || med.displayName || med.trade_name_en || med.name,
+          barcode: med.gtin_barcode || med.barcode || cleanCode,
+          public_price: pub || '',
+          discount_percent: disc || prev.discount_percent || '',
+          buy_price: buy || '',
+          pack_size: Number(med.pack_size) || 1,
+          catalog_price: pub || null
+        }));
+        showToastRef.current?.(`✅ تم العثور على الصنف: ${med.trade_name_ar || med.trade_name_en || med.name}`);
+        setTimeout(() => {
+          quantityInputRef.current?.focus();
+          quantityInputRef.current?.select();
+        }, 80);
+      } else {
+        showToastRef.current?.('⚠️ لم يتم العثور على صنف مسجل بهذا الباركود');
+      }
+    } catch (err) {
+      console.error('Barcode lookup error:', err);
+    }
+  };
+
+  // بدء تعديل صنف مسجل بجدول الفاتورة
+  const handleStartEditInvoiceItem = (item, index) => {
+    setEditingInvoiceItemIndex(index);
+    setManualItem({
+      medication_name: item.medication_name || '',
+      barcode: item.barcode || '',
+      pack_size: item.pack_size || 1,
+      quantity: item.quantity || 1,
+      public_price: item.public_price !== undefined ? item.public_price : '',
+      discount_percent: item.discount_percent !== undefined ? item.discount_percent : '',
+      buy_price: item.buy_price !== undefined ? item.buy_price : '',
+      expiry_date: item.expiry_date || '',
+      batch_number: item.batch_number || '',
+      catalog_price: item.catalog_price || null
+    });
+    setTimeout(() => {
+      quantityInputRef.current?.focus();
+    }, 60);
+  };
+
+  // إلغاء تعديل صنف
+  const handleCancelEditInvoiceItem = () => {
+    setEditingInvoiceItemIndex(null);
+    setManualItem({
+      medication_name: '',
+      barcode: '',
+      pack_size: 1,
+      quantity: 1,
+      public_price: '',
+      discount_percent: '',
+      buy_price: '',
+      expiry_date: '',
+      batch_number: '',
+      catalog_price: null
+    });
+    medicationInputRef.current?.focus();
+  };
+
+  // إضافة أو حفظ تعديل صنف يدوي
   const handleAddManualItem = () => {
     if (!manualItem.medication_name?.trim()) {
       showToastRef.current?.('يرجى كتابة اسم الصنف');
@@ -821,6 +1272,13 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
     }
     const tot = qty * (buy || 0);
 
+    // معالجة وتنسيق تاريخ الصلاحية
+    let formattedExp = manualItem.expiry_date?.trim() || '';
+    const parsedExp = parseExpiryDate(formattedExp);
+    if (parsedExp) {
+      formattedExp = parsedExp.formatted;
+    }
+
     const newItem = {
       id: `manual_${Date.now()}`,
       medication_name: manualItem.medication_name.trim(),
@@ -828,15 +1286,32 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       pack_size: Number(manualItem.pack_size) || 1,
       quantity: qty,
       public_price: pub,
+      catalog_price: manualItem.catalog_price || null,
       discount_percent: disc,
       buy_price: parseFloat((buy || 0).toFixed(2)),
-      total_price: parseFloat(tot.toFixed(2))
+      total_price: parseFloat(tot.toFixed(2)),
+      expiry_date: formattedExp,
+      batch_number: (manualItem.batch_number || '').trim()
     };
 
-    setInvoiceForm((prev) => ({
-      ...prev,
-      items: [...prev.items, newItem]
-    }));
+    if (editingInvoiceItemIndex !== null) {
+      setInvoiceForm((prev) => {
+        const nextItems = [...prev.items];
+        const existingId = nextItems[editingInvoiceItemIndex]?.id || newItem.id;
+        nextItems[editingInvoiceItemIndex] = {
+          ...newItem,
+          id: existingId
+        };
+        return { ...prev, items: nextItems };
+      });
+      setEditingInvoiceItemIndex(null);
+      showToastRef.current?.('✅ تم حفظ تعديل الصنف بالفاتورة بنجاح');
+    } else {
+      setInvoiceForm((prev) => ({
+        ...prev,
+        items: [...prev.items, newItem]
+      }));
+    }
 
     setManualItem({
       medication_name: '',
@@ -845,7 +1320,10 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       quantity: 1,
       public_price: '',
       discount_percent: '',
-      buy_price: ''
+      buy_price: '',
+      expiry_date: '',
+      batch_number: '',
+      catalog_price: null
     });
 
     setTimeout(() => {
@@ -858,6 +1336,9 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       ...prev,
       items: prev.items.filter((i) => i.id !== id)
     }));
+    if (editingInvoiceItemIndex !== null) {
+      setEditingInvoiceItemIndex(null);
+    }
   };
 
   // حساب إجماليات الفاتورة
@@ -930,18 +1411,27 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
         drive_folder_url: driveResult?.folderUrl || null
       };
 
-      const res = await outstockSaveSupplierInvoice(payload);
+      let res;
+      if (editingInvoiceId) {
+        res = await outstockUpdateSupplierInvoice(editingInvoiceId, payload);
+      } else {
+        res = await outstockSaveSupplierInvoice(payload);
+      }
+
       if (res?.success) {
-        showToastRef.current?.('تم تسجيل الفاتورة وأرشفتها بنجاح');
+        showToastRef.current?.(
+          editingInvoiceId ? '✅ تم تحديث بيانات الفاتورة بنجاح' : '✅ تم تسجيل الفاتورة وأرشفتها بنجاح'
+        );
         handleCloseInvoiceModal();
+        setEditingInvoiceId(null);
         loadInvoices();
         loadSuppliers();
       } else {
-        showToast?.(res?.error || 'فشل حفظ الفاتورة');
+        showToastRef.current?.(res?.error || 'فشل حفظ الفاتورة');
       }
     } catch (err) {
       console.error(err);
-      showToast?.('حدث خطأ أثناء حفظ الفاتورة');
+      showToastRef.current?.('حدث خطأ أثناء حفظ الفاتورة');
     } finally {
       setIsSavingInvoice(false);
       setIsUploadingToDrive(false);
@@ -973,6 +1463,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
   const [isBranchHistoryModalOpen, setIsBranchHistoryModalOpen] = useState(false);
   const [selectedBranchForHistory, setSelectedBranchForHistory] = useState(null);
   const [branchesList, setBranchesList] = useState([]);
+  const [editingWithdrawalId, setEditingWithdrawalId] = useState(null);
 
   const [extraForm, setExtraForm] = useState({
     branch_id: '',
@@ -1023,16 +1514,29 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
     const itemsCount = parseInt(extraForm.items_count || 1);
 
     try {
-      const res = await outstockSaveBranchWithdrawal({
-        branch_id: extraForm.branch_id,
-        amount: numAmount,
-        items_count: itemsCount,
-        withdrawal_date: extraForm.withdrawal_date,
-        notes: extraForm.notes
-      });
+      let res;
+      if (editingWithdrawalId) {
+        res = await outstockUpdateBranchWithdrawal(editingWithdrawalId, {
+          branch_id: extraForm.branch_id,
+          amount: numAmount,
+          items_count: itemsCount,
+          withdrawal_date: extraForm.withdrawal_date,
+          notes: extraForm.notes
+        });
+      } else {
+        res = await outstockSaveBranchWithdrawal({
+          branch_id: extraForm.branch_id,
+          amount: numAmount,
+          items_count: itemsCount,
+          withdrawal_date: extraForm.withdrawal_date,
+          notes: extraForm.notes
+        });
+      }
+
       if (res?.success) {
-        showToastRef.current?.('تم تسجيل مسحوبات الفرع بنجاح');
+        showToastRef.current?.(editingWithdrawalId ? '✅ تم تحديث مسحوب الفرع بنجاح' : '✅ تم تسجيل مسحوبات الفرع بنجاح');
         setIsExtraWithdrawalModalOpen(false);
+        setEditingWithdrawalId(null);
         setExtraForm({
           branch_id: '',
           amount: '',
@@ -1042,10 +1546,38 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
         });
         loadBranchWithdrawals();
       } else {
-        showToastRef.current?.(res?.error || 'فشل التسجيل');
+        showToastRef.current?.(res?.error || 'فشل الحفظ');
       }
     } catch (err) {
-      showToastRef.current?.('حدث خطأ أثناء تسجيل المسحوب');
+      showToastRef.current?.('حدث خطأ أثناء حفظ المسحوب');
+    }
+  };
+
+  const handleStartEditBranchWithdrawal = (withdrawal) => {
+    setEditingWithdrawalId(withdrawal.id);
+    setExtraForm({
+      branch_id: withdrawal.branch_id || (selectedBranchForHistory ? (selectedBranchForHistory.branch_id || selectedBranchForHistory.id) : ''),
+      amount: String(withdrawal.amount || ''),
+      items_count: String(withdrawal.items_count || 1),
+      withdrawal_date: withdrawal.withdrawal_date ? withdrawal.withdrawal_date.slice(0, 10) : new Date().toISOString().slice(0, 10),
+      notes: withdrawal.notes || ''
+    });
+    setIsExtraWithdrawalModalOpen(true);
+  };
+
+  const handleDeleteBranchWithdrawal = async (id) => {
+    if (!window.confirm('هل أنت متأكد من حذف هذا المسحوب نهائياً؟')) return;
+    try {
+      const res = await outstockDeleteBranchWithdrawal(id);
+      if (res?.success) {
+        showToastRef.current?.('✅ تم حذف المسحوب بنجاح');
+        loadBranchWithdrawals();
+      } else {
+        showToastRef.current?.(res?.error || 'تعذر حذف المسحوب');
+      }
+    } catch (err) {
+      console.error(err);
+      showToastRef.current?.('حدث خطأ أثناء حذف المسحوب');
     }
   };
 
@@ -1076,84 +1608,116 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
           flexWrap: 'wrap'
         }}
       >
-        <button
-          type="button"
-          className={`outstock-btn ${activeSubTab === 'accounts' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
-          onClick={() => setActiveSubTab('accounts')}
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 18px', fontWeight: 'bold' }}
-        >
-          <Truck size={17} />
-          <span>حسابات الموردين وحدود الائتمان</span>
-          <span
+        {canAccessAccounts && (
+          <button
+            type="button"
+            className={`outstock-btn ${activeSubTab === 'accounts' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
+            onClick={() => setActiveSubTab('accounts')}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 18px', fontWeight: 'bold' }}
+          >
+            <Truck size={17} />
+            <span>حسابات الموردين وحدود الائتمان</span>
+            <span
+              style={{
+                background: activeSubTab === 'accounts' ? 'rgba(255,255,255,0.25)' : '#e2e8f0',
+                padding: '2px 8px',
+                borderRadius: '12px',
+                fontSize: '11px'
+              }}
+            >
+              {suppliers.length}
+            </span>
+          </button>
+        )}
+
+        {canAccessReceiving && (
+          <button
+            type="button"
+            className={`outstock-btn ${activeSubTab === 'order_receiving' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
+            onClick={() => setActiveSubTab('order_receiving')}
             style={{
-              background: activeSubTab === 'accounts' ? 'rgba(255,255,255,0.25)' : '#e2e8f0',
-              padding: '2px 8px',
-              borderRadius: '12px',
-              fontSize: '11px'
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '9px 18px',
+              fontWeight: 'bold',
+              background: activeSubTab === 'order_receiving' ? '#0f766e' : '#f0fdfa',
+              color: activeSubTab === 'order_receiving' ? '#fff' : '#0f766e',
+              border: '1.5px solid #99f6e4'
             }}
           >
-            {suppliers.length}
-          </span>
-        </button>
+            <PackageCheck size={17} />
+            <span>استلام الطلبات والشحنات</span>
+          </button>
+        )}
 
-        <button
-          type="button"
-          className={`outstock-btn ${activeSubTab === 'order_receiving' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
-          onClick={() => setActiveSubTab('order_receiving')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '9px 18px',
-            fontWeight: 'bold',
-            background: activeSubTab === 'order_receiving' ? '#0f766e' : '#f0fdfa',
-            color: activeSubTab === 'order_receiving' ? '#fff' : '#0f766e',
-            border: '1.5px solid #99f6e4'
-          }}
-        >
-          <PackageCheck size={17} />
-          <span>استلام الطلبات والشحنات</span>
-        </button>
+        {canAccessInvoices && (
+          <button
+            type="button"
+            className={`outstock-btn ${activeSubTab === 'invoices' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
+            onClick={() => setActiveSubTab('invoices')}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 18px', fontWeight: 'bold' }}
+          >
+            <FileText size={17} />
+            <span>فواتير الموردين ومطابقتها (Drive)</span>
+          </button>
+        )}
 
-        <button
-          type="button"
-          className={`outstock-btn ${activeSubTab === 'invoices' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
-          onClick={() => setActiveSubTab('invoices')}
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 18px', fontWeight: 'bold' }}
-        >
-          <FileText size={17} />
-          <span>فواتير الموردين ومطابقتها (Drive)</span>
-        </button>
+        {canAccessWithdrawals && (
+          <button
+            type="button"
+            className={`outstock-btn ${activeSubTab === 'withdrawals' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
+            onClick={() => setActiveSubTab('withdrawals')}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 18px', fontWeight: 'bold' }}
+          >
+            <Building2 size={17} />
+            <span>مسحوبات الفروع الشهرية</span>
+          </button>
+        )}
 
-        <button
-          type="button"
-          className={`outstock-btn ${activeSubTab === 'withdrawals' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
-          onClick={() => setActiveSubTab('withdrawals')}
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 18px', fontWeight: 'bold' }}
-        >
-          <Building2 size={17} />
-          <span>مسحوبات الفروع الشهرية</span>
-        </button>
+        {canAccessDiscounts && (
+          <button
+            type="button"
+            className={`outstock-btn ${activeSubTab === 'discounts_comparison' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
+            onClick={() => setActiveSubTab('discounts_comparison')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '9px 18px',
+              fontWeight: 'bold',
+              background: activeSubTab === 'discounts_comparison' ? '#0f766e' : '#f0fdf4',
+              color: activeSubTab === 'discounts_comparison' ? '#fff' : '#15803d',
+              border: '1.5px solid #86efac'
+            }}
+            title="مقارنة نسب خصم شركات التوزيع للأصناف وبوابة الربط مع منصة i'SUPPLY"
+          >
+            <Percent size={17} />
+            <span>مقارنة خصومات الموردين و i'SUPPLY 👑</span>
+          </button>
+        )}
 
-        <button
-          type="button"
-          className={`outstock-btn ${activeSubTab === 'discounts_comparison' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
-          onClick={() => setActiveSubTab('discounts_comparison')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '9px 18px',
-            fontWeight: 'bold',
-            background: activeSubTab === 'discounts_comparison' ? '#0f766e' : '#f0fdf4',
-            color: activeSubTab === 'discounts_comparison' ? '#fff' : '#15803d',
-            border: '1.5px solid #86efac'
-          }}
-          title="مقارنة نسب خصم شركات التوزيع للأصناف وبوابة الربط مع منصة i'SUPPLY"
-        >
-          <Percent size={17} />
-          <span>مقارنة خصومات الموردين و i'SUPPLY 👑</span>
-        </button>
+        {canAccessPharmafly && (
+          <button
+            type="button"
+            className={`outstock-btn ${activeSubTab === 'pharmafly_sync' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
+            onClick={() => setActiveSubTab('pharmafly_sync')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '9px 18px',
+              fontWeight: 'bold',
+              background: activeSubTab === 'pharmafly_sync' ? '#065f46' : '#ecfdf5',
+              color: activeSubTab === 'pharmafly_sync' ? '#fff' : '#047857',
+              border: '1.5px solid #a7f3d0'
+            }}
+            title="ربط ومزامنة برنامج فارما فلاي للفروع لحظياً"
+          >
+            <Server size={17} />
+            <span>ربط فارما فلاي 🔄 (PharmaFly ERP)</span>
+          </button>
+        )}
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════════
@@ -1712,15 +2276,39 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
               </button>
             </div>
 
-            <button
-              type="button"
-              className="outstock-btn outstock-btn-primary"
-              onClick={handleOpenAddInvoice}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-            >
-              <Plus size={16} />
-              <span>تسجيل فاتورة توريد جديدة</span>
-            </button>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {hasInvoiceDraft && (
+                <button
+                  type="button"
+                  className="outstock-btn"
+                  onClick={handleRestoreInvoiceDraft}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: '#fef3c7',
+                    border: '1px solid #fde047',
+                    color: '#854d0e',
+                    fontWeight: '800',
+                    fontSize: '12px'
+                  }}
+                  title="استعادة مسودة الفاتورة المحفوظة مؤقتاً"
+                >
+                  <FolderArchive size={15} />
+                  <span>استعادة الحفظ المؤقت (مسودة)</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="outstock-btn outstock-btn-primary"
+                onClick={handleOpenAddInvoice}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Plus size={16} />
+                <span>تسجيل فاتورة توريد جديدة</span>
+              </button>
+            </div>
           </div>
 
           {/* قائمة الفواتير */}
@@ -1861,15 +2449,27 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                           )}
                         </td>
                         <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                          <button
-                            type="button"
-                            className="outstock-btn outstock-btn-secondary"
-                            onClick={() => handleViewInvoiceDetails(inv)}
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '5px 10px' }}
-                          >
-                            <Eye size={14} />
-                            <span>عرض البنود</span>
-                          </button>
+                          <div style={{ display: 'inline-flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              className="outstock-btn outstock-btn-secondary"
+                              onClick={() => handleOpenEditInvoice(inv)}
+                              title="تعديل بيانات الفاتورة والبنود"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '5px 8px', color: '#0284c7' }}
+                            >
+                              <Edit size={14} />
+                              <span>تعديل</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="outstock-btn outstock-btn-secondary"
+                              onClick={() => handleViewInvoiceDetails(inv)}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '5px 8px' }}
+                            >
+                              <Eye size={14} />
+                              <span>عرض</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -2080,6 +2680,13 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       ══════════════════════════════════════════════════════════════════════════ */}
       {activeSubTab === 'discounts_comparison' && (
         <SupplierDiscountsComparisonTab showToast={showToast} />
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════════
+          القسم الخامس: بوابة التكامل والمزامنة الحية مع برنامج فارما فلاي
+      ══════════════════════════════════════════════════════════════════════════ */}
+      {activeSubTab === 'pharmafly_sync' && (
+        <PharmaFlyIntegrationTab currentUser={currentUser} showToast={showToastRef.current || showToast} />
       )}
 
       {/* ══════════════════════════════════════════════════════════════════════════
@@ -2806,7 +3413,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       ══════════════════════════════════════════════════════════════════════════ */}
       {isInvoiceModalOpen && (
         <div className="outstock-modal-overlay">
-          <div className="outstock-modal-card" style={{ maxWidth: '960px', width: '96%', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
+          <div className="outstock-modal-card" style={{ maxWidth: '1420px', width: '97%', maxHeight: '94vh', display: 'flex', flexDirection: 'column' }}>
             <div
               style={{
                 display: 'flex',
@@ -2818,9 +3425,11 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
               }}
             >
               <div>
-                <h3 style={{ margin: 0, fontSize: '17px', color: '#0f172a' }}>تسجيل فاتورة توريد جديدة ومطابقة البنود</h3>
+                <h3 style={{ margin: 0, fontSize: '17px', color: '#0f172a' }}>
+                  {editingInvoiceId ? 'تعديل فاتورة توريد ومطابقة البنود' : 'تسجيل فاتورة توريد جديدة ومطابقة البنود'}
+                </h3>
                 <span style={{ fontSize: '11.5px', color: '#64748b' }}>
-                  أرشفة تلقائية على Google Drive في مجلد [Code] Name
+                  {editingInvoiceId ? 'تعديل الفاتورة وإعادة احتساب الأرصدة والمطابقة' : 'أرشفة تلقائية على Google Drive في مجلد [Code] Name'}
                 </span>
               </div>
               <button
@@ -2924,6 +3533,90 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                 </div>
               </div>
 
+              {/* قسم مطابقة الأمان مع أذون الاستلام الموثقة لنفس المورد اليوم */}
+              {sameDayReceipts.length > 0 && (
+                <div
+                  style={{
+                    background: '#eff6ff',
+                    border: '1.5px solid #bfdbfe',
+                    borderRadius: '10px',
+                    padding: '12px 14px',
+                    marginBottom: '14px'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <PackageCheck size={18} color="#2563eb" />
+                      <span style={{ fontSize: '13px', fontWeight: '800', color: '#1e40af' }}>
+                        أذون الاستلام الموثقة لهذا المورد بتاريخ اليوم ({sameDayReceipts.length}):
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <select
+                        className="outstock-form-select"
+                        value={selectedReceiptForMatching?.id || ''}
+                        onChange={(e) => handleSelectMatchingReceipt(e.target.value)}
+                        style={{ width: '220px', height: '34px', fontSize: '12px' }}
+                      >
+                        <option value="">-- اختر إذن استلام للمطابقة --</option>
+                        {sameDayReceipts.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            إذن: {r.invoice_number} ({r.total_quantity} وحدة)
+                          </option>
+                        ))}
+                      </select>
+
+                      {selectedReceiptForMatching && (
+                        <button
+                          type="button"
+                          onClick={handleApplyReceiptItemsToInvoice}
+                          className="outstock-btn"
+                          style={{
+                            background: '#2563eb',
+                            color: '#ffffff',
+                            padding: '6px 12px',
+                            fontSize: '11.5px',
+                            fontWeight: '800',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          <Check size={13} />
+                          <span>تحميل أصناف الإذن للفاتورة</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* تنبيهات مطابقة الأمان عند وجود فوارق أو أصناف غير متطابقة */}
+                  {selectedReceiptForMatching && matchingDiscrepancies.length > 0 && (
+                    <div style={{ marginTop: '10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#b91c1c', fontWeight: '800', fontSize: '12px', marginBottom: '6px' }}>
+                        <AlertCircle size={15} />
+                        <span>⚠️ تنبيه مطابقة الأمان: تم رصد {matchingDiscrepancies.length} حالة عدم تطابق بين الفاتورة وإذن الاستلام:</span>
+                      </div>
+                      <ul style={{ margin: 0, paddingRight: '20px', fontSize: '11.5px', color: '#dc2626' }}>
+                        {matchingDiscrepancies.map((disc, dIdx) => (
+                          <li key={dIdx} style={{ marginBottom: '2px' }}>
+                            {disc.message}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {selectedReceiptForMatching && matchingDiscrepancies.length === 0 && (
+                    <div style={{ marginTop: '8px', color: '#16a34a', fontSize: '12px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <CheckCircle2 size={15} />
+                      <span>جميع بنود وكميات الفاتورة متطابقة تماماً 100% مع إذن استلام الشحنة ✅</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* شريط الإدخال والذكاء الاصطناعي ورفع المستند */}
               <div
                 style={{
@@ -2997,24 +3690,87 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                 )}
               </div>
 
-              {/* صف إدخال صنف يدوي سريع */}
+              {/* تنبيهات ذكية للفاتورة: زيادة الأسعار والصلاحيات الوشيكة */}
+              {(() => {
+                const priceIncreasedItems = (invoiceForm.items || []).filter(
+                  (it) => it.catalog_price && Number(it.public_price) > Number(it.catalog_price)
+                );
+                const criticalExpiryItems = (invoiceForm.items || []).filter((it) => {
+                  const exp = getExpiryAnalysis(it.expiry_date);
+                  return exp.status === 'critical' || exp.status === 'expired';
+                });
+
+                return (
+                  <>
+                    {priceIncreasedItems.length > 0 && (
+                      <div
+                        style={{
+                          background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)',
+                          border: '1px solid #a7f3d0',
+                          borderRadius: '8px',
+                          padding: '8px 12px',
+                          marginBottom: '10px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          fontSize: '12px',
+                          color: '#065f46'
+                        }}
+                      >
+                        <Sparkles size={16} style={{ color: '#059669', flexShrink: 0 }} />
+                        <span>
+                          <strong>✨ رصد تحديث أسعار رسمي:</strong> تم رصد{' '}
+                          <strong>{priceIncreasedItems.length}</strong> أصناف بسعر بيع أعلى من المسجل بالكتالوج. سيتم تعميم الأسعار وتحديثها بقاعدة البيانات تلقائياً فور الحفظ.
+                        </span>
+                      </div>
+                    )}
+
+                    {criticalExpiryItems.length > 0 && (
+                      <div
+                        style={{
+                          background: '#fff1f2',
+                          border: '1px solid #fecdd3',
+                          borderRadius: '8px',
+                          padding: '8px 12px',
+                          marginBottom: '10px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          fontSize: '12px',
+                          color: '#9f1239'
+                        }}
+                      >
+                        <AlertCircle size={16} style={{ color: '#e11d48', flexShrink: 0 }} />
+                        <span>
+                          <strong>⚠️ تنبيه رقابي للصلاحيات:</strong> تتضمن الفاتورة{' '}
+                          <strong>{criticalExpiryItems.length}</strong> أصناف ذات صلاحية وشيكة (أقل من 6 أشهر) أو منتهية، يرجى مراجعتها وتوثيقها.
+                        </span>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+
+              {/* صف إدخال صنف يدوي سريع مع الصلاحية والتشغيلة وتحديث السعر */}
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '2.5fr 1fr 1fr 1fr 1fr 1fr auto',
-                  gap: '8px',
+                  gridTemplateColumns: 'minmax(280px, 3.2fr) 75px 115px 85px 110px 135px 120px 120px 48px',
+                  gap: '10px',
                   alignItems: 'end',
                   marginBottom: '12px',
                   background: '#fafafa',
-                  padding: '10px',
-                  borderRadius: '8px',
-                  border: '1px solid #f1f5f9'
+                  padding: '12px 14px',
+                  borderRadius: '10px',
+                  border: '1px solid #e2e8f0',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
                 }}
               >
                 <div>
                   <label className="outstock-form-label" style={{ fontSize: '11px' }}>اسم الصنف / الدواء</label>
                   <MedicationAutocompleteInput
                     inputRef={medicationInputRef}
+                    required={false}
                     value={manualItem.medication_name}
                     onChange={(val) => setManualItem((prev) => ({ ...prev, medication_name: val }))}
                     onTextChange={(val) => setManualItem((prev) => ({ ...prev, medication_name: val }))}
@@ -3027,8 +3783,9 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                         medication_name: displayName || med.name || med.arabic_name,
                         public_price: pub || '',
                         buy_price: buy || '',
-                        barcode: med.barcode || '',
-                        pack_size: Number(med.pack_size) || 1
+                        barcode: med.barcode || med.gtin_barcode || '',
+                        pack_size: Number(med.pack_size) || 1,
+                        catalog_price: pub || null
                       }));
                     }}
                     onSelect={(med, displayName) => {
@@ -3040,8 +3797,9 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                         medication_name: displayName || med.name || med.arabic_name,
                         public_price: pub || '',
                         buy_price: buy || '',
-                        barcode: med.barcode || '',
-                        pack_size: Number(med.pack_size) || 1
+                        barcode: med.barcode || med.gtin_barcode || '',
+                        pack_size: Number(med.pack_size) || 1,
+                        catalog_price: pub || null
                       }));
                     }}
                     placeholder="ابحث في دليل الأدوية..."
@@ -3050,6 +3808,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                 <div>
                   <label className="outstock-form-label" style={{ fontSize: '11px' }}>الكمية</label>
                   <input
+                    ref={quantityInputRef}
                     type="number"
                     min="1"
                     className="outstock-form-input"
@@ -3058,7 +3817,14 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                   />
                 </div>
                 <div>
-                  <label className="outstock-form-label" style={{ fontSize: '11px' }}>سعر الجمهور</label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label className="outstock-form-label" style={{ fontSize: '11px', margin: 0 }}>سعر الجمهور</label>
+                    {manualItem.catalog_price && Number(manualItem.public_price) > Number(manualItem.catalog_price) && (
+                      <span style={{ fontSize: '9.5px', color: '#15803d', fontWeight: 'bold' }}>
+                        🚀 زيادة
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="number"
                     step="any"
@@ -3104,67 +3870,241 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                   />
                 </div>
                 <div>
-                  <label className="outstock-form-label" style={{ fontSize: '11px' }}>الباركود</label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label className="outstock-form-label" style={{ fontSize: '11px', margin: 0 }}>الصلاحية</label>
+                    {manualItem.expiry_date && (
+                      <span style={{ fontSize: '9.5px', color: getExpiryAnalysis(manualItem.expiry_date).color, fontWeight: 'bold' }}>
+                        {parseExpiryDate(manualItem.expiry_date)?.formatted || ''}
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    className="outstock-form-input"
+                    placeholder="MM/YY مثلاً 08/27"
+                    value={manualItem.expiry_date}
+                    onChange={(e) => setManualItem({ ...manualItem, expiry_date: e.target.value })}
+                    title="تاريخ انتهاء الصلاحية (مثلاً: 08/27 أو 2027-08)"
+                  />
+                </div>
+                <div>
+                  <label className="outstock-form-label" style={{ fontSize: '11px' }}>رقم التشغيلة</label>
                   <input
                     type="text"
                     className="outstock-form-input"
                     placeholder="اختياري"
-                    value={manualItem.barcode}
-                    onChange={(e) => setManualItem({ ...manualItem, barcode: e.target.value })}
+                    value={manualItem.batch_number}
+                    onChange={(e) => setManualItem({ ...manualItem, batch_number: e.target.value })}
+                    title="رقم التشغيلة أو اللوت"
                   />
                 </div>
-                <button
-                  type="button"
-                  className="outstock-btn outstock-btn-primary"
-                  onClick={handleAddManualItem}
-                  style={{ padding: '8px 12px', fontSize: '12px' }}
-                >
-                  <Plus size={15} />
-                </button>
+                <div>
+                  <label className="outstock-form-label" style={{ fontSize: '11px' }}>الباركود (Enter 🔍)</label>
+                  <input
+                    ref={barcodeInputRef}
+                    type="text"
+                    className="outstock-form-input"
+                    placeholder="امسح الباركود..."
+                    value={manualItem.barcode}
+                    onChange={(e) => setManualItem({ ...manualItem, barcode: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleBarcodeLookup(manualItem.barcode);
+                      }
+                    }}
+                    title="امسح أو اكتب الباركود واضغط Enter للبحث المباشر"
+                  />
+                </div>
+                {editingInvoiceItemIndex !== null ? (
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button
+                      type="button"
+                      className="outstock-btn outstock-btn-primary"
+                      onClick={handleAddManualItem}
+                      style={{ height: '38px', width: '38px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#059669', borderColor: '#059669' }}
+                      title="حفظ تعديل الصنف (Enter)"
+                    >
+                      <Check size={18} />
+                    </button>
+                    <button
+                      type="button"
+                      className="outstock-btn outstock-btn-secondary"
+                      onClick={handleCancelEditInvoiceItem}
+                      style={{ height: '38px', width: '38px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}
+                      title="إلغاء التعديل"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="outstock-btn outstock-btn-primary"
+                    onClick={handleAddManualItem}
+                    style={{ height: '38px', width: '48px', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    title="إضافة الصنف للفاتورة"
+                  >
+                    <Plus size={18} />
+                  </button>
+                )}
               </div>
 
-              {/* جدول بنود الفاتورة المدخلة */}
-              <div style={{ flex: 1, minHeight: '140px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px', marginBottom: '14px' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '12px' }}>
+              {/* جدول بنود الفاتورة المدخلة الاحترافي */}
+              <div style={{ flex: 1, minHeight: '160px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '10px', marginBottom: '14px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '12.5px' }}>
                   <thead>
                     <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
-                      <th style={{ padding: '8px 10px' }}>م</th>
-                      <th style={{ padding: '8px 10px' }}>اسم الصنف</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'center' }}>الكمية</th>
-                      <th style={{ padding: '8px 10px' }}>سعر الجمهور</th>
-                      <th style={{ padding: '8px 10px' }}>نسبة الخصم</th>
-                      <th style={{ padding: '8px 10px' }}>سعر الشراء</th>
-                      <th style={{ padding: '8px 10px' }}>الإجمالي</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'center' }}>حذف</th>
+                      <th style={{ padding: '9px 10px', width: '40px', textAlign: 'center' }}>م</th>
+                      <th style={{ padding: '9px 10px' }}>اسم الصنف</th>
+                      <th style={{ padding: '9px 10px', textAlign: 'center', width: '75px' }}>الكمية</th>
+                      <th style={{ padding: '9px 10px', width: '120px' }}>سعر الجمهور</th>
+                      <th style={{ padding: '9px 10px', width: '85px' }}>نسبة الخصم</th>
+                      <th style={{ padding: '9px 10px', width: '110px' }}>سعر الشراء</th>
+                      <th style={{ padding: '9px 10px', textAlign: 'center', width: '135px' }}>تاريخ الصلاحية</th>
+                      <th style={{ padding: '9px 10px', textAlign: 'center', width: '120px' }}>رقم التشغيلة</th>
+                      <th style={{ padding: '9px 10px', width: '115px' }}>الإجمالي</th>
+                      <th style={{ padding: '9px 10px', textAlign: 'center', width: '75px' }}>إجراءات</th>
                     </tr>
                   </thead>
                   <tbody>
                     {invoiceForm.items.length === 0 ? (
                       <tr>
-                        <td colSpan={8} style={{ textAlign: 'center', padding: '24px', color: '#94a3b8' }}>
-                          لم يتم إضافة أي أصناف حتى الآن. يمكنك الإضافة يدوياً، أو الاستيراد من إكسل، أو الاستخراج بالذكاء الاصطناعي.
+                        <td colSpan={10} style={{ textAlign: 'center', padding: '24px', color: '#94a3b8' }}>
+                          لم يتم إضافة أي أصناف حتى الآن. يمكنك الإضافة يدوياً مع الصلاحية والتشغيلة، أو الاستيراد من إكسل، أو الاستخراج بالذكاء الاصطناعي.
                         </td>
                       </tr>
                     ) : (
                       invoiceForm.items.map((item, idx) => (
-                        <tr key={item.id || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '6px 10px', color: '#94a3b8' }}>{idx + 1}</td>
-                          <td style={{ padding: '6px 10px', fontWeight: 'bold' }}>{item.medication_name}</td>
-                          <td style={{ padding: '6px 10px', textAlign: 'center' }}>{item.quantity}</td>
-                          <td style={{ padding: '6px 10px' }}>{item.public_price || 0} ج.م</td>
-                          <td style={{ padding: '6px 10px', color: '#d97706' }}>{item.discount_percent || 0}%</td>
-                          <td style={{ padding: '6px 10px', fontWeight: 'bold' }}>{item.buy_price || 0} ج.م</td>
-                          <td style={{ padding: '6px 10px', fontWeight: 'bold', color: '#0f766e' }}>
+                        <tr
+                          key={item.id || idx}
+                          style={{
+                            borderBottom: '1px solid #f1f5f9',
+                            background: editingInvoiceItemIndex === idx ? '#fef9c3' : 'transparent',
+                            transition: 'background 0.2s ease'
+                          }}
+                        >
+                          <td style={{ padding: '6px 8px', color: '#94a3b8' }}>{idx + 1}</td>
+                          <td style={{ padding: '6px 8px', fontWeight: 'bold' }}>
+                            <div>{item.medication_name}</div>
+                            {item.barcode && (
+                              <span style={{ fontSize: '10px', color: '#64748b', display: 'block', fontWeight: 'normal' }}>
+                                🏷️ {item.barcode}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>{item.quantity}</td>
+                          <td style={{ padding: '6px 8px' }}>
+                            <div style={{ fontWeight: '600' }}>{item.public_price || 0} ج.م</div>
+                            {item.catalog_price && Number(item.public_price) > Number(item.catalog_price) && (
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  fontSize: '9.5px',
+                                  background: '#dcfce7',
+                                  color: '#15803d',
+                                  padding: '1px 5px',
+                                  borderRadius: '4px',
+                                  fontWeight: 'bold',
+                                  border: '1px solid #86efac'
+                                }}
+                                title={`سعر رسمي أعلى (السابق: ${item.catalog_price} ج.م)`}
+                              >
+                                🚀 زيادة +{(Number(item.public_price) - Number(item.catalog_price)).toFixed(1)} ج.م
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '6px 8px', color: '#d97706' }}>{item.discount_percent || 0}%</td>
+                          <td style={{ padding: '6px 8px', fontWeight: 'bold' }}>{item.buy_price || 0} ج.م</td>
+                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                            {(() => {
+                              const exp = getExpiryAnalysis(item.expiry_date);
+                              if (!item.expiry_date || exp.status === 'empty') {
+                                return <span style={{ color: '#94a3b8', fontSize: '11px' }}>—</span>;
+                              }
+                              return (
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                    padding: '2px 7px',
+                                    borderRadius: '6px',
+                                    fontSize: '11px',
+                                    fontWeight: 'bold',
+                                    background: exp.bg,
+                                    color: exp.color,
+                                    border: `1px solid ${exp.border}`
+                                  }}
+                                  title={`حالة الصلاحية: ${exp.label}`}
+                                >
+                                  {exp.label}
+                                </span>
+                              );
+                            })()}
+                          </td>
+                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                            {item.batch_number ? (
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  padding: '2px 6px',
+                                  borderRadius: '5px',
+                                  fontSize: '11px',
+                                  background: '#f8fafc',
+                                  color: '#334155',
+                                  border: '1px solid #cbd5e1',
+                                  fontFamily: 'monospace',
+                                  fontWeight: '600'
+                                }}
+                                title={`رقم التشغيلة: ${item.batch_number}`}
+                              >
+                                #{item.batch_number}
+                              </span>
+                            ) : (
+                              <span style={{ color: '#94a3b8', fontSize: '11px' }}>—</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '6px 8px', fontWeight: 'bold', color: '#0f766e' }}>
                             {Number(item.total_price || 0).toFixed(2)} ج.م
                           </td>
-                          <td style={{ padding: '6px 10px', textAlign: 'center' }}>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveInvoiceItem(item.id)}
-                              style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer' }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditInvoiceItem(item, idx)}
+                                style={{
+                                  border: 'none',
+                                  background: editingInvoiceItemIndex === idx ? '#0284c7' : '#f0f9ff',
+                                  color: editingInvoiceItemIndex === idx ? '#ffffff' : '#0284c7',
+                                  padding: '4px 6px',
+                                  borderRadius: '5px',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center'
+                                }}
+                                title="تعديل هذا الصنف"
+                              >
+                                <Edit size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveInvoiceItem(item.id)}
+                                style={{
+                                  border: 'none',
+                                  background: '#fef2f2',
+                                  color: '#ef4444',
+                                  padding: '4px 6px',
+                                  borderRadius: '5px',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center'
+                                }}
+                                title="حذف هذا الصنف من الفاتورة"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -3231,23 +4171,45 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
               </div>
 
               {/* أزرار الإجراءات */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px' }}>
                 <button
                   type="button"
-                  className="outstock-btn outstock-btn-secondary"
-                  onClick={handleCloseInvoiceModal}
+                  onClick={handleSaveInvoiceDraft}
+                  className="outstock-btn"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: '#fef3c7',
+                    border: '1px solid #fde047',
+                    color: '#854d0e',
+                    fontWeight: '800',
+                    fontSize: '12px'
+                  }}
+                  title="حفظ مسودة مؤقتة على المتصفح للعودة إليها لاحقاً"
                 >
-                  إلغاء
+                  <FolderArchive size={14} />
+                  <span>حفظ مسودة مؤقتة</span>
                 </button>
-                <button
-                  type="submit"
-                  className="outstock-btn outstock-btn-primary"
-                  disabled={isSavingInvoice || isUploadingToDrive}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                >
-                  {(isSavingInvoice || isUploadingToDrive) && <RefreshCw size={14} className="outstock-spin" />}
-                  <span>{isUploadingToDrive ? 'جاري الأرشفة على Drive...' : isSavingInvoice ? 'جاري الحفظ...' : 'حفظ وأرشفة الفاتورة'}</span>
-                </button>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="outstock-btn outstock-btn-secondary"
+                    onClick={handleCloseInvoiceModal}
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="submit"
+                    className="outstock-btn outstock-btn-primary"
+                    disabled={isSavingInvoice || isUploadingToDrive}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    {(isSavingInvoice || isUploadingToDrive) && <RefreshCw size={14} className="outstock-spin" />}
+                    <span>{editingInvoiceId ? 'حفظ تعديل الفاتورة' : isUploadingToDrive ? 'جاري الأرشفة على Drive...' : isSavingInvoice ? 'جاري الحفظ...' : 'حفظ وأرشفة الفاتورة'}</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -3312,13 +4274,15 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                     <th style={{ padding: '8px 10px' }}>سعر الجمهور</th>
                     <th style={{ padding: '8px 10px' }}>الخصم</th>
                     <th style={{ padding: '8px 10px' }}>سعر الشراء</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center' }}>تاريخ الصلاحية</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center' }}>رقم التشغيلة</th>
                     <th style={{ padding: '8px 10px' }}>الإجمالي</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(!viewingInvoice.items || viewingInvoice.items.length === 0) ? (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', padding: '24px', color: '#94a3b8' }}>
+                      <td colSpan={9} style={{ textAlign: 'center', padding: '24px', color: '#94a3b8' }}>
                         لا توجد بنود تفصيلية مسجلة لهذه الفاتورة
                       </td>
                     </tr>
@@ -3331,6 +4295,49 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                         <td style={{ padding: '8px 10px' }}>{item.public_price || 0} ج.م</td>
                         <td style={{ padding: '8px 10px', color: '#d97706' }}>{item.discount_percent || 0}%</td>
                         <td style={{ padding: '8px 10px', fontWeight: 'bold' }}>{item.buy_price || 0} ج.م</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                          {(() => {
+                            const exp = getExpiryAnalysis(item.expiry_date);
+                            if (!item.expiry_date || exp.status === 'empty') return <span style={{ color: '#94a3b8' }}>—</span>;
+                            return (
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  padding: '2px 7px',
+                                  borderRadius: '6px',
+                                  fontSize: '11px',
+                                  fontWeight: 'bold',
+                                  background: exp.bg,
+                                  color: exp.color,
+                                  border: `1px solid ${exp.border}`
+                                }}
+                              >
+                                {exp.label}
+                              </span>
+                            );
+                          })()}
+                        </td>
+                        <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                          {item.batch_number ? (
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                padding: '2px 6px',
+                                borderRadius: '5px',
+                                fontSize: '11px',
+                                background: '#f8fafc',
+                                color: '#334155',
+                                border: '1px solid #cbd5e1',
+                                fontFamily: 'monospace',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              #{item.batch_number}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94a3b8' }}>—</span>
+                          )}
+                        </td>
                         <td style={{ padding: '8px 10px', fontWeight: 'bold', color: '#0f766e' }}>
                           {Number(item.total_price || 0).toFixed(2)} ج.م
                         </td>
@@ -3375,11 +4382,16 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                 marginBottom: '16px'
               }}
             >
-              <h3 style={{ margin: 0, fontSize: '16.5px', color: '#0f172a' }}>تسجيل مسحوب فرع إضافي</h3>
+              <h3 style={{ margin: 0, fontSize: '16.5px', color: '#0f172a' }}>
+                {editingWithdrawalId ? '✏️ تعديل مسحوبات فرع مسجلة' : 'تسجيل مسحوب فرع إضافي'}
+              </h3>
               <button
                 type="button"
                 className="outstock-btn-close"
-                onClick={() => setIsExtraWithdrawalModalOpen(false)}
+                onClick={() => {
+                  setIsExtraWithdrawalModalOpen(false);
+                  setEditingWithdrawalId(null);
+                }}
               >
                 <X size={18} />
               </button>
@@ -3455,12 +4467,15 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                 <button
                   type="button"
                   className="outstock-btn outstock-btn-secondary"
-                  onClick={() => setIsExtraWithdrawalModalOpen(false)}
+                  onClick={() => {
+                    setIsExtraWithdrawalModalOpen(false);
+                    setEditingWithdrawalId(null);
+                  }}
                 >
                   إلغاء
                 </button>
                 <button type="submit" className="outstock-btn outstock-btn-primary">
-                  حفظ المسحوب
+                  {editingWithdrawalId ? 'حفظ التعديلات 💾' : 'حفظ المسحوب'}
                 </button>
               </div>
             </form>
@@ -3473,7 +4488,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
       ══════════════════════════════════════════════════════════════════════════ */}
       {isBranchHistoryModalOpen && selectedBranchForHistory && (
         <div className="outstock-modal-overlay">
-          <div className="outstock-modal-card" style={{ maxWidth: '750px', width: '95%' }}>
+          <div className="outstock-modal-card" style={{ maxWidth: '820px', width: '95%' }}>
             <div
               style={{
                 display: 'flex',
@@ -3523,6 +4538,7 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                         <th style={{ padding: '10px 12px' }}>عدد الأصناف</th>
                         <th style={{ padding: '10px 12px' }}>ملاحظات / السبب</th>
                         <th style={{ padding: '10px 12px' }}>المسؤول</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'center' }}>إجراءات</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3542,6 +4558,52 @@ export default function ProcurementSuppliersTab({ showToast = alert, initialSubT
                           </td>
                           <td style={{ padding: '10px 12px', color: '#64748b', fontSize: '12px' }}>
                             {item.created_by_name || '-'}
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditBranchWithdrawal(item)}
+                                style={{
+                                  border: 'none',
+                                  background: '#eff6ff',
+                                  color: '#2563eb',
+                                  padding: '4px 8px',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  fontSize: '11px',
+                                  fontWeight: 'bold'
+                                }}
+                                title="تعديل هذا المسحوب"
+                              >
+                                <Edit size={12} />
+                                <span>تعديل</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteBranchWithdrawal(item.id)}
+                                style={{
+                                  border: 'none',
+                                  background: '#fef2f2',
+                                  color: '#dc2626',
+                                  padding: '4px 8px',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  fontSize: '11px',
+                                  fontWeight: 'bold'
+                                }}
+                                title="حذف هذا المسحوب"
+                              >
+                                <Trash2 size={12} />
+                                <span>حذف</span>
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}

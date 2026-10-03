@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
   Send,
@@ -133,13 +134,14 @@ export default function OutstockConfirmModal({
     }
   };
 
-  return (
+  const content = (
     <div
       className="outstock-modal-backdrop"
       style={{
-        zIndex: 10000,
-        backgroundColor: 'rgba(15, 23, 42, 0.65)',
+        zIndex: 250000,
+        backgroundColor: 'rgba(15, 23, 42, 0.75)',
         backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -153,7 +155,7 @@ export default function OutstockConfirmModal({
           maxWidth: '460px',
           width: '100%',
           borderRadius: '20px',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.1)',
+          boxShadow: '0 30px 60px -12px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.1)',
           overflow: 'hidden',
           animation: 'modalSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1)'
         }}
@@ -256,4 +258,9 @@ export default function OutstockConfirmModal({
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(content, document.body);
+  }
+  return content;
 }

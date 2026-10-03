@@ -55,19 +55,35 @@ export async function exportProcurementOrdersExcel(aggregatedData = [], options 
   });
   const exportTimeStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
 
+  const category = options.category || 'all'; // 'medication' | 'cosmetics' | 'all'
+
+  let sheetName = 'طلبات الفروع المجمعة';
+  let sheetTitle = '📦 كشف طلبات الفروع المجمعة (أدوية ومستحضرات) — إدارة المشتريات والتوريدات';
+  let headerColor = THEME.headerBg;
+
+  if (category === 'medication') {
+    sheetName = 'طلبات الأدوية المجمعة';
+    sheetTitle = '💊 كشف طلبات الأدوية المجمعة للفروع — إدارة المشتريات والتوريدات';
+    headerColor = '059669';
+  } else if (category === 'cosmetics') {
+    sheetName = 'طلبات مستحضرات التجميل المجمعة';
+    sheetTitle = '💄 كشف طلبات مستحضرات التجميل والعناية المجمعة للفروع — إدارة المشتريات والتوريدات';
+    headerColor = 'BE185D';
+  }
+
   // ══════════════════════════════════════════════════════════════════════════════
   // الورقة الأولى: ملخص طلبات الفروع المجمعة (Aggregated Summary)
   // ══════════════════════════════════════════════════════════════════════════════
-  const wsSummary = wb.addWorksheet('ملخص طلبات الفروع والتوريد', {
+  const wsSummary = wb.addWorksheet(sheetName, {
     views: [{ rightToLeft: true, showGridLines: true, state: 'frozen', ySplit: 6 }]
   });
 
   // 1. ترويسة التقرير الرئيسية
   wsSummary.mergeCells('A1:J1');
   const titleCell = wsSummary.getCell('A1');
-  titleCell.value = '💊 كشف طلبات الأصناف والأدوية المجمعة للفروع — إدارة المشتريات والتوريدات';
+  titleCell.value = sheetTitle;
   titleCell.font = { name: 'Arial', bold: true, size: 15, color: { argb: THEME.white } };
-  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.headerBg } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerColor } };
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
   wsSummary.getRow(1).height = 42;
 
@@ -365,9 +381,11 @@ export async function exportProcurementOrdersExcel(aggregatedData = [], options 
   });
 
   const url = window.URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  const fileNameClean = `طلبات-المشتريات-المجمعة-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  let baseFileName = 'طلبات-الفروع-المجمعة';
+  if (category === 'medication') baseFileName = 'طلبات-الأدوية-المجمعة';
+  else if (category === 'cosmetics') baseFileName = 'طلبات-مستحضرات-التجميل-المجمعة';
+
+  const fileNameClean = `${baseFileName}-${new Date().toISOString().slice(0, 10)}.xlsx`;
   anchor.download = fileNameClean;
   document.body.appendChild(anchor);
   anchor.click();
@@ -969,6 +987,8 @@ export async function parseSupplierInvoiceExcel(file) {
     let discountCol = -1;
     let buyPriceCol = -1;
     let barcodeCol = -1;
+    let expiryCol = -1;
+    let batchCol = -1;
 
     for (let r = 1; r <= Math.min(15, ws.rowCount); r++) {
       const row = ws.getRow(r);
@@ -992,6 +1012,12 @@ export async function parseSupplierInvoiceExcel(file) {
         }
         if (val.includes('باركود') || val.includes('barcode') || val.includes('gtin') || val.includes('كود')) {
           barcodeCol = c;
+        }
+        if (val.includes('صلاحية') || val.includes('صلاحيه') || val.includes('expiry') || val.includes('exp') || val.includes('انتهاء')) {
+          expiryCol = c;
+        }
+        if (val.includes('تشغيلة') || val.includes('تشغيله') || val.includes('batch') || val.includes('lot') || val.includes('رقم التشغيلة')) {
+          batchCol = c;
         }
       }
       if (nameCol !== -1 && qtyCol !== -1) break;
@@ -1020,6 +1046,20 @@ export async function parseSupplierInvoiceExcel(file) {
         rawBuy = rawPub * (1 - (rawDisc / 100));
       }
 
+      let rawExpiry = '';
+      if (expiryCol !== -1) {
+        const expCell = row.getCell(expiryCol).value;
+        if (expCell instanceof Date) {
+          const m = String(expCell.getMonth() + 1).padStart(2, '0');
+          const y = String(expCell.getFullYear()).slice(-2);
+          rawExpiry = `${m}/${y}`;
+        } else {
+          rawExpiry = String(expCell || '').trim();
+        }
+      }
+
+      const rawBatch = batchCol !== -1 ? String(row.getCell(batchCol).value || '').trim() : '';
+
       items.push({
         id: `inv_item_${r}_${Date.now()}`,
         medication_name: name,
@@ -1029,7 +1069,9 @@ export async function parseSupplierInvoiceExcel(file) {
         public_price: Math.max(0, rawPub),
         discount_percent: Math.max(0, rawDisc),
         buy_price: Math.max(0, parseFloat(rawBuy.toFixed(2))),
-        total_price: parseFloat((rawQty * (rawBuy || rawPub)).toFixed(2))
+        total_price: parseFloat((rawQty * (rawBuy || rawPub)).toFixed(2)),
+        expiry_date: rawExpiry,
+        batch_number: rawBatch
       });
     }
 
@@ -1042,5 +1084,199 @@ export async function parseSupplierInvoiceExcel(file) {
     console.error('Error parsing supplier invoice excel:', err);
     return { success: false, error: err.message || 'فشل قراءة ملف الإكسل' };
   }
+}
+
+/**
+ * تصدير عروض وخصومات منصة i'SUPPLY وشبكة المخازن إلى ملف إكسل احترافي
+ * @param {Array} feeds - عروض السوق والموزعين
+ * @param {Object} options - خيارات إضافية (عنوان، تصفية المخزن، مخصصة)
+ */
+export async function exportISupplyMarketFeedsExcel(feeds = [], options = {}) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'منظومة إدارة النواقص والمشتريات - iSupply Gateway';
+  wb.lastModifiedBy = 'إدارة المشتريات والتوريدات';
+  wb.created = new Date();
+  wb.modified = new Date();
+
+  const ws = wb.addWorksheet('عروض iSupply والمخازن', {
+    views: [{ rightToLeft: true, state: 'normal' }],
+    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
+  });
+
+  const exportDateStr = new Date().toLocaleDateString('ar-EG', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+  const exportTimeStr = new Date().toLocaleTimeString('ar-EG', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  // 1. الترويسة الفاخرة
+  ws.mergeCells('A1:L1');
+  const titleCell = ws.getCell('A1');
+  titleCell.value = options.title || '🌐 كشف عروض وخصومات كبار الموزعين وشبكة المخازن - بوابة i\'SUPPLY المركزية';
+  titleCell.font = { name: 'Segoe UI', size: 15, bold: true, color: { argb: THEME.white } };
+  titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.headerBg } };
+  ws.getRow(1).height = 36;
+
+  ws.mergeCells('A2:L2');
+  const subCell = ws.getCell('A2');
+  const warehouseFilterStr = options.selectedWarehouse ? ` | تصفية المخزن: ${options.selectedWarehouse}` : '';
+  const scopeStr = options.isSelectedOnly ? ' (أصناف محددة يدوياً من الشاشة)' : ' (كافة عروض السوق المتاحة)';
+  subCell.value = `تاريخ الاستخراج: ${exportDateStr} - ${exportTimeStr} | إجمالي الأصناف: ${feeds.length} صنف${scopeStr}${warehouseFilterStr}`;
+  subCell.font = { name: 'Segoe UI', size: 10.5, italic: true, color: { argb: 'E0F2FE' } };
+  subCell.alignment = { vertical: 'middle', horizontal: 'center' };
+  subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.subHeaderBg } };
+  ws.getRow(2).height = 24;
+
+  ws.getRow(3).height = 10;
+
+  // 2. عناوين الأعمدة
+  const headers = [
+    'م',
+    'اسم الصنف الدوائي',
+    'الاسم التجاري / العلمي',
+    'الباركود',
+    'سعر الجمهور (ج.م)',
+    'أفضل موزع / شركة 👑',
+    'المستودع / المخزن المورد',
+    'أعلى خصم %',
+    'سعر الشراء الصافي (ج.م)',
+    'وفر الصنف للعلبة (ج.م)',
+    'البوانص والكوتات',
+    'حالة التوفر بالسوق'
+  ];
+
+  const headerRow = ws.getRow(4);
+  headerRow.values = headers;
+  headerRow.height = 28;
+
+  headerRow.eachCell((cell) => {
+    cell.font = { name: 'Segoe UI', size: 11, bold: true, color: { argb: THEME.white } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.accentRoyal } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    cell.border = THIN_BORDER;
+  });
+
+  // 3. تعبئة البيانات
+  let startRow = 5;
+  feeds.forEach((feed, idx) => {
+    const r = ws.getRow(startRow + idx);
+    const pub = Number(feed.public_price || 0);
+    const disc = Number(feed.best_discount_percent || 0);
+    const buy = Number(feed.best_buy_price || (pub > 0 ? pub * (1 - disc / 100) : 0));
+    const savings = Math.max(0, pub - buy);
+
+    let stockText = 'متوفر بالسوق';
+    if (feed.stock_status === 'low_stock') stockText = 'رصيد منخفض ⚠️';
+    else if (feed.stock_status === 'out_of_stock') stockText = 'غير متوفر ❌';
+
+    let bonusText = feed.bonus_info || '';
+    if (feed.quota_limit) {
+      bonusText += (bonusText ? ' | ' : '') + `كوتة: ${feed.quota_limit} علب`;
+    }
+    if (!bonusText) bonusText = 'متاح بدون قيود';
+
+    r.values = [
+      idx + 1,
+      feed.medication_name || '-',
+      feed.trade_name_ar || feed.trade_name_en || '-',
+      feed.barcode || '-',
+      pub,
+      feed.best_distributor_name || 'غير محدد',
+      feed.warehouse_name || 'المستودع الرئيسي',
+      disc,
+      buy,
+      savings,
+      bonusText,
+      stockText
+    ];
+
+    r.height = 22;
+
+    const isAlt = idx % 2 === 1;
+    const isTopDiscount = disc >= 24;
+
+    r.eachCell((cell, colNum) => {
+      cell.border = THIN_BORDER;
+      cell.font = { name: 'Segoe UI', size: 10 };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+      if (isAlt) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.altRowBg } };
+      }
+
+      if (colNum === 2 || colNum === 3) {
+        cell.alignment = { vertical: 'middle', horizontal: 'right' };
+        if (colNum === 2) cell.font = { name: 'Segoe UI', size: 10.5, bold: true, color: { argb: THEME.textDark } };
+      }
+
+      if (colNum === 5 || colNum === 9 || colNum === 10) {
+        cell.numFmt = '#,##0.00';
+      }
+
+      if (colNum === 8) {
+        cell.numFmt = '0.0"%"';
+        if (isTopDiscount) {
+          cell.font = { name: 'Segoe UI', size: 10.5, bold: true, color: { argb: THEME.textGreen } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.highlightGreen } };
+        }
+      }
+
+      if (colNum === 9) {
+        cell.font = { name: 'Segoe UI', size: 10.5, bold: true, color: { argb: THEME.headerBg } };
+      }
+
+      if (colNum === 10 && savings > 0) {
+        cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: THEME.textGreen } };
+      }
+    });
+  });
+
+  // 4. صف الإجماليات
+  const totalRowIndex = startRow + feeds.length;
+  if (feeds.length > 0) {
+    const totRow = ws.getRow(totalRowIndex);
+    totRow.getCell(1).value = 'الإجمالي والمتوسط العام';
+    ws.mergeCells(`A${totalRowIndex}:D${totalRowIndex}`);
+    totRow.getCell(5).value = { formula: `AVERAGE(E${startRow}:E${totalRowIndex - 1})` };
+    totRow.getCell(5).numFmt = '#,##0.00';
+    totRow.getCell(8).value = { formula: `AVERAGE(H${startRow}:H${totalRowIndex - 1})` };
+    totRow.getCell(8).numFmt = '0.0"%"';
+    totRow.getCell(9).value = { formula: `AVERAGE(I${startRow}:I${totalRowIndex - 1})` };
+    totRow.getCell(9).numFmt = '#,##0.00';
+    totRow.getCell(10).value = { formula: `SUM(J${startRow}:J${totalRowIndex - 1})` };
+    totRow.getCell(10).numFmt = '#,##0.00';
+
+    totRow.height = 26;
+    totRow.eachCell((cell) => {
+      cell.font = { name: 'Segoe UI', size: 11, bold: true, color: { argb: THEME.white } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.totalBg } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = THIN_BORDER;
+    });
+  }
+
+  // 5. ضبط عروض الأعمدة
+  const colWidths = [6, 28, 26, 16, 15, 22, 24, 13, 16, 16, 22, 16];
+  colWidths.forEach((w, i) => {
+    ws.getColumn(i + 1).width = w;
+  });
+
+  // 6. التنزيل بالمتصفح
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const fileNameSuffix = options.isSelectedOnly ? '-محدد' : '';
+  a.download = `عروض-سوق-iSupply${fileNameSuffix}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
 }
 

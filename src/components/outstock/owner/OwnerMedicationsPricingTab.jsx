@@ -1707,9 +1707,6 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
             justifyContent: 'center',
             padding: '16px'
           }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setBarcodeMedToPrint(null);
-          }}
         >
           <div
             style={{

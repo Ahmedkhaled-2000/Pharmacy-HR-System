@@ -58,7 +58,8 @@ export default function AddMedicationModal({
   initialData = {},
   creatorEmployee = null,
   onClose,
-  onSaveSuccess
+  onSaveSuccess,
+  zIndex = 120000
 }) {
   const isEditMode = Boolean(initialData?.id);
   const prevIsOpenRef = useRef(false);
@@ -267,14 +268,11 @@ export default function AddMedicationModal({
         inset: 0,
         backgroundColor: 'rgba(15, 23, 42, 0.75)',
         backdropFilter: 'blur(6px)',
-        zIndex: 99999,
+        zIndex: zIndex || 120000,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         padding: '16px'
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !isSaving) onClose();
       }}
     >
       <div

@@ -12,9 +12,13 @@ import {
   FileSpreadsheet,
   Download,
   Loader2,
-  Sparkles
+  Sparkles,
+  Camera,
+  X,
+  Pill,
+  Filter
 } from 'lucide-react';
-import { outstockGetProcurementAggregated, outstockProcurementItemAction } from '../../../utils/outstockApiClient';
+import { outstockGetProcurementAggregated, outstockProcurementItemAction, listenToOutstockLocalMessages } from '../../../utils/outstockApiClient';
 import { exportProcurementOrdersExcel } from '../../../utils/outstockExcelExporter';
 import OutstockConfirmModal from '../common/OutstockConfirmModal';
 import { getSocket } from '../../../utils/socketClient';
@@ -23,19 +27,24 @@ import { getSocket } from '../../../utils/socketClient';
  * ProcurementOrdersTab.jsx
  * شاشة طلبات الفروع المجمعة لإدارة المشتريات
  * - استلام أصناف مجمعة لكل فرع على حدة (Aggregated Item Model)
+ * - فلتر الصنف: أدوية (افتراضي) / مستحضرات / الكل مع تصدير إكسل مخصص
+ * - دعم صلاحية مسؤول مستحضرات التجميل
  * - تحديد ما تم توفيره بالفرع وما هو غير متوفر بالسوق
  * - شحن الأصناف المتوفرة لرصيد الفرع، أو شطب غير المتوفر وتحويله لنواقص الصيدلية
  * - تصدير شيت إكسل فاخر بتصميم احترافي (Dual-Sheet Executive Excel)
  * - نافذة تأكيد منبثقة احترافية بدلاً من window.confirm
  * - مزامنة لحظية فورية عبر WebSockets عند تسجيل أي طلب بالفرع
  */
-export default function ProcurementOrdersTab({ showToast }) {
+export default function ProcurementOrdersTab({ showToast, categoryScope = null }) {
   const [aggregatedData, setAggregatedData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [selectedBranchId, setSelectedBranchId] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState(() => categoryScope || 'medication'); // 'medication' | 'cosmetics' | 'all'
   const [isProcessing, setIsProcessing] = useState(false);
+  const [previewOrderImageUrl, setPreviewOrderImageUrl] = useState(null);
+  const [previewOrderImageTitle, setPreviewOrderImageTitle] = useState('');
 
   // قرارات الشراء المعلقة قبل الإرسال (Staged Decisions)
   // Map of `${branchId}_${medicationName}_${unitType}` -> 'available' | 'unavailable'
@@ -55,39 +64,83 @@ export default function ProcurementOrdersTab({ showToast }) {
     onConfirmAction: null
   });
 
+  const [lastSyncTime, setLastSyncTime] = useState(() => new Date());
+
+  const formattedSyncTime = useMemo(() => {
+    if (!lastSyncTime) return '';
+    const h = String(lastSyncTime.getHours()).padStart(2, '0');
+    const m = String(lastSyncTime.getMinutes()).padStart(2, '0');
+    const s = String(lastSyncTime.getSeconds()).padStart(2, '0');
+    return `${h}:${m}:${s}`;
+  }, [lastSyncTime]);
+
   const fetchAggregatedOrders = useCallback(async (isSilent = false) => {
     if (!isSilent) setIsLoading(true);
     try {
-      const res = await outstockGetProcurementAggregated();
+      const activeCat = categoryScope || categoryFilter;
+      const res = await outstockGetProcurementAggregated({ category: activeCat });
       if (res?.success && Array.isArray(res.aggregated)) {
         setAggregatedData(res.aggregated);
       }
+      setLastSyncTime(new Date());
     } catch (e) {
       console.warn('Fetch aggregated orders error:', e);
     } finally {
       if (!isSilent) setIsLoading(false);
     }
-  }, []);
+  }, [categoryFilter, categoryScope]);
 
   useEffect(() => {
     fetchAggregatedOrders();
 
-    // ── الاستماع اللحظي لأحداث Socket.io للمزامنة الفورية مع الفروع ──
+    // 1. الاستماع اللحظي لأحداث Socket.io للمزامنة الفورية مع الفروع
     const socket = getSocket();
+    const handleLiveOrder = () => {
+      fetchAggregatedOrders(true);
+    };
+
     if (socket) {
-      const handleLiveOrder = () => {
-        fetchAggregatedOrders(true);
-      };
       socket.on('outstock:order_created', handleLiveOrder);
       socket.on('outstock:items_status_updated', handleLiveOrder);
       socket.on('outstock:item_restocked', handleLiveOrder);
+    }
 
-      return () => {
+    // 2. الاستماع اللحظي عبر قناة المزامنة المحلية المشتركة بين التبويبات (BroadcastChannel)
+    const unsubscribeLocal = listenToOutstockLocalMessages((msg) => {
+      if (msg?.type?.startsWith('outstock:')) {
+        fetchAggregatedOrders(true);
+      }
+    });
+
+    // 3. مزامنة فورية عند إعادة تنشيط النافذة أو التبديل إليها (Focus & Visibility)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchAggregatedOrders(true);
+      }
+    };
+    const handleWindowFocus = () => {
+      fetchAggregatedOrders(true);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+
+    // 4. استطلاع ذكي دوري كل 8 ثوان لضمان عدم فوات أي طلب في الخلفية
+    const pollInterval = setInterval(() => {
+      fetchAggregatedOrders(true);
+    }, 8000);
+
+    return () => {
+      if (socket) {
         socket.off('outstock:order_created', handleLiveOrder);
         socket.off('outstock:items_status_updated', handleLiveOrder);
         socket.off('outstock:item_restocked', handleLiveOrder);
-      };
-    }
+      }
+      unsubscribeLocal?.();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+      clearInterval(pollInterval);
+    };
   }, [fetchAggregatedOrders]);
 
   // استخراج قائمة الفروع الفريدة
@@ -222,7 +275,8 @@ export default function ProcurementOrdersTab({ showToast }) {
       const branchNameStr = selectedBranchObj ? selectedBranchObj.name : 'كافة الفروع';
 
       await exportProcurementOrdersExcel(filteredItems, {
-        selectedBranchName: branchNameStr
+        selectedBranchName: branchNameStr,
+        category: categoryScope || categoryFilter
       });
       showToast?.('📊 تم استخراج وتنزيل شيت إكسل طلبات المشتريات بنجاح بتصميم احترافي');
     } catch (err) {
@@ -296,6 +350,95 @@ export default function ProcurementOrdersTab({ showToast }) {
                 ))}
               </select>
             </div>
+
+            {/* أزرار فلتر تصنيف الصنف (أصناف دوائية افتراضياً / مستحضرات / الكل) */}
+            {!categoryScope ? (
+              <div style={{ display: 'flex', gap: '4px', background: '#f1f5f9', padding: '3px', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter('medication')}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    border: 'none',
+                    background: categoryFilter === 'medication' ? '#059669' : 'transparent',
+                    color: categoryFilter === 'medication' ? '#ffffff' : '#475569',
+                    boxShadow: categoryFilter === 'medication' ? '0 2px 4px rgba(5, 150, 105, 0.25)' : 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <Pill size={14} />
+                  <span>أصناف دوائية 💊 (افتراضي)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter('cosmetics')}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    border: 'none',
+                    background: categoryFilter === 'cosmetics' ? '#db2777' : 'transparent',
+                    color: categoryFilter === 'cosmetics' ? '#ffffff' : '#475569',
+                    boxShadow: categoryFilter === 'cosmetics' ? '0 2px 4px rgba(219, 39, 119, 0.25)' : 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <Sparkles size={14} />
+                  <span>مستحضرات تجميل 💄</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter('all')}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    border: 'none',
+                    background: categoryFilter === 'all' ? '#1e293b' : 'transparent',
+                    color: categoryFilter === 'all' ? '#ffffff' : '#475569',
+                    boxShadow: categoryFilter === 'all' ? '0 2px 4px rgba(30, 41, 59, 0.25)' : 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <span>🌐 كافة الأصناف</span>
+                </button>
+              </div>
+            ) : (
+              <div
+                style={{
+                  background: '#fdf2f8',
+                  border: '1px solid #fbcfe8',
+                  color: '#be185d',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Sparkles size={14} />
+                <span>نطاق الصلاحية: مستحضرات تجميل وعناية فقط 💄</span>
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -335,6 +478,38 @@ export default function ProcurementOrdersTab({ showToast }) {
               <RefreshCw size={15} />
               <span>تحديث</span>
             </button>
+
+            {/* مؤشر المزامنة اللحظية الفورية مع توقيت الثواني */}
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '10px',
+                background: '#f0fdfa',
+                border: '1px solid #99f6e4',
+                color: '#0f766e',
+                fontSize: '12px',
+                fontWeight: '700'
+              }}
+              title="تحديث لحظي مستمر للطلبات فور تسجيلها بالفروع"
+            >
+              <span
+                style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: '#0d9488',
+                  boxShadow: '0 0 6px #0d9488',
+                  display: 'inline-block'
+                }}
+              />
+              <span>آخر مزامنة:</span>
+              <span style={{ direction: 'ltr', fontFamily: 'monospace', fontWeight: '800', fontSize: '13px' }}>
+                {formattedSyncTime} ⚡
+              </span>
+            </div>
 
             {Object.keys(decisions).filter(k => decisions[k]).length > 0 && (
               <button
@@ -441,11 +616,59 @@ export default function ProcurementOrdersTab({ showToast }) {
 
                       {/* صنف الدواء */}
                       <td>
-                        <div style={{ fontWeight: '900', fontSize: '14.5px', color: '#0d9488' }}>
-                          {item.medication_name}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <div style={{ fontWeight: '900', fontSize: '14.5px', color: '#0d9488' }}>
+                            {item.medication_name}
+                          </div>
+                          {item.item_type === 'cosmetics' ? (
+                            <span style={{ fontSize: '11px', background: '#fce7f3', color: '#be185d', padding: '2px 7px', borderRadius: '6px', fontWeight: '800' }}>
+                              💄 مستحضرات
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '11px', background: '#e0f2fe', color: '#0369a1', padding: '2px 7px', borderRadius: '6px', fontWeight: '800' }}>
+                              💊 دواء
+                            </span>
+                          )}
+                          {Boolean(item.order_type === 'branch' || (item.item_details || []).some(d => d.orderType === 'branch')) && (
+                            <span style={{ fontSize: '11px', background: '#fef3c7', color: '#92400e', padding: '2px 7px', borderRadius: '6px', fontWeight: '800' }}>
+                              🏢 طلب فرع
+                            </span>
+                          )}
+                          {(() => {
+                            const attachedImg = item.medication_image_url || (item.item_details || []).find(d => d.medicationImageUrl)?.medicationImageUrl;
+                            if (!attachedImg) return null;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPreviewOrderImageUrl(attachedImg);
+                                  setPreviewOrderImageTitle(`${item.medication_name} - ${item.branch_name || ''}`);
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  background: '#ecfeff',
+                                  color: '#0891b2',
+                                  border: '1px solid #a5f3fc',
+                                  fontSize: '11px',
+                                  fontWeight: '700',
+                                  cursor: 'pointer'
+                                }}
+                                title="عرض صورة الدواء أو الروشتة المرفقة بطلب العميل"
+                              >
+                                <Camera size={13} color="#0891b2" />
+                                <span>📷 روشتة / صورة مرفقة</span>
+                              </button>
+                            );
+                          })()}
                         </div>
                         <small style={{ color: 'var(--muted, #64748b)', fontSize: '11px' }}>
-                          مسجل كحجز مسبق للعملاء
+                          {(item.order_type === 'branch' || (item.item_details || []).some(d => d.orderType === 'branch'))
+                            ? 'نواقص مخزن الفرع الداخلي'
+                            : 'مسجل كحجز مسبق للعملاء'}
                         </small>
                       </td>
 
@@ -545,6 +768,69 @@ export default function ProcurementOrdersTab({ showToast }) {
           </div>
         )}
       </div>
+
+      {/* ── نافذة معاينة صورة الروشتة / الدواء المرفقة بطلب العميل (Lightbox) ── */}
+      {previewOrderImageUrl && (
+        <div
+          className="outstock-modal-backdrop"
+          style={{ zIndex: 99999, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setPreviewOrderImageUrl(null)}
+        >
+          <div
+            style={{
+              position: 'relative',
+              maxWidth: '92vw',
+              maxHeight: '90vh',
+              background: '#ffffff',
+              borderRadius: '16px',
+              padding: '16px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Camera size={18} color="#0d9488" />
+                <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '14px' }}>
+                  معاينة صورة طلب العميل: {previewOrderImageTitle}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewOrderImageUrl(null)}
+                style={{
+                  background: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: '#64748b'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <img
+              src={previewOrderImageUrl}
+              alt="صورة طلب العميل"
+              style={{
+                maxWidth: '85vw',
+                maxHeight: '75vh',
+                borderRadius: '8px',
+                objectFit: 'contain',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

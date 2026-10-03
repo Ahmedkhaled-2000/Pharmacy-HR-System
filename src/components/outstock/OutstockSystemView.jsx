@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import './outstock.css';
 import {
@@ -35,7 +35,8 @@ import {
   CreditCard,
   FileText,
   Sparkles,
-  PackageCheck
+  PackageCheck,
+  Server
 } from 'lucide-react';
 import OutstockNotificationModal from './common/OutstockNotificationModal';
 import OutstockCommandPalette from './common/OutstockCommandPalette';
@@ -52,6 +53,7 @@ import {
 
 // بوابات الصيدلية
 import PharmacyOrdersTab from './pharmacy/PharmacyOrdersTab';
+import BranchStockOrdersTab from './pharmacy/BranchStockOrdersTab';
 import PharmacyCustomersTab from './pharmacy/PharmacyCustomersTab';
 import PharmacyProcurementTrackingTab from './pharmacy/PharmacyProcurementTrackingTab';
 import PharmacyDeficienciesTab from './pharmacy/PharmacyDeficienciesTab';
@@ -111,6 +113,12 @@ export default function OutstockSystemView({
                             currentUser?.role === 'procurement_manager' ||
                             currentUser?.username === 'admin-stock';
 
+  // مسؤول مستحضرات التجميل (نطاق مخصص للمستحضرات فقط)
+  const isCosmeticsOfficer = (
+    currentUser?.role === 'cosmetics_officer' ||
+    currentUser?.category_scope === 'cosmetics'
+  ) && isProcurementRole;
+
   const [activeBranch, setActiveBranch] = useState(currentBranch || currentUser?.branchData || {
     id: currentUser?.branchId || currentUser?.branch_id || currentUser?.id || 'main',
     name: currentUser?.fullName || currentUser?.name || 'فرع الصيدلية الرئيسي'
@@ -124,6 +132,28 @@ export default function OutstockSystemView({
     if (userRole === 'procurement' || isProcurementRole) return 'branch_orders';
     return 'owner_branches';
   });
+
+  // قائمة أقسام طلبات الصيدلية المنسدلة (طلبات 📦)
+  const PHARMACY_ORDERS_SUBSECTIONS = [
+    {
+      id: 'orders',
+      title: 'طلبات العملاء',
+      desc: 'تسجيل ومتابعة طلبيات عملاء الصيدلية، الأسعار، والإيصالات',
+      icon: Package
+    },
+    {
+      id: 'branch_orders',
+      title: 'طلبات الفرع (نواقص ومخزون)',
+      desc: 'طلب أدوية ومستحضرات لمخزون الفرع مباشرة بدون عميل أو أسعار وبدون إيصال',
+      icon: Building2
+    },
+    {
+      id: 'procurement_tracking',
+      title: 'متابعة طلبات المشتريات',
+      desc: 'متابعة الأصناف المتوفرة وجاهزية الاستلام والتوريد بالفرع',
+      icon: Clock
+    }
+  ];
 
   // قائمة أقسام طلبات الفروع المجمعة المنسدلة
   const PROCUREMENT_BRANCH_ORDERS_SUBSECTIONS = [
@@ -184,6 +214,12 @@ export default function OutstockSystemView({
       title: 'مقارنة خصومات الموردين و i\'SUPPLY 👑',
       desc: 'رادار أفضل نسبة خصم بين الشركات وبوابة i\'SUPPLY اللحظية',
       icon: Sparkles
+    },
+    {
+      id: 'pharmafly_sync',
+      title: 'ربط فارما فلاي 🔄 (PharmaFly ERP)',
+      desc: 'المزامنة التلقائية للفواتير، المخزون الحي للفروع، ومسار التفعيل الميداني',
+      icon: Server
     }
   ];
 
@@ -263,6 +299,12 @@ export default function OutstockSystemView({
     alignMode: 'right'
   });
 
+  // ── قائمة طلبات الصيدلية المنسدلة الذكية (طلبات) ──
+  const [isPharmacyOrdersMenuOpen, setIsPharmacyOrdersMenuOpen] = useState(false);
+  const pharmacyOrdersButtonRef = useRef(null);
+  const pharmacyOrdersMenuRef = useRef(null);
+  const [pharmacyOrdersMenuCoords, setPharmacyOrdersMenuCoords] = useState(null);
+
   // ── قائمة طلبات الفروع المجمعة المنسدلة الذكية ──
   const [isBranchOrdersMenuOpen, setIsBranchOrdersMenuOpen] = useState(false);
   const branchOrdersButtonRef = useRef(null);
@@ -275,6 +317,47 @@ export default function OutstockSystemView({
   const suppliersMenuRef = useRef(null);
   const [suppliersMenuCoords, setSuppliersMenuCoords] = useState(null);
   const [suppliersActiveSubTab, setSuppliersActiveSubTab] = useState('accounts');
+
+  // فحص الصلاحيات الدقيقة للأقسام الخمسة لإدارة الموردين
+  const canAccessSuppliersTab = useMemo(() => {
+    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock') {
+      return true;
+    }
+    if (currentUser?.can_access_suppliers === false) {
+      return false;
+    }
+    const hasAnySubtab = (
+      currentUser?.can_access_supplier_accounts !== false ||
+      currentUser?.can_access_order_receiving !== false ||
+      currentUser?.can_access_supplier_invoices !== false ||
+      currentUser?.can_access_branch_withdrawals !== false ||
+      currentUser?.can_access_discounts_comparison !== false ||
+      currentUser?.can_access_pharmafly !== false
+    );
+    return hasAnySubtab;
+  }, [userRole, currentUser]);
+
+  const filteredSuppliersSubsections = useMemo(() => {
+    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock') {
+      return PROCUREMENT_SUPPLIERS_SUBSECTIONS;
+    }
+    return PROCUREMENT_SUPPLIERS_SUBSECTIONS.filter((sub) => {
+      if (sub.id === 'accounts') return currentUser?.can_access_supplier_accounts !== false;
+      if (sub.id === 'order_receiving') return currentUser?.can_access_order_receiving !== false;
+      if (sub.id === 'invoices') return currentUser?.can_access_supplier_invoices !== false;
+      if (sub.id === 'withdrawals') return currentUser?.can_access_branch_withdrawals !== false;
+      if (sub.id === 'discounts_comparison') return currentUser?.can_access_discounts_comparison !== false;
+      if (sub.id === 'pharmafly_sync') return currentUser?.can_access_pharmafly !== false;
+      return true;
+    });
+  }, [userRole, currentUser]);
+
+  // التحقق من تعيين قسم فرعي مسموح به تلقائياً
+  useEffect(() => {
+    if (filteredSuppliersSubsections.length > 0 && !filteredSuppliersSubsections.some(s => s.id === suppliersActiveSubTab)) {
+      setSuppliersActiveSubTab(filteredSuppliersSubsections[0].id);
+    }
+  }, [filteredSuppliersSubsections, suppliersActiveSubTab]);
 
   // ── شريط الأوامر السريع المركزي والبحث الشامل (HUD / Command Palette - Ctrl+K) ──
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -328,6 +411,12 @@ export default function OutstockSystemView({
   }, [isSettingsMenuOpen, calculateMenuCoords]);
 
   useEffect(() => {
+    if (isPharmacyOrdersMenuOpen) {
+      setPharmacyOrdersMenuCoords(calculateMenuCoords(pharmacyOrdersButtonRef));
+    }
+  }, [isPharmacyOrdersMenuOpen, calculateMenuCoords]);
+
+  useEffect(() => {
     if (isBranchOrdersMenuOpen) {
       setBranchOrdersMenuCoords(calculateMenuCoords(branchOrdersButtonRef));
     }
@@ -341,10 +430,11 @@ export default function OutstockSystemView({
 
   // إدارة أحداث الإغلاق عند النقر الخارجي وتغيير مقاس الشاشة
   useEffect(() => {
-    if (!isSettingsMenuOpen && !isBranchOrdersMenuOpen && !isSuppliersMenuOpen) return;
+    if (!isSettingsMenuOpen && !isBranchOrdersMenuOpen && !isSuppliersMenuOpen && !isPharmacyOrdersMenuOpen) return;
 
     const handleUpdate = () => {
       if (isSettingsMenuOpen) setMenuCoords(calculateMenuCoords(settingsButtonRef));
+      if (isPharmacyOrdersMenuOpen) setPharmacyOrdersMenuCoords(calculateMenuCoords(pharmacyOrdersButtonRef));
       if (isBranchOrdersMenuOpen) setBranchOrdersMenuCoords(calculateMenuCoords(branchOrdersButtonRef));
       if (isSuppliersMenuOpen) setSuppliersMenuCoords(calculateMenuCoords(suppliersButtonRef));
     };
@@ -353,6 +443,11 @@ export default function OutstockSystemView({
       if (isSettingsMenuOpen) {
         if (!settingsButtonRef.current?.contains(e.target) && !settingsMenuRef.current?.contains(e.target)) {
           setIsSettingsMenuOpen(false);
+        }
+      }
+      if (isPharmacyOrdersMenuOpen) {
+        if (!pharmacyOrdersButtonRef.current?.contains(e.target) && !pharmacyOrdersMenuRef.current?.contains(e.target)) {
+          setIsPharmacyOrdersMenuOpen(false);
         }
       }
       if (isBranchOrdersMenuOpen) {
@@ -370,6 +465,7 @@ export default function OutstockSystemView({
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setIsSettingsMenuOpen(false);
+        setIsPharmacyOrdersMenuOpen(false);
         setIsBranchOrdersMenuOpen(false);
         setIsSuppliersMenuOpen(false);
       }
@@ -388,19 +484,26 @@ export default function OutstockSystemView({
       document.removeEventListener('touchstart', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isSettingsMenuOpen, isBranchOrdersMenuOpen, isSuppliersMenuOpen, calculateMenuCoords]);
+  }, [isSettingsMenuOpen, isPharmacyOrdersMenuOpen, isBranchOrdersMenuOpen, isSuppliersMenuOpen, calculateMenuCoords]);
 
   // تحديث التبويب التلقائي عند تبديل الدور أو إذا كان التبويب الحالي غير متوافق
   useEffect(() => {
     if (userRole === 'branch') {
-      const branchTabs = ['orders', 'customers', 'procurement_tracking', 'deficiencies', 'branch_medication_search', 'inquiries', 'whatsapp'];
+      const branchTabs = ['orders', 'branch_orders', 'customers', 'procurement_tracking', 'deficiencies', 'branch_medication_search', 'inquiries', 'whatsapp'];
       if (!branchTabs.includes(activeTab)) {
         setActiveTab('orders');
       }
     } else if (userRole === 'procurement' || isProcurementRole) {
-      const procTabs = ['branch_orders', 'procurement_suppliers', 'procurement_inquiries', 'delivery_tracking', 'unavailable_items', 'procurement_team', 'procurement_whatsapp', 'procurement_medications'];
-      if (!procTabs.includes(activeTab)) {
-        setActiveTab('branch_orders');
+      if (isCosmeticsOfficer) {
+        const cosmeticsTabs = ['branch_orders', 'delivery_tracking'];
+        if (!cosmeticsTabs.includes(activeTab)) {
+          setActiveTab('branch_orders');
+        }
+      } else {
+        const procTabs = ['branch_orders', 'procurement_suppliers', 'procurement_inquiries', 'delivery_tracking', 'unavailable_items', 'procurement_team', 'procurement_whatsapp', 'procurement_medications'];
+        if (!procTabs.includes(activeTab)) {
+          setActiveTab('branch_orders');
+        }
       }
     } else if (userRole === 'owner') {
       const ownerTabs = ['owner_financial_reports', 'owner_branches', 'owner_procurement', 'owner_suppliers', 'owner_inquiries', 'owner_team', 'owner_medications', 'owner_customers', 'owner_whatsapp', 'owner_settings'];
@@ -408,7 +511,7 @@ export default function OutstockSystemView({
         setActiveTab('owner_branches');
       }
     }
-  }, [userRole, isProcurementRole, activeTab]);
+  }, [userRole, isProcurementRole, isCosmeticsOfficer, activeTab]);
 
   // ── العدادات التنبيهية الحية للنظام (Notification Badges) ──
   const [notificationsSummary, setNotificationsSummary] = useState({
@@ -434,9 +537,25 @@ export default function OutstockSystemView({
     const interval = setInterval(fetchNotificationsSummary, 25000);
 
     const handleRefresh = () => fetchNotificationsSummary();
+
+    const handleBranchOrderReplied = (e) => {
+      fetchNotificationsSummary();
+      const detail = e?.detail || e;
+      if (userRole === 'branch' && (!detail?.branchId || String(detail.branchId) === String(effectiveBranchId))) {
+        triggerNotification({
+          title: '💬 رد جديد من إدارة المشتريات',
+          message: `ورد رد جديد من إدارة المشتريات على طلب الفرع #${detail?.orderId || ''}. يمكنك مراجعته الآن في تبويبة طلبات الفرع.`,
+          type: 'info'
+        });
+      }
+    };
+
     window.addEventListener('outstock:refresh_notifications', handleRefresh);
     window.addEventListener('outstock:order_created', handleRefresh);
     window.addEventListener('outstock:order_updated', handleRefresh);
+    window.addEventListener('outstock:item_status_updated', handleRefresh);
+    window.addEventListener('outstock:items_status_updated', handleRefresh);
+    window.addEventListener('outstock:branch_order_replied', handleBranchOrderReplied);
     window.addEventListener('outstock:medication_request_created', handleRefresh);
     window.addEventListener('outstock:medication_request_replied', handleRefresh);
 
@@ -445,10 +564,13 @@ export default function OutstockSystemView({
       window.removeEventListener('outstock:refresh_notifications', handleRefresh);
       window.removeEventListener('outstock:order_created', handleRefresh);
       window.removeEventListener('outstock:order_updated', handleRefresh);
+      window.removeEventListener('outstock:item_status_updated', handleRefresh);
+      window.removeEventListener('outstock:items_status_updated', handleRefresh);
+      window.removeEventListener('outstock:branch_order_replied', handleBranchOrderReplied);
       window.removeEventListener('outstock:medication_request_created', handleRefresh);
       window.removeEventListener('outstock:medication_request_replied', handleRefresh);
     };
-  }, [fetchNotificationsSummary]);
+  }, [fetchNotificationsSummary, effectiveBranchId, userRole, triggerNotification]);
 
   // التحقق من صحة المستخدم
   useEffect(() => {
@@ -604,6 +726,7 @@ export default function OutstockSystemView({
 
       // Esc: إغلاق النوافذ المنبثقة والقوائم المنسدلة
       if (e.key === 'Escape') {
+        setIsPharmacyOrdersMenuOpen(false);
         setIsBranchOrdersMenuOpen(false);
         setIsSuppliersMenuOpen(false);
         setIsSettingsMenuOpen(false);
@@ -625,7 +748,7 @@ export default function OutstockSystemView({
 
       if (!isInputFocused) {
         // التنقل بالقوائم المنسدلة بالأسهم لأعلى ولأسفل
-        const isDropdownOpen = isBranchOrdersMenuOpen || isSuppliersMenuOpen || isSettingsMenuOpen;
+        const isDropdownOpen = isPharmacyOrdersMenuOpen || isBranchOrdersMenuOpen || isSuppliersMenuOpen || isSettingsMenuOpen;
         if (isDropdownOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
           e.preventDefault();
           const dropItems = Array.from(document.querySelectorAll('.outstock-dropdown-item:not([disabled])'));
@@ -880,16 +1003,39 @@ export default function OutstockSystemView({
       {/* ── شريط القوائم والتبويبات المخصص (Sub Navigation Bar) على غرار شريط الإدارة العليا في نظام HR ── */}
       <nav className="outstock-sub-navbar" aria-label="أقسام منظومة النواقص">
         <div className="outstock-sub-navbar-container">
-          {/* 1. قوائم بوابة الصيدلية (6 قوائم) */}
+          {/* 1. قوائم بوابة الصيدلية */}
           {userRole === 'branch' && (
             <>
+              {/* قائمة طلبات الصيدلية المنسدلة (طلبات العملاء، طلبات الفرع، متابعة طلبات المشتريات) */}
               <button
+                ref={pharmacyOrdersButtonRef}
                 type="button"
-                className={`outstock-subnav-btn ${activeTab === 'orders' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('orders')}
+                className={`outstock-subnav-btn ${['orders', 'branch_orders', 'procurement_tracking'].includes(activeTab) ? 'is-active' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPharmacyOrdersMenuCoords(calculateMenuCoords(pharmacyOrdersButtonRef));
+                  setIsPharmacyOrdersMenuOpen(prev => !prev);
+                }}
+                title="طلبات العملاء، طلبات الفرع، ومتابعة طلبات المشتريات"
+                aria-haspopup="true"
+                aria-expanded={isPharmacyOrdersMenuOpen}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
               >
                 <Package size={16} />
-                <span>طلبات العملاء</span>
+                <span>طلبات</span>
+                {notificationsSummary.branchReadyOrdersCount > 0 && (
+                  <span className="outstock-nav-badge success" title={`${notificationsSummary.branchReadyOrdersCount} طلب جاهز للتسليم بالفرع`}>
+                    {notificationsSummary.branchReadyOrdersCount}
+                  </span>
+                )}
+                <ChevronDown
+                  size={14}
+                  style={{
+                    transform: isPharmacyOrdersMenuOpen ? 'rotate(180deg)' : 'none',
+                    transition: 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                    opacity: 0.85
+                  }}
+                />
               </button>
 
               <button
@@ -899,20 +1045,6 @@ export default function OutstockSystemView({
               >
                 <Users size={16} />
                 <span>العملاء المسجلين</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-subnav-btn ${activeTab === 'procurement_tracking' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('procurement_tracking')}
-              >
-                <Clock size={16} />
-                <span>متابعة طلبات المشتريات</span>
-                {notificationsSummary.branchReadyOrdersCount > 0 && (
-                  <span className="outstock-nav-badge success" title={`${notificationsSummary.branchReadyOrdersCount} طلب جاهز للتسليم بالفرع`}>
-                    {notificationsSummary.branchReadyOrdersCount}
-                  </span>
-                )}
               </button>
 
               <button
@@ -964,96 +1096,130 @@ export default function OutstockSystemView({
           {/* 2. قوائم بوابة إدارة المشتريات */}
           {userRole === 'procurement' && (
             <>
-              {/* قائمة طلبات الفروع المجمعة المنسدلة الذكية */}
-              <button
-                ref={branchOrdersButtonRef}
-                type="button"
-                className={`outstock-subnav-btn ${['branch_orders', 'procurement_inquiries', 'delivery_tracking', 'unavailable_items'].includes(activeTab) ? 'is-active' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setBranchOrdersMenuCoords(calculateMenuCoords(branchOrdersButtonRef));
-                  setIsBranchOrdersMenuOpen(prev => !prev);
-                  if (isSuppliersMenuOpen) setIsSuppliersMenuOpen(false);
-                }}
-                title="طلبات الفروع المجمعة، الاستعلام وتصحيح الأصناف، متابعة التسليم، والأصناف غير المتوفرة بالسوق"
-                aria-haspopup="true"
-                aria-expanded={isBranchOrdersMenuOpen}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-              >
-                <Building2 size={16} />
-                <span>طلبات الفروع المجمعة</span>
-                {(notificationsSummary.pendingBranchOrdersCount + notificationsSummary.pendingInquiriesCount) > 0 && (
-                  <span className="outstock-nav-badge" title={`${notificationsSummary.pendingBranchOrdersCount} طلب فرع جديد و ${notificationsSummary.pendingInquiriesCount} استعلام معلق`}>
-                    {notificationsSummary.pendingBranchOrdersCount + notificationsSummary.pendingInquiriesCount}
-                  </span>
-                )}
-                <ChevronDown
-                  size={14}
-                  style={{
-                    transform: isBranchOrdersMenuOpen ? 'rotate(180deg)' : 'none',
-                    transition: 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
-                    opacity: 0.85
-                  }}
-                />
-              </button>
+              {isCosmeticsOfficer ? (
+                <>
+                  {/* واجهة مخصصة لمسؤول مستحضرات التجميل فقط */}
+                  <button
+                    type="button"
+                    className={`outstock-subnav-btn ${activeTab === 'branch_orders' ? 'is-active' : ''}`}
+                    onClick={() => setActiveTab('branch_orders')}
+                    title="طلبات مستحضرات التجميل المحولة من كافة الفروع"
+                  >
+                    <Sparkles size={16} />
+                    <span>طلبات المستحضرات المجمعة 💄</span>
+                    {notificationsSummary.pendingBranchOrdersCount > 0 && (
+                      <span className="outstock-nav-badge" title={`${notificationsSummary.pendingBranchOrdersCount} طلب مستحضرات جديد`}>
+                        {notificationsSummary.pendingBranchOrdersCount}
+                      </span>
+                    )}
+                  </button>
 
-              {/* قائمة الموردين وفواتير الشراء المنسدلة الذكية */}
-              <button
-                ref={suppliersButtonRef}
-                type="button"
-                className={`outstock-subnav-btn ${activeTab === 'procurement_suppliers' ? 'is-active' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSuppliersMenuCoords(calculateMenuCoords(suppliersButtonRef));
-                  setIsSuppliersMenuOpen(prev => !prev);
-                  if (isBranchOrdersMenuOpen) setIsBranchOrdersMenuOpen(false);
-                }}
-                title="حسابات الموردين وحدود الائتمان وفواتير الشراء ومسحوبات الفروع ومقارنة الخصومات و i'SUPPLY"
-                aria-haspopup="true"
-                aria-expanded={isSuppliersMenuOpen}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-              >
-                <Truck size={16} />
-                <span>الموردين وفواتير الشراء</span>
-                <ChevronDown
-                  size={14}
-                  style={{
-                    transform: isSuppliersMenuOpen ? 'rotate(180deg)' : 'none',
-                    transition: 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
-                    opacity: 0.85
-                  }}
-                />
-              </button>
+                  <button
+                    type="button"
+                    className={`outstock-subnav-btn ${activeTab === 'delivery_tracking' ? 'is-active' : ''}`}
+                    onClick={() => setActiveTab('delivery_tracking')}
+                    title="متابعة تسليم وتوريد مستحضرات التجميل للفروع"
+                  >
+                    <Activity size={16} />
+                    <span>متابعة تسليم المستحضرات 🚚</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* قائمة طلبات الفروع المجمعة المنسدلة الذكية */}
+                  <button
+                    ref={branchOrdersButtonRef}
+                    type="button"
+                    className={`outstock-subnav-btn ${['branch_orders', 'procurement_inquiries', 'delivery_tracking', 'unavailable_items'].includes(activeTab) ? 'is-active' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setBranchOrdersMenuCoords(calculateMenuCoords(branchOrdersButtonRef));
+                      setIsBranchOrdersMenuOpen(prev => !prev);
+                      if (isSuppliersMenuOpen) setIsSuppliersMenuOpen(false);
+                    }}
+                    title="طلبات الفروع المجمعة، الاستعلام وتصحيح الأصناف، متابعة التسليم، والأصناف غير المتوفرة بالسوق"
+                    aria-haspopup="true"
+                    aria-expanded={isBranchOrdersMenuOpen}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Building2 size={16} />
+                    <span>طلبات الفروع المجمعة</span>
+                    {(notificationsSummary.pendingBranchOrdersCount + notificationsSummary.pendingInquiriesCount) > 0 && (
+                      <span className="outstock-nav-badge" title={`${notificationsSummary.pendingBranchOrdersCount} طلب فرع جديد و ${notificationsSummary.pendingInquiriesCount} استعلام معلق`}>
+                        {notificationsSummary.pendingBranchOrdersCount + notificationsSummary.pendingInquiriesCount}
+                      </span>
+                    )}
+                    <ChevronDown
+                      size={14}
+                      style={{
+                        transform: isBranchOrdersMenuOpen ? 'rotate(180deg)' : 'none',
+                        transition: 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                        opacity: 0.85
+                      }}
+                    />
+                  </button>
 
-              <button
-                type="button"
-                className={`outstock-subnav-btn ${activeTab === 'procurement_team' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('procurement_team')}
-                title="إدارة أعضاء فريق المشتريات وصلاحية التعديل على الأصناف وقفل وتفعيل أسعار الفروع"
-              >
-                <UserCheck size={16} />
-                <span>فريق المشتريات والصلاحيات</span>
-              </button>
+                  {/* قائمة الموردين وفواتير الشراء المنسدلة الذكية */}
+                  {canAccessSuppliersTab && (
+                    <button
+                      ref={suppliersButtonRef}
+                      type="button"
+                      className={`outstock-subnav-btn ${activeTab === 'procurement_suppliers' ? 'is-active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSuppliersMenuCoords(calculateMenuCoords(suppliersButtonRef));
+                        setIsSuppliersMenuOpen(prev => !prev);
+                        if (isBranchOrdersMenuOpen) setIsBranchOrdersMenuOpen(false);
+                      }}
+                      title="حسابات الموردين وحدود الائتمان وفواتير الشراء ومسحوبات الفروع ومقارنة الخصومات و i'SUPPLY"
+                      aria-haspopup="true"
+                      aria-expanded={isSuppliersMenuOpen}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <Truck size={16} />
+                      <span>الموردين وفواتير الشراء</span>
+                      <ChevronDown
+                        size={14}
+                        style={{
+                          transform: isSuppliersMenuOpen ? 'rotate(180deg)' : 'none',
+                          transition: 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                          opacity: 0.85
+                        }}
+                      />
+                    </button>
+                  )}
 
-              <button
-                type="button"
-                className={`outstock-subnav-btn ${activeTab === 'procurement_whatsapp' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('procurement_whatsapp')}
-                title="مراسلة هواتف الفروع بالواتساب وإشعارات الشحن والنواقص"
-              >
-                <MessageSquare size={16} />
-                <span>واتساب الفروع</span>
-              </button>
+                  <button
+                    type="button"
+                    className={`outstock-subnav-btn ${activeTab === 'procurement_team' ? 'is-active' : ''}`}
+                    onClick={() => setActiveTab('procurement_team')}
+                    title="إدارة أعضاء فريق المشتريات وصلاحية التعديل على الأصناف وقفل وتفعيل أسعار الفروع"
+                  >
+                    <UserCheck size={16} />
+                    <span>فريق المشتريات والصلاحيات</span>
+                  </button>
 
-              <button
-                type="button"
-                className={`outstock-subnav-btn ${activeTab === 'procurement_medications' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('procurement_medications')}
-                title="كتالوج وتسعير الأدوية وهيئة الدواء ودراج آي"
-              >
-                <Pill size={16} />
-                <span>كتالوج وتسعير الأدوية</span>
-              </button>
+                  <button
+                    type="button"
+                    className={`outstock-subnav-btn ${activeTab === 'procurement_whatsapp' ? 'is-active' : ''}`}
+                    onClick={() => setActiveTab('procurement_whatsapp')}
+                    title="مراسلة هواتف الفروع بالواتساب وإشعارات الشحن والنواقص"
+                  >
+                    <MessageSquare size={16} />
+                    <span>واتساب الفروع</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`outstock-subnav-btn ${activeTab === 'procurement_medications' ? 'is-active' : ''}`}
+                    onClick={() => setActiveTab('procurement_medications')}
+                    title="كتالوج وتسعير الأدوية وهيئة الدواء ودراج آي"
+                  >
+                    <Pill size={16} />
+                    <span>كتالوج وتسعير الأدوية</span>
+                  </button>
+                </>
+              )}
             </>
           )}
 
@@ -1223,6 +1389,15 @@ export default function OutstockSystemView({
               />
             )}
 
+            {activeTab === 'branch_orders' && (
+              <BranchStockOrdersTab
+                branchId={effectiveBranchId}
+                branch={activeBranch}
+                currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
+                showToast={triggerNotification}
+              />
+            )}
+
             {activeTab === 'customers' && (
               <PharmacyCustomersTab
                 branchId={effectiveBranchId}
@@ -1278,14 +1453,17 @@ export default function OutstockSystemView({
         {userRole === 'procurement' && (
           <>
             {activeTab === 'branch_orders' && (
-              <ProcurementOrdersTab showToast={triggerNotification} />
+              <ProcurementOrdersTab
+                showToast={triggerNotification}
+                categoryScope={isCosmeticsOfficer ? 'cosmetics' : null}
+              />
             )}
 
-            {activeTab === 'procurement_suppliers' && (
-              <ProcurementSuppliersTab initialSubTab={suppliersActiveSubTab} showToast={triggerNotification} />
+            {activeTab === 'procurement_suppliers' && !isCosmeticsOfficer && (
+              <ProcurementSuppliersTab initialSubTab={suppliersActiveSubTab} currentUser={currentUser} showToast={triggerNotification} />
             )}
 
-            {activeTab === 'procurement_inquiries' && (
+            {activeTab === 'procurement_inquiries' && !isCosmeticsOfficer && (
               <ItemInquiryAndCorrectionTab
                 userRole={currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock' ? 'procurement_manager' : 'procurement_officer'}
                 branchId={effectiveBranchId}
@@ -1296,28 +1474,30 @@ export default function OutstockSystemView({
             )}
 
             {activeTab === 'delivery_tracking' && (
-              <ProcurementDeliveryTrackingTab />
+              <ProcurementDeliveryTrackingTab
+                categoryScope={isCosmeticsOfficer ? 'cosmetics' : null}
+              />
             )}
 
-            {activeTab === 'unavailable_items' && (
+            {activeTab === 'unavailable_items' && !isCosmeticsOfficer && (
               <ProcurementUnavailableTab showToast={triggerNotification} />
             )}
 
-            {activeTab === 'procurement_team' && (
+            {activeTab === 'procurement_team' && !isCosmeticsOfficer && (
               <ProcurementTeamTab
                 showToast={triggerNotification}
                 currentUser={currentUser}
               />
             )}
 
-            {activeTab === 'procurement_whatsapp' && (
+            {activeTab === 'procurement_whatsapp' && !isCosmeticsOfficer && (
               <ProcurementWhatsAppCenterTab
                 currentOfficer={currentUser?.fullName || currentUser?.name || 'مسؤول المشتريات'}
                 showToast={triggerNotification}
               />
             )}
 
-            {activeTab === 'procurement_medications' && (
+            {activeTab === 'procurement_medications' && !isCosmeticsOfficer && (
               <OwnerMedicationsPricingTab showToast={triggerNotification} />
             )}
           </>
@@ -1339,7 +1519,7 @@ export default function OutstockSystemView({
             )}
 
             {activeTab === 'owner_suppliers' && (
-              <ProcurementSuppliersTab initialSubTab={suppliersActiveSubTab} showToast={triggerNotification} />
+              <ProcurementSuppliersTab initialSubTab={suppliersActiveSubTab} currentUser={currentUser} showToast={triggerNotification} />
             )}
 
             {activeTab === 'owner_inquiries' && (
@@ -1456,6 +1636,82 @@ export default function OutstockSystemView({
         document.body
       )}
 
+      {/* ── قائمة الانتقال لأقسام طلبات الصيدلية المنسدلة (Portal) ── */}
+      {isPharmacyOrdersMenuOpen && (() => {
+        const coords = pharmacyOrdersMenuCoords || calculateMenuCoords(pharmacyOrdersButtonRef);
+        if (!coords) return null;
+        return createPortal(
+          <div
+            ref={pharmacyOrdersMenuRef}
+            className="outstock-settings-dropdown-portal outstock-dropdown-portal"
+            style={{
+              position: 'fixed',
+              top: `${coords.top}px`,
+              left: `${coords.left}px`,
+              width: `${coords.width}px`,
+              maxHeight: `${coords.maxHeight}px`,
+              zIndex: 99999
+            }}
+          >
+            <div
+              className="outstock-dropdown-arrow"
+              style={{
+                left: `${coords.arrowOffset}px`
+              }}
+            />
+            <div className="outstock-dropdown-header">
+              <div className="outstock-dropdown-header-title">
+                <Package size={15} className="outstock-dropdown-header-icon" />
+                <span>إدارة طلبات وتوريدات الصيدلية</span>
+              </div>
+              <span className="outstock-dropdown-header-badge">
+                {PHARMACY_ORDERS_SUBSECTIONS.length} أقسام
+              </span>
+            </div>
+            <div className="outstock-dropdown-list">
+              {PHARMACY_ORDERS_SUBSECTIONS.map((sub) => {
+                const isCurrent = activeTab === sub.id;
+                const IconComp = sub.icon;
+                const badgeCount = sub.id === 'procurement_tracking'
+                  ? notificationsSummary.branchReadyOrdersCount
+                  : 0;
+
+                return (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    className={`outstock-dropdown-item ${isCurrent ? 'is-active' : ''}`}
+                    onClick={() => {
+                      setActiveTab(sub.id);
+                      setIsPharmacyOrdersMenuOpen(false);
+                    }}
+                  >
+                    <div className={`outstock-dropdown-item-icon ${isCurrent ? 'is-active' : ''}`}>
+                      <IconComp size={18} />
+                    </div>
+                    <div className="outstock-dropdown-item-text">
+                      <span className="outstock-dropdown-item-title">{sub.title}</span>
+                      <span className="outstock-dropdown-item-desc">{sub.desc}</span>
+                    </div>
+                    {badgeCount > 0 && (
+                      <span className="outstock-dropdown-item-badge success">
+                        {badgeCount} جاهز
+                      </span>
+                    )}
+                    {isCurrent && (
+                      <div className="outstock-dropdown-item-check" title="القسم المعروض حالياً">
+                        <Check size={14} />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>,
+          document.body
+        );
+      })()}
+
       {/* ── قائمة الانتقال لأقسام طلبات الفروع المجمعة المنسدلة (Portal) ── */}
       {isBranchOrdersMenuOpen && (() => {
         const coords = branchOrdersMenuCoords || calculateMenuCoords(branchOrdersButtonRef);
@@ -1563,11 +1819,11 @@ export default function OutstockSystemView({
                 <span>إدارة الموردين وفواتير الشراء</span>
               </div>
               <span className="outstock-dropdown-header-badge">
-                {PROCUREMENT_SUPPLIERS_SUBSECTIONS.length} أقسام
+                {filteredSuppliersSubsections.length} أقسام
               </span>
             </div>
             <div className="outstock-dropdown-list">
-              {PROCUREMENT_SUPPLIERS_SUBSECTIONS.map((sub) => {
+              {filteredSuppliersSubsections.map((sub) => {
                 const isCurrent = (activeTab === 'procurement_suppliers' || activeTab === 'owner_suppliers') && suppliersActiveSubTab === sub.id;
                 const IconComp = sub.icon;
                 return (

@@ -176,12 +176,15 @@ export async function outstockGetOrders(params = {}) {
   const qs = new URLSearchParams();
   if (params.branchId) qs.append('branchId', params.branchId);
   if (params.status) qs.append('status', params.status);
+  if (params.orderType) qs.append('orderType', params.orderType);
   if (params.search) qs.append('search', params.search);
+  if (params.dateFrom) qs.append('dateFrom', params.dateFrom);
+  if (params.dateTo) qs.append('dateTo', params.dateTo);
   if (params.limit) qs.append('limit', String(params.limit));
 
   const res = await outstockRequest(`orders?${qs.toString()}`, { method: 'GET' });
   if (res?.success && Array.isArray(res.orders)) {
-    if (params.branchId) {
+    if (params.branchId && !params.orderType && !params.dateFrom) {
       cacheOrders(params.branchId, res.orders);
       return { success: true, orders: getCachedOrders(params.branchId) };
     }
@@ -198,6 +201,9 @@ export async function outstockGetOrders(params = {}) {
           const st = o.order_status || o.orderStatus;
           return st !== 'delivered' && st !== 'cancelled';
         });
+      }
+      if (params.orderType) {
+        filtered = filtered.filter(o => (o.order_type || o.orderType || 'customer') === params.orderType);
       }
       if (params.search) {
         const s = String(params.search).toLowerCase().trim();
@@ -270,8 +276,11 @@ export async function outstockMarkWhatsappNotified(orderId) {
 }
 
 // ── 6. إدارة المشتريات ──────────────────────────────────────────────────────
-export async function outstockGetProcurementAggregated() {
-  return await outstockRequest('procurement/aggregated', { method: 'GET' });
+export async function outstockGetProcurementAggregated(params = {}) {
+  const qs = new URLSearchParams();
+  if (params.category || params.itemType) qs.append('category', params.category || params.itemType);
+  if (params.branchId) qs.append('branchId', params.branchId);
+  return await outstockRequest(`procurement/aggregated?${qs.toString()}`, { method: 'GET' });
 }
 
 export async function outstockProcurementItemAction(payload) {
@@ -281,8 +290,14 @@ export async function outstockProcurementItemAction(payload) {
   });
 }
 
-export async function outstockGetProcurementTracking() {
-  return await outstockRequest('procurement/delivery-tracking', { method: 'GET' });
+export async function outstockGetProcurementTracking(params = {}) {
+  const qs = new URLSearchParams();
+  if (params.branchId) qs.append('branchId', params.branchId);
+  if (params.status) qs.append('status', params.status);
+  if (params.category || params.itemType) qs.append('category', params.category || params.itemType);
+  if (params.dateFrom) qs.append('dateFrom', params.dateFrom);
+  if (params.dateTo) qs.append('dateTo', params.dateTo);
+  return await outstockRequest(`procurement/delivery-tracking?${qs.toString()}`, { method: 'GET' });
 }
 
 export async function outstockGetUnavailableItems() {
@@ -645,6 +660,13 @@ export async function outstockSaveSupplierInvoice(invoiceData) {
   });
 }
 
+export async function outstockUpdateSupplierInvoice(id, invoiceData) {
+  return await outstockRequest(`supplier-invoices/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(invoiceData)
+  });
+}
+
 export async function outstockUploadInvoiceToDrive(data) {
   return await outstockRequest('supplier-invoices/upload-drive', {
     method: 'POST',
@@ -664,6 +686,19 @@ export async function outstockSaveBranchWithdrawal(withdrawalData) {
   return await outstockRequest('branch-withdrawals', {
     method: 'POST',
     body: JSON.stringify(withdrawalData)
+  });
+}
+
+export async function outstockUpdateBranchWithdrawal(id, withdrawalData) {
+  return await outstockRequest(`branch-withdrawals/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(withdrawalData)
+  });
+}
+
+export async function outstockDeleteBranchWithdrawal(id) {
+  return await outstockRequest(`branch-withdrawals/${id}`, {
+    method: 'DELETE'
   });
 }
 
@@ -704,6 +739,9 @@ export async function outstockSyncISupplyNow() {
 export async function outstockGetISupplyFeeds(params = {}) {
   const qs = new URLSearchParams();
   if (params.search) qs.append('search', params.search);
+  if (params.warehouse) qs.append('warehouse', params.warehouse);
+  if (params.stockStatus) qs.append('stockStatus', params.stockStatus);
+  if (params.minDiscount) qs.append('minDiscount', String(params.minDiscount));
   return await outstockRequest(`isupply/feeds?${qs.toString()}`, { method: 'GET' });
 }
 
@@ -717,7 +755,10 @@ export async function outstockClearISupplySession() {
 // ── 22. ملخص الإشعارات والعدادات الحية ─────────────────────────────────────────
 export async function outstockGetNotificationsSummary(branchId = '') {
   const qs = new URLSearchParams();
-  if (branchId) qs.append('branch_id', branchId);
+  if (branchId) {
+    qs.append('branch_id', branchId);
+    qs.append('branchId', branchId);
+  }
   return await outstockRequest(`notifications/summary?${qs.toString()}`, { method: 'GET' });
 }
 
@@ -753,4 +794,121 @@ export async function outstockGetOrderReceiptDetails(id) {
 
 export async function outstockDeleteOrderReceipt(id) {
   return await outstockRequest(`order-receipts/${id}`, { method: 'DELETE' });
+}
+
+export async function outstockUpdateOrderReceipt(id, receiptData) {
+  return await outstockRequest(`order-receipts/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(receiptData)
+  });
+}
+
+export async function outstockGetMedicationByBarcode(barcode) {
+  return await outstockRequest(`medications/barcode/${encodeURIComponent(barcode)}`, {
+    method: 'GET'
+  });
+}
+
+// ── 24. المزامنة اللحظية بين النوافذ والتبويبات (Instant Cross-Tab Sync) ─────────
+const OUTSTOCK_SYNC_CHANNEL_NAME = 'outstock_realtime_sync_channel';
+
+export function broadcastOutstockLocalMessage(payload) {
+  try {
+    if (typeof window !== 'undefined') {
+      // 1. BroadcastChannel API
+      if ('BroadcastChannel' in window) {
+        const bc = new BroadcastChannel(OUTSTOCK_SYNC_CHANNEL_NAME);
+        bc.postMessage(payload);
+        bc.close();
+      }
+      // 2. LocalStorage Event (cross-tab fallback)
+      localStorage.setItem('outstock_last_sync_signal', JSON.stringify({
+        ...payload,
+        _t: Date.now()
+      }));
+      // 3. In-tab CustomEvent
+      window.dispatchEvent(new CustomEvent('outstock:sync_event', { detail: payload }));
+    }
+  } catch (err) {
+    console.warn('[Outstock Sync] Failed to broadcast local message:', err);
+  }
+}
+
+export function listenToOutstockLocalMessages(callback) {
+  if (typeof window === 'undefined') return () => {};
+
+  let bc = null;
+  const channelListener = (event) => {
+    if (event?.data) callback(event.data);
+  };
+
+  if ('BroadcastChannel' in window) {
+    try {
+      bc = new BroadcastChannel(OUTSTOCK_SYNC_CHANNEL_NAME);
+      bc.onmessage = channelListener;
+    } catch (_) {}
+  }
+
+  const storageListener = (e) => {
+    if (e.key === 'outstock_last_sync_signal' && e.newValue) {
+      try {
+        const data = JSON.parse(e.newValue);
+        callback(data);
+      } catch (_) {}
+    }
+  };
+
+  const customEventListener = (e) => {
+    if (e.detail) callback(e.detail);
+  };
+
+  window.addEventListener('storage', storageListener);
+  window.addEventListener('outstock:sync_event', customEventListener);
+
+  return () => {
+    if (bc) {
+      try {
+        bc.close();
+      } catch (_) {}
+    }
+    window.removeEventListener('storage', storageListener);
+    window.removeEventListener('outstock:sync_event', customEventListener);
+  };
+}
+
+// ==========================================
+// PharmaFly ERP Integration Client APIs
+// ==========================================
+
+export async function outstockGetPharmaflyBranches() {
+  return outstockRequest('pharmafly/branches');
+}
+
+export async function outstockGeneratePharmaflyKey(branchId) {
+  return outstockRequest(`pharmafly/branches/${encodeURIComponent(branchId)}/generate-key`, {
+    method: 'POST'
+  });
+}
+
+export async function outstockTogglePharmaflyBranch(branchId, isEnabled) {
+  return outstockRequest(`pharmafly/branches/${encodeURIComponent(branchId)}/toggle`, {
+    method: 'POST',
+    body: JSON.stringify({ isEnabled })
+  });
+}
+
+export async function outstockGetPharmaflyStock(params = {}) {
+  const query = new URLSearchParams();
+  if (params.search) query.set('search', params.search);
+  if (params.branch_id) query.set('branch_id', params.branch_id);
+  if (params.in_stock) query.set('in_stock', params.in_stock);
+  if (params.limit) query.set('limit', params.limit);
+  return outstockRequest(`pharmafly/stock?${query.toString()}`);
+}
+
+export async function outstockGetPharmaflyLogs(params = {}) {
+  const query = new URLSearchParams();
+  if (params.branch_id) query.set('branch_id', params.branch_id);
+  if (params.limit) query.set('limit', params.limit);
+  return outstockRequest(`pharmafly/logs?${query.toString()}`);
 }

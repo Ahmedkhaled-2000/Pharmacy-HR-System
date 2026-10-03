@@ -178,7 +178,11 @@ export function initOutstockSyncService() {
       'outstock:restocked_alert',
       'outstock:item_restocked',
       'outstock:customer_updated',
-      'outstock:deficiency_reordered'
+      'outstock:deficiency_reordered',
+      'outstock:refresh_notifications',
+      'outstock:branch_order_replied',
+      'outstock:medication_request_created',
+      'outstock:medication_request_updated'
     ];
 
     outstockSocketEvents.forEach(evtName => {

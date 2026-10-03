@@ -22,11 +22,13 @@ import {
   Sparkles,
   ChevronDown,
   Pill,
-  Lock
+  Lock,
+  Edit2
 } from 'lucide-react';
 import {
   outstockGetSuppliers,
   outstockSaveOrderReceipt,
+  outstockUpdateOrderReceipt,
   outstockGetSupplierOrderReceiptsSummary,
   outstockGetOrderReceipts,
   outstockGetOrderReceiptDetails,
@@ -55,8 +57,9 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
   const [isEmployeeAuthOpen, setIsEmployeeAuthOpen] = useState(false);
   const [verifiedEmployee, setVerifiedEmployee] = useState(null);
 
-  // نافذة استلام طلبية جديدة
+  // نافذة استلام طلبية جديدة / تعديل طلبية مسجلة
   const [isNewReceiptModalOpen, setIsNewReceiptModalOpen] = useState(false);
+  const [editingReceiptId, setEditingReceiptId] = useState(null);
   const [isSubmittingReceipt, setIsSubmittingReceipt] = useState(false);
   const [receiptForm, setReceiptForm] = useState({
     supplier_id: '',
@@ -90,6 +93,9 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
   const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [historyDateFrom, setHistoryDateFrom] = useState('');
   const [historyDateTo, setHistoryDateTo] = useState('');
+
+  // تتبع فتح وضع التعديل من داخل السجل أو التفاصيل للرجوع إليه بسلاسة
+  const [returnToHistoryAfterEdit, setReturnToHistoryAfterEdit] = useState(false);
   const [historyReceipts, setHistoryReceipts] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
@@ -155,11 +161,13 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
   }, [supplierSummaries]);
 
   // ══════════════════════════════════════════════════════════════════════════
-  // تدفق استلام طلبية جديدة
+  // تدفق استلام طلبية جديدة وتعديل الطلبيات
   // ══════════════════════════════════════════════════════════════════════════
 
   // 1) الضغط على زر استلام طلبية جديدة يفتح التحقق من كود الموظف أولاً
   const handleStartNewReceipt = () => {
+    setReturnToHistoryAfterEdit(false);
+    setEditingReceiptId(null);
     setVerifiedEmployee(null);
     setIsEmployeeAuthOpen(true);
   };
@@ -168,6 +176,7 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
   const handleEmployeeVerified = (emp) => {
     setVerifiedEmployee(emp);
     setIsEmployeeAuthOpen(false);
+    setEditingReceiptId(null);
 
     // فتح نافذة الاستلام وتعيين المورد الافتراضي
     const defaultSup = suppliers[0] || null;
@@ -193,6 +202,86 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
       ]
     });
     setIsNewReceiptModalOpen(true);
+  };
+
+  // فتح نافذة تعديل طلبية مسجلة مسبقاً
+  const handleOpenEditReceipt = async (rec) => {
+    try {
+      // إغلاق نافذة السجل والتفاصيل فوراً لتفادي تداخل النوافذ مع حفظ نية العودة للسجل
+      const fromHistoryOrDetails = Boolean(isHistoryModalOpen || isDetailsModalOpen);
+      setReturnToHistoryAfterEdit(fromHistoryOrDetails);
+      setIsHistoryModalOpen(false);
+      setIsDetailsModalOpen(false);
+
+      let fullRec = rec;
+      if (!rec.items || rec.items.length === 0) {
+        const res = await outstockGetOrderReceiptDetails(rec.id);
+        if (res?.success && res.receipt) {
+          fullRec = res.receipt;
+        }
+      }
+
+      setEditingReceiptId(fullRec.id);
+      setVerifiedEmployee({
+        name: fullRec.receiving_employee_name || 'مسؤول الاستلام',
+        code: fullRec.receiving_employee_code || 'EMP'
+      });
+
+      const loadedItems = (fullRec.items && fullRec.items.length > 0)
+        ? fullRec.items.map((it) => ({
+            temp_id: `row_${it.id || Math.random().toString(36).substr(2, 6)}`,
+            medication_id: it.medication_id || null,
+            medication_name: it.medication_name || '',
+            trade_name_en: it.trade_name_en || '',
+            barcode: it.barcode || '',
+            unit_name: it.unit_name || 'علبة',
+            quantity_received: String(it.quantity_received || 1),
+            public_price: it.public_price ? String(it.public_price) : '',
+            batch_number: it.batch_number || '',
+            expiry_date: it.expiry_date || '',
+            notes: it.notes || ''
+          }))
+        : [
+            {
+              temp_id: `row_${Date.now()}`,
+              medication_id: null,
+              medication_name: '',
+              trade_name_en: '',
+              barcode: '',
+              unit_name: 'علبة',
+              quantity_received: '1',
+              public_price: '',
+              batch_number: '',
+              expiry_date: '',
+              notes: ''
+            }
+          ];
+
+      setReceiptForm({
+        supplier_id: fullRec.supplier_id || '',
+        invoice_number: fullRec.invoice_number || '',
+        receipt_date: fullRec.receipt_date ? fullRec.receipt_date.slice(0, 10) : new Date().toISOString().slice(0, 10),
+        notes: fullRec.notes || '',
+        items: loadedItems
+      });
+
+      setIsDetailsModalOpen(false);
+      setIsNewReceiptModalOpen(true);
+    } catch (err) {
+      console.error('Error opening edit receipt modal:', err);
+      showToastRef.current?.('تعذر فتح نافذة تعديل الطلبية');
+    }
+  };
+
+  // إغلاق نافذة إذن الاستلام والعودة للسجل في حال تم الفتح منه
+  const handleCloseReceiptModal = () => {
+    setIsNewReceiptModalOpen(false);
+    setEditingReceiptId(null);
+    if (returnToHistoryAfterEdit) {
+      setReturnToHistoryAfterEdit(false);
+      setIsHistoryModalOpen(true);
+      fetchHistoryReceipts();
+    }
   };
 
   // إضافة صف صنف جديد في جدول الطلبية
@@ -270,7 +359,7 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
     setActiveItemRowIndexForNewMed(null);
   };
 
-  // حفظ الطلبية المستلمة بالكامل
+  // حفظ الطلبية المستلمة بالكامل (جديد أو تعديل)
   const handleSaveOrderReceipt = async (e) => {
     e.preventDefault();
     if (!receiptForm.supplier_id) {
@@ -300,11 +389,27 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
         items: validItems
       };
 
-      const res = await outstockSaveOrderReceipt(payload);
+      let res;
+      if (editingReceiptId) {
+        res = await outstockUpdateOrderReceipt(editingReceiptId, payload);
+      } else {
+        res = await outstockSaveOrderReceipt(payload);
+      }
+
       if (res?.success) {
-        showToastRef.current?.('✅ تم حفظ استلام الطلبية وتوثيق أصناف الفاتورة بنجاح');
+        showToastRef.current?.(
+          editingReceiptId
+            ? '✅ تم تحديث بيانات استلام الطلبية بنجاح'
+            : '✅ تم حفظ استلام الطلبية وتوثيق أصناف الفاتورة بنجاح'
+        );
         setIsNewReceiptModalOpen(false);
+        setEditingReceiptId(null);
         loadData();
+        if (returnToHistoryAfterEdit || isHistoryModalOpen) {
+          setReturnToHistoryAfterEdit(false);
+          setIsHistoryModalOpen(true);
+          fetchHistoryReceipts();
+        }
       } else {
         showToastRef.current?.(res?.error || 'فشل حفظ الطلبية');
       }
@@ -740,6 +845,7 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
       ══════════════════════════════════════════════════════════════════════ */}
       <EmployeeCodeAuthModal
         isOpen={isEmployeeAuthOpen}
+        zIndex={115000}
         title="التحقق من كود الموظف المستلم"
         subtitle="أدخل كود الموظف السري لتوثيق مسؤوليته عن استلام وفحص أصناف الطلبية"
         actionLabel="تأكيد المستلم والمتابعة"
@@ -748,7 +854,7 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
       />
 
       {/* ══════════════════════════════════════════════════════════════════════
-          نافذة استلام طلبية جديدة
+          نافذة استلام طلبية جديدة / تعديل طلبية مسجلة
       ══════════════════════════════════════════════════════════════════════ */}
       {isNewReceiptModalOpen && (
         <div
@@ -758,14 +864,15 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
             inset: 0,
             backgroundColor: 'rgba(15, 23, 42, 0.75)',
             backdropFilter: 'blur(6px)',
-            zIndex: 100000,
+            zIndex: 110000,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             padding: '16px'
           }}
           onClick={(e) => {
-            if (e.target === e.currentTarget && !isSubmittingReceipt) setIsNewReceiptModalOpen(false);
+            // منع الإغلاق عند النقر بالخطأ على الخلفية لحماية مدخلات المستخدم
+            e.stopPropagation();
           }}
         >
           <div
@@ -773,7 +880,7 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
               background: '#ffffff',
               borderRadius: '20px',
               width: '100%',
-              maxWidth: '920px',
+              maxWidth: '1280px',
               maxHeight: '92vh',
               display: 'flex',
               flexDirection: 'column',
@@ -812,7 +919,7 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: '#0f172a' }}>
-                    استلام طلبية جديدة وتوثيق الأصناف
+                    {editingReceiptId ? 'تعديل بيانات طلبية مستلمة وتوثيق الأصناف' : 'استلام طلبية جديدة وتوثيق الأصناف'}
                   </h3>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
                     <span
@@ -827,13 +934,27 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
                     >
                       المستلم: {verifiedEmployee?.name || '---'} (كود: {verifiedEmployee?.code || '---'})
                     </span>
+                    {editingReceiptId && (
+                      <span
+                        style={{
+                          fontSize: '11.5px',
+                          background: '#e0f2fe',
+                          color: '#0369a1',
+                          padding: '1px 8px',
+                          borderRadius: '6px',
+                          fontWeight: '800'
+                        }}
+                      >
+                        وضع التعديل
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
 
               <button
                 type="button"
-                onClick={() => setIsNewReceiptModalOpen(false)}
+                onClick={handleCloseReceiptModal}
                 disabled={isSubmittingReceipt}
                 style={{
                   background: '#f1f5f9',
@@ -890,8 +1011,7 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
                       value={receiptForm.receipt_date}
                       onChange={(e) => setReceiptForm({ ...receiptForm, receipt_date: e.target.value })}
                       required
-                    >
-                    </input>
+                    />
                   </div>
 
                   <div>
@@ -943,11 +1063,10 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
                     <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '12px' }}>
                       <thead>
                         <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #e2e8f0' }}>
-                          <th style={{ padding: '8px 10px', width: '35px', textAlign: 'center' }}>#</th>
-                          <th style={{ padding: '8px 10px', width: '42%' }}>اسم الصنف (بحث عربي / إنجليزي 3 أحرف) *</th>
-                          <th style={{ padding: '8px 10px', width: '20%' }}>الباركود الدولي</th>
-                          <th style={{ padding: '8px 10px', width: '14%', textAlign: 'center' }}>الكمية المستلمة *</th>
-                          <th style={{ padding: '8px 10px', width: '14%', textAlign: 'center' }}>الوحدة</th>
+                          <th style={{ padding: '8px 10px', width: '38px', textAlign: 'center' }}>#</th>
+                          <th style={{ padding: '8px 10px', width: '56%' }}>اسم الصنف (بحث عربي / إنجليزي أو بالماسح الضوئي) *</th>
+                          <th style={{ padding: '8px 10px', width: '18%', textAlign: 'center' }}>الكمية المستلمة *</th>
+                          <th style={{ padding: '8px 10px', width: '16%', textAlign: 'center' }}>الوحدة</th>
                           <th style={{ padding: '8px 10px', width: '10%', textAlign: 'center' }}>إجراء</th>
                         </tr>
                       </thead>
@@ -958,26 +1077,14 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
                               {idx + 1}
                             </td>
 
-                            {/* اسم الصنف مع محرك البحث التلقائي وزر إضافة صنف جديد */}
+                            {/* اسم الصنف مع محرك البحث التلقائي ومسح الباركود وزر إضافة صنف جديد */}
                             <td style={{ padding: '6px 8px' }}>
                               <MedicationAutocompleteInput
                                 value={row.medication_name}
-                                placeholder="اكتب أول 3 حروف من الصنف (عربي أو إنجليزي)..."
+                                placeholder="اكتب أول 3 حروف من الصنف أو امسح الباركود الدولي بالماسح الضوئي..."
                                 onChange={(val) => handleItemFieldChange(idx, 'medication_name', val)}
                                 onMedicationSelect={(med) => handleSelectMedicationForRow(idx, med)}
                                 onAddNewMedication={() => handleOpenAddNewMedication(idx)}
-                              />
-                            </td>
-
-                            {/* الباركود */}
-                            <td style={{ padding: '6px 8px' }}>
-                              <input
-                                type="text"
-                                className="outstock-form-input"
-                                placeholder="الباركود الدولي..."
-                                value={row.barcode}
-                                onChange={(e) => handleItemFieldChange(idx, 'barcode', e.target.value)}
-                                style={{ height: '34px', fontSize: '12px' }}
                               />
                             </td>
 
@@ -1078,7 +1185,7 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
                   <button
                     type="button"
                     className="outstock-btn outstock-btn-secondary"
-                    onClick={() => setIsNewReceiptModalOpen(false)}
+                    onClick={handleCloseReceiptModal}
                     disabled={isSubmittingReceipt}
                   >
                     إلغاء
@@ -1104,7 +1211,7 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
                     ) : (
                       <>
                         <CheckCircle2 size={16} />
-                        <span>تأكيد استلام الطلبية</span>
+                        <span>{editingReceiptId ? 'حفظ التعديلات على الطلبية' : 'تأكيد استلام الطلبية'}</span>
                       </>
                     )}
                   </button>
@@ -1122,6 +1229,7 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
         <AddMedicationModal
           isOpen={isAddNewMedModalOpen}
           creatorEmployee={verifiedEmployee}
+          zIndex={120000}
           onClose={() => {
             setIsAddNewMedModalOpen(false);
             setActiveItemRowIndexForNewMed(null);
@@ -1148,7 +1256,8 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
             padding: '16px'
           }}
           onClick={(e) => {
-            if (e.target === e.currentTarget) setIsHistoryModalOpen(false);
+            // منع الإغلاق عند النقر على الخلفية
+            e.stopPropagation();
           }}
         >
           <div
@@ -1336,7 +1445,6 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
                       <th style={{ padding: '10px 12px' }}>تاريخ الاستلام</th>
                       <th style={{ padding: '10px 12px' }}>المورد</th>
                       <th style={{ padding: '10px 12px' }}>الموظف المستلم</th>
-                      <th style={{ padding: '10px 12px' }}>الأصناف المستلمة (عينة)</th>
                       <th style={{ padding: '10px 12px', textAlign: 'center' }}>الكميات</th>
                       <th style={{ padding: '10px 12px', textAlign: 'center' }}>إجراءات</th>
                     </tr>
@@ -1375,35 +1483,20 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
                               </span>
                             </div>
                           </td>
-                          <td style={{ padding: '10px 12px' }}>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxWidth: '280px' }}>
-                              {items.slice(0, 3).map((it, i) => (
-                                <span
-                                  key={i}
-                                  style={{
-                                    background: '#f1f5f9',
-                                    color: '#334155',
-                                    fontSize: '11px',
-                                    padding: '2px 6px',
-                                    borderRadius: '4px',
-                                    fontWeight: '600'
-                                  }}
-                                >
-                                  {it.medication_name} ({it.quantity_received} {it.unit_name || 'علبة'})
-                                </span>
-                              ))}
-                              {items.length > 3 && (
-                                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
-                                  +{items.length - 3} صنف آخر
-                                </span>
-                              )}
-                            </div>
-                          </td>
                           <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: '900', color: '#2563eb' }}>
                             {r.total_quantity || 0} وحدة
                           </td>
                           <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                             <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                              <button
+                                type="button"
+                                className="outstock-btn outstock-btn-secondary"
+                                onClick={() => handleOpenEditReceipt(r)}
+                                title="تعديل بيانات وأصناف الطلبية"
+                                style={{ padding: '5px 8px', color: '#0284c7' }}
+                              >
+                                <Edit2 size={14} />
+                              </button>
                               <button
                                 type="button"
                                 className="outstock-btn outstock-btn-secondary"
@@ -1446,14 +1539,15 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
             inset: 0,
             backgroundColor: 'rgba(15, 23, 42, 0.75)',
             backdropFilter: 'blur(6px)',
-            zIndex: 110000,
+            zIndex: 105000,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             padding: '16px'
           }}
           onClick={(e) => {
-            if (e.target === e.currentTarget) setIsDetailsModalOpen(false);
+            // منع الإغلاق عند النقر على الخلفية
+            e.stopPropagation();
           }}
         >
           <div
@@ -1490,21 +1584,40 @@ export default function ProcurementOrderReceivingTab({ showToast = alert }) {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setIsDetailsModalOpen(false)}
-                style={{
-                  background: '#f1f5f9',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  color: '#64748b',
-                  cursor: 'pointer',
-                  padding: '6px',
-                  display: 'flex'
-                }}
-              >
-                <X size={18} />
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="outstock-btn outstock-btn-secondary"
+                  onClick={() => handleOpenEditReceipt(selectedReceiptDetails)}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    color: '#0284c7',
+                    borderColor: '#bae6fd'
+                  }}
+                >
+                  <Edit2 size={14} />
+                  <span>تعديل الطلبية</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsDetailsModalOpen(false)}
+                  style={{
+                    background: '#f1f5f9',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '8px',
+                    color: '#64748b',
+                    cursor: 'pointer',
+                    padding: '6px',
+                    display: 'flex'
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>

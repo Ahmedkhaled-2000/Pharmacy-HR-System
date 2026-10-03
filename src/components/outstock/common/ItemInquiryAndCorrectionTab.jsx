@@ -19,7 +19,9 @@ import {
   FileText,
   User,
   ShieldCheck,
-  Tag
+  Tag,
+  Camera,
+  UploadCloud
 } from 'lucide-react';
 import {
   outstockGetMedicationRequests,
@@ -64,6 +66,9 @@ export default function ItemInquiryAndCorrectionTab({
   const [selectedMed, setSelectedMed] = useState(null);
   const [medicationName, setMedicationName] = useState('');
   const [notes, setNotes] = useState('');
+  const [attachmentImage, setAttachmentImage] = useState(null); // base64 string
+  const [attachmentName, setAttachmentName] = useState('');
+  const [previewImageUrl, setPreviewImageUrl] = useState(null); // Lightbox
   const [proposedData, setProposedData] = useState({
     public_price: '',
     pack_size: 1,
@@ -137,7 +142,9 @@ export default function ItemInquiryAndCorrectionTab({
         notes: notes.trim(),
         requestedBy: authenticatedEmployee?.name || currentUser?.name || currentUser?.full_name || 'صيدلي الفرع',
         employeeCode: authenticatedEmployee?.code || null,
-        employeeName: authenticatedEmployee?.name || null
+        employeeName: authenticatedEmployee?.name || null,
+        attachmentUrl: attachmentImage || null,
+        attachmentName: attachmentName || null
       };
 
       const res = await outstockCreateMedicationRequest(payload);
@@ -148,6 +155,8 @@ export default function ItemInquiryAndCorrectionTab({
         setMedicationName('');
         setSelectedMed(null);
         setNotes('');
+        setAttachmentImage(null);
+        setAttachmentName('');
         setProposedData({
           public_price: '',
           pack_size: 1,
@@ -482,6 +491,31 @@ export default function ItemInquiryAndCorrectionTab({
                             السعر المقترح: {parseFloat(propData.public_price).toFixed(2)} ج.م (حجم: {propData.pack_size || 1})
                           </div>
                         )}
+                        {reqItem.attachment_url && (
+                          <div style={{ marginTop: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => setPreviewImageUrl(reqItem.attachment_url)}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                border: '1px solid #bfdbfe',
+                                fontSize: '11.5px',
+                                fontWeight: '700',
+                                cursor: 'pointer'
+                              }}
+                              title="عرض الصورة المرفقة مع الطلب"
+                            >
+                              <Camera size={13} color="#2563eb" />
+                              <span>📷 عرض الصورة المرفقة</span>
+                            </button>
+                          </div>
+                        )}
                       </td>
 
                       {/* الحالة */}
@@ -778,6 +812,79 @@ export default function ItemInquiryAndCorrectionTab({
                 />
               </div>
 
+              {/* إرفاق صورة للصنف أو الروشتة */}
+              <div>
+                <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                  <Camera size={16} color="#0284c7" />
+                  <span>إرفاق صورة للصنف أو الروشتة (اختياري):</span>
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <label
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 14px',
+                      borderRadius: '8px',
+                      background: '#f8fafc',
+                      border: '1.5px dashed #94a3b8',
+                      color: '#334155',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <UploadCloud size={16} color="#0284c7" />
+                    <span>{attachmentImage ? 'تغيير الصورة المرفقة' : 'رفع صورة (كاميرا أو ملف)'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        if (file.size > 5 * 1024 * 1024) {
+                          showToast('⚠️ حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 5 ميجابايت');
+                          return;
+                        }
+                        setAttachmentName(file.name);
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          setAttachmentImage(event.target.result);
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </label>
+
+                  {attachmentImage && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '4px 10px', borderRadius: '8px' }}>
+                      <img
+                        src={attachmentImage}
+                        alt="معاينة"
+                        onClick={() => setPreviewImageUrl(attachmentImage)}
+                        style={{ width: '32px', height: '32px', objectFit: 'cover', borderRadius: '6px', cursor: 'pointer', border: '1px solid #86efac' }}
+                        title="انقر لتكبير الصورة"
+                      />
+                      <span style={{ fontSize: '11px', color: '#166534', fontWeight: 'bold' }}>
+                        {attachmentName || 'تم إرفاق الصورة'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAttachmentImage(null);
+                          setAttachmentName('');
+                        }}
+                        style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                        title="حذف الصورة"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* الأزرار */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
                 <button
@@ -896,6 +1003,67 @@ export default function ItemInquiryAndCorrectionTab({
         title="التحقق من هوية الصيدلي / الموظف"
         actionDescription="تقديم استفسار، تصحيح صنف، أو طلب إضافة دواء جديد للمشتريات"
       />
+
+      {/* نافذة معاينة الصورة بالحجم الكامل (Lightbox) */}
+      {previewImageUrl && (
+        <div
+          className="outstock-modal-backdrop"
+          style={{ zIndex: 99999, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setPreviewImageUrl(null)}
+        >
+          <div
+            style={{
+              position: 'relative',
+              maxWidth: '92vw',
+              maxHeight: '90vh',
+              background: '#ffffff',
+              borderRadius: '16px',
+              padding: '16px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Camera size={18} color="#0284c7" />
+                <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '14px' }}>معاينة الصورة المرفقة بالطلب</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewImageUrl(null)}
+                style={{
+                  background: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: '#64748b'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <img
+              src={previewImageUrl}
+              alt="معاينة الصورة"
+              style={{
+                maxWidth: '85vw',
+                maxHeight: '75vh',
+                borderRadius: '8px',
+                objectFit: 'contain',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

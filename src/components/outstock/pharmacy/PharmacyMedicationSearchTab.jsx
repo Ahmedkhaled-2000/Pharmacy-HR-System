@@ -286,30 +286,6 @@ export default function PharmacyMedicationSearchTab({
               </div>
             </div>
           </div>
-
-          {/* زر إضافة صنف جديد للكتالوج مع التحقق من كود الموظف الصيدلي */}
-          <button
-            type="button"
-            onClick={handleOpenAddNewMed}
-            style={{
-              padding: '9px 18px',
-              borderRadius: '12px',
-              background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
-              color: '#ffffff',
-              border: 'none',
-              fontWeight: '800',
-              fontSize: '13px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)',
-              transition: 'transform 0.15s ease'
-            }}
-          >
-            <Plus size={16} />
-            <span>إضافة صنف جديد للكتالوج</span>
-          </button>
         </div>
 
         {/* ── شريط البحث الفوري الذكي ── */}
@@ -670,9 +646,6 @@ export default function PharmacyMedicationSearchTab({
             justifyContent: 'center',
             padding: '16px'
           }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setMasterCardMedId(null);
-          }}
         >
           <div
             style={{
@@ -970,9 +943,6 @@ export default function PharmacyMedicationSearchTab({
             alignItems: 'center',
             justifyContent: 'center',
             padding: '16px'
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !isSavingPrice) setPriceEditMed(null);
           }}
         >
           <div

@@ -87,9 +87,6 @@ export default function EmployeeCodeAuthModal({
         justifyContent: 'center',
         padding: '16px'
       }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !isVerifying) onClose();
-      }}
     >
       <div
         style={{

@@ -31,7 +31,11 @@ import {
   ExternalLink,
   Info,
   Check,
-  X
+  X,
+  FileSpreadsheet,
+  Download,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import {
   outstockGetSupplierDiscountsComparison,
@@ -42,6 +46,7 @@ import {
   outstockGetISupplyFeeds,
   outstockClearISupplySession
 } from '../../../utils/outstockApiClient';
+import { exportISupplyMarketFeedsExcel } from '../../../utils/outstockExcelExporter';
 
 /**
  * SupplierDiscountsComparisonTab.jsx
@@ -134,9 +139,13 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
   });
   const [isupplyFeeds, setIsupplyFeeds] = useState([]);
   const [isupplySearch, setIsupplySearch] = useState('');
+  const [selectedWarehouseFilter, setSelectedWarehouseFilter] = useState('all');
+  const [selectedStockFilter, setSelectedStockFilter] = useState('all');
+  const [selectedFeedIds, setSelectedFeedIds] = useState(new Set());
   const [isLoadingISupply, setIsLoadingISupply] = useState(false);
   const [isConnectingSession, setIsConnectingSession] = useState(false);
   const [isSyncingFeeds, setIsSyncingFeeds] = useState(false);
+  const [isExportingISupply, setIsExportingISupply] = useState(false);
 
   // نموذج بيانات الاعتماد للجلسة
   const [sessionCredentials, setSessionCredentials] = useState({
@@ -150,9 +159,14 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
   const loadISupplyData = useCallback(async () => {
     try {
       setIsLoadingISupply(true);
+      const params = {};
+      if (isupplySearch?.trim()) params.search = isupplySearch.trim();
+      if (selectedWarehouseFilter && selectedWarehouseFilter !== 'all') params.warehouse = selectedWarehouseFilter;
+      if (selectedStockFilter && selectedStockFilter !== 'all') params.stockStatus = selectedStockFilter;
+
       const [statusRes, feedsRes] = await Promise.all([
         outstockGetISupplyStatus(),
-        outstockGetISupplyFeeds({ search: isupplySearch })
+        outstockGetISupplyFeeds(params)
       ]);
       if (statusRes?.success && statusRes.config) {
         setIsupplyStatus(statusRes.config);
@@ -172,13 +186,76 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
     } finally {
       setIsLoadingISupply(false);
     }
-  }, [isupplySearch]);
+  }, [isupplySearch, selectedWarehouseFilter, selectedStockFilter]);
 
   useEffect(() => {
     if (activeSubTab === 'isupply_gateway') {
       loadISupplyData();
     }
   }, [activeSubTab, loadISupplyData]);
+
+  // تبديل اختيار صنف محدد
+  const handleToggleSelectFeed = (id) => {
+    setSelectedFeedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // تحديد / إلغاء تحديد كافة الأصناف المعروضة
+  const handleToggleSelectAllFeeds = () => {
+    if (selectedFeedIds.size === isupplyFeeds.length && isupplyFeeds.length > 0) {
+      setSelectedFeedIds(new Set());
+    } else {
+      setSelectedFeedIds(new Set(isupplyFeeds.map((f) => f.id)));
+    }
+  };
+
+  // تصدير الأصناف المحددة إلى ملف إكسل
+  const handleExportSelectedFeedsExcel = async () => {
+    const selected = isupplyFeeds.filter((f) => selectedFeedIds.has(f.id));
+    if (selected.length === 0) {
+      showToastRef.current?.('يرجى تحديد صنف واحد على الأقل للتصدير');
+      return;
+    }
+    try {
+      setIsExportingISupply(true);
+      await exportISupplyMarketFeedsExcel(selected, {
+        isSelectedOnly: true,
+        selectedWarehouse: selectedWarehouseFilter !== 'all' ? selectedWarehouseFilter : null
+      });
+      showToastRef.current?.(`✅ تم تصدير ${selected.length} صنف محدد إلى Excel بنجاح`);
+    } catch (err) {
+      showToastRef.current?.('فشل تصدير ملف الإكسل');
+    } finally {
+      setIsExportingISupply(false);
+    }
+  };
+
+  // تصدير كافة عروض السوق الحالية إلى ملف إكسل
+  const handleExportAllFeedsExcel = async () => {
+    if (isupplyFeeds.length === 0) {
+      showToastRef.current?.('لا توجد أصناف لتصديرها');
+      return;
+    }
+    try {
+      setIsExportingISupply(true);
+      await exportISupplyMarketFeedsExcel(isupplyFeeds, {
+        isSelectedOnly: false,
+        selectedWarehouse: selectedWarehouseFilter !== 'all' ? selectedWarehouseFilter : null
+      });
+      showToastRef.current?.(`✅ تم تصدير ${isupplyFeeds.length} صنف إلى Excel بنجاح`);
+    } catch (err) {
+      showToastRef.current?.('فشل تصدير ملف الإكسل');
+    } finally {
+      setIsExportingISupply(false);
+    }
+  };
 
   // حفظ بيانات جلسة الربط
   const handleSaveISupplyConfig = async (e) => {
@@ -1068,15 +1145,17 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
               </form>
             </div>
 
-            {/* جدول أسعار وعروض الموزعين الحية من i'SUPPLY */}
+            {/* جدول أسعار وعروض الموزعين الحية وشبكة المخازن من i'SUPPLY */}
             <div
               style={{
                 background: '#fff',
                 border: '1px solid #e2e8f0',
                 borderRadius: '12px',
-                padding: '16px'
+                padding: '18px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
               }}
             >
+              {/* الرأس وأزرار التحكم والتصدير */}
               <div
                 style={{
                   display: 'flex',
@@ -1084,110 +1163,378 @@ export default function SupplierDiscountsComparisonTab({ showToast = alert }) {
                   alignItems: 'center',
                   marginBottom: '14px',
                   flexWrap: 'wrap',
-                  gap: '10px'
+                  gap: '12px'
                 }}
               >
                 <div>
-                  <h4 style={{ margin: 0, fontSize: '14.5px', color: '#0f172a' }}>
-                    أسعار وخصومات كبار الموزعين المزامنة من i'SUPPLY
-                  </h4>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>
-                    (ابن سينا فارما، المتحدة للصيادلة، فارما أوفرسيز، رامكو، سوفيكو، مالتي فارما)
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>
+                      عروض وخصومات كبار الموزعين وشبكة المخازن المركزية (i'SUPPLY)
+                    </h4>
+                    <span
+                      style={{
+                        background: '#e0f2fe',
+                        color: '#0369a1',
+                        fontSize: '11px',
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        fontWeight: '800'
+                      }}
+                    >
+                      {isupplyFeeds.length} صنف دوائي متاح
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                    ربط شامل ومباشر مع كافة المستودعات الإقليمية: المتحدة، ابن سينا، فارما أوفرسيز، رامكو، سوفيكو، مالتي فارما، مخازن الدلتا
                   </span>
                 </div>
 
-                <div style={{ position: 'relative', width: '220px' }}>
-                  <Search size={14} style={{ position: 'absolute', right: '8px', top: '8px', color: '#94a3b8' }} />
-                  <input
-                    type="text"
-                    className="outstock-form-input"
-                    placeholder="بحث في الأصناف المزامنة..."
-                    style={{ paddingRight: '28px', height: '30px', fontSize: '11.5px', width: '100%' }}
-                    value={isupplySearch}
-                    onChange={(e) => setIsupplySearch(e.target.value)}
-                  />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="outstock-btn outstock-btn-secondary"
+                    onClick={handleExportAllFeedsExcel}
+                    disabled={isExportingISupply || isupplyFeeds.length === 0}
+                    style={{
+                      background: '#f0fdf4',
+                      borderColor: '#86efac',
+                      color: '#15803d',
+                      fontSize: '12px',
+                      fontWeight: '800',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px'
+                    }}
+                    title="تصدير شيت إكسل كامل ومفصل لكافة الأصناف المعروضة"
+                  >
+                    <FileSpreadsheet size={15} color="#16a34a" />
+                    <span>تصدير الكل إلى Excel</span>
+                  </button>
                 </div>
               </div>
 
+              {/* شريط الفلاتر والبحث متعدد الأبعاد */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  marginBottom: '14px',
+                  flexWrap: 'wrap',
+                  background: '#f8fafc',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  border: '1px solid #e2e8f0'
+                }}
+              >
+                {/* البحث الذكي */}
+                <div style={{ position: 'relative', flex: 1.5, minWidth: '220px' }}>
+                  <Search size={14} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                  <input
+                    type="text"
+                    className="outstock-form-input"
+                    placeholder="بحث بالاسم العربي، الإنجليزي، الباركود، أو الموزع..."
+                    style={{ paddingRight: '32px', height: '34px', fontSize: '12px', width: '100%' }}
+                    value={isupplySearch}
+                    onChange={(e) => setIsupplySearch(e.target.value)}
+                  />
+                  {isupplySearch && (
+                    <button
+                      type="button"
+                      onClick={() => setIsupplySearch('')}
+                      style={{
+                        position: 'absolute',
+                        left: '8px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#94a3b8',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+
+                {/* فلترة المخزن / المستودع المورد */}
+                <div style={{ flex: 1, minWidth: '180px' }}>
+                  <select
+                    className="outstock-form-select"
+                    value={selectedWarehouseFilter}
+                    onChange={(e) => setSelectedWarehouseFilter(e.target.value)}
+                    style={{ height: '34px', fontSize: '12px', width: '100%' }}
+                  >
+                    <option value="all">🏬 كافة المستودعات والمخازن</option>
+                    <option value="القاهرة">مخازن القاهرة الكبرى (UCP)</option>
+                    <option value="المستودع الرئيسي">المستودع الرئيسي (Ibnsina)</option>
+                    <option value="الإسكندرية">مخازن الإسكندرية (Pharma Overseas)</option>
+                    <option value="الدلتا">مستودعات الدلتا - طنطا (Ramco)</option>
+                    <option value="القناة">مستودعات القناة وسيناء (Soficopharm)</option>
+                    <option value="الصعيد">مخازن الصعيد - أسيوط (Multi Pharma)</option>
+                    <option value="المنصورة">مخازن المنصورة المركزية (Delta)</option>
+                  </select>
+                </div>
+
+                {/* فلترة حالة التوفر بالسوق */}
+                <div style={{ minWidth: '140px' }}>
+                  <select
+                    className="outstock-form-select"
+                    value={selectedStockFilter}
+                    onChange={(e) => setSelectedStockFilter(e.target.value)}
+                    style={{ height: '34px', fontSize: '12px', width: '100%' }}
+                  >
+                    <option value="all">📦 حالة التوفر (الكل)</option>
+                    <option value="in_stock">متوفر بالسوق 🟢</option>
+                    <option value="low_stock">رصيد منخفض ⚠️</option>
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  className="outstock-btn outstock-btn-secondary"
+                  onClick={loadISupplyData}
+                  style={{ height: '34px', padding: '0 10px' }}
+                  title="تحديث البيانات"
+                >
+                  <RefreshCw size={13} className={isLoadingISupply ? 'outstock-spin' : ''} />
+                </button>
+              </div>
+
               {isLoadingISupply ? (
-                <div style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>
-                  <RefreshCw className="outstock-spin" size={20} style={{ marginBottom: '6px' }} />
-                  <div>جاري جلب عروض السوق...</div>
+                <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                  <RefreshCw className="outstock-spin" size={24} style={{ marginBottom: '8px', color: '#0d9488' }} />
+                  <div>جاري فحص وتحديث عروض شبكة المخازن من المنظومة...</div>
                 </div>
               ) : isupplyFeeds.length === 0 ? (
                 <div
                   style={{
                     textAlign: 'center',
-                    padding: '36px',
+                    padding: '40px 20px',
                     background: '#f8fafc',
                     borderRadius: '8px',
                     border: '1px dashed #cbd5e1'
                   }}
                 >
-                  <Globe size={32} style={{ color: '#94a3b8', marginBottom: '8px' }} />
-                  <div style={{ fontSize: '13.5px', fontWeight: 'bold', color: '#475569' }}>
-                    لا توجد بيانات سوق مزامنة حتى الآن
+                  <Globe size={36} style={{ color: '#94a3b8', marginBottom: '8px' }} />
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#475569' }}>
+                    لا توجد أصناف مطابقة لمعايير البحث في سوق iSupply
                   </div>
-                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-                    اضغط على زر «مزامنة وتحديث أسعار السوق الآن ⚡» لبدء جلب عروض الموزعين فورياً
+                  <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '4px' }}>
+                    جرب تغيير كلمات البحث أو اختيار مستودع آخر، أو اضغط زر «مزامنة وتحديث أسعار السوق الآن ⚡»
                   </div>
                 </div>
               ) : (
-                <div style={{ overflowX: 'auto', border: '1px solid #f1f5f9', borderRadius: '8px' }}>
+                <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '12px' }}>
                     <thead>
-                      <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
-                        <th style={{ padding: '8px 10px' }}>اسم الصنف</th>
-                        <th style={{ padding: '8px 10px' }}>سعر الجمهور</th>
-                        <th style={{ padding: '8px 10px' }}>أفضل موزع بـ i'SUPPLY 👑</th>
-                        <th style={{ padding: '8px 10px' }}>أعلى خصم</th>
-                        <th style={{ padding: '8px 10px' }}>سعر الشراء</th>
-                        <th style={{ padding: '8px 10px' }}>البوانص والكوتات</th>
+                      <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1', color: '#334155' }}>
+                        <th style={{ padding: '9px 10px', width: '36px', textAlign: 'center' }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedFeedIds.size === isupplyFeeds.length && isupplyFeeds.length > 0}
+                            onChange={handleToggleSelectAllFeeds}
+                            style={{ cursor: 'pointer', accentColor: '#0f766e', width: '15px', height: '15px' }}
+                            title="تحديد أو إلغاء تحديد كافة الأصناف"
+                          />
+                        </th>
+                        <th style={{ padding: '9px 8px', width: '30px', color: '#64748b', textAlign: 'center' }}>م</th>
+                        <th style={{ padding: '9px 12px' }}>اسم الصنف الدوائي</th>
+                        <th style={{ padding: '9px 10px', textAlign: 'center' }}>سعر الجمهور</th>
+                        <th style={{ padding: '9px 10px' }}>أفضل موزع / شركة 👑</th>
+                        <th style={{ padding: '9px 10px' }}>المستودع / المخزن المورد</th>
+                        <th style={{ padding: '9px 10px', textAlign: 'center' }}>أعلى خصم %</th>
+                        <th style={{ padding: '9px 10px', textAlign: 'center' }}>سعر الشراء الصافي</th>
+                        <th style={{ padding: '9px 10px', textAlign: 'center' }}>وفر العلبة</th>
+                        <th style={{ padding: '9px 10px' }}>البوانص والكوتات</th>
+                        <th style={{ padding: '9px 10px', textAlign: 'center' }}>حالة التوفر</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {isupplyFeeds.map((feed, idx) => (
-                        <tr key={feed.id || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '8px 10px', fontWeight: 'bold' }}>{feed.medication_name}</td>
-                          <td style={{ padding: '8px 10px' }}>{feed.public_price} ج.م</td>
-                          <td style={{ padding: '8px 10px' }}>
-                            <span
-                              style={{
-                                background: '#f0fdf4',
-                                color: '#15803d',
-                                border: '1px solid #bbf7d0',
-                                padding: '2px 8px',
-                                borderRadius: '10px',
-                                fontSize: '11px',
-                                fontWeight: 'bold'
-                              }}
-                            >
-                              {feed.best_distributor_name}
-                            </span>
-                          </td>
-                          <td style={{ padding: '8px 10px', fontWeight: 'bold', color: '#0f766e' }}>
-                            {feed.best_discount_percent}%
-                          </td>
-                          <td style={{ padding: '8px 10px', fontWeight: 'bold' }}>
-                            {feed.best_buy_price} ج.م
-                          </td>
-                          <td style={{ padding: '8px 10px' }}>
-                            {feed.bonus_info ? (
-                              <span style={{ color: '#059669', fontWeight: 'bold', fontSize: '11px' }}>
-                                🎁 {feed.bonus_info}
+                      {isupplyFeeds.map((feed, idx) => {
+                        const isSelected = selectedFeedIds.has(feed.id);
+                        const pub = Number(feed.public_price || 0);
+                        const disc = Number(feed.best_discount_percent || 0);
+                        const buy = Number(feed.best_buy_price || (pub > 0 ? pub * (1 - disc / 100) : 0));
+                        const savings = Math.max(0, pub - buy);
+
+                        return (
+                          <tr
+                            key={feed.id || idx}
+                            style={{
+                              borderBottom: '1px solid #f1f5f9',
+                              background: isSelected ? '#f0f9ff' : 'transparent',
+                              transition: 'background 0.15s ease'
+                            }}
+                          >
+                            <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleSelectFeed(feed.id)}
+                                style={{ cursor: 'pointer', accentColor: '#0f766e', width: '15px', height: '15px' }}
+                              />
+                            </td>
+                            <td style={{ padding: '8px 8px', textAlign: 'center', color: '#94a3b8', fontSize: '11px' }}>
+                              {idx + 1}
+                            </td>
+                            <td style={{ padding: '8px 12px', fontWeight: 'bold' }}>
+                              <div style={{ color: '#0f172a' }}>{feed.medication_name}</div>
+                              {feed.barcode && (
+                                <span style={{ fontSize: '10px', color: '#64748b', display: 'block', fontWeight: 'normal', fontFamily: 'monospace' }}>
+                                  🏷️ {feed.barcode}
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: '600' }}>
+                              {pub.toFixed(2)} ج.م
+                            </td>
+                            <td style={{ padding: '8px 10px' }}>
+                              <span
+                                style={{
+                                  background: '#f0fdf4',
+                                  color: '#15803d',
+                                  border: '1px solid #bbf7d0',
+                                  padding: '2px 8px',
+                                  borderRadius: '10px',
+                                  fontSize: '11px',
+                                  fontWeight: 'bold',
+                                  display: 'inline-block'
+                                }}
+                              >
+                                {feed.best_distributor_name}
                               </span>
-                            ) : feed.quota_limit ? (
-                              <span style={{ color: '#d97706', fontSize: '11px' }}>
-                                كوتة: {feed.quota_limit} علب
-                              </span>
-                            ) : (
-                              <span style={{ color: '#94a3b8' }}>متاح بدون شروط</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td style={{ padding: '8px 10px', color: '#475569', fontSize: '11.5px' }}>
+                              {feed.warehouse_name || 'المستودع الرئيسي'}
+                            </td>
+                            <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: '800', color: '#0f766e', fontSize: '13px' }}>
+                              {disc.toFixed(1)}%
+                            </td>
+                            <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: '800', color: '#1e293b' }}>
+                              {buy.toFixed(2)} ج.م
+                            </td>
+                            <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                              {savings > 0 ? (
+                                <span style={{ color: '#16a34a', fontWeight: 'bold', fontSize: '11.5px' }}>
+                                  +{savings.toFixed(2)} ج.م
+                                </span>
+                              ) : (
+                                <span style={{ color: '#94a3b8' }}>-</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '8px 10px' }}>
+                              {feed.bonus_info ? (
+                                <span style={{ color: '#059669', fontWeight: 'bold', fontSize: '11px' }}>
+                                  🎁 {feed.bonus_info}
+                                </span>
+                              ) : feed.quota_limit ? (
+                                <span style={{ color: '#d97706', fontSize: '11px', fontWeight: 'bold' }}>
+                                  كوتة: {feed.quota_limit} علب
+                                </span>
+                              ) : (
+                                <span style={{ color: '#94a3b8', fontSize: '11px' }}>متاح بدون شروط</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                              {feed.stock_status === 'low_stock' ? (
+                                <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fde047', padding: '1px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 'bold' }}>
+                                  رصيد منخفض ⚠️
+                                </span>
+                              ) : (
+                                <span style={{ background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '1px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 'bold' }}>
+                                  متوفر 🟢
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
+                </div>
+              )}
+
+              {/* الشريط العائم للإجراءات المجمعة عند تحديد أصناف */}
+              {selectedFeedIds.size > 0 && (
+                <div
+                  style={{
+                    position: 'sticky',
+                    bottom: '12px',
+                    zIndex: 40,
+                    marginTop: '16px',
+                    background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+                    color: '#ffffff',
+                    padding: '12px 20px',
+                    borderRadius: '12px',
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                    border: '1px solid #334155'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span
+                      style={{
+                        background: '#0284c7',
+                        color: '#fff',
+                        padding: '3px 10px',
+                        borderRadius: '20px',
+                        fontSize: '12px',
+                        fontWeight: '800'
+                      }}
+                    >
+                      {selectedFeedIds.size} صنف محدد
+                    </span>
+                    <span style={{ fontSize: '12.5px', color: '#cbd5e1' }}>
+                      تم تحديد هذه الأصناف من عروض شبكة المخازن والموزعين
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={handleExportSelectedFeedsExcel}
+                      disabled={isExportingISupply}
+                      style={{
+                        background: '#10b981',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '8px 16px',
+                        fontSize: '12.5px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        boxShadow: '0 2px 8px rgba(16, 185, 129, 0.4)'
+                      }}
+                    >
+                      <FileSpreadsheet size={15} />
+                      <span>تصدير الأصناف المحددة إلى Excel ({selectedFeedIds.size})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedFeedIds(new Set())}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.12)',
+                        color: '#e2e8f0',
+                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                        borderRadius: '8px',
+                        padding: '8px 14px',
+                        fontSize: '12px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      إلغاء التحديد
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

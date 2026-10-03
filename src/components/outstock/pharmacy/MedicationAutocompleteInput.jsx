@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Pill, Search, AlertTriangle, Snowflake, Sparkles, Check, ChevronDown, RefreshCw, Layers, Plus } from 'lucide-react';
-import { outstockSearchMedications, outstockGetSubstitutes } from '../../../utils/outstockApiClient';
+import { outstockSearchMedications, outstockGetSubstitutes, outstockGetMedicationByBarcode } from '../../../utils/outstockApiClient';
 
 // ── كتالوج محلي فائق السرعة لضمان العمل اللحظي دون أي تأخير ───────────────
 const LOCAL_FALLBACK_MEDS = [
@@ -427,7 +427,8 @@ export default function MedicationAutocompleteInput({
   // إحداثيات وأبعاد القائمة المنسدلة الموسعة لضمان التنسيق العريض وملاءمة الشاشة
   const [dropdownCoords, setDropdownCoords] = useState({
     width: 720,
-    right: 0
+    top: 100,
+    left: 14
   });
 
   const containerRef = useRef(null);
@@ -439,30 +440,30 @@ export default function MedicationAutocompleteInput({
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
 
     // العرض المستهدف الموسع: 720px إلى 740px أو عرض الشاشة المتاح
     const maxAllowedWidth = Math.max(300, viewportWidth - 28);
     const targetWidth = Math.min(740, maxAllowedWidth);
 
-    // في الواجهة RTL تثبيت الحافة اليمنى الافتراضية عند rect.right
-    // الحافة اليسرى ستكون عند: rect.right - targetWidth
-    const leftEdge = rect.right - targetWidth;
-    let rightOffset = 0;
-
-    // إذا كانت الحافة اليسرى ستتعدى حدود الشاشة من اليسار
-    if (leftEdge < 14) {
-      rightOffset = -(14 - leftEdge);
+    // الحافة اليمنى لـ RTL
+    let leftPos = rect.right - targetWidth;
+    if (leftPos < 14) {
+      leftPos = 14;
+    }
+    if (leftPos + targetWidth > viewportWidth - 14) {
+      leftPos = Math.max(14, viewportWidth - 14 - targetWidth);
     }
 
-    // التأكد من عدم تجاوز الحافة اليمنى لحدود الشاشة من اليمين
-    const currentRight = rect.right - rightOffset;
-    if (currentRight > viewportWidth - 14) {
-      rightOffset += (currentRight - (viewportWidth - 14));
+    let topPos = rect.bottom + 6;
+    if (viewportHeight - rect.bottom < 220 && rect.top > 260) {
+      topPos = Math.max(14, rect.top - 410);
     }
 
     setDropdownCoords({
       width: Math.round(targetWidth),
-      right: Math.round(rightOffset)
+      top: Math.round(topPos),
+      left: Math.round(leftPos)
     });
   }, []);
 
@@ -576,8 +577,45 @@ export default function MedicationAutocompleteInput({
     }
   };
 
-  // التنقل بالأسهم واختيار بزر Enter
-  const handleKeyDown = (e) => {
+  // التنقل بالأسهم واختيار بزر Enter أو قراءة الباركود بالسكانر اليدوي
+  const handleKeyDown = async (e) => {
+    if (e.key === 'Enter') {
+      const trimmed = String(inputValue || '').trim();
+      // فحص سريع إذا كان الإدخال باركود دولي (أرقام أو كود سكانر)
+      if (/^\d{6,16}$/.test(trimmed)) {
+        e.preventDefault();
+        try {
+          setIsLoading(true);
+          // أولاً: فحص الكتالوج المحلي السريع
+          const localMatch = LOCAL_FALLBACK_MEDS.find(m => m.gtin_barcode === trimmed);
+          if (localMatch) {
+            handleSelectMedication(localMatch);
+            return;
+          }
+          // ثانياً: استعلام خادم الباركود
+          const bRes = await outstockGetMedicationByBarcode(trimmed);
+          if (bRes?.success && bRes.medication) {
+            handleSelectMedication(bRes.medication);
+            return;
+          }
+        } catch (bErr) {
+          console.warn('Barcode scanner lookup error:', bErr);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+
+      if (isOpen && activeIndex >= 0 && activeIndex < suggestions.length) {
+        e.preventDefault();
+        handleSelectMedication(suggestions[activeIndex]);
+        return;
+      } else if (isOpen && suggestions.length > 0) {
+        e.preventDefault();
+        handleSelectMedication(suggestions[0]);
+        return;
+      }
+    }
+
     if (!isOpen || suggestions.length === 0) return;
 
     if (e.key === 'ArrowDown') {
@@ -586,11 +624,6 @@ export default function MedicationAutocompleteInput({
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActiveIndex(prev => (prev > 0 ? prev - 1 : suggestions.length - 1));
-    } else if (e.key === 'Enter') {
-      if (activeIndex >= 0 && activeIndex < suggestions.length) {
-        e.preventDefault();
-        handleSelectMedication(suggestions[activeIndex]);
-      }
     } else if (e.key === 'Escape') {
       setIsOpen(false);
     }
@@ -759,18 +792,18 @@ export default function MedicationAutocompleteInput({
       {isOpen && (suggestions.length > 0 || (onAddNewMedication && inputValue.trim().length >= 1)) && (
         <div
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: `${dropdownCoords.right}px`,
+            position: 'fixed',
+            top: `${dropdownCoords.top || 100}px`,
+            left: `${dropdownCoords.left || 14}px`,
             width: `${dropdownCoords.width}px`,
             maxWidth: 'calc(100vw - 20px)',
             background: '#ffffff',
             border: '1.5px solid #0d9488',
             borderRadius: '16px',
-            boxShadow: '0 22px 50px -10px rgba(15, 23, 42, 0.3), 0 0 0 1px rgba(13, 148, 136, 0.15)',
-            maxHeight: '440px',
+            boxShadow: '0 22px 50px -10px rgba(15, 23, 42, 0.35), 0 0 0 1px rgba(13, 148, 136, 0.15)',
+            maxHeight: '420px',
             overflowY: 'auto',
-            zIndex: 99999,
+            zIndex: 125000,
             padding: '10px',
             direction: 'rtl'
           }}
@@ -1094,7 +1127,7 @@ export default function MedicationAutocompleteInput({
           inset: 0,
           backgroundColor: 'rgba(15, 23, 42, 0.65)',
           backdropFilter: 'blur(3px)',
-          zIndex: 10000,
+          zIndex: 130000,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
