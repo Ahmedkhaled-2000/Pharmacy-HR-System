@@ -2463,6 +2463,24 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         const cmd = `C:${cmdId}:DATA UPDATE USERINFO PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=\tGrp=1\tTZ=0000000100000000\tVerify=0`;
         queueDeviceCommand(serialNumber, cmd);
 
+        // 🧬 فحص وترحيل أي قوالب بصمة إصبع مسجلة للموظف في الخزنة تلقائياً لحمايتها من الضياع
+        try {
+          const tplsRes = await db.query(
+            `SELECT * FROM public.biometric_templates 
+             WHERE employee_id = $1 OR device_user_pin = $2 OR device_user_pin = $3`,
+            [String(emp.id), String(pin), String(emp.code || '')]
+          );
+          for (let tIdx = 0; tIdx < (tplsRes.rows || []).length; tIdx++) {
+            const tpl = tplsRes.rows[tIdx];
+            if (tpl.template_type === 'FINGERPRINT') {
+              const cmdFp = `C:${cmdId + 1000 + tIdx}:DATA UPDATE FINGERTMP PIN=${pin}\tFID=${tpl.finger_id}\tSize=${tpl.size || tpl.template_data.length}\tValid=1\tTMP=${tpl.template_data}`;
+              queueDeviceCommand(serialNumber, cmdFp, 'FP_DISPATCH_SINGLE');
+            }
+          }
+        } catch (tplErr) {
+          console.warn('[Push Users Template Dispatch Warn]:', tplErr.message);
+        }
+
         // إدراج فوري للمستخدم في جدول ذاكرة الجهاز
         await db.query(
           `INSERT INTO public.biometric_device_users 
@@ -2971,9 +2989,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         queueDeviceCommand(targetSn, cmdUser, 'USER_DISPATCH_SINGLE');
 
         if (tpl.template_type === 'FINGERPRINT') {
-          const cmdBio = `C:${now + 1}:DATA UPDATE BIODATA Pin=${pin}\tNo=0\tIndex=${tpl.finger_id}\tValid=1\tDuress=0\tType=1\tMajorVer=${tpl.major_ver || '10'}\tMinorVer=0\tFormat=0\tTmp=${tpl.template_data}`;
-          queueDeviceCommand(targetSn, cmdBio, 'BIO_DISPATCH_SINGLE');
-          const cmdFp = `C:${now + 2}:DATA UPDATE FINGERTMP PIN=${pin}\tFID=${tpl.finger_id}\tSize=${tpl.size || tpl.template_data.length}\tValid=1\tTMP=${tpl.template_data}`;
+          const cmdFp = `C:${now + 1}:DATA UPDATE FINGERTMP PIN=${pin}\tFID=${tpl.finger_id}\tSize=${tpl.size || tpl.template_data.length}\tValid=1\tTMP=${tpl.template_data}`;
           queueDeviceCommand(targetSn, cmdFp, 'FP_DISPATCH_SINGLE');
         } else if (tpl.template_type === 'FACE') {
           const cmdFace = `C:${now + 1}:DATA UPDATE BIODATA Pin=${pin}\tNo=0\tIndex=0\tValid=1\tDuress=0\tType=9\tMajorVer=7\tMinorVer=0\tFormat=0\tTmp=${tpl.template_data}`;
