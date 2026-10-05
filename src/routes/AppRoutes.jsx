@@ -44,6 +44,7 @@ const OwnerAccessAndIdentityModule = lazy(() => import('../components/permission
 import OwnerCommandLaunchpadModal from '../components/auth/OwnerCommandLaunchpadModal';
 import UnifiedWorkspaceSwitcherModal from '../components/auth/UnifiedWorkspaceSwitcherModal';
 import { applyBrandIdentityToDOM, getEffectiveBrandIdentity } from '../utils/brandThemeEngine';
+import { isModuleAllowed, resolveFirstAllowedRoute, resolveEmployeeUnifiedAccess, isUserEligibleForSwitcher } from '../utils/permissionUtils';
 import OutstockOwnerGate from '../components/outstock/OutstockOwnerGate';
 import AdminSuspensionView from '../components/auth/AdminSuspensionView';
 import StaffSuspensionView from '../components/auth/StaffSuspensionView';
@@ -148,6 +149,8 @@ export default function AppRoutes() {
 
   // ── منظومة التبديل الموحد والتحكم السيادي (Unified Access & Switcher) ──
   const [showOwnerLaunchpad, setShowOwnerLaunchpad] = useState(false);
+  const [isOwnerLoginGateActive, setIsOwnerLoginGateActive] = useState(false);
+  const [pendingOwnerAuth, setPendingOwnerAuth] = useState(null);
   const [showWorkspaceSwitcher, setShowWorkspaceSwitcher] = useState(false);
   const [switcherUser, setSwitcherUser] = useState(null);
   const [ownerDisplayName, setOwnerDisplayName] = useState(() => {
@@ -168,8 +171,23 @@ export default function AppRoutes() {
   useEffect(() => {
     const handleOpenOwnerLaunchpad = () => setShowOwnerLaunchpad(true);
     const handleOpenWorkspaceSwitcher = (e) => {
-      const u = e?.detail?.user || currentEmpUser;
-      if (u) setSwitcherUser(u);
+      let u = e?.detail?.user || switcherUser || currentEmpUser;
+      if (!u) {
+        try {
+          const saved = localStorage.getItem('app_current_emp_user') || localStorage.getItem('outstock_user');
+          if (saved) u = JSON.parse(saved);
+        } catch {}
+      }
+      if (!u && authRole === 'branch' && currentBranch?.managerId) {
+        u = (state?.employees || []).find(emp => emp && (String(emp.id) === String(currentBranch.managerId) || (currentBranch.code && String(emp.code) === String(currentBranch.code))));
+      }
+      if (u) {
+        const uAccess = resolveEmployeeUnifiedAccess(u, state?.orgSettings);
+        if (uAccess) {
+          u = { ...u, unifiedAccess: uAccess };
+        }
+        setSwitcherUser(u);
+      }
       setShowWorkspaceSwitcher(true);
     };
     window.addEventListener('app:open-owner-launchpad', handleOpenOwnerLaunchpad);
@@ -178,20 +196,51 @@ export default function AppRoutes() {
       window.removeEventListener('app:open-owner-launchpad', handleOpenOwnerLaunchpad);
       window.removeEventListener('app:open-workspace-switcher', handleOpenWorkspaceSwitcher);
     };
-  }, [currentEmpUser]);
+  }, [currentEmpUser, switcherUser, authRole, currentBranch, state?.employees, state?.orgSettings]);
 
   const handleSelectOwnerSystem = useCallback((systemId) => {
     setShowOwnerLaunchpad(false);
+
+    let targetTab = 'dashboard';
     if (systemId === 'hr') {
-      setActiveNavTab('dashboard');
+      targetTab = 'dashboard';
     } else if (systemId === 'outstock') {
-      setActiveNavTab('outstock');
+      targetTab = 'outstock';
     } else if (systemId === 'accounts') {
-      setActiveNavTab('accounts');
+      targetTab = 'accounts';
     } else if (systemId === 'permissions') {
-      setActiveNavTab('owner-permissions');
+      targetTab = 'owner-permissions';
     }
-  }, [setActiveNavTab]);
+
+    if (isOwnerLoginGateActive && pendingOwnerAuth) {
+      const { cleanPass, dName, org } = pendingOwnerAuth;
+      try {
+        localStorage.setItem('app_auth_role', 'owner');
+        localStorage.setItem('app_owner_authenticated', 'true');
+        localStorage.setItem('app_owner_display_name', dName);
+        localStorage.setItem('app_owner_password_snapshot', cleanPass);
+        localStorage.setItem('app_owner_session_version', String(org?.ownerSessionVersion || 1));
+        sessionStorage.setItem('app_owner_authenticated', 'true');
+      } catch {}
+      setIsOwnerLoginGateActive(false);
+      setPendingOwnerAuth(null);
+
+      handleUnifiedLogin({ role: 'owner', redirectTab: targetTab });
+      setActiveNavTab(targetTab);
+      return;
+    }
+
+    setActiveNavTab(targetTab);
+  }, [isOwnerLoginGateActive, pendingOwnerAuth, handleUnifiedLogin, setActiveNavTab]);
+
+  const handleCancelOwnerLaunchpad = useCallback(() => {
+    setShowOwnerLaunchpad(false);
+    if (isOwnerLoginGateActive) {
+      setIsOwnerLoginGateActive(false);
+      setPendingOwnerAuth(null);
+      handleLogout();
+    }
+  }, [isOwnerLoginGateActive, handleLogout]);
 
   const handleSelectWorkspace = useCallback((workspace) => {
     setShowWorkspaceSwitcher(false);
@@ -207,19 +256,27 @@ export default function AppRoutes() {
       const targetBranch = workspace.branch || (state?.branches || []).find(b => String(b.id) === String(bId) || String(b.code) === String(bId)) || { id: bId };
       handleUnifiedLogin({ role: 'branch', branch: targetBranch, user: targetUser, redirectTab: 'branch' });
     } else if (kind === 'top_management') {
-      const firstTab = workspace.allowedModules?.[0] || 'dashboard';
+      const target = resolveFirstAllowedRoute(workspace.allowedModules);
       handleUnifiedLogin({
         role: 'admin',
         user: { ...targetUser, allowedModules: workspace.allowedModules, isMultiRole: true },
-        redirectTab: firstTab
+        redirectTab: target.tab
       });
+      if (target.subTab && setActiveSubTab) {
+        setActiveSubTab(target.subTab);
+      }
     } else if (kind === 'outstock') {
       const outRole = workspace.role || workspace.outstockRole || 'outstock_pharmacy';
-      const bId = workspace.branch?.id || workspace.branchId || targetUser.branchId;
+      const isProcMgr = outRole === 'procurement_manager' || outRole === 'outstock_procurement_manager';
+      const bId = isProcMgr ? 'all' : (workspace.branch?.id || workspace.branchId || targetUser.branchId);
       handleUnifiedLogin({
         role: outRole.startsWith('outstock_') ? outRole : ('outstock_' + outRole),
-        user: targetUser,
-        branch: { id: bId },
+        user: {
+          ...targetUser,
+          role: outRole,
+          allBranchesAccess: isProcMgr
+        },
+        branch: isProcMgr ? { id: 'all', name: 'كافة الفروع' } : { id: bId },
         redirectTab: 'outstock'
       });
     } else if (kind === 'accounts') {
@@ -1206,17 +1263,15 @@ export default function AppRoutes() {
       if (role === 'owner') {
         const dName = authResult.ownerUser?.name || authResult.ownerUser?.fullName || 'المالك (Owner)';
         setOwnerDisplayName(dName);
-        handleUnifiedLogin({ role: 'owner', redirectTab: 'dashboard' });
-        try {
-          localStorage.setItem('app_auth_role', 'owner');
-          localStorage.setItem('app_owner_authenticated', 'true');
-          localStorage.setItem('app_owner_display_name', dName);
-          localStorage.setItem('app_owner_password_snapshot', cleanPass);
-          localStorage.setItem('app_owner_session_version', String(org?.ownerSessionVersion || 1));
-          sessionStorage.setItem('app_owner_authenticated', 'true');
-        } catch {}
+        setPendingOwnerAuth({
+          authResult,
+          cleanPass,
+          dName,
+          org
+        });
+        setIsOwnerLoginGateActive(true);
         setShowOwnerLaunchpad(true);
-        return { success: true, role: 'owner' };
+        return { success: true, role: 'owner', pendingOwnerLaunchpad: true };
       }
 
       if (role === 'admin') {
@@ -1250,7 +1305,8 @@ export default function AppRoutes() {
           const workspaces = [];
 
           // 1. بوابة الموظف الذاتية
-          if (perms.personalPortal !== false) {
+          const isPortalEnabled = perms.hrPersonalPortal ? perms.hrPersonalPortal.enabled === true : perms.personalPortal !== false;
+          if (isPortalEnabled) {
             workspaces.push({
               id: 'portal',
               type: 'portal',
@@ -1261,7 +1317,7 @@ export default function AppRoutes() {
 
           // 2. مدير الفرع
           if (perms.branchManager?.enabled) {
-            const bId = perms.branchManager.branchId;
+            const bId = perms.branchManager.assignedBranchId || perms.branchManager.branchId;
             const bObj = (state?.branches || []).find(b => String(b.id) === String(bId) || String(b.code) === String(bId));
             workspaces.push({
               id: 'branch',
@@ -1288,13 +1344,16 @@ export default function AppRoutes() {
           // 4. النواقص والمشتريات
           if (perms.outstockHandling?.enabled || perms.outstock?.enabled) {
             const outPerm = perms.outstockHandling || perms.outstock || {};
+            const isProcMgr = outPerm.role === 'procurement_manager' || outPerm.role === 'outstock_procurement_manager';
+            const bId = isProcMgr ? 'all' : (outPerm.assignedBranchId || outPerm.branchId);
             workspaces.push({
               id: 'outstock',
               type: 'outstock',
               outstockRole: outPerm.role || 'outstock_pharmacy',
-              branchId: outPerm.branchId,
-              title: 'نظام متابعة النواقص والمشتريات (OutStock)',
-              desc: 'تسجيل ومتابعة طلبات ونواقص الأدوية'
+              branchId: bId,
+              allBranches: isProcMgr,
+              title: isProcMgr ? 'نظام النواقص والمشتريات (مدير مشتريات - كافة الفروع)' : 'نظام متابعة النواقص والمشتريات (OutStock)',
+              desc: isProcMgr ? 'إدارة مشتريات مركزية شاملة لكافة الفروع والموردين والطلبيات' : 'تسجيل ومتابعة طلبات ونواقص الأدوية'
             });
           }
 
@@ -1335,17 +1394,26 @@ export default function AppRoutes() {
             } else if (single.type === 'branch') {
               handleUnifiedLogin({ role: 'branch', branch: single.branch || { id: single.branchId }, user: targetUser, redirectTab: 'branch' });
             } else if (single.type === 'top_management') {
-              const firstTab = single.allowedModules?.[0] || 'dashboard';
+              const target = resolveFirstAllowedRoute(single.allowedModules);
               handleUnifiedLogin({
                 role: 'admin',
                 user: { ...targetUser, allowedModules: single.allowedModules, isMultiRole: false },
-                redirectTab: firstTab
+                redirectTab: target.tab
               });
+              if (target.subTab && setActiveSubTab) {
+                setActiveSubTab(target.subTab);
+              }
             } else if (single.type === 'outstock') {
+              const isProcMgr = single.outstockRole === 'procurement_manager' || single.outstockRole === 'outstock_procurement_manager';
+              const targetBranch = isProcMgr ? { id: 'all', name: 'كافة الفروع' } : { id: single.branchId };
               handleUnifiedLogin({
-                role: single.outstockRole || 'outstock_pharmacy',
-                user: targetUser,
-                branch: { id: single.branchId },
+                role: single.outstockRole ? (single.outstockRole.startsWith('outstock_') ? single.outstockRole : 'outstock_' + single.outstockRole) : 'outstock_pharmacy',
+                user: {
+                  ...targetUser,
+                  role: single.outstockRole,
+                  allBranchesAccess: isProcMgr
+                },
+                branch: targetBranch,
                 redirectTab: 'outstock'
               });
             } else if (single.type === 'accounts') {
@@ -1644,8 +1712,16 @@ export default function AppRoutes() {
           <Suspense fallback={<div className="loading-fallback">جاري تحميل منظومة النواقص والمشتريات...</div>}>
             <OutstockSystemView
               initialRole={authRole}
-              currentBranch={currentBranch}
-              currentUser={currentEmpUser}
+              currentBranch={
+                (authRole === 'outstock_procurement_manager' || currentEmpUser?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager')
+                  ? { id: 'all', name: 'كافة الفروع' }
+                  : currentBranch
+              }
+              currentUser={
+                (authRole === 'outstock_procurement_manager' || currentEmpUser?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager')
+                  ? { ...currentEmpUser, role: 'procurement_manager', allBranchesAccess: true }
+                  : currentEmpUser
+              }
               onLogout={handleLogout}
               themeMode={themeMode}
               toggleTheme={toggleTheme}
@@ -1755,13 +1831,13 @@ export default function AppRoutes() {
                     jobTitle: (state.employees || []).find((e) => e && e.id === currentBranch?.managerId)?.jobTitle || 'مدير فرع',
                     code: (state.employees || []).find((e) => e && e.id === currentBranch?.managerId)?.code || 'MGR',
                     photoUrl: (state.employees || []).find((e) => e && e.id === currentBranch?.managerId)?.photoUrl || '',
-                    unifiedAccess: currentEmpUser?.unifiedAccess
+                    unifiedAccess: resolveEmployeeUnifiedAccess(currentEmpUser || (state.employees || []).find((e) => e && e.id === currentBranch?.managerId), state?.orgSettings)
                   }
                 : {
                     name: currentEmpUser?.name || 'الإدارة العليا',
                     jobTitle: currentEmpUser?.jobTitle || 'Super Admin',
                     code: currentEmpUser?.code || 'ADMIN',
-                    unifiedAccess: currentEmpUser?.unifiedAccess,
+                    unifiedAccess: resolveEmployeeUnifiedAccess(currentEmpUser, state?.orgSettings),
                     allowedModules: currentEmpUser?.allowedModules || currentEmpUser?.unifiedAccess?.permissions?.topManagement?.allowedModules || null
                   }
             }
@@ -1835,7 +1911,7 @@ export default function AppRoutes() {
                 onBypassSandbox={() => handleSandboxBypass(activeNavTab)}
                 onNavigateHome={() => setActiveNavTab('dashboard')}
               />
-            ) : (authRole === 'admin' && Array.isArray(currentEmpUser?.allowedModules) && currentEmpUser.allowedModules.length > 0 && !currentEmpUser.allowedModules.includes(activeNavTab)) ? (
+            ) : (authRole === 'admin' && Array.isArray(currentEmpUser?.allowedModules) && currentEmpUser.allowedModules.length > 0 && !isModuleAllowed(activeNavTab, activeSubTab, currentEmpUser.allowedModules)) ? (
               <div style={{
                 background: 'var(--surface)',
                 border: '1px solid var(--border)',
@@ -1855,7 +1931,13 @@ export default function AppRoutes() {
                 <button
                   type="button"
                   className="btn btn-start"
-                  onClick={() => setActiveNavTab(currentEmpUser.allowedModules[0] || 'dashboard')}
+                  onClick={() => {
+                    const target = resolveFirstAllowedRoute(currentEmpUser.allowedModules);
+                    if (target.subTab && setActiveSubTab) {
+                      setActiveSubTab(target.subTab);
+                    }
+                    setActiveNavTab(target.tab);
+                  }}
                   style={{ padding: '10px 24px', fontSize: '14px', fontWeight: 'bold' }}
                 >
                   العودة للقسم المصرح به
@@ -2444,9 +2526,22 @@ export default function AppRoutes() {
                       ) : (
                         <OutstockSystemView
                           key={outstockUnlockedEpoch}
-                          initialRole={authRole === 'owner' ? 'outstock_owner' : authRole === 'branch' ? 'outstock_pharmacy' : 'outstock_owner'}
-                          currentBranch={currentBranch}
-                          currentUser={currentEmpUser}
+                          initialRole={
+                            authRole === 'owner' ? 'outstock_owner' :
+                            (authRole === 'outstock_procurement_manager' || authRole === 'procurement_manager' || currentEmpUser?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager') ? 'procurement_manager' :
+                            authRole === 'branch' ? 'outstock_pharmacy' :
+                            (typeof authRole === 'string' && authRole.startsWith('outstock_')) ? authRole : 'outstock_owner'
+                          }
+                          currentBranch={
+                            (authRole === 'outstock_procurement_manager' || authRole === 'procurement_manager' || currentEmpUser?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager')
+                              ? { id: 'all', name: 'كافة الفروع' }
+                              : currentBranch
+                          }
+                          currentUser={
+                            (authRole === 'outstock_procurement_manager' || authRole === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager')
+                              ? { ...currentEmpUser, role: 'procurement_manager', allBranchesAccess: true }
+                              : currentEmpUser
+                          }
                           onLogout={handleLogout}
                           themeMode={themeMode}
                           toggleTheme={toggleTheme}
@@ -2468,6 +2563,7 @@ export default function AppRoutes() {
                         currentRole={authRole}
                         showToast={showToast}
                         themeMode={themeMode}
+                        onNavigateTab={setActiveNavTab}
                       />
                     </Suspense>
                   </ErrorBoundary>
@@ -2540,10 +2636,11 @@ export default function AppRoutes() {
       {/* 🌟 بوابة قيادة المالك للتبديل بين المنظومات الأربعة */}
       <OwnerCommandLaunchpadModal
         isOpen={showOwnerLaunchpad}
-        onClose={() => setShowOwnerLaunchpad(false)}
+        onClose={handleCancelOwnerLaunchpad}
         onSelectSystem={handleSelectOwnerSystem}
         ownerName={ownerDisplayName}
         brandIdentity={getEffectiveBrandIdentity(state?.orgSettings)}
+        isGateMode={isOwnerLoginGateActive}
       />
 
       {/* 🌟 محول مسارات العمل الموحد للموظف متعدد الصلاحيات */}
@@ -2551,7 +2648,7 @@ export default function AppRoutes() {
         isOpen={showWorkspaceSwitcher}
         onClose={() => setShowWorkspaceSwitcher(false)}
         employeeName={(switcherUser || currentEmpUser)?.name || ''}
-        unifiedAccess={(switcherUser || currentEmpUser)?.unifiedAccess}
+        unifiedAccess={resolveEmployeeUnifiedAccess(switcherUser || currentEmpUser, state?.orgSettings)}
         branches={state?.branches || []}
         onSelectWorkspace={handleSelectWorkspace}
       />

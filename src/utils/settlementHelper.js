@@ -29,7 +29,7 @@ export function getPayrollCycleForDate(refDate = getRealTodayStr(), orgSettings 
  * 3. صافي مستحقات نهاية الخدمة والتصفية
  * 4. سجل الحضور والبصمات التفصيلي لدورة التصفية
  */
-export function computeEmployeeFinalSettlement(empId, state, terminationDate = null) {
+export function computeEmployeeFinalSettlement(empId, state, terminationDate = null, targetBranchId = null) {
   if (!empId || !state) return null;
 
   const emp = (state.employees || []).find((e) => String(e.id) === String(empId));
@@ -40,7 +40,7 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
   const payrollCycle = getPayrollCycleForDate(termDate, orgSettings);
 
   // الفروع والرواتب
-  const branches = (emp.branchesDetails && emp.branchesDetails.length > 0)
+  const allBranches = (emp.branchesDetails && emp.branchesDetails.length > 0)
     ? emp.branchesDetails
     : [{
         branchId: emp.branchId || 'main',
@@ -48,6 +48,14 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
         workHoursPerDay: emp.workHoursPerDay || 8,
         workDaysPerMonth: emp.workDaysPerMonth || 26
       }];
+
+  const isSingleBranchTermination = Boolean(targetBranchId && allBranches.length > 1);
+  const branches = targetBranchId
+    ? allBranches.filter((b) => String(b.branchId) === String(targetBranchId))
+    : allBranches;
+
+  const targetBranchObj = (state.branches || []).find((b) => String(b.id) === String(targetBranchId));
+  const targetBranchName = targetBranchObj ? targetBranchObj.name : (targetBranchId ? `فرع ${targetBranchId}` : null);
 
   let totalRegularHours = 0;
   let totalApprovedOvertimeHours = 0;
@@ -73,7 +81,7 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
       (s) =>
         String(s.employeeId) === String(empId) &&
         (s.date >= payrollCycle.startDate && s.date <= termDate) &&
-        (s.branchId === bId || !s.branchId || branches.length === 1)
+        (s.branchId === bId || (!s.branchId && branches.length === 1))
     ).sort((a, b) => (a.date > b.date ? 1 : -1));
 
     const regularHours = bShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
@@ -158,11 +166,12 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
 
   const totalAllowances = managementAllowance + transportAllowance + extraAllowance;
 
-  // المكافآت المسجلة خلال الدورة
+  // المكافآت المسجلة خلال الدورة (مفلترة للفرع في حال التصفية الجزئية)
   const allAdjs = [...(state.adjustments || []), ...(state.requests || [])].filter(
     (a) =>
       String(a.employeeId) === String(empId) &&
       (a.date ? (a.date >= payrollCycle.startDate && a.date <= termDate) : true) &&
+      (!isSingleBranchTermination || !a.branchId || String(a.branchId) === String(targetBranchId)) &&
       (a.status === 'approved' || a.adminApproved || !a.status) &&
       a.status !== 'rejected' &&
       a.status !== 'cancelled'
@@ -180,17 +189,21 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
 
   const totalBonus = bonusesList.reduce((acc, b) => acc + b.amount, 0);
 
+  // في حال إنهاء الخدمة من فرع واحد فقط مع بقاء الموظف في فروع أخرى، لا يتم صرف البدلات الشهرية العامة في تصفية هذا الفرع بل تستمر في راتب الفرع النشط
+  const effectiveAllowances = isSingleBranchTermination ? 0 : totalAllowances;
+
   // إجمالي الاستحقاقات
-  const totalEarnings = totalBaseEarnings + totalOvertimeEarnings + totalAllowances + totalBonus;
+  const totalEarnings = totalBaseEarnings + totalOvertimeEarnings + effectiveAllowances + totalBonus;
 
   // ── الاستقطاعات والديون المتبقية ──
 
-  // 1. كامل رصيد السلف والقروض والأدوية المتبقي بالكامل (وليس قسط الشهر فقط)
+  // 1. كامل رصيد السلف والقروض والأدوية المتبقي (في التصفية الجزئية لفرع لا يتم تصفية السلف العامة طالما الموظف مستمر في فرع آخر)
   const allLoansRaw = [...(state.loans || []), ...(state.requests || [])];
   const activeLoans = allLoansRaw
     .filter(
       (l) =>
         String(l.employeeId) === String(empId) &&
+        (!isSingleBranchTermination || (l.branchId && String(l.branchId) === String(targetBranchId))) &&
         (l.status === 'approved' || l.adminApproved || l.status === 'partial') &&
         (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine')
     )
@@ -212,10 +225,11 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
 
   const totalRemainingLoansDebt = activeLoans.reduce((acc, l) => acc + l.remainingBalance, 0);
 
-  // 2. خصومات التأخير اللائحي خلال الدورة
+  // 2. خصومات التأخير اللائحي خلال الدورة (مفلترة للفرع المستهدف إن وُجد)
   const empLateIncidents = (state.lateIncidents || []).filter(
     (inc) =>
       String(inc.employeeId) === String(empId) &&
+      (!isSingleBranchTermination || String(inc.branchId) === String(targetBranchId)) &&
       inc.status !== 'cancelled' &&
       !inc.isCancelled &&
       inc.objection?.status !== 'approved' &&
@@ -272,18 +286,23 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
     payrollCycle,
     cycleShiftsDetails,
     
+    // Multi-branch scoping
+    targetBranchId: targetBranchId || null,
+    targetBranchName,
+    isSingleBranchTermination,
+
     // Earnings
     totalRegularHours,
     totalApprovedOvertimeHours,
     totalPendingOvertimeHours,
     totalBaseEarnings,
     totalOvertimeEarnings,
-    managementAllowance,
-    transportAllowance,
-    extraAllowance,
+    managementAllowance: isSingleBranchTermination ? 0 : managementAllowance,
+    transportAllowance: isSingleBranchTermination ? 0 : transportAllowance,
+    extraAllowance: isSingleBranchTermination ? 0 : extraAllowance,
     extraAllowanceTitle,
-    extraAllowancesList,
-    totalAllowances,
+    extraAllowancesList: isSingleBranchTermination ? [] : extraAllowancesList,
+    totalAllowances: effectiveAllowances,
     bonusesList,
     totalBonus,
     totalEarnings,

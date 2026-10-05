@@ -359,7 +359,13 @@ export function AuthProvider({ children }) {
     } else if (role === 'admin') {
       setIsAdminLoggedIn(true);
       setCurrentBranch(null);
-      setCurrentEmpUser(null);
+      if (user) {
+        setCurrentEmpUser(user);
+        try { localStorage.setItem('app_current_emp_user', JSON.stringify(user)); } catch {}
+      } else {
+        setCurrentEmpUser(null);
+        try { localStorage.removeItem('app_current_emp_user'); } catch {}
+      }
       try {
         localStorage.setItem('app_auth_role', 'admin');
         localStorage.removeItem('app_owner_authenticated');
@@ -369,7 +375,10 @@ export function AuthProvider({ children }) {
     } else if (role === 'branch') {
       setIsAdminLoggedIn(false);
       setCurrentBranch(branch || user);
-      setCurrentEmpUser(null);
+      if (user) {
+        setCurrentEmpUser(user);
+        try { localStorage.setItem('app_current_emp_user', JSON.stringify(user)); } catch {}
+      }
       try {
         localStorage.removeItem('app_owner_authenticated');
         sessionStorage.removeItem('app_owner_authenticated');

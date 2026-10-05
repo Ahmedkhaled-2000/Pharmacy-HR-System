@@ -90,7 +90,8 @@ export default function NewCustomerOrderModal({
   onClose,
   onOrderCreated,
   onSuccess,
-  showToast
+  showToast,
+  availableBranches: propBranches = []
 }) {
   // ── 0. كود الموظف المستلم ──
 
@@ -156,8 +157,19 @@ export default function NewCustomerOrderModal({
   const [addMedTargetIndex, setAddMedTargetIndex] = useState(null);
   const [addMedInitialName, setAddMedInitialName] = useState('');
 
-  // ── 6. موظفو الفرع المستحقون (استبعاد عمال الدليفري والطيارين) ──
+  // ── 6. موظفو الفرع المستحقون (استبعاد عمال الدليفري والطيارين) والفروع النشطة ──
   const [serverEmployees, setServerEmployees] = useState([]);
+  const [availableBranches, setAvailableBranches] = useState(() => {
+    if (Array.isArray(propBranches) && propBranches.length > 0) return propBranches;
+    try {
+      const saved = localStorage.getItem('app_branches') || localStorage.getItem('branches');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return [];
+  });
   const [deliveryType, setDeliveryType] = useState('branch_pickup'); // 'branch_pickup' | 'home_delivery' | 'other_branch_pickup'
   const [deliveryTargetBranch, setDeliveryTargetBranch] = useState('');
   const [deliveryTargetBranchId, setDeliveryTargetBranchId] = useState('');
@@ -166,7 +178,9 @@ export default function NewCustomerOrderModal({
 
   // قائمة الفروع المستبعد منها الفرع الحالي لضمان عدم التحويل لنفس الفرع
   const targetBranchesList = useMemo(() => {
+    if (!Array.isArray(availableBranches)) return [];
     return availableBranches.filter(b => {
+      if (!b) return false;
       const bId = String(b.id || b.branchId || '');
       const bName = String(b.name || b.branch_name || '').trim().toLowerCase();
       const curId = String(branchId || '');
@@ -1996,7 +2010,7 @@ export default function NewCustomerOrderModal({
                     value={deliveryTargetBranchId || deliveryTargetBranch}
                     onChange={(e) => {
                       const selectedVal = e.target.value;
-                      const selectedObj = availableBranches.find(
+                      const selectedObj = (availableBranches || []).find(
                         (b) => String(b.id || b.branchId) === String(selectedVal) || b.name === selectedVal
                       );
                       setDeliveryTargetBranchId(selectedObj ? String(selectedObj.id || selectedObj.branchId || '') : selectedVal);

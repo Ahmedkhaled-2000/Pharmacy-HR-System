@@ -942,6 +942,195 @@ export function getEffectiveShiftHours(shift, state) {
 }
 
 /**
+ * المحرك المركزي الموحد لحساب وتفصيل ساعات الوردية:
+ * 1. يحسب صافي ساعات العمل الفعلية المجردة (actualWorkedHours) من وقت الدخول إلى الخروج مع خصم البريك.
+ * 2. يقسم الساعات إلى: أساسي مقرّر (regularHours) وإضافي (overtimeHours).
+ * 3. يحدد بدقة حالة الاعتماد للإضافي (overtimeStatus): approved | pending | rejected | none.
+ * 4. يحدد الساعات المستحقة للصرف المالي الفعلي (payableHours).
+ * 5. يوفر نصوصاً وشارات دقيقة للعرض في كافة الجداول والشاشات لمنع اختفاء أي دقيقة عمل للموظف.
+ */
+export function getShiftHoursMetrics(shift, state) {
+  if (!shift) {
+    return {
+      actualWorkedHours: 0,
+      regularHours: 0,
+      overtimeHours: 0,
+      overtimeStatus: 'none',
+      isOvertimeApproved: false,
+      payableHours: 0,
+      permissionHours: 0,
+      displayNetHours: 0,
+      breakHours: 0,
+      isCancelled: false,
+      isRejectedPhoto: false,
+      scheduledHours: 8
+    };
+  }
+
+  const isRejected = 
+    shift.status === 'cancelled' ||
+    shift.status === 'rejected' ||
+    shift.status === 'rejected_photo' ||
+    shift.isRejectedPhoto ||
+    shift.isCancelled ||
+    shift.rejected ||
+    (typeof shift.statusLabel === 'string' && (shift.statusLabel.includes('ملغي') || shift.statusLabel.includes('مرفوض')));
+
+  if (isRejected) {
+    return {
+      actualWorkedHours: 0,
+      regularHours: 0,
+      overtimeHours: 0,
+      overtimeStatus: 'rejected',
+      isOvertimeApproved: false,
+      payableHours: 0,
+      permissionHours: 0,
+      displayNetHours: 0,
+      breakHours: parseFloat(shift.breakHours) || 0,
+      isCancelled: true,
+      isRejectedPhoto: Boolean(shift.isRejectedPhoto || shift.status === 'rejected_photo'),
+      scheduledHours: 8
+    };
+  }
+
+  const emp = (state?.employees || []).find(
+    (e) => e && (String(e.id) === String(shift.employeeId) || (shift.employeeCode && String(e.code) === String(shift.employeeCode)))
+  );
+  const empBreak = emp?.breakHours || emp?.defaultBreakHours || (emp?.branchesDetails && emp.branchesDetails[0]?.breakHours) || 0;
+
+  const hasExplicitBreak = shift.breakHours !== undefined && shift.breakHours !== null && String(shift.breakHours).trim() !== '' && String(shift.breakHours).trim() !== '—';
+  const explicitBreakHours = hasExplicitBreak ? Math.max(0, parseFloat(shift.breakHours) || 0) : 0;
+
+  let rawHours = -1;
+  const timeIn = shift.timeIn || shift.checkIn || shift.inTime || shift.startTime;
+  const timeOut = shift.timeOut || shift.checkOut || shift.outTime || shift.endTime;
+
+  if (timeIn && timeOut && String(timeOut).trim() !== '' && String(timeOut).trim() !== '—') {
+    const [inH, inM] = String(timeIn).split(':').map(Number);
+    const [outH, outM] = String(timeOut).split(':').map(Number);
+    if (!isNaN(inH) && !isNaN(outH)) {
+      let start = inH * 60 + (inM || 0);
+      let end = outH * 60 + (outM || 0);
+      if (end <= start || shift.isOvernight) end += 24 * 60;
+      const totalHours = (end - start) / 60;
+
+      let breakToDeduct = explicitBreakHours;
+      if (!hasExplicitBreak && empBreak > 0 && totalHours >= 4.5 && !emp?.noMonthlySchedule) {
+        breakToDeduct = Math.min(parseFloat(empBreak) || 0, Math.max(0, totalHours - 1));
+      }
+
+      rawHours = Math.max(0, Math.round((totalHours - breakToDeduct) * 100) / 100);
+    }
+  }
+
+  if (rawHours < 0) {
+    const base = parseFloat(
+      shift._baseRawHours !== undefined
+        ? shift._baseRawHours
+        : shift.actualWorkedHours !== undefined
+        ? shift.actualWorkedHours
+        : shift.netHours !== undefined
+        ? shift.netHours
+        : shift.hours !== undefined
+        ? shift.hours
+        : shift.workHours || 0
+    ) || 0;
+    const breakToDeduct = hasExplicitBreak ? explicitBreakHours : (base >= 4.5 && !emp?.noMonthlySchedule ? Math.min(parseFloat(empBreak) || 0, Math.max(0, base - 1)) : 0);
+    rawHours = (shift.actualWorkedHours !== undefined || shift.netHours !== undefined)
+      ? Math.max(0, base)
+      : Math.max(0, Math.round((base - breakToDeduct) * 100) / 100);
+  }
+
+  // فحص الإذن المعتمد
+  const perm = isApprovedPermissionForDate(shift.employeeId, shift.date, state);
+  let permHours = 0;
+  if (perm) {
+    permHours = parseFloat(perm.hours) || 0;
+    if (!permHours && perm.durationMinutes) {
+      permHours = Math.round((perm.durationMinutes / 60) * 100) / 100;
+    }
+    if (!permHours && perm.startTime && perm.endTime) {
+      const [h1, m1] = perm.startTime.split(':').map(Number);
+      const [h2, m2] = perm.endTime.split(':').map(Number);
+      let diff = (h2 * 60 + (m2 || 0)) - (h1 * 60 + (m1 || 0));
+      if (diff <= 0) diff += 24 * 60;
+      permHours = Math.round((diff / 60) * 100) / 100;
+    }
+  } else if (shift.permissionHours) {
+    permHours = parseFloat(shift.permissionHours) || 0;
+  }
+
+  // ساعات الوردية المقررة
+  const scheduledHours = parseFloat(shift.scheduledHours || emp?.workHoursPerDay || emp?.workHours || 8);
+
+  // احتساب الساعات الأساسية والإضافية
+  let regularHours = Math.round(Math.min(rawHours, scheduledHours) * 100) / 100;
+  if (shift.regularHours !== undefined && parseFloat(shift.regularHours) > 0) {
+    regularHours = parseFloat(shift.regularHours);
+  }
+
+  let overtimeHours = Math.max(0, Math.round((rawHours - regularHours) * 100) / 100);
+  if (shift.overtimeHours !== undefined && parseFloat(shift.overtimeHours) > 0) {
+    overtimeHours = Math.max(overtimeHours, parseFloat(shift.overtimeHours));
+  }
+
+  // فحص طلبات الإضافي المرتبطة من جدول الطلبات requests
+  const dateStr = shift.date;
+  const linkedOtReq = (state?.requests || []).find(r => 
+    (r.id && (r.id === shift.linkedRequestId || r.id === shift.overtimeRequestId)) ||
+    ((String(r.employeeId) === String(shift.employeeId) || String(r.empId) === String(shift.employeeId)) &&
+     (r.date === dateStr || r.targetDate === dateStr || r.details?.shiftDate === dateStr) &&
+     (r.type === 'overtime' || r.type === 'طلب اضافي' || r.type === 'إضافي'))
+  );
+
+  let overtimeStatus = 'none';
+  if (linkedOtReq) {
+    overtimeStatus = linkedOtReq.status === 'approved' ? 'approved' : linkedOtReq.status === 'rejected' ? 'rejected' : 'pending';
+  } else if (shift.overtimeStatus) {
+    overtimeStatus = shift.overtimeStatus;
+  }
+
+  const isOtApproved = 
+    overtimeStatus === 'approved' || 
+    Boolean(shift.adminApproved) || 
+    Boolean(shift.isAdminCreated);
+
+  if (isOtApproved) {
+    overtimeStatus = 'approved';
+  } else if (overtimeHours > 0 && (overtimeStatus === 'none' || !overtimeStatus)) {
+    overtimeStatus = 'pending';
+  }
+
+  // الساعات المستحقة للصرف المالي (Payable Hours)
+  let payableHours = regularHours;
+  if (isOtApproved) {
+    payableHours = Math.round((regularHours + overtimeHours) * 100) / 100;
+  }
+  if (permHours > 0) {
+    payableHours = Math.round((payableHours + permHours) * 100) / 100;
+  }
+
+  // الساعات الصافية للعرض (Display Hours)
+  let displayNetHours = Math.round((rawHours + permHours) * 100) / 100;
+  if (overtimeStatus === 'rejected') {
+    displayNetHours = Math.round((regularHours + permHours) * 100) / 100;
+  }
+
+  return {
+    actualWorkedHours: rawHours,
+    regularHours,
+    overtimeHours,
+    overtimeStatus,
+    isOvertimeApproved: isOtApproved,
+    payableHours,
+    permissionHours: permHours,
+    displayNetHours,
+    breakHours: explicitBreakHours,
+    scheduledHours
+  };
+}
+
+/**
  * يقوم بمزامنة الأذونات المعتمدة مع سجل البصمات (shifts):
  * 1. تعويض ساعات الإذن المعتمدة في صافي ساعات العمل لليوم المعني.
  * 2. وضع إشعار وملاحظة واضحة على البصمة بأنها معدلة بإذن معتمد.

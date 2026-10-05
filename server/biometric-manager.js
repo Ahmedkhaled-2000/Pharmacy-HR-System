@@ -1919,6 +1919,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           const schedH = parseFloat(origShift?.scheduledHours || matchedEmpObj?.workHoursPerDay || matchedEmpObj?.workHours || 8);
           const regHours = Math.min(calcHours, schedH);
           const otHours = Math.max(0, Math.round((calcHours - regHours) * 100) / 100);
+          const isOtApproved = Boolean(origShift?.overtimeStatus === 'approved' || origShift?.adminApproved || origShift?.isAdminCreated);
+          const otStatus = isOtApproved ? 'approved' : (otHours > 0 ? 'pending' : 'none');
 
           const closedRecord = {
             ...(origShift || {}),
@@ -1936,6 +1938,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             netHours: calcHours,
             regularHours: regHours,
             overtimeHours: otHours,
+            overtimeStatus: otStatus,
             scheduledHours: schedH,
             isOvernight,
             isLiveActive: false,
@@ -2062,17 +2065,17 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         }
       }
 
-      // 8. حفظ التحديثات في Redis و PostgreSQL بهدوء فائق وسرعة دون بث عاصفة الـ 4.2MB
+            // ⚡ الرد الفوري فائق السرعة على ماكينة ZKTeco بالتأكيد (< 15ms) لمنع إعادة الإرسال والـ Timeouts
+            if (!res.headersSent) {
+              res.status(200).send(`OK: ${processedCount}`);
+            }
+
+            // 8. حفظ التحديثات في Redis و PostgreSQL بهدوء فائق وسرعة دون بث عاصفة الـ 4.2MB
             state.activeShifts = currentActiveShifts;
             state.shifts = currentShifts;
             state._punchSource = 'biometric_adms';
             state._endedShiftEmpIds = Array.from(endedEmpIds);
             await saveSettingsToStorage(STORAGE_KEY, state, 'batch-worker');
-
-            // الرد على ماكينة ZKTeco بالتأكيد
-            if (!res.headersSent) {
-              res.status(200).send(`OK: ${processedCount}`);
-            }
           } catch (batchErr) {
             console.error('[Biometric ATTLOG Batch Error]:', batchErr);
             if (!res.headersSent) res.status(500).send('ERROR');
@@ -4275,6 +4278,7 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
                 netHours: calcH,
                 regularHours: regH,
                 overtimeHours: otH,
+                overtimeStatus: otH > 0 ? 'pending' : 'none',
                 scheduledHours: schedH,
                 isOvernight: true,
                 isLiveActive: false,

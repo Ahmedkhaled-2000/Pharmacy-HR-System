@@ -1,12 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { applyBrandIdentityToDOM } from '../../utils/brandThemeEngine';
+import { TOP_MGMT_MODULES } from '../../utils/permissionUtils';
 
 export default function OwnerAccessAndIdentityModule({
   state,
   setState,
   saveState,
   showToast,
-  authRole = 'owner'
+  authRole = 'owner',
+  onNavigateTab
 }) {
   const [activeTab, setActiveTab] = useState('employees'); // 'employees' | 'brand' | 'owners'
   const [searchQuery, setSearchQuery] = useState('');
@@ -170,10 +172,47 @@ export default function OwnerAccessAndIdentityModule({
 
     try {
       const nowIso = new Date().toISOString();
+      const isProcMgr = empAccessForm.permissions?.outstockHandling?.enabled && empAccessForm.permissions?.outstockHandling?.role === 'procurement_manager';
+
+      // فحص هل تم تفعيل أي دور أو شاشات لضمان تفعيل مفتاح الحساب الموحد تلقائياً
+      const hasAnyRoleEnabled = Boolean(
+        empAccessForm.permissions?.topManagement?.enabled ||
+        empAccessForm.permissions?.branchManager?.enabled ||
+        empAccessForm.permissions?.outstockHandling?.enabled ||
+        empAccessForm.permissions?.accountsSystem?.enabled ||
+        (empAccessForm.permissions?.hrPersonalPortal?.enabled !== false)
+      );
+
+      // تطبيع وتوحيد أسماء وحدات الإدارة العليا بصيغة القياسية (hyphen-based)
+      let topMgmtAllowed = empAccessForm.permissions?.topManagement?.allowedModules || ['dashboard'];
+      if (!Array.isArray(topMgmtAllowed) || topMgmtAllowed.length === 0) {
+        topMgmtAllowed = ['dashboard'];
+      }
+      topMgmtAllowed = Array.from(new Set(topMgmtAllowed.map(m => String(m).trim().replace(/_/g, '-'))));
+
+      const cleanForm = {
+        ...empAccessForm,
+        isEnabled: empAccessForm.isEnabled !== undefined ? (empAccessForm.isEnabled || hasAnyRoleEnabled) : hasAnyRoleEnabled,
+        permissions: {
+          ...empAccessForm.permissions,
+          topManagement: {
+            ...empAccessForm.permissions?.topManagement,
+            allowedModules: topMgmtAllowed
+          },
+          outstockHandling: {
+            ...empAccessForm.permissions?.outstockHandling,
+            ...(isProcMgr ? {
+              assignedBranchId: 'all',
+              allBranchesAccess: true,
+              assignedBranchIds: (branches || []).map(b => b.id)
+            } : {})
+          }
+        }
+      };
       const updatedMap = {
         ...employeeUnifiedAccess,
         [String(editingEmp.id)]: {
-          ...empAccessForm,
+          ...cleanForm,
           employeeId: String(editingEmp.id),
           employeeCode: String(editingEmp.code || ''),
           updatedAt: nowIso
@@ -186,8 +225,25 @@ export default function OwnerAccessAndIdentityModule({
         updatedAt: nowIso
       };
 
+      // تحديث فوري لكائن الموظف داخل قائمة الموظفين لضمان الاستجابة اللحظية في كافة الشاشات
+      const updatedEmployees = (state?.employees || []).map(e => {
+        if (String(e.id) === String(editingEmp.id) || (editingEmp.code && String(e.code) === String(editingEmp.code))) {
+          return {
+            ...e,
+            unifiedAccess: {
+              ...cleanForm,
+              employeeId: String(editingEmp.id),
+              employeeCode: String(editingEmp.code || ''),
+              updatedAt: nowIso
+            }
+          };
+        }
+        return e;
+      });
+
       const updatedState = {
         ...state,
+        employees: updatedEmployees,
         orgSettings: updatedOrg
       };
 
@@ -409,18 +465,8 @@ export default function OwnerAccessAndIdentityModule({
     }
   };
 
-  // قائمة وحدات الإدارة العليا القابلة للترخيص
-  const topMgmtModules = [
-    { id: 'dashboard', label: 'لوحة القيادة والمؤشرات (Dashboard)', icon: '📊' },
-    { id: 'employees', label: 'شؤون الموظفين وملفات الكوادر (Employees)', icon: '👥' },
-    { id: 'roster', label: 'شفتات العمل والجدول الشهري (Roster)', icon: '📅' },
-    { id: 'payroll', label: 'مسير الرواتب المعتمد (Payroll)', icon: '💰' },
-    { id: 'requests', label: 'مركز الطلبات والموافقات (Requests)', icon: '📋' },
-    { id: 'bylaws', label: 'لائحة العمل والجزاءات (Bylaws)', icon: '📜' },
-    { id: 'financial_reports', label: 'التقارير المالية والأرباح (Financials)', icon: '📈' },
-    { id: 'whatsapp_center', label: 'مركز مراسلات الواتساب (WhatsApp)', icon: '💬' },
-    { id: 'settings', label: 'إعدادات النظام والمنظومة (Settings)', icon: '⚙️' }
-  ];
+  // قائمة وحدات وتراخيص الإدارة العليا المتوافقة كلياً مع كافة شاشات وأقسام النظام
+  const topMgmtModules = TOP_MGMT_MODULES;
 
   return (
     <div className="owner-access-identity-wrapper" style={{ padding: '16px 22px', maxWidth: '1440px', margin: '0 auto', fontFamily: 'Cairo, sans-serif' }}>
@@ -476,15 +522,73 @@ export default function OwnerAccessAndIdentityModule({
           </div>
         </div>
 
-        {/* أزرار التبويبات الثلاثة الرئيسية */}
-        <div style={{
-          display: 'flex',
-          background: 'var(--surface, #ffffff)',
-          padding: '4px',
-          borderRadius: '12px',
-          border: '1px solid var(--border, #e2e8f0)',
-          gap: '4px'
-        }}>
+        {/* أزرار الإجراءات السيادية والتبويبات */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('app:open-owner-launchpad'))}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: '10px',
+                border: '1px solid #f59e0b',
+                background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
+                color: '#92400e',
+                fontSize: '12.5px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(245, 158, 11, 0.15)',
+                transition: 'all 0.15s ease'
+              }}
+              title="فتح بوابة قيادة المالك لاختيار منظومة أخرى"
+            >
+              <span>🔀</span>
+              <span>تبديل المنظومة (بوابة المالك)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (onNavigateTab) {
+                  onNavigateTab('dashboard');
+                } else {
+                  window.dispatchEvent(new CustomEvent('app:navigate-tab', { detail: 'dashboard' }));
+                }
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: '10px',
+                border: '1px solid var(--border, #cbd5e1)',
+                background: 'var(--surface, #ffffff)',
+                color: 'var(--text, #334155)',
+                fontSize: '12.5px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+                transition: 'all 0.15s ease'
+              }}
+              title="الانتقال إلى منظومة الموارد البشرية (HR)"
+            >
+              <span>🏢</span>
+              <span>الدخول لمنظومة HR</span>
+            </button>
+          </div>
+
+          {/* أزرار التبويبات الثلاثة الرئيسية */}
+          <div style={{
+            display: 'flex',
+            background: 'var(--surface, #ffffff)',
+            padding: '4px',
+            borderRadius: '12px',
+            border: '1px solid var(--border, #e2e8f0)',
+            gap: '4px'
+          }}>
           <button
             type="button"
             onClick={() => setActiveTab('employees')}
@@ -551,6 +655,7 @@ export default function OwnerAccessAndIdentityModule({
             <span>إدارة المالكين ({systemOwners.length})</span>
           </button>
         </div>
+      </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
@@ -764,7 +869,7 @@ export default function OwnerAccessAndIdentityModule({
                                 )}
                                 {u.permissions?.outstockHandling?.enabled && (
                                   <span style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '2px 7px', borderRadius: '5px', fontSize: '10.5px', fontWeight: 800 }}>
-                                    💊 OutStock ({u.permissions?.outstockHandling?.role === 'procurement_manager' ? 'مدير مشتريات' : u.permissions?.outstockHandling?.role === 'cosmetics_officer' ? 'مسؤول مستحضرات تجميل 💄' : u.permissions?.outstockHandling?.role === 'procurement_team' ? 'فريق مشتريات' : 'صيدلية'})
+                                    💊 OutStock ({u.permissions?.outstockHandling?.role === 'procurement_manager' ? 'مدير مشتريات (كافة الفروع 🌐)' : u.permissions?.outstockHandling?.role === 'cosmetics_officer' ? 'مسؤول مستحضرات تجميل 💄' : u.permissions?.outstockHandling?.role === 'procurement_team' ? 'فريق مشتريات' : `صيدلية: ${(branches.find(b => String(b.id) === String(u.permissions?.outstockHandling?.assignedBranchId))?.name) || 'فرع'}`})
                                   </span>
                                 )}
                                 {u.permissions?.accountsSystem?.enabled && (
@@ -1376,24 +1481,88 @@ export default function OwnerAccessAndIdentityModule({
               </label>
 
               {empAccessForm.permissions?.topManagement?.enabled && (
-                <div style={{ marginRight: '28px', background: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: '12px', fontWeight: 800, marginBottom: '8px' }}>
-                    حدد الصفحات المسموحة للإدارة العليا:
+                <div style={{ marginRight: '28px', background: '#fff', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--primary, #0d9488)' }}>
+                      🛡️ حدد الصفحات والأقسام المصرح له بها في الإدارة العليا:
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allIds = topMgmtModules.map(m => m.id);
+                          setEmpAccessForm(prev => ({
+                            ...prev,
+                            permissions: {
+                              ...prev.permissions,
+                              topManagement: {
+                                ...prev.permissions?.topManagement,
+                                allowedModules: allIds
+                              }
+                            }
+                          }));
+                        }}
+                        style={{ background: 'rgba(13, 148, 136, 0.1)', color: 'var(--primary, #0d9488)', border: '1px solid var(--primary, #0d9488)', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}
+                      >
+                        ✓ تحديد الكل
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEmpAccessForm(prev => ({
+                            ...prev,
+                            permissions: {
+                              ...prev.permissions,
+                              topManagement: {
+                                ...prev.permissions?.topManagement,
+                                allowedModules: ['dashboard']
+                              }
+                            }
+                          }));
+                        }}
+                        style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#dc2626', border: '1px solid #fca5a5', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}
+                      >
+                        ✕ إلغاء التحديد
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px' }}>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '8px', maxHeight: '320px', overflowY: 'auto', padding: '4px' }}>
                     {topMgmtModules.map(mod => {
                       const currentMods = empAccessForm.permissions?.topManagement?.allowedModules || [];
-                      const isChecked = currentMods.includes(mod.id);
+                      const isChecked = currentMods.includes(mod.id) ||
+                        (mod.legacyId && currentMods.includes(mod.legacyId)) ||
+                        (mod.id.includes('-') && currentMods.includes(mod.id.replace(/-/g, '_')));
 
                       return (
-                        <label key={mod.id} style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', cursor: 'pointer' }}>
+                        <label
+                          key={mod.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                            padding: '6px 8px',
+                            borderRadius: '6px',
+                            background: isChecked ? 'rgba(13, 148, 136, 0.06)' : 'transparent',
+                            border: isChecked ? '1px solid rgba(13, 148, 136, 0.25)' : '1px solid transparent',
+                            transition: 'all 0.15s'
+                          }}
+                        >
                           <input
                             type="checkbox"
                             checked={isChecked}
                             onChange={(e) => {
-                              const nextMods = e.target.checked
-                                ? [...currentMods, mod.id]
-                                : currentMods.filter(m => m !== mod.id);
+                              const normId = mod.id;
+                              let nextMods = currentMods.filter(m =>
+                                m !== normId &&
+                                m !== mod.legacyId &&
+                                m !== normId.replace(/-/g, '_')
+                              );
+                              if (e.target.checked) {
+                                nextMods.push(normId);
+                              }
                               setEmpAccessForm(prev => ({
                                 ...prev,
                                 permissions: {
@@ -1406,8 +1575,10 @@ export default function OwnerAccessAndIdentityModule({
                               }));
                             }}
                           />
-                          <span>{mod.icon}</span>
-                          <span>{mod.label}</span>
+                          <span style={{ fontSize: '15px' }}>{mod.icon}</span>
+                          <span style={{ fontWeight: isChecked ? 700 : 500, color: isChecked ? 'var(--primary, #0d9488)' : 'inherit' }}>
+                            {mod.label}
+                          </span>
                         </label>
                       );
                     })}
@@ -1471,11 +1642,17 @@ export default function OwnerAccessAndIdentityModule({
                           ...prev,
                           permissions: {
                             ...prev.permissions,
-                            outstockHandling: { ...prev.permissions?.outstockHandling, role: 'procurement_manager' }
+                            outstockHandling: {
+                              ...prev.permissions?.outstockHandling,
+                              role: 'procurement_manager',
+                              assignedBranchId: 'all',
+                              allBranchesAccess: true,
+                              assignedBranchIds: (branches || []).map(b => b.id)
+                            }
                           }
                         }))}
                       />
-                      <span>👔 مدير مشتريات</span>
+                      <span>👔 مدير مشتريات (كافة الفروع)</span>
                     </label>
 
                     <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', cursor: 'pointer' }}>
@@ -1513,30 +1690,51 @@ export default function OwnerAccessAndIdentityModule({
                     </label>
                   </div>
 
-                  {/* تحديد الفرع المسؤول عنه */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, marginBottom: '5px' }}>
-                      الفرع المسؤول عنه في نظام النواقص:
-                    </label>
-                    <select
-                      value={empAccessForm.permissions?.outstockHandling?.assignedBranchId || ''}
-                      onChange={(e) => setEmpAccessForm(prev => ({
-                        ...prev,
-                        permissions: {
-                          ...prev.permissions,
-                          outstockHandling: {
-                            ...prev.permissions?.outstockHandling,
-                            assignedBranchId: e.target.value
+                  {/* تحديد الفرع المسؤول عنه أو إتاحة كافة الفروع لمدير المشتريات */}
+                  {empAccessForm.permissions?.outstockHandling?.role === 'procurement_manager' ? (
+                    <div style={{
+                      padding: '12px 14px',
+                      background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)',
+                      border: '1px solid #a7f3d0',
+                      borderRadius: '10px',
+                      color: '#065f46',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px'
+                    }}>
+                      <span style={{ fontSize: '22px' }}>🌐</span>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 900 }}>مسؤول عن كافة الفروع مركزياً (All Branches)</div>
+                        <div style={{ fontSize: '11.5px', color: '#047857', marginTop: '2px' }}>
+                          بصفته مديراً للمشتريات، يتم فتح كامل أقسام منظومة النواقص وسجل طلبات جميع الفروع والموردين والتقارير المالية دون تقييد بفرع محدد.
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, marginBottom: '5px' }}>
+                        الفرع المسؤول عنه في نظام النواقص:
+                      </label>
+                      <select
+                        value={empAccessForm.permissions?.outstockHandling?.assignedBranchId || ''}
+                        onChange={(e) => setEmpAccessForm(prev => ({
+                          ...prev,
+                          permissions: {
+                            ...prev.permissions,
+                            outstockHandling: {
+                              ...prev.permissions?.outstockHandling,
+                              assignedBranchId: e.target.value
+                            }
                           }
-                        }
-                      }))}
-                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', fontFamily: 'Cairo' }}
-                    >
-                      {branches.map(b => (
-                        <option key={b.id} value={b.id}>{b.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                        }))}
+                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', fontFamily: 'Cairo' }}
+                      >
+                        {branches.map(b => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

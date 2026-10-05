@@ -190,8 +190,8 @@ export function compileDailyDigestData(state, targetDate = getRealTodayStr()) {
     const act = activeShiftsMap[empId];
     if (!act) return false;
     const actDate = act.date || (act.startTime ? String(act.startTime).slice(0, 10) : targetDate);
-    const actEpoch = act.startEpoch || (act.createdAt ? new Date(act.createdAt).getTime() : 0);
-    const isOvernightActive = actDate < targetDate && (!actEpoch || (Date.now() - actEpoch) < 30 * 3600 * 1000);
+    const actEpoch = act.startEpoch || (act.createdAt ? new Date(act.createdAt).getTime() : (actDate && act.timeIn ? new Date(`${actDate}T${act.timeIn.slice(0, 5)}:00`).getTime() : 0));
+    const isOvernightActive = actDate < targetDate && actEpoch > 0 && (Date.now() - actEpoch) < 30 * 3600 * 1000;
     return actDate === targetDate || isOvernightActive;
   });
 

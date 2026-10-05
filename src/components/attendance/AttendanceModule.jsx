@@ -2,7 +2,16 @@ import React, { useState, useMemo } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
 import { recalculateEmployeeCycleLateness, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
-import { getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, getRealTodayStr, getPunchMethodDetails } from '../../utils/formatters';
+import {
+  getEmpDisplayName,
+  isEmployeeActive,
+  getEmployeeManualPunchesCount,
+  getRealTodayStr,
+  getPunchMethodDetails,
+  getShiftStartEpoch,
+  isEmployeeOnApprovedLeave,
+  getEmployeeCurrentApprovedLeave
+} from '../../utils/formatters';
 
 export default function AttendanceModule({
   state,
@@ -119,8 +128,8 @@ export default function AttendanceModule({
         timeIn: manualInTime,
         timeOut: manualOutTime,
         breakHours: bH,
-        hours: regularHours,
-        workHours: regularHours,
+        hours: workHours,
+        workHours: workHours,
         regularHours: regularHours,
         scheduledHours: scheduledShiftHours,
         actualWorkedHours: workHours,
@@ -448,30 +457,51 @@ export default function AttendanceModule({
                   return isMatch && activePeriodFilter(p.date);
                 });
 
-                // فحص ما إذا كان الموظف لديه بصمة حضور نشطة اليوم أو وردية ليلية عابرة لمنتصف الليل (Live Active Shift)
+                // فحص إجازة الموظف المعتمدة لليوم
                 const todayStrNow = typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
-                const openShiftInShifts = (state.shifts || []).find(s =>
+                const approvedLeaveToday = getEmployeeCurrentApprovedLeave(emp, todayStrNow, state);
+                const hasActualPunchToday = (state.shifts || []).some(s =>
                   (String(s.employeeId) === String(emp.id) || String(s.employeeCode) === String(emp.code)) &&
-                  (s.date === todayStrNow || (s.date < todayStrNow && (Date.now() - (s.startEpoch || (s.createdAt ? new Date(s.createdAt).getTime() : Date.now()))) < 30 * 3600 * 1000)) &&
-                  Boolean(s.timeIn && s.timeIn !== '—' && (!s.timeOut || s.timeOut === '—' || s.timeOut === '' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive)) &&
+                  s.date === todayStrNow &&
+                  Boolean(s.timeIn && s.timeIn !== '—') &&
                   s.status !== 'cancelled' && !s.isCancelled
                 );
-                const activeShift = state.activeShifts?.[emp.id] ||
+
+                // فحص ما إذا كان الموظف لديه بصمة حضور نشطة اليوم أو وردية ليلية عابرة لمنتصف الليل حقيقية (Live Active Shift)
+                const openShiftInShifts = (state.shifts || []).find(s => {
+                  if (String(s.employeeId) !== String(emp.id) && String(s.employeeCode) !== String(emp.code)) return false;
+                  if (s.status === 'cancelled' || s.isCancelled || s.status === 'completed') return false;
+                  if (!s.timeIn || s.timeIn === '—') return false;
+                  const hasTimeOut = Boolean(s.timeOut && s.timeOut !== '—' && s.timeOut !== '' && s.timeOut !== 'قيد العمل الآن');
+                  if (hasTimeOut) return false;
+
+                  const sEpoch = getShiftStartEpoch(s);
+                  if (s.date === todayStrNow) return true;
+                  // وردية ليلية بدأت أمس ومستمرة لليوم (خلال نافذة أقصاها 30 ساعة)
+                  return s.date < todayStrNow && sEpoch > 0 && (Date.now() - sEpoch) < 30 * 3600 * 1000;
+                });
+
+                const rawActiveShift = state.activeShifts?.[emp.id] ||
                   state.activeShifts?.[String(emp.id)] ||
                   (emp.code && state.activeShifts?.[emp.code]) ||
                   (emp.code && state.activeShifts?.[String(emp.code)]) ||
                   openShiftInShifts;
+
+                // إذا كان الموظف في إجازة معتمدة اليوم ولم يقم بالبصمة فعلياً اليوم، لا نعتبره متواجداً
+                const activeShift = (approvedLeaveToday && !hasActualPunchToday) ? null : rawActiveShift;
+                const actEpoch = activeShift ? getShiftStartEpoch(activeShift) : 0;
 
                 const isOvernightActive = Boolean(
                   activeShift &&
                   isEmployeeActive(emp) &&
                   activeShift.date &&
                   activeShift.date < todayStrNow &&
-                  (Date.now() - (activeShift.startEpoch || (activeShift.createdAt ? new Date(activeShift.createdAt).getTime() : Date.now()))) < 30 * 3600 * 1000
+                  actEpoch > 0 &&
+                  (Date.now() - actEpoch) < 30 * 3600 * 1000
                 );
                 const hasLiveShift = Boolean(activeShift && isEmployeeActive(emp) && (activeShift.date === todayStrNow || isOvernightActive));
-                const liveElapsedHours = hasLiveShift
-                  ? Math.max(0, Math.round(((Date.now() - (activeShift.startEpoch || (activeShift.createdAt ? new Date(activeShift.createdAt).getTime() : Date.now()))) / 3600000) * 10) / 10)
+                const liveElapsedHours = hasLiveShift && actEpoch > 0
+                  ? Math.max(0, Math.round(((Date.now() - actEpoch) / 3600000) * 10) / 10)
                   : 0;
 
                 const validPunches = empPunches.filter((p) => !p.isRejectedPhoto && p.status !== 'rejected_photo');
@@ -486,6 +516,13 @@ export default function AttendanceModule({
                     <td style={{ fontWeight: '700' }}>{emp.code}</td>
                     <td style={{ fontWeight: '800' }}>
                       {getEmpDisplayName(emp)}
+                      {approvedLeaveToday && !hasLiveShift && (
+                        <div style={{ marginTop: '3px', display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '11px', color: '#0369a1', background: '#e0f2fe', border: '1px solid #7dd3fc', padding: '1px 8px', borderRadius: '6px', fontWeight: '800' }}>
+                            🏖️ إجازة معتمدة ({approvedLeaveToday.leaveType === 'unpaid' ? 'بدون أجر' : approvedLeaveToday.leaveType === 'sick' ? 'مرضية' : 'سنوية'})
+                          </span>
+                        </div>
+                      )}
                       {hasLiveShift && (
                         <div style={{ marginTop: '3px', display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
                           <span style={{ fontSize: '11px', color: '#059669', fontWeight: '800' }}>
@@ -524,6 +561,11 @@ export default function AttendanceModule({
                         {hasLiveShift && (
                           <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: '800', textAlign: 'center' }}>
                             {isOvernightActive ? 'حضور حي 🌙 عابر لمنتصف الليل' : 'حضور حي'}
+                          </span>
+                        )}
+                        {approvedLeaveToday && !hasLiveShift && (
+                          <span style={{ background: '#f0f9ff', color: '#0369a1', border: '1px solid #bae6fd', padding: '1px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: '800', textAlign: 'center' }}>
+                            🏖️ في إجازة معتمدة
                           </span>
                         )}
                       </div>

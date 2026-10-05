@@ -4,7 +4,8 @@ export default function OwnerCommandLaunchpadModal({
   isOpen,
   onClose,
   ownerName = 'سيف',
-  onSelectSystem
+  onSelectSystem,
+  isGateMode = false
 }) {
   if (!isOpen) return null;
 
@@ -111,7 +112,7 @@ export default function OwnerCommandLaunchpadModal({
           <button
             type="button"
             onClick={onClose}
-            title="إغلاق"
+            title={isGateMode ? "إلغاء الدخول والعودة لشاشة الدخول" : "إغلاق"}
             style={{
               position: 'absolute',
               left: 0,
@@ -227,15 +228,27 @@ export default function OwnerCommandLaunchpadModal({
             type="button"
             onClick={onClose}
             style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--muted, #64748b)',
+              background: isGateMode ? '#fee2e2' : 'none',
+              border: isGateMode ? '1px solid #fca5a5' : 'none',
+              color: isGateMode ? '#dc2626' : 'var(--muted, #64748b)',
+              padding: isGateMode ? '8px 18px' : '4px 10px',
+              borderRadius: '8px',
               fontSize: '13px',
               fontWeight: 700,
-              cursor: 'pointer'
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px'
             }}
           >
-            المتابعة للوحة التحكم الرئيسية ↩
+            {isGateMode ? (
+              <>
+                <span>✕</span>
+                <span>إلغاء الدخول والعودة لشاشة تسجيل الدخول</span>
+              </>
+            ) : (
+              <span>العودة للشاشة السابقة ↩</span>
+            )}
           </button>
         </div>
       </div>

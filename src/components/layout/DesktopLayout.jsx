@@ -4,6 +4,7 @@ import { getCycleDateRange } from '../../utils/periodEngine';
 import { getNotificationTarget, getNotificationTargetTab, isRequestNotification } from '../../utils/notificationEngine';
 import { triggerAndroidApkDownload } from '../../utils/nativeAppUpdater';
 import { getPublicSystemUrl } from '../../utils/systemUrlHelper';
+import { isModuleAllowed, isUserEligibleForSwitcher } from '../../utils/permissionUtils';
 import AndroidSettingsModal from '../modals/AndroidSettingsModal';
 import OwnerOverrideModal from '../common/OwnerOverrideModal';
 import { useData } from '../../context/DataContext';
@@ -1049,7 +1050,10 @@ export default function DesktopLayout({
     }
   }, [currentRole, orgSettings]);
 
-  // Define Desktop Menu Structure for Super Admin
+  // التحقق من استحقاق المستخدم لإظهار زر تبديل مسارات العمل
+  const canSwitchWorkspaces = useMemo(() => {
+    return isUserEligibleForSwitcher(userProfile, orgSettings, currentRole);
+  }, [userProfile, orgSettings, currentRole]);
   const adminMenuItems = [
     {
       id: 'dashboard',
@@ -1715,32 +1719,32 @@ export default function DesktopLayout({
       ];
     }
 
-    // 2. إذا كان مستخدماً بصلاحيات محددة في الإدارة العليا (Strict Module Isolation)
+    // 2. إذا كان مستخدماً بصلاحيات محددة في الإدارة العليا (Strict Module Isolation - منع تسريب أي شاشات)
     const allowedModules = userProfile?.allowedModules || userProfile?.unifiedAccess?.permissions?.topManagement?.allowedModules || null;
     if (Array.isArray(allowedModules) && allowedModules.length > 0) {
       return adminMenuItems.map(menu => {
         if (menu.isSingle) {
-          if (allowedModules.includes(menu.targetTab)) return menu;
+          if (isModuleAllowed(menu.targetTab, menu.targetSubTab, allowedModules)) return menu;
           return null;
         }
         if (menu.children) {
           const filteredChildren = menu.children.filter(child => {
-            const t = child.targetTab;
-            return allowedModules.includes(t) ||
-                   (t === 'employees' && allowedModules.includes('employees')) ||
-                   (t === 'branches' && allowedModules.includes('branches')) ||
-                   (t === 'roster' && allowedModules.includes('roster')) ||
-                   (t === 'payroll' && allowedModules.includes('payroll')) ||
-                   (t === 'requests' && allowedModules.includes('requests')) ||
-                   (t === 'leaves-tracking' && allowedModules.includes('requests')) ||
-                   (t === 'permissions-management' && allowedModules.includes('requests')) ||
-                   (t === 'bylaws' && allowedModules.includes('bylaws')) ||
-                   (t === 'financial-reports' && (allowedModules.includes('financial_reports') || allowedModules.includes('financial-reports'))) ||
-                   (t === 'income-expenses' && (allowedModules.includes('financial_reports') || allowedModules.includes('financial-reports'))) ||
-                   (t === 'whatsapp-center' && (allowedModules.includes('whatsapp_center') || allowedModules.includes('whatsapp-center'))) ||
-                   (t === 'settings' && allowedModules.includes('settings'));
+            return isModuleAllowed(child.targetTab, child.targetSubTab, allowedModules);
           });
           if (filteredChildren.length > 0) {
+            // إذا كانت المجموعة تحتوي على شاشة واحدة فقط مصرح بها، نحولها لزر مباشر لتسهيل العمل ومنع القوائم المعقدة
+            if (filteredChildren.length === 1) {
+              const onlyChild = filteredChildren[0];
+              return {
+                id: onlyChild.id || menu.id,
+                label: onlyChild.label || menu.label,
+                icon: onlyChild.icon || menu.icon,
+                isSingle: true,
+                targetTab: onlyChild.targetTab,
+                targetSubTab: onlyChild.targetSubTab,
+                badge: onlyChild.badge
+              };
+            }
             return { ...menu, children: filteredChildren };
           }
         }
@@ -1988,6 +1992,9 @@ if (menu.isSingle) {
   } else if (menu.targetTab === 'kiosk' || menu.id === 'kiosk') {
     openKioskInNewTab();
   } else {
+    if (menu.targetSubTab && setActiveSubTab) {
+      setActiveSubTab(menu.targetSubTab);
+    }
     setActiveTab(menu.targetTab);
   }
   setOpenDropdown(null);
@@ -2138,39 +2145,45 @@ const handleTopMenuKeyDown = (e, menu, menuIndex) => {
   }
 };
 
-const getActiveBreadcrumb = () => {
-for (const menu of currentMenuItems) {
-  if (menu.isSingle && menu.targetTab === activeTab) {
-    return { group: menu.label, item: null, icon: menu.icon };
-  }
-  if (menu.children) {
-    for (const c of menu.children) {
-      if (c.subChildren && c.subChildren.length > 0) {
-        const foundSub = c.subChildren.find(sub => {
-          if (sub.targetTab === activeTab) {
-            if (sub.targetSubTab) return activeSubTab === sub.targetSubTab;
-            return true;
-          }
-          return false;
-        });
-        if (foundSub) {
-          return { group: menu.label, item: `${c.label} › ${foundSub.label}`, icon: foundSub.icon || c.icon };
-        }
+  const getActiveBreadcrumb = () => {
+    if (activeTab === 'owner-permissions') {
+      return { group: '👑 بوابة المالك السيادية', item: 'صلاحيات الموظفين وهوية النظام', icon: '👑' };
+    }
+    if (activeTab === 'outstock') {
+      return { group: '💊 نظام OutStock', item: 'متابعة النواقص والمشتريات', icon: '💊' };
+    }
+    for (const menu of currentMenuItems) {
+      if (menu.isSingle && menu.targetTab === activeTab) {
+        return { group: menu.label, item: null, icon: menu.icon };
       }
-      if (c.targetTab === activeTab) {
-        if (c.targetSubTab && activeSubTab !== c.targetSubTab) {
-          if (c.targetTab === 'branches' && c.targetSubTab === 'list' && (!activeSubTab || activeSubTab === 'branches' || activeSubTab === 'list')) {
+      if (menu.children) {
+        for (const c of menu.children) {
+          if (c.subChildren && c.subChildren.length > 0) {
+            const foundSub = c.subChildren.find(sub => {
+              if (sub.targetTab === activeTab) {
+                if (sub.targetSubTab) return activeSubTab === sub.targetSubTab;
+                return true;
+              }
+              return false;
+            });
+            if (foundSub) {
+              return { group: menu.label, item: `${c.label} › ${foundSub.label}`, icon: foundSub.icon || c.icon };
+            }
+          }
+          if (c.targetTab === activeTab) {
+            if (c.targetSubTab && activeSubTab !== c.targetSubTab) {
+              if (c.targetTab === 'branches' && c.targetSubTab === 'list' && (!activeSubTab || activeSubTab === 'branches' || activeSubTab === 'list')) {
+                return { group: menu.label, item: c.label, icon: c.icon };
+              }
+              continue;
+            }
             return { group: menu.label, item: c.label, icon: c.icon };
           }
-          continue;
         }
-        return { group: menu.label, item: c.label, icon: c.icon };
       }
     }
-  }
-}
-return { group: 'النظام', item: 'لوحة التحكم', icon: '📊' };
-};
+    return { group: 'النظام', item: 'لوحة التحكم', icon: '📊' };
+  };
 
 const breadcrumb = getActiveBreadcrumb();
 const profileName = userProfile?.name || ((currentRole === 'owner' || userProfile?.isOwner) ? '👑 المالك' : (currentRole === 'admin' ? 'الإدارة العليا' : (currentBranch?.name ? `مدير فرع - ${currentBranch.name}` : 'مدير الفرع')));
@@ -2251,6 +2264,31 @@ return (
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+        {/* زر التبديل الموحد لمسارات العمل للموظف متعدد الصلاحيات على الهاتف */}
+        {canSwitchWorkspaces && (
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('app:open-workspace-switcher', { detail: { user: userProfile } }))}
+            style={{
+              border: '1px solid var(--primary, #0d9488)',
+              background: 'rgba(13, 148, 136, 0.12)',
+              color: 'var(--primary, #0d9488)',
+              padding: '4px 8px',
+              borderRadius: '7px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+            title="التبديل بين صفحاتك المعتمدة"
+          >
+            <span>🔄</span>
+            <span style={{ fontSize: '10.5px' }}>تبديل</span>
+          </button>
+        )}
+
         <div style={{ position: 'relative' }} ref={notifDropdownRef}>
           <button
             type="button"
@@ -2614,10 +2652,10 @@ return (
           )}
 
           {/* زر تبديل مسار العمل للموظف متعدد الصلاحيات */}
-          {userProfile?.unifiedAccess?.isEnabled && (
+          {canSwitchWorkspaces && (
             <button
               type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('app:open-workspace-switcher'))}
+              onClick={() => window.dispatchEvent(new CustomEvent('app:open-workspace-switcher', { detail: { user: userProfile } }))}
               style={{
                 background: 'rgba(13, 148, 136, 0.12)',
                 color: 'var(--primary, #0d9488)',
@@ -3297,7 +3335,7 @@ return (
     </header>
   )}
 
-  {isMobileScreen && (
+  {isMobileScreen && activeTab !== 'owner-permissions' && activeTab !== 'outstock' && (
     <div className="mobile-subbar" style={{
       background: 'var(--surface-muted, #f8fafc)',
       borderBottom: '1px solid var(--border)',
@@ -3341,7 +3379,7 @@ return (
     </div>
   )}
 
-  {!isMobileScreen && (
+  {!isMobileScreen && activeTab !== 'owner-permissions' && activeTab !== 'outstock' && (
     <nav
       ref={menuContainerRef}
       className="desktop-menubar"

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { arabicWeekday, getRealTodayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { arabicWeekday, getRealTodayStr, getEmpDisplayName, isEmployeeActive, fmt } from '../../utils/formatters';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 
 export default function AdminResignationModule({
@@ -51,6 +51,82 @@ export default function AdminResignationModule({
         managerStatus: r.managerStatus || (r.branchApproved ? 'approved' : (r.branchApprovalStatus || 'pending')),
         adminStatus: r.adminStatus || (r.status === 'approved' ? 'approved' : r.status === 'rejected' ? 'rejected' : 'pending')
       });
+    }
+  });
+
+  // 3. Scan employees for archived single-branch terminations or terminated employees without separate request record
+  (state.employees || []).forEach(emp => {
+    // A. Single-branch terminations
+    (emp.archivedBranchesDetails || []).forEach((ab, idx) => {
+      const archKey = `archived_${emp.id}_${ab.branchId || idx}`;
+      const existsInList = rawList.some(r => 
+        (String(r.employeeId) === String(emp.id) || (emp.code && String(r.employeeCode) === String(emp.code))) &&
+        String(r.branchId) === String(ab.branchId)
+      );
+      if (!existsInList && !seenIds.has(archKey)) {
+        seenIds.add(archKey);
+        rawList.push({
+          id: archKey,
+          employeeId: emp.id,
+          employeeCode: emp.code,
+          employeeName: emp.name,
+          branchId: ab.branchId,
+          branchName: ab.branchName || (ab.branchId ? (state.branches?.find(b => String(b.id) === String(ab.branchId))?.name || `فرع ${ab.branchId}`) : 'الفرع المحدد'),
+          type: 'resignation',
+          resignationType: 'single_branch',
+          isSingleBranch: true,
+          employeeReason: ab.terminationReason || 'إنهاء خدمة وتصفية مستحقات من الفرع',
+          requestDate: ab.terminationDate || ab.terminatedAt?.slice(0, 10) || getRealTodayStr(),
+          terminationDate: ab.terminationDate || ab.terminatedAt?.slice(0, 10),
+          createdAt: ab.terminatedAt || ab.terminationDate,
+          managerStatus: 'approved',
+          adminStatus: 'approved',
+          status: 'approved',
+          adminApproved: true,
+          branchApproved: true,
+          finalSettlement: ab.finalSettlement,
+          signedClearanceDoc: ab.signedClearanceDoc,
+          clearanceNotes: ab.clearanceNotes,
+          noticeDays: 0
+        });
+      }
+    });
+
+    // B. Completely terminated / resigned employees who might not have an explicit request record
+    const isInactive = !isEmployeeActive(emp) || emp.status === 'تم الاستقالة' || emp.isTerminated || emp.isResigned;
+    if (isInactive) {
+      const empResignKey = `term_emp_${emp.id}`;
+      const existsInList = rawList.some(r => 
+        String(r.employeeId) === String(emp.id) || (emp.code && String(r.employeeCode) === String(emp.code))
+      );
+      if (!existsInList && !seenIds.has(empResignKey)) {
+        seenIds.add(empResignKey);
+        const bObj = (state.branches || []).find(b => String(b.id) === String(emp.branchId));
+        rawList.push({
+          id: empResignKey,
+          employeeId: emp.id,
+          employeeCode: emp.code,
+          employeeName: emp.name,
+          branchId: emp.branchId || 'main',
+          branchName: bObj ? bObj.name : 'الفرع الرئيسي',
+          type: 'resignation',
+          resignationType: 'full',
+          isSingleBranch: false,
+          employeeReason: emp.terminationReason || emp.suspension_reason || 'إنهاء خدمة شامل وتصفية مستحقات',
+          requestDate: emp.terminationDate || emp.resignationDate || emp.terminatedAt?.slice(0, 10) || getRealTodayStr(),
+          terminationDate: emp.terminationDate || emp.resignationDate || emp.terminatedAt?.slice(0, 10),
+          createdAt: emp.terminatedAt || emp.terminationDate,
+          managerStatus: 'approved',
+          adminStatus: 'approved',
+          status: 'approved',
+          adminApproved: true,
+          branchApproved: true,
+          finalSettlement: emp.finalSettlement,
+          signedClearanceDoc: emp.signedClearanceDoc,
+          clearanceNotes: emp.terminationNotes,
+          noticeDays: 0
+        });
+      }
     }
   });
 
@@ -764,7 +840,7 @@ export default function AdminResignationModule({
         <div style={{ display: 'grid', gap: '20px' }}>
           {allRequests.map((req, index) => {
             const emp = state.employees?.find(e => e.id === req.employeeId || e.code === req.employeeCode);
-            const branch = state.branches?.find(b => b.id === req.branchId || b.id === emp?.branchId);
+            const branch = state.branches?.find(b => String(b.id) === String(req.branchId) || String(b.id) === String(emp?.branchId));
 
             return (
               <div key={req.id || `res_${index}`} style={{ padding: '20px', border: '1px solid var(--border)', borderRadius: '12px', background: 'var(--background)' }}>
@@ -795,7 +871,7 @@ export default function AdminResignationModule({
                         )}
                       </div>
                       <div style={{ color: 'var(--muted)', fontSize: '13px', marginTop: '4px' }}>
-                        الفرع: <strong>{branch?.name || 'الفرع الرئيسي'}</strong> | كود: {emp?.code || '-'} | {emp?.jobTitle || '-'}
+                        الفرع: <strong>{branch?.name || req.branchName || 'الفرع الرئيسي'}</strong> | كود: {emp?.code || req.employeeCode || '-'} | {emp?.jobTitle || '-'}
                       </div>
                     </div>
                   </div>
@@ -809,10 +885,38 @@ export default function AdminResignationModule({
                       background: req.type === 'resignation' ? 'var(--danger-light)' : 'var(--primary-light)',
                       color: req.type === 'resignation' ? 'var(--danger-dark)' : 'var(--primary-dark)'
                     }}>
-                      {req.type === 'resignation' ? 'طلب استقالة' : 'طلب تراجع عن الاستقالة'}
+                      {req.type === 'resignation' ? (req.isSingleBranch ? 'إنهاء خدمة من فرع محدد' : 'طلب استقالة / إنهاء خدمة') : 'طلب تراجع عن الاستقالة'}
                     </div>
 
-                    {req.type === 'resignation' && (
+                    {req.isSingleBranch && (
+                      <div style={{
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        background: '#ecfdf5',
+                        color: '#065f46',
+                        border: '1px solid #a7f3d0'
+                      }}>
+                        🏢 من فرع: {branch?.name || req.branchName} (مع استمرار العمل بالفروع الأخرى)
+                      </div>
+                    )}
+
+                    {req.finalSettlement && (
+                      <div style={{
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        background: '#f0fdf4',
+                        color: '#15803d',
+                        border: '1px solid #bbf7d0'
+                      }}>
+                        💰 صافي المخالصة: {fmt(req.finalSettlement.netSettlement || 0)} ج.م
+                      </div>
+                    )}
+
+                    {req.type === 'resignation' && !req.isSingleBranch && (
                       <div style={{
                         fontSize: '11px',
                         fontWeight: 'bold',
@@ -828,7 +932,7 @@ export default function AdminResignationModule({
                     )}
 
                     <div style={{ color: 'var(--muted)', fontSize: '12px' }}>
-                      تاريخ التقديم: {req.requestDate}
+                      تاريخ التقديم / الإنهاء: {req.requestDate}
                     </div>
                   </div>
                 </div>

@@ -1,9 +1,18 @@
 import React, { useState } from 'react';
-import { isApprovedPermissionForDate, getEffectiveShiftHours, recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
+import { isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics, recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
-import { getEmployeeManualPunchesCount, isShiftManualPunch, arabicWeekday, getPunchMethodDetails } from '../../utils/formatters';
+import {
+  getEmployeeManualPunchesCount,
+  isShiftManualPunch,
+  arabicWeekday,
+  getPunchMethodDetails,
+  getShiftStartEpoch,
+  isEmployeeOnApprovedLeave,
+  getEmployeeCurrentApprovedLeave
+} from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
 import { isBranchMatch } from '../../utils/branchMatcher';
+import { apiSaveSettingsSlice } from '../../utils/apiClient';
 
 export default function AttendancePunchesModal({
   employee,
@@ -45,7 +54,17 @@ export default function AttendancePunchesModal({
   const periodLabel = isCustom ? `الفترة المخصصة: من ${customFrom} إلى ${customTo}` : (monthPicker ? `دورة شهر (${monthPicker})` : '');
 
   // فحص بصمة الحضور النشطة الحالية للموظف (Live Active Shift)
-  const activeShift =
+  const todayStrNow = typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
+  const approvedLeaveToday = getEmployeeCurrentApprovedLeave(employee, todayStrNow, state);
+  const hasActualPunchToday = (state.shifts || []).some(s =>
+    (String(s.employeeId) === String(employee.id) || String(s.employeeCode) === String(employee.code)) &&
+    s.date === todayStrNow &&
+    Boolean(s.timeIn && s.timeIn !== '—') &&
+    s.status !== 'cancelled' && !s.isCancelled
+  );
+  const isSuppressedByLeave = Boolean(approvedLeaveToday && !hasActualPunchToday);
+
+  const rawActiveShift =
     state.activeShifts?.[employee.id] ||
     state.activeShifts?.[String(employee.id)] ||
     (employee.code && state.activeShifts?.[employee.code]) ||
@@ -56,16 +75,19 @@ export default function AttendancePunchesModal({
         (employee.code && (String(s.employeeId) === String(employee.code) || String(s.employeeCode) === String(employee.code)))
       )
     );
-  const todayStrNow = typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
+
+  const activeShift = isSuppressedByLeave ? null : rawActiveShift;
+  const actEpoch = activeShift ? getShiftStartEpoch(activeShift) : 0;
   const isOvernightActive = Boolean(
     activeShift &&
     activeShift.date &&
     activeShift.date < todayStrNow &&
-    (Date.now() - (activeShift.startEpoch || (activeShift.createdAt ? new Date(activeShift.createdAt).getTime() : Date.now()))) < 30 * 3600 * 1000
+    actEpoch > 0 &&
+    (Date.now() - actEpoch) < 30 * 3600 * 1000
   );
-  const hasActiveShift = Boolean(activeShift && (activePeriodFilter(activeShift.date) || isOvernightActive));
-  const activeElapsedHours = hasActiveShift
-    ? Math.max(0, Math.round(((Date.now() - (activeShift.startEpoch || (activeShift.createdAt ? new Date(activeShift.createdAt).getTime() : Date.now()))) / 3600000) * 10) / 10)
+  const hasActiveShift = Boolean(!isSuppressedByLeave && activeShift && (activePeriodFilter(activeShift.date) || isOvernightActive));
+  const activeElapsedHours = hasActiveShift && actEpoch > 0
+    ? Math.max(0, Math.round(((Date.now() - actEpoch) / 3600000) * 10) / 10)
     : 0;
 
   const livePunch = hasActiveShift ? {
@@ -110,33 +132,108 @@ export default function AttendancePunchesModal({
     return isMatch && activePeriodFilter(p.date);
   });
 
-  // إثراء الورديات الحية في القائمة بالساعات المنقضية الحية ووسم "قيد العمل الآن"
+  // إثراء الورديات الحية في القائمة بالساعات المنقضية الحية ووسم الورديات غير المكتملة السابقة بدقة
   const enrichedMonthPunches = rawMonthPunches.map(p => {
-    const isLive = p.isLiveActive || (!p.timeOut || p.timeOut === '—' || p.timeOut === '' || p.timeOut === 'قيد العمل الآن');
-    if (isLive) {
+    // 🛡️ حماية صارمة للورديات المكتملة: لا يجوز أبداً أن تظهر كوردية حية أو معلقة
+    if (p.status === 'completed' || p.isCompleted) {
+      const schedH = parseFloat(p.scheduledHours || employee.workHoursPerDay || employee.workHours || 8);
+      let resolvedTimeOut = p.timeOut;
+      if (!resolvedTimeOut || resolvedTimeOut === '—' || resolvedTimeOut === '' || resolvedTimeOut === 'قيد العمل الآن') {
+        if (p.timeIn && p.timeIn !== '—') {
+          const [inH, inM] = String(p.timeIn).split(':').map(Number);
+          if (!isNaN(inH)) {
+            const outTotalMins = (inH * 60 + (inM || 0) + Math.round(schedH * 60)) % (24 * 60);
+            resolvedTimeOut = `${String(Math.floor(outTotalMins / 60)).padStart(2, '0')}:${String(outTotalMins % 60).padStart(2, '0')}`;
+          }
+        }
+      }
+      return {
+        ...p,
+        isLiveActive: false,
+        isStaleUnclosed: false,
+        timeOut: resolvedTimeOut || '—',
+        hours: (p.hours && p.hours > 0) ? p.hours : schedH,
+        netHours: (p.netHours && p.netHours > 0) ? p.netHours : schedH,
+        regularHours: (p.regularHours && p.regularHours > 0) ? p.regularHours : schedH,
+        actualWorkedHours: (p.actualWorkedHours && p.actualWorkedHours > 0) ? p.actualWorkedHours : schedH,
+        statusLabel: (p.statusLabel && !p.statusLabel.includes('قيد العمل')) ? p.statusLabel : 'حضور مكتمل'
+      };
+    }
+
+    const hasTimeOut = Boolean(p.timeOut && p.timeOut !== '—' && p.timeOut !== '' && p.timeOut !== 'قيد العمل الآن');
+    const pEpoch = getShiftStartEpoch(p);
+    // صمام الأمان: الورديات المفتوحة لا تتجاوز 16 ساعة كحد أقصى تماشياً مع صمام أمان الـ 15 ساعة
+    const isWithinSafetyValve = pEpoch > 0 && (Date.now() - pEpoch < 16 * 3600 * 1000);
+    const isLiveNow = !hasTimeOut && (p.isLiveActive || p.date === todayStrNow || isWithinSafetyValve) && !isSuppressedByLeave;
+    const isStaleUnclosed = !hasTimeOut && !isLiveNow;
+
+    if (isLiveNow) {
       const isNight = Boolean(p.isOvernight || (p.date && p.date < todayStrNow));
-      const liveElapsed = p.startEpoch
-        ? Math.max(0, Math.round(((Date.now() - Number(p.startEpoch)) / 3600000) * 10) / 10)
-        : (p.createdAt ? Math.max(0, Math.round(((Date.now() - new Date(p.createdAt).getTime()) / 3600000) * 10) / 10) : activeElapsedHours);
+      const liveElapsed = pEpoch > 0
+        ? Math.max(0, Math.round(((Date.now() - pEpoch) / 3600000) * 10) / 10)
+        : activeElapsedHours;
       return {
         ...p,
         isLiveActive: true,
+        isStaleUnclosed: false,
         isOvernight: isNight,
         timeOut: 'قيد العمل الآن',
         hours: p.hours || liveElapsed,
         netHours: p.netHours || liveElapsed
       };
     }
-    return p;
+
+    if (isStaleUnclosed) {
+      return {
+        ...p,
+        isLiveActive: false,
+        isStaleUnclosed: true,
+        timeOut: p.timeOut || 'غير مسجل'
+      };
+    }
+
+    return {
+      ...p,
+      isLiveActive: false
+    };
   });
 
   // فحص ما إذا كان السجل الحي موجوداً بالفعل لتجنب التكرار
   const alreadyHasLivePunch = enrichedMonthPunches.some(p => p.isLiveActive || (activeShift && p.date === activeShift.date && p.timeIn === activeShift.timeIn));
-  const monthPunches = (livePunch && !alreadyHasLivePunch) ? [livePunch, ...enrichedMonthPunches] : enrichedMonthPunches;
+  const rawMonthCombined = (livePunch && !alreadyHasLivePunch) ? [livePunch, ...enrichedMonthPunches] : enrichedMonthPunches;
 
-  // البحث عن أي وردية غير منتهية في قائمة ورديات هذا الشهر
-  const unclosedShift = enrichedMonthPunches.find(p => p.isLiveActive || (!p.timeOut || p.timeOut === '' || p.timeOut === '—' || p.timeOut === 'قيد العمل الآن'));
-  const showLiveBanner = Boolean(livePunch || unclosedShift);
+  // 🔄 ترتيب السجلات دائماً من الأحدث إلى الأقدم (Newest to Oldest)
+  const monthPunches = [...rawMonthCombined].sort((a, b) => {
+    // 1. الوردية الحية النشطة تكون دائماً في القمة أولاً
+    if (a?.isLiveActive && !b?.isLiveActive) return -1;
+    if (!a?.isLiveActive && b?.isLiveActive) return 1;
+
+    // 2. الترتيب حسب التاريخ من الأحدث إلى الأقدم (تنازلي)
+    const dateA = String(a?.date || '').trim();
+    const dateB = String(b?.date || '').trim();
+    if (dateA !== dateB) {
+      return dateB.localeCompare(dateA);
+    }
+
+    // 3. في نفس اليوم: الترتيب حسب وقت الدخول من الأحدث إلى الأقدم (تنازلي)
+    const timeA = String(a?.timeIn || '').trim();
+    const timeB = String(b?.timeIn || '').trim();
+    if (timeA !== timeB) {
+      return timeB.localeCompare(timeA);
+    }
+
+    // 4. في حالة التطابق: الترتيب حسب وقت الإنشاء تنازلياً
+    const createdA = String(a?.createdAt || a?.id || '');
+    const createdB = String(b?.createdAt || b?.id || '');
+    return createdB.localeCompare(createdA);
+  });
+
+  // استخراج الورديات الحية وغير المكتملة
+  const unclosedLiveShift = enrichedMonthPunches.find(p => p.isLiveActive);
+  const unclosedPastShift = enrichedMonthPunches.find(p => p.isStaleUnclosed);
+  const showLiveBanner = Boolean(livePunch || unclosedLiveShift);
+  const showLeaveBanner = Boolean(approvedLeaveToday && !showLiveBanner);
+  const showPastUnclosedBanner = Boolean(unclosedPastShift && !showLiveBanner);
 
   // Group or process punches into rows
   const shiftsCount = monthPunches.length;
@@ -146,28 +243,40 @@ export default function AttendancePunchesModal({
     if (isStoppingShift) return;
     setIsStoppingShift(true);
     try {
-      const p = targetPunch || unclosedShift || livePunch;
+      const p = targetPunch || unclosedLiveShift || unclosedPastShift || livePunch;
+      if (!p) {
+        showToast?.('⚠️ لم يتم العثور على وردية مفتوحة لإنهائها');
+        setIsStoppingShift(false);
+        return;
+      }
       const todayStr = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
-      const isPastDate = p && p.date && p.date < todayStr && !p.isLiveActive;
+      const isPastDate = Boolean(p.date && p.date < todayStr && !p.isLiveActive);
+      const empActualId = String(employee.id || '');
+      const empCode = employee.code ? String(employee.code) : '';
 
-      // 1. إذا كانت الوردية لليوم الحالي ونشطة في activeShifts، نستدعي stopShift الأساسي
-      if (!isPastDate && typeof stopShift === 'function' && state.activeShifts && (state.activeShifts[employee.id] || (employee.code && state.activeShifts[String(employee.code)]))) {
-        const res = await stopShift(employee.id);
-        if (res && res.success) {
-          showToast?.('⏹ تم إنهاء وردية الموظف بنجاح وتسجيل وقت الانصراف');
-          setIsStoppingShift(false);
-          return;
+      // 1. إذا كانت الوردية نشطة في activeShifts أو محرك الحضور، نحاول أولاً عبر stopShift الأساسي
+      if (!isPastDate && typeof stopShift === 'function' && state.activeShifts && (state.activeShifts[employee.id] || state.activeShifts[empActualId] || (empCode && state.activeShifts[empCode]))) {
+        try {
+          const res = await stopShift(employee.id);
+          if (res && res.success) {
+            showToast?.('⏹ تم إنهاء وردية الموظف بنجاح وتسجيل وقت الانصراف');
+            setIsStoppingShift(false);
+            return;
+          }
+        } catch (stopErr) {
+          console.warn('[AttendancePunchesModal] stopShift engine call failed, continuing to direct closure:', stopErr);
         }
       }
 
       // 2. معالجة وإنهاء الوردية المفتوحة مباشرة وتحديث shifts
       const nowStr = new Date().toTimeString().slice(0, 5);
+      const schedH = parseFloat(p?.scheduledHours || employee.workHoursPerDay || employee.workHours || 8);
       let calculatedTimeOut = nowStr;
-      if (isPastDate && p) {
-        const schedH = p.scheduledHours || employee.workHoursPerDay || 8;
+
+      if (p && p.timeIn && p.timeIn !== '—') {
         const [inH, inM] = String(p.timeIn || '09:00').split(':').map(Number);
         if (!isNaN(inH)) {
-          let outTotalMins = (inH * 60 + (inM || 0) + schedH * 60) % (24 * 60);
+          let outTotalMins = (inH * 60 + (inM || 0) + Math.round(schedH * 60)) % (24 * 60);
           const outH = Math.floor(outTotalMins / 60);
           const outM = outTotalMins % 60;
           calculatedTimeOut = `${String(outH).padStart(2, '0')}:${String(outM).padStart(2, '0')}`;
@@ -186,14 +295,17 @@ export default function AttendancePunchesModal({
       const profileHours = parseFloat(employee.workHoursPerDay || employee.workHours || 8);
       const regHours = Math.min(calcHours, profileHours);
 
-      const targetShiftId = p?.id;
-      const updatedShifts = (state.shifts || []).map(s => {
-        const isMatch = s.id === targetShiftId || (
-          p && (String(s.employeeId) === String(p.employeeId) || (employee.code && String(s.employeeCode) === String(employee.code))) &&
-          s.date === p.date &&
-          (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive)
+      const targetShiftId = p?.id ? String(p.id) : '';
+      let shiftUpdated = false;
+
+      let updatedShifts = (state.shifts || []).map(s => {
+        const isMatch = (targetShiftId && String(s.id) === targetShiftId) || (
+          p && (String(s.employeeId) === empActualId || (empCode && (String(s.employeeCode) === empCode || String(s.employeeId) === empCode))) &&
+          (s.date === p.date || (!s.timeOut && !s.date)) &&
+          (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive)
         );
         if (isMatch) {
+          shiftUpdated = true;
           return {
             ...s,
             timeOut: calculatedTimeOut,
@@ -204,30 +316,96 @@ export default function AttendancePunchesModal({
             isLiveActive: false,
             status: 'completed',
             statusLabel: 'حضور مكتمل (إنهاء الإدارة)',
-            note: 'تم إنهاء الوردية واعتماد ساعات العمل من قِبل الإدارة',
+            note: p.date < todayStr ? 'تم إغلاق الوردية السابقة واعتماد ساعاتها من الإدارة' : 'تم إنهاء الوردية واعتماد ساعات العمل من قِبل الإدارة',
             updatedAt: new Date().toISOString()
           };
         }
         return s;
       });
 
-      // تنظيف شامل للموظف من activeShifts
+      // إذا لم يكن السجل موجوداً أصلاً في state.shifts (مثلاً كان مسجلاً فقط في activeShifts) نضيفه
+      if (!shiftUpdated && p) {
+        const newClosedShift = {
+          id: p.id && !String(p.id).startsWith('active_') ? p.id : `shift_${empActualId}_${Date.now()}`,
+          employeeId: employee.id,
+          employeeCode: employee.code || '',
+          employeeName: employee.name || '',
+          branchId: p.branchId || employee.branchId || '',
+          branchName: p.branchName || employee.branchName || '',
+          date: p.date || todayStr,
+          timeIn: inTime,
+          timeOut: calculatedTimeOut,
+          hours: regHours,
+          netHours: calcHours,
+          actualWorkedHours: calcHours,
+          regularHours: regHours,
+          scheduledHours: schedH,
+          breakHours: bHours,
+          isLiveActive: false,
+          status: 'completed',
+          statusLabel: 'حضور مكتمل (إنهاء الإدارة)',
+          note: 'تم إنهاء الوردية واعتماد ساعات العمل من قِبل الإدارة',
+          createdAt: p.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        updatedShifts = [newClosedShift, ...updatedShifts];
+      }
+
+      // تنظيف شامل ومطلق لكافة مفاتيح الموظف في activeShifts
       const updatedActive = { ...(state.activeShifts || {}) };
       delete updatedActive[employee.id];
-      delete updatedActive[String(employee.id)];
-      if (employee.code) delete updatedActive[String(employee.code)];
+      delete updatedActive[empActualId];
+      if (empCode) delete updatedActive[empCode];
+
+      Object.keys(updatedActive).forEach((k) => {
+        const v = updatedActive[k];
+        if (
+          k === empActualId ||
+          (empCode && k === empCode) ||
+          (v && (
+            String(v.employeeId) === empActualId ||
+            (empCode && (String(v.employeeId) === empCode || String(v.employeeCode) === empCode)) ||
+            (v.id && (v.id === p?.id || v.id === targetShiftId)) ||
+            (v.shiftId && (v.shiftId === p?.id || v.shiftId === targetShiftId)) ||
+            (v.date === p?.date && (String(v.employeeId) === empActualId || String(v.employeeCode) === empCode))
+          ))
+        ) {
+          delete updatedActive[k];
+        }
+      });
+
+      const endedEmpIds = Array.from(new Set([
+        ...(state._endedShiftEmpIds || []),
+        employee.id,
+        empActualId,
+        empCode
+      ].filter(Boolean)));
 
       const nextState = {
         ...state,
         shifts: updatedShifts,
-        activeShifts: updatedActive
+        activeShifts: updatedActive,
+        _endedShiftEmpIds: endedEmpIds
       };
+
+      // تحديث فوري للحالة المحلية لتختفي شارة الوردية فوراً
+      if (typeof setState === 'function') {
+        setState(nextState);
+      }
+
+      // دفع ذري مباشر ومتسلسل إلى السيرفر عبر apiSaveSettingsSlice
+      try {
+        await apiSaveSettingsSlice('activeShifts', updatedActive);
+        await apiSaveSettingsSlice('shifts', updatedShifts);
+        await apiSaveSettingsSlice('_endedShiftEmpIds', endedEmpIds);
+      } catch (sliceErr) {
+        console.warn('[AttendancePunchesModal] Direct slice save error:', sliceErr);
+      }
 
       if (typeof saveState === 'function') {
         await saveState(nextState);
-      } else if (typeof setState === 'function') {
-        setState(nextState);
       }
+
       showToast?.('⏹ تم إنهاء وردية الموظف بنجاح وتسجيل وقت الانصراف');
     } catch (err) {
       console.error('Error ending shift from modal:', err);
@@ -237,7 +415,7 @@ export default function AttendancePunchesModal({
     }
   };
 
-  const handleStopLiveShift = () => handleStopShiftForRow(unclosedShift || livePunch);
+  const handleStopLiveShift = () => handleStopShiftForRow(unclosedLiveShift || livePunch || unclosedPastShift);
   const manualCount = getEmployeeManualPunchesCount(employee.id, state, activePeriodFilter);
 
   const totalBreakHours = monthPunches
@@ -246,15 +424,21 @@ export default function AttendancePunchesModal({
 
   const getApprovedOtHours = (p) => {
     if (!p) return 0;
-    const isApproved = p.overtimeStatus === 'approved' || (parseFloat(p.overtimeHours) > 0 && (p.adminApproved || p.isAdminCreated));
-    return isApproved ? (parseFloat(p.overtimeHours) || 0) : 0;
+    const m = getShiftHoursMetrics(p, state);
+    return m.isOvertimeApproved ? m.overtimeHours : 0;
   };
 
   const totalRegularHours = monthPunches
-    .reduce((acc, p) => acc + getEffectiveShiftHours(p, state), 0);
+    .reduce((acc, p) => acc + getShiftHoursMetrics(p, state).regularHours, 0);
 
   const totalApprovedOtHours = monthPunches
-    .reduce((acc, p) => acc + getApprovedOtHours(p), 0);
+    .reduce((acc, p) => acc + (getShiftHoursMetrics(p, state).isOvertimeApproved ? getShiftHoursMetrics(p, state).overtimeHours : 0), 0);
+
+  const totalPendingOtHours = monthPunches
+    .reduce((acc, p) => {
+      const m = getShiftHoursMetrics(p, state);
+      return acc + (m.overtimeStatus === 'pending' ? m.overtimeHours : 0);
+    }, 0);
 
   const totalWorkHours = (totalRegularHours + totalApprovedOtHours).toFixed(2);
 
@@ -810,14 +994,14 @@ export default function AttendancePunchesModal({
                       🌙 وردية ليلية بدأت أمس
                     </span>
                   )}
-                  تاريخ البدء: <strong>{(livePunch || unclosedShift)?.date}</strong> | وقت الدخول: <strong>{(livePunch || unclosedShift)?.timeIn}</strong>
-                  {livePunch ? ` | المنقضي حتى الآن: ${activeElapsedHours} ساعة` : ' | الحالة: غير منتهية (قيد العمل)'}
+                  تاريخ البدء: <strong>{(livePunch || unclosedLiveShift)?.date}</strong> | وقت الدخول: <strong>{(livePunch || unclosedLiveShift)?.timeIn}</strong>
+                  {livePunch ? ` | المنقضي حتى الآن: ${activeElapsedHours} ساعة` : ' | الحالة: قيد العمل الآن'}
                 </div>
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               {(() => {
-                const liveObj = livePunch || unclosedShift;
+                const liveObj = livePunch || unclosedLiveShift;
                 const meth = getPunchMethodDetails(liveObj);
                 return (
                   <span style={{
@@ -868,6 +1052,58 @@ export default function AttendancePunchesModal({
           </div>
         )}
 
+        {showLeaveBanner && (
+          <div style={{ background: '#f0f9ff', border: '1.5px solid #0284c7', borderRadius: '12px', padding: '14px 18px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', boxShadow: '0 4px 12px rgba(2, 132, 199, 0.08)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '26px' }}>🏖️</span>
+              <div>
+                <strong style={{ color: '#0369a1', fontSize: '15px' }}>
+                  الموظف في إجازة معتمدة رسمية ({approvedLeaveToday.leaveType === 'unpaid' ? 'إجازة بدون أجر' : approvedLeaveToday.leaveType === 'sick' ? 'إجازة مرضية' : 'إجازة سنوية'})
+                </strong>
+                <div style={{ fontSize: '13px', color: '#0284c7', marginTop: '3px' }}>
+                  فترة الإجازة: من <strong>{approvedLeaveToday.startDate}</strong> إلى <strong>{approvedLeaveToday.endDate || approvedLeaveToday.startDate}</strong> ({approvedLeaveToday.daysCount || 1} يوم) | الحالة: معتمدة ومسجلة بالنظام
+                </div>
+              </div>
+            </div>
+            <span style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #7dd3fc', padding: '5px 14px', borderRadius: '20px', fontWeight: '800', fontSize: '12px' }}>
+              🏖️ في إجازة معتمدة
+            </span>
+          </div>
+        )}
+
+        {showPastUnclosedBanner && (
+          <div style={{ background: '#fffbeb', border: '1.5px solid #f59e0b', borderRadius: '12px', padding: '14px 18px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', boxShadow: '0 4px 12px rgba(245, 158, 11, 0.08)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '26px' }}>⚠️</span>
+              <div>
+                <strong style={{ color: '#b45309', fontSize: '15px' }}>
+                  توجد وردية سابقة غير مغلقة لم يتم تسجيل انصراف لها
+                </strong>
+                <div style={{ fontSize: '13px', color: '#92400e', marginTop: '3px' }}>
+                  تاريخ البدء: <strong>{unclosedPastShift.date}</strong> | وقت الدخول: <strong>{unclosedPastShift.timeIn}</strong> | الحالة: معلقة (سابقة)
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button
+                className="btn btn-warning"
+                style={{ padding: '7px 16px', fontSize: '12.5px', background: '#d97706', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 800, cursor: isStoppingShift ? 'not-allowed' : 'pointer' }}
+                disabled={isStoppingShift}
+                onClick={() => handleStopShiftForRow(unclosedPastShift)}
+              >
+                {isStoppingShift ? 'جاري الإغلاق...' : '⏹ إغلاق الوردية السابقة'}
+              </button>
+              <button
+                className="del-btn"
+                style={{ padding: '7px 14px', fontSize: '12.5px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 800, cursor: 'pointer' }}
+                onClick={() => handleDeletePunch(unclosedPastShift)}
+              >
+                🗑️ حذف السجل غير المكتمل
+              </button>
+            </div>
+          </div>
+        )}
+
         {isMultiBranch ? (
           <div>
             {employee.branchesDetails.map((bd) => {
@@ -886,12 +1122,12 @@ export default function AttendancePunchesModal({
 
               const bShiftsCount = bPunches.length;
               const bTotalBreak = bPunches.reduce((acc, p) => acc + (parseFloat(p.breakHours) || 0), 0).toFixed(2);
-              const bTotalWork = bPunches.reduce((acc, p) => acc + (getEffectiveShiftHours(p, state) || 0) + getApprovedOtHours(p), 0).toFixed(2);
+              const bTotalWork = bPunches.reduce((acc, p) => acc + getShiftHoursMetrics(p, state).payableHours, 0).toFixed(2);
               const bRate = getBranchRate(bId);
               const bTotalEarned = bPunches.reduce((acc, p) => {
                 const isRej = p.isRejectedPhoto || p.status === 'rejected_photo' || (typeof p.statusLabel === 'string' && p.statusLabel.includes('رفض الصورة'));
                 if (isRej) return acc;
-                return acc + ((getEffectiveShiftHours(p, state) || 0) + getApprovedOtHours(p)) * bRate;
+                return acc + (getShiftHoursMetrics(p, state).payableHours * bRate);
               }, 0).toFixed(2);
 
               return (
@@ -938,15 +1174,48 @@ export default function AttendancePunchesModal({
                             const dayName = pDate.toLocaleDateString('ar-EG', { weekday: 'long' });
                             const dateStr = p.date || pDate.toISOString().slice(0, 10);
                             const isRejectedPhoto = p.isRejectedPhoto || p.status === 'rejected_photo' || (typeof p.statusLabel === 'string' && p.statusLabel.includes('رفض الصورة'));
-                            const regH = getEffectiveShiftHours(p, state);
-                            const otH = getApprovedOtHours(p);
-                            const totalH = (regH + otH).toFixed(2);
-                            const breakH = p.breakHours ? parseFloat(p.breakHours).toFixed(2) : null;
-                            const shiftEarned = isRejectedPhoto ? '0.00' : ((regH + otH) * bRate).toFixed(2);
+                            const shiftMetrics = getShiftHoursMetrics(p, state);
+                            const regH = shiftMetrics.regularHours;
+                            const otH = shiftMetrics.isOvertimeApproved ? shiftMetrics.overtimeHours : 0;
+                            const totalH = shiftMetrics.displayNetHours.toFixed(2);
+                            const breakH = shiftMetrics.breakHours > 0 ? shiftMetrics.breakHours.toFixed(2) : (p.breakHours ? parseFloat(p.breakHours).toFixed(2) : null);
+                            const shiftEarned = isRejectedPhoto ? '0.00' : (shiftMetrics.payableHours * bRate).toFixed(2);
+                            const pendingOtAmount = (!shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0)
+                              ? (shiftMetrics.overtimeHours * bRate).toFixed(2)
+                              : null;
 
                             const perm = isApprovedPermissionForDate(employee?.id, dateStr, state);
                             const hasPerm = p.hasApprovedPermission || !!perm;
                             const permHours = p.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+
+                            const linkedOtReq = (state?.requests || []).find(r => 
+                              (r.id && (r.id === p.linkedRequestId || r.id === p.overtimeRequestId)) ||
+                              ((String(r.employeeId) === String(employee?.id) || String(r.empId) === String(employee?.id)) &&
+                               (r.date === dateStr || r.targetDate === dateStr || r.details?.shiftDate === dateStr) &&
+                               (r.type === 'overtime' || r.type === 'طلب اضافي' || r.type === 'إضافي'))
+                            );
+                            const effectiveOtStatus = linkedOtReq ? (linkedOtReq.status === 'approved' ? 'approved' : linkedOtReq.status === 'rejected' ? 'rejected' : 'pending') : p.overtimeStatus;
+                            const effectiveOtHours = parseFloat(linkedOtReq?.hours || p.overtimeHours || (effectiveOtStatus === 'approved' ? otH : 0) || 0);
+
+                            const linkedPenaltyReq = (state?.requests || []).find(r => 
+                              (r.id && (r.id === p.penaltyRequestId || r.id === p.linkedPenaltyId)) ||
+                              ((String(r.employeeId) === String(employee?.id) || String(r.empId) === String(employee?.id)) &&
+                               (r.date === dateStr || r.targetDate === dateStr || r.details?.shiftDate === dateStr) &&
+                               (r.type === 'penalty' || r.type === 'جزاء' || r.type === 'خصم' || r.type === 'إنذار' || r.type === 'disciplinary'))
+                            );
+                            const effectivePenaltyStatus = linkedPenaltyReq ? (linkedPenaltyReq.status === 'approved' ? 'approved' : linkedPenaltyReq.status === 'rejected' ? 'rejected' : 'pending') : (p.penaltyStatus || null);
+
+                            let cleanNotes = p.notes || p.note || p.statusLabel || '';
+                            if (effectiveOtStatus === 'approved') {
+                              cleanNotes = cleanNotes.replace(/إضافي\s*قيد\s*الاعتماد/g, 'إضافي معتمد').replace(/قيد\s*الاعتماد/g, 'معتمد');
+                            } else if (effectiveOtStatus === 'rejected') {
+                              cleanNotes = cleanNotes.replace(/إضافي\s*قيد\s*الاعتماد/g, 'إضافي مرفوض').replace(/قيد\s*الاعتماد/g, 'مرفوض');
+                            }
+                            if (effectivePenaltyStatus === 'approved') {
+                              cleanNotes = cleanNotes.replace(/جزاء\s*قيد\s*الاعتماد/g, 'جزاء معتمد').replace(/خصم\s*قيد\s*الاعتماد/g, 'خصم معتمد');
+                            } else if (effectivePenaltyStatus === 'rejected') {
+                              cleanNotes = cleanNotes.replace(/جزاء\s*قيد\s*الاعتماد/g, 'جزاء مرفوض / ملغي').replace(/خصم\s*قيد\s*الاعتماد/g, 'خصم مرفوض / ملغي');
+                            }
 
                             return (
                               <tr key={p.id || index} style={{ background: isRejectedPhoto ? '#fff1f2' : (hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent') }}>
@@ -1032,10 +1301,12 @@ export default function AttendancePunchesModal({
                                     </div>
                                   ) : (
                                     <>
-                                      {totalH} ساعة
-                                      {otH > 0 && (
-                                        <div style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: 700, marginTop: '2px' }}>
-                                          (أساسي: {regH.toFixed(2)} س + إضافي: {otH.toFixed(2)} س)
+                                      <div style={{ fontSize: '13px' }}>{totalH} ساعة</div>
+                                      {shiftMetrics.overtimeHours > 0 && (
+                                        <div style={{ fontSize: '10.5px', marginTop: '2px', fontWeight: 700, color: shiftMetrics.isOvertimeApproved ? '#16a34a' : shiftMetrics.overtimeStatus === 'rejected' ? '#dc2626' : '#b45309' }}>
+                                          {shiftMetrics.isOvertimeApproved && `(أساسي: ${regH.toFixed(2)} س + إضافي: ${shiftMetrics.overtimeHours.toFixed(2)} س)`}
+                                          {shiftMetrics.overtimeStatus === 'pending' && `(أساسي: ${regH.toFixed(2)} س + إضافي: ${shiftMetrics.overtimeHours.toFixed(2)} س قيد الاعتماد)`}
+                                          {shiftMetrics.overtimeStatus === 'rejected' && `(معتمد: ${regH.toFixed(2)} س | إضافي مرفوض: ${shiftMetrics.overtimeHours.toFixed(2)} س)`}
                                         </div>
                                       )}
                                       {hasPerm && permHours > 0 && (
@@ -1043,24 +1314,24 @@ export default function AttendancePunchesModal({
                                           (فعلي: {(Math.max(0, regH - permHours)).toFixed(2)} س + إذن: {permHours} س)
                                         </div>
                                       )}
-                                      {p.overtimeStatus === 'approved' && parseFloat(p.overtimeHours) > 0 && (
+                                      {shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeHours > 0 && (
                                         <div style={{ marginTop: '3px' }}>
                                           <span style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
-                                            ✅ إضافي معتمد (+{parseFloat(p.overtimeHours).toFixed(2)} س)
+                                            ✅ إضافي معتمد (+{shiftMetrics.overtimeHours.toFixed(2)} س)
                                           </span>
                                         </div>
                                       )}
-                                      {p.overtimeStatus === 'rejected' && (
+                                      {shiftMetrics.overtimeStatus === 'rejected' && (
                                         <div style={{ marginTop: '3px' }}>
                                           <span style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
-                                            ❌ إضافي مرفوض {parseFloat(p.overtimeHours || p.rejectedOvertimeHours || 0) > 0 ? `(${parseFloat(p.overtimeHours || p.rejectedOvertimeHours).toFixed(2)} س)` : ''}
+                                            ❌ إضافي مرفوض ({shiftMetrics.overtimeHours.toFixed(2)} س)
                                           </span>
                                         </div>
                                       )}
-                                      {p.overtimeStatus === 'pending' && parseFloat(p.overtimeHours) > 0 && (
+                                      {shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0 && (
                                         <div style={{ marginTop: '3px' }}>
                                           <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
-                                            ⏳ إضافي قيد الاعتماد (+{parseFloat(p.overtimeHours).toFixed(2)} س)
+                                            ⏳ إضافي قيد الاعتماد (+{shiftMetrics.overtimeHours.toFixed(2)} س)
                                           </span>
                                         </div>
                                       )}
@@ -1074,32 +1345,70 @@ export default function AttendancePunchesModal({
                                       <div style={{ fontSize: '10px', color: '#dc2626' }}>ملغاة من الراتب</div>
                                     </div>
                                   ) : (
-                                    `${shiftEarned} ج.م`
+                                    <>
+                                      <div style={{ fontWeight: 800 }}>{shiftEarned} ج.م</div>
+                                      {pendingOtAmount && (
+                                        <div style={{ fontSize: '9.5px', color: '#b45309', fontWeight: 700, marginTop: '2px' }} title="مبلغ الوقت الإضافي بانتظار اعتماد الإدارة">
+                                          (+{pendingOtAmount} ج.م معلق)
+                                        </div>
+                                      )}
+                                    </>
                                   )}
                                 </td>
                                 <td style={{ fontSize: '12px', color: isRejectedPhoto ? '#b91c1c' : (hasPerm ? '#047857' : 'var(--muted)') }}>
                                   {isRejectedPhoto ? (
                                     <div>
                                       <strong style={{ color: '#dc2626', display: 'block' }}>⚠️ تم رفض البصمة بسبب رفض الصورة</strong>
-                                      <span style={{ fontSize: '11px', color: '#7f1d1d' }}>{p.notes || p.note || 'مستبعدة تماماً من احتساب الأجور'}</span>
+                                      <span style={{ fontSize: '11px', color: '#7f1d1d' }}>{cleanNotes || 'مستبعدة تماماً من احتساب الأجور'}</span>
                                     </div>
                                   ) : hasPerm ? (
                                     <div>
                                       <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
-                                      {p.notes && !p.notes.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{p.notes}</div>}
-                                    </div>
-                                  ) : p.overtimeStatus === 'rejected' ? (
-                                    <div>
-                                      <strong style={{ color: '#dc2626', display: 'block' }}>❌ تم رفض الساعات الإضافية من قِبل الإدارة</strong>
-                                      <span style={{ fontSize: '11px', color: '#7f1d1d' }}>{p.notes || p.note || `احتساب ساعات الوردية الأساسية فقط (${p.regularHours || p.hours} س)`}</span>
-                                    </div>
-                                  ) : p.overtimeStatus === 'approved' && parseFloat(p.overtimeHours) > 0 ? (
-                                    <div>
-                                      <strong style={{ color: '#16a34a', display: 'block' }}>✅ ساعات إضافية معتمدة (+{parseFloat(p.overtimeHours).toFixed(2)} س)</strong>
-                                      <span style={{ fontSize: '11px', color: '#047857' }}>{p.notes || p.note || 'تمت إضافة الساعات لصافي الاستحقاق'}</span>
+                                      {cleanNotes && !cleanNotes.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{cleanNotes}</div>}
                                     </div>
                                   ) : (
-                                    p.notes || p.note || p.statusLabel || 'تسجيل بصمة عادية'
+                                    <div>
+                                      {/* Penalty status badges */}
+                                      {effectivePenaltyStatus === 'approved' && (
+                                        <div style={{ marginBottom: '4px' }}>
+                                          <span style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #f87171', padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800, display: 'inline-block' }}>
+                                            ⚖️ جزاء معتمد {linkedPenaltyReq?.details?.penaltyDays ? `(${linkedPenaltyReq.details.penaltyDays} يوم)` : linkedPenaltyReq?.amount ? `(${linkedPenaltyReq.amount} ج.م)` : ''}
+                                          </span>
+                                          {linkedPenaltyReq?.details?.penaltyReason && (
+                                            <div style={{ fontSize: '10px', color: '#991b1b', marginTop: '1px' }}>{linkedPenaltyReq.details.penaltyReason}</div>
+                                          )}
+                                        </div>
+                                      )}
+                                      {effectivePenaltyStatus === 'rejected' && (
+                                        <div style={{ marginBottom: '4px' }}>
+                                          <span style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800, display: 'inline-block' }}>
+                                            🛡️ تم رفض / إلغاء الجزاء من الإدارة
+                                          </span>
+                                        </div>
+                                      )}
+                                      {effectivePenaltyStatus === 'pending' && (
+                                        <div style={{ marginBottom: '4px' }}>
+                                          <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800, display: 'inline-block' }}>
+                                            ⏳ جزاء قيد المراجعة والاعتماد
+                                          </span>
+                                        </div>
+                                      )}
+
+                                      {/* Overtime status messages */}
+                                      {effectiveOtStatus === 'rejected' ? (
+                                        <div>
+                                          <strong style={{ color: '#dc2626', display: 'block' }}>❌ تم رفض الساعات الإضافية من قِبل الإدارة</strong>
+                                          <span style={{ fontSize: '11px', color: '#7f1d1d' }}>{cleanNotes || `احتساب ساعات الوردية الأساسية فقط (${p.regularHours || p.hours} س)`}</span>
+                                        </div>
+                                      ) : effectiveOtStatus === 'approved' && effectiveOtHours > 0 ? (
+                                        <div>
+                                          <strong style={{ color: '#16a34a', display: 'block' }}>✅ ساعات إضافية معتمدة (+{effectiveOtHours.toFixed(2)} س)</strong>
+                                          <span style={{ fontSize: '11px', color: '#047857' }}>{cleanNotes || 'تمت إضافة الساعات لصافي الاستحقاق'}</span>
+                                        </div>
+                                      ) : (
+                                        <span>{cleanNotes || 'تسجيل بصمة عادية'}</span>
+                                      )}
+                                    </div>
                                   )}
                                 </td>
                                 <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
@@ -1117,6 +1426,37 @@ export default function AttendancePunchesModal({
                                           onClick={() => handleStopShiftForRow(p)}
                                         >
                                           ⏹ إنهاء
+                                        </button>
+                                        <button
+                                          className="btn btn-ghost"
+                                          style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
+                                          title="تعديل البصمة"
+                                          onClick={() => handleOpenEdit(p)}
+                                        >
+                                          ✏️
+                                        </button>
+                                        <button
+                                          className="del-btn"
+                                          style={{ padding: '3px 6px', fontSize: '11px' }}
+                                          title="حذف البصمة"
+                                          onClick={() => handleDeletePunch(p)}
+                                        >
+                                          🗑️
+                                        </button>
+                                      </>
+                                    ) : p.isStaleUnclosed ? (
+                                      <>
+                                        <span style={{ color: '#b45309', fontSize: '11px', fontWeight: '800', background: '#fffbeb', padding: '3px 8px', borderRadius: '6px', border: '1px solid #fde68a' }}>
+                                          ⚠️ غير مكتملة
+                                        </span>
+                                        <button
+                                          className="btn btn-warning"
+                                          style={{ padding: '3px 8px', fontSize: '11px', background: '#d97706', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 800, cursor: isStoppingShift ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}
+                                          title="إغلاق الوردية السابقة واعتماد ساعاتها"
+                                          disabled={isStoppingShift}
+                                          onClick={() => handleStopShiftForRow(p)}
+                                        >
+                                          ⏹ إغلاق
                                         </button>
                                         <button
                                           className="btn btn-ghost"
@@ -1226,12 +1566,16 @@ export default function AttendancePunchesModal({
                     const dayName = pDate.toLocaleDateString('ar-EG', { weekday: 'long' });
                     const dateStr = p.date || pDate.toISOString().slice(0, 10);
                     const isRejectedPhoto = p.isRejectedPhoto || p.status === 'rejected_photo' || (typeof p.statusLabel === 'string' && p.statusLabel.includes('رفض الصورة'));
-                    const regH = getEffectiveShiftHours(p, state);
-                    const otH = getApprovedOtHours(p);
-                    const totalH = (regH + otH).toFixed(2);
-                    const breakH = p.breakHours ? parseFloat(p.breakHours).toFixed(2) : null;
+                    const shiftMetrics = getShiftHoursMetrics(p, state);
+                    const regH = shiftMetrics.regularHours;
+                    const otH = shiftMetrics.isOvertimeApproved ? shiftMetrics.overtimeHours : 0;
+                    const totalH = shiftMetrics.displayNetHours.toFixed(2);
+                    const breakH = shiftMetrics.breakHours > 0 ? shiftMetrics.breakHours.toFixed(2) : (p.breakHours ? parseFloat(p.breakHours).toFixed(2) : null);
                     const shiftRate = getBranchRate(p.branchId || employee.branchId);
-                    const shiftEarned = isRejectedPhoto ? '0.00' : ((regH + otH) * shiftRate).toFixed(2);
+                    const shiftEarned = isRejectedPhoto ? '0.00' : (shiftMetrics.payableHours * shiftRate).toFixed(2);
+                    const pendingOtAmount = (!shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0)
+                      ? (shiftMetrics.overtimeHours * shiftRate).toFixed(2)
+                      : null;
 
                     const perm = isApprovedPermissionForDate(employee?.id, dateStr, state);
                     const hasPerm = p.hasApprovedPermission || !!perm;
@@ -1360,10 +1704,12 @@ export default function AttendancePunchesModal({
                             </div>
                           ) : (
                             <>
-                              {totalH} ساعة
-                              {otH > 0 && (
-                                <div style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: 700, marginTop: '2px' }}>
-                                  (أساسي: {regH.toFixed(2)} س + إضافي: {otH.toFixed(2)} س)
+                              <div style={{ fontSize: '13px' }}>{totalH} ساعة</div>
+                              {shiftMetrics.overtimeHours > 0 && (
+                                <div style={{ fontSize: '10.5px', marginTop: '2px', fontWeight: 700, color: shiftMetrics.isOvertimeApproved ? '#16a34a' : shiftMetrics.overtimeStatus === 'rejected' ? '#dc2626' : '#b45309' }}>
+                                  {shiftMetrics.isOvertimeApproved && `(أساسي: ${regH.toFixed(2)} س + إضافي: ${shiftMetrics.overtimeHours.toFixed(2)} س)`}
+                                  {shiftMetrics.overtimeStatus === 'pending' && `(أساسي: ${regH.toFixed(2)} س + إضافي: ${shiftMetrics.overtimeHours.toFixed(2)} س قيد الاعتماد)`}
+                                  {shiftMetrics.overtimeStatus === 'rejected' && `(معتمد: ${regH.toFixed(2)} س | إضافي مرفوض: ${shiftMetrics.overtimeHours.toFixed(2)} س)`}
                                 </div>
                               )}
                               {hasPerm && permHours > 0 && (
@@ -1371,24 +1717,24 @@ export default function AttendancePunchesModal({
                                   (فعلي: {(Math.max(0, regH - permHours)).toFixed(2)} س + إذن: {permHours} س)
                                 </div>
                               )}
-                              {p.overtimeStatus === 'approved' && parseFloat(p.overtimeHours) > 0 && (
+                              {shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeHours > 0 && (
                                 <div style={{ marginTop: '3px' }}>
                                   <span style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
-                                    ✅ إضافي معتمد (+{parseFloat(p.overtimeHours).toFixed(2)} س)
+                                    ✅ إضافي معتمد (+{shiftMetrics.overtimeHours.toFixed(2)} س)
                                   </span>
                                 </div>
                               )}
-                              {p.overtimeStatus === 'rejected' && (
+                              {shiftMetrics.overtimeStatus === 'rejected' && (
                                 <div style={{ marginTop: '3px' }}>
                                   <span style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
-                                    ❌ إضافي مرفوض {parseFloat(p.overtimeHours || p.rejectedOvertimeHours || 0) > 0 ? `(${parseFloat(p.overtimeHours || p.rejectedOvertimeHours).toFixed(2)} س)` : ''}
+                                    ❌ إضافي مرفوض ({shiftMetrics.overtimeHours.toFixed(2)} س)
                                   </span>
                                 </div>
                               )}
-                              {p.overtimeStatus === 'pending' && parseFloat(p.overtimeHours) > 0 && (
+                              {shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0 && (
                                 <div style={{ marginTop: '3px' }}>
                                   <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
-                                    ⏳ إضافي قيد الاعتماد (+{parseFloat(p.overtimeHours).toFixed(2)} س)
+                                    ⏳ إضافي قيد الاعتماد (+{shiftMetrics.overtimeHours.toFixed(2)} س)
                                   </span>
                                 </div>
                               )}
@@ -1404,7 +1750,14 @@ export default function AttendancePunchesModal({
                               <div style={{ fontSize: '10px', color: '#dc2626' }}>ملغاة من الراتب</div>
                             </div>
                           ) : (
-                            `${shiftEarned} ج.م`
+                            <>
+                              <div style={{ fontWeight: 800 }}>{shiftEarned} ج.م</div>
+                              {pendingOtAmount && (
+                                <div style={{ fontSize: '9.5px', color: '#b45309', fontWeight: 700, marginTop: '2px' }} title="مبلغ الوقت الإضافي بانتظار اعتماد الإدارة">
+                                  (+{pendingOtAmount} ج.م معلق)
+                                </div>
+                              )}
+                            </>
                           )}
                         </td>
 
@@ -1451,6 +1804,37 @@ export default function AttendancePunchesModal({
                                   onClick={() => handleStopShiftForRow(p)}
                                 >
                                   ⏹ إنهاء
+                                </button>
+                                <button
+                                  className="btn btn-ghost"
+                                  style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
+                                  title="تعديل البصمة"
+                                  onClick={() => handleOpenEdit(p)}
+                                >
+                                  ✏️
+                                </button>
+                                <button
+                                  className="del-btn"
+                                  style={{ padding: '3px 6px', fontSize: '11px' }}
+                                  title="حذف البصمة"
+                                  onClick={() => handleDeletePunch(p)}
+                                >
+                                  🗑️
+                                </button>
+                              </>
+                            ) : p.isStaleUnclosed ? (
+                              <>
+                                <span style={{ color: '#b45309', fontSize: '11px', fontWeight: '800', background: '#fffbeb', padding: '3px 8px', borderRadius: '6px', border: '1px solid #fde68a' }}>
+                                  ⚠️ غير مكتملة
+                                </span>
+                                <button
+                                  className="btn btn-warning"
+                                  style={{ padding: '3px 8px', fontSize: '11px', background: '#d97706', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 800, cursor: isStoppingShift ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}
+                                  title="إغلاق الوردية السابقة واعتماد ساعاتها"
+                                  disabled={isStoppingShift}
+                                  onClick={() => handleStopShiftForRow(p)}
+                                >
+                                  ⏹ إغلاق
                                 </button>
                                 <button
                                   className="btn btn-ghost"

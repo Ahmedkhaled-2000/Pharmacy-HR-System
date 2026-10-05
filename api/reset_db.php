@@ -7,16 +7,14 @@
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
 
-// حماية السكريبت برمز أمان
-$configuredSecret = getenv('RESET_SECRET') ?: 'reset_pharmacy_2026';
-$secret = $_GET['secret'] ?? $_POST['secret'] ?? '';
+// حماية صارمة: منع تشغيل هذا السكريبت نهائياً عبر المتصفح أو الويب
 $isCli = (php_sapi_name() === 'cli');
-
-if (!$isCli && (!is_string($secret) || !hash_equals($configuredSecret, $secret))) {
+if (!$isCli) {
     jsonResponse([
         'success' => false,
-        'error' => 'Access denied: Unauthorized maintenance request.'
+        'error' => 'Access denied: Database reset via HTTP web interface is permanently disabled for security. Use server CLI only.'
     ], 403);
+    exit();
 }
 
 try {

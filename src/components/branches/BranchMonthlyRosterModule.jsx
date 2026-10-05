@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { getResolvedEmployeeRoster } from '../roster/RosterModule';
 import { getEmpDisplayName, isEmployeeActive, getRealTodayStr, arabicMonthLabel } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
@@ -733,6 +733,22 @@ export default function BranchMonthlyRosterModule({
     return branches[0] ? String(branches[0].id) : '';
   });
 
+  // Ensure selectedBranchId stays synchronized when branch is loaded or switched
+  useEffect(() => {
+    const targetId = effectiveLockId || initialBranchId;
+    if (targetId && branches && branches.length > 0) {
+      const targetStr = String(targetId).trim();
+      const matched = branches.find(b => 
+        String(b.id) === targetStr || 
+        (b.branchCode && String(b.branchCode) === targetStr) || 
+        (b.code && String(b.code) === targetStr)
+      );
+      if (matched && String(selectedBranchId) !== String(matched.id)) {
+        setSelectedBranchId(String(matched.id));
+      }
+    }
+  }, [effectiveLockId, initialBranchId, branches, selectedBranchId]);
+
   const activeCycleDefault = useMemo(() => {
     return getActivePayrollMonth(state?.orgSettings || {});
   }, [state?.orgSettings?.payrollPayoutStartDay, state?.orgSettings?.payrollPayoutEndDay, state?.orgSettings?.payrollPeriodType]);
@@ -755,7 +771,10 @@ export default function BranchMonthlyRosterModule({
   // Branch Employees (primary branch or secondary branchDetails, excluding Branch Manager when in branch manager mode)
   const branchEmployees = useMemo(() => {
     if (!currentBranch) return [];
-    const bIdStr = String(currentBranch?.id || '');
+    const bIdStr = String(currentBranch?.id || '').trim();
+    const bCodeStr = String(currentBranch?.branchCode || currentBranch?.code || '').trim().toLowerCase();
+    const bNameStr = String(currentBranch?.name || '').trim().toLowerCase();
+
     return employees.filter(emp => {
       if (!isEmployeeActive(emp)) return false;
 
@@ -781,8 +800,24 @@ export default function BranchMonthlyRosterModule({
         }
       }
 
-      const isPrimary = String(emp.branchId || '') === bIdStr;
-      const isSecondary = Array.isArray(emp.branchesDetails) && emp.branchesDetails.some(bd => String(bd.branchId) === bIdStr);
+      const empBranchIdStr = String(emp.branchId || '').trim();
+      const empBranchCodeStr = String(emp.branchCode || '').trim().toLowerCase();
+      const empBranchNameStr = String(emp.branch || emp.branchName || '').trim().toLowerCase();
+
+      const isPrimary = 
+        (bIdStr && empBranchIdStr === bIdStr) ||
+        (bCodeStr && (empBranchCodeStr === bCodeStr || empBranchIdStr === bCodeStr)) ||
+        (bNameStr && empBranchNameStr === bNameStr);
+
+      const isSecondary = Array.isArray(emp.branchesDetails) && emp.branchesDetails.some(bd => {
+        const bdId = String(bd.branchId || '').trim();
+        const bdCode = String(bd.branchCode || bd.code || '').trim().toLowerCase();
+        const bdName = String(bd.branchName || bd.name || '').trim().toLowerCase();
+        return (bIdStr && bdId === bIdStr) ||
+               (bCodeStr && (bdCode === bCodeStr || bdId === bCodeStr)) ||
+               (bNameStr && bdName === bNameStr);
+      });
+
       return isPrimary || isSecondary;
     });
   }, [employees, currentBranch, isBranchManager, state.currentUserId]);

@@ -97,6 +97,17 @@ export default function OutstockSystemView({
   toggleTheme,
   showToast = alert
 }) {
+  const isProcurementManager = Boolean(
+    initialRole === 'procurement_manager' ||
+    initialRole === 'outstock_procurement_manager' ||
+    currentUser?.role === 'procurement_manager' ||
+    currentUser?.role === 'outstock_procurement_manager' ||
+    currentUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager' ||
+    currentUser?.outstockRole === 'procurement_manager' ||
+    currentUser?.permissions?.role === 'procurement_manager' ||
+    currentUser?.allBranchesAccess === true
+  );
+
   const [userRole, setUserRole] = useState(() => {
     let r = initialRole || currentUser?.role || 'owner';
     if (typeof r === 'string' && r.startsWith('outstock_')) {
@@ -104,6 +115,7 @@ export default function OutstockSystemView({
     }
     if (r === 'pharmacy') r = 'branch';
     if (
+      isProcurementManager ||
       ['procurement_manager', 'procurement_officer', 'cosmetics_officer', 'procurement'].includes(r) ||
       ['procurement_manager', 'procurement_officer', 'cosmetics_officer', 'procurement'].includes(currentUser?.role) ||
       currentUser?.role === 'outstock_cosmetics_officer' ||
@@ -124,6 +136,7 @@ export default function OutstockSystemView({
     }
     if (r === 'pharmacy') r = 'branch';
     if (
+      isProcurementManager ||
       ['procurement_manager', 'procurement_officer', 'cosmetics_officer', 'procurement'].includes(r) ||
       ['procurement_manager', 'procurement_officer', 'cosmetics_officer', 'procurement'].includes(currentUser?.role) ||
       currentUser?.role === 'outstock_cosmetics_officer' ||
@@ -135,7 +148,7 @@ export default function OutstockSystemView({
       r = 'procurement';
     }
     setUserRole(r);
-  }, [initialRole, currentUser]);
+  }, [initialRole, currentUser, isProcurementManager]);
 
   const isProcurementRole = userRole === 'procurement' ||
                             userRole === 'procurement_manager' ||
@@ -143,6 +156,7 @@ export default function OutstockSystemView({
                             userRole === 'cosmetics_officer' ||
                             userRole === 'outstock_procurement_officer' ||
                             userRole === 'outstock_cosmetics_officer' ||
+                            isProcurementManager ||
                             currentUser?.role === 'procurement_manager' ||
                             currentUser?.role === 'procurement_officer' ||
                             currentUser?.role === 'cosmetics_officer' ||
@@ -189,16 +203,22 @@ export default function OutstockSystemView({
     userRole === 'owner' ||
     currentUser?.role === 'owner' ||
     currentUser?.role === 'procurement_manager' ||
+    isProcurementManager ||
     currentUser?.username === 'admin-stock' ||
     effectivePermissions.can_manage_team === true
   );
 
-  const [activeBranch, setActiveBranch] = useState(currentBranch || currentUser?.branchData || {
-    id: currentUser?.branchId || currentUser?.branch_id || currentUser?.id || 'main',
-    name: currentUser?.fullName || currentUser?.name || 'فرع الصيدلية الرئيسي'
+  const [activeBranch, setActiveBranch] = useState(() => {
+    if (isProcurementManager) {
+      return { id: 'all', name: 'كافة الفروع (مركزي)' };
+    }
+    return currentBranch || currentUser?.branchData || {
+      id: currentUser?.branchId || currentUser?.branch_id || currentUser?.id || 'main',
+      name: currentUser?.fullName || currentUser?.name || 'فرع الصيدلية الرئيسي'
+    };
   });
 
-  const effectiveBranchId = activeBranch?.id || currentUser?.branchId || currentUser?.branch_id || currentUser?.id || 'main';
+  const effectiveBranchId = isProcurementManager ? 'all' : (activeBranch?.id || currentUser?.branchId || currentUser?.branch_id || currentUser?.id || 'main');
 
   // التبويب النشط
   const [activeTab, setActiveTab] = useState(() => {
@@ -406,7 +426,7 @@ export default function OutstockSystemView({
 
   // فحص الصلاحيات الدقيقة للأقسام الخمسة لإدارة الموردين
   const canAccessSuppliersTab = useMemo(() => {
-    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock') {
+    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock' || isProcurementManager) {
       return true;
     }
     if (effectivePermissions.can_access_suppliers !== true) {
@@ -421,10 +441,10 @@ export default function OutstockSystemView({
       effectivePermissions.can_access_pharmafly === true
     );
     return hasAnySubtab;
-  }, [userRole, currentUser, effectivePermissions]);
+  }, [userRole, currentUser, effectivePermissions, isProcurementManager]);
 
   const filteredSuppliersSubsections = useMemo(() => {
-    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock') {
+    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock' || isProcurementManager) {
       return PROCUREMENT_SUPPLIERS_SUBSECTIONS;
     }
     return PROCUREMENT_SUPPLIERS_SUBSECTIONS.filter((sub) => {
@@ -436,26 +456,26 @@ export default function OutstockSystemView({
       if (sub.id === 'pharmafly_sync') return effectivePermissions.can_access_pharmafly === true;
       return false;
     });
-  }, [userRole, currentUser, effectivePermissions]);
+  }, [userRole, currentUser, effectivePermissions, isProcurementManager]);
 
   // صلاحيات باقي أقسام المشتريات
   const canAccessBranchOrders = useMemo(() => {
-    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock') return true;
+    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock' || isProcurementManager) return true;
     return effectivePermissions.can_view_orders !== false;
-  }, [userRole, currentUser, effectivePermissions]);
+  }, [userRole, currentUser, effectivePermissions, isProcurementManager]);
 
   const canAccessMedicationsCatalog = useMemo(() => {
-    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock') return true;
+    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock' || isProcurementManager) return true;
     return effectivePermissions.can_edit_items === true;
-  }, [userRole, currentUser, effectivePermissions]);
+  }, [userRole, currentUser, effectivePermissions, isProcurementManager]);
 
   const canAccessProcurementWhatsApp = useMemo(() => {
-    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock') return true;
+    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock' || isProcurementManager) return true;
     return effectivePermissions.can_view_orders !== false;
-  }, [userRole, currentUser, effectivePermissions]);
+  }, [userRole, currentUser, effectivePermissions, isProcurementManager]);
 
   const filteredBranchOrdersSubsections = useMemo(() => {
-    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock') {
+    if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock' || isProcurementManager) {
       return PROCUREMENT_BRANCH_ORDERS_SUBSECTIONS;
     }
     return PROCUREMENT_BRANCH_ORDERS_SUBSECTIONS.filter((sub) => {
@@ -482,18 +502,22 @@ export default function OutstockSystemView({
 
   // قائمة التبويبات المسموح بها للمشتريات
   const allowedProcurementTabs = useMemo(() => {
-    if (userRole !== 'procurement' && !isProcurementRole) return [];
+    if (userRole !== 'procurement' && !isProcurementRole && !isProcurementManager) return [];
     const tabs = [];
     if (canAccessBranchOrders) tabs.push('branch_orders');
-    if (effectivePermissions.can_view_orders !== false || effectivePermissions.can_edit_items === true) tabs.push('procurement_inquiries');
+    if (effectivePermissions.can_view_orders !== false || effectivePermissions.can_edit_items === true || isProcurementManager) tabs.push('procurement_inquiries');
     if (canAccessBranchOrders) tabs.push('delivery_tracking');
-    if (effectivePermissions.can_view_orders !== false) tabs.push('unavailable_items');
+    if (effectivePermissions.can_view_orders !== false || isProcurementManager) tabs.push('unavailable_items');
     if (canAccessSuppliersTab) tabs.push('procurement_suppliers');
     if (canManageTeam) tabs.push('procurement_team');
     if (canAccessProcurementWhatsApp) tabs.push('procurement_whatsapp');
     if (canAccessMedicationsCatalog) tabs.push('procurement_medications');
+    if (isProcurementManager) {
+      tabs.push('owner_financial_reports');
+      tabs.push('owner_branches');
+    }
     return tabs;
-  }, [userRole, isProcurementRole, canAccessBranchOrders, effectivePermissions, canAccessSuppliersTab, canManageTeam, canAccessProcurementWhatsApp, canAccessMedicationsCatalog]);
+  }, [userRole, isProcurementRole, isProcurementManager, canAccessBranchOrders, effectivePermissions, canAccessSuppliersTab, canManageTeam, canAccessProcurementWhatsApp, canAccessMedicationsCatalog]);
 
   // التحقق من تعيين قسم فرعي مسموح به تلقائياً في الموردين
   useEffect(() => {
@@ -964,13 +988,41 @@ export default function OutstockSystemView({
           <div className="outstock-brand-info">
             <h2>نظام إدارة النواقص والمشتريات</h2>
             <p>
-              {userRole === 'owner' ? 'بوابة المالك والمشرف العام' : userRole === 'procurement' ? 'بوابة إدارة المشتريات والتوريدات' : `بوابة الصيدلية: ${activeBranch?.name || 'الفرع'}`}
+              {userRole === 'owner'
+                ? 'بوابة المالك والمشرف العام'
+                : isProcurementManager
+                ? 'بوابة مدير المشتريات (كافة الفروع 🌐)'
+                : userRole === 'procurement'
+                ? 'بوابة إدارة المشتريات والتوريدات'
+                : `بوابة الصيدلية: ${activeBranch?.name || 'الفرع'}`}
             </p>
           </div>
         </div>
 
         {/* أدوات التحكم والوضع الليلي وتسجيل الخروج */}
         <div className="outstock-user-controls">
+          {/* زر تبديل المنظومة والصفحات المصرح بها */}
+          <button
+            type="button"
+            className="outstock-btn outstock-btn-secondary"
+            style={{
+              padding: '6px 12px',
+              borderRadius: '10px',
+              background: 'rgba(13, 148, 136, 0.12)',
+              color: '#0d9488',
+              border: '1px solid rgba(13, 148, 136, 0.3)',
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+            onClick={() => window.dispatchEvent(new CustomEvent('app:open-workspace-switcher', { detail: { user: currentUser } }))}
+            title="التبديل بين المنظومات والصفحات المصرح بها (نظام HR، مدير الفرع، الإدارة العليا)"
+          >
+            <span>🔄</span>
+            <span className="outstock-btn-text-desktop">تبديل المنظومة</span>
+          </button>
+
           {/* زر شريط الأوامر السريع العالمي (Command Palette) */}
           <button
             type="button"
@@ -1085,7 +1137,15 @@ export default function OutstockSystemView({
 
           <div className="outstock-role-pill">
             <Shield size={12} />
-            <span>{userRole === 'owner' ? 'المالك' : userRole === 'procurement' ? 'المشتريات' : 'الفرع'}</span>
+            <span>
+              {userRole === 'owner'
+                ? 'المالك'
+                : isProcurementManager
+                ? 'مدير مشتريات (كافة الفروع)'
+                : userRole === 'procurement'
+                ? 'المشتريات'
+                : 'الفرع'}
+            </span>
           </div>
 
           {(() => {
@@ -1344,6 +1404,35 @@ export default function OutstockSystemView({
                   {isCosmeticsOfficer ? <Sparkles size={16} /> : <Pill size={16} />}
                   <span>{isCosmeticsOfficer ? 'كتالوج مستحضرات التجميل 💄' : 'كتالوج وتسعير الأدوية'}</span>
                 </button>
+              )}
+
+              {isProcurementManager && (
+                <>
+                  <button
+                    type="button"
+                    className={`outstock-subnav-btn ${activeTab === 'owner_financial_reports' ? 'is-active' : ''}`}
+                    onClick={() => setActiveTab('owner_financial_reports')}
+                    title="متابعة التقارير المالية ومبيعات الفروع والعربونات ونواقص السوق"
+                  >
+                    <BarChart3 size={16} />
+                    <span>التقارير المالية والأرباح</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`outstock-subnav-btn ${activeTab === 'owner_branches' ? 'is-active' : ''}`}
+                    onClick={() => setActiveTab('owner_branches')}
+                    title="طلبات الفروع وأرصدتها لكافة الفروع"
+                  >
+                    <Building2 size={16} />
+                    <span>طلبات الفروع وأرصدتها</span>
+                    {notificationsSummary.pendingBranchOrdersCount > 0 && (
+                      <span className="outstock-nav-badge" title={`${notificationsSummary.pendingBranchOrdersCount} طلب بانتظار التوريد`}>
+                        {notificationsSummary.pendingBranchOrdersCount}
+                      </span>
+                    )}
+                  </button>
+                </>
               )}
             </>
           )}
@@ -1704,8 +1793,8 @@ export default function OutstockSystemView({
           </>
         )}
 
-        {/* ── ج) تبويبات المالك ── */}
-        {userRole === 'owner' && (
+        {/* ── ج) تبويبات المالك ومدير المشتريات لكافة الفروع ── */}
+        {(userRole === 'owner' || isProcurementManager) && (
           <>
             {activeTab === 'owner_financial_reports' && (
               <OwnerFinancialReportsTab showToast={triggerNotification} />

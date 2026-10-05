@@ -28,6 +28,32 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
   const [isAddAdminModalOpen, setIsAddAdminModalOpen] = useState(false);
   const [pickerSearchQuery, setPickerSearchQuery] = useState('');
 
+  // ── Smart Kiosk Engine Settings State (Zero-Touch & Green Kiosk) ──
+  const kioskSettings = state.orgSettings?.kioskSettings || {};
+  const [localKioskSettings, setLocalKioskSettings] = useState(() => ({
+    zeroTouchKioskEnabled: Boolean(kioskSettings.zeroTouchKioskEnabled),
+    greenKioskEnergySaverEnabled: kioskSettings.greenKioskEnergySaverEnabled !== false,
+    kioskVoiceGreetingEnabled: kioskSettings.kioskVoiceGreetingEnabled !== false,
+    kioskMatchThreshold: kioskSettings.kioskMatchThreshold || 70,
+    kioskDimTimeoutSeconds: kioskSettings.kioskDimTimeoutSeconds || 60,
+  }));
+
+  const handleSaveKioskSettings = async () => {
+    const updatedState = {
+      ...state,
+      orgSettings: {
+        ...(state.orgSettings || {}),
+        kioskSettings: {
+          ...(state.orgSettings?.kioskSettings || {}),
+          ...localKioskSettings
+        }
+      }
+    };
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('✅ تم حفظ وتحديث إعدادات كشك البصمة الذكية بنجاح!');
+  };
+
   const employees = state.employees || [];
   const globalBiometricType = state.orgSettings?.biometricType || 'face';
 
@@ -549,6 +575,26 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
           }}>
             {allAdminCount}
           </span>
+        </button>
+
+        <button
+          type="button"
+          className={`btn ${activeSubTab === 'kiosk_settings' ? 'btn-start' : 'btn-ghost'}`}
+          style={{
+            padding: '10px 22px',
+            fontSize: '13.5px',
+            fontWeight: '800',
+            borderRadius: '10px',
+            background: activeSubTab === 'kiosk_settings' ? '#0d9488' : 'transparent',
+            color: activeSubTab === 'kiosk_settings' ? '#ffffff' : 'var(--text)',
+            border: activeSubTab === 'kiosk_settings' ? '1px solid #0f766e' : '1px solid var(--border)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+          onClick={() => setActiveSubTab('kiosk_settings')}
+        >
+          <span>⚡</span> إعدادات الكشك الذكي (Zero-Touch & Green Engine)
         </button>
       </div>
 
@@ -1083,6 +1129,277 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
             )}
           </tbody>
         </table>
+      </div>
+    </div>
+  )}
+
+  {/* ── SUB-TAB 3: SMART KIOSK ENGINE SETTINGS (Zero-Touch & Green Engine) ── */}
+  {activeSubTab === 'kiosk_settings' && (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {/* Banner */}
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(13, 148, 136, 0.12) 0%, rgba(2, 132, 199, 0.12) 100%)',
+        border: '1.5px solid rgba(13, 148, 136, 0.3)',
+        borderRadius: '16px',
+        padding: '20px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '16px'
+      }}>
+        <div>
+          <h3 style={{ margin: '0 0 6px 0', color: '#0f766e', fontSize: '18px', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>⚡</span> منظومة كشك البصمة الذكية فائقة التطور (Smart Kiosk Innovations)
+          </h3>
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--text)', opacity: 0.85, lineHeight: 1.6 }}>
+            تحكم كامل في تفعيل أو إيقاف تقنيات التعرف اللحظي بدون لمس (Zero-Touch) ونظام توفير الطاقة وحماية الأجهزة اللوحية (Green Engine).
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn btn-start"
+          onClick={handleSaveKioskSettings}
+          style={{ padding: '10px 24px', fontSize: '14px', fontWeight: 'bold', background: '#0d9488', display: 'flex', alignItems: 'center', gap: '8px' }}
+        >
+          <span>💾</span> حفظ التفضيلات وتطبيقها فوراً
+        </button>
+      </div>
+
+      {/* Grid of Settings Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '18px' }}>
+        
+        {/* Card 1: Zero-Touch Walk-Through Kiosk */}
+        <div style={{
+          background: 'var(--surface)',
+          border: localKioskSettings.zeroTouchKioskEnabled ? '2px solid #0d9488' : '1px solid var(--border)',
+          borderRadius: '16px',
+          padding: '22px',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          gap: '16px',
+          boxShadow: localKioskSettings.zeroTouchKioskEnabled ? '0 10px 25px -5px rgba(13, 148, 136, 0.15)' : 'none',
+          transition: 'all 0.25s ease'
+        }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '12px',
+                  background: 'rgba(13, 148, 136, 0.15)',
+                  color: '#0d9488',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '22px'
+                }}>
+                  👤
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>1. تقنية البصمة الصامتة السريعة</h4>
+                  <span style={{ fontSize: '11px', color: '#0d9488', fontWeight: 700 }}>Zero-Touch Walk-Through Kiosk</span>
+                </div>
+              </div>
+              <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '50px', height: '26px' }}>
+                <input
+                  type="checkbox"
+                  checked={localKioskSettings.zeroTouchKioskEnabled}
+                  onChange={(e) => setLocalKioskSettings(prev => ({ ...prev, zeroTouchKioskEnabled: e.target.checked }))}
+                  style={{ opacity: 0, width: 0, height: 0 }}
+                />
+                <span style={{
+                  position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                  backgroundColor: localKioskSettings.zeroTouchKioskEnabled ? '#0d9488' : '#cbd5e1',
+                  transition: '.3s', borderRadius: '34px',
+                }}>
+                  <span style={{
+                    position: 'absolute', content: '""', height: '20px', width: '20px', left: localKioskSettings.zeroTouchKioskEnabled ? '26px' : '3px', bottom: '3px',
+                    backgroundColor: 'white', transition: '.3s', borderRadius: '50%',
+                  }} />
+                </span>
+              </label>
+            </div>
+
+            <p style={{ margin: '0 0 12px 0', fontSize: '12.5px', color: 'var(--text)', lineHeight: 1.6, opacity: 0.9 }}>
+              يقف الموظف أمام الكاميرا دون الحاجة للمس الشاشة أو إدخال كود الموظف يدوياً. يتعرف النظام عليه فوراً عبر محرك ArcFace 512D ويسجل الوردية في أقل من ثانية واحدة.
+            </p>
+
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: '#ecfdf5', color: '#065f46', fontWeight: 700 }}>
+                ⚡ تسجيل في 800ms
+              </span>
+              <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: '#e0f2fe', color: '#0369a1', fontWeight: 700 }}>
+                🛡️ منع تلامس الشاشات
+              </span>
+              <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: '#fef3c7', color: '#92400e', fontWeight: 700 }}>
+                🧬 دقة فائقة 99.8%
+              </span>
+            </div>
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>الحالة الحالية للكشك:</span>
+            <span style={{
+              fontSize: '12px',
+              fontWeight: 800,
+              color: localKioskSettings.zeroTouchKioskEnabled ? '#059669' : '#dc2626'
+            }}>
+              {localKioskSettings.zeroTouchKioskEnabled ? '🟢 مفعلة بالكامل بالكشك' : '⚪ متوقفة (إدخال يدوي)'}
+            </span>
+          </div>
+        </div>
+
+        {/* Card 2: Green Kiosk Engine */}
+        <div style={{
+          background: 'var(--surface)',
+          border: localKioskSettings.greenKioskEnergySaverEnabled ? '2px solid #16a34a' : '1px solid var(--border)',
+          borderRadius: '16px',
+          padding: '22px',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          gap: '16px',
+          boxShadow: localKioskSettings.greenKioskEnergySaverEnabled ? '0 10px 25px -5px rgba(22, 163, 74, 0.15)' : 'none',
+          transition: 'all 0.25s ease'
+        }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '12px',
+                  background: 'rgba(22, 163, 74, 0.15)',
+                  color: '#16a34a',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '22px'
+                }}>
+                  🌱
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>3. وضع توفير الطاقة وحماية الشاشة</h4>
+                  <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 700 }}>Green Kiosk Engine</span>
+                </div>
+              </div>
+              <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '50px', height: '26px' }}>
+                <input
+                  type="checkbox"
+                  checked={localKioskSettings.greenKioskEnergySaverEnabled}
+                  onChange={(e) => setLocalKioskSettings(prev => ({ ...prev, greenKioskEnergySaverEnabled: e.target.checked }))}
+                  style={{ opacity: 0, width: 0, height: 0 }}
+                />
+                <span style={{
+                  position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                  backgroundColor: localKioskSettings.greenKioskEnergySaverEnabled ? '#16a34a' : '#cbd5e1',
+                  transition: '.3s', borderRadius: '34px',
+                }}>
+                  <span style={{
+                    position: 'absolute', content: '""', height: '20px', width: '20px', left: localKioskSettings.greenKioskEnergySaverEnabled ? '26px' : '3px', bottom: '3px',
+                    backgroundColor: 'white', transition: '.3s', borderRadius: '50%',
+                  }} />
+                </span>
+              </label>
+            </div>
+
+            <p style={{ margin: '0 0 12px 0', fontSize: '12.5px', color: 'var(--text)', lineHeight: 1.6, opacity: 0.9 }}>
+              يحمي أجهزة التابلت والشاشات من الاحتراق والسخونة؛ يقوم بتعتيم الشاشة وتخفيض استهلاك الكاميرا تلقائياً بعد 60 ثانية من الخمول، ويستيقظ فوراً عند اللمس أو الحركة.
+            </p>
+
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: '#dcfce7', color: '#15803d', fontWeight: 700 }}>
+                🔋 تبريد وحماية البطارية
+              </span>
+              <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: '#f1f5f9', color: '#475569', fontWeight: 700 }}>
+                🧹 تفريغ الذاكرة المستمر
+              </span>
+              <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', background: '#e0e7ff', color: '#4338ca', fontWeight: 700 }}>
+                ✨ استيقاظ لحظي
+              </span>
+            </div>
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>الحالة الحالية:</span>
+            <span style={{
+              fontSize: '12px',
+              fontWeight: 800,
+              color: localKioskSettings.greenKioskEnergySaverEnabled ? '#16a34a' : '#64748b'
+            }}>
+              {localKioskSettings.greenKioskEnergySaverEnabled ? '🟢 مفعل (وضع الاستدامة)' : '⚪ معطل (شاشة نشطة دائماً)'}
+            </span>
+          </div>
+        </div>
+
+        {/* Card 3: Voice Greeting */}
+        <div style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: '16px',
+          padding: '22px',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          gap: '16px'
+        }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '12px',
+                  background: 'rgba(99, 102, 241, 0.15)',
+                  color: '#6366f1',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '22px'
+                }}>
+                  🔔
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>الترحيب الصوتي ونغمات التأكيد</h4>
+                  <span style={{ fontSize: '11px', color: '#6366f1', fontWeight: 700 }}>Smart Audio Feedback</span>
+                </div>
+              </div>
+              <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '50px', height: '26px' }}>
+                <input
+                  type="checkbox"
+                  checked={localKioskSettings.kioskVoiceGreetingEnabled}
+                  onChange={(e) => setLocalKioskSettings(prev => ({ ...prev, kioskVoiceGreetingEnabled: e.target.checked }))}
+                  style={{ opacity: 0, width: 0, height: 0 }}
+                />
+                <span style={{
+                  position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                  backgroundColor: localKioskSettings.kioskVoiceGreetingEnabled ? '#6366f1' : '#cbd5e1',
+                  transition: '.3s', borderRadius: '34px',
+                }}>
+                  <span style={{
+                    position: 'absolute', content: '""', height: '20px', width: '20px', left: localKioskSettings.kioskVoiceGreetingEnabled ? '26px' : '3px', bottom: '3px',
+                    backgroundColor: 'white', transition: '.3s', borderRadius: '50%',
+                  }} />
+                </span>
+              </label>
+            </div>
+
+            <p style={{ margin: '0 0 12px 0', fontSize: '12.5px', color: 'var(--text)', lineHeight: 1.6, opacity: 0.9 }}>
+              تشغيل نغمة بصرية وصوتية تؤكد للموظف نجاح التبصيم مع نطق اسم الموظف صوتياً ("تم تسجيل حضورك يا دكتور...").
+            </p>
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>نطق الاسم والتأكيد:</span>
+            <span style={{ fontSize: '12px', fontWeight: 800, color: localKioskSettings.kioskVoiceGreetingEnabled ? '#6366f1' : '#64748b' }}>
+              {localKioskSettings.kioskVoiceGreetingEnabled ? '🟢 مفعل' : '⚪ معطل'}
+            </span>
+          </div>
+        </div>
+
       </div>
     </div>
   )}

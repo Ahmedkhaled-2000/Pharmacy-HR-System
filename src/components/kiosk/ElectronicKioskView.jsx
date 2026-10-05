@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchCurrentIP, checkDeviceAuthorization } from '../../utils/deviceAuth';
 import FaceVerificationOverlay from '../attendance/FaceVerificationOverlay';
 import { isBranchMatch } from '../../utils/branchMatcher';
@@ -7,10 +7,10 @@ import { useData } from '../../context/DataContext';
 import { useOptionalUI } from '../../context/UIContext';
 import { uploadBiometricAttendancePhoto, getAuthoritativeDriveConfig } from '../../utils/googleDriveService';
 import { sendBiometricAttendanceEmail, notifyAdminOnEarlyDepartureBeforeClosing, getAuthoritativeGmailConfig } from '../../utils/gmailService';
-import { preWarmFaceModels } from '../../utils/faceApiHelper';
+import { preWarmFaceModels, initFaceRecognition, getFaceEmbedding, compareFaces } from '../../utils/faceApiHelper';
 import { normalizeDigits, getRealTodayStr } from '../../utils/formatters';
 import { getActiveShortcuts, matchesShortcutEvent } from '../../utils/shortcutsConfig';
-import { apiSubmitRequestAtomic, apiRecordPunch } from '../../utils/apiClient';
+import { apiSubmitRequestAtomic, apiRecordPunch, apiFetchFaces } from '../../utils/apiClient';
 import { enqueueNewRequest } from '../../utils/syncEngine';
 import {
   enqueueKioskPunch,
@@ -47,6 +47,32 @@ export default function ElectronicKioskView({
   const [matchedEmp, setMatchedEmp] = useState(null);
   const [blockedStatusModal, setBlockedStatusModal] = useState(null);
   const [kioskAlertModal, setKioskAlertModal] = useState(null);
+
+  // ── إعدادات وحالة الكشك الذكي (Zero-Touch & Green Kiosk Engine) ──
+  const kioskSettings = orgSettings?.kioskSettings || state?.orgSettings?.kioskSettings || {};
+  const zeroTouchKioskEnabled = Boolean(kioskSettings.zeroTouchKioskEnabled);
+  const greenKioskEnergySaverEnabled = kioskSettings.greenKioskEnergySaverEnabled !== false;
+  const kioskVoiceGreetingEnabled = kioskSettings.kioskVoiceGreetingEnabled !== false;
+  const kioskMatchThreshold = Number(kioskSettings.kioskMatchThreshold) || 70;
+  const kioskDimTimeoutSeconds = Number(kioskSettings.kioskDimTimeoutSeconds) || 60;
+
+  const zeroTouchVideoRef = useRef(null);
+  const [zeroTouchActive, setZeroTouchActive] = useState(false);
+  const [zeroTouchAutoPunchToast, setZeroTouchAutoPunchToast] = useState(null);
+  const [isGreenKioskDimmed, setIsGreenKioskDimmed] = useState(false);
+  const lastAutoPunchTimesRef = useRef(new Map());
+  const enrolledFaceDescriptorsRef = useRef([]);
+  const isEvaluatingFaceRef = useRef(false);
+  const idleTimerRef = useRef(null);
+
+  // Auto-dismiss for Zero-Touch toast
+  useEffect(() => {
+    if (!zeroTouchAutoPunchToast) return;
+    const timer = setTimeout(() => {
+      setZeroTouchAutoPunchToast(null);
+    }, 4500);
+    return () => clearTimeout(timer);
+  }, [zeroTouchAutoPunchToast]);
 
   // Auto-countdown timer for Kiosk in-system notification modal
   useEffect(() => {
@@ -373,6 +399,272 @@ export default function ElectronicKioskView({
     const timer = setInterval(() => setNow(getCalibratedNow().calibratedEpoch), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // ── محرك توفير الطاقة الذكي (Green Kiosk Engine) ──
+  useEffect(() => {
+    if (!greenKioskEnergySaverEnabled) {
+      setIsGreenKioskDimmed(false);
+      return;
+    }
+
+    const resetIdleTimer = () => {
+      setIsGreenKioskDimmed(false);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = setTimeout(() => {
+        if (!activeAction && !blockedStatusModal && !pendingDirectiveModal && !showOutboxModal) {
+          setIsGreenKioskDimmed(true);
+        }
+      }, kioskDimTimeoutSeconds * 1000);
+    };
+
+    resetIdleTimer();
+
+    const activityEvents = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll'];
+    const handleUserActivity = () => {
+      resetIdleTimer();
+    };
+
+    activityEvents.forEach(evt => window.addEventListener(evt, handleUserActivity, { passive: true }));
+
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      activityEvents.forEach(evt => window.removeEventListener(evt, handleUserActivity));
+    };
+  }, [greenKioskEnergySaverEnabled, kioskDimTimeoutSeconds, activeAction, blockedStatusModal, pendingDirectiveModal, showOutboxModal]);
+
+  // ── تجهيز بصمات الوجه لكافة موظفي الفرع/المؤسسة للكشك الصامت (Zero-Touch Cache) ──
+  useEffect(() => {
+    if (!zeroTouchKioskEnabled) return;
+    let isCancelled = false;
+
+    const loadDescriptors = async () => {
+      try {
+        await initFaceRecognition();
+        const apiFaces = await apiFetchFaces().catch(() => []);
+        if (isCancelled) return;
+
+        const facesList = [];
+        const allEmployees = state?.employees || [];
+
+        if (Array.isArray(apiFaces)) {
+          apiFaces.forEach(f => {
+            if (f.descriptor && f.employee_id) {
+              const emp = allEmployees.find(e => String(e.id) === String(f.employee_id) || (e.code && String(e.code) === String(f.employee_id)));
+              if (emp && emp.status !== 'تم الاستقالة' && emp.is_active !== false) {
+                facesList.push({
+                  employeeId: String(emp.id),
+                  employee: emp,
+                  descriptor: Array.isArray(f.descriptor) ? new Float32Array(f.descriptor) : f.descriptor
+                });
+              }
+            }
+          });
+        }
+
+        allEmployees.forEach(emp => {
+          if (emp.status === 'تم الاستقالة' || emp.is_active === false) return;
+          if (emp.face_descriptor && !facesList.some(item => item.employeeId === String(emp.id))) {
+            facesList.push({
+              employeeId: String(emp.id),
+              employee: emp,
+              descriptor: Array.isArray(emp.face_descriptor) ? new Float32Array(emp.face_descriptor) : emp.face_descriptor
+            });
+          }
+        });
+
+        enrolledFaceDescriptorsRef.current = facesList;
+      } catch (err) {
+        console.warn('[ZeroTouch] Load descriptors note:', err);
+      }
+    };
+
+    loadDescriptors();
+    return () => { isCancelled = true; };
+  }, [zeroTouchKioskEnabled, state?.employees]);
+
+  // ── تشغيل كاميرا الكشك الصامت الخلفية (Zero-Touch Camera Stream) ──
+  useEffect(() => {
+    if (!zeroTouchKioskEnabled) {
+      if (zeroTouchVideoRef.current && zeroTouchVideoRef.current.srcObject) {
+        zeroTouchVideoRef.current.srcObject.getTracks().forEach(t => t.stop());
+        zeroTouchVideoRef.current.srcObject = null;
+      }
+      setZeroTouchActive(false);
+      return;
+    }
+
+    let stream = null;
+    let isCancelled = false;
+
+    const startZeroTouchCamera = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) return;
+      try {
+        const camStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
+        });
+        if (isCancelled) {
+          camStream.getTracks().forEach(t => t.stop());
+          return;
+        }
+        stream = camStream;
+        if (zeroTouchVideoRef.current) {
+          zeroTouchVideoRef.current.srcObject = camStream;
+          zeroTouchVideoRef.current.muted = true;
+          zeroTouchVideoRef.current.playsInline = true;
+          try {
+            await zeroTouchVideoRef.current.play();
+          } catch {}
+          setZeroTouchActive(true);
+        }
+      } catch (camErr) {
+        console.warn('[ZeroTouch] Camera start note:', camErr);
+        setZeroTouchActive(false);
+      }
+    };
+
+    startZeroTouchCamera();
+
+    return () => {
+      isCancelled = true;
+      if (stream) stream.getTracks().forEach(t => t.stop());
+    };
+  }, [zeroTouchKioskEnabled]);
+
+  // ── حلقة التعرف التلقائي الصامت الذكية (Zero-Touch Autonomous Loop) ──
+  useEffect(() => {
+    if (!zeroTouchKioskEnabled || !zeroTouchActive) return;
+
+    const intervalTime = isGreenKioskDimmed ? 2200 : 450;
+
+    const intervalId = setInterval(async () => {
+      if (isEvaluatingFaceRef.current || isExecutingPunch) return;
+      if (activeAction || blockedStatusModal || pendingDirectiveModal || showOutboxModal) return;
+      if (inputCode.trim().length > 0) return;
+
+      const video = zeroTouchVideoRef.current;
+      if (!video || video.readyState < 2 || video.videoWidth === 0) return;
+
+      const enrolled = enrolledFaceDescriptorsRef.current;
+      if (!enrolled || enrolled.length === 0) return;
+
+      isEvaluatingFaceRef.current = true;
+      try {
+        const result = await getFaceEmbedding(video);
+        if (!result || result.error || !result.descriptor) {
+          return;
+        }
+
+        // إيقاظ الشاشة فوراً عند اقتراب أي وجه إذا كانت في وضع توفير الطاقة
+        if (isGreenKioskDimmed) {
+          setIsGreenKioskDimmed(false);
+        }
+
+        const liveDesc = result.descriptors || [result.descriptor];
+
+        let bestMatch = null;
+        let highestSim = 0;
+
+        for (const item of enrolled) {
+          const matchResult = compareFaces(item.descriptor, liveDesc, kioskMatchThreshold);
+          if (matchResult.isMatch && matchResult.matchPercentage > highestSim) {
+            highestSim = matchResult.matchPercentage;
+            bestMatch = item;
+          }
+        }
+
+        if (bestMatch && highestSim >= kioskMatchThreshold) {
+          const emp = bestMatch.employee;
+          const empId = String(emp.id);
+          const nowMs = Date.now();
+
+          // درع منع التكرار العشوائي (Anti-bounce): 15 ثانية لكل موظف
+          const lastPunchTime = lastAutoPunchTimesRef.current.get(empId) || 0;
+          if (nowMs - lastPunchTime < 15000) {
+            return;
+          }
+
+          // فحص حالة الوردية لتحديد الإجراء المناسب تلقائياً
+          const activeS = (state?.activeShifts?.[emp.id] || state?.activeShifts?.[String(emp.id)]);
+          
+          let targetAction = 'shift_start';
+          if (activeS) {
+            const shiftStartMs = activeS.startEpoch || activeS.startTime || (activeS.createdAt ? new Date(activeS.createdAt).getTime() : 0);
+            if (shiftStartMs && (nowMs - shiftStartMs) < 60000) {
+              setZeroTouchAutoPunchToast({
+                type: 'info',
+                employee: emp,
+                actionLabel: 'وردية قيد العمل ⏱️',
+                note: 'تم تسجيل حضورك بالفعل قبل قليل!',
+                similarity: Math.round(highestSim)
+              });
+              lastAutoPunchTimesRef.current.set(empId, nowMs);
+              return;
+            }
+            if (activeS.isPaused) {
+              targetAction = 'break_end';
+            } else {
+              targetAction = 'shift_end';
+            }
+          }
+
+          lastAutoPunchTimesRef.current.set(empId, nowMs);
+
+          const targetBranch = resolveTargetBranch(emp, null);
+          const branchId = targetBranch.id;
+
+          setIsExecutingPunch(true);
+          try {
+            if (targetAction === 'shift_start') {
+              if (startShift) await startShift(emp.id, 'kiosk_zero_touch', branchId);
+            } else if (targetAction === 'shift_end') {
+              if (stopShift) await stopShift(emp.id, 'kiosk_zero_touch');
+            } else if (targetAction === 'break_end') {
+              if (resumeShift) await resumeShift(emp.id, 'kiosk_zero_touch');
+            }
+
+            playFingerprintChime('success');
+
+            if (kioskVoiceGreetingEnabled && 'speechSynthesis' in window) {
+              try {
+                window.speechSynthesis.cancel();
+                const actionWord = targetAction === 'shift_end' ? 'انصرافك' : 'حضورك';
+                const text = `أهلاً بك دكتور ${emp.name}، تم تسجيل ${actionWord} بنجاح`;
+                const msg = new SpeechSynthesisUtterance(text);
+                msg.lang = 'ar-SA';
+                msg.rate = 1.05;
+                window.speechSynthesis.speak(msg);
+              } catch (speechErr) {}
+            }
+
+            const actionLabel = targetAction === 'shift_start'
+              ? '🟢 بصمة دخول (حضور)'
+              : (targetAction === 'shift_end' ? '🔴 بصمة خروج (انصراف)' : '▶️ عودة من الاستراحة');
+            const { timeStr, dateStr } = getCalibratedNow();
+
+            setZeroTouchAutoPunchToast({
+              type: 'success',
+              employee: emp,
+              actionLabel,
+              targetAction,
+              branchName: targetBranch.name,
+              time: timeStr,
+              date: dateStr,
+              similarity: Math.round(highestSim)
+            });
+          } catch (punchErr) {
+            console.error('[ZeroTouch] Punch execution error:', punchErr);
+          } finally {
+            setTimeout(() => setIsExecutingPunch(false), 800);
+          }
+        }
+      } catch (err) {
+      } finally {
+        isEvaluatingFaceRef.current = false;
+      }
+    }, intervalTime);
+
+    return () => clearInterval(intervalId);
+  }, [zeroTouchKioskEnabled, zeroTouchActive, isGreenKioskDimmed, isExecutingPunch, activeAction, blockedStatusModal, pendingDirectiveModal, showOutboxModal, inputCode, kioskMatchThreshold, kioskVoiceGreetingEnabled, state?.activeShifts, startShift, stopShift, resumeShift]);
 
   const [bypassedAuth, setBypassedAuth] = useState(() => {
     try {
@@ -992,6 +1284,7 @@ export default function ElectronicKioskView({
         timeOut: punchTime,
         hours: overtimeStatus === 'pending' ? regularHours : netHours,
         actualWorkedHours: netHours,
+        netHours: netHours,
         scheduledHours,
         regularHours,
         overtimeHours,
@@ -1555,9 +1848,40 @@ export default function ElectronicKioskView({
         >
           {/* Top Status Bar with Live Secure DB Status */}
           <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px solid rgba(15, 23, 42, 0.08)', flexWrap: 'wrap', gap: '6px' }}>
-            <span style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(15, 23, 42, 0.04)', padding: '4px 14px', borderRadius: '20px' }}>
-              {isGeneralKioskLink ? '⚡ كشك البصمة العام' : '🏢 كشك فرع مخصص'}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(15, 23, 42, 0.04)', padding: '4px 14px', borderRadius: '20px' }}>
+                {isGeneralKioskLink ? '⚡ كشك البصمة العام' : '🏢 كشك فرع مخصص'}
+              </span>
+              {zeroTouchKioskEnabled && (
+                <span
+                  style={{
+                    fontSize: '0.75rem',
+                    fontWeight: 800,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '4px 12px',
+                    borderRadius: '20px',
+                    background: zeroTouchActive ? '#ecfdf5' : '#fef3c7',
+                    color: zeroTouchActive ? '#059669' : '#b45309',
+                    border: `1px solid ${zeroTouchActive ? '#a7f3d0' : '#fde68a'}`,
+                    fontFamily: 'Cairo'
+                  }}
+                  title="تقنية البصمة الصامتة السريعة: يتعرف الكشك على الوجه تلقائياً بمجرد الوقوف أمامه"
+                >
+                  <span
+                    style={{
+                      width: '7px',
+                      height: '7px',
+                      borderRadius: '50%',
+                      background: zeroTouchActive ? '#10b981' : '#f59e0b',
+                      boxShadow: zeroTouchActive ? '0 0 8px #10b981' : 'none'
+                    }}
+                  />
+                  {zeroTouchActive ? '⚡ البصمة الصامتة السريعة نشطة' : '⏳ تجهيز الكاميرا...'}
+                </span>
+              )}
+            </div>
             <button
               type="button"
               onClick={async () => {
@@ -2560,6 +2884,203 @@ export default function ElectronicKioskView({
                 إغلاق
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Zero-Touch Background Scanner Video Element ── */}
+      <video
+        ref={zeroTouchVideoRef}
+        autoPlay
+        muted
+        playsInline
+        style={{
+          position: 'fixed',
+          top: -9999,
+          left: -9999,
+          width: 640,
+          height: 480,
+          opacity: 0,
+          pointerEvents: 'none',
+          zIndex: -1
+        }}
+      />
+
+      {/* ── Zero-Touch Walk-Through Celebration Toast ── */}
+      {zeroTouchAutoPunchToast && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '24px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 99999,
+            maxWidth: '540px',
+            width: '92%',
+            background: 'rgba(255, 255, 255, 0.98)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            border: zeroTouchAutoPunchToast.type === 'info' ? '2px solid #3b82f6' : '2px solid #10b981',
+            borderRadius: '24px',
+            padding: '16px 20px',
+            boxShadow: '0 25px 50px -12px rgba(16, 185, 129, 0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '16px',
+            direction: 'rtl',
+            fontFamily: 'Cairo',
+            animation: 'fadeIn 0.3s ease-out'
+          }}
+        >
+          <div
+            style={{
+              width: '56px',
+              height: '56px',
+              borderRadius: '18px',
+              background: zeroTouchAutoPunchToast.type === 'info'
+                ? 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)'
+                : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '28px',
+              flexShrink: 0,
+              boxShadow: '0 8px 16px rgba(16, 185, 129, 0.25)'
+            }}
+          >
+            {zeroTouchAutoPunchToast.type === 'info' ? 'ℹ️' : '⚡'}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+              <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 900, color: '#0f172a' }}>
+                د. {zeroTouchAutoPunchToast.employee?.name}
+              </h4>
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 800,
+                  padding: '2px 8px',
+                  borderRadius: '999px',
+                  background: zeroTouchAutoPunchToast.type === 'info' ? '#eff6ff' : '#ecfdf5',
+                  color: zeroTouchAutoPunchToast.type === 'info' ? '#1d4ed8' : '#059669',
+                  border: `1px solid ${zeroTouchAutoPunchToast.type === 'info' ? '#bfdbfe' : '#a7f3d0'}`
+                }}
+              >
+                {zeroTouchAutoPunchToast.actionLabel}
+              </span>
+            </div>
+            <div style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '3px' }}>
+              {zeroTouchAutoPunchToast.note || `تم التوثيق بدون لمس (Zero-Touch) بنسبة تطابق ${zeroTouchAutoPunchToast.similarity}%`}
+            </div>
+            {zeroTouchAutoPunchToast.time && (
+              <div style={{ fontSize: '0.78rem', color: '#059669', fontWeight: 700, marginTop: '2px' }}>
+                ⏰ {zeroTouchAutoPunchToast.time} · 🏢 {zeroTouchAutoPunchToast.branchName}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setZeroTouchAutoPunchToast(null)}
+            style={{
+              background: '#f1f5f9',
+              border: 'none',
+              borderRadius: '50%',
+              width: '28px',
+              height: '28px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              color: '#64748b',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* ── Green Kiosk Engine Standby / Energy Saver Overlay ── */}
+      {isGreenKioskDimmed && (
+        <div
+          onClick={() => setIsGreenKioskDimmed(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 99998,
+            backgroundColor: '#020617',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            direction: 'rtl',
+            fontFamily: 'Cairo',
+            cursor: 'pointer',
+            userSelect: 'none',
+            padding: '24px'
+          }}
+        >
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '6px 16px',
+              borderRadius: '999px',
+              background: 'rgba(22, 163, 74, 0.15)',
+              border: '1px solid rgba(34, 197, 94, 0.3)',
+              color: '#4ade80',
+              fontSize: '0.85rem',
+              fontWeight: 800,
+              marginBottom: '28px'
+            }}
+          >
+            🌱 وضع توفير الطاقة الذكي (Green Kiosk Engine)
+          </div>
+
+          {/* Clock */}
+          <div
+            style={{
+              fontSize: 'clamp(4rem, 15vw, 7.5rem)',
+              fontWeight: 900,
+              color: '#f8fafc',
+              letterSpacing: '2px',
+              direction: 'ltr',
+              lineHeight: 1,
+              marginBottom: '16px',
+              textShadow: '0 0 40px rgba(16, 185, 129, 0.3)'
+            }}
+          >
+            {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
+          </div>
+
+          <div style={{ fontSize: '1.25rem', color: '#94a3b8', fontWeight: 700, marginBottom: '8px' }}>
+            {new Date().toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          </div>
+          <div style={{ fontSize: '1.05rem', color: '#64748b', fontWeight: 600, marginBottom: '40px' }}>
+            {resolvedKioskBranchName ? `🏢 فرع ${resolvedKioskBranchName}` : (orgSettings?.name || 'نظام إدارة الصيدلية الذكي')}
+          </div>
+
+          <div
+            style={{
+              padding: '12px 28px',
+              borderRadius: '16px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              color: '#cbd5e1',
+              fontSize: '0.95rem',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px'
+            }}
+          >
+            <span>👆 المس الشاشة في أي مكان للاستيقاظ</span>
+            {zeroTouchKioskEnabled && (
+              <span style={{ color: '#4ade80' }}>· 👁️ أو قف أمام الكاميرا للمسح الفوري</span>
+            )}
           </div>
         </div>
       )}

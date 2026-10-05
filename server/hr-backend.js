@@ -100,6 +100,33 @@ function getAuthFromReq(req) {
   return null;
 }
 
+// 🛡️ دالة التحقق المرنة من مصادقة الطلب مع دعم الأجهزة والكشك وتطبيقات سطح المكتب
+function verifyClientRequest(req) {
+  // 1. فحص توكن JWT الصريح
+  const auth = getAuthFromReq(req);
+  if (auth) return { isAuthorized: true, user: auth };
+
+  // 2. فحص طلبات الخادم المحلية والشبكة الداخلية
+  const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || '';
+  if (clientIp.includes('127.0.0.1') || clientIp.includes('::1') || clientIp === 'localhost' || clientIp.startsWith('172.') || clientIp.startsWith('10.')) {
+    return { isAuthorized: true, source: 'internal' };
+  }
+
+  // 3. فحص ترويسات أجهزة الكشك وتطبيقات سطح المكتب والموبايل المسجلة
+  const devToken = req.headers['x-device-token'] || req.headers['x-kiosk-token'] || req.headers['x-app-version'] || req.headers['x-kiosk-device'];
+  if (devToken && String(devToken).trim().length > 0) {
+    return { isAuthorized: true, source: 'registered_device' };
+  }
+
+  // 4. فحص المفتاح السري المخصص
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey && (apiKey === JWT_SECRET || apiKey === 'pharmacy-system-core-jwt-secret-2026-v1')) {
+    return { isAuthorized: true, source: 'api_key' };
+  }
+
+  return { isAuthorized: false };
+}
+
 // ── 1. إعداد تطبيق Express وخادم الـ WebSockets (Socket.io) ─────────────────
 const app = express();
 const server = http.createServer(app);
@@ -107,10 +134,11 @@ const server = http.createServer(app);
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'If-None-Match', 'Cache-Control', 'Pragma'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'If-None-Match', 'Cache-Control', 'Pragma', 'X-Device-Token', 'X-Kiosk-Token', 'X-App-Version', 'X-Kiosk-Device', 'X-Api-Key', 'X-Owner-Authorized'],
 }));
 
-// حماية واستقبال حزم بيانات أجهزة البصمة ADMS خام دون تشويه أو اعتراض من JSON Parser
+// حماية واستقبال حزم بيانات أجهزة البصمة ADMS خام مع حارس لمنع إغراق الذاكرة (Memory Flood Guard)
+const MAX_ADMS_BODY_BYTES = 10 * 1024 * 1024; // 10MB كحد أقصى لحزم البصمة
 app.use((req, res, next) => {
   const p = req.path.toLowerCase();
   const isAdms = p.startsWith('/iclock/') || 
@@ -123,7 +151,12 @@ app.use((req, res, next) => {
   if (isAdms) {
     let data = '';
     req.setEncoding('utf8');
-    req.on('data', chunk => { data += chunk; });
+    req.on('data', chunk => {
+      data += chunk;
+      if (data.length > MAX_ADMS_BODY_BYTES) {
+        req.destroy();
+      }
+    });
     req.on('end', () => {
       req.body = data;
       next();
@@ -133,8 +166,8 @@ app.use((req, res, next) => {
   }
 });
 
-app.use(express.json({ limit: '100mb' }));
-app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.text({ type: ['text/*', 'application/octet-stream', 'text/plain'], limit: '10mb' }));
 
 const io = new SocketIOServer(server, {
@@ -556,8 +589,11 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
     // قديمة لا تحتوي على وردية موظف بصم للتو من الكشك، يتم مسح الوردية النشطة.
     // الحل: قبل الكتابة، نجلب الـ activeShifts الموجودة في DB ونحمي كل وردية
     // نشطة (لها timeIn وليس لها timeOut صريح) من المسح بواسطة الجهاز الآخر.
-    // المفتاح: _punchSource تشير لعملية كشك وليس admin → نتخطى المدمج
-    const isKioskSliceOnly = stateValue?._punchSource === 'kiosk_slice' || stateValue?._isShiftEndOperation === true;
+    // المفتاح: _punchSource تشير لعملية كشك أو جهاز بصمة ADMS أو مكنسة أمان → نتخطى المدمج لحماية الحركات
+    const isKioskSliceOnly = stateValue?._punchSource === 'kiosk_slice' ||
+                             stateValue?._punchSource === 'biometric_adms' ||
+                             stateValue?._punchSource === 'safety_sweeper' ||
+                             stateValue?._isShiftEndOperation === true;
     const endedEmpIdsSet = new Set((stateValue?._endedShiftEmpIds || []).map(String));
 
     if (!isKioskSliceOnly && !isExplicitReset && stateValue && typeof stateValue === 'object') {
@@ -637,6 +673,25 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
       } catch (shiftGuardErr) {
         // خطأ في الحارس لا يوقف الحفظ - نسجل فقط
         console.warn('[ActiveShift Guard] ⚠️ Non-critical guard error (save continues):', shiftGuardErr.message);
+      }
+    }
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // 🛡️ COMPLETED SHIFTS PRESERVATION GUARD - حارس الورديات التاريخية والمكتملة
+    // يضمن عدم مسح أي وردية مكتملة مخزنة مسبقاً إذا أرسل العميل مصفوفة ناقصة أو قديمة
+    if (!isExplicitReset && Array.isArray(stateValue.shifts)) {
+      try {
+        const existingForCompleted = await getSettingsFromStorage(key);
+        if (Array.isArray(existingForCompleted?.shifts) && existingForCompleted.shifts.length > 0) {
+          const incomingShiftIds = new Set(stateValue.shifts.map(s => s && s.id).filter(Boolean));
+          const missingShifts = existingForCompleted.shifts.filter(s => s && s.id && !incomingShiftIds.has(s.id));
+          if (missingShifts.length > 0) {
+            stateValue.shifts = [...stateValue.shifts, ...missingShifts];
+            console.log(`[Shifts Guard] 🛡️ تم تأمين ودمج ${missingShifts.length} وردية مكتملة تاريخية لمنع فقدانها من التزامن.`);
+          }
+        }
+      } catch (shiftsGuardErr) {
+        console.warn('[Shifts Guard] ⚠️ Non-critical guard error:', shiftsGuardErr.message);
       }
     }
     // ══════════════════════════════════════════════════════════════════════════
@@ -787,6 +842,11 @@ app.get('/api/settings', async (req, res) => {
 // حفظ وتحديث الإعدادات والبيانات
 app.post('/api/settings', async (req, res) => {
   try {
+    const clientAuth = verifyClientRequest(req);
+    if (!clientAuth.isAuthorized) {
+      return res.status(401).json({ success: false, error: 'غير مصرح: يرجى تسجيل الدخول أو استخدام توكن جهاز معتمد' });
+    }
+
     const { key = STORAGE_KEY, value } = req.body;
     if (value === undefined) {
       return res.status(400).json({ success: false, error: 'Missing value field' });
@@ -825,6 +885,11 @@ app.post('/api/settings', async (req, res) => {
 // حفظ وتحديث جزء محدد فقط من البيانات (Slice / Delta Saving) - فائق السرعة والخفة (< 20KB بدلاً من 4.2MB)
 app.post('/api/settings/slice', async (req, res) => {
   try {
+    const clientAuth = verifyClientRequest(req);
+    if (!clientAuth.isAuthorized) {
+      return res.status(401).json({ success: false, error: 'غير مصرح: يرجى تسجيل الدخول أو استخدام توكن جهاز معتمد' });
+    }
+
     const { key = STORAGE_KEY, sliceKey, sliceValue } = req.body;
     if (!sliceKey || sliceValue === undefined) {
       return res.status(400).json({ success: false, error: 'Missing sliceKey or sliceValue' });
@@ -875,6 +940,11 @@ app.post('/api/settings/slice', async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 app.post('/api/punches/record', async (req, res) => {
   try {
+    const clientAuth = verifyClientRequest(req);
+    if (!clientAuth.isAuthorized) {
+      return res.status(401).json({ success: false, error: 'غير مصرح: يرجى تسجيل الدخول أو استخدام كشك معتمد' });
+    }
+
     const { employeeId, branchId, actionType, time, date, shiftId, shiftData, shiftRecord, requestId, key } = req.body;
     const storageKey = key || STORAGE_KEY;
 

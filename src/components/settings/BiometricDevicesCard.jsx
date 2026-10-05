@@ -145,6 +145,45 @@ export default function BiometricDevicesCard({ state, showToast }) {
 ⏱️ *مدة الاستراحة:* {break_duration}
 ━━━━━━━━━━━━━━━━━━━━━━
 💪 طاقة متجددة وعمل موفق ومتميز بإذن الله!
+🏛️ _{company_name}_`,
+
+    device_offline: `⚠️ *تحذير: انقطاع اتصال جهاز بصمة (Device Offline)*
+━━━━━━━━━━━━━━━━━━━━━━
+📟 *الجهاز:* {device_name}
+🏢 *الفرع:* {branch_name}
+🔢 *الرقم التسلسلي:* {device_serial}
+⏱️ *آخر ظهور (Ping):* {last_seen}
+⏳ *مدة الانقطاع:* {offline_duration}
+━━━━━━━━━━━━━━━━━━━━━━
+⚠️ يُرجى فحص راوتر الإنترنت أو كابل الشبكة ومصدر كهرباء الجهاز بالفرع.
+🏛️ _{company_name}_`,
+
+    device_online: `🟢 *إشعار: عودة اتصال جهاز البصمة بالإنترنت (Device Online)*
+━━━━━━━━━━━━━━━━━━━━━━
+📟 *الجهاز:* {device_name}
+🏢 *الفرع:* {branch_name}
+🔢 *الرقم التسلسلي:* {device_serial}
+🕒 *وقت العودة:* {time} | {date}
+🌐 *عنوان IP:* {client_ip}
+⏱️ *مزامنة التوقيت:* {time_sync_status}
+━━━━━━━━━━━━━━━━━━━━━━
+✅ تم استعادة الاتصال السحابي بالكامل وتأكيد نبض الماكينة.
+🏛️ _{company_name}_`,
+
+    reconciliation_report: `📊 *تقرير التسوية التلقائي بعد الاسترداد (Post-Recovery Reconciliation)*
+━━━━━━━━━━━━━━━━━━━━━━
+🏢 *الفرع:* {branch_name}
+📟 *الجهاز:* {device_name}
+🕒 *وقت المزامنة:* {sync_time} | {sync_date}
+━━━━━━━━━━━━━━━━━━━━━━
+📥 *إجمالي البصمات المستردة:* {total_punches} حركة
+⏱️ *نطاق فترة التبصيم:* من {period_from} إلى {period_to}
+🟢 *حركات الحضور:* {check_in_count}
+🔴 *حركات الانصراف:* {check_out_count}
+👥 *ملخص حركات الموظفين:*
+{employees_summary}
+━━━━━━━━━━━━━━━━━━━━━━
+✅ تمت معالجة وتسوية كافة الورديات بنجاح بالترتيب الزمني الدقيق وحساب ساعات العمل تلقائياً دون أي تضارب.
 🏛️ _{company_name}_`
   };
 
@@ -161,13 +200,30 @@ export default function BiometricDevicesCard({ state, showToast }) {
     notifyBreakEnd: true,         // ⚡ خاص بكشك البصمة فقط
     notifyEmployee: true,
     recipientPhones: [],
+    // 🛰️ نظام المراقبة الذكي
+    watchdogEnabled: true,
+    watchdogTimeoutMinutes: 10,
+    watchdogRecipientPhones: [],
+    // 📊 تقرير التسوية التلقائي
+    reconciliationEnabled: true,
+    reconciliationMinBatchSize: 3,
+    reconciliationRecipientPhones: [],
+    // 🛡️ صمامات الأمان
+    antiBounceEnabled: true,
+    antiBounceSeconds: 90,
+    autoTimeSyncOnReconnect: true,
+    universalShiftEngine: true,
+    shiftMaxHoursSafetyValve: 15,
+    minCheckoutMinutes: 15,
     templates: { ...DEFAULT_ATTENDANCE_TEMPLATES },
     adminMessageTemplate: DEFAULT_ATTENDANCE_TEMPLATES.admin_check_in
   });
   const [newWaPhone, setNewWaPhone] = useState('');
+  const [newWatchdogPhone, setNewWatchdogPhone] = useState('');
+  const [newReconciliationPhone, setNewReconciliationPhone] = useState('');
   const [isSavingWaConfig, setIsSavingWaConfig] = useState(false);
   const [isTestingWa, setIsTestingWa] = useState(false);
-  const [activeTemplateAction, setActiveTemplateAction] = useState('check_in'); // 'check_in' | 'check_out' | 'break_start' | 'break_end'
+  const [activeTemplateAction, setActiveTemplateAction] = useState('check_in'); // 'check_in' | 'check_out' | 'break_start' | 'break_end' | 'device_offline' | 'device_online' | 'reconciliation_report'
   const [activeTemplateTarget, setActiveTemplateTarget] = useState('admin'); // 'admin' | 'employee'
 
   // حالة مركز الترحيل والتوزيع بين الفروع (Cross-Branch Dispatcher)
@@ -1182,14 +1238,22 @@ export default function BiometricDevicesCard({ state, showToast }) {
       const effAction = actionTypeOverride || activeTemplateAction;
       const effTarget = targetOverride || activeTemplateTarget;
       const isBreak = effAction.startsWith('break_');
-      const templateKey = `${effTarget}_${effAction}`;
+      const isSystemAlert = effAction === 'device_offline' || effAction === 'device_online' || effAction === 'reconciliation_report';
+      const templateKey = isSystemAlert ? effAction : `${effTarget}_${effAction}`;
       const customTemplate = waConfig.templates?.[templateKey] || DEFAULT_ATTENDANCE_TEMPLATES[templateKey];
+
+      let defaultTargetPhone = waConfig.recipientPhones?.[0] || '';
+      if (effAction === 'device_offline' || effAction === 'device_online') {
+        defaultTargetPhone = waConfig.watchdogRecipientPhones?.[0] || waConfig.recipientPhones?.[0] || '';
+      } else if (effAction === 'reconciliation_report') {
+        defaultTargetPhone = waConfig.reconciliationRecipientPhones?.[0] || waConfig.recipientPhones?.[0] || '';
+      }
 
       const res = await fetch('/api/biometrics/whatsapp-test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          testPhone: testPhone || (waConfig.recipientPhones?.[0] || ''),
+          testPhone: testPhone || defaultTargetPhone,
           actionType: effAction,
           target: effTarget,
           source: isBreak ? 'kiosk' : 'biometric_device',
@@ -3427,7 +3491,8 @@ export default function BiometricDevicesCard({ state, showToast }) {
 
       {/* ── التبويب: إشعارات واتساب للإدارة العليا وكشك البصمة ── */}
       {activeSubTab === 'whatsappAlerts' && (() => {
-        const templateKey = `${activeTemplateTarget}_${activeTemplateAction}`;
+        const isSystemAlert = activeTemplateAction === 'device_offline' || activeTemplateAction === 'device_online' || activeTemplateAction === 'reconciliation_report';
+        const templateKey = isSystemAlert ? activeTemplateAction : `${activeTemplateTarget}_${activeTemplateAction}`;
         const currentTemplateText = waConfig.templates?.[templateKey] !== undefined
           ? waConfig.templates[templateKey]
           : (DEFAULT_ATTENDANCE_TEMPLATES[templateKey] || '');
@@ -3436,7 +3501,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
         const sampleMethodDesc = isBreakAction
           ? 'كشك البصمة الإلكترونية الذكي 📱'
           : (activeTemplateTarget === 'employee' ? 'بصمة الإصبع الحيوية (MB20) 🧬' : 'بصمة الإصبع (MB20)');
-        const sampleDeviceName = isBreakAction ? 'كشك البصمة - الفرع الرئيسي' : 'جهاز بصمة ZKTeco MB20';
+        const sampleDeviceName = isBreakAction ? 'كشك البصمة - الفرع الرئيسي' : 'جهاز بصمة ZKTeco MB20 (فرع المدينة الجامعية)';
 
         const sampleVars = {
           employee_name: activeTemplateTarget === 'employee' ? 'د. سيف الدين' : 'د. أحمد خالد',
@@ -3455,6 +3520,19 @@ export default function BiometricDevicesCard({ state, showToast }) {
               : (activeTemplateAction === 'break_start' ? '☕' : '⚡')),
           verify_type: sampleMethodDesc,
           device_name: sampleDeviceName,
+          device_serial: 'EUF7242701836',
+          last_seen: 'اليوم 04:30 م',
+          offline_duration: '15 دقيقة',
+          client_ip: '192.168.1.150',
+          time_sync_status: '✅ تم ضبط توقيت الماكينة تلقائياً بدقة',
+          sync_time: '04:45 م',
+          sync_date: new Date().toISOString().slice(0, 10),
+          total_punches: '12 حركة',
+          period_from: '09:00 ص',
+          period_to: '04:30 م',
+          check_in_count: '7 حضور',
+          check_out_count: '5 انصراف',
+          employees_summary: '• *د. أنس خالد*: حضور 09:00 ص | انصراف 02:00 م\n• *د. شيماء محمد*: حضور 09:15 ص | انصراف 04:30 م\n• *د. سيف الدين*: حضور 10:00 ص',
           company_name: state?.orgSettings?.orgName || state?.orgSettings?.companyName || 'مجموعة صيدليات المروة ود/ سيف',
           shift_hours: '8.5 ساعة',
           break_duration: '35 دقيقة'
@@ -3469,7 +3547,10 @@ export default function BiometricDevicesCard({ state, showToast }) {
           { id: 'check_in', label: '🟢 بصمة الحضور', badge: 'MB20 + الكشك' },
           { id: 'check_out', label: '🔴 بصمة الانصراف', badge: 'MB20 + الكشك' },
           { id: 'break_start', label: '☕ بدء الاستراحة', badge: 'كشك البصمة فقط', isKioskOnly: true },
-          { id: 'break_end', label: '⚡ إنهاء الاستراحة والعودة', badge: 'كشك البصمة فقط', isKioskOnly: true }
+          { id: 'break_end', label: '⚡ إنهاء الاستراحة والعودة', badge: 'كشك البصمة فقط', isKioskOnly: true },
+          { id: 'device_offline', label: '⚠️ انقطاع اتصال الجهاز', badge: 'نظام المراقبة Watchdog', isSystemAlert: true },
+          { id: 'device_online', label: '🟢 عودة اتصال الجهاز', badge: 'استعادة الاتصال', isSystemAlert: true },
+          { id: 'reconciliation_report', label: '📊 تقرير التسوية التلقائي', badge: 'استرداد الأوفلاين', isSystemAlert: true }
         ];
 
         return (
@@ -3486,7 +3567,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
               </div>
 
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '12px 14px', marginBottom: '16px', fontSize: '0.84rem', color: '#475569', lineHeight: '1.6' }}>
-                ✨ <strong>تنبيهات فورية متعددة القنوات:</strong> يتم إرسال الإشعارات لحظياً للإدارة العليا وهواتف الموظفين عند التبصيم مباشرة سواء عبر أجهزة بصمة الإصبع MB20 أو كشك البصمة الإلكترونية.
+                ✨ <strong>تنبيهات فورية متعددة القنوات:</strong> يتم إرسال الإشعارات لحظياً للإدارة العليا وهواتف الموظفين عند التبصيم مباشرة، مع مراقبة حية لحالة اتصال الأجهزة وتقارير تسوية تلقائية عند استرداد الاتصال.
               </div>
 
               {/* 1. المفتاح العام للنظام */}
@@ -3506,7 +3587,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
                         تفعيل نظام إشعارات واتساب اللحظية الشامل
                       </div>
                       <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '2px' }}>
-                        المفتاح الرئيسي لتشغيل إرسال رسائل الواتساب عند أي حركة تبصيم
+                        المفتاح الرئيسي لتشغيل إرسال رسائل الواتساب عند أي حركة تبصيم أو أحداث أمنية
                       </div>
                     </div>
                   </div>
@@ -3631,11 +3712,14 @@ export default function BiometricDevicesCard({ state, showToast }) {
                 </div>
               </div>
 
-              {/* 4. أرقام هواتف الإدارة العليا */}
-              <div>
-                <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
-                  📱 أرقام هواتف الإدارة العليا المستلمة للإشعارات (مثال: 201080739315):
+              {/* 4. أرقام هواتف الإدارة العليا المستلمة للإشعارات العامة */}
+              <div style={{ marginBottom: '16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '14px' }}>
+                <label style={{ display: 'block', fontSize: '0.86rem', fontWeight: 800, color: '#1e293b', marginBottom: '4px' }}>
+                  📱 أرقام هواتف الإدارة العليا المستلمة لكافة حركات التبصيم اليومية:
                 </label>
+                <p style={{ margin: '0 0 8px', fontSize: '0.76rem', color: '#64748b' }}>
+                  تصل إليها كافة إشعارات الحضور والانصراف اللحظية (تنسيق دولي بدون أصفار إضافية، مثال: 201080739315).
+                </p>
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
                   <input
                     type="text"
@@ -3666,7 +3750,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
                   </button>
                 </div>
 
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', minHeight: '36px', padding: '10px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '14px' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', minHeight: '36px', padding: '10px', background: '#ffffff', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
                   {(waConfig.recipientPhones || []).length === 0 ? (
                     <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
                       لم تُضف أرقام مخصصة بعد (سيتم استخدام هاتف الإدارة المسجل بإعدادات المنشأة تلقائياً).
@@ -3705,6 +3789,419 @@ export default function BiometricDevicesCard({ state, showToast }) {
                       </span>
                     ))
                   )}
+                </div>
+              </div>
+
+              {/* 5. 🛰️ نظام المراقبة الذكي للأجهزة والتنبيه بانقطاع الإنترنت (Device Watchdog & Smart Alerts) */}
+              <div style={{
+                marginBottom: '16px',
+                background: waConfig.watchdogEnabled !== false ? '#f0f9ff' : '#f8fafc',
+                border: `1.5px solid ${waConfig.watchdogEnabled !== false ? '#7dd3fc' : '#e2e8f0'}`,
+                borderRadius: '14px',
+                padding: '14px',
+                transition: 'all 0.2s'
+              }}>
+                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '1.2rem' }}>🛰️</span>
+                    <div>
+                      <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0369a1' }}>
+                        نظام المراقبة الذكي للأجهزة (Device Watchdog & WhatsApp Alerts)
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                        فحص دوري لنبض ماكينات البصمة وإرسال تنبيهات فورية عند انقطاع الاتصال وعند استعادته
+                      </div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={waConfig.watchdogEnabled !== false}
+                    onChange={(e) => setWaConfig({ ...waConfig, watchdogEnabled: e.target.checked })}
+                    style={{ width: '20px', height: '20px', accentColor: '#0284c7', cursor: 'pointer' }}
+                  />
+                </label>
+
+                {waConfig.watchdogEnabled !== false && (
+                  <div style={{ marginTop: '12px', borderTop: '1px dashed #bae6fd', paddingTop: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#334155' }}>
+                        ⏱️ مهلة اعتبار الجهاز غير متصل (بالدقائق):
+                      </span>
+                      <input
+                        type="number"
+                        min="3"
+                        max="60"
+                        value={waConfig.watchdogTimeoutMinutes || 10}
+                        onChange={(e) => setWaConfig({ ...waConfig, watchdogTimeoutMinutes: parseInt(e.target.value, 10) || 10 })}
+                        style={{ width: '70px', padding: '6px 8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', fontWeight: 700, textAlign: 'center' }}
+                      />
+                      <span style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                        (إذا لم يرسل الجهاز نبضاً خلال هذه المدة يتم إرسال تنبيه انقطاع فوري)
+                      </span>
+                    </div>
+
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#0369a1', marginBottom: '4px' }}>
+                      📱 أرقام هواتف مخصصة لاستلام تنبيهات انقطاع وعودة الأجهزة:
+                    </label>
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                      <input
+                        type="text"
+                        value={newWatchdogPhone}
+                        onChange={(e) => setNewWatchdogPhone(e.target.value)}
+                        placeholder="مثال: 201080739315"
+                        style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', fontFamily: 'monospace' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const clean = newWatchdogPhone.replace(/[^0-9]/g, '');
+                          if (!clean || clean.length < 8) {
+                            showToast?.('⚠️ يرجى إدخال رقم هاتف صحيح');
+                            return;
+                          }
+                          const existing = waConfig.watchdogRecipientPhones || [];
+                          if (existing.includes(clean)) {
+                            showToast?.('⚠️ هذا الرقم مضاف مسبقاً');
+                            return;
+                          }
+                          setWaConfig({ ...waConfig, watchdogRecipientPhones: [...existing, clean] });
+                          setNewWatchdogPhone('');
+                        }}
+                        style={{ padding: '8px 14px', borderRadius: '8px', background: '#0284c7', color: '#ffffff', border: 'none', fontWeight: 700, cursor: 'pointer', fontFamily: 'Cairo', fontSize: '0.82rem' }}
+                      >
+                        ➕ إضافة
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', minHeight: '32px', padding: '8px', background: '#ffffff', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '10px' }}>
+                      {(waConfig.watchdogRecipientPhones || []).length === 0 ? (
+                        <span style={{ fontSize: '0.76rem', color: '#94a3b8' }}>
+                          لم تُحدد أرقام خاصة بالمراقبة (سيتم الإرسال تلقائياً لأرقام الإدارة العليا المسجلة أعلاه).
+                        </span>
+                      ) : (
+                        waConfig.watchdogRecipientPhones.map(ph => (
+                          <span
+                            key={ph}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '2px 8px',
+                              borderRadius: '16px',
+                              background: '#e0f2fe',
+                              border: '1px solid #7dd3fc',
+                              color: '#0369a1',
+                              fontSize: '0.78rem',
+                              fontFamily: 'monospace',
+                              fontWeight: 700
+                            }}
+                          >
+                            <span>🛰️ {ph}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setWaConfig({
+                                  ...waConfig,
+                                  watchdogRecipientPhones: waConfig.watchdogRecipientPhones.filter(p => p !== ph)
+                                });
+                              }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontWeight: 800, padding: 0 }}
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        disabled={isTestingWa}
+                        onClick={() => handleTestWaAlert(null, 'device_offline')}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '8px',
+                          background: '#fef2f2',
+                          border: '1px solid #fecaca',
+                          color: '#dc2626',
+                          fontSize: '0.78rem',
+                          fontWeight: 800,
+                          cursor: isTestingWa ? 'not-allowed' : 'pointer',
+                          fontFamily: 'Cairo'
+                        }}
+                      >
+                        ⚠️ تجربة إشعار انقطاع الاتصال (Offline Test)
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isTestingWa}
+                        onClick={() => handleTestWaAlert(null, 'device_online')}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '8px',
+                          background: '#f0fdf4',
+                          border: '1px solid #bbf7d0',
+                          color: '#16a34a',
+                          fontSize: '0.78rem',
+                          fontWeight: 800,
+                          cursor: isTestingWa ? 'not-allowed' : 'pointer',
+                          fontFamily: 'Cairo'
+                        }}
+                      >
+                        🟢 تجربة إشعار عودة الاتصال (Online Test)
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 6. 📊 تقرير التسوية التلقائي بعد الاسترداد (Post-Recovery Reconciliation Report) */}
+              <div style={{
+                marginBottom: '16px',
+                background: waConfig.reconciliationEnabled !== false ? '#faf5ff' : '#f8fafc',
+                border: `1.5px solid ${waConfig.reconciliationEnabled !== false ? '#d8b4fe' : '#e2e8f0'}`,
+                borderRadius: '14px',
+                padding: '14px',
+                transition: 'all 0.2s'
+              }}>
+                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '1.2rem' }}>📊</span>
+                    <div>
+                      <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#7e22ce' }}>
+                        تقرير التسوية التلقائي بعد الاسترداد (Post-Recovery Reconciliation)
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                        إرسال تقرير تسوية شامل عبر واتساب فور استلام الحركات المتراكمة بعد انقطاع الإنترنت
+                      </div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={waConfig.reconciliationEnabled !== false}
+                    onChange={(e) => setWaConfig({ ...waConfig, reconciliationEnabled: e.target.checked })}
+                    style={{ width: '20px', height: '20px', accentColor: '#7e22ce', cursor: 'pointer' }}
+                  />
+                </label>
+
+                {waConfig.reconciliationEnabled !== false && (
+                  <div style={{ marginTop: '12px', borderTop: '1px dashed #e9d5ff', paddingTop: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#334155' }}>
+                        📥 الحد الأدنى للبصمات المتراكمة لإرسال التقرير:
+                      </span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="50"
+                        value={waConfig.reconciliationMinBatchSize || 3}
+                        onChange={(e) => setWaConfig({ ...waConfig, reconciliationMinBatchSize: parseInt(e.target.value, 10) || 3 })}
+                        style={{ width: '65px', padding: '6px 8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', fontWeight: 700, textAlign: 'center' }}
+                      />
+                      <span style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                        (حركات بصمة متراكمة تم رفعها دفعة واحدة)
+                      </span>
+                    </div>
+
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#7e22ce', marginBottom: '4px' }}>
+                      📱 أرقام هواتف مخصصة لاستلام تقرير التسوية التلقائي:
+                    </label>
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                      <input
+                        type="text"
+                        value={newReconciliationPhone}
+                        onChange={(e) => setNewReconciliationPhone(e.target.value)}
+                        placeholder="مثال: 201080739315"
+                        style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', fontFamily: 'monospace' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const clean = newReconciliationPhone.replace(/[^0-9]/g, '');
+                          if (!clean || clean.length < 8) {
+                            showToast?.('⚠️ يرجى إدخال رقم هاتف صحيح');
+                            return;
+                          }
+                          const existing = waConfig.reconciliationRecipientPhones || [];
+                          if (existing.includes(clean)) {
+                            showToast?.('⚠️ هذا الرقم مضاف مسبقاً');
+                            return;
+                          }
+                          setWaConfig({ ...waConfig, reconciliationRecipientPhones: [...existing, clean] });
+                          setNewReconciliationPhone('');
+                        }}
+                        style={{ padding: '8px 14px', borderRadius: '8px', background: '#7e22ce', color: '#ffffff', border: 'none', fontWeight: 700, cursor: 'pointer', fontFamily: 'Cairo', fontSize: '0.82rem' }}
+                      >
+                        ➕ إضافة
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', minHeight: '32px', padding: '8px', background: '#ffffff', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '10px' }}>
+                      {(waConfig.reconciliationRecipientPhones || []).length === 0 ? (
+                        <span style={{ fontSize: '0.76rem', color: '#94a3b8' }}>
+                          لم تُحدد أرقام خاصة بتقرير التسوية (سيتم الإرسال تلقائياً لأرقام الإدارة العليا المسجلة أعلاه).
+                        </span>
+                      ) : (
+                        waConfig.reconciliationRecipientPhones.map(ph => (
+                          <span
+                            key={ph}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '2px 8px',
+                              borderRadius: '16px',
+                              background: '#f3e8ff',
+                              border: '1px solid #d8b4fe',
+                              color: '#7e22ce',
+                              fontSize: '0.78rem',
+                              fontFamily: 'monospace',
+                              fontWeight: 700
+                            }}
+                          >
+                            <span>📊 {ph}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setWaConfig({
+                                  ...waConfig,
+                                  reconciliationRecipientPhones: waConfig.reconciliationRecipientPhones.filter(p => p !== ph)
+                                });
+                              }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontWeight: 800, padding: 0 }}
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+
+                    <div>
+                      <button
+                        type="button"
+                        disabled={isTestingWa}
+                        onClick={() => handleTestWaAlert(null, 'reconciliation_report')}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '8px',
+                          background: '#faf5ff',
+                          border: '1px solid #d8b4fe',
+                          color: '#7e22ce',
+                          fontSize: '0.78rem',
+                          fontWeight: 800,
+                          cursor: isTestingWa ? 'not-allowed' : 'pointer',
+                          fontFamily: 'Cairo'
+                        }}
+                      >
+                        📊 تجربة إرسال تقرير تسوية استرداد تجريبي (Test Report)
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 7. 🛡️ صمامات الأمان والمزامنة الزمنية الذكية (Clock Drift Guard & Anti-Bounce) */}
+              <div style={{ marginBottom: '18px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '14px' }}>
+                <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#334155', display: 'block', marginBottom: '8px' }}>
+                  🛡️ صمامات الأمان والمزامنة الزمنية الذكية:
+                </span>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px' }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={waConfig.autoTimeSyncOnReconnect !== false}
+                      onChange={(e) => setWaConfig({ ...waConfig, autoTimeSyncOnReconnect: e.target.checked })}
+                      style={{ marginTop: '3px', width: '18px', height: '18px', accentColor: '#0284c7' }}
+                    />
+                    <div>
+                      <div style={{ fontSize: '0.86rem', fontWeight: 800, color: '#0f172a' }}>
+                        ⏱️ مزامنة توقيت الجهاز تلقائياً مع السيرفر فور عودة الاتصال (Clock Drift Auto-Sync)
+                      </div>
+                      <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: '#64748b', lineHeight: '1.4' }}>
+                        يقوم الخادم بإرسال أمر ضبط الساعة (SET OPTION DateTime) فوراً للجهاز لمنع أي انزلاق زمني وحماية التوقيت.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={waConfig.antiBounceEnabled !== false}
+                      onChange={(e) => setWaConfig({ ...waConfig, antiBounceEnabled: e.target.checked })}
+                      style={{ marginTop: '3px', width: '18px', height: '18px', accentColor: '#0284c7' }}
+                    />
+                    <div>
+                      <div style={{ fontSize: '0.86rem', fontWeight: 800, color: '#0f172a' }}>
+                        🛡️ تفعيل فلتر مكافحة الارتداد للبصمات السريعة (Anti-Bounce: 90 ثانية)
+                      </div>
+                      <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: '#64748b', lineHeight: '1.4' }}>
+                        يمنع التبصيم المتكرر غير المقصود خلال 90 ثانية من إحداث تضارب في الورديات مع تسجيلها في السجل للتدقيق.
+                      </p>
+                    </div>
+                  </label>
+
+                  {/* 🌟 محرك الورديات الذكي العابر للزمن */}
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', background: '#f0fdf4', padding: '12px', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
+                    <input
+                      type="checkbox"
+                      checked={waConfig.universalShiftEngine !== false}
+                      onChange={(e) => setWaConfig({ ...waConfig, universalShiftEngine: e.target.checked })}
+                      style={{ marginTop: '3px', width: '18px', height: '18px', accentColor: '#16a34a' }}
+                    />
+                    <div>
+                      <div style={{ fontSize: '0.86rem', fontWeight: 800, color: '#166534' }}>
+                        🌟 محرك الورديات الذكي العابر للزمن والمنتصف (Universal Event-Driven Shift Engine)
+                      </div>
+                      <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: '#15803d', lineHeight: '1.4' }}>
+                        يجعل الوردية نشطة بشكل ديناميكي من لحظة بصمة الدخول في أي وقت وتظل قيد العمل حتى يتم تسجيل بصمة الانصراف دون أي قيود على ساعات اليوم أو التاريخ، مع حساب الساعات بدقة متناهية ومراعاة صمام الأمان.
+                      </p>
+                    </div>
+                  </label>
+
+                  {/* ⏱️ صمام أمان أقصى مدة للوردية والحد الأدنى الفاصل للانصراف */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', background: '#ffffff', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, color: '#334155', marginBottom: '4px' }}>
+                        ⏱️ صمام أمان أقصى مدة للوردية (ساعات):
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="number"
+                          min="8"
+                          max="24"
+                          step="1"
+                          value={waConfig.shiftMaxHoursSafetyValve || 15}
+                          onChange={(e) => setWaConfig({ ...waConfig, shiftMaxHoursSafetyValve: parseFloat(e.target.value) || 15 })}
+                          style={{ width: '70px', padding: '6px 8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', fontWeight: 700, textAlign: 'center' }}
+                        />
+                        <span style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                          ساعة (تغلق الوردية بعدها تلقائياً بالمجدول)
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, color: '#334155', marginBottom: '4px' }}>
+                        ⏳ الحد الأدنى للانصراف بعد الحضور (دقائق):
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="number"
+                          min="2"
+                          max="60"
+                          step="1"
+                          value={waConfig.minCheckoutMinutes || 15}
+                          onChange={(e) => setWaConfig({ ...waConfig, minCheckoutMinutes: parseInt(e.target.value, 10) || 15 })}
+                          style={{ width: '70px', padding: '6px 8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', fontWeight: 700, textAlign: 'center' }}
+                        />
+                        <span style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                          دقيقة (أقل منها يعتبر تأكيد حضور دون إغلاق)
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -3749,7 +4246,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
                         [templateKey]: DEFAULT_ATTENDANCE_TEMPLATES[templateKey]
                       }
                     });
-                    showToast?.('🔄 تم استعادة القالب الافتراضي لهذه الحركة بنجاح');
+                    showToast?.('🔄 تم استعادة القالب الافتراضي بنجاح');
                   }}
                   style={{
                     padding: '5px 12px',
@@ -3767,7 +4264,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
                 </button>
               </div>
 
-              {/* أزرار اختيار نوع الحركة (4 Actions Tabs) */}
+              {/* أزرار اختيار نوع الحركة (Action Tabs) */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
                 {actionTabs.map(tab => (
                   <button
@@ -3775,28 +4272,28 @@ export default function BiometricDevicesCard({ state, showToast }) {
                     type="button"
                     onClick={() => setActiveTemplateAction(tab.id)}
                     style={{
-                      padding: '7px 14px',
+                      padding: '7px 12px',
                       borderRadius: '10px',
                       border: activeTemplateAction === tab.id ? '2px solid #0284c7' : '1px solid #cbd5e1',
                       background: activeTemplateAction === tab.id ? '#f0f9ff' : '#ffffff',
                       color: activeTemplateAction === tab.id ? '#0284c7' : '#475569',
                       fontWeight: 800,
-                      fontSize: '0.82rem',
+                      fontSize: '0.8rem',
                       cursor: 'pointer',
                       fontFamily: 'Cairo',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '6px',
+                      gap: '5px',
                       transition: 'all 0.15s ease'
                     }}
                   >
                     <span>{tab.label}</span>
                     <span style={{
-                      fontSize: '0.7rem',
+                      fontSize: '0.68rem',
                       padding: '1px 5px',
                       borderRadius: '4px',
-                      background: tab.isKioskOnly ? '#fef3c7' : '#e2e8f0',
-                      color: tab.isKioskOnly ? '#92400e' : '#475569'
+                      background: tab.isSystemAlert ? '#ede9fe' : (tab.isKioskOnly ? '#fef3c7' : '#e2e8f0'),
+                      color: tab.isSystemAlert ? '#6d28d9' : (tab.isKioskOnly ? '#92400e' : '#475569')
                     }}>
                       {tab.badge}
                     </span>
@@ -3804,47 +4301,54 @@ export default function BiometricDevicesCard({ state, showToast }) {
                 ))}
               </div>
 
-              {/* اختيار المستهدف: رسالة الإدارة العليا أم رسالة الموظف */}
-              <div style={{ display: 'flex', gap: '6px', background: '#f1f5f9', padding: '4px', borderRadius: '10px', marginBottom: '12px' }}>
-                <button
-                  type="button"
-                  onClick={() => setActiveTemplateTarget('admin')}
-                  style={{
-                    flex: 1,
-                    padding: '7px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: activeTemplateTarget === 'admin' ? '#ffffff' : 'transparent',
-                    color: activeTemplateTarget === 'admin' ? '#0f172a' : '#64748b',
-                    fontWeight: 800,
-                    fontSize: '0.82rem',
-                    cursor: 'pointer',
-                    fontFamily: 'Cairo',
-                    boxShadow: activeTemplateTarget === 'admin' ? '0 2px 4px rgba(0,0,0,0.06)' : 'none'
-                  }}
-                >
-                  👑 إشعار الإدارة العليا
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTemplateTarget('employee')}
-                  style={{
-                    flex: 1,
-                    padding: '7px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: activeTemplateTarget === 'employee' ? '#ffffff' : 'transparent',
-                    color: activeTemplateTarget === 'employee' ? '#0f172a' : '#64748b',
-                    fontWeight: 800,
-                    fontSize: '0.82rem',
-                    cursor: 'pointer',
-                    fontFamily: 'Cairo',
-                    boxShadow: activeTemplateTarget === 'employee' ? '0 2px 4px rgba(0,0,0,0.06)' : 'none'
-                  }}
-                >
-                  📱 إشعار هاتف الموظف (توثيق وترحيب)
-                </button>
-              </div>
+              {/* اختيار المستهدف أو تنبيه النظام */}
+              {isSystemAlert ? (
+                <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '10px', padding: '8px 12px', marginBottom: '12px', fontSize: '0.82rem', color: '#6d28d9', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>🛰️</span>
+                  <span>إشعار أمني إداري فوري: يُرسل تلقائياً للأرقام المخصصة لنظام المراقبة والتسوية فور وقوع الحدث.</span>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: '6px', background: '#f1f5f9', padding: '4px', borderRadius: '10px', marginBottom: '12px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTemplateTarget('admin')}
+                    style={{
+                      flex: 1,
+                      padding: '7px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: activeTemplateTarget === 'admin' ? '#ffffff' : 'transparent',
+                      color: activeTemplateTarget === 'admin' ? '#0f172a' : '#64748b',
+                      fontWeight: 800,
+                      fontSize: '0.82rem',
+                      cursor: 'pointer',
+                      fontFamily: 'Cairo',
+                      boxShadow: activeTemplateTarget === 'admin' ? '0 2px 4px rgba(0,0,0,0.06)' : 'none'
+                    }}
+                  >
+                    👑 إشعار الإدارة العليا
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTemplateTarget('employee')}
+                    style={{
+                      flex: 1,
+                      padding: '7px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: activeTemplateTarget === 'employee' ? '#ffffff' : 'transparent',
+                      color: activeTemplateTarget === 'employee' ? '#0f172a' : '#64748b',
+                      fontWeight: 800,
+                      fontSize: '0.82rem',
+                      cursor: 'pointer',
+                      fontFamily: 'Cairo',
+                      boxShadow: activeTemplateTarget === 'employee' ? '0 2px 4px rgba(0,0,0,0.06)' : 'none'
+                    }}
+                  >
+                    📱 إشعار هاتف الموظف (توثيق وترحيب)
+                  </button>
+                </div>
+              )}
 
               {/* تنبيه خاص بحركات الاستراحة */}
               {isBreakAction && (
@@ -3868,7 +4372,35 @@ export default function BiometricDevicesCard({ state, showToast }) {
                   اضغط لإدراج المتغير الذكي في نص القالب:
                 </span>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-                  {[
+                  {(activeTemplateAction === 'device_offline' ? [
+                    { tag: '{device_name}', label: '📟 اسم الجهاز' },
+                    { tag: '{branch_name}', label: '🏢 الفرع' },
+                    { tag: '{device_serial}', label: '🔢 السيريال' },
+                    { tag: '{last_seen}', label: '⏱️ آخر ظهور' },
+                    { tag: '{offline_duration}', label: '⏳ مدة الانقطاع' },
+                    { tag: '{company_name}', label: '🏛️ المنشأة' }
+                  ] : activeTemplateAction === 'device_online' ? [
+                    { tag: '{device_name}', label: '📟 اسم الجهاز' },
+                    { tag: '{branch_name}', label: '🏢 الفرع' },
+                    { tag: '{device_serial}', label: '🔢 السيريال' },
+                    { tag: '{time}', label: '🕒 الوقت' },
+                    { tag: '{date}', label: '📅 التاريخ' },
+                    { tag: '{client_ip}', label: '🌐 عنوان IP' },
+                    { tag: '{time_sync_status}', label: '⏱️ مزامنة التوقيت' },
+                    { tag: '{company_name}', label: '🏛️ المنشأة' }
+                  ] : activeTemplateAction === 'reconciliation_report' ? [
+                    { tag: '{branch_name}', label: '🏢 الفرع' },
+                    { tag: '{device_name}', label: '📟 الجهاز' },
+                    { tag: '{sync_time}', label: '🕒 وقت المزامنة' },
+                    { tag: '{sync_date}', label: '📅 التاريخ' },
+                    { tag: '{total_punches}', label: '📥 إجمالي البصمات' },
+                    { tag: '{period_from}', label: '⏱️ بداية الفترة' },
+                    { tag: '{period_to}', label: '⏱️ نهاية الفترة' },
+                    { tag: '{check_in_count}', label: '🟢 عدد الحضور' },
+                    { tag: '{check_out_count}', label: '🔴 عدد الانصراف' },
+                    { tag: '{employees_summary}', label: '👥 ملخص الموظفين' },
+                    { tag: '{company_name}', label: '🏛️ المنشأة' }
+                  ] : [
                     { tag: '{employee_name}', label: '👤 الموظف' },
                     { tag: '{branch_name}', label: '🏢 الفرع' },
                     { tag: '{action}', label: '📌 الحركة' },
@@ -3880,7 +4412,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
                     { tag: '{company_name}', label: '🏛️ المنشأة' },
                     ...(activeTemplateAction === 'check_out' ? [{ tag: '{shift_hours}', label: '⏱️ ساعات العمل' }] : []),
                     ...(activeTemplateAction === 'break_end' ? [{ tag: '{break_duration}', label: '⏱️ مدة الاستراحة' }] : [])
-                  ].map(item => (
+                  ]).map(item => (
                     <button
                       key={item.tag}
                       type="button"
@@ -3962,21 +4494,25 @@ export default function BiometricDevicesCard({ state, showToast }) {
                   }}>
                     {/* رأس شاشة واتساب */}
                     <div style={{
-                      background: '#075e54',
+                      background: isSystemAlert ? '#312e81' : '#075e54',
                       color: '#ffffff',
                       padding: '10px 14px',
                       display: 'flex',
                       alignItems: 'center',
                       gap: '10px'
                     }}>
-                      <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#25d366', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.9rem' }}>
-                        {activeTemplateTarget === 'employee' ? '👤' : '🏛️'}
+                      <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: isSystemAlert ? '#6366f1' : '#25d366', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.9rem' }}>
+                        {isSystemAlert ? '🛰️' : (activeTemplateTarget === 'employee' ? '👤' : '🏛️')}
                       </div>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 800, fontSize: '0.84rem' }}>
-                          {activeTemplateTarget === 'employee' ? 'د. سيف الدين (الموظف)' : 'إدارة الصيدليات الموحدة'}
+                          {isSystemAlert
+                            ? (activeTemplateAction === 'reconciliation_report' ? 'نظام التسوية التلقائي بعد الاسترداد' : 'نظام مراقبة أجهزة البصمة (Watchdog)')
+                            : (activeTemplateTarget === 'employee' ? 'د. سيف الدين (الموظف)' : 'إدارة الصيدليات الموحدة')}
                         </div>
-                        <div style={{ fontSize: '0.7rem', color: '#bbf7d0' }}>متصل الآن (online)</div>
+                        <div style={{ fontSize: '0.7rem', color: isSystemAlert ? '#c7d2fe' : '#bbf7d0' }}>
+                          {isSystemAlert ? 'تنبيه مشفر وفوري عبر واتساب' : 'متصل الآن (online)'}
+                        </div>
                       </div>
                       <span style={{ fontSize: '1.1rem' }}>💬</span>
                     </div>
@@ -4037,7 +4573,11 @@ export default function BiometricDevicesCard({ state, showToast }) {
                         gap: '6px'
                       }}
                     >
-                      {isTestingWa ? '⏳ جاري إرسال التجربة...' : `📲 إرسال إشعار تجريبي لهذا القالب (${activeTemplateTarget === 'admin' ? 'للإدارة' : 'للموظف'})`}
+                      {isTestingWa ? '⏳ جاري إرسال التجربة...' : (
+                        isSystemAlert
+                          ? `📲 إرسال إشعار تجريبي لهذا القالب (${actionTabs.find(t => t.id === activeTemplateAction)?.label})`
+                          : `📲 إرسال إشعار تجريبي لهذا القالب (${activeTemplateTarget === 'admin' ? 'للإدارة' : 'للموظف'})`
+                      )}
                     </button>
                   </div>
                 </div>

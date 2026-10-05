@@ -543,8 +543,8 @@ export default function Dashboard({
                           );
                         if (!act) return false;
                         const actDate = act.date ? String(act.date).slice(0, 10) : targetLiveDate;
-                        const actEpoch = act.startEpoch || (act.createdAt ? new Date(act.createdAt).getTime() : 0);
-                        const isCrossMidnight = actDate < targetLiveDate && (!actEpoch || (Date.now() - actEpoch) < 30 * 3600 * 1000);
+                        const actEpoch = act.startEpoch || (act.createdAt ? new Date(act.createdAt).getTime() : (act.date && act.timeIn ? new Date(`${act.date}T${act.timeIn.slice(0, 5)}:00`).getTime() : 0));
+                        const isCrossMidnight = actDate < targetLiveDate && actEpoch > 0 && (Date.now() - actEpoch) < 30 * 3600 * 1000;
                         const isCurrentShift = (actDate === targetLiveDate) || isCrossMidnight;
                         return isCurrentShift && String(act.branchId || e.branchId) === String(b.id);
                       }).length
@@ -639,11 +639,12 @@ export default function Dashboard({
                                    ))
                                 : null;
                               const rawActiveDate = rawActive?.date ? String(rawActive.date).slice(0, 10) : targetLiveDate;
-                              const rawActiveEpoch = rawActive?.startEpoch || (rawActive?.createdAt ? new Date(rawActive.createdAt).getTime() : 0);
+                              const rawActiveEpoch = rawActive?.startEpoch || (rawActive?.createdAt ? new Date(rawActive.createdAt).getTime() : (rawActive?.date && rawActive?.timeIn ? new Date(`${rawActive.date}T${rawActive.timeIn.slice(0, 5)}:00`).getTime() : 0));
                               const isCrossMidnightActive = Boolean(
                                 rawActive &&
                                 rawActiveDate < targetLiveDate &&
-                                (!rawActiveEpoch || (Date.now() - rawActiveEpoch) < 30 * 3600 * 1000)
+                                rawActiveEpoch > 0 &&
+                                (Date.now() - rawActiveEpoch) < 30 * 3600 * 1000
                               );
                               const isShiftTarget = rawActive && (rawActiveDate === targetLiveDate || isCrossMidnightActive);
                               const isActiveInThisBranch = rawActive && isShiftTarget && isEmployeeActive(emp) && (String(rawActive.branchId || emp.branchId) === String(b.id));
@@ -796,11 +797,12 @@ export default function Dashboard({
                ))
             : null;
           const rawActiveDate = rawActive?.date ? String(rawActive.date).slice(0, 10) : targetAbsentDate;
-          const rawActiveEpoch = rawActive?.startEpoch || (rawActive?.createdAt ? new Date(rawActive.createdAt).getTime() : 0);
+          const rawActiveEpoch = rawActive?.startEpoch || (rawActive?.createdAt ? new Date(rawActive.createdAt).getTime() : (rawActive?.date && rawActive?.timeIn ? new Date(`${rawActive.date}T${rawActive.timeIn.slice(0, 5)}:00`).getTime() : 0));
           const isCrossMidnightActive = Boolean(
             rawActive &&
             rawActiveDate < targetAbsentDate &&
-            (!rawActiveEpoch || (Date.now() - rawActiveEpoch) < 30 * 3600 * 1000)
+            rawActiveEpoch > 0 &&
+            (Date.now() - rawActiveEpoch) < 30 * 3600 * 1000
           );
           const isShiftToday = rawActive && (rawActiveDate === targetAbsentDate || isCrossMidnightActive);
           if (rawActive && isShiftToday) return false;

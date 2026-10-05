@@ -185,7 +185,8 @@ export function generateClearanceSlipHTML({
   effectiveReason,
   clearanceNotes,
   settlement,
-  handoverChecklist = []
+  handoverChecklist = [],
+  targetBranchId = null
 }) {
   const orgSettings = state.orgSettings || {};
   const orgName = orgSettings.orgName || 'مجموعة الصيدليات الطبية';
@@ -193,16 +194,26 @@ export function generateClearanceSlipHTML({
   const issueDate = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
   const serialNo = `CLR-${emp.code || emp.id}-${(terminationDate || '').replace(/-/g, '')}`;
 
-  // Branches string
-  const branchNames = (emp.branchesDetails && emp.branchesDetails.length > 0)
-    ? emp.branchesDetails.map(bd => {
-        const br = (state.branches || []).find(b => String(b.id) === String(bd.branchId));
-        return br ? br.name : `فرع ${bd.branchId}`;
-      }).join(' + ')
-    : ((state.branches || []).find(b => String(b.id) === String(emp.branchId))?.name || emp.branchName || 'المركز الرئيسي');
+  const effBranchId = targetBranchId || settlement?.targetBranchId;
+  const isBranchScoped = Boolean(effBranchId && (emp.branchesDetails?.length > 1 || settlement?.isSingleBranchTermination));
+  const targetBranchObj = (state.branches || []).find(b => String(b.id) === String(effBranchId));
+  const targetBranchName = targetBranchObj ? targetBranchObj.name : (settlement?.targetBranchName || (effBranchId ? `فرع ${effBranchId}` : 'الفرع المحدد'));
 
-  // Lifetime Shifts count & hours
-  const empShifts = (state.shifts || []).filter(s => String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeId) === String(emp.code)));
+  // Branches string
+  const branchNames = isBranchScoped
+    ? `${targetBranchName} (إنهاء خدمة من هذا الفرع فقط مع استمرار العمل بالفروع الأخرى)`
+    : ((emp.branchesDetails && emp.branchesDetails.length > 0)
+        ? emp.branchesDetails.map(bd => {
+            const br = (state.branches || []).find(b => String(b.id) === String(bd.branchId));
+            return br ? br.name : `فرع ${bd.branchId}`;
+          }).join(' + ')
+        : ((state.branches || []).find(b => String(b.id) === String(emp.branchId))?.name || emp.branchName || 'المركز الرئيسي'));
+
+  // Lifetime Shifts count & hours (filtered if branch-scoped)
+  const empShifts = (state.shifts || []).filter(s =>
+    (String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeId) === String(emp.code))) &&
+    (!isBranchScoped || String(s.branchId) === String(effBranchId))
+  );
   const totalShiftsCount = empShifts.length;
 
   return `
@@ -218,7 +229,9 @@ export function generateClearanceSlipHTML({
         </div>
         <div style="text-align: center;">
           <div style="background: #f0fdf4; border: 2px solid #0f766e; padding: 4px 16px; border-radius: 8px;">
-            <h3 style="margin: 0; color: #0f766e; font-size: 15px; font-weight: 800;">نموذج إخلاء طرف ومخالصة مالية نهائية</h3>
+            <h3 style="margin: 0; color: #0f766e; font-size: 15px; font-weight: 800;">
+              ${isBranchScoped ? `نموذج إخلاء طرف ومخالصة مالية — خاص بـ (${targetBranchName})` : 'نموذج إخلاء طرف ومخالصة مالية نهائية'}
+            </h3>
           </div>
           <span style="font-size: 11px; color: #64748b; margin-top: 4px; display: block;">رقم المستند: <strong>${serialNo}</strong></span>
         </div>
@@ -428,7 +441,10 @@ export function generateClearanceSlipHTML({
 
       <!-- Legal Declaration -->
       <div style="font-size: 11px; line-height: 1.5; color: #1e293b; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 10px; margin-bottom: 16px;">
-        <strong>إقرار المخالصة وإبراء الذمة:</strong> أقر أنا الموظف الموقع أدناه بأنني قد راجعت واستلمت كافة مستحقاتي المالية عن فترة عملي بالصيدلية/الشركة حتى تاريخ هذا المستند، وسددت كافة التزاماتي وسلفياتي، وأبرأت ذمة الإدارة إبراءً شاملاً ومانعاً لأي مطالبة حالية أو مستقبلية، وتم إخلاء طرفي بالكامل.
+        <strong>إقرار المخالصة وإبراء الذمة:</strong> ${isBranchScoped
+          ? `أقر أنا الموظف الموقع أدناه بأنني قد راجعت واستلمت كافة مستحقاتي المالية عن فترة عملي بـ (${targetBranchName}) حتى تاريخ هذا المستند، وتم إخلاء طرفي المالي والإداري من هذا الفرع فقط مع استمرار سريان تعييني بالشركة في باقي الفروع المعتمدة.`
+          : 'أقر أنا الموظف الموقع أدناه بأنني قد راجعت واستلمت كافة مستحقاتي المالية عن فترة عملي بالصيدلية/الشركة حتى تاريخ هذا المستند، وسددت كافة التزاماتي وسلفياتي، وأبرأت ذمة الإدارة إبراءً شاملاً ومانعاً لأي مطالبة حالية أو مستقبلية، وتم إخلاء طرفي بالكامل.'
+        }
       </div>
 
       <!-- Signatures -->

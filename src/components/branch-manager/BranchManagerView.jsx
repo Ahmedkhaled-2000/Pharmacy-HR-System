@@ -17,14 +17,17 @@ import BranchMonthlyRosterModule from '../branches/BranchMonthlyRosterModule';
 import EmployeeRosterEditModal from '../branches/EmployeeRosterEditModal';
 import BranchSalesEntryModal from '../branches/BranchSalesEntryModal';
 import BranchDirectivesModule from '../branches/BranchDirectivesModule';
-import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, isShiftManualPunch, calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, fmt } from '../../utils/formatters';
-import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
+import BranchRecruitmentNeedModal from './BranchRecruitmentNeedModal';
+import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, isShiftManualPunch, calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, fmt, getRealTodayStr, getRealDate, getRealNowTimeStr } from '../../utils/formatters';
+import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics } from '../../utils/latePenaltyEngine';
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
 import { getCycleDateRange, createDatePredicate, getActivePayrollMonth, isPayrollPeriodFrozenForDate, isPayrollMonthFrozen } from '../../utils/periodEngine';
-import { getRealDate, getRealTodayStr } from '../../utils/timeEngine';
-import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
+import { getEmployeeDaySchedule, findEmployeeRoster } from '../../utils/rosterEngine';
 import { getBranchIdentifiers, isEmployeeInBranch } from '../../utils/disciplinaryPenaltyEngine';
 import { triggerAndroidApkDownload } from '../../utils/nativeAppUpdater';
+import { enqueueRequestDecision } from '../../utils/syncEngine';
+import { emitLiveRequestUpdated } from '../../utils/socketClient';
+import { broadcastStateChange } from '../../utils/offlineSync';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -383,6 +386,9 @@ export default function BranchManagerView({
 
   // 5. Branch Sales Entry by Manager State
   const [showBranchSalesModal, setShowBranchSalesModal] = useState(false);
+
+  // 6. Branch Recruitment Need Request State
+  const [showRecruitmentModal, setShowRecruitmentModal] = useState(false);
 
   // ── State for "طلبات الفرع المرسلة للإدارة" Tab ──
   const [sentCategoryFilter, setSentCategoryFilter] = useState('all');
@@ -846,6 +852,8 @@ export default function BranchManagerView({
         r.type === 'roster_edit' ||
         r.type === 'eval_edit_request' ||
         r.type === 'bonus' ||
+        r.type === 'recruitment_need' ||
+        r.type === 'staff_recruitment_request' ||
         (r.type === 'penalty' && r.subType !== 'lateness' && !idStr.startsWith('req_late_inc_')) ||
         (r.branchApproved && r.targetApproval !== 'branch_only')
       );
@@ -941,6 +949,9 @@ export default function BranchManagerView({
     if (type.includes('resign') || title.includes('استقال')) {
       return { cat: 'resignation', label: '🚪 طلب استقالة', icon: '🚪', bg: '#fff1f2', border: '#fecdd3', text: '#be123c' };
     }
+    if (type === 'recruitment_need' || type === 'staff_recruitment_request' || type.includes('recruit') || title.includes('توظيف') || title.includes('احتياج')) {
+      return { cat: 'recruitment', label: `👥 طلب احتياج توظيف (${r.jobTitle || 'موظف'})`, icon: '👥', bg: '#f0f9ff', border: '#bae6fd', text: '#0369a1' };
+    }
     return { cat: 'other', label: r.typeLabel || '📋 طلب إداري', icon: '📋', bg: '#f8fafc', border: '#e2e8f0', text: '#334155' };
   };
 
@@ -1030,7 +1041,14 @@ export default function BranchManagerView({
 
     const managerShifts = (state.shifts || []).filter(
       (s) => s && s.employeeId === managerEmp?.id && matchesDateRange(s.date)
-    );
+    ).sort((a, b) => {
+      if (a?.isLiveActive && !b?.isLiveActive) return -1;
+      if (!a?.isLiveActive && b?.isLiveActive) return 1;
+      const dateA = String(a?.date || '');
+      const dateB = String(b?.date || '');
+      if (dateA !== dateB) return dateB.localeCompare(dateA);
+      return String(b?.timeIn || '').localeCompare(String(a?.timeIn || ''));
+    });
     const totalHours = Math.round(managerShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0) * 100) / 100;
     // 3. أجر الساعات والمستحقات
     const baseEarnings = Math.round(totalHours * rate * 100) / 100;
@@ -1087,7 +1105,7 @@ export default function BranchManagerView({
       branchDecision: 'approved',
       branchRejected: false,
       branchApprovedAt: new Date().toISOString(),
-      status: isFullyApproved ? 'approved' : 'pending',
+      status: isFullyApproved ? 'approved' : 'pending_admin',
       approvedAt: isFullyApproved ? new Date().toISOString() : foundReq.approvedAt
     };
 
@@ -1272,6 +1290,21 @@ export default function BranchManagerView({
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);
+
+    try {
+      enqueueRequestDecision({
+        requestId: reqId,
+        decision: 'approve',
+        newStatus: isFullyApproved ? 'approved' : 'pending_admin',
+        reviewer: { role: 'branch' },
+        branchId: updatedTargetReq.branchId || currentBranch?.id
+      }).catch(err => console.warn('Outbox enqueue decision error:', err));
+      emitLiveRequestUpdated(updatedTargetReq);
+      broadcastStateChange('requests', updatedRequests);
+    } catch (syncErr) {
+      console.warn('Sync dispatch error in manager approve:', syncErr);
+    }
+
     showToast?.(isFullyApproved ? '✅ تم اعتماد وقبول الطلب بنجاح وتطبيقه بالنظام' : '✅ تم توقيع وموافقة مدير الفرع، والطلب الآن بانتظار الاعتماد النهائي من الإدارة العليا');
   };
 
@@ -1286,14 +1319,14 @@ export default function BranchManagerView({
       return;
     }
 
-    // Branch manager rejection: marks branchApproved: false, branchDecision: 'rejected', and stays 'pending' for Higher Management final review
+    // Branch manager rejection: marks branchApproved: false, branchDecision: 'rejected', and stays 'pending_admin' for Higher Management final review
     const updatedTargetReq = {
       ...foundReq,
       branchApproved: false,
       branchDecision: 'rejected',
       branchRejected: true,
       branchRejectedAt: new Date().toISOString(),
-      status: 'pending' // Remains pending for Upper Management final verdict
+      status: 'pending_admin' // Referred to Higher Management with rejection note
     };
 
     let updatedRequests = [...(state.requests || [])];
@@ -1308,7 +1341,7 @@ export default function BranchManagerView({
     if (updatedTargetReq.type === 'leave' || updatedTargetReq.type === 'leave_request' || updatedTargetReq.leaveType) {
       const lIdx = updatedLeaveRequests.findIndex(lr => lr.id === reqId || (String(lr.employeeId) === String(updatedTargetReq.employeeId) && lr.startDate === updatedTargetReq.startDate));
       if (lIdx >= 0) {
-        updatedLeaveRequests[lIdx] = { ...updatedLeaveRequests[lIdx], branchApproved: false, branchDecision: 'rejected', status: 'pending' };
+        updatedLeaveRequests[lIdx] = { ...updatedLeaveRequests[lIdx], branchApproved: false, branchDecision: 'rejected', status: 'pending_admin' };
       } else {
         updatedLeaveRequests.unshift(updatedTargetReq);
       }
@@ -1318,7 +1351,7 @@ export default function BranchManagerView({
     if (updatedTargetReq.type === 'swap' || updatedTargetReq.type === 'shift_swap') {
       const sIdx = updatedSwaps.findIndex(s => s.id === reqId);
       if (sIdx >= 0) {
-        updatedSwaps[sIdx] = { ...updatedSwaps[sIdx], branchApproved: false, branchDecision: 'rejected', status: 'pending' };
+        updatedSwaps[sIdx] = { ...updatedSwaps[sIdx], branchApproved: false, branchDecision: 'rejected', status: 'pending_admin' };
       } else {
         updatedSwaps.unshift(updatedTargetReq);
       }
@@ -1328,14 +1361,14 @@ export default function BranchManagerView({
     if (updatedTargetReq.type === 'permission' || updatedTargetReq.type === 'إذن' || updatedTargetReq.type === 'late_permission' || updatedTargetReq.type === 'early_leave' || updatedTargetReq.permType || updatedTargetReq.type === 'permission_request') {
       const pIdx = updatedPermRequests.findIndex(p => p.id === reqId || (String(p.employeeId) === String(updatedTargetReq.employeeId) && p.date === updatedTargetReq.date));
       if (pIdx >= 0) {
-        updatedPermRequests[pIdx] = { ...updatedPermRequests[pIdx], branchApproved: false, branchDecision: 'rejected', branchRejected: true, status: 'pending' };
+        updatedPermRequests[pIdx] = { ...updatedPermRequests[pIdx], branchApproved: false, branchDecision: 'rejected', branchRejected: true, status: 'pending_admin' };
       } else {
-        updatedPermRequests.unshift({ ...updatedTargetReq, branchApproved: false, branchDecision: 'rejected', branchRejected: true, status: 'pending' });
+        updatedPermRequests.unshift({ ...updatedTargetReq, branchApproved: false, branchDecision: 'rejected', branchRejected: true, status: 'pending_admin' });
       }
     }
 
     const updatedNotifications = (state.notifications || []).map((n) => {
-      if (n.requestId === reqId) return { ...n, isRead: true, status: 'pending' };
+      if (n.requestId === reqId) return { ...n, isRead: true, status: 'pending_admin' };
       return n;
     });
 
@@ -1350,6 +1383,22 @@ export default function BranchManagerView({
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);
+
+    try {
+      enqueueRequestDecision({
+        requestId: reqId,
+        decision: 'status_change',
+        newStatus: 'pending_admin',
+        reviewer: { role: 'branch' },
+        reason: 'عدم موافقة مدير الفرع (محال للإدارة العليا)',
+        branchId: updatedTargetReq.branchId || currentBranch?.id
+      }).catch(err => console.warn('Outbox enqueue rejection error:', err));
+      emitLiveRequestUpdated(updatedTargetReq);
+      broadcastStateChange('requests', updatedRequests);
+    } catch (syncErr) {
+      console.warn('Sync dispatch error in manager reject:', syncErr);
+    }
+
     showToast?.('⚠️ تم تسجيل عدم موافقة مدير الفرع، وتم تحويل الطلب للإدارة العليا للبت النهائي');
   };
 
@@ -1381,6 +1430,25 @@ export default function BranchManagerView({
     const updatedState = { ...state, rosters: updatedRosters, requests: updatedRequests };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
+
+    try {
+      const targetReq = updatedRequests.find(r => r.id === targetId || (r.employeeId === targetId && (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request')));
+      if (targetReq) {
+        enqueueRequestDecision({
+          requestId: targetReq.id,
+          decision: 'approve',
+          newStatus: targetReq.status,
+          reviewer: { role: 'branch' },
+          branchId: targetReq.branchId || currentBranch?.id
+        }).catch(err => console.warn('Outbox roster error:', err));
+        emitLiveRequestUpdated(targetReq);
+      }
+      broadcastStateChange('requests', updatedRequests);
+      broadcastStateChange('rosters', updatedRosters);
+    } catch (e) {
+      console.warn('Sync roster error:', e);
+    }
+
     showToast?.('✅ تم التوقيع والموافقة على الجدول من مدير الفرع، وبانتظار الاعتماد النهائي من الإدارة العليا');
   };
 
@@ -1803,11 +1871,12 @@ export default function BranchManagerView({
         })),
         timeIn: manualPunchData.timeIn || '09:00',
         timeOut: manualPunchData.timeOut || '17:00',
-        hours: Math.round(totalRegularHours * 100) / 100,
+        hours: Math.round(totalNetHours * 100) / 100,
+        netHours: Math.round(totalNetHours * 100) / 100,
+        actualWorkedHours: Math.round(totalNetHours * 100) / 100,
         regularHours: Math.round(totalRegularHours * 100) / 100,
         overtimeHours: Math.round(totalOvertimeHours * 100) / 100,
         grossHours: Math.round(totalGrossHours * 100) / 100,
-        netHours: Math.round(totalNetHours * 100) / 100,
         scheduledHours: Math.round(totalRegularHours * 100) / 100,
         typeLabel: `طلب تعديل بصمات لعدة أيام (${sortedDays.length} أيام)`,
         reason: manualPunchData.reason.trim(),
@@ -1939,7 +2008,9 @@ export default function BranchManagerView({
       date: manualPunchData.date,
       timeIn: finalTimeIn,
       timeOut: finalTimeOut,
-      hours: regularHours,
+      hours: calcNetHours,
+      netHours: calcNetHours,
+      actualWorkedHours: calcNetHours,
       regularHours: regularHours,
       scheduledHours: schedHours,
       overtimeHours: overtimeHours,
@@ -2440,6 +2511,32 @@ export default function BranchManagerView({
         </div>
 
         <div style={{ display: 'flex', gap: isMobileScreen ? '8px' : '12px', flexWrap: 'wrap', alignItems: 'center', width: isMobileScreen ? '100%' : 'auto' }}>
+          {/* زر تبديل مسارات العمل والمنظومات المعتمدة لمدير الفرع */}
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('app:open-workspace-switcher', { detail: { user: managerEmp } }))}
+            style={{
+              background: 'rgba(255, 255, 255, 0.2)',
+              color: '#ffffff',
+              border: '1.5px solid rgba(255, 255, 255, 0.5)',
+              borderRadius: '10px',
+              padding: isMobileScreen ? '7px 12px' : '8px 16px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              fontWeight: 800,
+              fontSize: isMobileScreen ? '12px' : '13px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              transition: 'all 0.15s ease'
+            }}
+            title="التبديل بين صفحاتك المعتمدة (بوابة الموظف، الإدارة العليا، النواقص، الحسابات)"
+          >
+            <span style={{ fontSize: '15px' }}>🔄</span>
+            <span>تبديل صفحتي</span>
+          </button>
+
           <button
             type="button"
             onClick={triggerAndroidApkDownload}
@@ -2535,6 +2632,13 @@ export default function BranchManagerView({
                 onClick={() => setShowLeaveModal(true)}
               >
                 🏖️ طلب إجازة لموظف
+              </button>
+              <button
+                className="btn btn-start"
+                style={{ padding: isMobileScreen ? '8px 10px' : '8px 16px', fontSize: isMobileScreen ? '12px' : '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', background: '#0369a1', fontWeight: 800 }}
+                onClick={() => setShowRecruitmentModal(true)}
+              >
+                👥 طلب احتياج توظيف
               </button>
               {Boolean(state?.branchSalesSettings?.allowBranchManagersEntry) && (
                 <button
@@ -3069,6 +3173,7 @@ export default function BranchManagerView({
         const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request'].includes(previewModalReq.type);
         const isOvertime = previewModalReq.type === 'overtime' || previewModalReq.type === 'overtime_request' || previewModalReq.type === 'إضافي';
         const isScheduleDeviation = previewModalReq.type === 'schedule_deviation' || previewModalReq.type === 'عدم الالتزام بالجدول';
+        const isRecruitment = previewModalReq.type === 'recruitment_need' || previewModalReq.type === 'staff_recruitment_request';
 
         const totalAmount = parseFloat(previewModalReq.amount) || 0;
         const monthlyDed = parseFloat(previewModalReq.monthlyDeduction || previewModalReq.installmentAmount) || 0;
@@ -3247,6 +3352,81 @@ export default function BranchManagerView({
                         </div>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* ── RECRUITMENT NEED DETAILS ── */}
+                {isRecruitment && (
+                  <div style={{ background: '#f0f9ff', padding: '16px', borderRadius: '12px', border: '1px solid #bae6fd' }}>
+                    <h4 style={{ margin: '0 0 12px', color: '#0369a1', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      👥 تفاصيل طلب احتياج التوظيف:
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#0369a1' }}>الوظيفة المطلوبة:</span>
+                        <div style={{ fontWeight: 'bold', color: '#0c4a6e', fontSize: '15px' }}>
+                          💼 {previewModalReq.jobTitle || 'وظيفة بالفرع'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#0369a1' }}>القسم التابع له:</span>
+                        <div style={{ fontWeight: 'bold', color: '#0c4a6e' }}>
+                          🏢 {previewModalReq.department || 'عام'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#0369a1' }}>العدد المطلوب:</span>
+                        <div style={{ fontWeight: '900', color: '#0284c7', fontSize: '15px' }}>
+                          👤 {previewModalReq.headcount || 1} موظف
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#0369a1' }}>درجة الأولوية:</span>
+                        <div style={{ fontWeight: 'bold', color: previewModalReq.urgency === 'urgent' ? '#dc2626' : '#ea580c' }}>
+                          ⚠️ {previewModalReq.urgencyLabel || previewModalReq.urgency || 'أولوية قصوى'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#0369a1' }}>الوردية المقترحة:</span>
+                        <div style={{ fontWeight: 'bold', color: '#0c4a6e' }}>
+                          ⏱️ {previewModalReq.shiftTypeLabel || previewModalReq.shiftType || 'دوام كامل'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#0369a1' }}>المؤهل المطلوب:</span>
+                        <div style={{ fontWeight: 'bold', color: '#0c4a6e' }}>
+                          🎓 {previewModalReq.qualification || '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#0369a1' }}>سنوات الخبرة:</span>
+                        <div style={{ fontWeight: 'bold', color: '#0c4a6e' }}>
+                          ⭐ {previewModalReq.experienceYears || 0} سنوات
+                        </div>
+                      </div>
+                    </div>
+
+                    {previewModalReq.requirements && (
+                      <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e0f2fe', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '12px', color: '#0369a1', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                          📋 الشروط والمواصفات المحددة من مدير الفرع:
+                        </span>
+                        <div style={{ fontSize: '13px', color: '#1e293b', whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+                          {previewModalReq.requirements}
+                        </div>
+                      </div>
+                    )}
+
+                    {previewModalReq.reason && (
+                      <div style={{ background: '#fef2f2', padding: '10px 14px', borderRadius: '8px', border: '1px solid #fecaca' }}>
+                        <span style={{ fontSize: '12px', color: '#b91c1c', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                          ⚠️ مبرر وسبب الاحتياج:
+                        </span>
+                        <div style={{ fontSize: '13px', color: '#7f1d1d', lineHeight: 1.4 }}>
+                          {previewModalReq.reason}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -3560,6 +3740,44 @@ export default function BranchManagerView({
                           ☕ {previewModalReq.breakHours || '0'} ساعة
                         </div>
                       </div>
+                      {(() => {
+                        const tIn = previewModalReq.timeIn || previewModalReq.time;
+                        const tOut = previewModalReq.timeOut;
+                        const bH = Math.max(0, parseFloat(previewModalReq.breakHours) || 0);
+                        let realGross = 0;
+                        let realNet = 0;
+                        if (tIn && tOut && String(tOut).trim() !== '' && String(tOut).trim() !== '—') {
+                          const [inH, inM] = String(tIn).split(':').map(Number);
+                          const [outH, outM] = String(tOut).split(':').map(Number);
+                          if (!isNaN(inH) && !isNaN(outH)) {
+                            let diff = (outH * 60 + (outM || 0)) - (inH * 60 + (inM || 0));
+                            if (diff <= 0 || previewModalReq.isOvernight) diff += 24 * 60;
+                            realGross = Math.round((diff / 60) * 100) / 100;
+                            realNet = Math.max(0, Math.round((realGross - bH) * 100) / 100);
+                          }
+                        }
+                        if (!realNet) {
+                          realNet = parseFloat(previewModalReq.actualWorkedHours || previewModalReq.netHours || previewModalReq.hours || 0) || 0;
+                        }
+                        if (!realNet) return null;
+                        const schedH = parseFloat(previewModalReq.scheduledHours) || 8;
+                        const regH = previewModalReq.regularHours !== undefined ? parseFloat(previewModalReq.regularHours) : Math.min(realNet, schedH);
+                        const otH = previewModalReq.overtimeHours !== undefined ? parseFloat(previewModalReq.overtimeHours) : Math.max(0, Math.round((realNet - regH) * 100) / 100);
+
+                        return (
+                          <div style={{ gridColumn: 'span 2', background: '#fdf2f8', padding: '10px 14px', borderRadius: '10px', border: '1.5px solid #f472b6' }}>
+                            <span style={{ fontSize: '12px', color: '#9d174d', fontWeight: 'bold' }}>صافي ساعات العمل المحسوبة:</span>
+                            <div style={{ fontWeight: '900', color: '#be185d', fontSize: '17px', marginTop: '2px' }}>
+                              ⏱️ {realNet.toFixed(2)} ساعة
+                            </div>
+                            {otH > 0 && (
+                              <div style={{ fontSize: '11px', marginTop: '3px', color: '#9d174d', fontWeight: 700 }}>
+                                (أساسي: {regH.toFixed(2)} س + إضافي: {otH.toFixed(2)} س)
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}
@@ -4292,12 +4510,13 @@ export default function BranchManagerView({
               ) : (
                 branchEmployees.map((emp) => {
                   const empIdStr = String(emp.id);
+                  const empCodeStr = emp.code ? String(emp.code) : '';
                   const roster = (state.rosters || []).find(
-                    (r) => String(r.employeeId) === empIdStr && (r.month === selectedMonth || !r.month)
-                  );
+                    (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode || r.employeeId) === empCodeStr)) && (r.month === selectedMonth || !r.month)
+                  ) || findEmployeeRoster(emp.id, selectedMonth, state, currentBranch?.id);
                   const req = (state.requests || []).find(
                     (r) =>
-                      String(r.employeeId) === empIdStr &&
+                      (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode || r.employeeId) === empCodeStr)) &&
                       (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
                       (r.month === selectedMonth || !r.month)
                   );
@@ -4413,16 +4632,17 @@ export default function BranchManagerView({
                   ) : (
                     branchEmployees.map((emp) => {
                       const empIdStr = String(emp.id);
+                      const empCodeStr = emp.code ? String(emp.code) : '';
 
-                      // 1. Check in state.rosters
+                      // 1. Check in state.rosters or via findEmployeeRoster
                       const roster = (state.rosters || []).find(
-                        (r) => String(r.employeeId) === empIdStr && (r.month === selectedMonth || !r.month)
-                      );
+                        (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode || r.employeeId) === empCodeStr)) && (r.month === selectedMonth || !r.month)
+                      ) || findEmployeeRoster(emp.id, selectedMonth, state, currentBranch?.id);
 
                       // 2. Check in state.requests
                       const req = (state.requests || []).find(
                         (r) =>
-                          String(r.employeeId) === empIdStr &&
+                          (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode || r.employeeId) === empCodeStr)) &&
                           (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
                           (r.month === selectedMonth || !r.month)
                       );
@@ -4551,8 +4771,13 @@ export default function BranchManagerView({
 
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px', WebkitOverflowScrolling: 'touch' }}>
                   {(() => {
-                    const roster = (state.rosters || []).find((r) => r && r.employeeId === previewRosterEmp?.id && r.month === selectedMonth);
-                    if (!roster || !roster.schedule) {
+                    const resolvedRoster = (state.rosters || []).find((r) => 
+                      r && (String(r.employeeId) === String(previewRosterEmp?.id) || (previewRosterEmp?.code && String(r.employeeCode || r.employeeId) === String(previewRosterEmp.code))) && 
+                      (r.month === selectedMonth || !r.month)
+                    ) || findEmployeeRoster(previewRosterEmp?.id, selectedMonth, state, currentBranch?.id);
+
+                    const scheduleMap = resolvedRoster?.schedule || resolvedRoster?.newSchedule || previewRosterEmp?.roster?.schedule || previewRosterEmp?.weeklySchedule;
+                    if (!scheduleMap || typeof scheduleMap !== 'object' || Object.keys(scheduleMap).length === 0) {
                       return <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '20px' }}>لم يتم إدخال جدول شهري لهذا الموظف عن شهر {selectedMonth}.</p>;
                     }
                     return (
@@ -4567,7 +4792,8 @@ export default function BranchManagerView({
                             </tr>
                           </thead>
                           <tbody>
-                            {Object.entries(roster.schedule).map(([dayName, sch]) => {
+                            {Object.entries(scheduleMap).map(([dayName, sch]) => {
+                              if (!sch) return null;
                               const isOff = sch.type === 'off' || sch.isOff === true;
                               const isSwapped = Boolean(sch.isSwapped);
 
@@ -5404,7 +5630,9 @@ export default function BranchManagerView({
                         const perm = isApprovedPermissionForDate(s.employeeId, s.date, state);
                         const hasPerm = s.hasApprovedPermission || !!perm;
                         const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
-                        const effHours = getEffectiveShiftHours(s, state);
+                        const shiftMetrics = getShiftHoursMetrics(s, state);
+                        const regH = shiftMetrics.regularHours;
+                        const totalH = shiftMetrics.displayNetHours;
                         const isManualShift = isShiftManualPunch(s);
 
                         return (
@@ -5435,10 +5663,31 @@ export default function BranchManagerView({
                               )}
                             </td>
                             <td style={{ fontWeight: '700', color: '#0d9488' }}>
-                              {formatMoney(effHours)} ساعة
+                              <div>{formatMoney(totalH)} ساعة</div>
+                              {shiftMetrics.overtimeHours > 0 && (
+                                <div style={{ fontSize: '10.5px', marginTop: '2px', fontWeight: 700, color: shiftMetrics.isOvertimeApproved ? '#16a34a' : shiftMetrics.overtimeStatus === 'rejected' ? '#dc2626' : '#b45309' }}>
+                                  {shiftMetrics.isOvertimeApproved && `(أساسي: ${formatMoney(regH)} س + إضافي: ${formatMoney(shiftMetrics.overtimeHours)} س)`}
+                                  {shiftMetrics.overtimeStatus === 'pending' && `(أساسي: ${formatMoney(regH)} س + إضافي: ${formatMoney(shiftMetrics.overtimeHours)} س قيد الاعتماد)`}
+                                  {shiftMetrics.overtimeStatus === 'rejected' && `(معتمد: ${formatMoney(regH)} س | إضافي مرفوض: ${formatMoney(shiftMetrics.overtimeHours)} س)`}
+                                </div>
+                              )}
                               {hasPerm && permHours > 0 && (
                                 <div style={{ fontSize: '10.5px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
-                                  (فعلي: {formatMoney(Math.max(0, effHours - permHours))} س + إذن: {formatMoney(permHours)} س)
+                                  (فعلي: {formatMoney(Math.max(0, regH - permHours))} س + إذن: {formatMoney(permHours)} س)
+                                </div>
+                              )}
+                              {shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeHours > 0 && (
+                                <div style={{ marginTop: '2px' }}>
+                                  <span style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', padding: '1px 5px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 800 }}>
+                                    ✅ إضافي معتمد
+                                  </span>
+                                </div>
+                              )}
+                              {shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0 && (
+                                <div style={{ marginTop: '2px' }}>
+                                  <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 5px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 800 }}>
+                                    ⏳ إضافي قيد الاعتماد (+{formatMoney(shiftMetrics.overtimeHours)} س)
+                                  </span>
                                 </div>
                               )}
                             </td>
@@ -5531,39 +5780,58 @@ export default function BranchManagerView({
                 {managerSalaryMetrics.shiftsList.length === 0 ? (
                   <tr><td colSpan="9" style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)' }}>لا توجد بصمات مسجلة باسمك عن هذا الشهر.</td></tr>
                 ) : (
-                  managerSalaryMetrics.shiftsList.map((s, idx) => (
-                    <tr key={s.id}>
-                      <td style={{ color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
-                      <td style={{ fontWeight: '700' }}>{s.date}</td>
-                      <td>{getArabicWeekday(s.date)}</td>
-                      <td>
-                        <span style={{ background: '#dcfce7', color: '#15803d', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
-                          {s.timeIn || '—'}
-                        </span>
-                      </td>
-                      <td>
-                        <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
-                          {s.timeOut || '—'}
-                        </span>
-                      </td>
-                      <td>
-                        {(s.breakHours || 0) > 0 ? (
-                          <span style={{ background: '#fef3c7', color: '#b45309', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
-                            {formatMoney(s.breakHours)} س
+                  managerSalaryMetrics.shiftsList.map((s, idx) => {
+                    const shiftMetrics = getShiftHoursMetrics(s, state);
+                    const regH = shiftMetrics.regularHours;
+                    const totalH = shiftMetrics.displayNetHours;
+                    const shiftEarned = (shiftMetrics.payableHours * managerSalaryMetrics.hourlyRate);
+
+                    return (
+                      <tr key={s.id}>
+                        <td style={{ color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
+                        <td style={{ fontWeight: '700' }}>{s.date}</td>
+                        <td>{getArabicWeekday(s.date)}</td>
+                        <td>
+                          <span style={{ background: '#dcfce7', color: '#15803d', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
+                            {s.timeIn || '—'}
                           </span>
-                        ) : (
-                          <span style={{ color: 'var(--muted)' }}>—</span>
-                        )}
-                      </td>
-                      <td style={{ fontWeight: '700', color: '#0d9488' }}>
-                        {formatMoney(getEffectiveShiftHours(s, state))} ساعة
-                      </td>
-                      <td style={{ fontWeight: '700', color: '#16a34a' }}>
-                        {formatMoney(getEffectiveShiftHours(s, state) * managerSalaryMetrics.hourlyRate)} ج.م
-                      </td>
-                      <td style={{ fontSize: '12px', color: 'var(--muted)' }}>{s.note || 'تسجيل بصمة حية'}</td>
-                    </tr>
-                  ))
+                        </td>
+                        <td>
+                          <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
+                            {s.timeOut || '—'}
+                          </span>
+                        </td>
+                        <td>
+                          {(s.breakHours || 0) > 0 ? (
+                            <span style={{ background: '#fef3c7', color: '#b45309', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
+                              {formatMoney(s.breakHours)} س
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--muted)' }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ fontWeight: '700', color: '#0d9488' }}>
+                          <div>{formatMoney(totalH)} ساعة</div>
+                          {shiftMetrics.overtimeHours > 0 && (
+                            <div style={{ fontSize: '10.5px', marginTop: '2px', fontWeight: 700, color: shiftMetrics.isOvertimeApproved ? '#16a34a' : shiftMetrics.overtimeStatus === 'rejected' ? '#dc2626' : '#b45309' }}>
+                              {shiftMetrics.isOvertimeApproved && `(أساسي: ${formatMoney(regH)} س + إضافي: ${formatMoney(shiftMetrics.overtimeHours)} س)`}
+                              {shiftMetrics.overtimeStatus === 'pending' && `(أساسي: ${formatMoney(regH)} س + إضافي: ${formatMoney(shiftMetrics.overtimeHours)} س قيد الاعتماد)`}
+                              {shiftMetrics.overtimeStatus === 'rejected' && `(معتمد: ${formatMoney(regH)} س | إضافي مرفوض: ${formatMoney(shiftMetrics.overtimeHours)} س)`}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ fontWeight: '700', color: '#16a34a' }}>
+                          <div>{formatMoney(shiftEarned)} ج.م</div>
+                          {!shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0 && (
+                            <div style={{ fontSize: '9.5px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
+                              (+{formatMoney(shiftMetrics.overtimeHours * managerSalaryMetrics.hourlyRate)} ج.م معلق)
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ fontSize: '12px', color: 'var(--muted)' }}>{s.note || 'تسجيل بصمة حية'}</td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
               {managerSalaryMetrics.shiftsList.length > 0 && (
@@ -6116,6 +6384,14 @@ export default function BranchManagerView({
                 }}
               >
                 ⭐ رصد تقييم أداء موظف
+              </button>
+              <button
+                type="button"
+                className="btn btn-start"
+                style={{ padding: '7px 14px', fontSize: '12.5px', background: 'linear-gradient(135deg, #0284c7, #0369a1)', color: '#fff', display: 'flex', alignItems: 'center', gap: '5px', boxShadow: '0 2px 8px rgba(2,132,199,0.25)', fontWeight: 'bold' }}
+                onClick={() => setShowRecruitmentModal(true)}
+              >
+                👥 طلب احتياج توظيف
               </button>
             </div>
           </div>
@@ -7291,8 +7567,14 @@ export default function BranchManagerView({
               if (!isMatch) return false;
               const isThisBranchShift = String(s.branchId) === cIdStr || (!s.branchId && String(emp.branchId) === cIdStr);
               if (!isThisBranchShift) return false;
-              return matchesDateRange(s.date);
-            }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+            }).sort((a, b) => {
+              if (a?.isLiveActive && !b?.isLiveActive) return -1;
+              if (!a?.isLiveActive && b?.isLiveActive) return 1;
+              const dateA = String(a?.date || '');
+              const dateB = String(b?.date || '');
+              if (dateA !== dateB) return dateB.localeCompare(dateA);
+              return String(b?.timeIn || '').localeCompare(String(a?.timeIn || ''));
+            });
 
             const empHours = empShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
             const empBreak = empShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0);
@@ -8369,6 +8651,20 @@ export default function BranchManagerView({
             />
           </div>
         </div>
+      )}
+
+      {/* ── Branch Recruitment Need Modal ── */}
+      {showRecruitmentModal && (
+        <BranchRecruitmentNeedModal
+          isOpen={showRecruitmentModal}
+          onClose={() => setShowRecruitmentModal(false)}
+          currentBranch={currentBranch}
+          managerEmp={managerEmp}
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+        />
       )}
 
     </div>

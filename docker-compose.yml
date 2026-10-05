@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres_hr_2026
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - ./docker-data/postgres:/var/lib/postgresql/data
       - ./database/schema_postgresql.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -26,7 +26,7 @@ services:
     restart: unless-stopped
     command: redis-server --save 60 1 --loglevel warning
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - ./docker-data/redis:/data
     healthcheck:

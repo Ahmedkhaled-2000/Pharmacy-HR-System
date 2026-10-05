@@ -12,6 +12,20 @@ export default function EmployeeTerminationModal({
   onConfirmTermination
 }) {
   const { showConfirm } = useUI();
+  const isMultiBranchEmp = Array.isArray(emp.branchesDetails) && emp.branchesDetails.length > 1;
+  const [terminationScope, setTerminationScope] = useState(isMultiBranchEmp ? 'single_branch' : 'all');
+  
+  // Prioritize the branch corresponding to the card clicked in EmployeeCardsGrid
+  const initialBranchId = isMultiBranchEmp
+    ? (
+        (emp.currentSelectedBranchId && emp.branchesDetails.some(b => String(b.branchId) === String(emp.currentSelectedBranchId)))
+          ? String(emp.currentSelectedBranchId)
+          : String(emp.branchesDetails[0]?.branchId || emp.branchId || 'main')
+      )
+    : null;
+
+  const [targetBranchId, setTargetBranchId] = useState(initialBranchId);
+
   const [terminationReason, setTerminationReason] = useState('استقالة بناءً على رغبة الموظف');
   const [customReason, setCustomReason] = useState('');
   const [terminationDate, setTerminationDate] = useState(getRealTodayStr());
@@ -23,7 +37,11 @@ export default function EmployeeTerminationModal({
   if (!emp) return null;
 
   const effectiveReason = terminationReason === 'أخرى' && customReason.trim() ? customReason.trim() : terminationReason;
-  const settlement = computeEmployeeFinalSettlement(emp.id, state, terminationDate);
+  const effectiveBranchId = (isMultiBranchEmp && terminationScope === 'single_branch') ? targetBranchId : null;
+  const settlement = computeEmployeeFinalSettlement(emp.id, state, terminationDate, effectiveBranchId);
+
+  const targetBranchObj = (state.branches || []).find(b => String(b.id) === String(effectiveBranchId));
+  const targetBranchName = targetBranchObj ? targetBranchObj.name : (effectiveBranchId ? `فرع ${effectiveBranchId}` : 'الفرع المحدد');
 
   const handlePrintSlip = () => {
     try {
@@ -33,9 +51,11 @@ export default function EmployeeTerminationModal({
         terminationDate,
         effectiveReason,
         clearanceNotes,
-        settlement
+        settlement,
+        targetBranchId: effectiveBranchId
       });
-      triggerDirectPrint(html, `إخلاء طرف - ${emp.name}`);
+      const titleSuffix = effectiveBranchId ? ` - ${targetBranchName}` : '';
+      triggerDirectPrint(html, `إخلاء طرف - ${emp.name}${titleSuffix}`);
     } catch (err) {
       console.error('Error generating print slip:', err);
       window.print();
@@ -73,10 +93,15 @@ export default function EmployeeTerminationModal({
       alert('يرجى تحديد تاريخ سريان إنهاء الخدمة');
       return;
     }
+    const isSingleBranch = isMultiBranchEmp && terminationScope === 'single_branch';
+    const confirmMsg = isSingleBranch
+      ? `هل أنت متأكد من اعتماد إنهاء خدمة الموظف (${emp.name}) من فرع (${targetBranchName}) فقط، وتصفية حسابه المالي لهذا الفرع بصافي (${fmt(settlement?.netSettlement || 0)} ج.م) مع استمرار عمله في باقي الفروع؟`
+      : `هل أنت متأكد من اعتماد إنهاء خدمة الموظف (${emp.name}) نهائياً من كافة الفروع وتصفية حسابه المالي بصافي (${fmt(settlement?.netSettlement || 0)} ج.م)؟`;
+
     const isConfirmed = await showConfirm({
-      title: 'اعتماد إنهاء الخدمة وتصفية المستحقات',
-      message: `هل أنت متأكد من اعتماد إنهاء خدمة الموظف (${emp.name}) وتصفية حسابه المالي بصافي (${fmt(settlement?.netSettlement || 0)} ج.م)؟`,
-      confirmText: 'اعتماد إنهاء الخدمة',
+      title: isSingleBranch ? `إنهاء خدمة الموظف من فرع (${targetBranchName})` : 'اعتماد إنهاء الخدمة الشامل وتصفية المستحقات',
+      message: confirmMsg,
+      confirmText: isSingleBranch ? 'اعتماد إنهاء الخدمة من الفرع' : 'اعتماد إنهاء الخدمة الشامل',
       cancelText: 'إلغاء وتراجع',
       type: 'danger',
       icon: '🚪'
@@ -90,7 +115,10 @@ export default function EmployeeTerminationModal({
         terminationDate,
         clearanceNotes: clearanceNotes.trim(),
         settlement,
-        signedClearanceDoc: signedDoc
+        signedClearanceDoc: signedDoc,
+        terminationScope: isSingleBranch ? 'single_branch' : 'all',
+        targetBranchId: effectiveBranchId,
+        targetBranchName: isSingleBranch ? targetBranchName : null
       });
     } catch (err) {
       console.error(err);
@@ -143,16 +171,73 @@ export default function EmployeeTerminationModal({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '14px', marginBottom: '18px' }} className="no-print">
           <div>
             <h3 style={{ margin: 0, color: 'var(--danger-dark, #b91c1c)', fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              🛑 إنهاء الخدمة النهائي والمخالصة المالية الشاملة
+              {isMultiBranchEmp && terminationScope === 'single_branch'
+                ? `🛑 إنهاء الخدمة من فرع (${targetBranchName}) وإخلاء الطرف`
+                : '🛑 إنهاء الخدمة النهائي والمخالصة المالية الشاملة'}
             </h3>
             <span style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
-              تصفية كافة مستحقات وسلف والتزامات الموظف: <strong>{emp.name} ({emp.code})</strong>
+              {isMultiBranchEmp && terminationScope === 'single_branch'
+                ? `تصفية مستحقات الفرع المحدد مع الإبقاء على استمرار عمل الموظف: `
+                : `تصفية كافة مستحقات وسلف والتزامات الموظف: `}
+              <strong>{emp.name} ({emp.code})</strong>
             </span>
           </div>
           <button className="del-btn" onClick={onClose} disabled={isSubmitting}>✕</button>
         </div>
 
         <form onSubmit={handleSubmit} className="no-print">
+          {/* Multi-Branch Scope Selection */}
+          {isMultiBranchEmp && (
+            <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', padding: '14px 18px', borderRadius: '12px', marginBottom: '18px' }}>
+              <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#166534', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>🏢 نطاق إنهاء الخدمة: الموظف مسجل ويعمل في ({emp.branchesDetails.length}) فروع</span>
+              </div>
+              <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '800', cursor: 'pointer', color: '#15803d' }}>
+                  <input
+                    type="radio"
+                    name="termScope"
+                    value="single_branch"
+                    checked={terminationScope === 'single_branch'}
+                    onChange={() => setTerminationScope('single_branch')}
+                  />
+                  <span>إنهاء الخدمة من فرع محدد فقط (مع بقاء الموظف على رأس العمل بالفروع الأخرى)</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '800', cursor: 'pointer', color: '#b91c1c' }}>
+                  <input
+                    type="radio"
+                    name="termScope"
+                    value="all"
+                    checked={terminationScope === 'all'}
+                    onChange={() => setTerminationScope('all')}
+                  />
+                  <span>إنهاء خدمة كلي وشامل من كافة الفروع والمؤسسة</span>
+                </label>
+              </div>
+
+              {terminationScope === 'single_branch' && (
+                <div style={{ marginTop: '12px', padding: '10px 14px', background: '#fff', borderRadius: '8px', border: '1px solid #bbf7d0', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '13px', fontWeight: '800', color: '#166534' }}>حدد الفرع المراد إنهاء خدمته منه:</span>
+                  <select
+                    value={targetBranchId || ''}
+                    onChange={(e) => setTargetBranchId(e.target.value)}
+                    style={{ padding: '6px 14px', borderRadius: '8px', border: '1.5px solid #16a34a', background: '#fff', fontSize: '13px', fontWeight: 'bold', color: '#0f172a' }}
+                  >
+                    {emp.branchesDetails.map((bd) => {
+                      const bObj = (state.branches || []).find(b => String(b.id) === String(bd.branchId));
+                      const bName = bObj ? bObj.name : `فرع ${bd.branchId}`;
+                      return (
+                        <option key={bd.branchId} value={bd.branchId}>
+                          {bName} (سعر الساعة: {bd.salary} ج.م - {bd.workHoursPerDay || 8} س/يوم)
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Section 1: Termination Details Input */}
           <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '16px', borderRadius: '12px', marginBottom: '20px' }}>
             <h4 style={{ margin: '0 0 12px', color: '#991b1b', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>

@@ -70,12 +70,20 @@ export function useRequestsManager() {
           updatedShifts = updatedShifts.map((s) => {
             if (s.id === target.shiftId || (String(s.employeeId) === String(target.employeeId) && s.date === target.date)) {
               const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || s.hours);
+              const cleanExistingNotes = (s.notes || s.note || '')
+                .replace(/⏳?\s*إضافي قيد الاعتماد\s*(\(\+?[0-9.]+\s*س\))?/g, '')
+                .replace(/قيد الاعتماد/g, '')
+                .trim();
+              const newNote = cleanExistingNotes
+                ? `${cleanExistingNotes} | ✅ إضافي معتمد (+${overtimeHrs} س)`
+                : `✅ ساعات عمل وإضافي معتمد (أساسي: ${regHours} س + إضافي: ${overtimeHrs} س)`;
               return {
                 ...s,
                 overtimeStatus: 'approved',
                 overtimeHours: overtimeHrs,
                 adminApproved: true,
-                note: `ساعات عمل وإضافي معتمد (أساسي: ${regHours} س + إضافي: ${overtimeHrs} س)`
+                note: newNote,
+                notes: newNote
               };
             }
             return s;
@@ -222,9 +230,9 @@ export function useRequestsManager() {
                   timeIn: effectiveTimeIn,
                   timeOut: effectiveTimeOut,
                   breakHours: bH,
-                  hours: finalReg,
-                  workHours: finalReg,
-                  netHours: finalReg,
+                  hours: finalNet,
+                  workHours: finalNet,
+                  netHours: finalNet,
                   regularHours: finalReg,
                   actualWorkedHours: finalNet,
                   grossHours: finalGross,
@@ -252,9 +260,9 @@ export function useRequestsManager() {
                 timeIn,
                 timeOut: isCheckInOnly ? '' : timeOut,
                 breakHours: bH,
-                hours: regularHours,
-                workHours: regularHours,
-                netHours: regularHours,
+                hours: calcNetTotalHrs,
+                workHours: calcNetTotalHrs,
+                netHours: calcNetTotalHrs,
                 regularHours: regularHours,
                 actualWorkedHours: calcNetTotalHrs,
                 grossHours: calcGrossHrs,
@@ -390,10 +398,29 @@ export function useRequestsManager() {
                 description: penaltyDesc,
                 notes: penaltyDesc,
                 reason: penaltyDesc,
-                date: target.date || target.startDate || new Date().toISOString().slice(0, 10),
-                createdAt: new Date().toISOString()
               });
             }
+
+            // مزامنة فورية لسجل البصمات والورديات وإزالة نص "قيد الاعتماد"
+            const pDate = target.date || target.startDate || new Date().toISOString().slice(0, 10);
+            updatedShifts = updatedShifts.map((s) => {
+              if (String(s.employeeId) === String(target.employeeId) && s.date === pDate) {
+                const cleanExistingNotes = (s.notes || s.note || '')
+                  .replace(/⚠️?\s*جزاء\s*قيد الاعتماد/g, '')
+                  .replace(/قيد الاعتماد/g, '')
+                  .trim();
+                const newPenaltyNote = cleanExistingNotes
+                  ? `${cleanExistingNotes} | ⚖️ ${penaltyDesc}`
+                  : `⚖️ ${penaltyDesc}`;
+                return {
+                  ...s,
+                  penaltyStatus: 'approved',
+                  note: newPenaltyNote,
+                  notes: newPenaltyNote
+                };
+              }
+              return s;
+            });
           }
 
           if (target.actionTitle === 'إنهاء خدمة / فصل تأديبي' || target.penaltyAction === 'إنهاء خدمة / فصل تأديبي') {
@@ -1285,15 +1312,57 @@ export function useRequestsManager() {
         updatedShifts = updatedShifts.map((s) => {
           if (s.id === targetReq.shiftId || (String(s.employeeId) === String(targetReq.employeeId) && s.date === targetReq.date)) {
             const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || 8);
+            const cleanExistingNotes = (s.notes || s.note || '')
+              .replace(/⏳?\s*إضافي قيد الاعتماد\s*(\(\+?[0-9.]+\s*س\))?/g, '')
+              .replace(/قيد الاعتماد/g, '')
+              .trim();
+            const rejectedNote = cleanExistingNotes
+              ? `${cleanExistingNotes} | ❌ إضافي مرفوض من الإدارة`
+              : `ساعات الوردية الأساسية (${regHours} س) — ❌ تم استبعاد الإضافي (${targetReq.hours} س) بواسطة الإدارة`;
             return {
               ...s,
               overtimeStatus: 'rejected',
               adminApproved: false,
-              note: `ساعات الوردية الأساسية (${regHours} س) — تم استبعاد الإضافي (${targetReq.hours} س) بواسطة الإدارة`
+              note: rejectedNote,
+              notes: rejectedNote
             };
           }
           return s;
         });
+      }
+
+      // مزامنة الورديات عند رفض أو إسقاط جزاء أو مخالفة تأديبية
+      const isRejectedPenalty =
+        targetReq && (
+          targetReq.type === 'penalty' ||
+          targetReq.type === 'disciplinary_penalty' ||
+          targetReq.subType === 'disciplinary_penalty' ||
+          targetReq.type === 'penalty_objection' ||
+          targetReq.type === 'deduction'
+        );
+
+      if (isRejectedPenalty) {
+        const pDate = targetReq.date || targetReq.startDate || (targetReq.createdAt ? targetReq.createdAt.slice(0, 10) : null);
+        if (pDate) {
+          updatedShifts = updatedShifts.map((s) => {
+            if (String(s.employeeId) === String(targetReq.employeeId) && s.date === pDate) {
+              const cleanExistingNotes = (s.notes || s.note || '')
+                .replace(/⚠️?\s*جزاء\s*قيد الاعتماد/g, '')
+                .replace(/قيد الاعتماد/g, '')
+                .trim();
+              const rejectedPenaltyNote = cleanExistingNotes
+                ? `${cleanExistingNotes} | 🛡️ تم رفض / إسقاط الجزاء من الإدارة`
+                : '🛡️ تم رفض / إسقاط الجزاء بقرار الإدارة';
+              return {
+                ...s,
+                penaltyStatus: 'rejected',
+                note: rejectedPenaltyNote,
+                notes: rejectedPenaltyNote
+              };
+            }
+            return s;
+          });
+        }
       }
 
       if (targetReq && targetReq.type === 'schedule_deviation') {

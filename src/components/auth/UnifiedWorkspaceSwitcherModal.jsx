@@ -8,9 +8,9 @@ export default function UnifiedWorkspaceSwitcherModal({
   branches = [],
   onSelectWorkspace
 }) {
-  if (!isOpen || !unifiedAccess?.permissions) return null;
+  if (!isOpen) return null;
 
-  const perms = unifiedAccess.permissions;
+  const perms = unifiedAccess?.permissions || unifiedAccess || {};
   const availableWorkspaces = [];
 
   // 1. بوابته الشخصية بالـ HR
@@ -177,78 +177,86 @@ export default function UnifiedWorkspaceSwitcherModal({
         </div>
 
         {/* Workspace Cards */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-          gap: '14px',
-          marginBottom: '20px'
-        }}>
-          {availableWorkspaces.map((ws) => (
-            <div
-              key={ws.id}
-              onClick={() => onSelectWorkspace(ws)}
-              style={{
-                background: ws.lightBg,
-                border: `1.5px solid ${ws.borderColor}`,
-                borderRadius: '16px',
-                padding: '18px',
-                cursor: 'pointer',
-                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'translateY(-3px)';
-                e.currentTarget.style.boxShadow = '0 10px 25px rgba(0,0,0,0.08)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'none';
-                e.currentTarget.style.boxShadow = 'none';
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                  <span style={{ fontSize: '28px' }}>{ws.icon}</span>
-                  <span style={{
-                    background: '#fff',
-                    padding: '2px 8px',
-                    borderRadius: '6px',
-                    fontSize: '11px',
-                    fontWeight: 800,
-                    border: '1px solid var(--border)'
-                  }}>
-                    {ws.badge}
-                  </span>
+        {availableWorkspaces.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--muted)', background: 'var(--surface-muted, #f8fafc)', borderRadius: '16px', marginBottom: '20px' }}>
+            <div style={{ fontSize: '42px', marginBottom: '10px' }}>🔒</div>
+            <h4 style={{ margin: '0 0 6px', color: 'var(--text)', fontSize: '16px', fontWeight: 800 }}>لا توجد صفحات أو أنظمة مصرح بها إضافية</h4>
+            <p style={{ margin: 0, fontSize: '13px' }}>حسابك مفعل بصلاحيات أساسية. يمكنك مراجعة المالك لمنحك تراخيص إضافية.</p>
+          </div>
+        ) : (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+            gap: '14px',
+            marginBottom: '20px'
+          }}>
+            {availableWorkspaces.map((ws) => (
+              <div
+                key={ws.id}
+                onClick={() => onSelectWorkspace(ws)}
+                style={{
+                  background: ws.lightBg,
+                  border: `1.5px solid ${ws.borderColor}`,
+                  borderRadius: '16px',
+                  padding: '18px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-3px)';
+                  e.currentTarget.style.boxShadow = '0 10px 25px rgba(0,0,0,0.08)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'none';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                    <span style={{ fontSize: '28px' }}>{ws.icon}</span>
+                    <span style={{
+                      background: '#fff',
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      border: '1px solid var(--border)'
+                    }}>
+                      {ws.badge}
+                    </span>
+                  </div>
+
+                  <h3 style={{ margin: '0 0 4px', fontSize: '15.5px', fontWeight: 800, color: 'var(--text, #0f172a)' }}>
+                    {ws.title}
+                  </h3>
+                  <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted, #475569)', lineHeight: 1.45 }}>
+                    {ws.desc}
+                  </p>
                 </div>
 
-                <h3 style={{ margin: '0 0 4px', fontSize: '15.5px', fontWeight: 800, color: 'var(--text, #0f172a)' }}>
-                  {ws.title}
-                </h3>
-                <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted, #475569)', lineHeight: 1.45 }}>
-                  {ws.desc}
-                </p>
+                <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'flex-end' }}>
+                  <span style={{
+                    background: ws.gradient,
+                    color: '#fff',
+                    padding: '6px 14px',
+                    borderRadius: '7px',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    <span>دخول مباشر</span>
+                    <span>←</span>
+                  </span>
+                </div>
               </div>
-
-              <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'flex-end' }}>
-                <span style={{
-                  background: ws.gradient,
-                  color: '#fff',
-                  padding: '6px 14px',
-                  borderRadius: '7px',
-                  fontSize: '12px',
-                  fontWeight: 800,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}>
-                  <span>دخول مباشر</span>
-                  <span>←</span>
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

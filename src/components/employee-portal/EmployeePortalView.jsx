@@ -11,6 +11,7 @@ import EmployeePermissionsModule from './EmployeePermissionsModule';
 import EmployeeRosterModule from './EmployeeRosterModule';
 import EmployeeShiftSwapModule from './EmployeeShiftSwapModule';
 import ShiftAdjustmentModule from '../shifts/ShiftAdjustmentModule';
+import EmployeePunchEditRequestModule from './EmployeePunchEditRequestModule';
 import EmployeeEvaluationsModule from './EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
 import BylawsModule from '../bylaws/BylawsModule';
@@ -23,7 +24,7 @@ import FaceTestModal from '../attendance/FaceTestModal';
 import { preWarmFaceModels } from '../../utils/faceApiHelper';
 import { uploadBiometricAttendancePhoto, getAuthoritativeDriveConfig } from '../../utils/googleDriveService';
 import { sendBiometricRegistrationRequestEmail, sendBiometricResetRequestEmail } from '../../utils/gmailService';
-import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
+import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics } from '../../utils/latePenaltyEngine';
 import { getEmployeeDaySchedule, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
@@ -33,7 +34,36 @@ import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 import { triggerAndroidApkDownload } from '../../utils/nativeAppUpdater';
 import AndroidSettingsModal from '../modals/AndroidSettingsModal';
 import { getMobileConfig } from '../../utils/mobileConfigHelper';
+import { isUserEligibleForSwitcher } from '../../utils/permissionUtils';
 import '../../portal.css';
+
+export function isAdministrativeRole(employee, state = null) {
+  if (!employee) return false;
+  const role = String(employee.role || '').toLowerCase();
+  const title = String(employee.jobTitle || employee.title || employee.position || '').toLowerCase();
+  
+  if (employee.isBranchManager === true || employee.isManager === true || employee.is_manager === true) return true;
+  if (role === 'branch_manager' || role === 'branch' || role === 'manager' || role === 'admin' || role === 'owner' || role === 'purchase_manager' || role === 'purchasing_manager' || role === 'hr' || role === 'accountant') return true;
+
+  const adminKeywords = [
+    'مدير', 'إداري', 'اداري', 'إدارية', 'ادارية', 'مشرف', 'محاسب', 'مشتريات',
+    'موارد بشرية', 'اتش ار', 'hr', 'manager', 'admin', 'supervisor', 'accountant', 'purchas'
+  ];
+  if (adminKeywords.some(kw => title.includes(kw) || role.includes(kw))) return true;
+
+  if (state?.branches && Array.isArray(state.branches)) {
+    const empIdStr = String(employee.id || '');
+    const empCodeStr = String(employee.code || '');
+    const isBranchMgr = state.branches.some(b => {
+      const mgrIds = [b.managerId, b.manager_id, b.managerEmpId].filter(Boolean).map(String);
+      const mgrCodes = [b.managerCode, b.manager_code].filter(Boolean).map(String);
+      return mgrIds.includes(empIdStr) || mgrCodes.includes(empCodeStr) || (b.manager?.id && String(b.manager.id) === empIdStr);
+    });
+    if (isBranchMgr) return true;
+  }
+
+  return false;
+}
 
 // ─────────────────────────────────────────
 //  Month navigation helpers
@@ -102,6 +132,7 @@ const NAV_ITEMS = [
   { id: 'biometric',   icon: '📸', label: 'البصمة الإلكترونية' },
   { id: 'roster',      icon: '🗓️', label: 'الجدول الشهري' },
   { id: 'shift-adjustment', icon: '🔄', label: 'تعديل الشيفت' },
+  { id: 'punch-edit-request', icon: '🖐️', label: 'إرسال تعديل بصمة' },
   { id: 'swaps',       icon: '🔄', label: 'تبديل الشيفتات' },
   { id: 'evaluations', icon: '⭐', label: 'التقييمات والشكاوي' },
   { id: 'bylaws',      icon: '📜', label: 'لائحة العمل والجزاءات' },
@@ -156,6 +187,10 @@ export default function EmployeePortalView({
     );
     return found || currentEmpUser;
   }, [state?.employees, currentEmpUser]);
+
+  const canSwitchWorkspaces = useMemo(() => {
+    return isUserEligibleForSwitcher(currentEmpUser, orgSettings || state?.orgSettings, 'employee');
+  }, [currentEmpUser, orgSettings, state?.orgSettings]);
 
   const activeAutoCycleMonth = useMemo(() => {
     return getActivePayrollMonth(orgSettings || state?.orgSettings, getRealDate());
@@ -1056,6 +1091,9 @@ export default function EmployeePortalView({
   const canSubmitComplaint = isPermActive('canSubmitComplaint', true);
   const canViewProfile = isPermActive('canViewProfile', true);
 
+  // 🖐️ فحص ما إذا كان الموظف يشغل وظيفة إدارية (مدير فرع، مدير مشتريات، مشرف، محاسب، إدارة، الخ)
+  const isAdministrativeEmp = useMemo(() => isAdministrativeRole(emp, state), [emp, state]);
+
   // 🛵 فحص مسمى أو قسم خدمة التوصيل والدليفري
   const isDeliveryRole = useMemo(() => {
     if (!emp) return false;
@@ -1187,7 +1225,14 @@ export default function EmployeePortalView({
   const empShifts = emp
     ? (state.shifts || [])
         .filter((s) => s.employeeId === emp.id && filterFn(s.date) && (!selectedBranchId || s.branchId === selectedBranchId || !s.branchId))
-        .sort((a, b) => (a.date === b.date ? a.timeIn.localeCompare(b.timeIn) : a.date.localeCompare(b.date)))
+        .sort((a, b) => {
+          if (a?.isLiveActive && !b?.isLiveActive) return -1;
+          if (!a?.isLiveActive && b?.isLiveActive) return 1;
+          const dateA = String(a?.date || '');
+          const dateB = String(b?.date || '');
+          if (dateA !== dateB) return dateB.localeCompare(dateA);
+          return String(b?.timeIn || '').localeCompare(String(a?.timeIn || ''));
+        })
     : [];
 
   const empAdjs = useMemo(() => {
@@ -2029,6 +2074,14 @@ export default function EmployeePortalView({
             visible: !isAllBranchesMode
           },
           {
+            id: 'punch-edit-request',
+            targetTab: 'punch-edit-request',
+            label: 'إرسال تعديل بصمة',
+            icon: '🖐️',
+            desc: 'تقديم ومتابعة طلبات تسجيل وتعديل البصمات والمأموريات الإدارية',
+            visible: isAdministrativeEmp
+          },
+          {
             id: 'swaps',
             targetTab: 'swaps',
             label: 'تبديل ونقل الشيفتات',
@@ -2126,6 +2179,7 @@ export default function EmployeePortalView({
     canViewBylaws,
     canViewProfile,
     showDeliveryAddresses,
+    isAdministrativeEmp,
     empAdjs.length,
     empShifts.length,
     resignationBadgeCount,
@@ -2189,12 +2243,14 @@ export default function EmployeePortalView({
       };
       return { group: 'الرواتب والمالية', item: itemMap[activeTab]?.name || activeTab, icon: itemMap[activeTab]?.icon || '💼' };
     }
-    if (['shifts', 'roster', 'swaps', 'biometric'].includes(activeTab)) {
+    if (['shifts', 'roster', 'swaps', 'biometric', 'punch-edit-request', 'shift-adjustment'].includes(activeTab)) {
       const itemMap = {
         shifts: { name: 'سجل البصمات وساعات العمل', icon: '📋' },
         biometric: { name: 'البصمة الإلكترونية والتحقق الذاتي', icon: '📸' },
         roster: { name: 'الجدول الشهري ومناوبات العمل', icon: '🗓️' },
-        swaps: { name: 'تبديل ونقل الشيفتات', icon: '🔄' }
+        swaps: { name: 'تبديل ونقل الشيفتات', icon: '🔄' },
+        'shift-adjustment': { name: 'تعديل الشيفت والجدول الشهري', icon: '🔄' },
+        'punch-edit-request': { name: 'إرسال تعديل بصمة (للوظائف الإدارية)', icon: '🖐️' }
       };
       return { group: 'الدوام والورديات', item: itemMap[activeTab]?.name || activeTab, icon: itemMap[activeTab]?.icon || '⏱️' };
     }
@@ -2642,7 +2698,7 @@ export default function EmployeePortalView({
                 ⚙️
               </button>
 
-              {currentEmpUser?.unifiedAccess?.isEnabled && (
+              {canSwitchWorkspaces && (
                 <button
                   type="button"
                   onClick={() => window.dispatchEvent(new CustomEvent('app:open-workspace-switcher', { detail: { user: currentEmpUser } }))}
@@ -2654,11 +2710,15 @@ export default function EmployeePortalView({
                     borderRadius: '8px',
                     cursor: 'pointer',
                     fontSize: '12px',
-                    lineHeight: 1
+                    lineHeight: 1,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '3px'
                   }}
                   title="التبديل بين الصفحات والأنظمة المصرح بها"
                 >
-                  🔄
+                  <span>🔄</span>
+                  <span style={{ fontSize: '11px', fontWeight: 'bold' }}>تبديل</span>
                 </button>
               )}
               <button
@@ -3254,6 +3314,32 @@ export default function EmployeePortalView({
               <span className="ep-btn-label">{isPrivacyMode ? 'محمي' : 'خصوصية'}</span>
             </button>
 
+            {/* Workspace Switcher Button */}
+            {canSwitchWorkspaces && (
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('app:open-workspace-switcher', { detail: { user: currentEmpUser } }))}
+                title="التبديل بين الصفحات والأنظمة المصرح بها"
+                style={{
+                  border: '1px solid var(--primary, #0d9488)',
+                  background: 'rgba(13, 148, 136, 0.12)',
+                  color: 'var(--primary, #0d9488)',
+                  padding: '5px 10px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <span>🔄</span>
+                <span className="ep-btn-label">تبديل صفحتي</span>
+              </button>
+            )}
+
             {/* Logout Button */}
             <button
               type="button"
@@ -3705,6 +3791,35 @@ export default function EmployeePortalView({
                 <span>📱</span>
                 <span>تنزيل تطبيق الأندرويد (v1.2.48)</span>
               </button>
+
+              {canSwitchWorkspaces && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileDrawerOpen(false);
+                    window.dispatchEvent(new CustomEvent('app:open-workspace-switcher', { detail: { user: currentEmpUser } }));
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '9px 14px',
+                    borderRadius: '8px',
+                    background: 'rgba(13, 148, 136, 0.12)',
+                    color: 'var(--primary, #0d9488)',
+                    border: '1px solid var(--primary, #0d9488)',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <span>🔄</span>
+                  <span>التبديل بين الصفحات والأنظمة</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => {
@@ -5287,7 +5402,13 @@ export default function EmployeePortalView({
                                     const perm = isApprovedPermissionForDate(emp.id, s.date, state);
                                     const hasPerm = s.hasApprovedPermission || !!perm;
                                     const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
-                                    const effHours = getEffectiveShiftHours(s, state);
+                                    const shiftMetrics = getShiftHoursMetrics(s, state);
+                                    const regH = shiftMetrics.regularHours;
+                                    const totalH = shiftMetrics.displayNetHours;
+                                    const shiftEarned = shiftMetrics.payableHours * bRate;
+                                    const pendingOtEarned = (!shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0)
+                                      ? (shiftMetrics.overtimeHours * bRate)
+                                      : null;
 
                                     return (
                                       <tr key={s.id} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
@@ -5305,9 +5426,32 @@ export default function EmployeePortalView({
                                         <td><span className="ep-time-badge ep-time-out">{s.timeOut || '—'}</span></td>
                                         <td>{(s.breakHours || 0) > 0 ? <span className="ep-break-badge">{fmt(s.breakHours)} س</span> : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
                                         <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>
-                                          {fmt(effHours)} ساعة
+                                          <div>{fmt(totalH)} ساعة</div>
+                                          {shiftMetrics.overtimeHours > 0 && (
+                                            <div style={{ fontSize: '10.5px', marginTop: '2px', fontWeight: 700, color: shiftMetrics.isOvertimeApproved ? '#16a34a' : shiftMetrics.overtimeStatus === 'rejected' ? '#dc2626' : '#b45309' }}>
+                                              {shiftMetrics.isOvertimeApproved && `(أساسي: ${fmt(regH)} س + إضافي: ${fmt(shiftMetrics.overtimeHours)} س)`}
+                                              {shiftMetrics.overtimeStatus === 'pending' && `(أساسي: ${fmt(regH)} س + إضافي: ${fmt(shiftMetrics.overtimeHours)} س قيد الاعتماد)`}
+                                              {shiftMetrics.overtimeStatus === 'rejected' && `(معتمد: ${fmt(regH)} س | إضافي مرفوض: ${fmt(shiftMetrics.overtimeHours)} س)`}
+                                            </div>
+                                          )}
+                                          {hasPerm && permHours > 0 && (
+                                            <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
+                                              (فعلي: {fmt(Math.max(0, regH - permHours))} س + إذن: {fmt(permHours)} س)
+                                            </div>
+                                          )}
                                         </td>
-                                        <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>{canViewSalary ? `${fmt(effHours * bRate)} ج.م` : '🔒 مقيد'}</td>
+                                        <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>
+                                          {canViewSalary ? (
+                                            <>
+                                              <div>{fmt(shiftEarned)} ج.م</div>
+                                              {pendingOtEarned && (
+                                                <div style={{ fontSize: '9.5px', color: '#b45309', fontWeight: 700, marginTop: '2px' }} title="مبلغ الوقت الإضافي بانتظار الاعتماد">
+                                                  (+{fmt(pendingOtEarned)} ج.م معلق)
+                                                </div>
+                                              )}
+                                            </>
+                                          ) : '🔒 مقيد'}
+                                        </td>
                                         <td style={{ color: hasPerm ? '#047857' : 'var(--text-muted)', fontSize: '0.88rem' }}>
                                           {hasPerm ? (
                                             <div>
@@ -5507,7 +5651,14 @@ export default function EmployeePortalView({
                           const hasPerm = s.hasApprovedPermission || !!perm;
                           const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
 
-                          const effHours = getEffectiveShiftHours(s, state);
+                          const shiftMetrics = getShiftHoursMetrics(s, state);
+                          const regH = shiftMetrics.regularHours;
+                          const totalH = shiftMetrics.displayNetHours;
+                          const effectiveRate = summary.perBranch?.[s.branchId]?.rate || summary.rate || 0;
+                          const shiftEarned = shiftMetrics.payableHours * effectiveRate;
+                          const pendingOtEarned = (!shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0)
+                            ? (shiftMetrics.overtimeHours * effectiveRate)
+                            : null;
 
                           return (
                             <tr key={s.id} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
@@ -5524,17 +5675,17 @@ export default function EmployeePortalView({
                                     🖐️ بصمة يدوية معتمدة
                                   </span>
                                 )}
-                                {s.overtimeStatus === 'approved' && (
+                                {shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeHours > 0 && (
                                   <span style={{ display: 'block', marginTop: '2px', background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
-                                    ⭐ وقت إضافي معتمد (+{s.overtimeHours} س)
+                                    ⭐ وقت إضافي معتمد (+{shiftMetrics.overtimeHours} س)
                                   </span>
                                 )}
-                                {s.overtimeStatus === 'pending' && (
+                                {shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0 && (
                                   <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
-                                    ⏳ إضافي (+{s.overtimeHours} س) بانتظار الاعتماد
+                                    ⏳ إضافي (+{shiftMetrics.overtimeHours} س) بانتظار الاعتماد
                                   </span>
                                 )}
-                                {s.overtimeStatus === 'rejected' && (
+                                {shiftMetrics.overtimeStatus === 'rejected' && (
                                   <span style={{ display: 'block', marginTop: '2px', background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
                                     ❌ إضافي مستبعد
                                   </span>
@@ -5550,15 +5701,30 @@ export default function EmployeePortalView({
                                 }
                               </td>
                               <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>
-                                {fmt(effHours)} ساعة
+                                <div>{fmt(totalH)} ساعة</div>
+                                {shiftMetrics.overtimeHours > 0 && (
+                                  <div style={{ fontSize: '10px', marginTop: '2px', fontWeight: 700, color: shiftMetrics.isOvertimeApproved ? '#16a34a' : shiftMetrics.overtimeStatus === 'rejected' ? '#dc2626' : '#b45309' }}>
+                                    {shiftMetrics.isOvertimeApproved && `(أساسي: ${fmt(regH)} س + إضافي: ${fmt(shiftMetrics.overtimeHours)} س)`}
+                                    {shiftMetrics.overtimeStatus === 'pending' && `(أساسي: ${fmt(regH)} س + إضافي: ${fmt(shiftMetrics.overtimeHours)} س)`}
+                                  </div>
+                                )}
                                 {hasPerm && permHours > 0 && (
                                   <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
-                                    (فعلي: {fmt(Math.max(0, effHours - permHours))} س + إذن: {fmt(permHours)} س)
+                                    (فعلي: {fmt(Math.max(0, regH - permHours))} س + إذن: {fmt(permHours)} س)
                                   </div>
                                 )}
                               </td>
                               <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>
-                                {canViewSalary ? `${fmt(effHours * (summary.perBranch?.[s.branchId]?.rate || summary.rate))} ج.م` : '🔒 مقيد'}
+                                {canViewSalary ? (
+                                  <>
+                                    <div>{fmt(shiftEarned)} ج.م</div>
+                                    {pendingOtEarned && (
+                                      <div style={{ fontSize: '9.5px', color: '#b45309', fontWeight: 700, marginTop: '2px' }} title="مبلغ الوقت الإضافي بانتظار الاعتماد">
+                                        (+{fmt(pendingOtEarned)} ج.م معلق)
+                                      </div>
+                                    )}
+                                  </>
+                                ) : '🔒 مقيد'}
                               </td>
                               <td style={{ color: hasPerm ? '#047857' : 'var(--text-muted)', fontSize: '0.88rem' }}>
                                 {hasPerm ? (
@@ -6587,6 +6753,18 @@ export default function EmployeePortalView({
               saveState={saveState}
               showToast={showToast}
               selectedMonth={selectedMonth}
+              selectedBranchId={selectedBranchId || null}
+            />
+          )}
+
+          {/* ── 8.6. Tab: Administrative Punch Edit Request (إرسال تعديل بصمة) ── */}
+          {activeTab === 'punch-edit-request' && isAdministrativeEmp && (
+            <EmployeePunchEditRequestModule
+              emp={emp}
+              state={state}
+              setState={setState}
+              saveState={saveState}
+              showToast={showToast}
               selectedBranchId={selectedBranchId || null}
             />
           )}

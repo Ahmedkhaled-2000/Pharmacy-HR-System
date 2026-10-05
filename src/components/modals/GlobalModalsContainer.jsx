@@ -5,7 +5,7 @@ import { compressImage } from '../../utils/imageCompressor';
 import { syncNow } from '../../utils/offlineSync';
 import { smartMergeStates } from '../../utils/stateMerger';
 import { normalizeState } from '../../utils/formatters';
-import { getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
+import { getEffectiveShiftHours, getShiftHoursMetrics } from '../../utils/latePenaltyEngine';
 import { syncEmployeeEntireDrive } from '../../utils/googleDriveService';
 import { getJobsList, getDepartmentsList } from '../../utils/jobsHelper';
 import { emitRevokeSession } from '../../utils/socketClient';
@@ -377,7 +377,21 @@ export default function GlobalModalsContainer() {
                               <td>{s.timeIn}</td>
                               <td>{s.timeOut}</td>
                               <td>{fmt(s.breakHours || 0)} س</td>
-                              <td className="money" style={{ color: 'var(--primary-dark)' }}>{fmt(getEffectiveShiftHours(s, state))} س</td>
+                              <td className="money" style={{ color: 'var(--primary-dark)' }}>
+                                {(() => {
+                                  const m = getShiftHoursMetrics(s, state);
+                                  return (
+                                    <div>
+                                      <div>{fmt(m.displayNetHours)} س</div>
+                                      {m.overtimeHours > 0 && (
+                                        <div style={{ fontSize: '10px', color: m.isOvertimeApproved ? '#16a34a' : '#b45309', fontWeight: 'bold' }}>
+                                          ({fmt(m.regularHours)} + {fmt(m.overtimeHours)} {m.isOvertimeApproved ? 'معتمد' : 'إضافي'})
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                              </td>
                               <td>{s.note || '—'}</td>
                               <td>
                                 <button className="del-btn" style={{ color: 'var(--primary)', marginLeft: '6px' }} onClick={() => openEditShift(s)}>✏️ تعديل</button>

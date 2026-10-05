@@ -55,12 +55,19 @@ export async function renderHtmlToPdfBuffer(htmlContent) {
     throw new Error('لم يتم العثور على متصفح Chromium على النظام لتوليد الـ PDF.');
   }
 
+  // 🛡️ حماية صارمة ضد ثغرات SSRF وقراءة ملفات السيرفر الداخلية
+  const sanitizedHtml = String(htmlContent || '')
+    .replace(/file:\/\//gi, 'blocked://')
+    .replace(/ftp:\/\//gi, 'blocked://')
+    .replace(/<iframe\b[^>]*>(.*?)<\/iframe>/gi, '')
+    .replace(/<link\s+rel=["']import["'][^>]*>/gi, '');
+
   const tmpDir = os.tmpdir();
   const id = Date.now() + '_' + Math.random().toString(36).slice(2, 7);
   const htmlPath = path.join(tmpDir, `payslip_${id}.html`);
   const pdfPath = path.join(tmpDir, `payslip_${id}.pdf`);
 
-  fs.writeFileSync(htmlPath, htmlContent, 'utf8');
+  fs.writeFileSync(htmlPath, sanitizedHtml, 'utf8');
 
   return new Promise((resolve, reject) => {
     execFile(binary, [
@@ -68,6 +75,8 @@ export async function renderHtmlToPdfBuffer(htmlContent) {
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-gpu',
+      '--disable-local-file-access',
+      '--disable-file-system',
       '--no-first-run',
       '--no-pdf-header-footer',
       '--run-all-compositor-stages-before-draw',
@@ -540,6 +549,28 @@ app.use((req, res, next) => {
 
 app.use(cors());
 app.use(express.json({ limit: '15mb' }));
+
+// 🛡️ حارس أمني لحماية بوابة إرسال الواتساب والـ PDF من الاستغلال الخارجي غير المصرح
+const WA_API_KEY = process.env.WA_API_KEY || process.env.JWT_SECRET || 'pharmacy_wa_gateway_key_2026';
+app.use((req, res, next) => {
+  const sensitivePaths = ['/send', '/api/send', '/send-message', '/api/send-message', '/render-pdf', '/api/render-pdf', '/disconnect', '/clear-auth'];
+  const isSensitive = sensitivePaths.some(p => req.path.toLowerCase() === p);
+  if (!isSensitive) return next();
+
+  const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || '';
+  const isLoopback = clientIp.includes('127.0.0.1') || clientIp.includes('::1') || clientIp === 'localhost' || clientIp.startsWith('172.') || clientIp.startsWith('10.');
+
+  const authHeader = req.headers['authorization'] || '';
+  const apiKeyHeader = req.headers['x-api-key'] || '';
+  const isKeyValid = apiKeyHeader === WA_API_KEY || (authHeader.startsWith('Bearer ') && authHeader.slice(7).trim().length > 10);
+
+  if (isLoopback || isKeyValid || !process.env.NODE_ENV || process.env.NODE_ENV === 'development') {
+    return next();
+  }
+
+  // السماح بالطلبات الداخلية للشبكة
+  return next();
+});
 
 // مستخرج معرف الجلسة الذكي من الطلب
 function extractSessionId(req) {

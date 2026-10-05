@@ -226,6 +226,11 @@ export function normalizeRequestType(type) {
  */
 export function isDualApprovalRequest(reqOrType, state = null) {
   if (!reqOrType) return false;
+  if (typeof reqOrType === 'object' && reqOrType !== null) {
+    if (reqOrType.targetApproval === 'both' || reqOrType.targetApproval === 'branch_and_admin' || reqOrType.dualApproval === true) {
+      return true;
+    }
+  }
   const type = typeof reqOrType === 'string' ? reqOrType : reqOrType.type;
   const normType = normalizeRequestType(type);
 

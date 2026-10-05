@@ -931,7 +931,7 @@ export function normalizeState(parsed) {
             branchName: s.branchName || '',
             date: s.date,
             timeIn: s.timeIn,
-            startEpoch: s.createdAt ? new Date(s.createdAt).getTime() : Date.now(),
+            startEpoch: shiftEpoch || (s.createdAt ? new Date(s.createdAt).getTime() : Date.now()),
             isPaused: Boolean(s.isPaused),
             isOnBreak: Boolean(s.isOnBreak),
             breakStartTime: s.breakStartTime || null,
@@ -1203,6 +1203,52 @@ export function getEmployeeApprovedLeaves(emp, state, periodFilterFn = null) {
 }
 
 export const getUniqueApprovedLeavesForEmployee = getEmployeeApprovedLeaves;
+
+/**
+ * Returns the exact start epoch (timestamp ms) of any shift or punch record
+ */
+export function getShiftStartEpoch(s) {
+  if (!s) return 0;
+  if (s.startEpoch && Number(s.startEpoch) > 0) return Number(s.startEpoch);
+  if (s.createdAt) {
+    const t = new Date(s.createdAt).getTime();
+    if (!isNaN(t) && t > 0) return t;
+  }
+  if (s.date && s.timeIn && s.timeIn !== '—') {
+    const timeClean = s.timeIn.length === 5 ? `${s.timeIn}:00` : s.timeIn;
+    const t = new Date(`${s.date}T${timeClean}`).getTime();
+    if (!isNaN(t) && t > 0) return t;
+  }
+  return 0;
+}
+
+/**
+ * Checks whether an employee is on approved leave on a given date (YYYY-MM-DD)
+ */
+export function isEmployeeOnApprovedLeave(emp, dateStr, state) {
+  if (!emp || !dateStr) return false;
+  const leaves = getEmployeeApprovedLeaves(emp, state);
+  return leaves.some((l) => {
+    const s = l.startDate;
+    const e = l.endDate || s;
+    return s && dateStr >= s && dateStr <= e;
+  });
+}
+
+/**
+ * Returns the active approved leave object for an employee on a given date, if any
+ */
+export function getEmployeeCurrentApprovedLeave(emp, dateStr, state) {
+  if (!emp || !dateStr) return null;
+  const leaves = getEmployeeApprovedLeaves(emp, state);
+  return (
+    leaves.find((l) => {
+      const s = l.startDate;
+      const e = l.endDate || s;
+      return s && dateStr >= s && dateStr <= e;
+    }) || null
+  );
+}
 
 /**
  * Calculates annual leave total, taken days, and remaining balance for an employee

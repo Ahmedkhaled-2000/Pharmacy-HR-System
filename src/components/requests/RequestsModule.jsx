@@ -182,6 +182,10 @@ export function getFormattedRequestBadge(type, leaveType, targetAction, fullReq 
   if (cleanType === 'profile_update' || cleanType === 'profile_edit' || cleanType === 'profile_update_request' || cleanType.includes('profile')) {
     return <span className="badge badge-primary" style={{ background: '#0d9488', color: '#fff', border: '1px solid #0f766e', fontWeight: 700 }}>👤 طلب تحديث بيانات شخصية</span>;
   }
+  if (cleanType === 'recruitment_need' || cleanType === 'staff_recruitment_request' || cleanType === 'طلب احتياج توظيف') {
+    return <span className="badge" style={{ background: '#4f46e5', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>👥 طلب احتياج توظيف</span>;
+  }
+
 
   // إذا كان النص يحتوي على حروف إنجليزية ولم يطابق ما سبق
   if (/[a-zA-Z]/.test(type)) {
@@ -581,6 +585,7 @@ export default function RequestsModule({
     biometric: 'اعتمادات البصمة والكشك (AI)',
     expense: 'فواتير ومصروفات الفروع',
     comp_off: 'إجازات بدل الراحة',
+    recruitment_need: 'طلبات احتياج التوظيف للفروع',
     complaint: 'الشكاوى والتظلمات الإدارية',
     penalty: 'الجزاءات والمخالفات'
   };
@@ -589,6 +594,10 @@ export default function RequestsModule({
     all: {
       title: '📋 مركز إدارة طلبات الموظفين الموحد',
       desc: 'معاينة كافة الطلبات، الإجازات، الأذون، السلف، الأدوية، وتبديل الورديات واتخاذ قرارات الموافقة المزدوجة'
+    },
+    recruitment_need: {
+      title: '👥 إدارة طلبات احتياج التوظيف للفروع',
+      desc: 'معاينة وتدقيق طلبات مديري الفروع لاحتياجات التوظيف والكوادر وتحديد الشروط والمؤهلات'
     },
     leave: {
       title: '🏖️ إدارة طلبات الإجازات (كافة الأنواع)',
@@ -718,6 +727,8 @@ export default function RequestsModule({
       return r.type === 'comp_off_grant' || r.type === 'leave_comp_off' || r.leaveType === 'comp_off';
     } else if (type === 'expense' || type === 'financial' || type === 'invoice') {
       return r.type === 'expense' || r.type === 'financial_expense' || r.type === 'invoice' || r.type === 'financial_alert' || r.subType === 'invoice';
+    } else if (type === 'recruitment_need' || type === 'recruitment') {
+      return r.type === 'recruitment_need' || r.type === 'staff_recruitment_request' || r.subType === 'recruitment_need';
     }
     return r.type === type;
   };
@@ -1142,12 +1153,20 @@ export default function RequestsModule({
         updatedShifts = updatedShifts.map((s) => {
           if (s.id === approvedTargetReq.shiftId || (String(s.employeeId) === String(approvedTargetReq.employeeId) && s.date === approvedTargetReq.date)) {
             const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || s.hours);
+            const cleanExistingNotes = (s.notes || s.note || '')
+              .replace(/⏳?\s*إضافي قيد الاعتماد\s*(\(\+?[0-9.]+\s*س\))?/g, '')
+              .replace(/قيد الاعتماد/g, '')
+              .trim();
+            const newNote = cleanExistingNotes
+              ? `${cleanExistingNotes} | ✅ إضافي معتمد (+${overtimeHrs} س)`
+              : `✅ ساعات عمل وإضافي معتمد (أساسي: ${regHours} س + إضافي: ${overtimeHrs} س)`;
             return {
               ...s,
               overtimeStatus: 'approved',
               overtimeHours: overtimeHrs,
               adminApproved: true,
-              note: `ساعات عمل وإضافي معتمد (أساسي: ${regHours} س + إضافي: ${overtimeHrs} س)`
+              note: newNote,
+              notes: newNote
             };
           }
           return s;
@@ -1267,9 +1286,9 @@ export default function RequestsModule({
                 timeIn: effectiveTimeIn,
                 timeOut: effectiveTimeOut,
                 breakHours: bH,
-                hours: finalReg,
-                workHours: finalReg,
-                netHours: finalReg,
+                hours: finalNet,
+                workHours: finalNet,
+                netHours: finalNet,
                 regularHours: finalReg,
                 actualWorkedHours: finalNet,
                 grossHours: finalGross,
@@ -1297,9 +1316,9 @@ export default function RequestsModule({
               timeIn,
               timeOut: isCheckInOnly ? '' : timeOut,
               breakHours: bH,
-              hours: regularHours,
-              workHours: regularHours,
-              netHours: regularHours,
+              hours: calcNetTotalHrs,
+              workHours: calcNetTotalHrs,
+              netHours: calcNetTotalHrs,
               regularHours: regularHours,
               actualWorkedHours: calcNetTotalHrs,
               grossHours: calcGrossHrs,
@@ -1445,6 +1464,26 @@ export default function RequestsModule({
           } else {
             updatedAdjustments.unshift(newAdj);
           }
+
+          // مزامنة فورية لسجل البصمات والورديات وإزالة نص "قيد الاعتماد"
+          updatedShifts = updatedShifts.map((s) => {
+            if (String(s.employeeId) === String(approvedTargetReq.employeeId) && s.date === reqDate) {
+              const cleanExistingNotes = (s.notes || s.note || '')
+                .replace(/⚠️?\s*جزاء\s*قيد الاعتماد/g, '')
+                .replace(/قيد الاعتماد/g, '')
+                .trim();
+              const newPenaltyNote = cleanExistingNotes
+                ? `${cleanExistingNotes} | ⚖️ ${penaltyDesc}`
+                : `⚖️ ${penaltyDesc}`;
+              return {
+                ...s,
+                penaltyStatus: 'approved',
+                note: newPenaltyNote,
+                notes: newPenaltyNote
+              };
+            }
+            return s;
+          });
         }
       }
 
@@ -2398,15 +2437,57 @@ export default function RequestsModule({
       updatedShifts = updatedShifts.map((s) => {
         if (s.id === rejectedTargetReq.shiftId || (String(s.employeeId) === String(rejectedTargetReq.employeeId) && s.date === rejectedTargetReq.date)) {
           const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || 8);
+          const cleanExistingNotes = (s.notes || s.note || '')
+            .replace(/⏳?\s*إضافي قيد الاعتماد\s*(\(\+?[0-9.]+\s*س\))?/g, '')
+            .replace(/قيد الاعتماد/g, '')
+            .trim();
+          const rejectedNote = cleanExistingNotes
+            ? `${cleanExistingNotes} | ❌ إضافي مرفوض من الإدارة`
+            : `ساعات الوردية الأساسية (${regHours} س) — ❌ تم استبعاد الإضافي (${rejectedTargetReq.hours} س) بواسطة الإدارة`;
           return {
             ...s,
             overtimeStatus: 'rejected',
             adminApproved: false,
-            note: `ساعات الوردية الأساسية (${regHours} س) — تم استبعاد الإضافي (${rejectedTargetReq.hours} س) بواسطة الإدارة`
+            note: rejectedNote,
+            notes: rejectedNote
           };
         }
         return s;
       });
+    }
+
+    // مزامنة الورديات عند رفض أو إسقاط جزاء أو مخالفة تأديبية
+    const isRejectedPenalty =
+      rejectedTargetReq && (
+        rejectedTargetReq.type === 'penalty' ||
+        rejectedTargetReq.type === 'disciplinary_penalty' ||
+        rejectedTargetReq.subType === 'disciplinary_penalty' ||
+        rejectedTargetReq.type === 'penalty_objection' ||
+        rejectedTargetReq.type === 'deduction'
+      );
+
+    if (isRejectedPenalty) {
+      const pDate = rejectedTargetReq.date || rejectedTargetReq.startDate || (rejectedTargetReq.createdAt ? rejectedTargetReq.createdAt.slice(0, 10) : null);
+      if (pDate) {
+        updatedShifts = updatedShifts.map((s) => {
+          if (String(s.employeeId) === String(rejectedTargetReq.employeeId) && s.date === pDate) {
+            const cleanExistingNotes = (s.notes || s.note || '')
+              .replace(/⚠️?\s*جزاء\s*قيد الاعتماد/g, '')
+              .replace(/قيد الاعتماد/g, '')
+              .trim();
+            const rejectedPenaltyNote = cleanExistingNotes
+              ? `${cleanExistingNotes} | 🛡️ تم رفض / إسقاط الجزاء من الإدارة العليا`
+              : '🛡️ تم رفض / إسقاط الجزاء بقرار الإدارة العليا';
+            return {
+              ...s,
+              penaltyStatus: 'rejected',
+              note: rejectedPenaltyNote,
+              notes: rejectedPenaltyNote
+            };
+          }
+          return s;
+        });
+      }
     }
 
     const updatedLeaveRequests = (state.leaveRequests || []).map((lr) =>
@@ -3656,6 +3737,7 @@ export default function RequestsModule({
             <option value="roster_edit">📅 تعديلات الجداول الشهرية</option>
             <option value="biometric">📸 اعتمادات البصمة والكشك (AI)</option>
             <option value="expense">📑 فواتير ومصروفات الفروع</option>
+            <option value="recruitment_need">👥 طلبات احتياج توظيف للفروع</option>
             <option value="comp_off">🛋️ إجازات بدل الراحة والتشغيل</option>
             <option value="complaint">📢 الشكاوى والتظلمات الإدارية</option>
             <option value="penalty">⚠️ جزاءات ومخالفات لائحية</option>
@@ -4006,6 +4088,7 @@ export default function RequestsModule({
           Boolean(previewModalReq.transactionId) ||
           String(previewModalReq.id || '').startsWith('req_fin_') ||
           String(previewModalReq.id || '').startsWith('req_tx_');
+        const isRecruitmentNeed = ['recruitment_need', 'staff_recruitment_request'].includes(previewModalReq.type) || previewModalReq.subType === 'recruitment_need';
 
         const totalAmount = parseFloat(previewModalReq.amount) || 0;
         const monthlyDed = parseFloat(previewModalReq.monthlyDeduction || previewModalReq.installmentAmount) || 0;
@@ -4020,6 +4103,7 @@ export default function RequestsModule({
               previewModalReq.targetApproval === 'admin' ||
               isLoan ||
               isExpense ||
+              isRecruitmentNeed ||
               isComplaint ||
               isPenaltyObjection ||
               isProfileUpdate ||
@@ -4098,13 +4182,13 @@ export default function RequestsModule({
                 {/* 1. Employee & Branch Information Card */}
                 <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
                   <h4 style={{ margin: '0 0 12px', color: 'var(--text)', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {isExpense ? '🏢 بيانات الفرع ومقدم الفاتورة / المصروف:' : '👤 بيانات الموظف ومقدم الطلب:'}
+                    {isExpense ? '🏢 بيانات الفرع ومقدم الفاتورة / المصروف:' : isRecruitmentNeed ? '🏢 بيانات الفرع ومقدم طلب الاحتياج:' : '👤 بيانات الموظف ومقدم الطلب:'}
                   </h4>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
                     <div>
-                      <span style={{ color: 'var(--muted)', fontSize: '12px' }}>{isExpense ? 'مقدم الفاتورة / المسؤول:' : 'اسم الموظف:'}</span>
+                      <span style={{ color: 'var(--muted)', fontSize: '12px' }}>{isExpense ? 'مقدم الفاتورة / المسؤول:' : isRecruitmentNeed ? 'مقدم الطلب (مدير الفرع):' : 'اسم الموظف:'}</span>
                       <div style={{ fontWeight: 'bold', color: 'var(--text)', fontSize: '14px' }}>
-                        {previewModalReq.submittedBy || (empObj ? getEmpDisplayName(empObj) : (previewModalReq.employeeName || (isExpense ? 'مدير الفرع' : 'غير معروف')))}
+                        {previewModalReq.submittedBy || (empObj ? getEmpDisplayName(empObj) : (previewModalReq.employeeName || (isExpense || isRecruitmentNeed ? 'مدير الفرع' : 'غير معروف')))}
                       </div>
                     </div>
                     <div>
@@ -4574,7 +4658,7 @@ export default function RequestsModule({
                         </div>
                         <div style={{ background: '#ffffff', padding: '10px', borderRadius: '10px', border: '1px solid #ccfbf1', textAlign: 'center' }}>
                           <span style={{ fontSize: '11.5px', color: '#64748b', display: 'block' }}>إجمالي الساعات</span>
-                          <strong style={{ fontSize: '17px', color: '#16a34a' }}>⏱️ {previewModalReq.hours || previewModalReq.regularHours || '—'} س</strong>
+                          <strong style={{ fontSize: '17px', color: '#16a34a' }}>⏱️ {previewModalReq.netHours || previewModalReq.actualWorkedHours || previewModalReq.hours || previewModalReq.regularHours || '—'} س</strong>
                         </div>
                         {parseFloat(previewModalReq.overtimeHours) > 0 && (
                           <div style={{ background: '#fef3c7', padding: '10px', borderRadius: '10px', border: '1px solid #fde68a', textAlign: 'center' }}>
@@ -4674,14 +4758,65 @@ export default function RequestsModule({
                             ☕ {previewModalReq.breakHours !== undefined ? previewModalReq.breakHours : 0} ساعة
                           </div>
                         </div>
-                        {previewModalReq.hours && (
-                          <div style={{ background: 'var(--success-tint)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--success)' }}>
-                            <span style={{ fontSize: '12px', color: 'var(--success)', fontWeight: 'bold' }}>صافي ساعات العمل المحسوبة:</span>
-                            <div style={{ fontWeight: '900', color: 'var(--success)', fontSize: '16px' }}>
-                              ⏱️ {previewModalReq.hours} ساعة
+                        {(() => {
+                          const tIn = previewModalReq.timeIn;
+                          const tOut = previewModalReq.timeOut;
+                          const bH = Math.max(0, parseFloat(previewModalReq.breakHours) || 0);
+                          let realGrossHours = 0;
+                          let realNetHours = 0;
+
+                          if (tIn && tOut && String(tOut).trim() !== '' && String(tOut).trim() !== '—') {
+                            const [inH, inM] = String(tIn).split(':').map(Number);
+                            const [outH, outM] = String(tOut).split(':').map(Number);
+                            if (!isNaN(inH) && !isNaN(outH)) {
+                              let diff = (outH * 60 + (outM || 0)) - (inH * 60 + (inM || 0));
+                              if (diff <= 0 || previewModalReq.isOvernight) diff += 24 * 60;
+                              realGrossHours = Math.round((diff / 60) * 100) / 100;
+                              realNetHours = Math.max(0, Math.round((realGrossHours - bH) * 100) / 100);
+                            }
+                          }
+
+                          if (!realNetHours) {
+                            realNetHours = parseFloat(
+                              previewModalReq.actualWorkedHours !== undefined
+                                ? previewModalReq.actualWorkedHours
+                                : previewModalReq.netHours !== undefined
+                                ? previewModalReq.netHours
+                                : previewModalReq.grossHours !== undefined
+                                ? (parseFloat(previewModalReq.grossHours) - bH)
+                                : previewModalReq.hours || 0
+                            ) || 0;
+                          }
+
+                          if (!realNetHours && !previewModalReq.hours && !previewModalReq.regularHours) return null;
+
+                          const schedH = parseFloat(previewModalReq.scheduledHours) || (empObj?.workHoursPerDay ? parseFloat(empObj.workHoursPerDay) : 8);
+                          const regH = previewModalReq.regularHours !== undefined 
+                            ? parseFloat(previewModalReq.regularHours) 
+                            : Math.min(realNetHours, schedH);
+                          const otH = previewModalReq.overtimeHours !== undefined 
+                            ? parseFloat(previewModalReq.overtimeHours) 
+                            : Math.max(0, Math.round((realNetHours - regH) * 100) / 100);
+
+                          return (
+                            <div style={{ background: 'var(--success-tint)', padding: '10px 14px', borderRadius: '10px', border: '1.5px solid var(--success)', gridColumn: 'span 2' }}>
+                              <span style={{ fontSize: '12px', color: 'var(--success)', fontWeight: 'bold' }}>صافي ساعات العمل المحسوبة:</span>
+                              <div style={{ fontWeight: '900', color: 'var(--success)', fontSize: '18px', marginTop: '2px' }}>
+                                ⏱️ {realNetHours.toFixed(2)} ساعة
+                              </div>
+                              {otH > 0 && (
+                                <div style={{ fontSize: '11.5px', marginTop: '4px', color: '#15803d', fontWeight: 700 }}>
+                                  (أساسي: {regH.toFixed(2)} س + إضافي: {otH.toFixed(2)} س)
+                                </div>
+                              )}
+                              {bH > 0 && (
+                                <div style={{ fontSize: '11px', marginTop: '2px', color: 'var(--muted)' }}>
+                                  (إجمالي التواجد: {realGrossHours > 0 ? realGrossHours.toFixed(2) : (realNetHours + bH).toFixed(2)} س - بريك: {bH.toFixed(2)} س)
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </div>
                     </div>
                   )
@@ -5633,6 +5768,116 @@ export default function RequestsModule({
                   </div>
                 )}
 
+                {/* ── RECRUITMENT NEED DETAILS (طلب احتياج توظيف للفرع) ── */}
+                {isRecruitmentNeed && (
+                  <div style={{ background: '#f5f3ff', padding: '18px', borderRadius: '14px', border: '1.5px solid #c4b5fd', boxShadow: '0 2px 10px rgba(109, 40, 217, 0.06)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                      <h4 style={{ margin: 0, color: '#5b21b6', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800 }}>
+                        <span>👥</span>
+                        <span>تفاصيل ومواصفات الكادر والوظيفة المطلوبة للفرع:</span>
+                      </h4>
+                      <span style={{
+                        background: previewModalReq.status === 'approved' ? '#dcfce7' : previewModalReq.status === 'rejected' ? '#fee2e2' : '#ede9fe',
+                        color: previewModalReq.status === 'approved' ? '#15803d' : previewModalReq.status === 'rejected' ? '#b91c1c' : '#6d28d9',
+                        border: '1px solid currentColor',
+                        padding: '3px 12px',
+                        borderRadius: '8px',
+                        fontSize: '12.5px',
+                        fontWeight: 800
+                      }}>
+                        {previewModalReq.status === 'approved' ? '🟢 تم اعتماد طلب التوظيف' : previewModalReq.status === 'rejected' ? '🔴 تم رفض الطلب' : '⏳ بانتظار موافقة الإدارة العليا'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #ddd6fe' }}>
+                        <span style={{ fontSize: '12px', color: '#6d28d9', fontWeight: 600 }}>💼 المسمى الوظيفي المطلوب:</span>
+                        <div style={{ fontWeight: 900, color: '#4c1d95', fontSize: '16px', marginTop: '3px' }}>
+                          {previewModalReq.jobTitle || previewModalReq.details || '—'}
+                        </div>
+                        {previewModalReq.department && (
+                          <div style={{ fontSize: '12px', color: '#7c3aed', marginTop: '2px' }}>
+                            القسم: {previewModalReq.department}
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #ddd6fe' }}>
+                        <span style={{ fontSize: '12px', color: '#6d28d9', fontWeight: 600 }}>🔢 العدد المطلوب:</span>
+                        <div style={{ fontWeight: 900, color: '#059669', fontSize: '18px', marginTop: '3px' }}>
+                          {previewModalReq.headcount || 1} موظف
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #ddd6fe' }}>
+                        <span style={{ fontSize: '12px', color: '#6d28d9', fontWeight: 600 }}>⚡ درجة الأهمية والاستعجال:</span>
+                        <div style={{ fontWeight: 800, marginTop: '3px' }}>
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '3px 10px',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            fontWeight: 800,
+                            background: previewModalReq.urgency === 'urgent' ? '#fee2e2' : previewModalReq.urgency === 'high' ? '#ffedd5' : '#f1f5f9',
+                            color: previewModalReq.urgency === 'urgent' ? '#b91c1c' : previewModalReq.urgency === 'high' ? '#c2410c' : '#334155'
+                          }}>
+                            {previewModalReq.urgency === 'urgent' ? '🔴 عاجل جداً وفوري' :
+                             previewModalReq.urgency === 'high' ? '🟠 أولوية قصوى' :
+                             previewModalReq.urgency === 'medium' ? '🟡 متوسط الأهمية' : '🟢 عادي / روتيني'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #ddd6fe' }}>
+                        <span style={{ fontSize: '12px', color: '#6d28d9', fontWeight: 600 }}>⏰ نظام / فترة الوردية:</span>
+                        <div style={{ fontWeight: 800, color: '#1e293b', fontSize: '14px', marginTop: '3px' }}>
+                          {previewModalReq.shiftPreference === 'morning' ? '🌅 وردية صباحية' :
+                           previewModalReq.shiftPreference === 'evening' ? '🌆 وردية مسائية' :
+                           previewModalReq.shiftPreference === 'night' ? '🌙 وردية ليلية (سهر)' :
+                           previewModalReq.shiftPreference === 'rotational' ? '🔄 ورديات متغيرة (روتيشن)' :
+                           (previewModalReq.shiftPreference || 'مرن / غير محدد')}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #ddd6fe' }}>
+                        <span style={{ fontSize: '12px', color: '#6d28d9', fontWeight: 600 }}>🎓 المؤهل الدراسي:</span>
+                        <div style={{ fontWeight: 800, color: '#1e293b', fontSize: '14px', marginTop: '3px' }}>
+                          {previewModalReq.qualification || 'مؤهل عالي مناسب'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #ddd6fe' }}>
+                        <span style={{ fontSize: '12px', color: '#6d28d9', fontWeight: 600 }}>⏳ سنوات الخبرة المطلوبة:</span>
+                        <div style={{ fontWeight: 800, color: '#1e293b', fontSize: '14px', marginTop: '3px' }}>
+                          {previewModalReq.experienceYears ? `${previewModalReq.experienceYears} سنوات خبرة` : 'حديث تخرج أو خبرة سنة فأكثر'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {previewModalReq.requirements && (
+                      <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #ddd6fe', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '12px', color: '#6d28d9', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                          📋 الشروط والمهارات الخاصة المطلوبة من مدير الفرع:
+                        </span>
+                        <div style={{ fontSize: '13.5px', color: '#1e293b', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                          {previewModalReq.requirements}
+                        </div>
+                      </div>
+                    )}
+
+                    {previewModalReq.reason && (
+                      <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                        <span style={{ fontSize: '12px', color: '#475569', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                          💡 مبررات وأسباب الاحتياج في الفرع:
+                        </span>
+                        <div style={{ fontSize: '13.5px', color: '#334155', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                          {previewModalReq.reason}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* 4. Reason, Notes and Description Card */}
                 <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
                   <h4 style={{ margin: '0 0 8px', color: 'var(--primary-dark)', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -5909,6 +6154,8 @@ export default function RequestsModule({
                           ? `✓ اعتماد السلفة بالمبلغ المعتمد (${loanCustomAmount || previewModalReq.amount} ج.م)`
                           : isExpense
                           ? '✓ موافقة واعتماد الفاتورة / المصروف'
+                          : isRecruitmentNeed
+                          ? '✓ موافقة واعتماد طلب احتياج التوظيف'
                           : '✓ اعتماد وموافقة الطلب فوراً'}
                       </button>
                     </div>

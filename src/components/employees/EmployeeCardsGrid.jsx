@@ -54,11 +54,21 @@ export default function EmployeeCardsGrid({
   const [rehireModalEmp, setRehireModalEmp] = useState(null);
   const [rehireDate, setRehireDate] = useState(getRealTodayStr());
   const [rehireBranchId, setRehireBranchId] = useState('');
+  const [rehireHourlyRate, setRehireHourlyRate] = useState('');
   const [rehireNotes, setRehireNotes] = useState('');
   const [isRehiring, setIsRehiring] = useState(false);
   const [previewPhotoEmp, setPreviewPhotoEmp] = useState(null);
   const [showSalaryIncreasesHub, setShowSalaryIncreasesHub] = useState(false);
   const [stoppingEmpIds, setStoppingEmpIds] = useState(new Set());
+
+  const openRehireModal = (emp) => {
+    if (!emp) return;
+    setRehireModalEmp(emp);
+    setRehireBranchId(emp.branchId || (emp.branchesDetails?.[0]?.branchId) || 'main');
+    setRehireHourlyRate(emp.salary || emp.hourlyRate || (emp.branchesDetails?.[0]?.salary) || '');
+    setRehireDate(getRealTodayStr());
+    setRehireNotes('');
+  };
 
   const handleStopShift = async (empId) => {
     if (stoppingEmpIds.has(empId)) return;
@@ -129,7 +139,11 @@ export default function EmployeeCardsGrid({
   }, [employees]);
 
   const resignedEmployeesList = useMemo(() => {
-    return employees.filter((emp) => !isEmployeeActive(emp));
+    return employees.filter((emp) => {
+      const isInactive = !isEmployeeActive(emp);
+      const hasArchivedBranches = Array.isArray(emp.archivedBranchesDetails) && emp.archivedBranchesDetails.length > 0;
+      return isInactive || hasArchivedBranches;
+    });
   }, [employees]);
 
   // Current list based on active tab and search filters
@@ -144,9 +158,16 @@ export default function EmployeeCardsGrid({
 
       // Branch filter
       if (selectedBranchFilter !== 'all') {
-        const matchesMain = String(emp.branchId) === String(selectedBranchFilter);
-        const matchesDetails = emp.branchesDetails?.some((b) => String(b.branchId) === String(selectedBranchFilter));
-        if (!matchesMain && !matchesDetails) return false;
+        if (activeMainTab === 'resigned') {
+          const matchesMain = String(emp.branchId) === String(selectedBranchFilter);
+          const matchesDetails = emp.branchesDetails?.some((b) => String(b.branchId) === String(selectedBranchFilter));
+          const matchesArchived = emp.archivedBranchesDetails?.some((ab) => String(ab.branchId) === String(selectedBranchFilter));
+          if (!matchesMain && !matchesDetails && !matchesArchived) return false;
+        } else {
+          const matchesMain = String(emp.branchId) === String(selectedBranchFilter);
+          const matchesDetails = emp.branchesDetails?.some((b) => String(b.branchId) === String(selectedBranchFilter));
+          if (!matchesMain && !matchesDetails) return false;
+        }
       }
       // Search term
       if (searchTerm.trim()) {
@@ -171,32 +192,75 @@ export default function EmployeeCardsGrid({
       if (selectedBranchFilter !== 'all') {
         // When a specific branch is selected in filter, strictly group under that branch only
         const key = selectedBranchFilter;
-        if (!grouped[key]) grouped[key] = [];
-        if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
-          grouped[key].push(emp);
-        }
-      } else {
-        if (emp.branchesDetails && emp.branchesDetails.length > 0) {
-          emp.branchesDetails.forEach((bd) => {
-            const rawId = bd.branchId ? String(bd.branchId) : '';
-            const key = rawId && validBranchIds.has(rawId) ? rawId : 'main';
-            if (!grouped[key]) grouped[key] = [];
-            if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
-              grouped[key].push(emp);
-            }
-          });
+        let belongs = false;
+        if (activeMainTab === 'resigned') {
+          belongs = (Array.isArray(emp.archivedBranchesDetails) && emp.archivedBranchesDetails.some((ab) => String(ab.branchId) === key)) ||
+                    (!isEmployeeActive(emp) && (String(emp.branchId) === key || emp.branchesDetails?.some((b) => String(b.branchId) === key)));
         } else {
-          const rawId = emp.branchId ? String(emp.branchId) : '';
-          const key = rawId && validBranchIds.has(rawId) ? rawId : 'main';
+          belongs = String(emp.branchId) === key || emp.branchesDetails?.some((b) => String(b.branchId) === key);
+        }
+        if (belongs) {
           if (!grouped[key]) grouped[key] = [];
           if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
             grouped[key].push(emp);
           }
         }
+      } else {
+        if (activeMainTab === 'resigned') {
+          let placed = false;
+          if (Array.isArray(emp.archivedBranchesDetails) && emp.archivedBranchesDetails.length > 0) {
+            emp.archivedBranchesDetails.forEach((ab) => {
+              const rawId = ab.branchId ? String(ab.branchId) : '';
+              const key = rawId && validBranchIds.has(rawId) ? rawId : 'main';
+              if (!grouped[key]) grouped[key] = [];
+              if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
+                grouped[key].push(emp);
+              }
+              placed = true;
+            });
+          }
+          if (!isEmployeeActive(emp) || !placed) {
+            if (emp.branchesDetails && emp.branchesDetails.length > 0) {
+              emp.branchesDetails.forEach((bd) => {
+                const rawId = bd.branchId ? String(bd.branchId) : '';
+                const key = rawId && validBranchIds.has(rawId) ? rawId : 'main';
+                if (!grouped[key]) grouped[key] = [];
+                if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
+                  grouped[key].push(emp);
+                }
+              });
+            } else {
+              const rawId = emp.branchId ? String(emp.branchId) : '';
+              const key = rawId && validBranchIds.has(rawId) ? rawId : 'main';
+              if (!grouped[key]) grouped[key] = [];
+              if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
+                grouped[key].push(emp);
+              }
+            }
+          }
+        } else {
+          if (emp.branchesDetails && emp.branchesDetails.length > 0) {
+            emp.branchesDetails.forEach((bd) => {
+              const rawId = bd.branchId ? String(bd.branchId) : '';
+              const key = rawId && validBranchIds.has(rawId) ? rawId : 'main';
+              if (!grouped[key]) grouped[key] = [];
+              if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
+                grouped[key].push(emp);
+              }
+            });
+          } else {
+            const rawId = emp.branchId ? String(emp.branchId) : '';
+            const key = rawId && validBranchIds.has(rawId) ? rawId : 'main';
+            if (!grouped[key]) grouped[key] = [];
+            if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
+              grouped[key].push(emp);
+            }
+          }
+        }
       }
     });
     return grouped;
-  }, [displayedEmployees, selectedBranchFilter, branches]);
+  }, [displayedEmployees, selectedBranchFilter, branches, activeMainTab]);
 
   // Handle Termination
   const handleConfirmTermination = async (empId, data) => {
@@ -208,14 +272,116 @@ export default function EmployeeCardsGrid({
         return;
       }
 
-      // Default internal handler
+      // Case A: Single-Branch Termination (Employee stays active in other branches)
+      if (data.terminationScope === 'single_branch' && data.targetBranchId) {
+        const remainingBranches = (targetEmp?.branchesDetails || []).filter(
+          (b) => String(b.branchId) !== String(data.targetBranchId)
+        );
+        const newPrimaryBranchId = remainingBranches[0]?.branchId || targetEmp?.branchId || 'main';
+        const newPrimaryRate = remainingBranches[0]?.salary || targetEmp?.salary;
+
+        const branchArchiveRecord = {
+          branchId: data.targetBranchId,
+          branchName: data.targetBranchName || `فرع ${data.targetBranchId}`,
+          terminationDate: data.terminationDate,
+          terminationReason: data.terminationReason,
+          clearanceNotes: data.clearanceNotes,
+          finalSettlement: data.settlement,
+          signedClearanceDoc: data.signedClearanceDoc || null,
+          terminatedAt: new Date().toISOString()
+        };
+
+        const updatedEmployees = employees.map((e) => {
+          if (String(e.id) === String(empId)) {
+            return {
+              ...e,
+              // Remains actively working in remaining branches
+              status: 'على رأس العمل',
+              employmentStatus: 'active',
+              is_active: true,
+              branchId: newPrimaryBranchId,
+              salary: newPrimaryRate,
+              branchesDetails: remainingBranches,
+              archivedBranchesDetails: [
+                ...(e.archivedBranchesDetails || []),
+                branchArchiveRecord
+              ],
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return e;
+        });
+
+        // Clear active shift if it was in the terminated branch
+        const updatedActiveShifts = { ...(state.activeShifts || {}) };
+        const activeShift = updatedActiveShifts[empId] || updatedActiveShifts[String(empId)];
+        if (activeShift && String(activeShift.branchId) === String(data.targetBranchId)) {
+          delete updatedActiveShifts[empId];
+          delete updatedActiveShifts[String(empId)];
+        }
+
+        // Add to resignationRequests so it immediately appears in AdminResignationModule & BranchResignationModule
+        const newResignationRecord = {
+          id: `res_${empId}_${data.targetBranchId}_${Date.now()}`,
+          employeeId: targetEmp?.id || empId,
+          employeeCode: targetEmp?.code || '',
+          employeeName: targetEmp?.name || '',
+          branchId: data.targetBranchId,
+          branchName: data.targetBranchName || (data.targetBranchId ? (state.branches?.find(b => String(b.id) === String(data.targetBranchId))?.name || `فرع ${data.targetBranchId}`) : 'الفرع المحدد'),
+          type: 'resignation',
+          resignationType: 'single_branch',
+          isSingleBranch: true,
+          reason: data.terminationReason || 'إنهاء خدمة من الفرع',
+          employeeReason: data.terminationReason || 'إنهاء خدمة من الفرع',
+          status: 'approved',
+          managerStatus: 'approved',
+          adminStatus: 'approved',
+          adminApproved: true,
+          branchApproved: true,
+          requestDate: data.terminationDate,
+          terminationDate: data.terminationDate,
+          date: data.terminationDate,
+          noticeDays: 0,
+          finalSettlement: data.settlement,
+          signedClearanceDoc: data.signedClearanceDoc || null,
+          clearanceNotes: data.clearanceNotes || '',
+          approvedBy: 'الإدارة',
+          approvedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
+        const updatedResignationRequests = [
+          newResignationRecord,
+          ...(state.resignationRequests || []).filter(r => !(String(r.employeeId) === String(empId) && String(r.branchId) === String(data.targetBranchId)))
+        ];
+
+        const updatedState = {
+          ...state,
+          employees: updatedEmployees,
+          activeShifts: updatedActiveShifts,
+          resignationRequests: updatedResignationRequests
+        };
+
+        if (setState) setState(updatedState);
+        if (saveState) await saveState(updatedState);
+        if (showToast) showToast(`✅ تم إنهاء خدمة الموظف (${targetEmp?.name}) من فرع (${data.targetBranchName}) وتصفية مستحقاته مع استمرار عمله بالفروع الأخرى`);
+
+        setTerminationModalEmp(null);
+        return;
+      }
+
+      // Case B: Global/Full Termination from all branches
       const updatedEmployees = employees.map((e) => {
         if (String(e.id) === String(empId)) {
           return {
             ...e,
             status: 'تم الاستقالة',
+            employmentStatus: 'terminated',
             is_active: false,
             fingerprint_active: false,
+            isTerminated: true,
+            isResigned: true,
             terminationReason: data.terminationReason,
             terminationDate: data.terminationDate,
             resignationDate: data.terminationDate,
@@ -233,10 +399,47 @@ export default function EmployeeCardsGrid({
       delete updatedActiveShifts[empId];
       delete updatedActiveShifts[String(empId)];
 
+      // Add to resignationRequests so it immediately appears in AdminResignationModule & BranchResignationModule
+      const newResignationRecord = {
+        id: `res_${empId}_all_${Date.now()}`,
+        employeeId: targetEmp?.id || empId,
+        employeeCode: targetEmp?.code || '',
+        employeeName: targetEmp?.name || '',
+        branchId: targetEmp?.branchId || 'main',
+        branchName: targetEmp?.branchId ? (state.branches?.find(b => String(b.id) === String(targetEmp.branchId))?.name || `فرع ${targetEmp.branchId}`) : 'كافة الفروع',
+        type: 'resignation',
+        resignationType: 'full',
+        isSingleBranch: false,
+        reason: data.terminationReason || 'إنهاء خدمة شامل',
+        employeeReason: data.terminationReason || 'إنهاء خدمة شامل',
+        status: 'approved',
+        managerStatus: 'approved',
+        adminStatus: 'approved',
+        adminApproved: true,
+        branchApproved: true,
+        requestDate: data.terminationDate,
+        terminationDate: data.terminationDate,
+        date: data.terminationDate,
+        noticeDays: 0,
+        finalSettlement: data.settlement,
+        signedClearanceDoc: data.signedClearanceDoc || targetEmp?.signedClearanceDoc || null,
+        clearanceNotes: data.clearanceNotes || '',
+        approvedBy: 'الإدارة',
+        approvedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      const updatedResignationRequests = [
+        newResignationRecord,
+        ...(state.resignationRequests || []).filter(r => String(r.employeeId) !== String(empId))
+      ];
+
       const updatedState = {
         ...state,
         employees: updatedEmployees,
-        activeShifts: updatedActiveShifts
+        activeShifts: updatedActiveShifts,
+        resignationRequests: updatedResignationRequests
       };
 
       if (setState) setState(updatedState);
@@ -299,10 +502,17 @@ export default function EmployeeCardsGrid({
 
     setIsRehiring(true);
     try {
+      const newRate = parseFloat(rehireHourlyRate) > 0
+        ? parseFloat(rehireHourlyRate)
+        : (parseFloat(rehireModalEmp.salary) || parseFloat(rehireModalEmp.hourlyRate) || 0);
+
+      const targetBranch = rehireBranchId || rehireModalEmp.branchId || 'main';
+
       if (onReinstateEmployee) {
         await onReinstateEmployee(rehireModalEmp.id, {
           rehireDate,
-          rehireBranchId: rehireBranchId || rehireModalEmp.branchId || 'main',
+          rehireBranchId: targetBranch,
+          rehireHourlyRate: newRate,
           rehireNotes
         });
       } else {
@@ -310,32 +520,89 @@ export default function EmployeeCardsGrid({
           if (String(emp.id) === String(rehireModalEmp.id)) {
             return {
               ...emp,
+              // 1. Core Active Status
               status: 'على رأس العمل',
+              employmentStatus: 'active',
               is_active: true,
               fingerprint_active: true,
               suspension_reason: '',
-              branchId: rehireBranchId || emp.branchId || 'main',
+              isTerminated: false,
+              isResigned: false,
+              isArchived: false,
+              resignationStatus: null,
+
+              // 2. Clear all resignation and termination dates/flags so isEmployeeActive evaluates to true
+              terminationDate: null,
+              resignationDate: null,
+              terminatedAt: null,
+              resignedAt: null,
+              terminationReason: null,
+              terminationNotes: null,
+              finalSettlement: null,
+
+              // 3. New Rate / Salary confirmation
+              salary: newRate,
+              hourlyRate: newRate,
+              branchId: targetBranch,
+              branchesDetails: [
+                ...((emp.branchesDetails || []).filter(b => String(b.branchId) !== String(targetBranch))),
+                {
+                  branchId: targetBranch,
+                  salary: newRate,
+                  workHoursPerDay: emp.workHoursPerDay || 8,
+                  workDaysPerMonth: emp.workDaysPerMonth || 26
+                }
+              ],
+              archivedBranchesDetails: (emp.archivedBranchesDetails || []).filter(
+                ab => String(ab.branchId) !== String(targetBranch)
+              ),
+
+              // 4. Audit Trail & Rehire History
               rejoinDate: rehireDate,
               reinstatedAt: new Date().toISOString(),
               reinstatementNotes: rehireNotes.trim(),
-              updatedAt: new Date().toISOString()
+              updatedAt: new Date().toISOString(),
+              rehireHistory: [
+                ...(emp.rehireHistory || []),
+                {
+                  rehireDate,
+                  hourlyRate: newRate,
+                  branchId: targetBranch,
+                  notes: rehireNotes.trim(),
+                  reinstatedAt: new Date().toISOString()
+                }
+              ]
             };
           }
           return emp;
         });
 
+        // 5. Update previous resignation requests in resignationRequests to mark as reinstated
+        const updatedResignationRequests = (state.resignationRequests || []).map((r) => {
+          if (String(r.employeeId) === String(rehireModalEmp.id) || (rehireModalEmp.code && String(r.employeeCode) === String(rehireModalEmp.code))) {
+            return {
+              ...r,
+              isReinstated: true,
+              reinstatedAt: new Date().toISOString()
+            };
+          }
+          return r;
+        });
+
         const updatedState = {
           ...state,
-          employees: updatedEmployees
+          employees: updatedEmployees,
+          resignationRequests: updatedResignationRequests
         };
 
         if (setState) setState(updatedState);
         if (saveState) await saveState(updatedState);
-        if (showToast) showToast(`✅ تم إعادة الموظف (${rehireModalEmp.name}) على رأس العمل بنجاح مع الاحتفاظ بكامل سجلاته التاريخية`);
+        if (showToast) showToast(`✅ تم إعادة الموظف (${rehireModalEmp.name}) على رأس العمل بسعر ساعة (${newRate} ج.م) بنجاح`);
       }
 
       setRehireModalEmp(null);
       setRehireNotes('');
+      setRehireHourlyRate('');
     } catch (err) {
       console.error(err);
     } finally {
@@ -713,22 +980,32 @@ export default function EmployeeCardsGrid({
 
                   let resStatusBadge = null;
 
-                  if (emp.status === 'تم الاستقالة' || emp.is_active === false) {
-                    const reasonText = emp.terminationReason || emp.suspension_reason || 'تم إنهاء الخدمة';
-                    const termDate = emp.terminationDate || emp.resignationDate || emp.terminatedAt?.slice(0, 10);
+                  const isArchivedInThisBranch = (emp.archivedBranchesDetails || []).some((ab) => String(ab.branchId) === String(branchKey));
+                  const branchArchiveRecord = (emp.archivedBranchesDetails || []).find((ab) => String(ab.branchId) === String(branchKey));
+
+                  if (emp.status === 'تم الاستقالة' || emp.is_active === false || (activeMainTab === 'resigned' && isArchivedInThisBranch)) {
+                    const reasonText = branchArchiveRecord?.terminationReason || emp.terminationReason || emp.suspension_reason || 'تم إنهاء الخدمة';
+                    const termDate = branchArchiveRecord?.terminationDate || emp.terminationDate || emp.resignationDate || emp.terminatedAt?.slice(0, 10);
+                    const settlementData = branchArchiveRecord?.finalSettlement || emp.finalSettlement;
+
                     resStatusBadge = (
                       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
                         <span style={{ background: '#fee2e2', color: '#991b1b', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 'bold', border: '1px solid #fca5a5' }}>
-                          🔴 إنهاء الخدمة: {reasonText}
+                          🔴 {isArchivedInThisBranch && isEmployeeActive(emp) ? 'إنهاء خدمة من هذا الفرع' : 'إنهاء الخدمة'}: {reasonText}
                         </span>
                         {termDate && (
                           <span style={{ background: '#f1f5f9', color: '#475569', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}>
                             📅 تاريخ: {termDate}
                           </span>
                         )}
-                        {emp.finalSettlement && (
+                        {settlementData && (
                           <span style={{ background: '#dcfce7', color: '#166534', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 'bold', border: '1px solid #86efac' }}>
-                            💰 صافي المخالصة: {fmt(emp.finalSettlement.netSettlement || 0)} ج.م
+                            💰 صافي المخالصة: {fmt(settlementData.netSettlement || 0)} ج.م
+                          </span>
+                        )}
+                        {isArchivedInThisBranch && isEmployeeActive(emp) && (
+                          <span style={{ background: '#ecfdf5', color: '#047857', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 'bold', border: '1px solid #a7f3d0' }}>
+                            🟢 لا يزال على رأس العمل بالفروع الأخرى
                           </span>
                         )}
                       </div>
@@ -755,7 +1032,9 @@ export default function EmployeeCardsGrid({
                     }
                   }
 
-                  const isEmpTerminated = emp.status === 'تم الاستقالة' || emp.is_active === false;
+                  const isEmpTerminated = activeMainTab === 'resigned'
+                    ? (emp.status === 'تم الاستقالة' || emp.is_active === false || isArchivedInThisBranch)
+                    : (emp.status === 'تم الاستقالة' || emp.is_active === false);
                   const isEmpSuspended = Boolean(emp.accountSuspended || emp.biometricSuspended || emp.punchDisabled || emp.status === 'معلق');
 
                   let suspStatusBadge = null;
@@ -906,13 +1185,17 @@ export default function EmployeeCardsGrid({
                         /* Middle Block for Resigned: Archive Summary snippet */
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', color: '#64748b', flexWrap: 'wrap' }}>
                           <span style={{ background: '#f1f5f9', padding: '3px 8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
-                            📁 تاريخ الإنهاء: <strong>{emp.terminationDate || emp.resignationDate || '—'}</strong>
+                            📁 تاريخ الإنهاء: <strong>{branchArchiveRecord?.terminationDate || emp.terminationDate || emp.resignationDate || '—'}</strong>
                           </span>
-                          {emp.signedClearanceDoc && (
+                          {(branchArchiveRecord?.signedClearanceDoc || emp.signedClearanceDoc) && (
                             <span
                               onClick={() => {
                                 setDossierInitialTab('settlement');
-                                setDossierModalEmp(emp);
+                                setDossierModalEmp({
+                                  ...emp,
+                                  signedClearanceDoc: branchArchiveRecord?.signedClearanceDoc || emp.signedClearanceDoc,
+                                  finalSettlement: branchArchiveRecord?.finalSettlement || emp.finalSettlement
+                                });
                               }}
                               style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac', padding: '3px 8px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
                               title="اضغط لفتح ومعاينة إخلاء الطرف الموقع"
@@ -954,7 +1237,7 @@ export default function EmployeeCardsGrid({
                             <button
                               type="button"
                               className="btn btn-ghost"
-                              onClick={() => setTerminationModalEmp(emp)}
+                              onClick={() => setTerminationModalEmp({ ...emp, currentSelectedBranchId: branchKey })}
                               title="إنهاء الخدمة النهائي وتصفية الحساب"
                               style={{
                                 background: '#fef2f2',
@@ -978,11 +1261,8 @@ export default function EmployeeCardsGrid({
                             <button
                               type="button"
                               className="btn btn-start"
-                              onClick={() => {
-                                setRehireModalEmp(emp);
-                                setRehireBranchId(emp.branchId || 'main');
-                              }}
-                              title="إعادة الموظف على رأس العمل"
+                              onClick={() => openRehireModal(emp)}
+                              title="إعادة الموظف على رأس العمل وتحديد سعر الساعة"
                               style={{
                                 background: '#059669',
                                 color: '#fff',
@@ -1003,7 +1283,11 @@ export default function EmployeeCardsGrid({
                               className="btn btn-ghost"
                               onClick={() => {
                                 setDossierInitialTab('settlement');
-                                setDossierModalEmp(emp);
+                                setDossierModalEmp({
+                                  ...emp,
+                                  signedClearanceDoc: branchArchiveRecord?.signedClearanceDoc || emp.signedClearanceDoc,
+                                  finalSettlement: branchArchiveRecord?.finalSettlement || emp.finalSettlement
+                                });
                               }}
                               title="فتح صفحة المخالصة المالية وإخلاء الطرف"
                               style={{
@@ -1049,7 +1333,12 @@ export default function EmployeeCardsGrid({
                             <button
                               type="button"
                               className="icon-btn"
-                              onClick={() => setTerminationModalEmp(emp)}
+                              onClick={() => setTerminationModalEmp({
+                                ...emp,
+                                currentSelectedBranchId: branchKey,
+                                signedClearanceDoc: branchArchiveRecord?.signedClearanceDoc || emp.signedClearanceDoc,
+                                finalSettlement: branchArchiveRecord?.finalSettlement || emp.finalSettlement
+                              })}
                               title="إعادة معاينة وطباعة المخالصة المالية"
                             >
                               🖨️
@@ -1131,8 +1420,7 @@ export default function EmployeeCardsGrid({
           onSaveSignedClearance={handleSaveSignedClearance}
           onOpenRehireModal={(emp) => {
             setDossierModalEmp(null);
-            setRehireModalEmp(emp);
-            setRehireBranchId(emp.branchId || 'main');
+            openRehireModal(emp);
           }}
           onOpenEditModal={(emp) => {
             setDossierModalEmp(null);
@@ -1187,6 +1475,33 @@ export default function EmployeeCardsGrid({
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
                 </select>
+              </div>
+
+              {/* سعر الساعة المؤكد للعودة */}
+              <div className="field" style={{ marginBottom: '12px' }}>
+                <label style={{ fontSize: '12.5px', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>💰 سعر الساعة المعتمد للعودة (ج.م/ساعة) *</span>
+                  {rehireModalEmp && (
+                    <span style={{ fontSize: '11px', color: '#047857', background: '#ecfdf5', padding: '1px 6px', borderRadius: '4px', border: '1px solid #a7f3d0' }}>
+                      السعر السابق: {rehireModalEmp.salary || rehireModalEmp.hourlyRate || 0} ج.م
+                    </span>
+                  )}
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="1"
+                    placeholder="أدخل سعر الساعة الجديد..."
+                    value={rehireHourlyRate}
+                    onChange={(e) => setRehireHourlyRate(e.target.value)}
+                    required
+                    style={{ width: '100%', padding: '8px 12px', paddingLeft: '50px', borderRadius: '8px', border: '1.5px solid #059669', fontSize: '13.5px', fontWeight: 'bold', background: '#fff' }}
+                  />
+                  <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: '#059669', fontWeight: 'bold' }}>
+                    ج.م/س
+                  </span>
+                </div>
               </div>
 
               <div className="field" style={{ marginBottom: '16px' }}>

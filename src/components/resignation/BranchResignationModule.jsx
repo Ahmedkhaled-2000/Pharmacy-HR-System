@@ -32,6 +32,7 @@ export default function BranchResignationModule({
       if (reqEmp) {
         if (reqEmp.branchId && String(reqEmp.branchId) === cIdStr) return true;
         if (reqEmp.branchesDetails && reqEmp.branchesDetails.some(bd => String(bd.branchId) === cIdStr)) return true;
+        if (reqEmp.archivedBranchesDetails && reqEmp.archivedBranchesDetails.some(ab => String(ab.branchId) === cIdStr)) return true;
       }
       return false;
     };
@@ -48,6 +49,34 @@ export default function BranchResignationModule({
           map.set(String(r.id), { ...map.get(String(r.id)), ...r });
         }
       }
+    });
+
+    (state.employees || []).forEach(emp => {
+      (emp.archivedBranchesDetails || []).forEach((ab, idx) => {
+        if (String(ab.branchId) === cIdStr) {
+          const pseudoId = `archived_${emp.id}_${ab.branchId}_${idx}`;
+          if (!map.has(pseudoId)) {
+            map.set(pseudoId, {
+              id: pseudoId,
+              employeeId: emp.id,
+              employeeCode: emp.code,
+              employeeName: emp.name,
+              branchId: ab.branchId,
+              branchName: ab.branchName,
+              type: 'resignation',
+              isSingleBranch: true,
+              employeeReason: ab.terminationReason || 'إنهاء خدمة من الفرع',
+              requestDate: ab.terminationDate || ab.terminatedAt?.slice(0, 10),
+              status: 'approved',
+              managerStatus: 'approved',
+              adminStatus: 'approved',
+              createdAt: ab.terminatedAt || ab.terminationDate,
+              finalSettlement: ab.finalSettlement,
+              signedClearanceDoc: ab.signedClearanceDoc
+            });
+          }
+        }
+      });
     });
 
     return Array.from(map.values());
