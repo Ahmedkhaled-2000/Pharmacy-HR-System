@@ -202,15 +202,11 @@ export function DataProvider({ children, showToast = () => {} }) {
     orgSettings: {
       orgName: 'نظام إدارة الصيدليات',
       logoUrl: '',
-      ownerUsername: (() => {
-        try {
-          return localStorage.getItem('pharmacy_owner_username') || 'owner';
-        } catch { return 'owner'; }
-      })(),
+      ownerUsername: 'saif',
       ownerPassword: (() => {
         try {
-          return localStorage.getItem('pharmacy_owner_password') || 'owner123';
-        } catch { return 'owner123'; }
+          return localStorage.getItem('pharmacy_owner_password') || '181013';
+        } catch { return '181013'; }
       })(),
       adminUsername: 'admin',
       adminPassword: '123',

@@ -755,11 +755,11 @@ export default function DesktopLayout({
       const type = r.type;
 
       // فحص الإجازات بكافة أنواعها
-      if (type === 'long_leave' || type === 'leave' || type === 'annual_leave' || type === 'sick_leave' || type === 'unpaid_leave' || type === 'casual_leave' || r.leaveType) {
+      if (type === 'long_leave' || type === 'leave' || type === 'leave_request' || type === 'annual_leave' || type === 'sick_leave' || type === 'unpaid_leave' || type === 'casual_leave' || String(r.id || '').startsWith('req_leave_') || r.leaveType) {
         registerCount(r.id, 'leaves');
       } else if (type === 'schedule_deviation' || type === 'deviation' || type === 'عدم الالتزام بالجدول' || (r.details && r.details.includes('عدم الالتزام بالجدول'))) {
         registerCount(r.id, 'schedule_deviations');
-      } else if (r.submittedByBranchManager || r.subType === 'punch_correction' || r.subType === 'manual_punch_request' || String(r.id || '').startsWith('req_punch_') || type === 'branch_punch_edit' || type === 'manual_punch' || type === 'manual_punch_request') {
+      } else if ((r.submittedByBranchManager && (type === 'manual_punch' || type === 'branch_punch_edit' || type === 'punch_correction' || String(r.id || '').startsWith('req_punch_') || r.subType?.includes('punch'))) || r.subType === 'punch_correction' || r.subType === 'manual_punch_request' || String(r.id || '').startsWith('req_punch_') || type === 'branch_punch_edit' || type === 'manual_punch' || type === 'manual_punch_request') {
         registerCount(r.id, 'manual_punches');
       } else if (type === 'overtime' || type === 'extra_hours' || type === 'overtime_request' || (parseFloat(r.overtimeHours) > 0)) {
         registerCount(r.id, 'overtimes');

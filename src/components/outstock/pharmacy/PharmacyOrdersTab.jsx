@@ -45,9 +45,15 @@ import OrderComplaintModal from './OrderComplaintModal';
  * - تسجيل وعرض تاريخ ووقت رد المشتريات وتتبع مدة الاستجابة
  * - التحقق الإجباري من كود الموظف المستلم والمسلّم (مستور كباسورد) 🔒
  */
-export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist = '', showToast }) {
+export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist = '', showToast, initialInnerTab = 'active' }) {
   // التبويبة الداخلية: 'active' (النشطة والمعلقة) | 'transferred' (محولة من وإلى) | 'delivered' (المسلمة)
-  const [activeInnerTab, setActiveInnerTab] = useState('active');
+  const [activeInnerTab, setActiveInnerTab] = useState(initialInnerTab);
+
+  useEffect(() => {
+    if (initialInnerTab) {
+      setActiveInnerTab(initialInnerTab);
+    }
+  }, [initialInnerTab]);
 
   // فلاتر التبويبة النشطة: 'all' | 'waiting_procurement' | 'replied'
   const [activeSubFilter, setActiveSubFilter] = useState('all');

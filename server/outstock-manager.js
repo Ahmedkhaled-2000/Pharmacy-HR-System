@@ -601,6 +601,12 @@ export async function initOutstockTables(db) {
         CREATE INDEX IF NOT EXISTS idx_outstock_complaints_order ON public.outstock_order_complaints (order_id);
         CREATE INDEX IF NOT EXISTS idx_outstock_complaints_branch ON public.outstock_order_complaints (branch_id);
         CREATE INDEX IF NOT EXISTS idx_outstock_complaints_status ON public.outstock_order_complaints (status);
+
+        ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS procurement_reply TEXT;
+        ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS procurement_replied_at TIMESTAMPTZ;
+        ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS procurement_responder_name VARCHAR(128);
+        ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS owner_reply TEXT;
+        ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS owner_replied_at TIMESTAMPTZ;
       `);
     } catch (migErr) {
       console.warn('⚠️ [OutStock Schema Migrations Warning]:', migErr.message);
@@ -2399,6 +2405,47 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         message: `⚠️ تنبيه عاجل من فرع [${order.branch_name}]: الصنف لم يتوفر بالرغم أنك وافقت على توفيره! (طلب رقم #${order.order_number})`
       });
 
+      // 3. 📲 إرسال إشعار فوري لهاتف المالك عبر واتساب إذا كانت الميزة مفعلة
+      (async () => {
+        try {
+          if (typeof getSettingsFromStorage === 'function') {
+            const mainState = await getSettingsFromStorage('pharmacy-tracker-data');
+            const alertsConfig = mainState?.orgSettings?.biometricWhatsAppAlerts || {};
+            const ownerPhone = alertsConfig.ownerWhatsAppNumber || mainState?.orgSettings?.ownerPhone;
+            const isEnabled = alertsConfig.notifyOwnerOnOutstockComplaints !== false;
+
+            if (isEnabled && ownerPhone) {
+              const complaintTypeLabel = complaintType === 'delayed_response'
+                ? 'تأخر رد المشتريات على طلب العميل'
+                : 'صنف لم يتوفر بالرغم من موافقة المشتريات';
+              const waMsg = `🚨 *تنبيه شكوى عاجلة مصعدة من فرع (${order.branch_name})*\n` +
+                            `📋 *الطلب:* #${order.order_number}\n` +
+                            `👤 *الصيدلي:* ${reporter}\n` +
+                            `⚠️ *نوع الشكوى:* ${complaintTypeLabel}\n` +
+                            `📝 *ملاحظات الفرع:* ${notes || 'لا يوجد تفاصيل إضافية'}\n` +
+                            `⏳ *الحالة:* بانتظار رد وتوضيح مدير المشتريات وقراركم بالمنظومة.`;
+
+              const cleanPh = String(ownerPhone).replace(/\D/g, '');
+              const normalizedPhone = (cleanPh.startsWith('01') && cleanPh.length === 11) ? ('2' + cleanPh) : cleanPh;
+              const waUrls = ['http://hr-whatsapp-server:3100/send', 'http://127.0.0.1:3100/send'];
+              for (const u of waUrls) {
+                try {
+                  const wRes = await fetch(u, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone: normalizedPhone, message: waMsg }),
+                    signal: AbortSignal.timeout(5000)
+                  });
+                  if (wRes.ok) break;
+                } catch {}
+              }
+            }
+          }
+        } catch (waErr) {
+          console.warn('[Complaint WhatsApp Alert Error]:', waErr?.message);
+        }
+      })();
+
       broadcastOutstock('outstock:refresh_notifications', { branchId: order.branch_id });
 
       res.json({
@@ -2412,7 +2459,52 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     }
   });
 
-  // ── جلب الشكاوى المرفوعة للمالك ──
+  // ── رد وتوضيح مدير المشتريات على الشكوى ──
+  app.put('/api/outstock/procurement/complaints/:id/reply', authMiddleware, async (req, res) => {
+    try {
+      const complaintId = req.params.id;
+      const { procurementReply, responderName } = req.body || {};
+      if (!procurementReply || !String(procurementReply).trim()) {
+        return res.status(400).json({ success: false, error: 'يرجى كتابة رد وتوضيح مدير المشتريات' });
+      }
+
+      const updated = await db.query(`
+        UPDATE public.outstock_order_complaints
+        SET procurement_reply = $1,
+            procurement_replied_at = CURRENT_TIMESTAMP,
+            procurement_responder_name = $2,
+            status = 'pending_owner',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        RETURNING *
+      `, [
+        procurementReply.trim(),
+        responderName || req.user?.fullName || req.user?.name || 'مدير المشتريات',
+        complaintId
+      ]);
+
+      if (updated.rowCount === 0) {
+        return res.status(404).json({ success: false, error: 'الشكوى غير موجودة' });
+      }
+
+      const updatedComplaint = updated.rows[0];
+      broadcastOutstock('outstock:complaint_updated', { complaint: updatedComplaint });
+      broadcastOutstock('outstock:owner_complaint_escalation', {
+        complaint: updatedComplaint,
+        message: `💬 رد مدير المشتريات على شكوى طلب #${updatedComplaint.order_number} وبانتظار قراركم`
+      });
+
+      res.json({
+        success: true,
+        complaint: updatedComplaint,
+        message: 'تم إرسال رد وتوضيح المشتريات بنجاح وإحالة الشكوى للمالك'
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ── جلب الشكاوى المرفوعة للمالك وللمشتريات وللفروع ──
   app.get('/api/outstock/owner/complaints', authMiddleware, async (req, res) => {
     try {
       const { status, branchId } = req.query;
@@ -2425,15 +2517,19 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         WHERE 1=1
       `;
       const params = [];
-      if (status) {
-        params.push(status);
-        query += ` AND c.status = $${params.length}`;
+      if (status && status !== 'all') {
+        if (status === 'pending_owner') {
+          query += ` AND (c.status = 'pending_owner' OR c.status = 'pending' OR c.status = 'pending_procurement')`;
+        } else {
+          params.push(status);
+          query += ` AND c.status = $${params.length}`;
+        }
       }
-      if (branchId) {
+      if (branchId && branchId !== 'ALL') {
         params.push(branchId);
         query += ` AND c.branch_id = $${params.length}`;
       }
-      query += ` ORDER BY c.created_at DESC LIMIT 100`;
+      query += ` ORDER BY c.created_at DESC LIMIT 150`;
 
       const result = await db.query(query, params);
       res.json({ success: true, complaints: result.rows });
@@ -2442,24 +2538,29 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     }
   });
 
-  // ── تحديث حالة الشكوى (مراجعة / حل) من قبل المالك ──
+  // ── تحديث حالة الشكوى (مراجعة / رد وحل) من قبل المالك ──
   app.put('/api/outstock/owner/complaints/:id/status', authMiddleware, async (req, res) => {
     try {
       const complaintId = req.params.id;
-      const { status, ownerNotes } = req.body || {};
+      const { status, ownerNotes, ownerReply } = req.body || {};
+      const finalReply = ownerReply || ownerNotes || '';
       const updated = await db.query(`
         UPDATE public.outstock_order_complaints
-        SET status = $1, notes = COALESCE($2, notes), updated_at = CURRENT_TIMESTAMP
+        SET status = $1,
+            owner_reply = COALESCE(NULLIF($2, ''), owner_reply),
+            owner_replied_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
         WHERE id = $3
         RETURNING *
-      `, [status || 'resolved', ownerNotes, complaintId]);
+      `, [status || 'resolved', finalReply, complaintId]);
 
       if (updated.rowCount === 0) {
         return res.status(404).json({ success: false, error: 'الشكوى غير موجودة' });
       }
 
-      broadcastOutstock('outstock:complaint_updated', { complaint: updated.rows[0] });
-      res.json({ success: true, complaint: updated.rows[0], message: 'تم تحديث حالة الشكوى' });
+      const updatedComplaint = updated.rows[0];
+      broadcastOutstock('outstock:complaint_updated', { complaint: updatedComplaint });
+      res.json({ success: true, complaint: updatedComplaint, message: 'تم تسجيل قرار واعتماد المالك بنجاح' });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }

@@ -40,23 +40,18 @@ export default function OwnerAccessAndIdentityModule({
     return orgSettings?.employeeUnifiedAccess || {};
   }, [orgSettings?.employeeUnifiedAccess]);
 
-  // قائمة المالكين
+  // قائمة المالكين (المالك الوحيد المعتمد: سيف saif)
   const systemOwners = useMemo(() => {
-    const list = Array.isArray(orgSettings?.systemOwners) ? [...orgSettings.systemOwners] : [];
-    // ضمان وجود سيف كمالك أساسي دائماً
-    if (!list.some(o => String(o.username || '').toLowerCase() === 'saif')) {
-      list.unshift({
-        id: 'owner_saif',
-        username: 'saif',
-        password: '***',
-        fullName: 'سيف (المالك الأساسي)',
-        phone: '',
-        isActive: true,
-        isPrimaryOwner: true
-      });
-    }
-    return list;
-  }, [orgSettings?.systemOwners]);
+    return [{
+      id: 'owner_saif',
+      username: 'saif',
+      password: '***',
+      fullName: 'سيف (المالك المعتمد والوحيد)',
+      phone: '',
+      isActive: true,
+      isPrimaryOwner: true
+    }];
+  }, []);
 
   // نموذج هوية النظام
   const [brandForm, setBrandForm] = useState(() => {

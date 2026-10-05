@@ -43,9 +43,39 @@ export function getFormattedRequestBadge(type, leaveType, targetAction, fullReq 
   const cleanLeaveType = String(resolvedLeaveType || '').trim().toLowerCase();
   const cleanAction = String(resolvedAction || '').trim().toLowerCase();
 
+  // فحص صريح وشامل للإجازات أولاً قبل أي فحص آخر لضمان عدم الخلط مع بصمات الفرع
+  const isLeave = Boolean(
+    cleanType === 'leave' ||
+    cleanType === 'leave_request' ||
+    cleanType === 'annual_leave' ||
+    cleanType === 'sick_leave' ||
+    cleanType === 'unpaid_leave' ||
+    cleanType === 'casual_leave' ||
+    cleanType === 'weekly_rest' ||
+    String(reqObj?.id || '').startsWith('req_leave_') ||
+    cleanLeaveType ||
+    reqObj?.leaveType
+  );
+
+  if (isLeave) {
+    const rawLeave = String(reqObj?.leaveType || cleanLeaveType || '').toLowerCase();
+    if (cleanLeaveType === 'weekly_rest' || cleanType === 'weekly_rest') return <span className="badge badge-info" style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd' }}>🛋️ راحة أسبوعية</span>;
+    if (cleanLeaveType === 'annual' || cleanType === 'annual_leave') return <span className="badge badge-success">🏖️ إجازة سنوية</span>;
+    if (cleanLeaveType === 'unpaid' || cleanType === 'unpaid_leave') return <span className="badge badge-warning">⏱️ إجازة غير مدفوعة</span>;
+    if (cleanLeaveType === 'sick' || cleanType === 'sick_leave') return <span className="badge badge-danger">🏥 إجازة مرضية</span>;
+    if (cleanLeaveType === 'casual' || cleanType === 'casual_leave') return <span className="badge badge-info">🌴 إجازة عارضة</span>;
+    if (cleanLeaveType === 'marriage') return <span className="badge badge-primary">💍 إجازة زواج</span>;
+    if (cleanLeaveType === 'maternity') return <span className="badge badge-primary">👶 إجازة وضع</span>;
+    if (cleanLeaveType === 'bereavement') return <span className="badge badge-secondary">🖤 إجازة وفاة</span>;
+    if (rawLeave.includes('رسمي') || rawLeave.includes('official') || String(reqObj?.details || '').includes('إجازة رسمية')) {
+      return <span className="badge badge-success" style={{ background: '#059669', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🏖️ إجازة رسمية</span>;
+    }
+    return <span className="badge badge-success">🏖️ طلب إجازة</span>;
+  }
+
   // فحص ما إذا كان الطلب تعديل بصمة موظف أو تسجيل بصمة يدوي من مدير الفرع أو الإدارة
   const isBranchPunch = Boolean(
-    reqObj?.submittedByBranchManager ||
+    (reqObj?.submittedByBranchManager && (cleanType === 'manual_punch' || cleanType === 'branch_punch_edit' || cleanType === 'punch_correction' || String(reqObj?.id || '').startsWith('req_punch_') || reqObj?.subType?.includes('punch'))) ||
     reqObj?.subType === 'punch_correction' ||
     reqObj?.subType === 'manual_punch_request' ||
     String(reqObj?.id || '').startsWith('req_punch_') ||
@@ -74,18 +104,6 @@ export function getFormattedRequestBadge(type, leaveType, targetAction, fullReq 
       return <span className="badge" style={{ background: '#0d9488', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🖐️ طلب تعديل بصمة مسجلة</span>;
     }
     return <span className="badge" style={{ background: '#0d9488', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🖐️ طلب تسجيل بصمة يدوي</span>;
-  }
-
-  if (cleanType === 'leave' || cleanType === 'leave_request' || cleanType === 'annual_leave' || cleanType === 'sick_leave' || cleanType === 'unpaid_leave' || cleanType === 'weekly_rest') {
-    if (cleanLeaveType === 'weekly_rest' || cleanType === 'weekly_rest') return <span className="badge badge-info" style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd' }}>🛋️ راحة أسبوعية</span>;
-    if (cleanLeaveType === 'annual' || cleanType === 'annual_leave') return <span className="badge badge-success">🏖️ إجازة سنوية</span>;
-    if (cleanLeaveType === 'unpaid' || cleanType === 'unpaid_leave') return <span className="badge badge-warning">⏱️ إجازة غير مدفوعة</span>;
-    if (cleanLeaveType === 'sick' || cleanType === 'sick_leave') return <span className="badge badge-danger">🏥 إجازة مرضية</span>;
-    if (cleanLeaveType === 'casual') return <span className="badge badge-info">🌴 إجازة عارضة</span>;
-    if (cleanLeaveType === 'marriage') return <span className="badge badge-primary">💍 إجازة زواج</span>;
-    if (cleanLeaveType === 'maternity') return <span className="badge badge-primary">👶 إجازة وضع</span>;
-    if (cleanLeaveType === 'bereavement') return <span className="badge badge-secondary">🖤 إجازة وفاة</span>;
-    return <span className="badge badge-success">🏖️ طلب إجازة</span>;
   }
 
   if (cleanType === 'expense' || cleanType === 'financial_expense' || cleanType === 'invoice' || cleanType === 'financial' || cleanType === 'financial_alert') {

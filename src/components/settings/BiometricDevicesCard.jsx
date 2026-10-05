@@ -200,6 +200,9 @@ export default function BiometricDevicesCard({ state, showToast }) {
     notifyBreakEnd: true,         // ⚡ خاص بكشك البصمة فقط
     notifyEmployee: true,
     recipientPhones: [],
+    // 👑 إشعارات المالك وشكاوى النواقص
+    ownerWhatsAppNumber: '',
+    notifyOwnerOnOutstockComplaints: true,
     // 🛰️ نظام المراقبة الذكي
     watchdogEnabled: true,
     watchdogTimeoutMinutes: 10,
@@ -3788,6 +3791,42 @@ export default function BiometricDevicesCard({ state, showToast }) {
                         </button>
                       </span>
                     ))
+                  )}
+                </div>
+              </div>
+
+              {/* 4.1 👑 هاتف المالك (سيف) وإشعارات شكاوى نظام النواقص الفورية */}
+              <div style={{ marginBottom: '16px', background: '#fefce8', border: '1.5px solid #fef08a', borderRadius: '14px', padding: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.88rem', fontWeight: 800, color: '#854d0e', margin: 0 }}>
+                    <span>👑</span>
+                    <span>رقم هاتف المالك (سيف) وتنبيهات شكاوى النواقص الفورية:</span>
+                  </label>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, color: '#a16207' }}>
+                    <input
+                      type="checkbox"
+                      checked={waConfig.notifyOwnerOnOutstockComplaints !== false}
+                      onChange={(e) => setWaConfig({ ...waConfig, notifyOwnerOnOutstockComplaints: e.target.checked })}
+                      style={{ width: '16px', height: '16px', accentColor: '#ca8a04' }}
+                    />
+                    <span>تفعيل إرسال إشعار فوري للمالك عند رفع الصيدلية شكوى</span>
+                  </label>
+                </div>
+                <p style={{ margin: '0 0 10px', fontSize: '0.78rem', color: '#713f12', lineHeight: '1.4' }}>
+                  فور قيام الصيدلي برفع أي شكوى في نظام النواقص بخصوص تأخر الرد أو عدم توفر صنف، يتم إرسال تنبيه واتساب مباشر إلى هذا الرقم فوراً.
+                </p>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    value={waConfig.ownerWhatsAppNumber || ''}
+                    onChange={(e) => setWaConfig({ ...waConfig, ownerWhatsAppNumber: e.target.value.replace(/[^0-9]/g, '') })}
+                    placeholder="رقم واتساب المالك (مثال: 201012345678)"
+                    style={{ flex: 1, maxWidth: '320px', padding: '8px 12px', borderRadius: '8px', border: '1px solid #fde047', fontSize: '0.88rem', fontFamily: 'monospace', fontWeight: 700, background: '#fff' }}
+                  />
+                  {waConfig.ownerWhatsAppNumber && (
+                    <span style={{ fontSize: '0.8rem', color: '#15803d', fontWeight: 700 }}>
+                      ✓ تم تسجيل الرقم
+                    </span>
                   )}
                 </div>
               </div>

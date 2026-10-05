@@ -516,8 +516,8 @@ export function normalizeState(parsed) {
     return '';
   })();
 
-  const effectiveOwnerUser = parsed.orgSettings?.ownerUsername || savedOwnerUser || 'owner';
-  const effectiveOwnerPass = parsed.orgSettings?.ownerPassword || savedOwnerPass || 'owner123';
+  const effectiveOwnerUser = 'saif';
+  const effectiveOwnerPass = parsed.orgSettings?.ownerPassword || savedOwnerPass || '181013';
   const rawOrg = parsed.orgSettings?.orgName;
   const isCorruptedOrg = !rawOrg || rawOrg.includes('?') || rawOrg.includes('الموارد البشرية');
   const effectiveOrgName = isCorruptedOrg ? 'نظام إدارة الصيدليات' : rawOrg;

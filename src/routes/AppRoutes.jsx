@@ -821,7 +821,7 @@ export default function AppRoutes() {
     }
 
     // الدخول المباشر لنظام إدارة النواقص والمشتريات (OutStock Handling)
-    if (cleanUser === 'out' || cleanUser.startsWith('outstock') || cleanUser === 'admin-stock') {
+    if (cleanUser === 'out' || cleanUser.startsWith('outstock')) {
       try {
         const outRes = await outstockLogin(cleanUser, cleanPass);
         if (outRes?.success && outRes?.user) {
@@ -854,15 +854,11 @@ export default function AppRoutes() {
 
     const checkMatch = (currentState) => {
       const org = currentState?.orgSettings || {};
-      let savedOwnerUser = '';
       let savedOwnerPass = '';
       try {
-        savedOwnerUser = localStorage.getItem('pharmacy_owner_username') || '';
         savedOwnerPass = localStorage.getItem('pharmacy_owner_password') || '';
       } catch {}
 
-      const ownerUser = cleanStr(org.ownerUsername || savedOwnerUser || 'owner').toLowerCase();
-      const ownerPass = cleanStr(org.ownerPassword || savedOwnerPass || 'owner123');
       const adminUser = cleanStr(org.adminUsername || org.adminUser || 'admin').toLowerCase();
       const adminPass = cleanStr(org.adminPassword || org.adminPass || '123');
 
@@ -875,45 +871,15 @@ export default function AppRoutes() {
         return { role: 'developer', matched: true };
       }
 
-      // 1. Check Sovereign Primary Owner 'saif' / '181013'
-      if ((cleanUser === 'saif' || stdUser === 'saif') && isPasswordMatch('181013', cleanPass)) {
+      // 1. Check Sovereign Primary Owner 'saif' (يوزر المالك المعتمد الوحيد)
+      const isSaif = cleanUser === 'saif' || stdUser === 'saif';
+      const saifPass = org.ownerPassword || savedOwnerPass || '181013';
+      if (isSaif && (isPasswordMatch('181013', cleanPass) || isPasswordMatch(saifPass, cleanPass))) {
         return {
           role: 'owner',
           matched: true,
           org,
           ownerUser: { username: 'saif', name: 'المالك سيف', isOwner: true }
-        };
-      }
-
-      // 1.1 Check Multi-Owners in org.systemOwners
-      const systemOwners = Array.isArray(org.systemOwners) ? org.systemOwners : [];
-      const matchedSystemOwner = systemOwners.find((o) => {
-        if (!o || o.isActive === false) return false;
-        const oUser = cleanStr(o.username || '').toLowerCase();
-        const oPass = cleanStr(o.password || '');
-        return (oUser === cleanUser || toStdDigits(oUser) === stdUser) && isPasswordMatch(oPass, cleanPass);
-      });
-      if (matchedSystemOwner) {
-        return {
-          role: 'owner',
-          matched: true,
-          org,
-          ownerUser: {
-            username: matchedSystemOwner.username,
-            name: matchedSystemOwner.fullName || matchedSystemOwner.name || 'مالك المنظومة',
-            isOwner: true
-          }
-        };
-      }
-
-      // 1.2 Check Default Owner (يوزر المالك)
-      const isOwnerUserMatch = cleanUser === ownerUser || stdUser === toStdDigits(ownerUser);
-      if (isOwnerUserMatch && isPasswordMatch(ownerPass, cleanPass)) {
-        return {
-          role: 'owner',
-          matched: true,
-          org,
-          ownerUser: { username: ownerUser, name: org.ownerName || 'مالك المنظومة', isOwner: true }
         };
       }
 

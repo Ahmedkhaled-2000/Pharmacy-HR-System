@@ -1574,14 +1574,12 @@ tbody tr:hover {
   }
 }
 
-/* Modal Actions Pro (Sticky Glassmorphism Footer) */
+/* Modal Actions Pro (Universal Modal Footer) */
 .modal-actions-pro {
-  position: sticky !important;
-  bottom: 0 !important;
-  z-index: 25 !important;
-  background: rgba(255, 255, 255, 0.95) !important;
-  backdrop-filter: blur(10px) !important;
-  -webkit-backdrop-filter: blur(10px) !important;
+  position: relative !important;
+  bottom: auto !important;
+  z-index: 10 !important;
+  background: var(--surface, #ffffff) !important;
   border-top: 1px solid var(--border, #e2e8f0) !important;
   padding: 12px 20px !important;
   display: flex !important;
@@ -1590,6 +1588,7 @@ tbody tr:hover {
   margin-top: auto !important;
   flex-shrink: 0 !important;
   box-sizing: border-box !important;
+  width: 100% !important;
 }
 
 /* Universal scrollbars for all modals: vertical only, zero horizontal */

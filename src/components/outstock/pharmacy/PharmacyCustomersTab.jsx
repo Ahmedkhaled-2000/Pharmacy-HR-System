@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Phone, MapPin, Calendar, Clock, Edit2, History, X, User, CheckCircle, Trash2, AlertTriangle } from 'lucide-react';
-import { outstockGetCustomers, outstockSaveCustomer, outstockGetCustomerHistory, outstockDeleteCustomer } from '../../../utils/outstockApiClient';
+import { Search, Plus, Phone, MapPin, Calendar, Clock, Edit2, History, X, User, CheckCircle, Trash2, AlertTriangle, Building2 } from 'lucide-react';
+import { outstockGetCustomers, outstockSaveCustomer, outstockGetCustomerHistory, outstockDeleteCustomer, outstockGetBranches } from '../../../utils/outstockApiClient';
 
 /**
  * PharmacyCustomersTab.jsx
  * شاشة العملاء المسجلين بالصيدلية
- * - استعراض كافة العملاء المسجلين وسجل طلباتهم
+ * - استعراض كافة العملاء المسجلين وسجل طلباتهم لكافة الفروع
  * - البحث بالرقم، أو باسم صنف الدواء، وفلترة التاريخ
  * - إضافة وتعديل عميل مع فرض فرادة رقم الهاتف
  * - اختيار المنطقة من قائمة منسدلة
@@ -14,6 +14,8 @@ import { outstockGetCustomers, outstockSaveCustomer, outstockGetCustomerHistory,
  */
 export default function PharmacyCustomersTab({ branchId, showToast }) {
   const [customers, setCustomers] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState('all');
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -52,13 +54,19 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
   const [customerOrders, setCustomerOrders] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
-  // جلب العملاء
+  // جلب العملاء عبر كافة الفروع ومزامنة الفروع
   const fetchCustomers = async () => {
     setIsLoading(true);
     try {
-      const res = await outstockGetCustomers({ branchId });
-      if (res?.success && Array.isArray(res.customers)) {
-        setCustomers(res.customers);
+      const [custRes, branchRes] = await Promise.all([
+        outstockGetCustomers({}),
+        outstockGetBranches().catch(() => null)
+      ]);
+      if (custRes?.success && Array.isArray(custRes.customers)) {
+        setCustomers(custRes.customers);
+      }
+      if (branchRes?.success && Array.isArray(branchRes.branches)) {
+        setBranches(branchRes.branches);
       }
     } catch (e) {
       console.warn('Fetch customers error:', e);
@@ -179,25 +187,34 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
     }
   };
 
-  // فلترة العملاء بالبحث
+  // فلترة العملاء بالبحث والفرع
   const filteredCustomers = useMemo(() => {
-    const q = String(searchQuery || '').trim().toLowerCase();
-    if (!q) return customers;
-
     return customers.filter(c => {
-      const name = String(c.full_name || '').toLowerCase();
-      const phone = String(c.whatsapp_phone || '').toLowerCase();
-      const code = String(c.customer_code || '').toLowerCase();
-      const address = String(c.address || '').toLowerCase();
-      return name.includes(q) || phone.includes(q) || code.includes(q) || address.includes(q);
+      if (selectedBranchFilter !== 'all') {
+        if (selectedBranchFilter === 'current_branch') {
+          if (String(c.primary_branch_id) !== String(branchId)) return false;
+        } else if (String(c.primary_branch_id) !== String(selectedBranchFilter)) {
+          return false;
+        }
+      }
+      if (searchQuery && String(searchQuery).trim()) {
+        const q = String(searchQuery).trim().toLowerCase();
+        const name = String(c.full_name || '').toLowerCase();
+        const phone = String(c.whatsapp_phone || '').toLowerCase();
+        const code = String(c.customer_code || '').toLowerCase();
+        const address = String(c.address || '').toLowerCase();
+        const bName = String(c.branch_name || '').toLowerCase();
+        return name.includes(q) || phone.includes(q) || code.includes(q) || address.includes(q) || bName.includes(q);
+      }
+      return true;
     });
-  }, [customers, searchQuery]);
+  }, [customers, selectedBranchFilter, searchQuery, branchId]);
 
   return (
     <div>
       {/* ── شريط الأدوات ── */}
       <div className="outstock-card" style={{ padding: '16px' }}>
-        <div className="outstock-filters-bar">
+        <div className="outstock-filters-bar" style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
           <div className="outstock-search-bar" style={{ flex: 1, minWidth: '240px' }}>
             <Search size={18} className="outstock-search-icon" />
             <input
@@ -207,6 +224,23 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="outstock-search-input"
             />
+          </div>
+
+          {/* فلتر الفروع المشتركة */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <Building2 size={16} color="#0d9488" />
+            <select
+              value={selectedBranchFilter}
+              onChange={(e) => setSelectedBranchFilter(e.target.value)}
+              className="outstock-search-input"
+              style={{ padding: '8px 12px', minWidth: '180px', fontWeight: '800', fontSize: '13px' }}
+            >
+              <option value="all">🌐 كافة الفروع ({customers.length})</option>
+              <option value="current_branch">🏢 فرعنا فقط</option>
+              {branches.map(b => (
+                <option key={b.id} value={b.id}>🏢 {b.name}</option>
+              ))}
+            </select>
           </div>
 
           <button
@@ -246,6 +280,7 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                 <tr>
                   <th>كود العميل</th>
                   <th>اسم العميل</th>
+                  <th>فرع التسجيل</th>
                   <th>رقم الواتساب</th>
                   <th>الهاتف الأرضي</th>
                   <th>المنطقة والعنوان</th>
@@ -265,6 +300,22 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                     </td>
                     <td>
                       <strong style={{ color: '#0f172a', fontSize: '13.5px' }}>{cust.full_name}</strong>
+                    </td>
+                    <td>
+                      <span style={{
+                        background: String(cust.primary_branch_id) === String(branchId) ? '#f0fdf4' : '#eff6ff',
+                        color: String(cust.primary_branch_id) === String(branchId) ? '#166534' : '#1d4ed8',
+                        border: `1px solid ${String(cust.primary_branch_id) === String(branchId) ? '#bbf7d0' : '#bfdbfe'}`,
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        fontSize: '11.5px',
+                        fontWeight: '800',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        🏢 {cust.branch_name || (String(cust.primary_branch_id) === String(branchId) ? 'فرعكم' : 'فرع مسجل')}
+                      </span>
                     </td>
                     <td>
                       <span style={{ color: '#0284c7', fontWeight: '700', direction: 'ltr', display: 'inline-block' }}>

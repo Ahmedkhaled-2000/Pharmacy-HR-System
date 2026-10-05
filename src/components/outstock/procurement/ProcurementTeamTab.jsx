@@ -478,16 +478,6 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
           <Lock size={17} />
           <span>صلاحيات تعديل الأسعار بالفروع</span>
         </button>
-
-        <button
-          type="button"
-          className={`outstock-btn ${activeSection === 'manager_profile' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
-          onClick={() => setActiveSection('manager_profile')}
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 18px', fontWeight: 'bold' }}
-        >
-          <ShieldCheck size={17} />
-          <span>حساب وتأمين مدير المشتريات (admin-stock)</span>
-        </button>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════════
@@ -975,105 +965,6 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                 <span>حفظ التعديلات في الصلاحيات</span>
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════════════════════════
-          القسم الثالث: حساب وتأمين مدير المشتريات (admin-stock)
-      ══════════════════════════════════════════════════════════════════════════ */}
-      {activeSection === 'manager_profile' && (
-        <div style={{ maxWidth: '520px' }}>
-          <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '20px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
-              <div
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  background: '#f0fdfa',
-                  color: '#0d9488',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                <ShieldCheck size={22} />
-              </div>
-              <div>
-                <h4 style={{ margin: 0, fontSize: '16px', color: '#0f172a' }}>بيانات وتأمين مدير المشتريات</h4>
-                <span style={{ fontSize: '11.5px', color: '#64748b' }}>
-                  اسم المستخدم الافتراضي: admin-stock | كلمة المرور الافتراضية: 123
-                </span>
-              </div>
-            </div>
-
-            <form onSubmit={handleUpdateManagerProfile}>
-              <div style={{ marginBottom: '14px' }}>
-                <label className="outstock-form-label">اسم المستخدم للدخول (Username)</label>
-                <input
-                  type="text"
-                  className="outstock-form-input"
-                  value={managerProfile.username}
-                  onChange={(e) => setManagerProfile({ ...managerProfile, username: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div style={{ marginBottom: '14px' }}>
-                <label className="outstock-form-label">الاسم الكامل لمدير المشتريات</label>
-                <input
-                  type="text"
-                  className="outstock-form-input"
-                  value={managerProfile.fullName}
-                  onChange={(e) => setManagerProfile({ ...managerProfile, fullName: e.target.value })}
-                />
-              </div>
-
-              <div style={{ marginBottom: '14px' }}>
-                <label className="outstock-form-label">كلمة المرور الحالية</label>
-                <input
-                  type="password"
-                  className="outstock-form-input"
-                  placeholder="أدخل كلمة المرور الحالية للتأكيد..."
-                  value={managerProfile.currentPassword}
-                  onChange={(e) => setManagerProfile({ ...managerProfile, currentPassword: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '18px' }}>
-                <div>
-                  <label className="outstock-form-label">كلمة المرور الجديدة</label>
-                  <input
-                    type="password"
-                    className="outstock-form-input"
-                    placeholder="كلمة مرور جديدة..."
-                    value={managerProfile.newPassword}
-                    onChange={(e) => setManagerProfile({ ...managerProfile, newPassword: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="outstock-form-label">تأكيد كلمة المرور</label>
-                  <input
-                    type="password"
-                    className="outstock-form-input"
-                    placeholder="أعد إدخال الجديدة..."
-                    value={managerProfile.confirmPassword}
-                    onChange={(e) => setManagerProfile({ ...managerProfile, confirmPassword: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="outstock-btn outstock-btn-primary"
-                disabled={isUpdatingManager}
-                style={{ width: '100%', padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-              >
-                {isUpdatingManager ? <RefreshCw size={15} className="outstock-spin" /> : <Save size={15} />}
-                <span>حفظ بيانات وتأمين الحساب</span>
-              </button>
-            </form>
           </div>
         </div>
       )}

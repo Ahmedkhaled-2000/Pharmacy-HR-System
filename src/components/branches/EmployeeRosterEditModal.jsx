@@ -218,7 +218,159 @@ export default function EmployeeRosterEditModal({
     });
   };
 
-  // تطبيق قوالب الورديات السريعة
+  // ── نمط العرض النشط: التقويم الشهري التفاعلي الكامل vs النمط الأسبوعي ──
+  const [activeTabMode, setActiveTabMode] = useState('monthly_calendar');
+
+  // توليد كافة أيام دورة الرواتب الفعلية للشهر المحدد
+  const cycleDays = useMemo(() => {
+    if (!cycleRange?.startDate || !cycleRange?.endDate) return [];
+    const days = [];
+    try {
+      const cur = new Date(cycleRange.startDate + 'T00:00:00');
+      const end = new Date(cycleRange.endDate + 'T00:00:00');
+      while (cur <= end) {
+        const y = cur.getFullYear();
+        const m = String(cur.getMonth() + 1).padStart(2, '0');
+        const d = String(cur.getDate()).padStart(2, '0');
+        const dateStr = `${y}-${m}-${d}`;
+        const dayLabel = arabicWeekday(cur);
+        days.push({
+          dateStr,
+          dayLabel,
+          dayNumber: cur.getDate(),
+          monthNumber: cur.getMonth() + 1,
+          jsDayIndex: cur.getDay()
+        });
+        cur.setDate(cur.getDate() + 1);
+      }
+    } catch (e) {
+      console.warn('Error generating cycle days:', e);
+    }
+    return days;
+  }, [cycleRange]);
+
+  // خريطة أيام الشهر التفاعلية المفصلة (YYYY-MM-DD -> { type, start, end, hours, isOff })
+  const [monthlyDaysSchedule, setMonthlyDaysSchedule] = useState(() => {
+    const map = {};
+    if (existingRoster?.schedule && typeof existingRoster.schedule === 'object') {
+      Object.keys(existingRoster.schedule).forEach((key) => {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(key)) {
+          map[key] = { ...existingRoster.schedule[key] };
+        }
+      });
+    }
+    return map;
+  });
+
+  // مزامنة أيام الشهر عند تغيير الموظف أو دورة الشهر
+  useEffect(() => {
+    if (!cycleDays || cycleDays.length === 0) return;
+    setMonthlyDaysSchedule((prev) => {
+      const updated = {};
+      cycleDays.forEach((day) => {
+        if (existingRoster?.schedule && existingRoster.schedule[day.dateStr]) {
+          updated[day.dateStr] = { ...existingRoster.schedule[day.dateStr] };
+        } else if (prev[day.dateStr]) {
+          updated[day.dateStr] = { ...prev[day.dateStr] };
+        } else {
+          const weeklyConf = (existingRoster?.schedule && existingRoster.schedule[day.dayLabel]) || scheduleInputs[day.dayLabel] || DEFAULT_SCHEDULE[day.dayLabel];
+          if (weeklyConf) {
+            updated[day.dateStr] = { ...weeklyConf };
+          } else {
+            const isFri = day.dayLabel === 'الجمعة';
+            updated[day.dateStr] = {
+              type: isFri ? 'off' : 'shift',
+              isOff: isFri,
+              start: isFri ? '' : '08:00',
+              end: isFri ? '' : '16:00',
+              hours: isFri ? 0 : 8
+            };
+          }
+        }
+      });
+      return updated;
+    });
+  }, [cycleDays, existingRoster, targetEmp?.id]);
+
+  // تعديل يوم محدد في التقويم الشهري
+  const handleMonthlyDayChange = (dateStr, field, value) => {
+    setMonthlyDaysSchedule((prev) => {
+      const current = prev[dateStr] || { type: 'shift', start: '08:00', end: '16:00', hours: 8 };
+      let updated = { ...current };
+
+      if (field === 'type') {
+        const isOff = value === 'off';
+        updated = {
+          ...updated,
+          type: isOff ? 'off' : 'shift',
+          isOff,
+          start: isOff ? '' : (updated.start || '08:00'),
+          end: isOff ? '' : (updated.end || '16:00'),
+          hours: isOff ? 0 : (updated.hours || 8)
+        };
+      } else if (field === 'start') {
+        updated.start = value;
+        if (updated.end) {
+          const [sH, sM] = value.split(':').map(Number);
+          const [eH, eM] = updated.end.split(':').map(Number);
+          let diff = (eH * 60 + eM) - (sH * 60 + sM);
+          if (diff <= 0) diff += 24 * 60;
+          updated.hours = Math.round((diff / 60) * 10) / 10;
+        }
+      } else if (field === 'end') {
+        updated.end = value;
+        if (updated.start) {
+          const [sH, sM] = updated.start.split(':').map(Number);
+          const [eH, eM] = value.split(':').map(Number);
+          let diff = (eH * 60 + eM) - (sH * 60 + sM);
+          if (diff <= 0) diff += 24 * 60;
+          updated.hours = Math.round((diff / 60) * 10) / 10;
+        }
+      }
+
+      return {
+        ...prev,
+        [dateStr]: updated
+      };
+    });
+  };
+
+  // تطبيق النمط الأسبوعي على كامل أيام الشهر
+  const applyWeeklyPatternToAllMonth = () => {
+    const updated = {};
+    cycleDays.forEach((day) => {
+      const pattern = scheduleInputs[day.dayLabel] || DEFAULT_SCHEDULE[day.dayLabel];
+      updated[day.dateStr] = { ...pattern };
+    });
+    setMonthlyDaysSchedule(updated);
+    showToast?.('⚡ تم تطبيق النمط الأسبوعي على كامل أيام الشهر بنجاح');
+  };
+
+  // تطبيق قوالب الورديات السريعة على كامل أيام الشهر
+  const applyMonthlyPreset = (presetType) => {
+    const updated = {};
+    cycleDays.forEach((day) => {
+      const isFri = day.dayLabel === 'الجمعة';
+      if (presetType === 'morning') {
+        updated[day.dateStr] = isFri
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0 }
+          : { type: 'shift', isOff: false, start: '08:00', end: '16:00', hours: 8 };
+      } else if (presetType === 'evening') {
+        updated[day.dateStr] = isFri
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0 }
+          : { type: 'shift', isOff: false, start: '16:00', end: '00:00', hours: 8 };
+      } else if (presetType === 'night') {
+        updated[day.dateStr] = isFri
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0 }
+          : { type: 'shift', isOff: false, start: '00:00', end: '08:00', hours: 8 };
+      } else if (presetType === 'all_off') {
+        updated[day.dateStr] = { type: 'off', isOff: true, start: '', end: '', hours: 0 };
+      }
+    });
+    setMonthlyDaysSchedule(updated);
+  };
+
+  // تطبيق قوالب الورديات السريعة للنمط الأسبوعي
   const applyPreset = (presetType) => {
     const newInputs = {};
     DAYS_OF_WEEK.forEach((d) => {
@@ -247,7 +399,35 @@ export default function EmployeeRosterEditModal({
     setScheduleInputs(newInputs);
   };
 
-  // إحصائيات الجدول المعد
+  // إحصائيات الشهر التفاعلية
+  const monthlyStats = useMemo(() => {
+    let totalMonthHours = 0;
+    let workDaysCount = 0;
+    let offDaysCount = 0;
+
+    cycleDays.forEach((day) => {
+      const conf = monthlyDaysSchedule[day.dateStr];
+      if (!conf || conf.type === 'off' || conf.isOff === true) {
+        offDaysCount++;
+      } else if (conf.start && conf.end) {
+        workDaysCount++;
+        const [sH, sM] = conf.start.split(':').map(Number);
+        const [eH, eM] = conf.end.split(':').map(Number);
+        let diff = (eH * 60 + eM) - (sH * 60 + sM);
+        if (diff <= 0) diff += 24 * 60;
+        totalMonthHours += Math.round((diff / 60) * 10) / 10;
+      }
+    });
+
+    return {
+      totalMonthHours: Math.round(totalMonthHours * 10) / 10,
+      workDaysCount,
+      offDaysCount,
+      totalDays: cycleDays.length
+    };
+  }, [cycleDays, monthlyDaysSchedule]);
+
+  // إحصائيات الجدول الأسبوعي المعد
   const stats = useMemo(() => {
     let totalWeeklyHours = 0;
     let workDaysCount = 0;
@@ -278,14 +458,17 @@ export default function EmployeeRosterEditModal({
       return;
     }
 
-    if (stats.workDaysCount === 0) {
-      showToast?.('⚠️ يرجى تحديد وردية عمل واحدة على الأقل في الأسبوع');
+    if (stats.workDaysCount === 0 && monthlyStats.workDaysCount === 0) {
+      showToast?.('⚠️ يرجى تحديد وردية عمل واحدة على الأقل');
       return;
     }
 
     setSubmitting(true);
     try {
-      const safeInputs = { ...scheduleInputs };
+      const safeInputs = {
+        ...scheduleInputs,
+        ...monthlyDaysSchedule
+      };
       const effectiveBranchId = targetEmp.branchId || branchId || '';
       const effectiveBranchName = branchName || allBranches.find(b => String(b.id) === String(effectiveBranchId))?.name || 'الفرع الرئيسي';
 
@@ -646,184 +829,440 @@ export default function EmployeeRosterEditModal({
               </div>
             </div>
 
-            {/* ── قوالب الورديات السريعة (Quick Presets) ── */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text)' }}>
-                ⚡ قوالب ضبط سريعة:
-              </span>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => applyPreset('morning')}
-                  style={{ fontSize: '11.5px', padding: '4px 10px', background: '#f0fdf4', color: '#166534', border: '1px solid #86efac', borderRadius: '6px' }}
-                  title="وردية صباحية 8 ص - 4 م (الجمعة راحة)"
-                >
-                  ☀️ صباحي (08:00 - 16:00)
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => applyPreset('evening')}
-                  style={{ fontSize: '11.5px', padding: '4px 10px', background: '#eff6ff', color: '#1e40af', border: '1px solid #93c5fd', borderRadius: '6px' }}
-                  title="وردية مسائية 4 م - 12 ص (الجمعة راحة)"
-                >
-                  🌆 مسائي (16:00 - 00:00)
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => applyPreset('night')}
-                  style={{ fontSize: '11.5px', padding: '4px 10px', background: '#faf5ff', color: '#6b21a8', border: '1px solid #d8b4fe', borderRadius: '6px' }}
-                  title="وردية ليلية 12 ص - 8 ص (الجمعة راحة)"
-                >
-                  🌙 ليلي (00:00 - 08:00)
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => applyPreset('all_off')}
-                  style={{ fontSize: '11.5px', padding: '4px 10px', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', borderRadius: '6px' }}
-                  title="تفريغ كافة الأيام وجعلها راحة"
-                >
-                  🧹 تفريغ (راحة للكل)
-                </button>
-              </div>
+            {/* ── أزرار تبديل العرض: التقويم الشهري التفاعلي الكامل vs النمط الأسبوعي ── */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', borderBottom: '1.5px solid var(--border)', paddingBottom: '10px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setActiveTabMode('monthly_calendar')}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  border: activeTabMode === 'monthly_calendar' ? '2px solid #0284c7' : '1px solid var(--border)',
+                  background: activeTabMode === 'monthly_calendar' ? '#eff6ff' : '#ffffff',
+                  color: activeTabMode === 'monthly_calendar' ? '#0369a1' : 'var(--text)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>📅 التقويم الشهري التفاعلي الكامل ({cycleDays.length} يوم)</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setActiveTabMode('weekly_pattern')}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  border: activeTabMode === 'weekly_pattern' ? '2px solid #0284c7' : '1px solid var(--border)',
+                  background: activeTabMode === 'weekly_pattern' ? '#eff6ff' : '#ffffff',
+                  color: activeTabMode === 'weekly_pattern' ? '#0369a1' : 'var(--text)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>⚡ ضبط النمط الأسبوعي الأساسي (السبت - الجمعة)</span>
+              </button>
             </div>
 
-            {/* ── جدول الأيام السبعة ── */}
-            <div className="table-responsive" style={{ border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden', marginBottom: '16px' }}>
-              <table className="bylaws-table" style={{ margin: 0, fontSize: '13px', width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: 'var(--surface-muted)' }}>
-                    <th style={{ width: '120px', padding: '10px 12px' }}>اليوم</th>
-                    <th style={{ width: '170px', padding: '10px 12px' }}>نوع اليوم</th>
-                    <th style={{ padding: '10px 12px' }}>موعد البداية (دخول)</th>
-                    <th style={{ padding: '10px 12px' }}>موعد النهاية (خروج)</th>
-                    <th style={{ width: '110px', textAlign: 'center', padding: '10px 12px' }}>ساعات العمل</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {DAYS_OF_WEEK.map((d) => {
-                    const conf = scheduleInputs[d.label] || { type: 'shift', start: '08:00', end: '16:00', hours: 8 };
-                    const isOff = conf.type === 'off' || conf.isOff === true;
+            {/* ── أولاً: عرض التقويم الشهري التفاعلي الكامل لكافة أيام الشهر ── */}
+            {activeTabMode === 'monthly_calendar' && (
+              <>
+                {/* شريط الإجراءات والقوالب السريعة لكامل الشهر */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px', background: '#f8fafc', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={applyWeeklyPatternToAllMonth}
+                      style={{ fontSize: '12px', padding: '6px 12px', background: '#ecfdf5', color: '#047857', border: '1.5px solid #a7f3d0', borderRadius: '8px', fontWeight: 900 }}
+                      title="نسخ النمط الأسبوعي وتطبيقه على كافة أيام دورة هذا الشهر"
+                    >
+                      ⚡ تطبيق النمط الأسبوعي على كامل أيام الشهر
+                    </button>
+                  </div>
 
-                    return (
-                      <tr
-                        key={d.key}
-                        style={{
-                          background: isOff ? 'rgba(245, 158, 11, 0.04)' : 'transparent',
-                          borderBottom: '1px solid var(--border)'
-                        }}
-                      >
-                        <td style={{ fontWeight: 800, padding: '10px 12px' }}>
-                          <span style={{ display: 'inline-block', width: '22px' }}>{isOff ? '🏖️' : '🟢'}</span>
-                          {d.label}
-                        </td>
+                  <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => applyMonthlyPreset('morning')}
+                      style={{ fontSize: '11px', padding: '4px 8px', background: '#f0fdf4', color: '#166534', border: '1px solid #86efac', borderRadius: '6px', fontWeight: 700 }}
+                    >
+                      ☀️ صباحي كامل الشهر
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => applyMonthlyPreset('evening')}
+                      style={{ fontSize: '11px', padding: '4px 8px', background: '#eff6ff', color: '#1e40af', border: '1px solid #93c5fd', borderRadius: '6px', fontWeight: 700 }}
+                    >
+                      🌆 مسائي كامل الشهر
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => applyMonthlyPreset('night')}
+                      style={{ fontSize: '11px', padding: '4px 8px', background: '#faf5ff', color: '#6b21a8', border: '1px solid #d8b4fe', borderRadius: '6px', fontWeight: 700 }}
+                    >
+                      🌙 ليلي كامل الشهر
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => applyMonthlyPreset('all_off')}
+                      style={{ fontSize: '11px', padding: '4px 8px', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', borderRadius: '6px', fontWeight: 700 }}
+                    >
+                      🧹 راحة للكل
+                    </button>
+                  </div>
+                </div>
 
-                        <td style={{ padding: '8px 12px' }}>
-                          <select
-                            value={isOff ? 'off' : 'shift'}
-                            onChange={(e) => handleDayChange(d.label, 'type', e.target.value)}
+                {/* بطاقات ملخص إحصائيات الشهر */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', marginBottom: '14px' }}>
+                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '8px 12px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '18px' }}>⏱️</span>
+                    <div>
+                      <div style={{ fontSize: '10.5px', color: '#166534', fontWeight: 700 }}>ساعات الشهر المخططة</div>
+                      <div style={{ fontSize: '15px', fontWeight: 900, color: '#15803d' }}>{monthlyStats.totalMonthHours} ساعة</div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', padding: '8px 12px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '18px' }}>💼</span>
+                    <div>
+                      <div style={{ fontSize: '10.5px', color: '#1e40af', fontWeight: 700 }}>أيام العمل بالشهر</div>
+                      <div style={{ fontSize: '15px', fontWeight: 900, color: '#1d4ed8' }}>{monthlyStats.workDaysCount} يوم</div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#fefce8', border: '1px solid #fde68a', padding: '8px 12px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '18px' }}>🏖️</span>
+                    <div>
+                      <div style={{ fontSize: '10.5px', color: '#854d0e', fontWeight: 700 }}>أيام الراحة بالشهر</div>
+                      <div style={{ fontSize: '15px', fontWeight: 900, color: '#a16207' }}>{monthlyStats.offDaysCount} يوم</div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '18px' }}>📅</span>
+                    <div>
+                      <div style={{ fontSize: '10.5px', color: '#475569', fontWeight: 700 }}>أيام دورة الراتب</div>
+                      <div style={{ fontSize: '15px', fontWeight: 900, color: '#334155' }}>{cycleDays.length} يوم</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* جدول أيام دورة الشهر التفاعلي الكامل مع شريط تمرير سلس وتثبيت الترويسة */}
+                <div className="table-responsive" style={{ border: '1px solid var(--border)', borderRadius: '12px', maxHeight: '360px', overflowY: 'auto', marginBottom: '16px', WebkitOverflowScrolling: 'touch' }}>
+                  <table className="bylaws-table" style={{ margin: 0, fontSize: '12.5px', width: '100%', borderCollapse: 'collapse' }}>
+                    <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--surface-muted, #f1f5f9)', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                      <tr>
+                        <th style={{ width: '110px', padding: '9px 12px' }}>التاريخ</th>
+                        <th style={{ width: '90px', padding: '9px 12px' }}>اليوم</th>
+                        <th style={{ width: '150px', padding: '9px 12px' }}>نوع اليوم</th>
+                        <th style={{ padding: '9px 12px' }}>موعد البداية (دخول)</th>
+                        <th style={{ padding: '9px 12px' }}>موعد النهاية (خروج)</th>
+                        <th style={{ width: '90px', textAlign: 'center', padding: '9px 12px' }}>الساعات</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cycleDays.map((day) => {
+                        const conf = monthlyDaysSchedule[day.dateStr] || { type: 'shift', start: '08:00', end: '16:00', hours: 8 };
+                        const isOff = conf.type === 'off' || conf.isOff === true;
+                        const isFri = day.dayLabel === 'الجمعة';
+
+                        return (
+                          <tr
+                            key={day.dateStr}
                             style={{
-                              width: '100%',
-                              padding: '6px 10px',
-                              borderRadius: '8px',
-                              border: `1.5px solid ${isOff ? '#fde68a' : 'var(--border)'}`,
-                              background: isOff ? '#fefce8' : '#fff',
-                              fontWeight: 700,
-                              color: isOff ? '#92400e' : 'var(--text)'
+                              background: isOff ? (isFri ? '#fffbeb' : '#fefce8') : (isFri ? '#fafafa' : 'transparent'),
+                              borderBottom: '1px solid var(--border)'
                             }}
                           >
-                            <option value="shift">🟢 وردية عمل (Shift)</option>
-                            <option value="off">🏖️ راحة أسبوعية (OFF)</option>
-                          </select>
-                        </td>
+                            <td style={{ fontWeight: 800, padding: '7px 12px', direction: 'ltr', textAlign: 'right' }}>
+                              <span style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '11.5px', color: '#475569' }}>
+                                {day.dateStr}
+                              </span>
+                            </td>
 
-                        <td style={{ padding: '8px 12px' }}>
-                          {isOff ? (
-                            <span style={{ color: 'var(--muted)', fontSize: '12px' }}>— غير محدد</span>
-                          ) : (
-                            <input
-                              type="time"
-                              value={conf.start || '08:00'}
-                              onChange={(e) => handleDayChange(d.label, 'start', e.target.value)}
-                              required={!isOff}
-                              style={{
-                                padding: '6px 10px',
-                                borderRadius: '8px',
-                                border: '1px solid var(--border)',
-                                fontSize: '13px',
-                                fontWeight: 700,
-                                width: '130px'
-                              }}
-                            />
-                          )}
-                        </td>
+                            <td style={{ fontWeight: 800, padding: '7px 12px' }}>
+                              <span style={{ display: 'inline-block', width: '18px' }}>{isOff ? '🏖️' : '🟢'}</span>
+                              <span style={{ color: isFri ? '#b45309' : 'inherit' }}>{day.dayLabel}</span>
+                            </td>
 
-                        <td style={{ padding: '8px 12px' }}>
-                          {isOff ? (
-                            <span style={{ color: 'var(--muted)', fontSize: '12px' }}>— غير محدد</span>
-                          ) : (
-                            <input
-                              type="time"
-                              value={conf.end || '16:00'}
-                              onChange={(e) => handleDayChange(d.label, 'end', e.target.value)}
-                              required={!isOff}
-                              style={{
-                                padding: '6px 10px',
-                                borderRadius: '8px',
-                                border: '1px solid var(--border)',
-                                fontSize: '13px',
-                                fontWeight: 700,
-                                width: '130px'
-                              }}
-                            />
-                          )}
-                        </td>
+                            <td style={{ padding: '6px 12px' }}>
+                              <select
+                                value={isOff ? 'off' : 'shift'}
+                                onChange={(e) => handleMonthlyDayChange(day.dateStr, 'type', e.target.value)}
+                                style={{
+                                  width: '100%',
+                                  padding: '5px 8px',
+                                  borderRadius: '6px',
+                                  border: `1.5px solid ${isOff ? '#fde68a' : 'var(--border)'}`,
+                                  background: isOff ? '#fefce8' : '#fff',
+                                  fontWeight: 700,
+                                  fontSize: '12px',
+                                  color: isOff ? '#92400e' : 'var(--text)'
+                                }}
+                              >
+                                <option value="shift">🟢 وردية عمل (Shift)</option>
+                                <option value="off">🏖️ راحة أسبوعية (OFF)</option>
+                              </select>
+                            </td>
 
-                        <td style={{ textAlign: 'center', fontWeight: 800, padding: '8px 12px' }}>
-                          {isOff ? (
-                            <span style={{ color: '#b45309', fontSize: '12px' }}>0 س</span>
-                          ) : (
-                            <span style={{ color: 'var(--primary)', fontSize: '13px' }}>
-                              {conf.hours || 8} س
-                            </span>
-                          )}
-                        </td>
+                            <td style={{ padding: '6px 12px' }}>
+                              {isOff ? (
+                                <span style={{ color: 'var(--muted)', fontSize: '11.5px' }}>— راحة</span>
+                              ) : (
+                                <input
+                                  type="time"
+                                  value={conf.start || '08:00'}
+                                  onChange={(e) => handleMonthlyDayChange(day.dateStr, 'start', e.target.value)}
+                                  required={!isOff}
+                                  style={{
+                                    padding: '5px 8px',
+                                    borderRadius: '6px',
+                                    border: '1px solid var(--border)',
+                                    fontSize: '12px',
+                                    fontWeight: 700,
+                                    width: '115px'
+                                  }}
+                                />
+                              )}
+                            </td>
+
+                            <td style={{ padding: '6px 12px' }}>
+                              {isOff ? (
+                                <span style={{ color: 'var(--muted)', fontSize: '11.5px' }}>— راحة</span>
+                              ) : (
+                                <input
+                                  type="time"
+                                  value={conf.end || '16:00'}
+                                  onChange={(e) => handleMonthlyDayChange(day.dateStr, 'end', e.target.value)}
+                                  required={!isOff}
+                                  style={{
+                                    padding: '5px 8px',
+                                    borderRadius: '6px',
+                                    border: '1px solid var(--border)',
+                                    fontSize: '12px',
+                                    fontWeight: 700,
+                                    width: '115px'
+                                  }}
+                                />
+                              )}
+                            </td>
+
+                            <td style={{ textAlign: 'center', fontWeight: 800, padding: '6px 12px' }}>
+                              {isOff ? (
+                                <span style={{ color: '#b45309', fontSize: '11.5px' }}>0 س</span>
+                              ) : (
+                                <span style={{ color: 'var(--primary, #0f766e)', fontSize: '12px' }}>
+                                  {conf.hours || 8} س
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {/* ── ثانياً: عرض النمط الأسبوعي الأساسي (7 أيام) ── */}
+            {activeTabMode === 'weekly_pattern' && (
+              <>
+                {/* قوالب الورديات السريعة */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text)' }}>
+                    ⚡ قوالب ضبط سريعة:
+                  </span>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => applyPreset('morning')}
+                      style={{ fontSize: '11.5px', padding: '4px 10px', background: '#f0fdf4', color: '#166534', border: '1px solid #86efac', borderRadius: '6px' }}
+                      title="وردية صباحية 8 ص - 4 م (الجمعة راحة)"
+                    >
+                      ☀️ صباحي (08:00 - 16:00)
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => applyPreset('evening')}
+                      style={{ fontSize: '11.5px', padding: '4px 10px', background: '#eff6ff', color: '#1e40af', border: '1px solid #93c5fd', borderRadius: '6px' }}
+                      title="وردية مسائية 4 م - 12 ص (الجمعة راحة)"
+                    >
+                      🌆 مسائي (16:00 - 00:00)
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => applyPreset('night')}
+                      style={{ fontSize: '11.5px', padding: '4px 10px', background: '#faf5ff', color: '#6b21a8', border: '1px solid #d8b4fe', borderRadius: '6px' }}
+                      title="وردية ليلية 12 ص - 8 ص (الجمعة راحة)"
+                    >
+                      🌙 ليلي (00:00 - 08:00)
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => applyPreset('all_off')}
+                      style={{ fontSize: '11.5px', padding: '4px 10px', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', borderRadius: '6px' }}
+                      title="تفريغ كافة الأيام وجعلها راحة"
+                    >
+                      🧹 تفريغ (راحة للكل)
+                    </button>
+                  </div>
+                </div>
+
+                {/* جدول الأيام السبعة */}
+                <div className="table-responsive" style={{ border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden', marginBottom: '16px' }}>
+                  <table className="bylaws-table" style={{ margin: 0, fontSize: '13px', width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--surface-muted)' }}>
+                        <th style={{ width: '120px', padding: '10px 12px' }}>اليوم</th>
+                        <th style={{ width: '170px', padding: '10px 12px' }}>نوع اليوم</th>
+                        <th style={{ padding: '10px 12px' }}>موعد البداية (دخول)</th>
+                        <th style={{ padding: '10px 12px' }}>موعد النهاية (خروج)</th>
+                        <th style={{ width: '110px', textAlign: 'center', padding: '10px 12px' }}>ساعات العمل</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {DAYS_OF_WEEK.map((d) => {
+                        const conf = scheduleInputs[d.label] || { type: 'shift', start: '08:00', end: '16:00', hours: 8 };
+                        const isOff = conf.type === 'off' || conf.isOff === true;
 
-            {/* ── بطاقة ملخص ساعات الأسبوع ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginBottom: '18px' }}>
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '10px 14px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '20px' }}>⏱️</span>
-                <div>
-                  <div style={{ fontSize: '11px', color: '#166534', fontWeight: 700 }}>ساعات العمل الأسبوعية</div>
-                  <div style={{ fontSize: '16px', fontWeight: 900, color: '#15803d' }}>{stats.totalWeeklyHours} ساعة</div>
-                </div>
-              </div>
+                        return (
+                          <tr
+                            key={d.key}
+                            style={{
+                              background: isOff ? 'rgba(245, 158, 11, 0.04)' : 'transparent',
+                              borderBottom: '1px solid var(--border)'
+                            }}
+                          >
+                            <td style={{ fontWeight: 800, padding: '10px 12px' }}>
+                              <span style={{ display: 'inline-block', width: '22px' }}>{isOff ? '🏖️' : '🟢'}</span>
+                              {d.label}
+                            </td>
 
-              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', padding: '10px 14px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '20px' }}>💼</span>
-                <div>
-                  <div style={{ fontSize: '11px', color: '#1e40af', fontWeight: 700 }}>أيام العمل بالجدول</div>
-                  <div style={{ fontSize: '16px', fontWeight: 900, color: '#1d4ed8' }}>{stats.workDaysCount} أيام</div>
-                </div>
-              </div>
+                            <td style={{ padding: '8px 12px' }}>
+                              <select
+                                value={isOff ? 'off' : 'shift'}
+                                onChange={(e) => handleDayChange(d.label, 'type', e.target.value)}
+                                style={{
+                                  width: '100%',
+                                  padding: '6px 10px',
+                                  borderRadius: '8px',
+                                  border: `1.5px solid ${isOff ? '#fde68a' : 'var(--border)'}`,
+                                  background: isOff ? '#fefce8' : '#fff',
+                                  fontWeight: 700,
+                                  color: isOff ? '#92400e' : 'var(--text)'
+                                }}
+                              >
+                                <option value="shift">🟢 وردية عمل (Shift)</option>
+                                <option value="off">🏖️ راحة أسبوعية (OFF)</option>
+                              </select>
+                            </td>
 
-              <div style={{ background: '#fefce8', border: '1px solid #fde68a', padding: '10px 14px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '20px' }}>🏖️</span>
-                <div>
-                  <div style={{ fontSize: '11px', color: '#854d0e', fontWeight: 700 }}>أيام الراحة الأسبوعية</div>
-                  <div style={{ fontSize: '16px', fontWeight: 900, color: '#a16207' }}>{stats.offDaysCount} أيام</div>
+                            <td style={{ padding: '8px 12px' }}>
+                              {isOff ? (
+                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>— غير محدد</span>
+                              ) : (
+                                <input
+                                  type="time"
+                                  value={conf.start || '08:00'}
+                                  onChange={(e) => handleDayChange(d.label, 'start', e.target.value)}
+                                  required={!isOff}
+                                  style={{
+                                    padding: '6px 10px',
+                                    borderRadius: '8px',
+                                    border: '1px solid var(--border)',
+                                    fontSize: '13px',
+                                    fontWeight: 700,
+                                    width: '130px'
+                                  }}
+                                />
+                              )}
+                            </td>
+
+                            <td style={{ padding: '8px 12px' }}>
+                              {isOff ? (
+                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>— غير محدد</span>
+                              ) : (
+                                <input
+                                  type="time"
+                                  value={conf.end || '16:00'}
+                                  onChange={(e) => handleDayChange(d.label, 'end', e.target.value)}
+                                  required={!isOff}
+                                  style={{
+                                    padding: '6px 10px',
+                                    borderRadius: '8px',
+                                    border: '1px solid var(--border)',
+                                    fontSize: '13px',
+                                    fontWeight: 700,
+                                    width: '130px'
+                                  }}
+                                />
+                              )}
+                            </td>
+
+                            <td style={{ textAlign: 'center', fontWeight: 800, padding: '8px 12px' }}>
+                              {isOff ? (
+                                <span style={{ color: '#b45309', fontSize: '12px' }}>0 س</span>
+                              ) : (
+                                <span style={{ color: 'var(--primary)', fontSize: '13px' }}>
+                                  {conf.hours || 8} س
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
-            </div>
+
+                {/* بطاقة ملخص ساعات الأسبوع */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginBottom: '18px' }}>
+                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '10px 14px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '20px' }}>⏱️</span>
+                    <div>
+                      <div style={{ fontSize: '11px', color: '#166534', fontWeight: 700 }}>ساعات العمل الأسبوعية</div>
+                      <div style={{ fontSize: '16px', fontWeight: 900, color: '#15803d' }}>{stats.totalWeeklyHours} ساعة</div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', padding: '10px 14px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '20px' }}>💼</span>
+                    <div>
+                      <div style={{ fontSize: '11px', color: '#1e40af', fontWeight: 700 }}>أيام العمل بالجدول</div>
+                      <div style={{ fontSize: '16px', fontWeight: 900, color: '#1d4ed8' }}>{stats.workDaysCount} أيام</div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#fefce8', border: '1px solid #fde68a', padding: '10px 14px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '20px' }}>🏖️</span>
+                    <div>
+                      <div style={{ fontSize: '11px', color: '#854d0e', fontWeight: 700 }}>أيام الراحة الأسبوعية</div>
+                      <div style={{ fontSize: '16px', fontWeight: 900, color: '#a16207' }}>{stats.offDaysCount} أيام</div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* ── ملاحظات إضافية ── */}
             <div className="field" style={{ marginBottom: '6px' }}>

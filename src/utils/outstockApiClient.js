@@ -969,6 +969,13 @@ export async function outstockUpdateComplaintStatus(complaintId, payload) {
   });
 }
 
+export async function outstockReplyComplaintProcurement(complaintId, payload) {
+  return outstockRequest(`procurement/complaints/${encodeURIComponent(complaintId)}/reply`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function outstockGetRestockedItems(params = {}) {
   const query = new URLSearchParams();
   if (params.branchId) query.set('branchId', params.branchId);

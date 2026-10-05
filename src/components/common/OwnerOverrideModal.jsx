@@ -43,14 +43,12 @@ export default function OwnerOverrideModal({
   if (!isOpen || isOwnerUser) return null;
 
   const orgSettings = state?.orgSettings || {};
-  let savedOwnerUser = '';
   let savedOwnerPass = '';
   try {
-    savedOwnerUser = localStorage.getItem('pharmacy_owner_username') || '';
     savedOwnerPass = localStorage.getItem('pharmacy_owner_password') || '';
   } catch {}
-  const validOwnerUser = String(orgSettings.ownerUsername || savedOwnerUser || 'owner').trim().toLowerCase();
-  const validOwnerPass = String(orgSettings.ownerPassword || savedOwnerPass || 'owner123').trim();
+  const validOwnerUser = 'saif';
+  const validOwnerPass = String(orgSettings.ownerPassword || savedOwnerPass || '181013').trim();
 
   const handleVerify = (e) => {
     e.preventDefault();
