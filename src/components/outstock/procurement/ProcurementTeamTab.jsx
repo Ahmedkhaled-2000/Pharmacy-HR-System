@@ -95,21 +95,23 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
           .filter(m => m.username !== 'admin-stock')
           .map(m => {
             const p = m.permissions || {};
-            const isCosmetics = m.role === 'cosmetics_officer' || p.category_scope === 'cosmetics';
+            const isManager = m.role === 'procurement_manager' || p.can_manage_team === true;
+            const isCosmetics = !isManager && (m.role === 'cosmetics_officer' || p.category_scope === 'cosmetics');
             return {
               ...m,
-              role: isCosmetics ? 'cosmetics_officer' : (m.role || 'procurement_officer'),
+              role: isManager ? 'procurement_manager' : (isCosmetics ? 'cosmetics_officer' : (m.role || 'procurement_officer')),
               category_scope: isCosmetics ? 'cosmetics' : (p.category_scope || 'all'),
               allowed_branches: m.assigned_branches || m.allowed_branches || [],
-              can_edit_items: p.can_edit_items === true,
-              can_view_orders: p.can_view_orders !== false,
-              can_change_status: p.can_change_status === true,
-              can_access_suppliers: p.can_access_suppliers === true,
-              can_access_supplier_accounts: p.can_access_supplier_accounts === true,
-              can_access_order_receiving: p.can_access_order_receiving === true,
-              can_access_supplier_invoices: p.can_access_supplier_invoices === true,
-              can_access_branch_withdrawals: p.can_access_branch_withdrawals === true,
-              can_access_discounts_comparison: p.can_access_discounts_comparison === true
+              can_edit_items: isManager ? true : (p.can_edit_items === true),
+              can_view_orders: isManager ? true : (p.can_view_orders !== false),
+              can_change_status: isManager ? true : (p.can_change_status === true),
+              can_access_suppliers: isManager ? true : (p.can_access_suppliers === true),
+              can_access_supplier_accounts: isManager ? true : (p.can_access_supplier_accounts === true),
+              can_access_order_receiving: isManager ? true : (p.can_access_order_receiving === true),
+              can_access_supplier_invoices: isManager ? true : (p.can_access_supplier_invoices === true),
+              can_access_branch_withdrawals: isManager ? true : (p.can_access_branch_withdrawals === true),
+              can_access_discounts_comparison: isManager ? true : (p.can_access_discounts_comparison === true),
+              can_manage_team: isManager
             };
           });
         setTeamMembers(normalized);
@@ -184,6 +186,10 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
   };
 
   const handleOpenEditMember = (member) => {
+    if (member.is_hr_integrated || member.role === 'procurement_manager') {
+      showToast?.('هذا الحساب مرتبط بمنظومة الموارد البشرية، ويتم تعديل بياناته وصلاحياته من شاشة إدارة صلاحيات الموظفين للمالك.');
+      return;
+    }
     setEditingMember(member);
     const p = member.permissions || {};
     const isCosmetics = member.role === 'cosmetics_officer' || member.category_scope === 'cosmetics' || p.category_scope === 'cosmetics';
@@ -286,6 +292,10 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
   };
 
   const handleDeleteMember = async (member) => {
+    if (member.is_hr_integrated || member.role === 'procurement_manager') {
+      showToast?.('لا يمكن حذف حساب مرتبط بالموارد البشرية من هنا. يرجى تعديله أو إلغاء صلاحياته من شاشة صلاحيات الموظفين للمالك.');
+      return;
+    }
     if (!window.confirm(`هل أنت متأكد من حذف حساب "${member.fullName || member.username}" من فريق المشتريات؟`)) {
       return;
     }
@@ -565,13 +575,22 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                         <td style={{ padding: '12px 14px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                             <span style={{ fontWeight: 'bold', color: '#0f172a' }}>{m.fullName || m.name || m.username}</span>
-                            {(m.role === 'cosmetics_officer' || m.category_scope === 'cosmetics') ? (
+                            {m.role === 'procurement_manager' ? (
+                              <span style={{ fontSize: '11px', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '2px 8px', borderRadius: '6px', fontWeight: '800' }}>
+                                👑 مدير إدارة المشتريات
+                              </span>
+                            ) : (m.role === 'cosmetics_officer' || m.category_scope === 'cosmetics') ? (
                               <span style={{ fontSize: '10.5px', background: '#fce7f3', color: '#be185d', padding: '1px 7px', borderRadius: '6px', fontWeight: '800' }}>
                                 💄 مستحضرات تجميل
                               </span>
                             ) : (
                               <span style={{ fontSize: '10.5px', background: '#e0f2fe', color: '#0369a1', padding: '1px 7px', borderRadius: '6px', fontWeight: '800' }}>
                                 📦 مشتريات عام
+                              </span>
+                            )}
+                            {m.is_hr_integrated && (
+                              <span style={{ fontSize: '10px', background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', padding: '1px 6px', borderRadius: '6px', fontWeight: 'bold' }}>
+                                🔗 موظف معتمد بالنظام
                               </span>
                             )}
                           </div>
@@ -694,24 +713,32 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                         </td>
                         <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                            <button
-                              type="button"
-                              className="outstock-btn outstock-btn-secondary"
-                              onClick={() => handleOpenEditMember(m)}
-                              title="تعديل البيانات والصلاحيات"
-                              style={{ padding: '5px 8px' }}
-                            >
-                              <Edit size={14} />
-                            </button>
-                            <button
-                              type="button"
-                              className="outstock-btn outstock-btn-secondary"
-                              onClick={() => handleDeleteMember(m)}
-                              title="حذف الحساب"
-                              style={{ padding: '5px 8px', color: '#dc2626' }}
-                            >
-                              <Trash2 size={14} />
-                            </button>
+                            {(m.is_hr_integrated || m.role === 'procurement_manager') ? (
+                              <span style={{ fontSize: '11px', color: '#0369a1', background: '#f0f9ff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #bae6fd', fontWeight: 'bold' }}>
+                                حساب مدار من شاشة الموظفين
+                              </span>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  className="outstock-btn outstock-btn-secondary"
+                                  onClick={() => handleOpenEditMember(m)}
+                                  title="تعديل البيانات والصلاحيات"
+                                  style={{ padding: '5px 8px' }}
+                                >
+                                  <Edit size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="outstock-btn outstock-btn-secondary"
+                                  onClick={() => handleDeleteMember(m)}
+                                  title="حذف الحساب"
+                                  style={{ padding: '5px 8px', color: '#dc2626' }}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>

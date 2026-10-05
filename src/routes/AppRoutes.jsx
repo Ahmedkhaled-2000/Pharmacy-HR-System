@@ -820,6 +820,20 @@ export default function AppRoutes() {
       return { success: false, error: 'يرجى إدخال اسم المستخدم وكلمة المرور' };
     }
 
+    // ⛔ منع صريح لأي محاولة دخول باستخدام يوزر owner القديم أو admin-stock الملغى
+    if (cleanUser === 'owner') {
+      return {
+        success: false,
+        error: 'تم إلغاء حساب owner القديم نهائياً. يرجى تسجيل الدخول بحساب المالك المعتمد (saif).'
+      };
+    }
+    if (cleanUser === 'admin-stock') {
+      return {
+        success: false,
+        error: 'تم إلغاء حساب admin-stock نهائياً. يتم الدخول كمدير مشتريات فقط من خلال حساب الموظف المعتمد.'
+      };
+    }
+
     // الدخول المباشر لنظام إدارة النواقص والمشتريات (OutStock Handling)
     if (cleanUser === 'out' || cleanUser.startsWith('outstock')) {
       try {

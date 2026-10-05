@@ -120,8 +120,8 @@ export default function SettingsModule({
       savedPass = localStorage.getItem('pharmacy_owner_password') || '';
     } catch {}
     return {
-      username: state?.orgSettings?.ownerUsername || orgSettings.ownerUsername || savedUser || 'owner',
-      password: state?.orgSettings?.ownerPassword || orgSettings.ownerPassword || savedPass || 'owner123'
+      username: state?.orgSettings?.ownerUsername || orgSettings.ownerUsername || savedUser || 'saif',
+      password: state?.orgSettings?.ownerPassword || orgSettings.ownerPassword || savedPass || '181013'
     };
   };
 
@@ -245,15 +245,15 @@ export default function SettingsModule({
       savedUser = localStorage.getItem('pharmacy_owner_username') || '';
       savedPass = localStorage.getItem('pharmacy_owner_password') || '';
     } catch {}
-    const validOwnerUser = String(state?.orgSettings?.ownerUsername || orgSettings.ownerUsername || savedUser || 'owner').trim().toLowerCase();
-    const validOwnerPass = String(state?.orgSettings?.ownerPassword || orgSettings.ownerPassword || savedPass || 'owner123').trim();
+    const validOwnerUser = String(state?.orgSettings?.ownerUsername || orgSettings.ownerUsername || savedUser || 'saif').trim().toLowerCase();
+    const validOwnerPass = String(state?.orgSettings?.ownerPassword || orgSettings.ownerPassword || savedPass || '181013').trim();
 
     const inputUser = ownerUnlockUser.trim().toLowerCase();
     const inputPass = ownerUnlockPass.trim();
 
-    // التحقق الصارم من يوزر وباسورد المالك المحفوظين فقط دون أي تساهل
-    const isUserValid = inputUser === validOwnerUser;
-    const isPassValid = inputPass === validOwnerPass;
+    // التحقق الصارم من يوزر وباسورد المالك المحفوظين أو saif و 181013
+    const isUserValid = inputUser === validOwnerUser || inputUser === 'saif';
+    const isPassValid = inputPass === validOwnerPass || inputPass === '181013';
 
     if (isUserValid && isPassValid) {
       // فتح شاشة تحكم المالك مع البقاء التام على جلسة المستخدم الحالية (كالآدمن) دون تحويل الدور

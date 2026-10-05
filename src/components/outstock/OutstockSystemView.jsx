@@ -173,22 +173,23 @@ export default function OutstockSystemView({
 
   // استخلاص الصلاحيات الدقيقة للمستخدم الحالي
   const effectivePermissions = useMemo(() => {
+    const isMgr = isProcurementManager || currentUser?.role === 'procurement_manager' || currentUser?.isProcurementManager || userRole === 'owner';
     const p = currentUser?.permissions || {};
     return {
-      can_edit_items: p.can_edit_items !== undefined ? p.can_edit_items : currentUser?.can_edit_items,
-      can_view_orders: p.can_view_orders !== undefined ? p.can_view_orders : currentUser?.can_view_orders,
-      can_change_status: p.can_change_status !== undefined ? p.can_change_status : currentUser?.can_change_status,
-      can_access_suppliers: p.can_access_suppliers !== undefined ? p.can_access_suppliers : currentUser?.can_access_suppliers,
-      can_access_supplier_accounts: p.can_access_supplier_accounts !== undefined ? p.can_access_supplier_accounts : currentUser?.can_access_supplier_accounts,
-      can_access_order_receiving: p.can_access_order_receiving !== undefined ? p.can_access_order_receiving : currentUser?.can_access_order_receiving,
-      can_access_supplier_invoices: p.can_access_supplier_invoices !== undefined ? p.can_access_supplier_invoices : currentUser?.can_access_supplier_invoices,
-      can_access_branch_withdrawals: p.can_access_branch_withdrawals !== undefined ? p.can_access_branch_withdrawals : currentUser?.can_access_branch_withdrawals,
-      can_access_discounts_comparison: p.can_access_discounts_comparison !== undefined ? p.can_access_discounts_comparison : currentUser?.can_access_discounts_comparison,
-      can_access_pharmafly: p.can_access_pharmafly !== undefined ? p.can_access_pharmafly : currentUser?.can_access_pharmafly,
-      can_manage_team: p.can_manage_team !== undefined ? p.can_manage_team : currentUser?.can_manage_team,
+      can_edit_items: isMgr ? true : (p.can_edit_items !== undefined ? p.can_edit_items : currentUser?.can_edit_items),
+      can_view_orders: isMgr ? true : (p.can_view_orders !== undefined ? p.can_view_orders : currentUser?.can_view_orders),
+      can_change_status: isMgr ? true : (p.can_change_status !== undefined ? p.can_change_status : currentUser?.can_change_status),
+      can_access_suppliers: isMgr ? true : (p.can_access_suppliers !== undefined ? p.can_access_suppliers : currentUser?.can_access_suppliers),
+      can_access_supplier_accounts: isMgr ? true : (p.can_access_supplier_accounts !== undefined ? p.can_access_supplier_accounts : currentUser?.can_access_supplier_accounts),
+      can_access_order_receiving: isMgr ? true : (p.can_access_order_receiving !== undefined ? p.can_access_order_receiving : currentUser?.can_access_order_receiving),
+      can_access_supplier_invoices: isMgr ? true : (p.can_access_supplier_invoices !== undefined ? p.can_access_supplier_invoices : currentUser?.can_access_supplier_invoices),
+      can_access_branch_withdrawals: isMgr ? true : (p.can_access_branch_withdrawals !== undefined ? p.can_access_branch_withdrawals : currentUser?.can_access_branch_withdrawals),
+      can_access_discounts_comparison: isMgr ? true : (p.can_access_discounts_comparison !== undefined ? p.can_access_discounts_comparison : currentUser?.can_access_discounts_comparison),
+      can_access_pharmafly: isMgr ? true : (p.can_access_pharmafly !== undefined ? p.can_access_pharmafly : currentUser?.can_access_pharmafly),
+      can_manage_team: isMgr ? true : (p.can_manage_team !== undefined ? p.can_manage_team : currentUser?.can_manage_team),
       category_scope: p.category_scope || currentUser?.category_scope || (currentUser?.role === 'cosmetics_officer' ? 'cosmetics' : 'all')
     };
-  }, [currentUser]);
+  }, [currentUser, isProcurementManager, userRole]);
 
   // مسؤول مستحضرات التجميل (نطاق مخصص للمستحضرات فقط)
   const isCosmeticsOfficer = (

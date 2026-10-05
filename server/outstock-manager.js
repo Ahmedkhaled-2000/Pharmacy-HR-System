@@ -625,22 +625,11 @@ export async function initOutstockTables(db) {
       console.log('👑 [OutStock Engine] تم إنشاء حساب المالك المبدئي بنجاح (المستخدم: out / كلمة المرور: 123)');
     }
 
-    // غرس حساب مدير المشتريات الافتراضي (admin-stock / 123)
-    const checkProcMgr = await db.query("SELECT id FROM public.outstock_users WHERE username = 'admin-stock'");
-    if (checkProcMgr.rows.length === 0) {
-      await db.query(`
-        INSERT INTO public.outstock_users (id, username, password, full_name, role, permissions, is_active)
-        VALUES (
-          'outstock_procurement_manager_root',
-          'admin-stock',
-          '123',
-          'مدير إدارة المشتريات والتوريدات',
-          'procurement_manager',
-          '{"can_edit_items": true, "can_view_orders": true, "can_change_status": true, "can_access_suppliers": true, "can_manage_team": true}',
-          true
-        )
-      `);
-      console.log('📦 [OutStock Engine] تم إنشاء حساب مدير المشتريات الافتراضي (المستخدم: admin-stock / كلمة المرور: 123)');
+    // إزالة حساب admin-stock نهائياً والاعتماد الحصري على الموظف المعين كمدير مشتريات
+    try {
+      await db.query("DELETE FROM public.outstock_users WHERE username = 'admin-stock'");
+    } catch (cleanStockErr) {
+      console.warn('[OutStock Clean Admin-Stock Warn]:', cleanStockErr.message);
     }
 
     // مزامنة فروع الـ HR المسجلة في app_settings تلقائياً (دليل الفروع فقط دون لمس بيانات الدخول)
@@ -788,9 +777,29 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         cleanRole = cleanRole.replace('outstock_', '');
       }
 
-      if (['owner', 'admin', 'developer'].includes(cleanRole)) {
+      // 🔍 التحقق الذكي مما إذا كان المستخدم موظفاً معتمداً كمدير مشتريات
+      let isEmpProcMgr = (
+        cleanRole === 'procurement_manager' ||
+        payload.outstockRole === 'procurement_manager' ||
+        payload.isProcurementManager === true ||
+        payload.permissions?.can_manage_team === true
+      );
+
+      // إذا لم يكن محدداً مباشرة في التوكن ولكن المعرف لموظف، نتحقق من إعدادات الموارد البشرية
+      if (!isEmpProcMgr && payload.id) {
+        try {
+          const appSettings = await getSettingsFromStorage(STORAGE_KEY);
+          const empAccessMap = appSettings?.orgSettings?.employeeUnifiedAccess || {};
+          const empAccess = empAccessMap[payload.id] || empAccessMap[payload.username] || empAccessMap[payload.userId];
+          if (empAccess?.isEnabled !== false && empAccess?.permissions?.outstockHandling?.enabled && empAccess?.permissions?.outstockHandling?.role === 'procurement_manager') {
+            isEmpProcMgr = true;
+          }
+        } catch (e) {}
+      }
+
+      if (['owner', 'admin', 'developer'].includes(cleanRole) || payload.username === 'saif') {
         payload.role = 'owner';
-      } else if (cleanRole === 'procurement_manager' || payload.username === 'admin-stock') {
+      } else if (isEmpProcMgr) {
         payload.role = 'procurement_manager';
       } else if (['procurement', 'procurement_officer'].includes(cleanRole)) {
         payload.role = 'procurement_officer';
@@ -800,8 +809,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         payload.role = cleanRole;
       }
 
-      // إذا كان المستخدم admin-stock أو مدير مشتريات أو مالك، فله كافة الصلاحيات
-      if (payload.username === 'admin-stock' || payload.role === 'procurement_manager' || payload.role === 'owner') {
+      // إذا كان المستخدم مدير مشتريات أو مالك، فله كافة الصلاحيات وإدارة الفريق
+      if (payload.role === 'procurement_manager' || payload.role === 'owner') {
         payload.permissions = {
           can_edit_items: true,
           can_view_orders: true,
@@ -887,9 +896,62 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         return res.status(400).json({ success: false, error: 'يرجى إدخال اسم المستخدم وكلمة المرور' });
       }
 
-      // 1. البحث في جدول outstock_users أولاً
+      // ⛔ منع صريح ليوزر owner القديم ويوزر admin-stock الملغى
+      if (cleanUser === 'owner') {
+        return res.status(401).json({
+          success: false,
+          error: 'تم إلغاء حساب owner القديم نهائياً. يرجى تسجيل الدخول بحساب المالك المعتمد (saif).'
+        });
+      }
+      if (cleanUser === 'admin-stock') {
+        return res.status(401).json({
+          success: false,
+          error: 'تم إلغاء حساب admin-stock نهائياً. يتم الدخول كمدير مشتريات فقط من خلال حساب الموظف المعتمد.'
+        });
+      }
+
+      // 👑 فحص المالك المعتمد الحصري (saif)
+      if (cleanUser === 'saif') {
+        const appSettings = await getSettingsFromStorage(STORAGE_KEY);
+        const org = appSettings?.orgSettings || {};
+        const storedOwnerPass = org.ownerPassword || '181013';
+        if (
+          cleanPass === '181013' || stdPass === '181013' ||
+          cleanPass === storedOwnerPass || (stdPass && toStdDigits(storedOwnerPass) === stdPass)
+        ) {
+          const ownerPayload = {
+            id: 'owner_master_saif',
+            username: 'saif',
+            fullName: 'سيف (المالك)',
+            name: 'سيف (المالك)',
+            role: 'owner',
+            isOwner: true,
+            isPrimaryOwner: true,
+            permissions: {
+              can_edit_items: true,
+              can_view_orders: true,
+              can_change_status: true,
+              can_access_suppliers: true,
+              can_access_supplier_accounts: true,
+              can_access_order_receiving: true,
+              can_access_supplier_invoices: true,
+              can_access_branch_withdrawals: true,
+              can_access_discounts_comparison: true,
+              can_manage_team: true
+            }
+          };
+          const token = generateToken(ownerPayload, JWT_SECRET);
+          return res.json({
+            success: true,
+            token,
+            user: ownerPayload
+          });
+        }
+      }
+
+      // 1. البحث في جدول outstock_users أولاً (باستثناء admin-stock)
       const userRes = await db.query(
-        'SELECT * FROM public.outstock_users WHERE (LOWER(username) = $1 OR username = $2) AND is_active = true',
+        "SELECT * FROM public.outstock_users WHERE (LOWER(username) = $1 OR username = $2) AND is_active = true AND username <> 'admin-stock'",
         [cleanUser, stdUser]
       );
 
@@ -993,7 +1055,92 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         }
       }
 
-      // ⚠️ لا يوجد Fallback لفروع الـ HR! كل نظام له بيانات دخول منفصلة تماماً
+      // 3. البحث في موظفي الـ HR الحاصلين على صلاحية النواقص وإدارة المشتريات
+      try {
+        const appSettings = await getSettingsFromStorage(STORAGE_KEY);
+        const org = appSettings?.orgSettings || {};
+        const empAccessMap = org.employeeUnifiedAccess || {};
+        const emps = appSettings?.employees || [];
+
+        const matchedEmp = emps.find(item => {
+          if (!item) return false;
+          const eCode = String(item.code || '').trim().toLowerCase();
+          const eId = String(item.id || '').trim().toLowerCase();
+          const eUser = String(item.username || '').trim().toLowerCase();
+          const ePhone = String(item.phone || '').trim();
+          const uAccess = empAccessMap[item.id] || empAccessMap[item.code] || null;
+          const uCustomUser = uAccess?.username ? String(uAccess.username).trim().toLowerCase() : '';
+
+          return (
+            eCode === cleanUser ||
+            eId === cleanUser ||
+            eUser === cleanUser ||
+            ePhone === cleanUser ||
+            (uCustomUser && uCustomUser === cleanUser) ||
+            (stdUser && (toStdDigits(eCode) === stdUser || toStdDigits(eId) === stdUser || toStdDigits(eUser) === stdUser || toStdDigits(ePhone) === stdUser || (uCustomUser && toStdDigits(uCustomUser) === stdUser)))
+          );
+        });
+
+        if (matchedEmp) {
+          const uAccess = empAccessMap[matchedEmp.id] || empAccessMap[matchedEmp.code] || null;
+          const ePass = String(matchedEmp.password || '').trim();
+          const uPass = uAccess?.password ? String(uAccess.password).trim() : '';
+
+          const isPassOk = cleanPass === ePass || 
+                           (uPass && cleanPass === uPass) ||
+                           (stdPass && toStdDigits(ePass) === stdPass) || 
+                           (uPass && stdPass && toStdDigits(uPass) === stdPass) ||
+                           (!ePass && !uPass && (cleanPass === '123' || stdPass === '123'));
+
+          if (isPassOk && uAccess?.isEnabled !== false && uAccess?.permissions?.outstockHandling?.enabled) {
+            const outstockPerm = uAccess.permissions.outstockHandling;
+            const isProcMgr = outstockPerm.role === 'procurement_manager';
+            const role = isProcMgr ? 'procurement_manager' : (
+              outstockPerm.role === 'cosmetics_officer' ? 'cosmetics_officer' : (
+                outstockPerm.role === 'branch' ? 'outstock_branch' : 'procurement_officer'
+              )
+            );
+
+            const userPermissions = {
+              can_edit_items: true,
+              can_view_orders: true,
+              can_change_status: true,
+              can_access_suppliers: true,
+              can_access_supplier_accounts: isProcMgr,
+              can_access_order_receiving: true,
+              can_access_supplier_invoices: isProcMgr,
+              can_access_branch_withdrawals: isProcMgr,
+              can_access_discounts_comparison: isProcMgr,
+              can_manage_team: isProcMgr,
+              category_scope: role === 'cosmetics_officer' ? 'cosmetics' : 'all'
+            };
+
+            const userPayload = {
+              id: matchedEmp.id,
+              username: uAccess.username || matchedEmp.code || cleanUser,
+              fullName: matchedEmp.name || matchedEmp.fullName,
+              name: matchedEmp.name || matchedEmp.fullName,
+              role: role === 'outstock_branch' ? 'outstock_branch' : `outstock_${role}`,
+              originalRole: role,
+              isProcurementManager: isProcMgr,
+              allBranchesAccess: isProcMgr,
+              branchId: outstockPerm.assignedBranchId || matchedEmp.branchId,
+              permissions: userPermissions,
+              ...userPermissions
+            };
+
+            const token = generateToken(userPayload, JWT_SECRET);
+            return res.json({
+              success: true,
+              token,
+              user: userPayload
+            });
+          }
+        }
+      } catch (hrLoginErr) {
+        console.warn('[Outstock HR Employee Login Check Warn]:', hrLoginErr.message);
+      }
+
       return res.status(401).json({ success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة في نظام النواقص' });
     } catch (err) {
       console.error('[OutStock Login Error]:', err);
@@ -3677,7 +3824,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   // ───────────────────────────────────────────────────────────────────────────
   app.get('/api/outstock/procurement-team', authMiddleware, async (req, res) => {
     try {
-      if (req.outstockUser.role !== 'owner' && req.outstockUser.role !== 'procurement_manager') {
+      const isManagerOrOwner = req.outstockUser.role === 'owner' ||
+                               req.outstockUser.role === 'procurement_manager' ||
+                               req.outstockUser.isProcurementManager ||
+                               req.outstockUser.permissions?.can_manage_team;
+      if (!isManagerOrOwner) {
         return res.status(403).json({ success: false, error: 'غير مصرح - إدارة فريق المشتريات متاحة للمدير والمالك فقط' });
       }
 
@@ -3691,7 +3842,67 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         ORDER BY u.created_at ASC
       `);
 
-      res.json({ success: true, team: usersRes.rows });
+      let team = [...usersRes.rows];
+
+      // دمج موظفي الموارد البشرية الحاصلين على صلاحية إدارة أو فريق المشتريات
+      try {
+        const settings = await getSettingsFromStorage(STORAGE_KEY);
+        const org = settings?.orgSettings || {};
+        const empAccessMap = org.employeeUnifiedAccess || {};
+        const emps = settings?.employees || [];
+
+        for (const [empId, acc] of Object.entries(empAccessMap)) {
+          if (!acc || acc.isEnabled === false) continue;
+          const outstockPerm = acc.permissions?.outstockHandling;
+          if (outstockPerm?.enabled) {
+            const empObj = emps.find(e => String(e.id) === String(empId) || String(e.code) === String(empId));
+            const empName = empObj?.name || empObj?.fullName || `موظف #${empId}`;
+            const empUser = acc.username || empObj?.code || empObj?.phone || empId;
+
+            // عدم التكرار إن كان مسجلاً بالفعل في outstock_users
+            const alreadyInList = team.some(m =>
+              String(m.id) === String(empId) ||
+              String(m.username).toLowerCase() === String(empUser).toLowerCase() ||
+              m.full_name === empName
+            );
+
+            if (!alreadyInList) {
+              const role = outstockPerm.role === 'procurement_manager' ? 'procurement_manager' : (
+                outstockPerm.role === 'cosmetics_officer' ? 'cosmetics_officer' : 'procurement_officer'
+              );
+              team.push({
+                id: `hr_emp_${empId}`,
+                employee_id: empId,
+                username: empUser,
+                full_name: empName,
+                role: role,
+                phone: empObj?.phone || acc.phone || '',
+                is_active: true,
+                is_hr_integrated: true,
+                assigned_branches: outstockPerm.assignedBranchIds || (outstockPerm.assignedBranchId && outstockPerm.assignedBranchId !== 'all' ? [outstockPerm.assignedBranchId] : []),
+                permissions: {
+                  can_edit_items: true,
+                  can_view_orders: true,
+                  can_change_status: true,
+                  can_access_suppliers: true,
+                  can_access_supplier_accounts: role === 'procurement_manager',
+                  can_access_order_receiving: true,
+                  can_access_supplier_invoices: role === 'procurement_manager',
+                  can_access_branch_withdrawals: role === 'procurement_manager',
+                  can_access_discounts_comparison: role === 'procurement_manager',
+                  can_manage_team: role === 'procurement_manager',
+                  category_scope: role === 'cosmetics_officer' ? 'cosmetics' : 'all'
+                },
+                created_at: acc.updatedAt || new Date().toISOString()
+              });
+            }
+          }
+        }
+      } catch (hrMergeErr) {
+        console.warn('[Procurement Team HR Merge Warn]:', hrMergeErr.message);
+      }
+
+      res.json({ success: true, team });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -3699,7 +3910,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
   app.post('/api/outstock/procurement-team', authMiddleware, async (req, res) => {
     try {
-      if (req.outstockUser.role !== 'owner' && req.outstockUser.role !== 'procurement_manager') {
+      const isManagerOrOwner = req.outstockUser.role === 'owner' ||
+                               req.outstockUser.role === 'procurement_manager' ||
+                               req.outstockUser.isProcurementManager ||
+                               req.outstockUser.permissions?.can_manage_team;
+      if (!isManagerOrOwner) {
         return res.status(403).json({ success: false, error: 'غير مصرح - إضافة موظف مشتريات متاحة للمدير والمالك فقط' });
       }
 
@@ -3779,11 +3994,22 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
   app.put('/api/outstock/procurement-team/:id', authMiddleware, async (req, res) => {
     try {
-      if (req.outstockUser.role !== 'owner' && req.outstockUser.role !== 'procurement_manager') {
+      const isManagerOrOwner = req.outstockUser.role === 'owner' ||
+                               req.outstockUser.role === 'procurement_manager' ||
+                               req.outstockUser.isProcurementManager ||
+                               req.outstockUser.permissions?.can_manage_team;
+      if (!isManagerOrOwner) {
         return res.status(403).json({ success: false, error: 'غير مصرح - تعديل الموظف متاح للمدير والمالك فقط' });
       }
 
       const targetId = req.params.id;
+      if (String(targetId).startsWith('hr_emp_')) {
+        return res.status(400).json({
+          success: false,
+          error: 'هذا الحساب مرتبط مباشرة بمنظومة الموارد البشرية. يرجى تعديل صلاحياته من شاشة إدارة صلاحيات الموظفين للمالك.'
+        });
+      }
+
       const {
         fullName,
         phone,
@@ -3863,11 +4089,22 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
   app.delete('/api/outstock/procurement-team/:id', authMiddleware, async (req, res) => {
     try {
-      if (req.outstockUser.role !== 'owner' && req.outstockUser.role !== 'procurement_manager') {
-        return res.status(403).json({ success: false, error: 'غير مصرح' });
+      const isManagerOrOwner = req.outstockUser.role === 'owner' ||
+                               req.outstockUser.role === 'procurement_manager' ||
+                               req.outstockUser.isProcurementManager ||
+                               req.outstockUser.permissions?.can_manage_team;
+      if (!isManagerOrOwner) {
+        return res.status(403).json({ success: false, error: 'غير مصرح - حذف الموظف متاح للمدير والمالك فقط' });
       }
 
       const targetId = req.params.id;
+      if (String(targetId).startsWith('hr_emp_')) {
+        return res.status(400).json({
+          success: false,
+          error: 'هذا الحساب مرتبط بمنظومة الموارد البشرية. لإلغاء دوره كمدير مشتريات أو إزالته، يرجى تعديله من شاشة صلاحيات الموظفين.'
+        });
+      }
+
       const targetUser = await db.query('SELECT username, role FROM public.outstock_users WHERE id = $1', [targetId]);
       if (targetUser.rows.length === 0) {
         return res.status(404).json({ success: false, error: 'المستخدم غير موجود' });

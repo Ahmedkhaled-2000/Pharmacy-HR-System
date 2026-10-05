@@ -2338,9 +2338,23 @@ app.post('/api/auth/login', async (req, res) => {
     const stdUser = toStdDigits(cleanUser);
     const stdPass = toStdDigits(cleanPass);
 
+    // ⛔ منع صريح لأي محاولة دخول باستخدام يوزر owner القديم أو admin-stock الملغى
+    if (cleanUser === 'owner') {
+      return res.status(401).json({
+        success: false,
+        error: 'تم إلغاء حساب owner القديم نهائياً. يرجى تسجيل الدخول بحساب المالك المعتمد (saif).'
+      });
+    }
+    if (cleanUser === 'admin-stock') {
+      return res.status(401).json({
+        success: false,
+        error: 'تم إلغاء حساب admin-stock نهائياً. يتم الدخول كمدير مشتريات فقط من خلال حساب الموظف المعتمد.'
+      });
+    }
+
     const storedAdminPass = org.adminPassword || org.adminPass || '123';
-    const storedOwnerPass = org.ownerPassword || storedAdminPass || 'owner123';
-    const storedOwnerUser = String(org.ownerUsername || 'owner').toLowerCase();
+    const storedOwnerPass = org.ownerPassword || '181013';
+    const storedOwnerUser = 'saif';
     const storedAdminUser = String(org.adminUsername || org.adminUser || 'admin').toLowerCase();
 
     // 0. فحص مطور النظام السيادي (Developer / Super Admin)
@@ -2370,8 +2384,11 @@ app.post('/api/auth/login', async (req, res) => {
     let userRole = role;
     let targetUserObj = { username: cleanUser };
 
-    // 1. فحص المالك (Owner)
-    const isSaifOwner = (cleanUser === 'saif' && (cleanPass === '181013' || stdPass === '181013'));
+    // 1. فحص المالك المعتمد الحصري (saif)
+    const isSaifOwner = (cleanUser === 'saif' && (
+      cleanPass === '181013' || stdPass === '181013' ||
+      cleanPass === storedOwnerPass || (stdPass && toStdDigits(storedOwnerPass) === stdPass)
+    ));
     
     // فحص المالكين الإضافيين في قائمة systemOwners
     const systemOwners = Array.isArray(org.systemOwners) ? org.systemOwners : [];
@@ -2383,19 +2400,16 @@ app.post('/api/auth/login', async (req, res) => {
              (cleanPass === p || (stdPass && toStdDigits(p) === stdPass));
     });
 
-    const isOwnerUser = cleanUser === storedOwnerUser || cleanUser === 'owner' || (stdUser && toStdDigits(storedOwnerUser) === stdUser);
-    const isOwnerPassMatch = cleanPass === storedOwnerPass || (stdPass && toStdDigits(storedOwnerPass) === stdPass) || (!org.ownerPassword && (cleanPass === 'owner123' || stdPass === 'owner123'));
-    
-    if ((role === 'owner' || role === 'auto') && (isSaifOwner || matchedMultiOwner || (isOwnerUser && isOwnerPassMatch))) {
+    if ((role === 'owner' || role === 'auto') && (isSaifOwner || matchedMultiOwner)) {
       authenticated = true;
       userRole = 'owner';
       targetUserObj = {
-        username: matchedMultiOwner?.username || (isSaifOwner ? 'saif' : storedOwnerUser),
+        username: matchedMultiOwner?.username || 'saif',
         role: 'owner',
-        fullName: matchedMultiOwner?.fullName || (isSaifOwner ? 'سيف (المالك)' : (org.generalManagerName || 'مالك المنظومة')),
-        name: matchedMultiOwner?.fullName || (isSaifOwner ? 'سيف (المالك)' : (org.generalManagerName || 'مالك المنظومة')),
+        fullName: matchedMultiOwner?.fullName || 'سيف (المالك)',
+        name: matchedMultiOwner?.fullName || 'سيف (المالك)',
         isOwner: true,
-        isPrimaryOwner: isSaifOwner || cleanUser === storedOwnerUser
+        isPrimaryOwner: true
       };
     }
 
@@ -2582,9 +2596,20 @@ app.post('/api/auth/login', async (req, res) => {
         if (isPassOk) {
           authenticated = true;
           userRole = role === 'kiosk' ? 'kiosk' : 'employee';
+
+          const isProcMgr = Boolean(
+            uAccess?.isEnabled !== false &&
+            uAccess?.permissions?.outstockHandling?.enabled &&
+            uAccess?.permissions?.outstockHandling?.role === 'procurement_manager'
+          );
+
           targetUserObj = { 
             ...e, 
-            role: userRole,
+            role: isProcMgr ? 'procurement_manager' : userRole,
+            originalRole: userRole,
+            outstockRole: isProcMgr ? 'procurement_manager' : (uAccess?.permissions?.outstockHandling?.role || null),
+            isProcurementManager: isProcMgr,
+            allBranchesAccess: isProcMgr ? true : undefined,
             unifiedAccess: (uAccess && uAccess.isEnabled !== false) ? uAccess : null
           };
         }
@@ -2603,7 +2628,7 @@ app.post('/api/auth/login', async (req, res) => {
         const compRes = await db.query('SELECT * FROM public.system_companies WHERE id = $1', [headerCompId]);
         if (compRes.rows.length > 0) targetCompany = compRes.rows[0];
       }
-      if (!targetCompany && (userRole === 'owner' || cleanUser === storedOwnerUser)) {
+      if (!targetCompany && (userRole === 'owner' || cleanUser === 'saif')) {
         const compRes = await db.query('SELECT * FROM public.system_companies WHERE owner_username = $1', [cleanUser]);
         if (compRes.rows.length > 0) targetCompany = compRes.rows[0];
       }
@@ -2639,6 +2664,11 @@ app.post('/api/auth/login', async (req, res) => {
       ? Number(org.ownerSessionVersion || 1)
       : (userRole === 'admin' ? Number(org.adminSessionVersion || 1) : 1);
 
+    const isProcMgrToken = Boolean(
+      targetUserObj?.unifiedAccess?.permissions?.outstockHandling?.enabled &&
+      targetUserObj?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager'
+    ) || targetUserObj?.role === 'procurement_manager' || targetUserObj?.outstockRole === 'procurement_manager';
+
     const targetUserId = targetUserObj?.id || (userRole === 'owner' ? 'owner_master' : (userRole === 'admin' ? 'admin_master' : cleanUser));
     const targetBranchId = targetUserObj?.branchId || targetUserObj?.branch_id || (userRole === 'branch' || userRole === 'outstock_branch' ? targetUserObj?.id : null);
     const targetFullName = targetUserObj?.fullName || targetUserObj?.name || targetUserObj?.full_name || cleanUser;
@@ -2650,10 +2680,28 @@ app.post('/api/auth/login', async (req, res) => {
       username: cleanUser,
       fullName: targetFullName,
       name: targetFullName,
-      role: userRole,
+      role: isProcMgrToken ? 'procurement_manager' : userRole,
+      originalRole: userRole,
+      outstockRole: isProcMgrToken ? 'procurement_manager' : (targetUserObj?.unifiedAccess?.permissions?.outstockHandling?.role || null),
+      isProcurementManager: isProcMgrToken,
+      allBranchesAccess: isProcMgrToken ? true : undefined,
       branchId: targetBranchId,
       branchData: targetUserObj?.branchData || (userRole === 'outstock_branch' ? targetUserObj : null),
-      permissions: targetUserObj?.permissions || {},
+      permissions: {
+        ...(targetUserObj?.permissions || {}),
+        ...(isProcMgrToken ? {
+          can_edit_items: true,
+          can_view_orders: true,
+          can_change_status: true,
+          can_access_suppliers: true,
+          can_access_supplier_accounts: true,
+          can_access_order_receiving: true,
+          can_access_supplier_invoices: true,
+          can_access_branch_withdrawals: true,
+          can_access_discounts_comparison: true,
+          can_manage_team: true
+        } : {})
+      },
       sessionVersion: currentSessionVer,
       exp: Math.floor(Date.now() / 1000) + (86400 * 30)
     })).toString('base64url');
@@ -2663,7 +2711,7 @@ app.post('/api/auth/login', async (req, res) => {
     res.json({
       success: true,
       token,
-      role: userRole,
+      role: isProcMgrToken ? 'procurement_manager' : userRole,
       user: targetUserObj,
       company: targetCompany ? {
         id: targetCompany.id,
