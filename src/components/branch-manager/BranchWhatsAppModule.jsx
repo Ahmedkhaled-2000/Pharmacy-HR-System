@@ -19,7 +19,10 @@ import {
   Eye,
   Clock,
   ChevronDown,
-  Info
+  Info,
+  LogOut,
+  Maximize2,
+  X
 } from 'lucide-react';
 import { getEmpDisplayName, getEmpWhatsAppPhone } from '../../utils/formatters';
 import { getResolvedWhatsAppServerUrl } from '../../utils/systemUrlHelper';
@@ -133,7 +136,14 @@ export default function BranchWhatsAppModule({
   const [attachedFile, setAttachedFile] = useState(null); // { name, size, type, dataUrl, base64 }
   const [isSending, setIsSending] = useState(false);
   const [sendProgress, setSendProgress] = useState({ current: 0, total: 0, text: '' });
-  const [waServerStatus, setWaServerStatus] = useState('checking'); // 'CONNECTED' | 'DISCONNECTED' | 'QR_READY' | 'checking'
+  const [waServerStatus, setWaServerStatus] = useState('checking'); // 'CONNECTED' | 'DISCONNECTED' | 'QR_READY' | 'CONNECTING' | 'checking'
+  const [waLiveQr, setWaLiveQr] = useState('');
+  const [waConnectedPhone, setWaConnectedPhone] = useState('');
+  const [waDeviceName, setWaDeviceName] = useState('');
+  const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
+  const [isResettingSession, setIsResettingSession] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
+
   const [managerPhoneInput, setManagerPhoneInput] = useState('');
   const [isEditingPhone, setIsEditingPhone] = useState(false);
   const [historyTab, setHistoryTab] = useState(false); // view sent logs
@@ -142,6 +152,13 @@ export default function BranchWhatsAppModule({
   const branchIdStr = String(currentBranch?.id || '');
   const branchName = currentBranch?.name || currentBranch?.branchName || 'الفرع';
   const managerName = managerEmp?.name || currentBranch?.managerName || 'مدير الفرع';
+
+  // معرّف جلسة الواتساب المستقلة الخاصة بهذا الفرع حصراً (عزل تام لكل مدير فرع)
+  const branchSessionId = useMemo(() => {
+    const raw = String(currentBranch?.id || branchIdStr || currentBranch?.code || 'default');
+    const clean = raw.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    return clean.startsWith('branch_') ? clean : `branch_${clean}`;
+  }, [currentBranch?.id, branchIdStr, currentBranch?.code]);
 
   // Branch Manager effective WhatsApp phone
   const detectedManagerPhone = useMemo(() => {
@@ -186,36 +203,119 @@ export default function BranchWhatsAppModule({
     }
   }, [branchEmployees, selectAll]);
 
-  // Check WhatsApp Server Health
-  const checkServerStatus = useCallback(async () => {
+  // ── 1. فحص حالة الاتصال واسترجاع الـ QR الخاص بجلسة هذا الفرع المستقلة ───────────
+  const fetchBranchWaStatus = useCallback(async (silent = false) => {
+    if (!silent) setIsRefreshingStatus(true);
     try {
       const serverUrl = getResolvedWhatsAppServerUrl(state?.orgSettings);
-      const res = await fetch(`${serverUrl.replace(/\/$/, '')}/health`, {
-        signal: AbortSignal.timeout(2500)
+      const cleanBase = serverUrl.replace(/\/+$/, '');
+      const res = await fetch(`${cleanBase}/status?sessionId=${branchSessionId}`, {
+        headers: {
+          'bypass-tunnel-reminder': 'true',
+          'x-session-id': branchSessionId
+        },
+        signal: AbortSignal.timeout(4500)
       }).catch(() => null);
 
       if (res && res.ok) {
         const data = await res.json().catch(() => ({}));
-        if (data.status === 'CONNECTED' || data.connected) {
-          setWaServerStatus('CONNECTED');
-        } else if (data.status === 'QR_READY' || data.qr) {
-          setWaServerStatus('QR_READY');
-        } else {
-          setWaServerStatus('CONNECTED'); // server is live
+        const newStatus = data.status || 'DISCONNECTED';
+        setWaServerStatus(newStatus);
+        setWaConnectedPhone(data.phone || '');
+        setWaDeviceName(data.deviceName || '');
+        setWaLiveQr(data.qrCodeDataUrl || '');
+
+        if (!silent && newStatus === 'CONNECTED' && data.phone) {
+          showToast?.(`🟢 واتساب الفرع مقترن بنجاح (+${data.phone})`);
         }
       } else {
         setWaServerStatus('DISCONNECTED');
+        setWaLiveQr('');
       }
     } catch {
       setWaServerStatus('DISCONNECTED');
+      setWaLiveQr('');
+    } finally {
+      if (!silent) setIsRefreshingStatus(false);
     }
-  }, [state?.orgSettings]);
+  }, [state?.orgSettings, branchSessionId, showToast]);
 
   useEffect(() => {
-    checkServerStatus();
-    const interval = setInterval(checkServerStatus, 15000);
-    return () => clearInterval(interval);
-  }, [checkServerStatus]);
+    fetchBranchWaStatus(false);
+  }, [fetchBranchWaStatus]);
+
+  // فحص دوري ذكي: كل ثانيتين ونصف عند انتظار مسح الـ QR أو فتح النافذة، وكل 15 ثانية عند الاستقرار
+  useEffect(() => {
+    const isWaitingQr = waServerStatus === 'QR_READY' || waServerStatus === 'CONNECTING' || showQrModal;
+    const intervalMs = isWaitingQr ? 2500 : 15000;
+    const timer = setInterval(() => {
+      fetchBranchWaStatus(true);
+    }, intervalMs);
+    return () => clearInterval(timer);
+  }, [fetchBranchWaStatus, waServerStatus, showQrModal]);
+
+  // ── 2. إجراءات الخادم الخاصة بجلسة هذا الفرع ──────────────────────────────────
+  // تصفير الجلسة وتوليد رمز QR جديد فوري
+  const handleForceResetSession = async () => {
+    setIsResettingSession(true);
+    try {
+      const serverUrl = getResolvedWhatsAppServerUrl(state?.orgSettings);
+      const cleanBase = serverUrl.replace(/\/+$/, '');
+      showToast?.('⏳ جاري تصفير الجلسة وتوليد رمز QR جديد لفرعك...');
+      const res = await fetch(`${cleanBase}/force-reset`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'bypass-tunnel-reminder': 'true',
+          'x-session-id': branchSessionId
+        },
+        body: JSON.stringify({ sessionId: branchSessionId })
+      });
+      if (res.ok) {
+        setWaLiveQr('');
+        setWaServerStatus('CONNECTING');
+        setTimeout(() => fetchBranchWaStatus(false), 1200);
+      } else {
+        showToast?.('⚠️ تعذر إعادة تعيين الجلسة من الخادم');
+      }
+    } catch {
+      showToast?.('حدث خطأ أثناء التواصل مع خادم الواتساب');
+    } finally {
+      setIsResettingSession(false);
+    }
+  };
+
+  // تسجيل الخروج وفك ارتباط واتساب هذا الفرع
+  const handleLogoutSession = async () => {
+    if (!window.confirm('هل أنت متأكد من فك ارتباط واتساب الفرع الحالي؟ سيتطلب ذلك مسح رمز QR جديد للربط مجدداً.')) return;
+    setIsResettingSession(true);
+    try {
+      const serverUrl = getResolvedWhatsAppServerUrl(state?.orgSettings);
+      const cleanBase = serverUrl.replace(/\/+$/, '');
+      const res = await fetch(`${cleanBase}/logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'bypass-tunnel-reminder': 'true',
+          'x-session-id': branchSessionId
+        },
+        body: JSON.stringify({ sessionId: branchSessionId })
+      });
+      if (res.ok) {
+        showToast?.('🚪 تم فك ارتباط واتساب الفرع بنجاح');
+        setWaServerStatus('DISCONNECTED');
+        setWaConnectedPhone('');
+        setWaLiveQr('');
+        setTimeout(() => fetchBranchWaStatus(false), 1000);
+      } else {
+        showToast?.('تعذر فك الارتباط');
+      }
+    } catch {
+      showToast?.('حدث خطأ أثناء فك الارتباط');
+    } finally {
+      setIsResettingSession(false);
+    }
+  };
 
   // Handle template selection
   const handleSelectTemplate = (tmpl) => {
@@ -352,6 +452,13 @@ export default function BranchWhatsAppModule({
 
   // ── Mode A: Send via Automated WhatsApp Server API ──
   const handleSendViaServer = async () => {
+    if (waServerStatus !== 'CONNECTED') {
+      showToast?.('⚠️ واتساب الفرع غير مقترن حالياً. يرجى مسح رمز الـ QR للاقتران أولاً.');
+      setShowQrModal(true);
+      fetchBranchWaStatus(false);
+      return;
+    }
+
     const targetEmps = branchEmployees.filter((e) => selectedEmployees.has(String(e.id)));
     if (targetEmps.length === 0) {
       showToast?.('⚠️ يرجى اختيار موظف واحد على الأقل من القائمة.');
@@ -377,6 +484,7 @@ export default function BranchWhatsAppModule({
 
     try {
       const serverUrl = getResolvedWhatsAppServerUrl(state?.orgSettings);
+      const cleanBase = serverUrl.replace(/\/+$/, '');
       const messagesPayload = validRecipients.map((emp) => {
         let phone = getEmpWhatsAppPhone(emp).replace(/\D/g, '');
         if (phone.startsWith('01') && phone.length === 11) {
@@ -393,16 +501,22 @@ export default function BranchWhatsAppModule({
         };
       });
 
-      const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/send-bulk`, {
+      const res = await fetch(`${cleanBase}/api/send-bulk`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true' },
+        headers: {
+          'Content-Type': 'application/json',
+          'bypass-tunnel-reminder': 'true',
+          'x-session-id': branchSessionId
+        },
         body: JSON.stringify({
-          sessionId: `branch_${branchIdStr}` || 'hr_main',
+          sessionId: branchSessionId,
           messages: messagesPayload
         })
       });
 
-      if (res.ok) {
+      const resData = await res.json().catch(() => ({}));
+
+      if (res.ok && resData.success !== false) {
         showToast?.(`🚀 تم إرسال التوجيهات إلى (${validRecipients.length}) موظف بنجاح!`);
         // Record in sent log
         recordDirectiveHistory({
@@ -414,8 +528,12 @@ export default function BranchWhatsAppModule({
           date: new Date().toISOString()
         });
       } else {
-        // Fallback: server rejected or not fully ready, advise direct web
-        showToast?.('⚠️ تعذر الإرسال الآلي التلقائي، يمكنك استخدام زر الإرسال المباشر عبر WhatsApp Web أدناه.');
+        const errorMsg = resData.error || 'تعذر الإرسال الآلي التلقائي، يمكنك استخدام زر الإرسال المباشر عبر WhatsApp Web أدناه.';
+        showToast?.(`⚠️ ${errorMsg}`);
+        if (res.status === 503 || String(errorMsg).includes('QR') || String(errorMsg).includes('غير متصل')) {
+          setShowQrModal(true);
+          fetchBranchWaStatus(false);
+        }
       }
     } catch (err) {
       console.warn('Server send error:', err);
@@ -500,30 +618,168 @@ export default function BranchWhatsAppModule({
           </p>
         </div>
 
-        {/* Manager Phone & Server Status Badges */}
+        {/* Branch WhatsApp Status & Action Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          {/* Server indicator */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '6px 12px',
-            borderRadius: '10px',
-            background: waServerStatus === 'CONNECTED' ? '#ecfdf5' : '#fffbeb',
-            border: `1px solid ${waServerStatus === 'CONNECTED' ? '#a7f3d0' : '#fde68a'}`,
-            fontSize: '12px',
-            fontWeight: 700,
-            color: waServerStatus === 'CONNECTED' ? '#065f46' : '#92400e'
-          }}>
-            <span style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              background: waServerStatus === 'CONNECTED' ? '#10b981' : '#f59e0b',
-              boxShadow: waServerStatus === 'CONNECTED' ? '0 0 6px #10b981' : 'none'
-            }} />
-            <span>{waServerStatus === 'CONNECTED' ? 'خادم الواتساب متصل 🟢' : 'ربط مباشر (Web / App) ⚡'}</span>
-          </div>
+          {/* Branch specific WhatsApp status badge */}
+          {waServerStatus === 'CONNECTED' ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: '10px',
+              background: '#ecfdf5',
+              border: '1.5px solid #a7f3d0',
+              fontSize: '12px',
+              fontWeight: 800,
+              color: '#065f46'
+            }}>
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: '#10b981',
+                boxShadow: '0 0 8px #10b981'
+              }} />
+              <span>واتساب الفرع مقترن {waConnectedPhone ? `(+${waConnectedPhone})` : '🟢'}</span>
+            </div>
+          ) : waServerStatus === 'QR_READY' ? (
+            <button
+              type="button"
+              onClick={() => setShowQrModal(true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '10px',
+                background: '#fffbeb',
+                border: '1.5px solid #fde68a',
+                fontSize: '12px',
+                fontWeight: 800,
+                color: '#92400e',
+                cursor: 'pointer'
+              }}
+            >
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: '#f59e0b',
+                boxShadow: '0 0 8px #f59e0b'
+              }} />
+              <span>بانتظار مسح رمز QR الفرع 📱</span>
+            </button>
+          ) : waServerStatus === 'CONNECTING' ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: '10px',
+              background: '#eff6ff',
+              border: '1.5px solid #bfdbfe',
+              fontSize: '12px',
+              fontWeight: 800,
+              color: '#1e40af'
+            }}>
+              <RefreshCw size={12} className="animate-spin" />
+              <span>جاري تهيئة جلسة الفرع...</span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleForceResetSession}
+              disabled={isResettingSession}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '10px',
+                background: '#fef2f2',
+                border: '1.5px solid #fecaca',
+                fontSize: '12px',
+                fontWeight: 800,
+                color: '#991b1b',
+                cursor: 'pointer'
+              }}
+            >
+              <AlertCircle size={13} />
+              <span>واتساب الفرع غير مقترن (اضغط للربط)</span>
+            </button>
+          )}
+
+          {/* Quick Action: Unlink or Show QR */}
+          {waServerStatus === 'CONNECTED' ? (
+            <button
+              type="button"
+              onClick={handleLogoutSession}
+              disabled={isResettingSession}
+              title="فك ارتباط واتساب الفرع"
+              style={{
+                padding: '6px 12px',
+                fontSize: '12px',
+                borderRadius: '10px',
+                border: '1px solid #fecaca',
+                background: '#fff',
+                color: '#dc2626',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontWeight: 700,
+                cursor: 'pointer'
+              }}
+            >
+              <LogOut size={13} />
+              <span>فك الارتباط</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setShowQrModal(true);
+                if (waServerStatus !== 'QR_READY') fetchBranchWaStatus(false);
+              }}
+              style={{
+                padding: '6px 12px',
+                fontSize: '12px',
+                borderRadius: '10px',
+                border: '1px solid #0d9488',
+                background: '#f0fdfa',
+                color: '#0f766e',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontWeight: 800,
+                cursor: 'pointer'
+              }}
+            >
+              <QrCode size={13} />
+              <span>رمز الـ QR</span>
+            </button>
+          )}
+
+          {/* Refresh Connection Status */}
+          <button
+            type="button"
+            onClick={() => fetchBranchWaStatus(false)}
+            disabled={isRefreshingStatus}
+            title="تحديث حالة الاتصال الآن"
+            style={{
+              padding: '6px 10px',
+              fontSize: '12px',
+              borderRadius: '10px',
+              border: '1px solid var(--border)',
+              background: 'var(--surface)',
+              color: 'var(--text)',
+              display: 'flex',
+              alignItems: 'center',
+              cursor: 'pointer'
+            }}
+          >
+            <RefreshCw size={13} className={isRefreshingStatus ? 'animate-spin' : ''} />
+          </button>
 
           {/* Toggle Log button */}
           <button
@@ -641,6 +897,286 @@ export default function BranchWhatsAppModule({
           <span>💡 يتم استخدام هذا الرقم كهوية رسمية لمرسل التوجيهات ومحادثات الموظفين</span>
         </div>
       </div>
+
+      {/* ── 2.5. Dedicated Branch WhatsApp Session & QR Section ── */}
+      {waServerStatus === 'CONNECTED' ? (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(5, 150, 105, 0.05) 100%)',
+          border: '1.5px solid #a7f3d0',
+          borderRadius: '14px',
+          padding: '14px 18px',
+          marginBottom: '20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{
+              width: '42px',
+              height: '42px',
+              borderRadius: '12px',
+              background: '#10b981',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '20px',
+              flexShrink: 0,
+              boxShadow: '0 4px 10px rgba(16, 185, 129, 0.3)'
+            }}>
+              ✅
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '14.5px', fontWeight: 900, color: '#065f46' }}>
+                  واتساب الفرع مقترن وجاهز للإرسال الآلي
+                </span>
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  background: '#d1fae5',
+                  color: '#047857'
+                }}>
+                  جلسة مستقلة: {branchSessionId}
+                </span>
+              </div>
+              <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#047857' }}>
+                الهاتف المرتبط: <strong>+{waConnectedPhone || detectedManagerPhone}</strong> {waDeviceName ? `(${waDeviceName})` : ''} • يتم إرسال التعليمات مباشرة من رقم الفرع
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={() => fetchBranchWaStatus(false)}
+              disabled={isRefreshingStatus}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: '1px solid #a7f3d0',
+                background: '#ffffff',
+                color: '#065f46',
+                fontSize: '12px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px'
+              }}
+            >
+              <RefreshCw size={13} className={isRefreshingStatus ? 'animate-spin' : ''} />
+              <span>فحص الاتصال</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleLogoutSession}
+              disabled={isResettingSession}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: '1px solid #fecaca',
+                background: '#fef2f2',
+                color: '#dc2626',
+                fontSize: '12px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px'
+              }}
+            >
+              <LogOut size={13} />
+              <span>فك الارتباط لربط رقم آخر</span>
+            </button>
+          </div>
+        </div>
+      ) : waServerStatus === 'QR_READY' && waLiveQr ? (
+        <div style={{
+          background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
+          border: '2px dashed #f59e0b',
+          borderRadius: '16px',
+          padding: '20px',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '28px',
+          flexWrap: 'wrap',
+          boxShadow: '0 4px 16px rgba(245, 158, 11, 0.12)'
+        }}>
+          {/* QR Code Container */}
+          <div style={{
+            background: '#ffffff',
+            padding: '14px',
+            borderRadius: '16px',
+            boxShadow: '0 6px 18px rgba(0,0,0,0.1)',
+            border: '1.5px solid #fde68a',
+            textAlign: 'center'
+          }}>
+            <img
+              src={waLiveQr}
+              alt="WhatsApp QR Code"
+              style={{ width: '220px', height: '220px', display: 'block', borderRadius: '8px' }}
+            />
+            <div style={{ marginTop: '8px', fontSize: '11.5px', fontWeight: 800, color: '#92400e' }}>
+              📱 امسح الرمز من واتساب الفرع
+            </div>
+          </div>
+
+          {/* Instructions & Controls */}
+          <div style={{ maxWidth: '440px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <span style={{ fontSize: '22px' }}>📲</span>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 900, color: '#92400e' }}>
+                ربط واتساب فرع {branchName} (جلسة مستقلة):
+              </h3>
+            </div>
+            <p style={{ margin: '0 0 10px', fontSize: '12.5px', color: '#b45309', lineHeight: 1.6 }}>
+              لكل فرع جلسة واتساب مستقلة تماماً لا تتداخل مع الإدارة أو الفروع الأخرى. امسح هذا الرمز لربط هاتف الفرع لإرسال التوجيهات آلياً:
+            </p>
+            <ol style={{ margin: 0, paddingRight: '20px', fontSize: '12px', color: '#78350f', lineHeight: 1.8 }}>
+              <li>افتح تطبيق <strong>WhatsApp</strong> على هاتف الصيدلية أو هاتف المدير.</li>
+              <li>اضغط على <strong>القائمة (⋮)</strong> أو الإعدادات ➔ <strong>الأجهزة المرتبطة (Linked Devices)</strong>.</li>
+              <li>اضغط على <strong>ربط جهاز (Link a Device)</strong>.</li>
+              <li>وجّه كاميرا الهاتف نحو مربع الـ QR المقابل ليتم الاقتران فورياً.</li>
+            </ol>
+
+            <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={handleForceResetSession}
+                disabled={isResettingSession}
+                style={{
+                  padding: '7px 14px',
+                  borderRadius: '8px',
+                  border: '1px solid #d97706',
+                  background: '#ffffff',
+                  color: '#b45309',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <RefreshCw size={13} className={isResettingSession ? 'animate-spin' : ''} />
+                <span>تحديث رمز الـ QR</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowQrModal(true)}
+                style={{
+                  padding: '7px 14px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: '#f59e0b',
+                  color: '#ffffff',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Maximize2 size={13} />
+                <span>تكبير الرمز في نافذة منبثقة</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => fetchBranchWaStatus(false)}
+                disabled={isRefreshingStatus}
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #fde68a',
+                  background: 'rgba(255,255,255,0.7)',
+                  color: '#78350f',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                ⚡ فحص الاتصال
+              </button>
+            </div>
+            <div style={{ marginTop: '8px', fontSize: '11px', color: '#b45309' }}>
+              ⏳ يتجدد الرمز تلقائياً عند انتهاء صلاحيته لضمان الأمان.
+            </div>
+          </div>
+        </div>
+      ) : waServerStatus === 'CONNECTING' ? (
+        <div style={{
+          background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+          border: '1.5px solid #93c5fd',
+          borderRadius: '14px',
+          padding: '16px',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '12px',
+          color: '#1e40af'
+        }}>
+          <RefreshCw size={18} className="animate-spin" />
+          <span style={{ fontSize: '13.5px', fontWeight: 800 }}>
+            جاري تهيئة جلسة واتساب فرع ({branchName}) وتوليد رمز الاقتران QR... يرجى الانتظار ثوانٍ معدودة.
+          </span>
+        </div>
+      ) : (
+        <div style={{
+          background: '#f8fafc',
+          border: '1.5px dashed #cbd5e1',
+          borderRadius: '14px',
+          padding: '16px 20px',
+          marginBottom: '20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '24px' }}>⚠️</span>
+            <div>
+              <span style={{ fontSize: '13.5px', fontWeight: 800, color: 'var(--text)', display: 'block' }}>
+                واتساب فرع {branchName} غير مقترن حالياً (جلسة مستقلة)
+              </span>
+              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                لبدء إرسال التوجيهات والتعليمات آلياً للموظفين، يرجى بدء الربط ومسح رمز الـ QR من هاتف الفرع.
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleForceResetSession}
+            disabled={isResettingSession}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '10px',
+              border: 'none',
+              background: '#0d9488',
+              color: '#ffffff',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 8px rgba(13, 148, 136, 0.25)'
+            }}
+          >
+            <QrCode size={15} />
+            <span>{isResettingSession ? 'جاري التوليد...' : 'بدء ربط واتساب الفرع الآن (توليد QR)'}</span>
+          </button>
+        </div>
+      )}
 
       {/* ── 3. History Modal / Accordion View ── */}
       {historyTab && (
@@ -1094,6 +1630,153 @@ export default function BranchWhatsAppModule({
           </div>
         </div>
       </div>
+
+      {/* ── 5. Modal: QR Code Scanner Modal ── */}
+      {showQrModal && (
+        <div
+          onClick={() => setShowQrModal(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(5px)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="fade-in"
+            style={{
+              background: '#ffffff',
+              borderRadius: '20px',
+              maxWidth: '460px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
+              position: 'relative',
+              textAlign: 'center'
+            }}
+          >
+            {/* Close Button */}
+            <button
+              type="button"
+              onClick={() => setShowQrModal(false)}
+              style={{
+                position: 'absolute',
+                top: '16px',
+                left: '16px',
+                background: '#f1f5f9',
+                border: 'none',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#64748b'
+              }}
+            >
+              <X size={16} />
+            </button>
+
+            {/* Modal Header */}
+            <div style={{ display: 'inline-flex', padding: '10px', borderRadius: '16px', background: '#f0fdfa', color: '#0d9488', marginBottom: '10px' }}>
+              <QrCode size={30} />
+            </div>
+            <h3 style={{ margin: '0 0 6px', fontSize: '18px', fontWeight: 900, color: '#0f172a' }}>
+              ربط واتساب فرع: {branchName}
+            </h3>
+            <p style={{ margin: '0 0 16px', fontSize: '12.5px', color: '#64748b' }}>
+              جلسة مستقلة تماماً ({branchSessionId}) • امسح الرمز للاقتران الفوري
+            </p>
+
+            {/* QR Image Box */}
+            <div style={{
+              background: '#f8fafc',
+              border: '2px dashed #cbd5e1',
+              borderRadius: '16px',
+              padding: '16px',
+              display: 'inline-block',
+              margin: '0 auto 16px',
+              minWidth: '240px',
+              minHeight: '240px'
+            }}>
+              {waLiveQr ? (
+                <img
+                  src={waLiveQr}
+                  alt="WhatsApp Branch QR Code"
+                  style={{ width: '240px', height: '240px', display: 'block', borderRadius: '8px' }}
+                />
+              ) : (
+                <div style={{ width: '240px', height: '240px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: '#64748b' }}>
+                  <RefreshCw size={28} className="animate-spin" />
+                  <span style={{ fontSize: '13px', fontWeight: 700 }}>جاري جلب رمز الـ QR...</span>
+                </div>
+              )}
+            </div>
+
+            {/* Steps Guide */}
+            <div style={{ background: '#f8fafc', borderRadius: '12px', padding: '12px 14px', textAlign: 'right', marginBottom: '18px', border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '12px', fontWeight: 800, color: '#0f172a', marginBottom: '4px' }}>
+                📋 خطوات الربط بالهاتف:
+              </div>
+              <div style={{ fontSize: '11.5px', color: '#475569', lineHeight: 1.7 }}>
+                1. افتح <strong>واتساب</strong> على هاتف الفرع.<br />
+                2. اضغط <strong>الأجهزة المرتبطة (Linked Devices)</strong>.<br />
+                3. اختر <strong>ربط جهاز</strong> ووجّه الكاميرا نحو الرمز أعلاه.
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button
+                type="button"
+                onClick={handleForceResetSession}
+                disabled={isResettingSession}
+                style={{
+                  flex: 1,
+                  padding: '9px 14px',
+                  borderRadius: '10px',
+                  border: '1px solid #0d9488',
+                  background: '#f0fdfa',
+                  color: '#0f766e',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px'
+                }}
+              >
+                <RefreshCw size={14} className={isResettingSession ? 'animate-spin' : ''} />
+                <span>تحديث الرمز الآن</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowQrModal(false)}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: '10px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

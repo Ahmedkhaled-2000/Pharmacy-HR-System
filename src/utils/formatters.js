@@ -13,10 +13,19 @@ export function arabicMonthLabel(monthStr) {
   return `${AR_MONTHS[idx]} ${y} (الشهر ${m})`;
 }
 
-export function arabicWeekday(dateStr) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr + 'T00:00:00');
-  return AR_WEEKDAYS[d.getDay()];
+export function arabicWeekday(dateInput) {
+  if (!dateInput) return '';
+  let d;
+  if (dateInput instanceof Date) {
+    d = dateInput;
+  } else if (typeof dateInput === 'string') {
+    const cleanStr = dateInput.trim().split('T')[0];
+    d = new Date(cleanStr + 'T00:00:00');
+  } else {
+    d = new Date(dateInput);
+  }
+  if (isNaN(d.getTime())) return '';
+  return AR_WEEKDAYS[d.getDay()] || '';
 }
 export const getArabicWeekday = arabicWeekday;
 

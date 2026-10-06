@@ -235,7 +235,7 @@ export default function EmployeeRosterEditModal({
         const m = String(cur.getMonth() + 1).padStart(2, '0');
         const d = String(cur.getDate()).padStart(2, '0');
         const dateStr = `${y}-${m}-${d}`;
-        const dayLabel = arabicWeekday(cur);
+        const dayLabel = arabicWeekday(dateStr) || arabicWeekday(cur);
         days.push({
           dateStr,
           dayLabel,
@@ -823,7 +823,10 @@ export default function EmployeeRosterEditModal({
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', margin: 0 }}>
           
           {/* جسم المودال القابل للتمرير الرأسي السلس (Scrollable Body) */}
-          <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '18px 22px', WebkitOverflowScrolling: 'touch' }}>
+          <div
+            className="modal-card-body"
+            style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '18px 22px', WebkitOverflowScrolling: 'touch' }}
+          >
             
             {/* ── شريط الفلاتر: فلتر الفرع + فلتر الموظفين بدون جدول + اختيار الموظف ── */}
             <div
@@ -1209,8 +1212,10 @@ export default function EmployeeRosterEditModal({
                             </td>
 
                             <td style={{ fontWeight: 800, padding: '7px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
-                              <span style={{ display: 'inline-block', marginLeft: '4px' }}>{isOff ? '🏖️' : '🟢'}</span>
-                              <span style={{ color: isFri ? '#b45309' : 'inherit' }}>{day.dayLabel}</span>
+                              <span style={{ color: isFri ? '#b45309' : isOff ? '#854d0e' : 'var(--text)', fontSize: '13px', fontWeight: 800 }}>
+                                {day.dayLabel || arabicWeekday(day.dateStr)}
+                              </span>
+                              {isOff && <span style={{ marginRight: '4px', fontSize: '11px' }}>🏖️</span>}
                             </td>
 
                             <td style={{ padding: '6px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
@@ -1500,8 +1505,9 @@ export default function EmployeeRosterEditModal({
             </div>
           </div>
 
-          {/* ── 3. شريط أزرار الإجراء والاعتماد المثبت بالسفل (Sticky Footer) ── */}
+          {/* ── 3. شريط أزرار الإجراء والاعتماد المثبت بالسفل (Fixed Rigid Footer) ── */}
           <div
+            className="modal-card-footer"
             style={{
               padding: '14px 22px',
               borderTop: '1.5px solid var(--border)',
@@ -1512,7 +1518,11 @@ export default function EmployeeRosterEditModal({
               alignItems: 'center',
               flexWrap: 'wrap',
               gap: '10px',
-              boxShadow: '0 -4px 12px rgba(0, 0, 0, 0.03)'
+              boxShadow: '0 -4px 12px rgba(0, 0, 0, 0.03)',
+              position: 'relative',
+              marginTop: 'auto',
+              width: '100%',
+              boxSizing: 'border-box'
             }}
           >
             <button

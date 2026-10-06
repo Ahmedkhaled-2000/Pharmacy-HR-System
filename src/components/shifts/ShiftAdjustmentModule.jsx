@@ -1635,7 +1635,8 @@ export default function ShiftAdjustmentModule({
               alignItems: 'center',
               background: 'rgba(15, 23, 42, 0.75)',
               backdropFilter: 'blur(6px)',
-              padding: '14px'
+              padding: '14px',
+              overflow: 'hidden'
             }}
           >
             <div
@@ -1724,15 +1725,19 @@ export default function ShiftAdjustmentModule({
               </div>
 
               {/* Scrollable Body */}
-              <div style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '22px 24px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '18px',
-                background: 'var(--surface-muted, #f8fafc)'
-              }}>
+              <div
+                className="modal-card-body"
+                style={{
+                  flex: '1 1 auto',
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  padding: '22px 24px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '18px',
+                  background: 'var(--surface-muted, #f8fafc)'
+                }}
+              >
                 {/* 1. بطاقة معلومات الموظف ومسار الطلب */}
                 <div style={{
                   display: 'grid',
@@ -2082,15 +2087,22 @@ export default function ShiftAdjustmentModule({
               </div>
 
               {/* Sticky Footer */}
-              <div style={{
-                padding: '14px 24px',
-                background: 'var(--surface, #ffffff)',
-                borderTop: '1px solid var(--border)',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexShrink: 0
-              }}>
+              <div
+                className="modal-card-footer"
+                style={{
+                  padding: '14px 24px',
+                  background: 'var(--surface, #ffffff)',
+                  borderTop: '1px solid var(--border)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexShrink: 0,
+                  position: 'relative',
+                  marginTop: 'auto',
+                  width: '100%',
+                  boxSizing: 'border-box'
+                }}
+              >
                 <button
                   type="button"
                   className="btn btn-ghost"

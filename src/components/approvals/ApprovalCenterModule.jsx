@@ -351,10 +351,31 @@ export default function ApprovalCenterModule({
                         shouldRouteDirectToAdmin(emp, effectiveBranchId, state, req)
                       ));
 
+                      const isFromBranchMgr = Boolean(
+                        req.submittedByBranchManager ||
+                        req.createdRole === 'branch' ||
+                        req.createdRole === 'branch_manager' ||
+                        req.creatorRole === 'branch' ||
+                        req.creatorRole === 'branch_manager' ||
+                        req.createdBy === 'branch' ||
+                        req.senderRole === 'branch' ||
+                        req.submittedBy === 'branch_manager' ||
+                        req.submittedBy === 'branch' ||
+                        req.branchManagerStatus === 'branch_sent' ||
+                        req.branchStatus === 'branch_sent' ||
+                        req.type === 'disciplinary_penalty' ||
+                        req.type === 'roster_update' ||
+                        req.type === 'roster_edit' ||
+                        req.type === 'roster_edit_request' ||
+                        (typeof req.details === 'string' && (req.details.includes('قام مدير فرع') || req.details.includes('مدير الفرع')))
+                      );
+
                       return (
                         <div style={{ display: 'flex', gap: '12px', marginTop: '8px', flexWrap: 'wrap' }}>
-                          <div className={`approval-status-badge ${isBranchNotReq ? 'na' : isBranchApproved ? 'approved' : req.branchRejected ? 'rejected' : 'pending'}`}>
-                            {hasNoManager
+                          <div className={`approval-status-badge ${isFromBranchMgr ? 'approved' : isBranchNotReq ? 'na' : isBranchApproved ? 'approved' : req.branchRejected ? 'rejected' : 'pending'}`}>
+                            {isFromBranchMgr
+                              ? '🏢 مدير الفرع: مرسل من مدير الفرع'
+                              : hasNoManager
                               ? '🏢 مدير الفرع: الفرع بدون مدير'
                               : isBranchNotReq
                               ? '🔒 مدير الفرع: غير موجهة إليه (إدارة)'

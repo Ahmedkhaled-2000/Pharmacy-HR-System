@@ -4007,13 +4007,7 @@ export default function RequestsModule({
                               shouldRouteDirectToAdmin(emp, effectiveBranchId, state, req)
                             );
 
-                        if (noManager) {
-                          return (
-                            <span style={{ color: '#0284c7', fontWeight: '800', background: '#e0f2fe', padding: '4px 8px', borderRadius: '6px', border: '1px solid #bae6fd', fontSize: '12px' }}>
-                              🏢 الفرع بدون مدير
-                            </span>
-                          );
-                        }
+                        // 1. الأولوية الأولى: هل الطلب صادر ومرسل من مدير الفرع؟
                         const isFromBranchMgr = Boolean(
                           req.submittedByBranchManager ||
                           req.createdRole === 'branch' ||
@@ -4021,12 +4015,41 @@ export default function RequestsModule({
                           req.creatorRole === 'branch' ||
                           req.creatorRole === 'branch_manager' ||
                           req.createdBy === 'branch' ||
-                          req.senderRole === 'branch'
+                          req.senderRole === 'branch' ||
+                          req.submittedBy === 'branch_manager' ||
+                          req.submittedBy === 'branch' ||
+                          req.branchManagerStatus === 'branch_sent' ||
+                          req.branchStatus === 'branch_sent' ||
+                          req.type === 'disciplinary_penalty' ||
+                          req.type === 'roster_update' ||
+                          req.type === 'roster_edit' ||
+                          req.type === 'roster_edit_request' ||
+                          (typeof req.details === 'string' && (req.details.includes('قام مدير فرع') || req.details.includes('مدير الفرع')))
                         );
-                        if (req.type === 'disciplinary_penalty' || isFromBranchMgr) {
+                        if (isFromBranchMgr) {
                           return (
-                            <span style={{ color: '#15803d', fontWeight: '800', background: '#f0fdf4', padding: '4px 8px', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '12px' }}>
-                              🏢 مرسل من مدير الفرع
+                            <span style={{
+                              color: '#047857',
+                              fontWeight: '800',
+                              background: '#ecfdf5',
+                              padding: '4px 10px',
+                              borderRadius: '8px',
+                              border: '1px solid #a7f3d0',
+                              fontSize: '12px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}>
+                              <span>🏢</span>
+                              <span>مرسل من مدير الفرع</span>
+                            </span>
+                          );
+                        }
+
+                        if (noManager) {
+                          return (
+                            <span style={{ color: '#0284c7', fontWeight: '800', background: '#e0f2fe', padding: '4px 8px', borderRadius: '6px', border: '1px solid #bae6fd', fontSize: '12px' }}>
+                              🏢 الفرع بدون مدير
                             </span>
                           );
                         }
@@ -4223,8 +4246,7 @@ export default function RequestsModule({
               display: 'flex',
               justifyContent: 'center',
               alignItems: 'center',
-              overflowY: 'auto',
-              overflowX: 'hidden',
+              overflow: 'hidden',
               padding: '14px 10px',
               background: 'rgba(15, 23, 42, 0.85)',
               backdropFilter: 'blur(8px)',
@@ -4290,7 +4312,10 @@ export default function RequestsModule({
               </div>
 
               {/* Scrollable Modal Body */}
-              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '13.5px', WebkitOverflowScrolling: 'touch' }}>
+              <div
+                className="modal-card-body"
+                style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '13.5px', WebkitOverflowScrolling: 'touch' }}
+              >
                 
                 {/* 1. Employee & Branch Information Card */}
                 <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
@@ -4346,12 +4371,25 @@ export default function RequestsModule({
                         previewModalReq.senderRole === 'branch' ||
                         previewModalReq.submittedBy === 'branch_manager' ||
                         previewModalReq.submittedBy === 'branch' ||
+                        previewModalReq.branchManagerStatus === 'branch_sent' ||
+                        previewModalReq.branchStatus === 'branch_sent' ||
+                        previewModalReq.type === 'disciplinary_penalty' ||
                         previewModalReq.type === 'roster_update' ||
                         previewModalReq.type === 'roster_edit' ||
                         previewModalReq.type === 'roster_edit_request' ||
                         (typeof previewModalReq.details === 'string' && (previewModalReq.details.includes('قام مدير فرع') || previewModalReq.details.includes('مدير الفرع')))
                       ) ? (
-                        <span style={{ color: '#15803d', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <span style={{
+                          color: '#047857',
+                          background: '#ecfdf5',
+                          padding: '4px 10px',
+                          borderRadius: '8px',
+                          border: '1px solid #a7f3d0',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          fontWeight: '800'
+                        }}>
                           <span>🏢</span>
                           <span>مرسل من مدير الفرع</span>
                         </span>
@@ -6109,6 +6147,7 @@ export default function RequestsModule({
 
               {/* Modal Actions Fixed Sticky Footer */}
               <div
+                className="modal-card-footer"
                 style={{
                   padding: '12px 20px',
                   borderTop: '1.5px solid var(--border)',
@@ -6119,7 +6158,11 @@ export default function RequestsModule({
                   alignItems: 'center',
                   flexWrap: 'wrap',
                   gap: '10px',
-                  boxShadow: '0 -4px 12px rgba(0, 0, 0, 0.03)'
+                  boxShadow: '0 -4px 12px rgba(0, 0, 0, 0.03)',
+                  position: 'relative',
+                  marginTop: 'auto',
+                  width: '100%',
+                  boxSizing: 'border-box'
                 }}
               >
                 <button

@@ -296,8 +296,7 @@ export default function RosterPreviewModal({
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        overflowY: 'auto',
-        overflowX: 'hidden',
+        overflow: 'hidden',
         padding: '12px 10px',
         background: 'rgba(15, 23, 42, 0.85)',
         backdropFilter: 'blur(8px)',
@@ -374,7 +373,10 @@ export default function RosterPreviewModal({
         </div>
 
         {/* Modal Body */}
-        <div style={{ padding: '18px 22px', overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: 0 }}>
+        <div
+          className="modal-card-body"
+          style={{ padding: '18px 22px', overflowY: 'auto', overflowX: 'hidden', flex: '1 1 auto', minHeight: 0 }}
+        >
           {isMultiBranch ? (
             <div>
               {employee.branchesDetails.map((bd) => {
@@ -865,7 +867,10 @@ export default function RosterPreviewModal({
         </div>
 
         {/* Modal Footer */}
-        <div className="modal-actions-pro" style={{ justifyContent: 'flex-end', padding: '12px 20px', flexShrink: 0, borderTop: '1px solid var(--border)' }}>
+        <div
+          className="modal-card-footer"
+          style={{ justifyContent: 'flex-end', padding: '12px 20px', flexShrink: 0, borderTop: '1px solid var(--border)', position: 'relative', marginTop: 'auto', width: '100%', boxSizing: 'border-box' }}
+        >
           <button type="button" className="btn btn-ghost" onClick={onClose} style={{ padding: '8px 22px', fontSize: '13px' }}>
             ✕ إغلاق النافذة
           </button>
