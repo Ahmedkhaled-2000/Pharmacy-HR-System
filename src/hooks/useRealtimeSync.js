@@ -432,10 +432,17 @@ export function useRealtimeSync(props = {}) {
           ? existingReqs.map((r) => String(r.id) === reqIdStr ? { ...r, ...incomingReq } : r)
           : [incomingReq, ...existingReqs];
 
-        // تحديث مصفوفات الطلبات التخصصية (الإجازات، السلف، الأذونات، التبديلات) إن وُجدت
-        const updateSpecialtyList = (list) => {
-          if (!Array.isArray(list)) return list;
-          return list.map((item) => (item && String(item.id) === reqIdStr ? { ...item, ...incomingReq } : item));
+        // تحديث مصفوفات الطلبات التخصصية (الإجازات، السلف، الأذونات، التبديلات) مع الإضافة التلقائية للطلبات الجديدة
+        const updateOrAppendSpecialty = (list, matchTypeFn) => {
+          const arr = Array.isArray(list) ? list : [];
+          const itemExists = arr.some((item) => item && String(item.id) === reqIdStr);
+          if (itemExists) {
+            return arr.map((item) => (item && String(item.id) === reqIdStr ? { ...item, ...incomingReq } : item));
+          }
+          if (matchTypeFn && matchTypeFn(incomingReq)) {
+            return [incomingReq, ...arr];
+          }
+          return arr;
         };
 
         let updatedNotifs = Array.isArray(prev.notifications) ? prev.notifications : [];
@@ -446,11 +453,11 @@ export function useRealtimeSync(props = {}) {
         return {
           ...prev,
           requests: updatedReqs,
-          leaveRequests: updateSpecialtyList(prev.leaveRequests),
-          loans: updateSpecialtyList(prev.loans),
-          shiftSwaps: updateSpecialtyList(prev.shiftSwaps),
-          permissionRequests: updateSpecialtyList(prev.permissionRequests),
-          resignationRequests: updateSpecialtyList(prev.resignationRequests),
+          leaveRequests: updateOrAppendSpecialty(prev.leaveRequests, (r) => r.type === 'leave' || r.type === 'leave_request' || Boolean(r.leaveType)),
+          loans: updateOrAppendSpecialty(prev.loans, (r) => r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || Boolean(r.installmentAmount || r.loanAmount)),
+          shiftSwaps: updateOrAppendSpecialty(prev.shiftSwaps, (r) => r.type === 'swap' || r.type === 'shift_swap'),
+          permissionRequests: updateOrAppendSpecialty(prev.permissionRequests, (r) => r.type === 'permission' || r.type === 'permission_request'),
+          resignationRequests: updateOrAppendSpecialty(prev.resignationRequests, (r) => r.type === 'resignation' || r.type === 'resignation_request'),
           notifications: updatedNotifs,
           _requestsUpdatedAt: new Date().toISOString()
         };

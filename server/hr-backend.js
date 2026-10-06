@@ -630,7 +630,11 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
 
             const hasClosedInIncoming = Array.isArray(stateValue.shifts) && stateValue.shifts.some(s =>
               isEmpShiftMatch(s) &&
-              (existingShift.shiftId && s.id === existingShift.shiftId ? true : (s.date === existingShift.date && s.timeIn === existingShift.timeIn)) &&
+              (
+                (existingShift.shiftId && (s.id === existingShift.shiftId || s.shiftId === existingShift.shiftId)) ||
+                (s.date === existingShift.date && (!existingShift.timeIn || !s.timeIn || s.timeIn.slice(0, 5) === existingShift.timeIn.slice(0, 5))) ||
+                (s.date === existingShift.date)
+              ) &&
               isShiftTrulyClosed(s)
             );
 
@@ -644,11 +648,12 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
               continue;
             }
 
-            // الوردية النشطة: لها date اليوم، ولها timeIn، وليس لها timeOut صريح
+            // الوردية النشطة: لها date اليوم، ولها timeIn، وليس لها timeOut صريح، وليست مكتملة
             const isActiveToday = existingShift.date === today;
             const hasCheckIn = Boolean(existingShift.timeIn && existingShift.timeIn !== '');
             const noCheckOut = !existingShift.timeOut || existingShift.timeOut === '' || existingShift.timeOut === '—' || existingShift.timeOut === '-';
-            const isGenuinelyActive = isActiveToday && hasCheckIn && noCheckOut;
+            const isNotCompleted = existingShift.status !== 'completed' && existingShift.isLiveActive !== false;
+            const isGenuinelyActive = isActiveToday && hasCheckIn && noCheckOut && isNotCompleted;
 
             if (isGenuinelyActive) {
               const incomingShift = incomingActiveShifts[empId] || incomingActiveShifts[String(empId)] || (empCode && incomingActiveShifts[empCode]);
@@ -1626,9 +1631,27 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
         // إغلاق أي ورديات مفتوحة متبقية لنفس الموظف لضمان عدم تعليق أي شفت قديم
         currentShifts = currentShifts.map((s, idx) => {
           if (idx !== targetIdx && possibleKeys.has(String(s.employeeId)) && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === '-' || s.isLiveActive)) {
+            let autoOutTime = punchTime;
+            let autoHours = s.hours || 8;
+            // إذا كانت الوردية من تاريخ سابق أو بصمة اليوم لا تنتمي لنفس اليوم، لا نضع وقت بصمة اليوم كوقت انصراف لأمس!
+            if (s.date && s.date !== punchDate && s.timeIn) {
+              const [inH, inM] = String(s.timeIn).split(':').map(Number);
+              const schedH = Number(s.scheduledHours || s.hours) || 8;
+              if (!isNaN(inH)) {
+                const outTotalMins = (inH * 60 + (inM || 0) + Math.round(schedH * 60)) % (24 * 60);
+                autoOutTime = `${String(Math.floor(outTotalMins / 60)).padStart(2, '0')}:${String(outTotalMins % 60).padStart(2, '0')}`;
+                autoHours = schedH;
+              }
+            }
             return {
               ...s,
-              timeOut: punchTime,
+              timeOut: autoOutTime,
+              hours: autoHours,
+              actualWorkedHours: autoHours,
+              netHours: autoHours,
+              regularHours: autoHours,
+              overtimeHours: 0,
+              overtimeStatus: 'none',
               isLiveActive: false,
               status: 'completed',
               updatedAt: now
@@ -1942,21 +1965,52 @@ async function flushRequestBatch() {
       if (r && r.id) reqMap.set(String(r.id), r);
     }
 
+    const leaveReqs = Array.isArray(settings.leaveRequests) ? [...settings.leaveRequests] : [];
+    const leaveMap = new Map(leaveReqs.filter(r => r && r.id).map(r => [String(r.id), r]));
+
+    const loansList = Array.isArray(settings.loans) ? [...settings.loans] : [];
+    const loansMap = new Map(loansList.filter(r => r && r.id).map(r => [String(r.id), r]));
+
+    const swapsList = Array.isArray(settings.shiftSwaps) ? [...settings.shiftSwaps] : [];
+    const swapsMap = new Map(swapsList.filter(r => r && r.id).map(r => [String(r.id), r]));
+
+    const resList = Array.isArray(settings.resignationRequests) ? [...settings.resignationRequests] : [];
+    const resMap = new Map(resList.filter(r => r && r.id).map(r => [String(r.id), r]));
+
     const newNotifs = [];
     for (const item of batch) {
       if (item.request && item.request.id) {
-        reqMap.set(String(item.request.id), item.request);
+        const r = item.request;
+        const rId = String(r.id);
+        reqMap.set(rId, r);
+
+        // Synchronize specialty arrays atomically
+        if (r.type === 'leave' || r.type === 'leave_request' || r.leaveType) {
+          leaveMap.set(rId, { ...r, type: r.type || 'leave' });
+        } else if (r.type === 'loan' || r.type === 'advance' || r.type === 'meds') {
+          loansMap.set(rId, { ...r, type: r.type || 'loan' });
+        } else if (r.type === 'swap' || r.type === 'shift_swap') {
+          swapsMap.set(rId, { ...r, type: 'swap' });
+        } else if (r.type === 'resignation' || r.type === 'resignation_request') {
+          resMap.set(rId, { ...r, type: 'resignation' });
+        }
       }
       if (item.notification && item.notification.id) {
         newNotifs.push(item.notification);
       }
     }
 
-    settings.requests = Array.from(reqMap.values()).sort((a, b) => {
+    const sortByDateDesc = (a, b) => {
       const tA = new Date(a.createdAt || a.created_at || a.date || 0).getTime();
       const tB = new Date(b.createdAt || b.created_at || b.date || 0).getTime();
       return tB - tA;
-    });
+    };
+
+    settings.requests = Array.from(reqMap.values()).sort(sortByDateDesc);
+    settings.leaveRequests = Array.from(leaveMap.values()).sort(sortByDateDesc);
+    settings.loans = Array.from(loansMap.values()).sort(sortByDateDesc);
+    settings.shiftSwaps = Array.from(swapsMap.values()).sort(sortByDateDesc);
+    settings.resignationRequests = Array.from(resMap.values()).sort(sortByDateDesc);
 
     if (newNotifs.length > 0) {
       const notifMap = new Map();
@@ -3337,6 +3391,28 @@ app.post('/api/sync/push', async (req, res) => {
             curPayload.status = cleanStatus;
             const isAdminApproved = ['approved', 'completed', 'paid', 'partial'].includes(cleanStatus);
             curPayload.adminApproved = isAdminApproved;
+
+            const isBranchActor = actorRole === 'branch' || actorRole === 'branch_manager' || opPayload.branchApproved !== undefined;
+            if (isBranchActor) {
+              if (opPayload.decision === 'approve' || opPayload.branchApproved === true || (opType.includes('APPROVE') && !opType.includes('REJECT'))) {
+                curPayload.branchApproved = true;
+                curPayload.branchDecision = 'approved';
+                curPayload.branchRejected = false;
+                curPayload.branchApprovedAt = curPayload.branchApprovedAt || opPayload.branchApprovedAt || new Date().toISOString();
+                curPayload.branchApproverName = actorName;
+              } else if (opPayload.decision === 'reject' || opPayload.branchRejected === true || opType.includes('REJECT')) {
+                curPayload.branchApproved = false;
+                curPayload.branchDecision = 'rejected';
+                curPayload.branchRejected = true;
+                curPayload.branchRejectedAt = curPayload.branchRejectedAt || opPayload.branchRejectedAt || new Date().toISOString();
+                curPayload.branchRejecterName = actorName;
+                if (comment) curPayload.branchComment = comment;
+              }
+            } else if (isAdminApproved) {
+              curPayload.branchApproved = true;
+              curPayload.branchDecision = 'approved';
+            }
+
             if (isAdminApproved) {
               curPayload.approvedAt = new Date().toISOString();
               curPayload.approvedBy = actorName;
@@ -3357,27 +3433,94 @@ app.post('/api/sync/push', async (req, res) => {
             );
 
             // مزامنة فورية مع app_settings إن وجد
+            // مزامنة فورية مع app_settings لكل المصفوفات (requests, leaveRequests, loans, shiftSwaps, resignationRequests)
             try {
+              const patchObj = {
+                status: cleanStatus,
+                adminApproved: isAdminApproved,
+                branchApproved: Boolean(curPayload.branchApproved),
+                branchDecision: String(curPayload.branchDecision || ''),
+                branchRejected: Boolean(curPayload.branchRejected)
+              };
+              if (isAdminApproved) {
+                patchObj.approvedAt = curPayload.approvedAt || new Date().toISOString();
+                patchObj.approvedBy = curPayload.approvedBy || actorName;
+              } else if (cleanStatus === 'rejected') {
+                patchObj.rejectedAt = curPayload.rejectedAt || new Date().toISOString();
+                patchObj.rejectedBy = curPayload.rejectedBy || actorName;
+                if (curPayload.rejectionReason) patchObj.rejectionReason = curPayload.rejectionReason;
+              }
+
               await db.query(`
                 UPDATE public.app_settings
                 SET value_data = jsonb_set(
-                  value_data,
-                  '{requests}',
+                  jsonb_set(
+                    jsonb_set(
+                      jsonb_set(
+                        jsonb_set(
+                          value_data,
+                          '{requests}',
+                          (
+                            SELECT COALESCE(jsonb_agg(
+                              CASE 
+                                WHEN (elem->>'id') = $1 THEN elem || $2::jsonb
+                                ELSE elem 
+                              END
+                            ), '[]'::jsonb)
+                            FROM jsonb_array_elements(COALESCE(value_data->'requests', '[]'::jsonb)) AS elem
+                          )
+                        ),
+                        '{leaveRequests}',
+                        (
+                          SELECT COALESCE(jsonb_agg(
+                            CASE 
+                              WHEN (elem->>'id') = $1 THEN elem || $2::jsonb
+                              ELSE elem 
+                            END
+                          ), '[]'::jsonb)
+                          FROM jsonb_array_elements(COALESCE(value_data->'leaveRequests', '[]'::jsonb)) AS elem
+                        )
+                      ),
+                      '{loans}',
+                      (
+                        SELECT COALESCE(jsonb_agg(
+                          CASE 
+                            WHEN (elem->>'id') = $1 THEN elem || $2::jsonb
+                            ELSE elem 
+                          END
+                        ), '[]'::jsonb)
+                        FROM jsonb_array_elements(COALESCE(value_data->'loans', '[]'::jsonb)) AS elem
+                      )
+                    ),
+                    '{shiftSwaps}',
+                    (
+                      SELECT COALESCE(jsonb_agg(
+                        CASE 
+                          WHEN (elem->>'id') = $1 THEN elem || $2::jsonb
+                          ELSE elem 
+                        END
+                      ), '[]'::jsonb)
+                      FROM jsonb_array_elements(COALESCE(value_data->'shiftSwaps', '[]'::jsonb)) AS elem
+                    )
+                  ),
+                  '{resignationRequests}',
                   (
                     SELECT COALESCE(jsonb_agg(
                       CASE 
-                        WHEN (elem->>'id') = $1 THEN elem || jsonb_build_object('status', $2::text, 'adminApproved', $3::boolean)
+                        WHEN (elem->>'id') = $1 THEN elem || $2::jsonb
                         ELSE elem 
                       END
                     ), '[]'::jsonb)
-                    FROM jsonb_array_elements(COALESCE(value_data->'requests', '[]'::jsonb)) AS elem
+                    FROM jsonb_array_elements(COALESCE(value_data->'resignationRequests', '[]'::jsonb)) AS elem
                   )
                 ),
                 updated_at = NOW(),
                 version = version + 1
-                WHERE key_name = 'pharmacy-tracker-data' AND value_data->'requests' IS NOT NULL
-              `, [reqId, cleanStatus, isAdminApproved]);
-            } catch {}
+                WHERE key_name = 'pharmacy-tracker-data'
+              `, [reqId, JSON.stringify(patchObj)]);
+            } catch (errSync) {
+              console.warn('[sync/push] app_settings patch error:', errSync.message);
+            }
 
             await db.query(
               `INSERT INTO public.request_status_history (request_id, from_status, to_status, actor_id, actor_name, actor_role, comment)
@@ -4478,9 +4621,16 @@ io.on('connection', (socket) => {
   // استقبال وبث قرارات وتحديثات الطلبات الفورية (< 5ms) لجميع الأجهزة وصفحات الموظفين
   socket.on('request:update', (payload) => {
     try {
-      if (payload && (payload.request || payload.requestId)) {
-        console.log(`⚡ [Socket.io] بث فوري لقرار/تحديث الطلب (${payload.request?.id || payload.requestId}) لكافة الموظفين والأجهزة`);
-        io.emit('request:updated', payload);
+      if (payload && (payload.request || payload.requestId || payload.id)) {
+        const reqObj = payload.request || payload;
+        const reqId = String(payload.requestId || payload.request?.id || payload.id);
+        const normalizedPayload = {
+          ...payload,
+          request: reqObj,
+          requestId: reqId
+        };
+        console.log(`⚡ [Socket.io] بث فوري لقرار/تحديث الطلب (${reqId}) لكافة الموظفين والأجهزة`);
+        io.emit('request:updated', normalizedPayload);
       }
     } catch (err) {
       console.warn('[Socket.io] error on request:update:', err.message);

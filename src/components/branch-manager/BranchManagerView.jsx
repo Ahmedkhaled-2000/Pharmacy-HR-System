@@ -18,6 +18,8 @@ import EmployeeRosterEditModal from '../branches/EmployeeRosterEditModal';
 import BranchSalesEntryModal from '../branches/BranchSalesEntryModal';
 import BranchDirectivesModule from '../branches/BranchDirectivesModule';
 import BranchRecruitmentNeedModal from './BranchRecruitmentNeedModal';
+import BranchWhatsAppModule from './BranchWhatsAppModule';
+import DayDetailsModal from '../attendance/DayDetailsModal';
 import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, isShiftManualPunch, calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, fmt, getRealTodayStr, getRealDate, getRealNowTimeStr } from '../../utils/formatters';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics } from '../../utils/latePenaltyEngine';
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
@@ -30,6 +32,53 @@ import { emitLiveRequestUpdated } from '../../utils/socketClient';
 import { broadcastStateChange } from '../../utils/offlineSync';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+
+export const BRANCH_REQUEST_TITLES = {
+  all: {
+    title: '📋 كافة طلبات وموافقات موظفي الفرع',
+    desc: 'معاينة واعتماد جميع طلبات موظفي الفرع (إجازات، أذونات، تعديل بصمات، ساعات إضافية، تبديل ورديات)'
+  },
+  leave: {
+    title: '🏖️ طلبات إجازات موظفي الفرع',
+    desc: 'معاينة واعتماد طلبات الإجازات الاعتيادية والعارضة والمرضية لموظفي الفرع وفحص رصيد الإجازات'
+  },
+  schedule_deviation: {
+    title: '⚠️ طلبات عدم الالتزام بالجدول',
+    desc: 'معاينة حالات الحضور والانصراف المتأخر غير المتطابقة مع مواعيد العمل والورديات المقررة'
+  },
+  manual_punch: {
+    title: '🖐️ طلبات تسجيل وتعديل البصمات اليدوية',
+    desc: 'مراجعة وتوثيق بصمات الدخول والخروج اليدوية المصححة لموظفي الفرع'
+  },
+  overtime: {
+    title: '⭐ طلبات الساعات الإضافية لموظفي الفرع',
+    desc: 'اعتماد ومراجعة ساعات العمل الإضافية المنجزة واحتساب مستحقات التشغيل الإضافي'
+  },
+  permission: {
+    title: '⏰ أذونات واستئذانات موظفي الفرع',
+    desc: 'مراجعة وتوقيع أذونات التأخير والخروج المبكر وساعات الاستئذان المعتمدة'
+  },
+  swap: {
+    title: '🔄 طلبات تبديل ومناوبة الورديات',
+    desc: 'معاينة وموافقة طلبات تبديل الورديات والشفتات التبادلية بين زملاء الفرع'
+  },
+  shift_adjustment: {
+    title: '⏱️ طلبات تعديلات الشفتات والمواعيد',
+    desc: 'تعديل ومواءمة فترات الورديات ومواعيد الحضور والانصراف التشغيلية'
+  },
+  roster_edit: {
+    title: '📅 طلبات تعديلات الجداول الشهرية',
+    desc: 'معاينة واعتماد تعديلات الجداول التكليفية والورديات لموظفي الفرع'
+  },
+  comp_offs: {
+    title: '🛋️ طلبات إجازات بدل الراحة والتشغيل',
+    desc: 'اعتماد أيام التعويض وبدل الراحة مقابل العمل في العطلات والراحات الأسبوعية'
+  },
+  comp_off: {
+    title: '🛋️ طلبات إجازات بدل الراحة والتشغيل',
+    desc: 'اعتماد أيام التعويض وبدل الراحة مقابل العمل في العطلات والراحات الأسبوعية'
+  }
+};
 
 function getArabicWeekday(dateStr) {
   if (!dateStr) return '';
@@ -72,6 +121,76 @@ function getActiveBreakStr(activeShift) {
   } catch {
     return '';
   }
+}
+
+/**
+ * Safely determines if an employee is currently genuinely live and clocked-in on duty.
+ * Validates against:
+ * 1. Existence of active shift with timeIn and NO timeOut.
+ * 2. status !== 'completed' and isLiveActive !== false.
+ * 3. Legitimate current date: today's date, or yesterday evening (>= 17:00) for overnight shift.
+ * 4. Checks state.shifts: if state.shifts has a completed shift for this employee on that date
+ *    with a timeOut, the shift is already finished and NOT currently live.
+ */
+export function getEmployeeLiveActiveShift(emp, state) {
+  if (!emp || !emp.id || !state || !state.activeShifts) return null;
+  const activeShiftsMap = state.activeShifts || {};
+
+  const candidate = activeShiftsMap[emp.id] ||
+    activeShiftsMap[String(emp.id)] ||
+    (emp.code && activeShiftsMap[emp.code]) ||
+    (emp.code && activeShiftsMap[String(emp.code)]) ||
+    Object.values(activeShiftsMap).find(s =>
+      s && (String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code)))
+    );
+
+  if (!candidate || !candidate.timeIn) return null;
+
+  // If timeOut is present, or marked completed/inactive, it is not live
+  if (candidate.timeOut || candidate.status === 'completed' || candidate.isLiveActive === false) {
+    return null;
+  }
+
+  const todayStr = typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
+  const shiftDate = candidate.date || todayStr;
+
+  // Validate shift freshness:
+  // Must be today, or yesterday evening (>= 17:00) for a legitimate overnight night shift
+  if (shiftDate !== todayStr) {
+    const dNow = new Date(todayStr);
+    const dShift = new Date(shiftDate);
+    const diffDays = Math.round((dNow - dShift) / (1000 * 3600 * 24));
+    if (diffDays !== 1) {
+      // Stale shift from earlier days
+      return null;
+    }
+    // If from yesterday, must have started in evening (>= 17:00)
+    const [inH] = String(candidate.timeIn).split(':').map(Number);
+    if (isNaN(inH) || inH < 17) {
+      return null;
+    }
+  }
+
+  // Cross-reference with state.shifts:
+  // If state.shifts already recorded a completed checkout for this employee on this date, candidate is stale
+  const completedMatch = (state.shifts || []).find(s => {
+    if (!s || s.date !== shiftDate) return false;
+    const isEmpMatch = String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code));
+    if (!isEmpMatch) return false;
+    if (!s.timeOut || s.timeOut === '—') return false;
+    if (s.timeIn && candidate.timeIn) {
+      const sInPrefix = s.timeIn.slice(0, 5);
+      const cInPrefix = candidate.timeIn.slice(0, 5);
+      if (sInPrefix === cInPrefix) return true;
+    }
+    return Boolean(s.timeOut && s.hours > 0);
+  });
+
+  if (completedMatch) {
+    return null;
+  }
+
+  return candidate;
 }
 
 export function getArabicStatusBadge(status, adminApproved, branchApproved, req = null) {
@@ -143,7 +262,7 @@ export function getRequestSortTime(r) {
 // ─────────────────────────────────────────────────────────────
 function buildDayPunchObject(dateStr, empId, defaultTimeIn = '09:00', defaultTimeOut = '17:00', defaultBreak = '0', defaultPunchType = 'full', state = {}, explicitShift = null) {
   const emp = (state.employees || []).find((e) => String(e.id) === String(empId));
-  const existingShift = explicitShift || (state.shifts || []).find(s => 
+  const existingShift = explicitShift || (state.shifts || []).find(s =>
     (String(s.employeeId) === String(empId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
     s.date === dateStr &&
     s.status !== 'cancelled' && !s.isCancelled
@@ -311,13 +430,31 @@ export default function BranchManagerView({
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-  
+
   // Roster & Request Modal Preview states
   const [previewRosterEmp, setPreviewRosterEmp] = useState(null);
   const [previewModalReq, setPreviewModalReq] = useState(null);
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
   const [branchReqEmpFilter, setBranchReqEmpFilter] = useState('all');
   const [branchReqDateFilter, setBranchReqDateFilter] = useState('');
+  const [branchReqStatusFilter, setBranchReqStatusFilter] = useState('all'); // 'all' | 'pending' | 'approved' | 'rejected'
+  const [branchReqTypeFilter, setBranchReqTypeFilter] = useState(() => {
+    try {
+      return window.__lastRequestsFilterType || 'all';
+    } catch {
+      return 'all';
+    }
+  });
+
+  useEffect(() => {
+    const handleSetFilter = (e) => {
+      if (e?.detail?.filterType) {
+        setBranchReqTypeFilter(e.detail.filterType);
+      }
+    };
+    window.addEventListener('requests:set-filter-type', handleSetFilter);
+    return () => window.removeEventListener('requests:set-filter-type', handleSetFilter);
+  }, []);
 
   // 1. Manual Punch / Punch Correction Request State (Supports Single-Day and Multi-Day Batch)
   const [showManualPunchModal, setShowManualPunchModal] = useState(false);
@@ -344,6 +481,7 @@ export default function BranchManagerView({
   const [previewPunchesEmp, setPreviewPunchesEmp] = useState(null);
   const [selectedShiftDates, setSelectedShiftDates] = useState([]);
   const [punchesSearchQuery, setPunchesSearchQuery] = useState('');
+  const [selectedDayDetails, setSelectedDayDetails] = useState(null);
 
   // 2. Bonus Request State
   const [showBonusModal, setShowBonusModal] = useState(false);
@@ -430,7 +568,7 @@ export default function BranchManagerView({
       localStorage.setItem('bm_selected_month', selectedMonth);
       localStorage.setItem('bm_custom_from', customFromDate);
       localStorage.setItem('bm_custom_to', customToDate);
-    } catch {}
+    } catch { }
   }, [filterMode, selectedMonth, customFromDate, customToDate]);
 
   const cycleRange = useMemo(() => {
@@ -521,7 +659,7 @@ export default function BranchManagerView({
     const cCodeStr = String(currentBranch?.branchCode || currentBranch?.code || '');
     const cNameStr = String(currentBranch?.name || '').trim().toLowerCase();
 
-    const found = (state.branches || []).find((b) => 
+    const found = (state.branches || []).find((b) =>
       b && (
         (b.id && String(b.id) === cIdStr) ||
         (b.branchCode && String(b.branchCode) === cCodeStr) ||
@@ -556,7 +694,7 @@ export default function BranchManagerView({
     // 3. Manager object or name on branch
     if (branchToUse?.manager && typeof branchToUse.manager === 'object') {
       const mObj = branchToUse.manager;
-      const found = (state.employees || []).find((e) => 
+      const found = (state.employees || []).find((e) =>
         e && (
           (mObj?.id && String(e.id) === String(mObj.id)) ||
           (mObj?.code && String(e.code) === String(mObj.code))
@@ -580,7 +718,7 @@ export default function BranchManagerView({
     // 5. Branch username matching employee
     const bUser = String(branchToUse?.username || '').trim().toLowerCase();
     if (bUser) {
-      const found = (state.employees || []).find((e) => 
+      const found = (state.employees || []).find((e) =>
         e && (
           (e.username && String(e.username).trim().toLowerCase() === bUser) ||
           (e.code && String(e.code).trim().toLowerCase() === bUser) ||
@@ -593,7 +731,7 @@ export default function BranchManagerView({
     // 6. Employee with explicit manager title or role in this branch
     const mgrTitleEmp = (state.employees || []).find((e) => {
       if (!e) return false;
-      const inBranch = String(e.branchId || '') === cIdStr || 
+      const inBranch = String(e.branchId || '') === cIdStr ||
         (Array.isArray(e.branchesDetails) && e.branchesDetails.some((bd) => bd && String(bd.branchId) === cIdStr));
       if (!inBranch) return false;
       if (e.isBranchManager || e.isManager || e.role === 'branch_manager' || e.role === 'manager' || e.role === 'branch') return true;
@@ -778,7 +916,7 @@ export default function BranchManagerView({
       // 3. Request employee belongs to this branch
       if (r.employeeId && branchEmpIdSet.has(String(r.employeeId))) return true;
       if (r.employeeCode && branchEmpIdSet.has(String(r.employeeCode))) return true;
-      
+
       if (empObj) {
         if (empObj.branchId && String(empObj.branchId) === cIdStr) return true;
         if (empObj.branchesDetails && empObj.branchesDetails.some((bd) => String(bd.branchId) === cIdStr)) return true;
@@ -789,6 +927,61 @@ export default function BranchManagerView({
     return list.sort((a, b) => getRequestSortTime(b) - getRequestSortTime(a));
   }, [state.requests, state.leaveRequests, state.shiftSwaps, state.resignationRequests, state.employees, state.approvalRules, branchEmployees, currentBranch, deletedIdsSet]);
 
+  // Request Statistics for Branch Manager quick filter tabs
+  const branchReqStats = useMemo(() => {
+    let pending = 0;
+    let approved = 0;
+    let rejected = 0;
+    (branchRequests || []).forEach((r) => {
+      const isApproved = Boolean(
+        r.branchApproved ||
+        r.branchDecision === 'approved' ||
+        r.status === 'approved' ||
+        r.status === 'paid' ||
+        r.status === 'completed' ||
+        r.adminApproved
+      );
+      const isRejected = Boolean(
+        r.branchDecision === 'rejected' ||
+        r.branchRejected ||
+        r.status === 'rejected' ||
+        r.status === 'cancelled' ||
+        r.isCancelled ||
+        r.adminDecision === 'rejected'
+      );
+      if (isApproved) {
+        approved++;
+      } else if (isRejected) {
+        rejected++;
+      } else {
+        pending++;
+      }
+    });
+    return {
+      total: (branchRequests || []).length,
+      pending,
+      approved,
+      rejected
+    };
+  }, [branchRequests]);
+
+  // Request Type Statistics for Branch Manager request filter pills
+  const branchReqTypeStats = useMemo(() => {
+    const counts = { all: (branchRequests || []).length, leave: 0, schedule_deviation: 0, manual_punch: 0, overtime: 0, permission: 0, swap: 0, shift_adjustment: 0, roster_edit: 0, comp_off: 0 };
+    (branchRequests || []).forEach((r) => {
+      if (r.type === 'leave' || r.type === 'leave_request' || r.type === 'long_leave' || r.type === 'annual_leave' || r.type === 'sick_leave' || Boolean(r.leaveType)) counts.leave++;
+      else if (r.type === 'schedule_deviation' || r.type === 'deviation' || (typeof r.details === 'string' && r.details.includes('عدم الالتزام بالجدول'))) counts.schedule_deviation++;
+      else if (r.submittedByBranchManager || r.subType === 'punch_correction' || r.subType === 'manual_punch_request' || String(r.id || '').startsWith('req_punch_') || r.type === 'manual_punch' || r.type === 'branch_punch_edit') counts.manual_punch++;
+      else if (r.type === 'overtime' || r.type === 'extra_hours' || (parseFloat(r.overtimeHours) > 0)) counts.overtime++;
+      else if (r.type === 'permission' || r.type === 'late_permission' || r.type === 'early_leave') counts.permission++;
+      else if (r.type === 'swap' || r.type === 'shift_swap') counts.swap++;
+      else if (r.type === 'shift_adjustment') counts.shift_adjustment++;
+      else if (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') counts.roster_edit++;
+      else if (r.type === 'comp_off_grant' || r.type === 'leave_comp_off' || r.leaveType === 'comp_off') counts.comp_off++;
+    });
+    return counts;
+  }, [branchRequests]);
+
   const filteredBranchRequests = useMemo(() => {
     const list = branchRequests.filter((r) => {
       if (branchReqEmpFilter !== 'all' && String(r.employeeId) !== String(branchReqEmpFilter)) return false;
@@ -796,11 +989,60 @@ export default function BranchManagerView({
         const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.startDate || r.date || ''));
         if (!rDate.startsWith(branchReqDateFilter)) return false;
       }
+      if (branchReqTypeFilter && branchReqTypeFilter !== 'all') {
+        if (branchReqTypeFilter === 'leave') {
+          const isLeave = r.type === 'leave' || r.type === 'leave_request' || r.type === 'long_leave' || r.type === 'annual_leave' || r.type === 'sick_leave' || Boolean(r.leaveType);
+          if (!isLeave) return false;
+        } else if (branchReqTypeFilter === 'schedule_deviation') {
+          const isDev = r.type === 'schedule_deviation' || r.type === 'deviation' || (typeof r.details === 'string' && r.details.includes('عدم الالتزام بالجدول'));
+          if (!isDev) return false;
+        } else if (branchReqTypeFilter === 'manual_punch') {
+          const isPunch = r.submittedByBranchManager || r.subType === 'punch_correction' || r.subType === 'manual_punch_request' || String(r.id || '').startsWith('req_punch_') || r.type === 'manual_punch' || r.type === 'branch_punch_edit';
+          if (!isPunch) return false;
+        } else if (branchReqTypeFilter === 'overtime') {
+          const isOt = r.type === 'overtime' || r.type === 'extra_hours' || (parseFloat(r.overtimeHours) > 0);
+          if (!isOt) return false;
+        } else if (branchReqTypeFilter === 'permission') {
+          const isPerm = r.type === 'permission' || r.type === 'late_permission' || r.type === 'early_leave';
+          if (!isPerm) return false;
+        } else if (branchReqTypeFilter === 'swap') {
+          const isSwap = r.type === 'swap' || r.type === 'shift_swap';
+          if (!isSwap) return false;
+        } else if (branchReqTypeFilter === 'shift_adjustment') {
+          const isShiftAdj = r.type === 'shift_adjustment';
+          if (!isShiftAdj) return false;
+        } else if (branchReqTypeFilter === 'roster_edit') {
+          const isRoster = r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request';
+          if (!isRoster) return false;
+        } else if (branchReqTypeFilter === 'comp_off' || branchReqTypeFilter === 'comp_offs') {
+          const isCompOff = r.type === 'comp_off_grant' || r.type === 'leave_comp_off' || r.leaveType === 'comp_off';
+          if (!isCompOff) return false;
+        }
+      }
+      const isApproved = Boolean(
+        r.branchApproved ||
+        r.branchDecision === 'approved' ||
+        r.status === 'approved' ||
+        r.status === 'paid' ||
+        r.status === 'completed' ||
+        r.adminApproved
+      );
+      const isRejected = Boolean(
+        r.branchDecision === 'rejected' ||
+        r.branchRejected ||
+        r.status === 'rejected' ||
+        r.status === 'cancelled' ||
+        r.isCancelled ||
+        r.adminDecision === 'rejected'
+      );
+      if (branchReqStatusFilter === 'approved' && !isApproved) return false;
+      if (branchReqStatusFilter === 'rejected' && !isRejected) return false;
+      if (branchReqStatusFilter === 'pending' && (isApproved || isRejected)) return false;
       return true;
     });
 
     return list.sort((a, b) => getRequestSortTime(b) - getRequestSortTime(a));
-  }, [branchRequests, branchReqEmpFilter, branchReqDateFilter]);
+  }, [branchRequests, branchReqEmpFilter, branchReqDateFilter, branchReqStatusFilter, branchReqTypeFilter]);
 
   // ── All Requests Sent from this Branch Manager to Higher Management (Punches, Leaves, Permissions, Penalties, Bonuses, Evaluations, Roster Edits, Resignations) ──
   const branchSentRequests = useMemo(() => {
@@ -833,9 +1075,9 @@ export default function BranchManagerView({
       }
 
       const isMatchBranch = (r.branchId && String(r.branchId) === cIdStr) ||
-                            (r.employeeId && branchEmpIdSet.has(String(r.employeeId))) ||
-                            (r.employeeCode && branchEmpIdSet.has(String(r.employeeCode))) ||
-                            branchEmployees.some(e => String(e.id) === String(r.employeeId));
+        (r.employeeId && branchEmpIdSet.has(String(r.employeeId))) ||
+        (r.employeeCode && branchEmpIdSet.has(String(r.employeeCode))) ||
+        branchEmployees.some(e => String(e.id) === String(r.employeeId));
 
       if (!isMatchBranch) return;
 
@@ -868,8 +1110,8 @@ export default function BranchManagerView({
     (state.leaveRequests || []).forEach((lr) => {
       if (!lr || !lr.id || seenIds.has(String(lr.id))) return;
       const isMatchBranch = (lr.branchId && String(lr.branchId) === cIdStr) ||
-                            (lr.employeeId && branchEmpIdSet.has(String(lr.employeeId))) ||
-                            branchEmployees.some(e => String(e.id) === String(lr.employeeId));
+        (lr.employeeId && branchEmpIdSet.has(String(lr.employeeId))) ||
+        branchEmployees.some(e => String(e.id) === String(lr.employeeId));
       if (!isMatchBranch) return;
 
       const isSentByBranch = Boolean(
@@ -890,8 +1132,8 @@ export default function BranchManagerView({
     (state.evaluations || []).forEach((ev) => {
       if (!ev || !ev.id || seenIds.has(String(ev.id))) return;
       const isMatchBranch = (ev.branchId && String(ev.branchId) === cIdStr) ||
-                            (ev.employeeId && branchEmpIdSet.has(String(ev.employeeId))) ||
-                            branchEmployees.some(e => String(e.id) === String(ev.employeeId));
+        (ev.employeeId && branchEmpIdSet.has(String(ev.employeeId))) ||
+        branchEmployees.some(e => String(e.id) === String(ev.employeeId));
       if (!isMatchBranch) return;
 
       const isSentByBranch = Boolean(
@@ -1032,7 +1274,7 @@ export default function BranchManagerView({
     const hourlyBase = parseFloat(managerEmp?.salary) || 0;
     const workHoursPerDay = parseFloat(managerEmp?.workHoursPerDay) || 8;
     const workDaysPerMonth = parseFloat(managerEmp?.workDaysPerMonth) || 26;
-    
+
     // 1. احتساب سعر اليوم = (سعر الساعة الشهري * ساعات العمل المدخلة) / أيام العمل المدخلة
     const dailyRate = workDaysPerMonth > 0 ? (hourlyBase * workHoursPerDay) / workDaysPerMonth : 0;
     // 2. احتساب سعر الساعة اليومي = سعر اليوم / ساعات العمل المدخلة
@@ -1087,9 +1329,9 @@ export default function BranchManagerView({
   // ── Handlers ──
   const handleManagerApproveRequest = async (reqId) => {
     let foundReq = (state.requests || []).find(r => r && r.id === reqId) ||
-                   (state.leaveRequests || []).find(r => r && r.id === reqId) ||
-                   (state.shiftSwaps || []).find(r => r && r.id === reqId) ||
-                   (state.loans || []).find(r => r && r.id === reqId);
+      (state.leaveRequests || []).find(r => r && r.id === reqId) ||
+      (state.shiftSwaps || []).find(r => r && r.id === reqId) ||
+      (state.loans || []).find(r => r && r.id === reqId);
 
     if (!foundReq) {
       showToast?.('لم يتم العثور على الطلب');
@@ -1142,9 +1384,9 @@ export default function BranchManagerView({
       };
 
       const existingIdx = updatedRosters.findIndex(
-        (ros) => String(ros.employeeId) === String(updatedTargetReq.employeeId) && 
-                 (ros.month === updatedTargetReq.month || !updatedTargetReq.month || !ros.month) && 
-                 (String(ros.branchId || '') === targetBStr || (!ros.branchId && !targetBStr))
+        (ros) => String(ros.employeeId) === String(updatedTargetReq.employeeId) &&
+          (ros.month === updatedTargetReq.month || !updatedTargetReq.month || !ros.month) &&
+          (String(ros.branchId || '') === targetBStr || (!ros.branchId && !targetBStr))
       );
 
       if (existingIdx >= 0) {
@@ -1186,7 +1428,7 @@ export default function BranchManagerView({
       const targetDate = updatedTargetReq.date || updatedTargetReq.startDate;
       const existingShiftIdx = updatedShifts.findIndex(
         s => (updatedTargetReq.shiftId && s.id === updatedTargetReq.shiftId) ||
-             (String(s.employeeId) === String(updatedTargetReq.employeeId) && s.date === targetDate)
+          (String(s.employeeId) === String(updatedTargetReq.employeeId) && s.date === targetDate)
       );
       if (existingShiftIdx >= 0) {
         const s = updatedShifts[existingShiftIdx];
@@ -1289,7 +1531,7 @@ export default function BranchManagerView({
     };
 
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
+    if (saveState) await saveState(updatedState, { entityType: 'requests' });
 
     try {
       enqueueRequestDecision({
@@ -1297,9 +1539,24 @@ export default function BranchManagerView({
         decision: 'approve',
         newStatus: isFullyApproved ? 'approved' : 'pending_admin',
         reviewer: { role: 'branch' },
-        branchId: updatedTargetReq.branchId || currentBranch?.id
+        branchId: updatedTargetReq.branchId || currentBranch?.id,
+        additionalData: {
+          branchApproved: true,
+          branchDecision: 'approved',
+          branchRejected: false,
+          branchApprovedAt: new Date().toISOString()
+        }
       }).catch(err => console.warn('Outbox enqueue decision error:', err));
-      emitLiveRequestUpdated(updatedTargetReq);
+      emitLiveRequestUpdated({
+        ...updatedTargetReq,
+        request: updatedTargetReq,
+        requestId: reqId,
+        id: reqId,
+        status: updatedTargetReq.status,
+        branchApproved: true,
+        branchDecision: 'approved',
+        branchRejected: false
+      });
       broadcastStateChange('requests', updatedRequests);
     } catch (syncErr) {
       console.warn('Sync dispatch error in manager approve:', syncErr);
@@ -1310,9 +1567,9 @@ export default function BranchManagerView({
 
   const handleManagerRejectRequest = async (reqId) => {
     let foundReq = (state.requests || []).find(r => r && r.id === reqId) ||
-                   (state.leaveRequests || []).find(r => r && r.id === reqId) ||
-                   (state.shiftSwaps || []).find(r => r && r.id === reqId) ||
-                   (state.loans || []).find(r => r && r.id === reqId);
+      (state.leaveRequests || []).find(r => r && r.id === reqId) ||
+      (state.shiftSwaps || []).find(r => r && r.id === reqId) ||
+      (state.loans || []).find(r => r && r.id === reqId);
 
     if (!foundReq) {
       showToast?.('لم يتم العثور على الطلب');
@@ -1382,7 +1639,7 @@ export default function BranchManagerView({
     };
 
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
+    if (saveState) await saveState(updatedState, { entityType: 'requests' });
 
     try {
       enqueueRequestDecision({
@@ -1391,9 +1648,24 @@ export default function BranchManagerView({
         newStatus: 'pending_admin',
         reviewer: { role: 'branch' },
         reason: 'عدم موافقة مدير الفرع (محال للإدارة العليا)',
-        branchId: updatedTargetReq.branchId || currentBranch?.id
+        branchId: updatedTargetReq.branchId || currentBranch?.id,
+        additionalData: {
+          branchApproved: false,
+          branchDecision: 'rejected',
+          branchRejected: true,
+          branchRejectedAt: new Date().toISOString()
+        }
       }).catch(err => console.warn('Outbox enqueue rejection error:', err));
-      emitLiveRequestUpdated(updatedTargetReq);
+      emitLiveRequestUpdated({
+        ...updatedTargetReq,
+        request: updatedTargetReq,
+        requestId: reqId,
+        id: reqId,
+        status: updatedTargetReq.status,
+        branchApproved: false,
+        branchDecision: 'rejected',
+        branchRejected: true
+      });
       broadcastStateChange('requests', updatedRequests);
     } catch (syncErr) {
       console.warn('Sync dispatch error in manager reject:', syncErr);
@@ -1589,10 +1861,10 @@ export default function BranchManagerView({
     const targetDate = date || getRealTodayStr();
     const emp = (state.employees || []).find((e) => String(e.id) === String(empId));
     const defaultBreak = emp?.breakHours || emp?.defaultBreakHours || emp?.branchesDetails?.[0]?.breakHours || '0';
-    
-    const empActive = empId ? (state.activeShifts?.[empId] || state.activeShifts?.[String(empId)] || (emp?.code && state.activeShifts?.[emp.code])) : null;
-    const isShiftOpen = existingPunch 
-      ? (!existingPunch.timeOut || existingPunch.timeOut === '—') 
+
+    const empActive = emp ? getEmployeeLiveActiveShift(emp, state) : null;
+    const isShiftOpen = existingPunch
+      ? (!existingPunch.timeOut || existingPunch.timeOut === '—')
       : Boolean(empActive && empActive.date === targetDate);
 
     const initialPunchType = isShiftOpen ? 'in' : (existingPunch ? 'correction' : 'full');
@@ -1611,18 +1883,18 @@ export default function BranchManagerView({
     let initialBatchDays = [];
     if (isMulti) {
       initialBatchDays = sortedDates.map(dStr => {
-        const exS = (state.shifts || []).find(s => 
+        const exS = (state.shifts || []).find(s =>
           (String(s.employeeId) === String(empId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
           s.date === dStr && s.status !== 'cancelled' && !s.isCancelled
         );
         return buildDayPunchObject(
-          dStr, 
-          empId, 
-          exS?.timeIn || initialTimeIn, 
-          exS?.timeOut || initialTimeOut, 
-          exS?.breakHours !== undefined ? String(exS.breakHours) : String(defaultBreak), 
-          initialPunchType, 
-          state, 
+          dStr,
+          empId,
+          exS?.timeIn || initialTimeIn,
+          exS?.timeOut || initialTimeOut,
+          exS?.breakHours !== undefined ? String(exS.breakHours) : String(defaultBreak),
+          initialPunchType,
+          state,
           exS
         );
       });
@@ -1644,9 +1916,9 @@ export default function BranchManagerView({
       breakHours: existingPunch?.breakHours !== undefined ? String(existingPunch.breakHours) : String(defaultBreak),
       reason: isMulti && preselectedDates.length > 1
         ? `طلب تعديل بصمة لعدة أيام (${preselectedDates.length} أيام)`
-        : (isShiftOpen 
-            ? `طلب تعديل بصمة حضور (الوردية الحالية مستمرة)`
-            : (existingPunch ? `طلب تعديل بصمة يوم ${targetDate}` : '')),
+        : (isShiftOpen
+          ? `طلب تعديل بصمة حضور (الوردية الحالية مستمرة)`
+          : (existingPunch ? `طلب تعديل بصمة يوم ${targetDate}` : '')),
       shiftId: existingPunch?.id || empActive?.shiftId || null
     });
     setShowManualPunchModal(true);
@@ -2002,8 +2274,8 @@ export default function BranchManagerView({
       subType: isEdit ? 'punch_correction' : 'manual_punch_request',
       punchType: manualPunchData.punchType,
       targetAction: isCheckInOnly ? 'shift_start' : (isCheckOutOnly ? 'shift_end' : 'shift_full'),
-      typeLabel: isCheckInOnly 
-        ? 'طلب تعديل بصمة حضور' 
+      typeLabel: isCheckInOnly
+        ? 'طلب تعديل بصمة حضور'
         : (isCheckOutOnly ? 'طلب تعديل بصمة انصراف' : (isEdit ? 'طلب تعديل بصمة مسجلة' : 'طلب تسجيل بصمة يدوي')),
       date: manualPunchData.date,
       timeIn: finalTimeIn,
@@ -2537,9 +2809,10 @@ export default function BranchManagerView({
             <span>تبديل صفحتي</span>
           </button>
 
+          {/* زر التوجه لمركز واتساب وتوجيهات الفرع (بديل زر الأندرويد الذي تم حذفه بناءً على الطلب) */}
           <button
             type="button"
-            onClick={triggerAndroidApkDownload}
+            onClick={() => setActiveTab('branch-whatsapp')}
             style={{
               background: 'linear-gradient(135deg, #10b981, #059669)',
               color: '#ffffff',
@@ -2556,16 +2829,10 @@ export default function BranchManagerView({
               boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
               transition: 'all 0.15s ease'
             }}
-            title="تحميل تطبيق الأندرويد لمدير الفرع والموظفين بصيغة APK (الإصدار v1.2.48)"
+            title="فتح مركز مراسلات وتوجيهات الواتساب لموظفي الفرع"
           >
-            <span style={{ fontSize: '15px' }}>📱</span>
-            <span>تنزيل تطبيق الأندرويد</span>
-            <span style={{
-              background: 'rgba(255,255,255,0.25)',
-              padding: '1px 6px',
-              borderRadius: '6px',
-              fontSize: '10px'
-            }}>v1.2.48</span>
+            <span style={{ fontSize: '15px' }}>💬</span>
+            <span>واتساب وتوجيهات الفرع</span>
           </button>
           <div style={{ flex: isMobileScreen ? 1 : 'none', background: 'rgba(255,255,255,0.15)', padding: isMobileScreen ? '6px 10px' : '8px 16px', borderRadius: '10px', textAlign: 'center' }}>
             <span style={{ fontSize: '11px', display: 'block', opacity: 0.85 }}>عدد موظفي الفرع</span>
@@ -2593,7 +2860,7 @@ export default function BranchManagerView({
       {/* ───────────────────────────────────────────────────────────── */}
       {activeTab === 'dashboard' && (
         <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: isMobileScreen ? '16px' : '24px' }}>
-          
+
           {/* Quick Actions Bar */}
           <div className="card settings-card" style={{ padding: isMobileScreen ? '12px 14px' : '16px 20px', background: 'linear-gradient(135deg, #f0fdf4, #e6f7f5)', border: '1px solid #99f6e4', borderRadius: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
             <div>
@@ -2608,9 +2875,10 @@ export default function BranchManagerView({
               <button
                 className="btn btn-start"
                 style={{ padding: isMobileScreen ? '8px 10px' : '8px 16px', fontSize: isMobileScreen ? '12px' : '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', background: 'linear-gradient(135deg, #059669, #10b981)', fontWeight: 800 }}
-                onClick={triggerAndroidApkDownload}
+                onClick={() => setActiveTab('branch-whatsapp')}
+                title="فتح مركز مراسلات وتوجيهات الواتساب لموظفي الفرع"
               >
-                📱 تطبيق الأندرويد (APK)
+                💬 توجيهات الواتساب
               </button>
               <button
                 className="btn btn-start"
@@ -2658,14 +2926,14 @@ export default function BranchManagerView({
             const cIdStr = String(currentBranch?.id || '');
             const totalBranchStaff = branchEmployees.length;
             const activeStaffCount = branchEmployees.filter(emp => {
-              const s = state.activeShifts?.[emp.id] || state.activeShifts?.[String(emp.id)] || (emp.code && state.activeShifts?.[emp.code]);
+              const s = getEmployeeLiveActiveShift(emp, state);
               return s && !s.isOnBreak && !s.isPaused && (String(s.branchId || emp.branchId) === cIdStr);
             }).length;
             const breakStaffCount = branchEmployees.filter(emp => {
-              const s = state.activeShifts?.[emp.id] || state.activeShifts?.[String(emp.id)] || (emp.code && state.activeShifts?.[emp.code]);
+              const s = getEmployeeLiveActiveShift(emp, state);
               return s && (s.isOnBreak || s.isPaused) && (String(s.branchId || emp.branchId) === cIdStr);
             }).length;
-            const pendingBranchReqsCount = (branchRequests || []).filter(r => !r.branchApproved && r.status !== 'rejected').length;
+            const pendingBranchReqsCount = branchReqStats.pending;
 
             return (
               <div style={{
@@ -2721,20 +2989,14 @@ export default function BranchManagerView({
             <h3 style={{ margin: '0 0 14px', fontSize: isMobileScreen ? '15px' : '16px', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
               👥 رادار الحضور وتتبع البصمة الحية لموظفي الفرع اليوم
             </h3>
-            
+
             {branchEmployees.length === 0 ? (
               <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '20px' }}>لا يوجد موظفين مسجلين بهذا الفرع حتى الآن.</p>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: isMobileScreen ? '1fr' : 'repeat(auto-fill, minmax(260px, 1fr))', gap: isMobileScreen ? '10px' : '14px' }}>
                 {branchEmployees.filter(Boolean).map((emp) => {
                   if (!emp || !emp.id) return null;
-                  const activeShift = state.activeShifts?.[emp.id] ||
-                    state.activeShifts?.[String(emp.id)] ||
-                    (emp.code && state.activeShifts?.[emp.code]) ||
-                    (emp.code && state.activeShifts?.[String(emp.code)]) ||
-                    Object.values(state.activeShifts || {}).find(s =>
-                      s && (String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code)))
-                    );
+                  const activeShift = getEmployeeLiveActiveShift(emp, state);
                   const cIdStr = String(currentBranch?.id || '');
                   const activeInThisBranch = activeShift && (String(activeShift.branchId || emp.branchId) === cIdStr);
                   const activeInOtherBranch = activeShift && !activeInThisBranch;
@@ -2778,11 +3040,13 @@ export default function BranchManagerView({
                     statusBg = 'var(--surface-muted)';
                     statusColor = 'var(--muted)';
                   } else if (todayShiftsInThisBranch.length > 0) {
+                    const lastShift = todayShiftsInThisBranch[todayShiftsInThisBranch.length - 1];
                     const totalHrs = todayShiftsInThisBranch.reduce((acc, s) => acc + (s.hours || 0), 0);
-                    statusLabel = `🟢 تم الحضور بهذا الفرع (${totalHrs.toFixed(2)} س)`;
-                    statusBg = 'rgba(14, 165, 233, 0.1)';
-                    statusColor = '#0284c7';
-                    statusDotClass = 'online';
+                    const checkoutText = lastShift?.timeOut && lastShift.timeOut !== '—' ? ` (انصراف: ${lastShift.timeOut})` : '';
+                    statusLabel = `✔️ أنهى ورديته بهذا الفرع${checkoutText} [${totalHrs.toFixed(2)} س]`;
+                    statusBg = 'rgba(14, 165, 233, 0.08)';
+                    statusColor = '#0369a1';
+                    statusDotClass = 'offline';
                   } else if (onLeaveToday) {
                     statusLabel = '🏖️ في إجازة معتمدة';
                     statusBg = 'rgba(34, 197, 94, 0.08)';
@@ -2949,11 +3213,30 @@ export default function BranchManagerView({
       {activeTab === 'requests' && (
         <div className="card settings-card fade-in" style={{ padding: isMobileScreen ? '14px' : '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-            <h3 style={{ margin: 0, fontSize: isMobileScreen ? '15.5px' : '17px', color: '#1e293b' }}>
-              📋 جميع طلبات موظفي الفرع (إجازات - أذونات - تبديل شفتات - جداول عمل)
-            </h3>
+            <div>
+              <h3 style={{ margin: 0, fontSize: isMobileScreen ? '15.5px' : '18px', color: '#1e293b', fontWeight: 900 }}>
+                {BRANCH_REQUEST_TITLES[branchReqTypeFilter]?.title || `📋 إدارة طلبات ${branchReqTypeFilter}`}
+              </h3>
+              <p style={{ margin: '4px 0 0', fontSize: isMobileScreen ? '11.5px' : '13px', color: 'var(--muted)' }}>
+                {BRANCH_REQUEST_TITLES[branchReqTypeFilter]?.desc || 'معاينة واعتماد طلبات موظفي الفرع المحددة'}
+              </p>
+            </div>
 
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', width: isMobileScreen ? '100%' : 'auto' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: isMobileScreen ? 1 : 'none' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold' }}>⚡ الحالة:</label>
+                <select
+                  value={branchReqStatusFilter}
+                  onChange={(e) => setBranchReqStatusFilter(e.target.value)}
+                  style={{ flex: isMobileScreen ? 1 : 'none', padding: '5px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12.5px', fontWeight: 'bold' }}
+                >
+                  <option value="all">-- جميع الحالات ({branchReqStats.total}) --</option>
+                  <option value="pending">⏳ طلبات قيد الاعتماد ({branchReqStats.pending})</option>
+                  <option value="approved">✅ طلبات تم اعتمادها ({branchReqStats.approved})</option>
+                  <option value="rejected">❌ طلبات مرفوضة ({branchReqStats.rejected})</option>
+                </select>
+              </div>
+
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: isMobileScreen ? 1 : 'none' }}>
                 <label style={{ fontSize: '12px', fontWeight: 'bold' }}>👤 الموظف:</label>
                 <select
@@ -2981,6 +3264,220 @@ export default function BranchManagerView({
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Horizontal Scrollable Request Type Pills Bar */}
+          <div style={{
+            display: 'flex',
+            gap: '6px',
+            overflowX: 'auto',
+            paddingBottom: '8px',
+            marginBottom: '14px',
+            scrollbarWidth: 'thin'
+          }}>
+            {[
+              { id: 'all', label: 'كافة الطلبات', icon: '📋', count: branchReqTypeStats.all },
+              { id: 'leave', label: 'الإجازات', icon: '🏖️', count: branchReqTypeStats.leave },
+              { id: 'schedule_deviation', label: 'عدم الالتزام', icon: '⚠️', count: branchReqTypeStats.schedule_deviation },
+              { id: 'manual_punch', label: 'بصمة يدوي', icon: '🖐️', count: branchReqTypeStats.manual_punch },
+              { id: 'overtime', label: 'إضافي', icon: '⭐', count: branchReqTypeStats.overtime },
+              { id: 'permission', label: 'أذونات', icon: '⏰', count: branchReqTypeStats.permission },
+              { id: 'swap', label: 'تبديل ورديات', icon: '🔄', count: branchReqTypeStats.swap },
+              { id: 'shift_adjustment', label: 'تعديل مواعيد', icon: '⏱️', count: branchReqTypeStats.shift_adjustment },
+              { id: 'roster_edit', label: 'تعديل جداول', icon: '📅', count: branchReqTypeStats.roster_edit },
+              { id: 'comp_off', label: 'بدل راحة', icon: '🛋️', count: branchReqTypeStats.comp_off }
+            ].map((t) => {
+              const isActive = branchReqTypeFilter === t.id || (t.id === 'comp_off' && branchReqTypeFilter === 'comp_offs');
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setBranchReqTypeFilter(t.id)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    border: isActive ? '1.5px solid #0d9488' : '1px solid var(--border)',
+                    background: isActive ? '#ccfbf1' : 'var(--surface-muted)',
+                    color: isActive ? '#0f766e' : 'var(--text)',
+                    fontSize: '12px',
+                    fontWeight: isActive ? 800 : 600,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <span>{t.icon}</span>
+                  <span>{t.label}</span>
+                  {t.count > 0 && (
+                    <span style={{
+                      background: isActive ? '#0d9488' : 'rgba(0,0,0,0.06)',
+                      color: isActive ? '#ffffff' : 'var(--muted)',
+                      padding: '1px 6px',
+                      borderRadius: '10px',
+                      fontSize: '10.5px',
+                      fontWeight: 700
+                    }}>
+                      {t.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Quick Filter Status Tabs / Pills with count badges */}
+          <div style={{
+            display: 'flex',
+            gap: '8px',
+            flexWrap: 'wrap',
+            marginBottom: '16px',
+            padding: '5px',
+            background: 'var(--surface-muted, #f8fafc)',
+            borderRadius: '12px',
+            border: '1px solid var(--border)'
+          }}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setBranchReqStatusFilter('all')}
+              style={{
+                flex: isMobileScreen ? '1 1 45%' : 'none',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '12.5px',
+                fontWeight: branchReqStatusFilter === 'all' ? 800 : 600,
+                background: branchReqStatusFilter === 'all' ? '#0d9488' : 'transparent',
+                color: branchReqStatusFilter === 'all' ? '#ffffff' : 'var(--text)',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                boxShadow: branchReqStatusFilter === 'all' ? '0 2px 6px rgba(13,148,136,0.3)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span>🔘 الكل</span>
+              <span style={{
+                background: branchReqStatusFilter === 'all' ? 'rgba(255,255,255,0.25)' : 'var(--surface, #ffffff)',
+                color: branchReqStatusFilter === 'all' ? '#ffffff' : 'var(--muted)',
+                padding: '1px 7px',
+                borderRadius: '10px',
+                fontSize: '11px',
+                fontWeight: 700
+              }}>
+                {branchReqStats.total}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setBranchReqStatusFilter('pending')}
+              style={{
+                flex: isMobileScreen ? '1 1 45%' : 'none',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '12.5px',
+                fontWeight: branchReqStatusFilter === 'pending' ? 800 : 600,
+                background: branchReqStatusFilter === 'pending' ? '#d97706' : 'transparent',
+                color: branchReqStatusFilter === 'pending' ? '#ffffff' : 'var(--text)',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                boxShadow: branchReqStatusFilter === 'pending' ? '0 2px 6px rgba(217,119,6,0.3)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span>⏳ طلبات قيد الاعتماد</span>
+              <span style={{
+                background: branchReqStatusFilter === 'pending' ? 'rgba(255,255,255,0.25)' : 'rgba(217, 119, 6, 0.15)',
+                color: branchReqStatusFilter === 'pending' ? '#ffffff' : '#b45309',
+                padding: '1px 7px',
+                borderRadius: '10px',
+                fontSize: '11px',
+                fontWeight: 700
+              }}>
+                {branchReqStats.pending}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setBranchReqStatusFilter('approved')}
+              style={{
+                flex: isMobileScreen ? '1 1 45%' : 'none',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '12.5px',
+                fontWeight: branchReqStatusFilter === 'approved' ? 800 : 600,
+                background: branchReqStatusFilter === 'approved' ? '#16a34a' : 'transparent',
+                color: branchReqStatusFilter === 'approved' ? '#ffffff' : 'var(--text)',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                boxShadow: branchReqStatusFilter === 'approved' ? '0 2px 6px rgba(22,163,74,0.3)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span>✅ طلبات تم اعتمادها</span>
+              <span style={{
+                background: branchReqStatusFilter === 'approved' ? 'rgba(255,255,255,0.25)' : 'rgba(22, 163, 74, 0.15)',
+                color: branchReqStatusFilter === 'approved' ? '#ffffff' : '#15803d',
+                padding: '1px 7px',
+                borderRadius: '10px',
+                fontSize: '11px',
+                fontWeight: 700
+              }}>
+                {branchReqStats.approved}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setBranchReqStatusFilter('rejected')}
+              style={{
+                flex: isMobileScreen ? '1 1 45%' : 'none',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '12.5px',
+                fontWeight: branchReqStatusFilter === 'rejected' ? 800 : 600,
+                background: branchReqStatusFilter === 'rejected' ? '#dc2626' : 'transparent',
+                color: branchReqStatusFilter === 'rejected' ? '#ffffff' : 'var(--text)',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                boxShadow: branchReqStatusFilter === 'rejected' ? '0 2px 6px rgba(220,38,38,0.3)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span>❌ طلبات مرفوضة</span>
+              <span style={{
+                background: branchReqStatusFilter === 'rejected' ? 'rgba(255,255,255,0.25)' : 'rgba(220, 38, 38, 0.15)',
+                color: branchReqStatusFilter === 'rejected' ? '#ffffff' : '#b91c1c',
+                padding: '1px 7px',
+                borderRadius: '10px',
+                fontSize: '11px',
+                fontWeight: 700
+              }}>
+                {branchReqStats.rejected}
+              </span>
+            </button>
           </div>
 
           {isMobileScreen ? (
@@ -3226,7 +3723,7 @@ export default function BranchManagerView({
                 boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
               }}
             >
-              
+
               {/* Modal Top Header */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid var(--border)', padding: '14px 20px', flexShrink: 0, background: 'var(--surface)', flexWrap: 'wrap', gap: '10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -3242,13 +3739,32 @@ export default function BranchManagerView({
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {getFormattedRequestBadge(previewModalReq.type, previewModalReq.leaveType, previewModalReq.targetAction)}
+                  {Boolean(
+                    previewModalReq.submittedByBranchManager ||
+                    previewModalReq.createdRole === 'branch' ||
+                    previewModalReq.createdRole === 'branch_manager' ||
+                    previewModalReq.creatorRole === 'branch' ||
+                    previewModalReq.creatorRole === 'branch_manager' ||
+                    previewModalReq.createdBy === 'branch' ||
+                    previewModalReq.senderRole === 'branch' ||
+                    previewModalReq.submittedBy === 'branch_manager' ||
+                    previewModalReq.submittedBy === 'branch' ||
+                    previewModalReq.type === 'roster_update' ||
+                    previewModalReq.type === 'roster_edit' ||
+                    previewModalReq.type === 'roster_edit_request' ||
+                    (typeof previewModalReq.details === 'string' && (previewModalReq.details.includes('قام مدير فرع') || previewModalReq.details.includes('مدير الفرع')))
+                  ) && (
+                    <span className="badge" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', fontWeight: '800' }}>
+                      🏢 مرسل من مدير الفرع
+                    </span>
+                  )}
                   <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '14px' }} onClick={() => setPreviewModalReq(null)}>✕ إغلاق</button>
                 </div>
               </div>
 
               {/* Scrollable Modal Body */}
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '13.5px', WebkitOverflowScrolling: 'touch' }}>
-                
+
                 {/* 1. Employee Info Card */}
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
                   <h4 style={{ margin: '0 0 12px', color: '#1e293b', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -3258,7 +3774,7 @@ export default function BranchManagerView({
                     <div>
                       <span style={{ color: 'var(--muted)', fontSize: '12px' }}>اسم الموظف:</span>
                       <div style={{ fontWeight: 'bold', color: 'var(--text)', fontSize: '14px' }}>
-                        {empObj ? getEmpDisplayName(empObj) : (previewModalReq.employeeName || 'غير معروف')}
+                        {empObj ? getEmpDisplayName(empObj) : ((previewModalReq.employeeName && previewModalReq.employeeName !== 'branch_manager' && previewModalReq.employeeName !== 'branch') ? previewModalReq.employeeName : (previewModalReq.submittedBy && previewModalReq.submittedBy !== 'branch_manager' && previewModalReq.submittedBy !== 'branch' ? previewModalReq.submittedBy : 'غير معروف'))}
                       </div>
                     </div>
                     <div>
@@ -3293,7 +3809,26 @@ export default function BranchManagerView({
                   <div style={{ background: '#fff', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
                     <span style={{ fontSize: '12px', color: 'var(--muted)' }}>موقف موافقتك (مدير الفرع):</span>
                     <div style={{ marginTop: '4px', fontWeight: 'bold', fontSize: '13.5px' }}>
-                      {isBranchNotReq ? (
+                      {Boolean(
+                        previewModalReq.submittedByBranchManager ||
+                        previewModalReq.createdRole === 'branch' ||
+                        previewModalReq.createdRole === 'branch_manager' ||
+                        previewModalReq.creatorRole === 'branch' ||
+                        previewModalReq.creatorRole === 'branch_manager' ||
+                        previewModalReq.createdBy === 'branch' ||
+                        previewModalReq.senderRole === 'branch' ||
+                        previewModalReq.submittedBy === 'branch_manager' ||
+                        previewModalReq.submittedBy === 'branch' ||
+                        previewModalReq.type === 'roster_update' ||
+                        previewModalReq.type === 'roster_edit' ||
+                        previewModalReq.type === 'roster_edit_request' ||
+                        (typeof previewModalReq.details === 'string' && (previewModalReq.details.includes('قام مدير فرع') || previewModalReq.details.includes('مدير الفرع')))
+                      ) ? (
+                        <span style={{ color: '#16a34a', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                          <span>🏢</span>
+                          <span>مرسل من طرفك للإدارة العليا</span>
+                        </span>
+                      ) : isBranchNotReq ? (
                         <span style={{ color: '#475569' }}>🔒 موجهة للإدارة العليا مباشرة</span>
                       ) : previewModalReq.branchApproved ? (
                         <span style={{ color: '#16a34a' }}>🟢 معتمد وموافق عليه من طرفك</span>
@@ -3576,7 +4111,7 @@ export default function BranchManagerView({
                         <div>
                           <span style={{ fontSize: '12px', color: '#92400e' }}>يوم وتاريخ الإذن:</span>
                           <div style={{ fontWeight: 'bold', color: '#78350f' }}>
-                            📅 {previewModalReq.date || previewModalReq.startDate || '—'} { (previewModalReq.date || previewModalReq.startDate) && `(${getArabicWeekday(previewModalReq.date || previewModalReq.startDate)})` }
+                            📅 {previewModalReq.date || previewModalReq.startDate || '—'} {(previewModalReq.date || previewModalReq.startDate) && `(${getArabicWeekday(previewModalReq.date || previewModalReq.startDate)})`}
                           </div>
                         </div>
                         <div>
@@ -3609,7 +4144,7 @@ export default function BranchManagerView({
                           {previewModalReq.employeeName || empObj?.name || 'مقدم الطلب'} {empObj?.code ? `(كود: ${empObj.code})` : ''}
                         </div>
                         <div style={{ fontSize: '13px', color: '#6d28d9', marginTop: '4px' }}>
-                          📅 تاريخ شيفت الموظف: <strong>{previewModalReq.requesterDate || previewModalReq.startDate || previewModalReq.date || '—'}</strong> { (previewModalReq.requesterDate || previewModalReq.startDate || previewModalReq.date) && `(${getArabicWeekday(previewModalReq.requesterDate || previewModalReq.startDate || previewModalReq.date)})` }
+                          📅 تاريخ شيفت الموظف: <strong>{previewModalReq.requesterDate || previewModalReq.startDate || previewModalReq.date || '—'}</strong> {(previewModalReq.requesterDate || previewModalReq.startDate || previewModalReq.date) && `(${getArabicWeekday(previewModalReq.requesterDate || previewModalReq.startDate || previewModalReq.date)})`}
                         </div>
                       </div>
 
@@ -3619,7 +4154,7 @@ export default function BranchManagerView({
                           {previewModalReq.targetEmpName || targetEmpObj?.name || 'الزميل البديل'} {targetEmpObj?.code ? `(كود: ${targetEmpObj.code})` : ''}
                         </div>
                         <div style={{ fontSize: '13px', color: '#6d28d9', marginTop: '4px' }}>
-                          📅 تاريخ شيفت الزميل: <strong>{previewModalReq.targetDate || previewModalReq.peerDate || '—'}</strong> { (previewModalReq.targetDate || previewModalReq.peerDate) && `(${getArabicWeekday(previewModalReq.targetDate || previewModalReq.peerDate)})` }
+                          📅 تاريخ شيفت الزميل: <strong>{previewModalReq.targetDate || previewModalReq.peerDate || '—'}</strong> {(previewModalReq.targetDate || previewModalReq.peerDate) && `(${getArabicWeekday(previewModalReq.targetDate || previewModalReq.peerDate)})`}
                         </div>
                       </div>
                     </div>
@@ -3791,10 +4326,10 @@ export default function BranchManagerView({
                         <span style={{ fontSize: '12px', color: '#0f766e' }}>نوع الإجراء المطلوب:</span>
                         <div style={{ fontWeight: 'bold', color: '#115e59', fontSize: '14px' }}>
                           {previewModalReq.targetAction === 'shift_start' ? '🟢 تسجيل دخول (بداية الوردية)' :
-                           previewModalReq.targetAction === 'shift_end' ? '🔴 تسجيل خروج (نهاية الوردية)' :
-                           previewModalReq.targetAction === 'break_start' ? '☕ بدء استراحة (بريك)' :
-                           previewModalReq.targetAction === 'break_end' ? '⏱️ انتهاء استراحة (بريك)' :
-                           (previewModalReq.actionLabel || previewModalReq.targetAction || 'بصمة حية')}
+                            previewModalReq.targetAction === 'shift_end' ? '🔴 تسجيل خروج (نهاية الوردية)' :
+                              previewModalReq.targetAction === 'break_start' ? '☕ بدء استراحة (بريك)' :
+                                previewModalReq.targetAction === 'break_end' ? '⏱️ انتهاء استراحة (بريك)' :
+                                  (previewModalReq.actionLabel || previewModalReq.targetAction || 'بصمة حية')}
                         </div>
                       </div>
                       <div>
@@ -3988,7 +4523,7 @@ export default function BranchManagerView({
 
                 {/* ── ROSTER EDIT DETAILS & COMPARISON (الجدول السابق مقابل الجديد) ── */}
                 {isRoster && (() => {
-                  const existingRoster = (state.rosters || []).find(r => 
+                  const existingRoster = (state.rosters || []).find(r =>
                     (String(r.employeeId) === String(previewModalReq.employeeId) || (previewModalReq.employeeCode && String(r.employeeCode) === String(previewModalReq.employeeCode))) &&
                     (!previewModalReq.month || r.month === previewModalReq.month) &&
                     (String(r.branchId || '') === String(previewModalReq.branchId || '') || !previewModalReq.branchId)
@@ -4022,12 +4557,12 @@ export default function BranchManagerView({
                   ]));
                   const hasCustomDates = customDateKeys.length > 0;
 
-                  const displayList = hasCustomDates 
+                  const displayList = hasCustomDates
                     ? customDateKeys.sort().map(dateKey => {
-                        const d = new Date(dateKey + 'T00:00:00');
-                        const arDay = !isNaN(d.getTime()) ? d.toLocaleDateString('ar-EG', { weekday: 'long' }) : '';
-                        return { key: dateKey, label: arDay ? `${dateKey} (${arDay})` : dateKey, isDate: true };
-                      })
+                      const d = new Date(dateKey + 'T00:00:00');
+                      const arDay = !isNaN(d.getTime()) ? d.toLocaleDateString('ar-EG', { weekday: 'long' }) : '';
+                      return { key: dateKey, label: arDay ? `${dateKey} (${arDay})` : dateKey, isDate: true };
+                    })
                     : standardDays;
 
                   return (
@@ -4083,7 +4618,7 @@ export default function BranchManagerView({
                               return (
                                 <tr key={dayItem.key} style={{ background: isChanged ? '#fffbeb' : '#fff', borderBottom: '1px solid #e2e8f0' }}>
                                   <td style={{ fontWeight: 'bold', color: '#334155' }}>{dayItem.label}</td>
-                                  
+
                                   {/* Previous Schedule */}
                                   <td style={{ background: isOldOff ? '#fef2f2' : 'transparent' }}>
                                     {isOldOff ? (
@@ -4290,9 +4825,9 @@ export default function BranchManagerView({
                     const attName = previewModalReq.attachmentName || previewModalReq.fileName || (typeof attData === 'string' && attData.startsWith('data:video/') ? 'فيديو توثيق المخالفة.mp4' : typeof attData === 'string' && attData.startsWith('data:application/pdf') ? 'مستند_التحقيق.pdf' : 'مستند / مرفق رسمي');
                     const attType = previewModalReq.attachmentType || (
                       (typeof attData === 'string' && (attData.startsWith('data:image/') || /\.(jpg|jpeg|png|webp|gif)$/i.test(attData) || previewModalReq.photoUrl)) ? 'image' :
-                      (typeof attData === 'string' && (attData.startsWith('data:application/pdf') || /\.pdf$/i.test(attData) || /\.pdf$/i.test(attName))) ? 'pdf' :
-                      (typeof attData === 'string' && (attData.startsWith('data:video/') || /\.(mp4|webm|mov|ogg)$/i.test(attData) || previewModalReq.videoUrl)) ? 'video' :
-                      'image'
+                        (typeof attData === 'string' && (attData.startsWith('data:application/pdf') || /\.pdf$/i.test(attData) || /\.pdf$/i.test(attName))) ? 'pdf' :
+                          (typeof attData === 'string' && (attData.startsWith('data:video/') || /\.(mp4|webm|mov|ogg)$/i.test(attData) || previewModalReq.videoUrl)) ? 'video' :
+                            'image'
                     );
 
                     if (!attData) return null;
@@ -4771,8 +5306,8 @@ export default function BranchManagerView({
 
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px', WebkitOverflowScrolling: 'touch' }}>
                   {(() => {
-                    const resolvedRoster = (state.rosters || []).find((r) => 
-                      r && (String(r.employeeId) === String(previewRosterEmp?.id) || (previewRosterEmp?.code && String(r.employeeCode || r.employeeId) === String(previewRosterEmp.code))) && 
+                    const resolvedRoster = (state.rosters || []).find((r) =>
+                      r && (String(r.employeeId) === String(previewRosterEmp?.id) || (previewRosterEmp?.code && String(r.employeeCode || r.employeeId) === String(previewRosterEmp.code))) &&
                       (r.month === selectedMonth || !r.month)
                     ) || findEmployeeRoster(previewRosterEmp?.id, selectedMonth, state, currentBranch?.id);
 
@@ -5054,8 +5589,8 @@ export default function BranchManagerView({
                 📋 سجل البصمات والورديات — موظفي الفرع ({selectedMonth})
               </h3>
               <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
-                {punchesViewMode === 'employees' 
-                  ? 'كشف موظفي الفرع: معاينة سجل بصمات كل موظف وتقديم طلبات تعديل البصمات للإدارة العليا' 
+                {punchesViewMode === 'employees'
+                  ? 'كشف موظفي الفرع: معاينة سجل بصمات كل موظف وتقديم طلبات تعديل البصمات للإدارة العليا'
                   : 'الكشف المجمع لكافة بصمات وورديات الفرع المسجلة بالتاريخ'}
               </p>
             </div>
@@ -5120,9 +5655,9 @@ export default function BranchManagerView({
               {/* Employee Filter (Shown in All Punches Mode) */}
               {punchesViewMode === 'all_punches' && (
                 <div style={{ maxWidth: isMobileScreen ? '100%' : '200px', flex: isMobileScreen ? 1 : 'none' }}>
-                  <select 
-                    value={selectedPunchEmpId} 
-                    onChange={(e) => setSelectedPunchEmpId(e.target.value)} 
+                  <select
+                    value={selectedPunchEmpId}
+                    onChange={(e) => setSelectedPunchEmpId(e.target.value)}
                     style={{ width: '100%', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '12.5px' }}
                   >
                     <option value="">-- جميع موظفي الفرع --</option>
@@ -5215,9 +5750,10 @@ export default function BranchManagerView({
                         const empBreak = empShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0);
                         const manualCount = getEmployeeManualPunchesCount(emp.id, state, matchesDateRange);
 
-                        const activeShift = state.activeShifts?.[emp.id] || state.activeShifts?.[String(emp.id)] || (emp.code && state.activeShifts?.[emp.code]);
-                        const isLiveActive = Boolean(activeShift && activeShift.date === todayStrNow);
-                        const todayCompleted = empShifts.find(s => s.date === todayStrNow && s.timeOut && s.timeOut !== '—');
+                        const activeShift = getEmployeeLiveActiveShift(emp, state);
+                        const isLiveActive = Boolean(activeShift && (String(activeShift.branchId || emp.branchId) === cIdStr || !activeShift.branchId));
+                        const todayCompleted = empShifts.find(s => s.date === todayStrNow && s.timeOut && s.timeOut !== '—') ||
+                          (state.shifts || []).find(s => (String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code))) && s.date === todayStrNow && s.timeOut && s.timeOut !== '—');
 
                         return (
                           <div key={emp.id} className="card" style={{
@@ -5367,9 +5903,10 @@ export default function BranchManagerView({
                             const empBreak = empShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0);
                             const manualCount = getEmployeeManualPunchesCount(emp.id, state, matchesDateRange);
 
-                            const activeShift = state.activeShifts?.[emp.id] || state.activeShifts?.[String(emp.id)] || (emp.code && state.activeShifts?.[emp.code]);
-                            const isLiveActive = Boolean(activeShift && activeShift.date === todayStrNow);
-                            const todayCompleted = empShifts.find(s => s.date === todayStrNow && s.timeOut && s.timeOut !== '—');
+                            const activeShift = getEmployeeLiveActiveShift(emp, state);
+                            const isLiveActive = Boolean(activeShift && (String(activeShift.branchId || emp.branchId) === cIdStr || !activeShift.branchId));
+                            const todayCompleted = empShifts.find(s => s.date === todayStrNow && s.timeOut && s.timeOut !== '—') ||
+                              (state.shifts || []).find(s => (String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code))) && s.date === todayStrNow && s.timeOut && s.timeOut !== '—');
 
                             return (
                               <tr key={emp.id} style={{ background: isLiveActive ? 'rgba(236, 253, 245, 0.4)' : 'transparent' }}>
@@ -5771,14 +6308,13 @@ export default function BranchManagerView({
                   <th>وقت الدخول</th>
                   <th>وقت الخروج</th>
                   <th>ساعات البريك</th>
-                  <th>صافي ساعات العمل</th>
-                  <th>المبلغ المستحق</th>
-                  <th>الملاحظات</th>
+                  <th style={{ textAlign: 'center' }}>صافي ساعات العمل</th>
+                  <th style={{ textAlign: 'center' }}>الملاحظات</th>
                 </tr>
               </thead>
               <tbody>
                 {managerSalaryMetrics.shiftsList.length === 0 ? (
-                  <tr><td colSpan="9" style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)' }}>لا توجد بصمات مسجلة باسمك عن هذا الشهر.</td></tr>
+                  <tr><td colSpan="8" style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)' }}>لا توجد بصمات مسجلة باسمك عن هذا الشهر.</td></tr>
                 ) : (
                   managerSalaryMetrics.shiftsList.map((s, idx) => {
                     const shiftMetrics = getShiftHoursMetrics(s, state);
@@ -5810,25 +6346,46 @@ export default function BranchManagerView({
                             <span style={{ color: 'var(--muted)' }}>—</span>
                           )}
                         </td>
-                        <td style={{ fontWeight: '700', color: '#0d9488' }}>
-                          <div>{formatMoney(totalH)} ساعة</div>
-                          {shiftMetrics.overtimeHours > 0 && (
-                            <div style={{ fontSize: '10.5px', marginTop: '2px', fontWeight: 700, color: shiftMetrics.isOvertimeApproved ? '#16a34a' : shiftMetrics.overtimeStatus === 'rejected' ? '#dc2626' : '#b45309' }}>
-                              {shiftMetrics.isOvertimeApproved && `(أساسي: ${formatMoney(regH)} س + إضافي: ${formatMoney(shiftMetrics.overtimeHours)} س)`}
-                              {shiftMetrics.overtimeStatus === 'pending' && `(أساسي: ${formatMoney(regH)} س + إضافي: ${formatMoney(shiftMetrics.overtimeHours)} س قيد الاعتماد)`}
-                              {shiftMetrics.overtimeStatus === 'rejected' && `(معتمد: ${formatMoney(regH)} س | إضافي مرفوض: ${formatMoney(shiftMetrics.overtimeHours)} س)`}
-                            </div>
-                          )}
+                        <td style={{ fontWeight: '700', color: '#0d9488', textAlign: 'center', fontSize: '13.5px' }}>
+                          {formatMoney(totalH)} س
                         </td>
-                        <td style={{ fontWeight: '700', color: '#16a34a' }}>
-                          <div>{formatMoney(shiftEarned)} ج.م</div>
-                          {!shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0 && (
-                            <div style={{ fontSize: '9.5px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
-                              (+{formatMoney(shiftMetrics.overtimeHours * managerSalaryMetrics.hourlyRate)} ج.م معلق)
-                            </div>
-                          )}
+                        <td style={{ textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDayDetails({
+                              punch: s,
+                              date: s.date,
+                              dayName: getArabicWeekday(s.date),
+                              employee: managerEmp,
+                              hourlyRate: managerSalaryMetrics.hourlyRate,
+                              regH,
+                              otH: shiftMetrics.overtimeHours,
+                              totalH,
+                              breakH: s.breakHours,
+                              shiftEarned,
+                              effectiveOtStatus: shiftMetrics.isOvertimeApproved ? 'approved' : shiftMetrics.overtimeStatus,
+                              effectiveOtHours: shiftMetrics.overtimeHours,
+                              cleanNotes: s.note || 'تسجيل بصمة حية',
+                              source: s.source || 'kiosk'
+                            })}
+                            title="عرض تفاصيل اليوم"
+                            style={{
+                              padding: '5px 10px',
+                              borderRadius: '8px',
+                              border: '1px solid #cbd5e1',
+                              background: '#f8fafc',
+                              cursor: 'pointer',
+                              fontSize: '15px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#0f766e',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                            }}
+                          >
+                            📋
+                          </button>
                         </td>
-                        <td style={{ fontSize: '12px', color: 'var(--muted)' }}>{s.note || 'تسجيل بصمة حية'}</td>
                       </tr>
                     );
                   })
@@ -5845,8 +6402,7 @@ export default function BranchManagerView({
                         {formatMoney(managerSalaryMetrics.totalBreakHours)} س
                       </span>
                     </td>
-                    <td style={{ color: '#0d9488' }}>{formatMoney(managerSalaryMetrics.totalHours)} ساعة</td>
-                    <td style={{ color: '#16a34a' }}>{formatMoney(managerSalaryMetrics.baseEarnings)} ج.م</td>
+                    <td style={{ color: '#0d9488', textAlign: 'center' }}>{formatMoney(managerSalaryMetrics.totalHours)} س</td>
                     <td></td>
                   </tr>
                 </tfoot>
@@ -6072,6 +6628,19 @@ export default function BranchManagerView({
           saveState={saveState}
           showToast={showToast}
           currentBranch={currentBranch}
+        />
+      )}
+
+      {/* ── 11.6. BRANCH WHATSAPP DIRECTIVES TAB ── */}
+      {activeTab === 'branch-whatsapp' && (
+        <BranchWhatsAppModule
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          currentBranch={liveBranch || currentBranch}
+          managerEmp={managerEmp}
+          showToast={showToast}
+          isMobileScreen={isMobileScreen}
         />
       )}
 
@@ -6323,7 +6892,7 @@ export default function BranchManagerView({
       {/* ───────────────────────────────────────────────────────────── */}
       {activeTab === 'branch-sent-requests' && (
         <div className="card settings-card fade-in" style={{ padding: isMobileScreen ? '14px' : '22px' }}>
-          
+
           {/* Header */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
             <div>
@@ -6752,22 +7321,22 @@ export default function BranchManagerView({
                       const empId = e.target.value;
                       const emp = branchEmployees.find(em => String(em.id) === String(empId));
                       const bH = emp?.breakHours || emp?.defaultBreakHours || emp?.branchesDetails?.[0]?.breakHours || '0';
-                      setManualPunchData({ 
-                        ...manualPunchData, 
-                        employeeId: empId, 
+                      setManualPunchData({
+                        ...manualPunchData,
+                        employeeId: empId,
                         breakHours: String(bH),
                         selectedDays: manualPunchData.mode === 'multiple' && manualPunchData.startDate && manualPunchData.endDate
                           ? generateBatchDaysList(
-                              manualPunchData.startDate,
-                              manualPunchData.endDate,
-                              empId,
-                              manualPunchData.timeIn || '09:00',
-                              manualPunchData.timeOut || '17:00',
-                              String(bH),
-                              manualPunchData.punchType || 'full',
-                              manualPunchData.excludeOffDays !== false,
-                              state
-                            )
+                            manualPunchData.startDate,
+                            manualPunchData.endDate,
+                            empId,
+                            manualPunchData.timeIn || '09:00',
+                            manualPunchData.timeOut || '17:00',
+                            String(bH),
+                            manualPunchData.punchType || 'full',
+                            manualPunchData.excludeOffDays !== false,
+                            state
+                          )
                           : manualPunchData.selectedDays
                       });
                     }}
@@ -7565,8 +8134,9 @@ export default function BranchManagerView({
               if (s.status === 'cancelled' || s.isCancelled) return false;
               const isMatch = String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code));
               if (!isMatch) return false;
-              const isThisBranchShift = String(s.branchId) === cIdStr || (!s.branchId && String(emp.branchId) === cIdStr);
+              const isThisBranchShift = String(s.branchId) === cIdStr || (!s.branchId && (String(emp.branchId) === cIdStr || (emp.branchesDetails && emp.branchesDetails.some(bd => String(bd.branchId) === cIdStr)))) || !cIdStr;
               if (!isThisBranchShift) return false;
+              return matchesDateRange ? matchesDateRange(s.date) : true;
             }).sort((a, b) => {
               if (a?.isLiveActive && !b?.isLiveActive) return -1;
               if (!a?.isLiveActive && b?.isLiveActive) return 1;
@@ -7575,6 +8145,18 @@ export default function BranchManagerView({
               if (dateA !== dateB) return dateB.localeCompare(dateA);
               return String(b?.timeIn || '').localeCompare(String(a?.timeIn || ''));
             });
+
+            // Include current active live shift if on duty and not yet finalized
+            const currentLiveShift = getEmployeeLiveActiveShift(emp, state);
+            if (currentLiveShift && !empShifts.some(s => s.date === currentLiveShift.date && s.timeIn === currentLiveShift.timeIn)) {
+              empShifts.unshift({
+                ...currentLiveShift,
+                isLiveActive: true,
+                timeOut: '—',
+                hours: 0,
+                breakHours: currentLiveShift.breakHours || 0
+              });
+            }
 
             const empHours = empShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
             const empBreak = empShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0);
@@ -7833,26 +8415,48 @@ export default function BranchManagerView({
                                     <span style={{ color: 'var(--muted)' }}>—</span>
                                   )}
                                 </td>
-                                <td style={{ textAlign: 'center', fontWeight: '800', color: '#0d9488' }}>
+                                <td style={{ textAlign: 'center', fontWeight: '800', color: '#0d9488', fontSize: '13.5px' }}>
                                   {formatMoney(effHours)} س
-                                  {hasPerm && permHours > 0 && (
-                                    <div style={{ fontSize: '10.5px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
-                                      (فعلي: {formatMoney(Math.max(0, effHours - permHours))} س + إذن: {formatMoney(permHours)} س)
-                                    </div>
-                                  )}
                                 </td>
-                                <td style={{ fontSize: '12px' }}>
-                                  {isManualShift && (
-                                    <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, marginLeft: '5px' }}>
-                                      🖐️ بصمة يدوية
-                                    </span>
-                                  )}
-                                  {hasPerm && (
-                                    <span style={{ background: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, marginLeft: '5px' }}>
-                                      ⏰ إذن معتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})
-                                    </span>
-                                  )}
-                                  <span style={{ color: 'var(--text-muted)' }}>{s.note || (isManualShift ? 'بصمة يدوية معتمدة' : 'تسجيل اعتيادي')}</span>
+                                <td style={{ textAlign: 'center' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedDayDetails({
+                                      punch: s,
+                                      date: s.date,
+                                      dayName: getArabicWeekday(s.date),
+                                      employee: emp,
+                                      hourlyRate: emp.hourlyRate || (emp.salary ? (parseFloat(emp.salary) / (parseFloat(emp.workDaysPerMonth || 26) * parseFloat(emp.workHoursPerDay || 8))) : 0),
+                                      regH: s.regularHours || effHours,
+                                      otH: s.overtimeHours || 0,
+                                      totalH: effHours,
+                                      breakH: s.breakHours,
+                                      hasPerm,
+                                      perm,
+                                      permHours,
+                                      effectiveOtStatus: s.overtimeStatus,
+                                      effectiveOtHours: s.overtimeHours,
+                                      isManualShift,
+                                      cleanNotes: s.note || '',
+                                      source: s.source || 'kiosk'
+                                    })}
+                                    title="عرض تفاصيل اليوم"
+                                    style={{
+                                      padding: '5px 10px',
+                                      borderRadius: '8px',
+                                      border: '1px solid #cbd5e1',
+                                      background: '#f8fafc',
+                                      cursor: 'pointer',
+                                      fontSize: '15px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      color: '#0f766e',
+                                      boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                                    }}
+                                  >
+                                    📋
+                                  </button>
                                 </td>
                                 <td style={{ textAlign: 'center' }}>
                                   <button
@@ -8019,33 +8623,33 @@ export default function BranchManagerView({
             <form onSubmit={handleSubmitBonusRequest} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', margin: 0 }}>
               <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px', WebkitOverflowScrolling: 'touch' }}>
                 <div className="field">
-                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>اختر الموظف:</label>
-                <select
-                  value={bonusData.employeeId}
-                  onChange={(e) => setBonusData({ ...bonusData, employeeId: e.target.value })}
-                  required
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                >
-                  <option value="">-- اختر موظف من الفرع --</option>
-                  {branchEmployees.map((e) => (
-                    <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
-                  ))}
-                </select>
-              </div>
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>اختر الموظف:</label>
+                  <select
+                    value={bonusData.employeeId}
+                    onChange={(e) => setBonusData({ ...bonusData, employeeId: e.target.value })}
+                    required
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  >
+                    <option value="">-- اختر موظف من الفرع --</option>
+                    {branchEmployees.map((e) => (
+                      <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+                    ))}
+                  </select>
+                </div>
 
-              <div className="field">
-                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>مبلغ المكافأة المقترح (ج.م):</label>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  placeholder="مثال: 500"
-                  value={bonusData.amount}
-                  onChange={(e) => setBonusData({ ...bonusData, amount: e.target.value })}
-                  required
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                />
-              </div>
+                <div className="field">
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>مبلغ المكافأة المقترح (ج.م):</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="مثال: 500"
+                    value={bonusData.amount}
+                    onChange={(e) => setBonusData({ ...bonusData, amount: e.target.value })}
+                    required
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  />
+                </div>
 
                 <div className="field">
                   <label style={{ fontWeight: 'bold', fontSize: '13px' }}>سبب استحقاق المكافأة ومبررات مدير الفرع:</label>
@@ -8281,7 +8885,7 @@ export default function BranchManagerView({
               boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
             }}
           >
-            
+
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1.5px solid #ccfbf1', flexShrink: 0 }}>
               <h3 style={{ margin: 0, fontSize: '17.5px', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -8293,244 +8897,244 @@ export default function BranchManagerView({
 
             <form onSubmit={handleSubmitBranchEvaluation} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', margin: 0 }}>
               <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '16px', WebkitOverflowScrolling: 'touch' }}>
-              
-              {/* Month Switcher System (Requirement 28) */}
-              <div style={{
-                background: 'linear-gradient(135deg, #f0fdfa, #f8fafc)',
-                border: '1.5px solid #99f6e4',
-                borderRadius: '12px',
-                padding: '12px 16px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '10px'
-              }}>
-                <span style={{ fontSize: '13px', fontWeight: '800', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span>🗓️</span>
-                  <span>شهر التقييم المستهدف:</span>
-                </span>
-                
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => {
-                      const cur = bmEvalMonth || selectedMonth || getRealTodayStr().slice(0, 7);
-                      const [y, m] = cur.split('-').map(Number);
-                      const d = new Date(y, m - 2, 1);
-                      setBmEvalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-                    }}
-                    style={{ padding: '3px 8px', fontSize: '12px', background: '#fff', border: '1px solid #99f6e4', borderRadius: '6px' }}
-                    title="الشهر السابق"
-                  >
-                    ◀
-                  </button>
 
-                  <input
-                    type="month"
-                    value={bmEvalMonth || selectedMonth || getRealTodayStr().slice(0, 7)}
-                    onChange={(e) => setBmEvalMonth(e.target.value)}
-                    style={{
-                      padding: '5px 10px',
-                      borderRadius: '8px',
-                      border: '1.5px solid #0d9488',
-                      fontWeight: 'bold',
-                      fontSize: '13px',
-                      color: '#0f766e',
-                      background: '#fff',
-                      cursor: 'pointer'
-                    }}
-                    required
-                  />
+                {/* Month Switcher System (Requirement 28) */}
+                <div style={{
+                  background: 'linear-gradient(135deg, #f0fdfa, #f8fafc)',
+                  border: '1.5px solid #99f6e4',
+                  borderRadius: '12px',
+                  padding: '12px 16px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '10px'
+                }}>
+                  <span style={{ fontSize: '13px', fontWeight: '800', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>🗓️</span>
+                    <span>شهر التقييم المستهدف:</span>
+                  </span>
 
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => {
-                      const cur = bmEvalMonth || selectedMonth || getRealTodayStr().slice(0, 7);
-                      const [y, m] = cur.split('-').map(Number);
-                      const d = new Date(y, m, 1);
-                      setBmEvalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-                    }}
-                    style={{ padding: '3px 8px', fontSize: '12px', background: '#fff', border: '1px solid #99f6e4', borderRadius: '6px' }}
-                    title="الشهر التالي"
-                  >
-                    ▶
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        const cur = bmEvalMonth || selectedMonth || getRealTodayStr().slice(0, 7);
+                        const [y, m] = cur.split('-').map(Number);
+                        const d = new Date(y, m - 2, 1);
+                        setBmEvalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                      }}
+                      style={{ padding: '3px 8px', fontSize: '12px', background: '#fff', border: '1px solid #99f6e4', borderRadius: '6px' }}
+                      title="الشهر السابق"
+                    >
+                      ◀
+                    </button>
+
+                    <input
+                      type="month"
+                      value={bmEvalMonth || selectedMonth || getRealTodayStr().slice(0, 7)}
+                      onChange={(e) => setBmEvalMonth(e.target.value)}
+                      style={{
+                        padding: '5px 10px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #0d9488',
+                        fontWeight: 'bold',
+                        fontSize: '13px',
+                        color: '#0f766e',
+                        background: '#fff',
+                        cursor: 'pointer'
+                      }}
+                      required
+                    />
+
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        const cur = bmEvalMonth || selectedMonth || getRealTodayStr().slice(0, 7);
+                        const [y, m] = cur.split('-').map(Number);
+                        const d = new Date(y, m, 1);
+                        setBmEvalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                      }}
+                      style={{ padding: '3px 8px', fontSize: '12px', background: '#fff', border: '1px solid #99f6e4', borderRadius: '6px' }}
+                      title="الشهر التالي"
+                    >
+                      ▶
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              {/* Employee Selector (Requirement 28) */}
-              <div className="field">
-                <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#1e293b' }}>اختر الموظف المراد تقييمه *</label>
-                <select
-                  value={bmEvalEmpId}
-                  onChange={(e) => setBmEvalEmpId(e.target.value)}
-                  required
-                  style={{ width: '100%', padding: '9px 14px', borderRadius: '10px', border: '1.5px solid #0d9488', fontWeight: 'bold', fontSize: '13.5px', background: '#fff' }}
-                >
-                  <option value="">-- اختر موظف من طاقم الفرع --</option>
-                  {branchEmployees
-                    .filter(e => {
-                      if (!e) return false;
-                      if (currentBranch?.managerId && String(e.id) === String(currentBranch.managerId)) return false;
-                      if (currentBranch?.managerCode && String(e.code) === String(currentBranch.managerCode)) return false;
-                      if (state.currentUserId && String(e.id) === String(state.currentUserId)) return false;
-                      if (e.jobTitle && (e.jobTitle.includes('مدير فرع') || e.jobTitle.includes('مدير الفرع'))) return false;
-                      return true;
-                    })
-                    .map((e) => (
-                      <option key={e.id} value={e.id}>
-                        {e.name} (كود: {e.code} — الوظيفة: {e.jobTitle || 'موظف'})
-                      </option>
-                    ))}
-                </select>
-              </div>
+                {/* Employee Selector (Requirement 28) */}
+                <div className="field">
+                  <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#1e293b' }}>اختر الموظف المراد تقييمه *</label>
+                  <select
+                    value={bmEvalEmpId}
+                    onChange={(e) => setBmEvalEmpId(e.target.value)}
+                    required
+                    style={{ width: '100%', padding: '9px 14px', borderRadius: '10px', border: '1.5px solid #0d9488', fontWeight: 'bold', fontSize: '13.5px', background: '#fff' }}
+                  >
+                    <option value="">-- اختر موظف من طاقم الفرع --</option>
+                    {branchEmployees
+                      .filter(e => {
+                        if (!e) return false;
+                        if (currentBranch?.managerId && String(e.id) === String(currentBranch.managerId)) return false;
+                        if (currentBranch?.managerCode && String(e.code) === String(currentBranch.managerCode)) return false;
+                        if (state.currentUserId && String(e.id) === String(state.currentUserId)) return false;
+                        if (e.jobTitle && (e.jobTitle.includes('مدير فرع') || e.jobTitle.includes('مدير الفرع'))) return false;
+                        return true;
+                      })
+                      .map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.name} (كود: {e.code} — الوظيفة: {e.jobTitle || 'موظف'})
+                        </option>
+                      ))}
+                  </select>
+                </div>
 
-              {/* Immediate Job Title & Employee Info Card (Requirement 28) */}
-              {bmEvalEmpId && (() => {
-                const selEmp = branchEmployees.find((e) => e && String(e.id) === String(bmEvalEmpId)) || (state.employees || []).find((e) => e && String(e.id) === String(bmEvalEmpId));
-                const totalSc = bmEvalItems.reduce((acc, i) => acc + (parseFloat(i.score) || 0), 0);
-                const maxSc = bmEvalItems.reduce((acc, i) => acc + (parseFloat(i.maxScore) || 20), 0);
-                const pct = maxSc > 0 ? Math.round((totalSc / maxSc) * 100) : 0;
+                {/* Immediate Job Title & Employee Info Card (Requirement 28) */}
+                {bmEvalEmpId && (() => {
+                  const selEmp = branchEmployees.find((e) => e && String(e.id) === String(bmEvalEmpId)) || (state.employees || []).find((e) => e && String(e.id) === String(bmEvalEmpId));
+                  const totalSc = bmEvalItems.reduce((acc, i) => acc + (parseFloat(i.score) || 0), 0);
+                  const maxSc = bmEvalItems.reduce((acc, i) => acc + (parseFloat(i.maxScore) || 20), 0);
+                  const pct = maxSc > 0 ? Math.round((totalSc / maxSc) * 100) : 0;
 
-                return (
-                  <div style={{
-                    background: 'linear-gradient(135deg, #f0fdfa, #e6fffa)',
-                    border: '2px solid #0d9488',
-                    padding: '14px 18px',
-                    borderRadius: '14px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '10px',
-                    boxShadow: '0 3px 10px rgba(13,148,136,0.08)'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '18px' }}>👤</span>
-                        <strong style={{ fontSize: '15.5px', color: '#0f172a' }}>{selEmp?.name}</strong>
-                        <span style={{ fontSize: '12px', background: '#ccfbf1', color: '#0f766e', padding: '2px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
-                          كود: {selEmp?.code}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontSize: '12px', color: '#475569' }}>📍 الفرع:</span>
-                        <strong style={{ color: '#0f766e', fontSize: '13px' }}>{currentBranch?.name || 'الفرع'}</strong>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid #99f6e4', paddingTop: '8px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '13px', color: '#0f766e', fontWeight: 'bold' }}>الوظيفة المعتمدة:</span>
-                        <span style={{
-                          background: '#0d9488',
-                          color: '#ffffff',
-                          padding: '4px 14px',
-                          borderRadius: '8px',
-                          fontWeight: '900',
-                          fontSize: '14px',
-                          boxShadow: '0 2px 6px rgba(13,148,136,0.2)'
-                        }}>
-                          👔 {selEmp?.jobTitle || 'موظف'}
-                        </span>
-                        <span style={{ fontSize: '12px', color: '#64748b' }}>
-                          ({bmEvalItems.length} معايير محملة)
-                        </span>
+                  return (
+                    <div style={{
+                      background: 'linear-gradient(135deg, #f0fdfa, #e6fffa)',
+                      border: '2px solid #0d9488',
+                      padding: '14px 18px',
+                      borderRadius: '14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '10px',
+                      boxShadow: '0 3px 10px rgba(13,148,136,0.08)'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '18px' }}>👤</span>
+                          <strong style={{ fontSize: '15.5px', color: '#0f172a' }}>{selEmp?.name}</strong>
+                          <span style={{ fontSize: '12px', background: '#ccfbf1', color: '#0f766e', padding: '2px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
+                            كود: {selEmp?.code}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '12px', color: '#475569' }}>📍 الفرع:</span>
+                          <strong style={{ color: '#0f766e', fontSize: '13px' }}>{currentBranch?.name || 'الفرع'}</strong>
+                        </div>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '12.5px', color: '#0f766e', fontWeight: 'bold' }}>الدرجة والنسبة:</span>
-                        <span style={{
-                          background: pct >= 85 ? '#dcfce7' : pct >= 70 ? '#fef3c7' : '#fee2e2',
-                          color: pct >= 85 ? '#15803d' : pct >= 70 ? '#b45309' : '#b91c1c',
-                          border: `1px solid ${pct >= 85 ? '#86efac' : pct >= 70 ? '#fde68a' : '#fca5a5'}`,
-                          padding: '3px 12px',
-                          borderRadius: '8px',
-                          fontWeight: '900',
-                          fontSize: '15px'
-                        }}>
-                          {totalSc} / {maxSc} ({pct}%)
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Dynamic Job Criteria Rows */}
-              {bmEvalItems.length > 0 && (
-                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                    <label style={{ fontWeight: '800', fontSize: '13.5px', color: '#1e293b' }}>
-                      📋 بنود التقييم المعتمدة لوظيفة الموظف ({bmEvalItems.length} معايير):
-                    </label>
-                    <span style={{ fontSize: '12px', color: '#64748b' }}>
-                      الدرجة من 0 إلى الدرجة القصوى
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {bmEvalItems.map((item, idx) => (
-                      <div
-                        key={item.id || idx}
-                        style={{
-                          display: 'flex',
-                          gap: '12px',
-                          alignItems: 'center',
-                          flexWrap: 'wrap',
-                          background: '#ffffff',
-                          padding: '10px 14px',
-                          borderRadius: '8px',
-                          border: '1px solid #cbd5e1'
-                        }}
-                      >
-                        <div style={{ flex: '3 1 250px' }}>
-                          <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#0f172a' }}>
-                            #{idx + 1} — {item.title}
-                          </div>
-                          {item.description && (
-                            <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
-                              {item.description}
-                            </div>
-                          )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid #99f6e4', paddingTop: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '13px', color: '#0f766e', fontWeight: 'bold' }}>الوظيفة المعتمدة:</span>
+                          <span style={{
+                            background: '#0d9488',
+                            color: '#ffffff',
+                            padding: '4px 14px',
+                            borderRadius: '8px',
+                            fontWeight: '900',
+                            fontSize: '14px',
+                            boxShadow: '0 2px 6px rgba(13,148,136,0.2)'
+                          }}>
+                            👔 {selEmp?.jobTitle || 'موظف'}
+                          </span>
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>
+                            ({bmEvalItems.length} معايير محملة)
+                          </span>
                         </div>
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <label style={{ fontSize: '12px', color: '#475569', fontWeight: 'bold' }}>الدرجة:</label>
-                          <input
-                            type="number"
-                            min="0"
-                            max={item.maxScore}
-                            value={item.score}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 0;
-                              setBmEvalItems(bmEvalItems.map((i) => i.id === item.id ? { ...i, score: Math.min(val, item.maxScore) } : i));
-                            }}
-                            style={{ width: '75px', padding: '6px 8px', borderRadius: '6px', border: '1.5px solid #0d9488', textAlign: 'center', fontWeight: 'bold', fontSize: '14px', color: '#0f766e' }}
-                            required
-                          />
-                          <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#64748b' }}>
-                            / {item.maxScore}
+                          <span style={{ fontSize: '12.5px', color: '#0f766e', fontWeight: 'bold' }}>الدرجة والنسبة:</span>
+                          <span style={{
+                            background: pct >= 85 ? '#dcfce7' : pct >= 70 ? '#fef3c7' : '#fee2e2',
+                            color: pct >= 85 ? '#15803d' : pct >= 70 ? '#b45309' : '#b91c1c',
+                            border: `1px solid ${pct >= 85 ? '#86efac' : pct >= 70 ? '#fde68a' : '#fca5a5'}`,
+                            padding: '3px 12px',
+                            borderRadius: '8px',
+                            fontWeight: '900',
+                            fontSize: '15px'
+                          }}>
+                            {totalSc} / {maxSc} ({pct}%)
                           </span>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                    </div>
+                  );
+                })()}
 
-              {/* Manager Notes */}
-              <div className="field">
-                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>📝 ملاحظات وتوصيات مدير الفرع على أداء الموظف</label>
-                <textarea
-                  rows="2"
-                  placeholder="اكتب ملاحظاتك التوجيهية وتوصياتك الإدارية..."
-                  value={bmEvalNotes}
-                  onChange={(e) => setBmEvalNotes(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                />
-              </div>
+                {/* Dynamic Job Criteria Rows */}
+                {bmEvalItems.length > 0 && (
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <label style={{ fontWeight: '800', fontSize: '13.5px', color: '#1e293b' }}>
+                        📋 بنود التقييم المعتمدة لوظيفة الموظف ({bmEvalItems.length} معايير):
+                      </label>
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>
+                        الدرجة من 0 إلى الدرجة القصوى
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {bmEvalItems.map((item, idx) => (
+                        <div
+                          key={item.id || idx}
+                          style={{
+                            display: 'flex',
+                            gap: '12px',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            background: '#ffffff',
+                            padding: '10px 14px',
+                            borderRadius: '8px',
+                            border: '1px solid #cbd5e1'
+                          }}
+                        >
+                          <div style={{ flex: '3 1 250px' }}>
+                            <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#0f172a' }}>
+                              #{idx + 1} — {item.title}
+                            </div>
+                            {item.description && (
+                              <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
+                                {item.description}
+                              </div>
+                            )}
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <label style={{ fontSize: '12px', color: '#475569', fontWeight: 'bold' }}>الدرجة:</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max={item.maxScore}
+                              value={item.score}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setBmEvalItems(bmEvalItems.map((i) => i.id === item.id ? { ...i, score: Math.min(val, item.maxScore) } : i));
+                              }}
+                              style={{ width: '75px', padding: '6px 8px', borderRadius: '6px', border: '1.5px solid #0d9488', textAlign: 'center', fontWeight: 'bold', fontSize: '14px', color: '#0f766e' }}
+                              required
+                            />
+                            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#64748b' }}>
+                              / {item.maxScore}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Manager Notes */}
+                <div className="field">
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>📝 ملاحظات وتوصيات مدير الفرع على أداء الموظف</label>
+                  <textarea
+                    rows="2"
+                    placeholder="اكتب ملاحظاتك التوجيهية وتوصياتك الإدارية..."
+                    value={bmEvalNotes}
+                    onChange={(e) => setBmEvalNotes(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  />
+                </div>
               </div>
 
               {/* Action Buttons Sticky Footer */}
@@ -8666,6 +9270,12 @@ export default function BranchManagerView({
           showToast={showToast}
         />
       )}
+
+      {/* ── Day Details Modal (نافذة تفاصيل اليوم) ── */}
+      <DayDetailsModal
+        details={selectedDayDetails}
+        onClose={() => setSelectedDayDetails(null)}
+      />
 
     </div>
   );

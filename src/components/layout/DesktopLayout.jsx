@@ -667,8 +667,67 @@ export default function DesktopLayout({
 
   // حساب أعداد الطلبات قيد الاعتماد لحظياً لكل نوع من أنواع الطلبات
   const pendingCountsByType = useMemo(() => {
+    const deletedIdsSet = new Set((state?._deletedIds || []).map(String));
+    const adminHiddenSet = new Set((state?.adminHiddenRequestIds || []).map(String));
+    const loansList = state?.loans || [];
+
+    const isLoanReconciledApproved = (r, idStr) => {
+      const isLoanType = r.type === 'loan' || r.type === 'meds' || r.type === 'credit_medicine' || r.type === 'advance';
+      if (!isLoanType) return false;
+      const rAmt = parseFloat(r.amount || r.totalAmount) || 0;
+      const matchingLoan = loansList.find((l) => {
+        if (!l) return false;
+        if (String(l.id) === idStr || String(l.requestId) === idStr || String(r.requestId) === String(l.id)) return true;
+        if (String(l.employeeId) === String(r.employeeId)) {
+          const lAmt = parseFloat(l.amount || l.totalAmount) || 0;
+          if (rAmt > 0 && lAmt > 0 && Math.abs(rAmt - lAmt) < 0.01) return true;
+        }
+        return false;
+      });
+      if (matchingLoan) {
+        return (
+          matchingLoan.status === 'approved' ||
+          matchingLoan.status === 'paid' ||
+          matchingLoan.status === 'partial' ||
+          matchingLoan.adminApproved === true ||
+          parseFloat(matchingLoan.paidAmount) > 0 ||
+          (Array.isArray(matchingLoan.paymentsHistory) && matchingLoan.paymentsHistory.length > 0)
+        );
+      }
+      return parseFloat(r.paidAmount) > 0 || (Array.isArray(r.paymentsHistory) && r.paymentsHistory.length > 0);
+    };
+
+    const isBiometricAlreadyResolved = (r) => {
+      const isBio = r.type === 'biometric_verification' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد' || r.requestType === 'biometric_verification';
+      if (!isBio) return false;
+      const reqDate = r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '');
+      const actionType = r.targetAction || r.actionType;
+      const empShifts = (state?.shifts || []).filter(s =>
+        (String(s.employeeId) === String(r.employeeId) || (r.employeeCode && String(s.employeeCode) === String(r.employeeCode))) &&
+        s.date === reqDate
+      );
+      if (empShifts.some(s => s.adminApproved === true && (s.id === r.shiftId || (actionType === 'shift_end' && s.timeOut) || (actionType === 'shift_start' && s.timeIn)))) {
+        return true;
+      }
+      return false;
+    };
+
     const isPending = (r) => {
-      if (!r) return false;
+      if (!r || !r.id) return false;
+      const idStr = String(r.id);
+      if (deletedIdsSet.has(idStr)) return false;
+      if (r.hiddenFromAdmin || adminHiddenSet.has(idStr)) return false;
+      // Resignations are counted exclusively via resignationCount
+      if (r.type === 'resignation' || r.type === 'withdraw' || r.type === 'resignation_request' || idStr.startsWith('res_')) return false;
+      if (isLoanReconciledApproved(r, idStr)) return false;
+      if (isBiometricAlreadyResolved(r)) return false;
+      if (
+        (r.type === 'penalty' || r.type === 'late_penalty' || r.subType === 'lateness' || idStr.startsWith('req_late_inc_') || idStr.startsWith('req_inc_')) &&
+        (r.source === 'system' || r.source === 'late_penalty_engine' || r.subType === 'lateness' || idStr.startsWith('req_late_inc_') || r.adminApproved || r.status === 'approved') &&
+        r.type !== 'penalty_objection' && !idStr.startsWith('obj_')
+      ) {
+        return false;
+      }
       if (r.adminApproved === true || r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.status === 'rejected' || r.status === 'cancelled') {
         return false;
       }
@@ -727,24 +786,30 @@ export default function DesktopLayout({
     // 4. تظلمات الجزاءات من وقائع التأخير
     (state?.lateIncidents || []).forEach(inc => {
       if (inc && inc.objection && (inc.objection.status === 'pending' || inc.status === 'objection_pending')) {
-        registerCount(`obj_inc_${inc.id}`, 'penalty_objections');
+        const oId = `obj_inc_${inc.id}`;
+        if (!deletedIdsSet.has(oId) && !adminHiddenSet.has(oId)) {
+          registerCount(oId, 'penalty_objections');
+        }
       }
     });
 
     // 5. تظلمات الخصومات المالية
     (state?.adjustments || []).forEach(adj => {
       if (adj && adj.objection && adj.objection.status === 'pending') {
-        registerCount(`obj_adj_${adj.id}`, 'penalty_objections');
+        const oId = `obj_adj_${adj.id}`;
+        if (!deletedIdsSet.has(oId) && !adminHiddenSet.has(oId)) {
+          registerCount(oId, 'penalty_objections');
+        }
       }
     });
 
-    // 6. فواتير ومصروفات الفروع
+    // 6. فواتير ومصروفات الفروع (تحسب فقط إذا كانت معلقة وتحت الاعتماد)
     const allFin = [...(state?.finances || []), ...(state?.transactions || [])];
     allFin.forEach(tx => {
-      if (tx && (tx.approvalStatus === 'pending' || (!tx.approvalStatus && (tx.createdByRole === 'branch' || tx.subType === 'invoice')))) {
-        const isExp = tx.type === 'expense' || !tx.type;
-        if (isExp) {
-          registerCount(tx.id || `fin_${tx.date}_${tx.amount}`, 'expenses');
+      if (tx && tx.approvalStatus === 'pending') {
+        const txId = String(tx.id || '');
+        if (!deletedIdsSet.has(txId) && !adminHiddenSet.has(txId)) {
+          registerCount(txId, 'expenses');
         }
       }
     });
@@ -939,6 +1004,100 @@ export default function DesktopLayout({
     }
   ], [pendingCountsByType]);
 
+  // قائمة العناصر الفرعية الخاصة بمدير الفرع حصرياً (مستثنى منها طلبات الإدارة العليا: السلف، الأدوية، التظلمات، البصمة AI، المصروفات، الشكاوى)
+  const branchRequestSubChildren = useMemo(() => [
+    {
+      id: 'branch-requests:all',
+      targetTab: 'requests',
+      filterType: 'all',
+      label: 'كافة أنواع طلبات الفرع',
+      icon: '📋',
+      badge: pendingCountsByType.all,
+      desc: 'عرض ومتابعة كافة طلبات موظفي الفرع في شاشة موحدة'
+    },
+    {
+      id: 'branch-requests:leaves',
+      targetTab: 'requests',
+      filterType: 'leave',
+      label: '🏖️ طلبات الإجازات (كافة الأنواع)',
+      icon: '🏖️',
+      badge: pendingCountsByType.leaves,
+      desc: 'إجازات سنوية، اعتيادية، عارضة، مرضية، وطويلة لموظفي الفرع'
+    },
+    {
+      id: 'branch-requests:schedule_deviation',
+      targetTab: 'requests',
+      filterType: 'schedule_deviation',
+      label: '⚠️ عدم الالتزام بالجدول',
+      icon: '⚠️',
+      badge: pendingCountsByType.schedule_deviations,
+      desc: 'حالات الحضور والانصراف المتأخر غير المتطابقة مع مواعيد العمل المقررة'
+    },
+    {
+      id: 'branch-requests:manual_punch',
+      targetTab: 'requests',
+      filterType: 'manual_punch',
+      label: '🖐️ طلب تسجيل بصمة يدوي',
+      icon: '🖐️',
+      badge: pendingCountsByType.manual_punches,
+      desc: 'تسجيل وتعديل بصمات الحضور والانصراف اليدوية لموظفي الفرع'
+    },
+    {
+      id: 'branch-requests:overtime',
+      targetTab: 'requests',
+      filterType: 'overtime',
+      label: '⭐ ساعات إضافية',
+      icon: '⭐',
+      badge: pendingCountsByType.overtimes,
+      desc: 'اعتماد ومراجعة ساعات العمل الإضافية لموظفي الفرع'
+    },
+    {
+      id: 'branch-requests:permissions',
+      targetTab: 'requests',
+      filterType: 'permission',
+      label: 'أذونات وساعات الاستئذان',
+      icon: '⏰',
+      badge: pendingCountsByType.permissions,
+      desc: 'أذونات التأخير والخروج المبكر وساعات الاستئذان الرسمية'
+    },
+    {
+      id: 'branch-requests:swaps',
+      targetTab: 'requests',
+      filterType: 'swap',
+      label: 'تبديل ومناوبة الورديات',
+      icon: '🔄',
+      badge: pendingCountsByType.swaps,
+      desc: 'تبديل الشفتات المتبادلة بين موظفي الفرع'
+    },
+    {
+      id: 'branch-requests:shift_adjustments',
+      targetTab: 'requests',
+      filterType: 'shift_adjustment',
+      label: 'تعديلات الشفتات والمواعيد',
+      icon: '⏱️',
+      badge: pendingCountsByType.shift_adjustments,
+      desc: 'تغيير مواعيد الحضور وتعديل فترات العمل'
+    },
+    {
+      id: 'branch-requests:roster_edits',
+      targetTab: 'requests',
+      filterType: 'roster_edit',
+      label: 'تعديلات الجداول الشهرية',
+      icon: '📅',
+      badge: pendingCountsByType.roster_edits,
+      desc: 'تعديل الجدول التكليفي وجداول ورديات الفرع'
+    },
+    {
+      id: 'branch-requests:comp_offs',
+      targetTab: 'requests',
+      filterType: 'comp_off',
+      label: 'إجازات بدل الراحة والتشغيل',
+      icon: '🛋️',
+      badge: pendingCountsByType.comp_offs,
+      desc: 'تعويضات العمل في العطلات الرسمية والراحات الأسبوعية'
+    }
+  ], [pendingCountsByType]);
+
   const currentCycleRange = useMemo(() => {
     return getCycleDateRange(monthPicker, orgSettings);
   }, [monthPicker, orgSettings]);
@@ -960,6 +1119,7 @@ export default function DesktopLayout({
   });
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [drawerExpandedGroup, setDrawerExpandedGroup] = useState(null);
+  const [drawerExpandedSubGroup, setDrawerExpandedSubGroup] = useState(null);
   const [ownerAuthModalForOutstock, setOwnerAuthModalForOutstock] = useState(false);
 
   useEffect(() => {
@@ -1160,14 +1320,14 @@ export default function DesktopLayout({
       id: 'requests-group',
       label: 'الطلبات والموافقات',
       icon: '📋',
-      badge: (pendingCountsByType.all || pendingCount) + resignationCount,
+      badge: (pendingCountsByType.all !== undefined ? pendingCountsByType.all : pendingCount) + resignationCount,
       children: [
         {
           id: 'requests',
           targetTab: 'requests',
           label: 'مركز إدارة واعتماد الطلبات',
           icon: '📋',
-          badge: pendingCountsByType.all || pendingCount,
+          badge: pendingCountsByType.all !== undefined ? pendingCountsByType.all : pendingCount,
           desc: 'مراجعة واعتماد طلبات الإجازات والأذونات والسلف',
           subChildren: requestSubChildren
         },
@@ -1581,6 +1741,13 @@ export default function DesktopLayout({
           label: 'تعليمات مدير الفرع',
           icon: '📢',
           desc: 'إصدار تعليمات وتوجيهات لموظفي الفرع وإلزام قراءتها في البصمة'
+        },
+        {
+          id: 'branch-whatsapp',
+          targetTab: 'branch-whatsapp',
+          label: '💬 رسائل وتوجيهات الواتساب',
+          icon: '💬',
+          desc: 'إرسال تعليمات وتوجيهات لموظفي الفرع وربط رقم المدير مع إرفاق ملفات'
         }
       ]
     },
@@ -1588,16 +1755,16 @@ export default function DesktopLayout({
       id: 'branch-reqs',
       label: 'الطلبات والموافقات',
       icon: '📋',
-      badge: (pendingCountsByType.all || pendingCount) + resignationCount,
+      badge: (pendingCount || 0) + resignationCount,
       children: [
         {
           id: 'requests',
           targetTab: 'requests',
           label: 'مركز موافقات الطلبات',
           icon: '📋',
-          badge: pendingCountsByType.all || pendingCount,
+          badge: pendingCount || 0,
           desc: 'موافقة وتوقيع طلبات موظفي الفرع',
-          subChildren: requestSubChildren
+          subChildren: branchRequestSubChildren
         },
         {
           id: 'leaves',
@@ -3510,57 +3677,59 @@ return (
         );
       })}
 
-      {/* ── زر تنزيل تطبيق الأندرويد في القائمة العليا بعد أزرار الصفحات مباشرة ── */}
-      <div style={{ display: 'flex', alignItems: 'center', marginInlineStart: 'auto', paddingInlineStart: '8px' }}>
-        <button
-          type="button"
-          onClick={triggerAndroidApkDownload}
-          title="تحميل وتحديث تطبيق الأندرويد لهواتف الموظفين ومديري الفروع (بصيغة APK)"
-          className="desktop-menubar-btn topbar-apk-btn"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '7px',
-            padding: '7px 15px',
-            borderRadius: '10px',
-            border: '1px solid #10b981',
-            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(5, 150, 105, 0.22) 100%)',
-            color: '#059669',
-            fontSize: '13px',
-            fontWeight: 800,
-            cursor: 'pointer',
-            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-            boxShadow: '0 2px 6px rgba(16, 185, 129, 0.15)',
-            outline: 'none',
-            whiteSpace: 'nowrap'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'linear-gradient(135deg, #059669 0%, #10b981 100%)';
-            e.currentTarget.style.color = '#ffffff';
-            e.currentTarget.style.boxShadow = '0 4px 14px rgba(16, 185, 129, 0.35)';
-            e.currentTarget.style.transform = 'translateY(-1px)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(5, 150, 105, 0.22) 100%)';
-            e.currentTarget.style.color = '#059669';
-            e.currentTarget.style.boxShadow = '0 2px 6px rgba(16, 185, 129, 0.15)';
-            e.currentTarget.style.transform = 'translateY(0)';
-          }}
-        >
-          <span style={{ fontSize: '15px' }}>🤖</span>
-          <span>تنزيل تطبيق الأندرويد</span>
-          <span style={{
-            background: '#10b981',
-            color: '#ffffff',
-            fontSize: '10px',
-            fontWeight: 900,
-            padding: '1px 6px',
-            borderRadius: '5px'
-          }}>
-            APK
-          </span>
-        </button>
-      </div>
+      {/* ── زر تنزيل تطبيق الأندرويد في القائمة العليا بعد أزرار الصفحات مباشرة (مخفي في صفحة مدير الفرع بناءً على الطلب) ── */}
+      {currentRole !== 'branch' && (
+        <div style={{ display: 'flex', alignItems: 'center', marginInlineStart: 'auto', paddingInlineStart: '8px' }}>
+          <button
+            type="button"
+            onClick={triggerAndroidApkDownload}
+            title="تحميل وتحديث تطبيق الأندرويد لهواتف الموظفين ومديري الفروع (بصيغة APK)"
+            className="desktop-menubar-btn topbar-apk-btn"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '7px',
+              padding: '7px 15px',
+              borderRadius: '10px',
+              border: '1px solid #10b981',
+              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(5, 150, 105, 0.22) 100%)',
+              color: '#059669',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+              boxShadow: '0 2px 6px rgba(16, 185, 129, 0.15)',
+              outline: 'none',
+              whiteSpace: 'nowrap'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'linear-gradient(135deg, #059669 0%, #10b981 100%)';
+              e.currentTarget.style.color = '#ffffff';
+              e.currentTarget.style.boxShadow = '0 4px 14px rgba(16, 185, 129, 0.35)';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(5, 150, 105, 0.22) 100%)';
+              e.currentTarget.style.color = '#059669';
+              e.currentTarget.style.boxShadow = '0 2px 6px rgba(16, 185, 129, 0.15)';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            <span style={{ fontSize: '15px' }}>🤖</span>
+            <span>تنزيل تطبيق الأندرويد</span>
+            <span style={{
+              background: '#10b981',
+              color: '#ffffff',
+              fontSize: '10px',
+              fontWeight: 900,
+              padding: '1px 6px',
+              borderRadius: '5px'
+            }}>
+              APK
+            </span>
+          </button>
+        </div>
+      )}
     </nav>
   )}
 
@@ -3705,7 +3874,10 @@ return (
               <div key={menu.id} style={{ borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.05))', paddingBottom: '4px' }}>
                 <button
                   type="button"
-                  onClick={() => setDrawerExpandedGroup(prev => prev === menu.id ? null : menu.id)}
+                  onClick={() => {
+                    setDrawerExpandedGroup(prev => prev === menu.id ? null : menu.id);
+                    setDrawerExpandedSubGroup(null);
+                  }}
                   style={{
                     width: '100%',
                     display: 'flex',
@@ -3733,9 +3905,118 @@ return (
                 </button>
 
                 {isExpanded && menu.children && (
-                  <div style={{ padding: '4px 10px 8px 14px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  <div style={{ padding: '4px 10px 8px 14px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     {menu.children.map((child) => {
                       const isChildActive = child.targetTab === activeTab && (!child.targetSubTab || activeSubTab === child.targetSubTab || (child.targetTab === 'branches' && child.targetSubTab === 'list' && (!activeSubTab || activeSubTab === 'branches' || activeSubTab === 'list')));
+                      const hasSubChildren = Array.isArray(child.subChildren) && child.subChildren.length > 0;
+                      const isSubExpanded = drawerExpandedSubGroup === child.id;
+
+                      if (hasSubChildren) {
+                        return (
+                          <div key={child.id} style={{ borderRadius: '8px', background: isSubExpanded ? 'rgba(0,0,0,0.02)' : 'transparent', border: isSubExpanded ? '1px solid var(--border-light, rgba(0,0,0,0.06))' : 'none' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleSubItemClick(child);
+                                  setIsMobileDrawerOpen(false);
+                                }}
+                                style={{
+                                  flex: 1,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '10px',
+                                  padding: '9px 12px',
+                                  borderRadius: '8px 0 0 8px',
+                                  border: 'none',
+                                  background: isChildActive ? 'var(--primary-light, #ccfbf1)' : 'transparent',
+                                  color: isChildActive ? 'var(--primary-dark, #0f766e)' : 'var(--text)',
+                                  fontSize: '13px',
+                                  fontWeight: isChildActive ? 800 : 600,
+                                  cursor: 'pointer',
+                                  textAlign: 'right',
+                                  fontFamily: 'inherit'
+                                }}
+                              >
+                                <span style={{ fontSize: '16px' }}>{child.icon}</span>
+                                <span style={{ flex: 1 }}>{child.label}</span>
+                                {child.badge > 0 && (
+                                  <span style={{ background: 'var(--danger)', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '1px 5px', borderRadius: '99px' }}>
+                                    {child.badge}
+                                  </span>
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDrawerExpandedSubGroup(prev => prev === child.id ? null : child.id);
+                                }}
+                                title="عرض القائمة الفرعية"
+                                style={{
+                                  padding: '9px 12px',
+                                  border: 'none',
+                                  background: 'transparent',
+                                  color: 'var(--muted)',
+                                  cursor: 'pointer',
+                                  fontSize: '11px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center'
+                                }}
+                              >
+                                <span style={{ display: 'inline-block', transform: isSubExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease' }}>
+                                  ▼
+                                </span>
+                              </button>
+                            </div>
+
+                            {/* Nested Sub-Children Accordion for Mobile */}
+                            {isSubExpanded && (
+                              <div style={{ padding: '4px 10px 8px 18px', display: 'flex', flexDirection: 'column', gap: '3px', borderTop: '1px dashed var(--border-light, rgba(0,0,0,0.06))' }}>
+                                {child.subChildren.map((subChild) => {
+                                  const isSubActive = isChildActive && (subChild.filterType === window.__lastRequestsFilterType || subChild.targetSubTab === activeSubTab);
+                                  return (
+                                    <button
+                                      key={subChild.id}
+                                      type="button"
+                                      onClick={() => {
+                                        handleSubItemClick(subChild);
+                                        setIsMobileDrawerOpen(false);
+                                      }}
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '8px',
+                                        padding: '7px 10px',
+                                        borderRadius: '6px',
+                                        border: 'none',
+                                        background: isSubActive ? 'rgba(13, 148, 136, 0.15)' : 'transparent',
+                                        color: isSubActive ? 'var(--primary-dark, #0f766e)' : 'var(--text)',
+                                        fontSize: '12px',
+                                        fontWeight: isSubActive ? 800 : 500,
+                                        cursor: 'pointer',
+                                        textAlign: 'right',
+                                        width: '100%',
+                                        fontFamily: 'inherit'
+                                      }}
+                                    >
+                                      <span style={{ fontSize: '14px' }}>{subChild.icon}</span>
+                                      <span style={{ flex: 1 }}>{subChild.label}</span>
+                                      {subChild.badge > 0 && (
+                                        <span style={{ background: '#f59e0b', color: '#fff', fontSize: '9px', fontWeight: 800, padding: '1px 5px', borderRadius: '99px' }}>
+                                          {subChild.badge}
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+
                       return (
                         <button
                           key={child.id}

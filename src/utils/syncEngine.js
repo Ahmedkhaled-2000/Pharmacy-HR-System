@@ -151,15 +151,37 @@ export async function enqueueRequestDecision({
 
   const hlcTimestamp = generateHlcTimestamp();
 
+  const isBranchReviewer = reviewer.role === 'branch' || reviewer.role === 'branch_manager';
+  const isAdminReviewer = reviewer.role === 'admin' || reviewer.role === 'owner';
+
+  const branchApprovalFields = {};
+  if (isBranchReviewer) {
+    if (decision === 'approve') {
+      branchApprovalFields.branchApproved = true;
+      branchApprovalFields.branchDecision = 'approved';
+      branchApprovalFields.branchRejected = false;
+      branchApprovalFields.branchApprovedAt = now;
+    } else if (decision === 'reject') {
+      branchApprovalFields.branchApproved = false;
+      branchApprovalFields.branchDecision = 'rejected';
+      branchApprovalFields.branchRejected = true;
+      branchApprovalFields.branchRejectedAt = now;
+    }
+  } else if (isAdminReviewer && decision === 'approve') {
+    branchApprovalFields.adminApproved = true;
+    branchApprovalFields.branchApproved = true;
+  }
+
   const updatedRequest = {
     ...(existing || {}),
     ...additionalData,
+    ...branchApprovalFields,
     id: String(requestId),
     status: targetStatus,
     hlc_timestamp: hlcTimestamp,
     updated_at: now,
     decision_reason: reason || existing?.decision_reason || '',
-    decided_by: reviewer.name || reviewer.id || 'Admin',
+    decided_by: reviewer.name || reviewer.id || (isBranchReviewer ? 'مدير الفرع' : 'Admin'),
     decided_at: now
   };
 
@@ -184,9 +206,18 @@ export async function enqueueRequestDecision({
       reason: reason || '',
       comment: reason || '',
       reviewer,
-      actor_role: reviewer.role || 'admin',
-      actor_name: reviewer.name || reviewer.id || 'Admin',
-      additional_data: additionalData,
+      actor_role: reviewer.role || (isBranchReviewer ? 'branch' : 'admin'),
+      actor_name: reviewer.name || reviewer.id || (isBranchReviewer ? 'مدير الفرع' : 'Admin'),
+      branchApproved: updatedRequest.branchApproved,
+      branchDecision: updatedRequest.branchDecision,
+      branchRejected: updatedRequest.branchRejected,
+      branchApprovedAt: updatedRequest.branchApprovedAt,
+      branchRejectedAt: updatedRequest.branchRejectedAt,
+      adminApproved: updatedRequest.adminApproved,
+      additional_data: {
+        ...(additionalData || {}),
+        ...branchApprovalFields
+      },
       hlc_timestamp: hlcTimestamp,
       updated_at: now
     }

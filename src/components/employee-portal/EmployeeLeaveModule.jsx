@@ -6,6 +6,20 @@ import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jo
 import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 import { getActivePayrollMonth, getCycleDateRange } from '../../utils/periodEngine';
 
+function getLeaveBadge(lt) {
+  const clean = String(lt || '').toLowerCase();
+  if (clean === 'annual') return <span className="badge success" style={{ fontSize: '11.5px' }}>🌴 إجازة سنوية</span>;
+  if (clean === 'sick') return <span className="badge danger" style={{ fontSize: '11.5px', background: '#fee2e2', color: '#b91c1c' }}>🏥 إجازة مرضية</span>;
+  if (clean === 'casual') return <span className="badge info" style={{ fontSize: '11.5px', background: '#e0f2fe', color: '#0369a1' }}>🌴 إجازة عارضة</span>;
+  if (clean === 'unpaid') return <span className="badge warning" style={{ fontSize: '11.5px', background: '#fef3c7', color: '#b45309' }}>💸 غير مدفوعة الأجر</span>;
+  if (clean === 'marriage') return <span className="badge" style={{ fontSize: '11.5px', background: '#fdf2f8', color: '#db2777', border: '1px solid #fbcfe8' }}>💍 إجازة زواج</span>;
+  if (clean === 'maternity') return <span className="badge" style={{ fontSize: '11.5px', background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe' }}>👶 إجازة وضع</span>;
+  if (clean === 'bereavement') return <span className="badge" style={{ fontSize: '11.5px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}>🖤 إجازة وفاة</span>;
+  if (clean === 'comp_off') return <span className="badge" style={{ fontSize: '11.5px', background: '#f3e8ff', color: '#7c3aed', border: '1px solid #d8b4fe' }}>🛋️ بدل راحة</span>;
+  if (clean === 'weekly_rest') return <span className="badge info" style={{ fontSize: '11.5px' }}>🛋️ راحة أسبوعية</span>;
+  return <span className="badge success" style={{ fontSize: '11.5px' }}>🏖️ إجازة اعتيادية</span>;
+}
+
 export default function EmployeeLeaveModule({
   emp,
   state,
@@ -234,7 +248,17 @@ export default function EmployeeLeaveModule({
       type: 'leave',
       targetRole: (isDirectAdmin || willExceedThreeDays || noBranchMgr) ? 'admin' : 'branch_and_admin',
       title: `🏖️ طلب إجازة جديد: ${emp.name}`,
-      message: `طلب إجازة (${newRequest.leaveType === 'annual' ? 'سنوية' : newRequest.leaveType === 'sick' ? 'مرضية' : 'اعتيادية'}) لمدة ${daysCount} يوم من ${startDate} إلى ${endDate}. السبب: ${reason.trim() || '—'}`,
+      message: `طلب إجازة (${
+        newRequest.leaveType === 'annual' ? 'سنوية' :
+        newRequest.leaveType === 'sick' ? 'مرضية بتقرير طبي' :
+        newRequest.leaveType === 'casual' ? 'عارضة' :
+        newRequest.leaveType === 'unpaid' ? 'بدون أجر' :
+        newRequest.leaveType === 'marriage' ? 'زواج' :
+        newRequest.leaveType === 'maternity' ? 'وضع ورعاية طفل' :
+        newRequest.leaveType === 'bereavement' ? 'وفاة / حداد' :
+        newRequest.leaveType === 'comp_off' ? 'بدل راحة' :
+        newRequest.leaveType === 'weekly_rest' ? 'راحة أسبوعية' : 'اعتيادية'
+      }) لمدة ${daysCount} يوم من ${startDate} إلى ${endDate}. السبب: ${reason.trim() || '—'}`,
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
@@ -360,16 +384,19 @@ export default function EmployeeLeaveModule({
             <div className="field" style={{ flex: '1 1 180px' }}>
               <label style={{ fontWeight: '700' }}>نوع الإجازة</label>
               <select value={leaveType} onChange={(e) => setLeaveType(e.target.value)}>
+                <option value="annual">🌴 إجازة سنوية اعتيادية (تُخصم من الرصيد السنوي)</option>
+                <option value="sick">🏥 إجازة مرضية (بتقرير طبي)</option>
+                <option value="casual">🌴 إجازة عارضة</option>
+                <option value="unpaid">💸 إجازة بدون أجر</option>
+                <option value="marriage">💍 إجازة زواج</option>
+                <option value="maternity">👶 إجازة وضع / رعاية طفل</option>
+                <option value="bereavement">🖤 إجازة وفاة / حداد</option>
                 {compOffBalance > 0 && (
-                  <option value="comp_off">🛋️ إجازة بدل راحة (مدفوعة الأجر كاملة - الرصيد: {compOffBalance} يوم)</option>
+                  <option value="comp_off">🛋️ إجازة بدل راحة (مدفوعة الأجر - الرصيد: {compOffBalance} يوم)</option>
                 )}
                 {isVariableSchedule && (
                   <option value="weekly_rest">🛋️ راحة أسبوعية (مدفوعة الأجر - ضمن الراتب)</option>
                 )}
-                {annualQuota > 0 && (
-                  <option value="annual">🌴 إجازة سنوية (مدفوعة الأجر - لا تؤثر على الراتب)</option>
-                )}
-                <option value="unpaid">💸 إجازة غير مدفوعة الأجر (تخصم من الراتب)</option>
               </select>
             </div>
 
@@ -468,13 +495,7 @@ export default function EmployeeLeaveModule({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--muted)' }}>#{idx + 1}</span>
-                    {r.leaveType === 'comp_off' ? (
-                      <span className="badge" style={{ fontSize: '11.5px', background: '#f3e8ff', color: '#7c3aed', border: '1px solid #d8b4fe' }}>🛋️ بدل راحة (مدفوعة)</span>
-                    ) : r.leaveType === 'annual' ? (
-                      <span className="badge success" style={{ fontSize: '11.5px' }}>🌴 سنوي (مدفوعة)</span>
-                    ) : (
-                      <span className="badge danger" style={{ fontSize: '11.5px' }}>💸 غير مدفوعة الأجر</span>
-                    )}
+                    {getLeaveBadge(r.leaveType)}
                   </div>
                   <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
                     {r.createdAt ? r.createdAt.slice(0, 10) : '—'}
@@ -550,13 +571,7 @@ export default function EmployeeLeaveModule({
                   <tr key={r.id}>
                     <td>{idx + 1}</td>
                     <td>
-                      {r.leaveType === 'comp_off' ? (
-                        <span className="badge" style={{ background: '#f3e8ff', color: '#7c3aed', border: '1px solid #d8b4fe' }}>🛋️ بدل راحة (مدفوعة)</span>
-                      ) : r.leaveType === 'annual' ? (
-                        <span className="badge success">🌴 سنوي (مدفوعة)</span>
-                      ) : (
-                        <span className="badge danger">💸 غير مدفوعة الأجر</span>
-                      )}
+                      {getLeaveBadge(r.leaveType)}
                     </td>
                     <td>{r.startDate}</td>
                     <td>{r.endDate}</td>

@@ -220,6 +220,8 @@ export default function EmployeeRosterEditModal({
 
   // ── نمط العرض النشط: التقويم الشهري التفاعلي الكامل vs النمط الأسبوعي ──
   const [activeTabMode, setActiveTabMode] = useState('monthly_calendar');
+  const [defaultShiftStart, setDefaultShiftStart] = useState('08:00');
+  const [defaultShiftEnd, setDefaultShiftEnd] = useState('16:00');
 
   // توليد كافة أيام دورة الرواتب الفعلية للشهر المحدد
   const cycleDays = useMemo(() => {
@@ -397,6 +399,114 @@ export default function EmployeeRosterEditModal({
       }
     });
     setScheduleInputs(newInputs);
+  };
+
+  // تطبيق مواعيد الوردية الافتراضية على جميع أيام العمل مع الحفاظ على الراحات
+  const handleApplyDefaultShiftTimes = () => {
+    if (!defaultShiftStart || !defaultShiftEnd) {
+      showToast?.('⚠️ يرجى تحديد وقت البداية ووقت النهاية');
+      return;
+    }
+    const [sH, sM] = defaultShiftStart.split(':').map(Number);
+    const [eH, eM] = defaultShiftEnd.split(':').map(Number);
+    let diff = (eH * 60 + eM) - (sH * 60 + sM);
+    if (diff <= 0) diff += 24 * 60;
+    const hours = Math.round((diff / 60) * 10) / 10;
+
+    // تطبيق على الأيام في التقويم الشهري
+    setMonthlyDaysSchedule((prev) => {
+      const updated = { ...prev };
+      cycleDays.forEach((day) => {
+        const cur = updated[day.dateStr] || { type: 'shift', isOff: false };
+        if (cur.type !== 'off' && !cur.isOff) {
+          updated[day.dateStr] = {
+            ...cur,
+            start: defaultShiftStart,
+            end: defaultShiftEnd,
+            hours
+          };
+        }
+      });
+      return updated;
+    });
+
+    // تطبيق على النمط الأسبوعي أيضاً
+    setScheduleInputs((prev) => {
+      const updated = { ...prev };
+      DAYS_OF_WEEK.forEach((d) => {
+        const cur = updated[d.label] || { type: 'shift', isOff: false };
+        if (cur.type !== 'off' && !cur.isOff) {
+          updated[d.label] = {
+            ...cur,
+            start: defaultShiftStart,
+            end: defaultShiftEnd,
+            hours
+          };
+        }
+      });
+      return updated;
+    });
+
+    showToast?.('⚡ تم تطبيق مواعيد الوردية على جميع أيام العمل بنجاح');
+  };
+
+  // نسخ جدول الشهر السابق للموظف وتطبيقه
+  const handleCopyPreviousMonthRoster = () => {
+    if (!targetEmp) {
+      showToast?.('⚠️ يرجى اختيار الموظف أولاً');
+      return;
+    }
+    let prevMonthStr = '';
+    if (effectiveMonth && /^\d{4}-\d{2}$/.test(effectiveMonth)) {
+      const [y, m] = effectiveMonth.split('-').map(Number);
+      const d = new Date(y, m - 2, 1);
+      const py = d.getFullYear();
+      const pm = String(d.getMonth() + 1).padStart(2, '0');
+      prevMonthStr = `${py}-${pm}`;
+    }
+
+    const prevRoster = (state?.rosters || []).find((r) =>
+      (String(r.employeeId) === String(targetEmp.id) || (targetEmp.code && String(r.employeeCode) === String(targetEmp.code))) &&
+      (r.month === prevMonthStr || (prevMonthStr && r.fromDate && r.fromDate.startsWith(prevMonthStr)))
+    );
+
+    if (!prevRoster || !prevRoster.schedule || Object.keys(prevRoster.schedule).length === 0) {
+      showToast?.(`⚠️ لم يتم العثور على جدول سابق للموظف لشهر (${prevMonthStr || 'السابق'})`);
+      return;
+    }
+
+    let appliedWeekly = false;
+    const newScheduleInputs = { ...scheduleInputs };
+    DAYS_OF_WEEK.forEach((d) => {
+      if (prevRoster.schedule[d.label]) {
+        newScheduleInputs[d.label] = { ...prevRoster.schedule[d.label] };
+        appliedWeekly = true;
+      }
+    });
+    if (appliedWeekly) {
+      setScheduleInputs(newScheduleInputs);
+    }
+
+    const newMonthlyDays = {};
+    cycleDays.forEach((day) => {
+      if (prevRoster.schedule[day.dateStr]) {
+        newMonthlyDays[day.dateStr] = { ...prevRoster.schedule[day.dateStr] };
+      } else if (prevRoster.schedule[day.dayLabel]) {
+        newMonthlyDays[day.dateStr] = { ...prevRoster.schedule[day.dayLabel] };
+      } else {
+        const prevDateMatch = Object.keys(prevRoster.schedule).find(
+          (k) => /^\d{4}-\d{2}-\d{2}$/.test(k) && new Date(k + 'T00:00:00').getDay() === day.jsDayIndex
+        );
+        if (prevDateMatch && prevRoster.schedule[prevDateMatch]) {
+          newMonthlyDays[day.dateStr] = { ...prevRoster.schedule[prevDateMatch] };
+        } else {
+          newMonthlyDays[day.dateStr] = newScheduleInputs[day.dayLabel] || DEFAULT_SCHEDULE[day.dayLabel];
+        }
+      }
+    });
+
+    setMonthlyDaysSchedule(newMonthlyDays);
+    showToast?.(`✅ تم نسخ جدول شهر (${prevMonthStr}) بنجاح وتطبيقه على هذا الشهر`);
   };
 
   // إحصائيات الشهر التفاعلية
@@ -578,6 +688,11 @@ export default function EmployeeRosterEditModal({
           oldSchedule: existingRoster?.schedule || null,
           previousSchedule: existingRoster?.schedule || null,
           submittedBy: 'branch_manager',
+          submittedByBranchManager: true,
+          createdBy: 'branch',
+          createdRole: 'branch',
+          creatorRole: 'branch',
+          senderRole: 'branch',
           managerStatus: 'approved',
           branchApproved: true,
           branchApprovalStatus: 'approved',
@@ -874,6 +989,104 @@ export default function EmployeeRosterEditModal({
               </button>
             </div>
 
+            {/* ── شريط الأدوات والتعيين السريع لمواعيد الوردية ونسخ الشهر السابق ── */}
+            <div
+              style={{
+                background: 'linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%)',
+                border: '1.5px solid #bae6fd',
+                borderRadius: '12px',
+                padding: '12px 16px',
+                marginBottom: '14px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '12px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: '#0369a1' }}>⏰ وقت البداية الافتراضي:</span>
+                  <input
+                    type="time"
+                    value={defaultShiftStart}
+                    onChange={(e) => setDefaultShiftStart(e.target.value)}
+                    style={{
+                      padding: '5px 8px',
+                      borderRadius: '6px',
+                      border: '1.5px solid #7dd3fc',
+                      fontSize: '12.5px',
+                      fontWeight: 700,
+                      background: '#fff'
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: '#0369a1' }}>⏰ وقت النهاية الافتراضي:</span>
+                  <input
+                    type="time"
+                    value={defaultShiftEnd}
+                    onChange={(e) => setDefaultShiftEnd(e.target.value)}
+                    style={{
+                      padding: '5px 8px',
+                      borderRadius: '6px',
+                      border: '1.5px solid #7dd3fc',
+                      fontSize: '12.5px',
+                      fontWeight: 700,
+                      background: '#fff'
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleApplyDefaultShiftTimes}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 900,
+                    background: '#0284c7',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgba(2, 132, 199, 0.2)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px'
+                  }}
+                  title="تطبيق موعد البداية والنهاية على كافة أيام العمل مع الحفاظ على أيام الراحة"
+                >
+                  <span>⚡ تطبيق على جميع أيام العمل</span>
+                </button>
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleCopyPreviousMonthRoster}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 900,
+                    background: '#10b981',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px'
+                  }}
+                  title="نسخ جدول الموظف من الشهر السابق مباشرة وتطبيقه على هذا الشهر"
+                >
+                  <span>📋 نسخ جدول الشهر السابق</span>
+                </button>
+              </div>
+            </div>
+
             {/* ── أولاً: عرض التقويم الشهري التفاعلي الكامل لكافة أيام الشهر ── */}
             {activeTabMode === 'monthly_calendar' && (
               <>
@@ -962,17 +1175,17 @@ export default function EmployeeRosterEditModal({
                   </div>
                 </div>
 
-                {/* جدول أيام دورة الشهر التفاعلي الكامل مع شريط تمرير سلس وتثبيت الترويسة */}
+                {/* جدول أيام دورة الشهر التفاعلي الكامل مع تنسيق متوازن وتثبيت العرض */}
                 <div className="table-responsive" style={{ border: '1px solid var(--border)', borderRadius: '12px', maxHeight: '360px', overflowY: 'auto', marginBottom: '16px', WebkitOverflowScrolling: 'touch' }}>
-                  <table className="bylaws-table" style={{ margin: 0, fontSize: '12.5px', width: '100%', borderCollapse: 'collapse' }}>
+                  <table className="bylaws-table" style={{ margin: 0, fontSize: '12.5px', width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                     <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--surface-muted, #f1f5f9)', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
                       <tr>
-                        <th style={{ width: '110px', padding: '9px 12px' }}>التاريخ</th>
-                        <th style={{ width: '90px', padding: '9px 12px' }}>اليوم</th>
-                        <th style={{ width: '150px', padding: '9px 12px' }}>نوع اليوم</th>
-                        <th style={{ padding: '9px 12px' }}>موعد البداية (دخول)</th>
-                        <th style={{ padding: '9px 12px' }}>موعد النهاية (خروج)</th>
-                        <th style={{ width: '90px', textAlign: 'center', padding: '9px 12px' }}>الساعات</th>
+                        <th style={{ width: '16%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>التاريخ</th>
+                        <th style={{ width: '14%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>اليوم</th>
+                        <th style={{ width: '22%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>نوع اليوم</th>
+                        <th style={{ width: '20%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>موعد البداية (دخول)</th>
+                        <th style={{ width: '20%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>موعد النهاية (خروج)</th>
+                        <th style={{ width: '8%', textAlign: 'center', padding: '9px 10px', boxSizing: 'border-box' }}>الساعات</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -989,23 +1202,24 @@ export default function EmployeeRosterEditModal({
                               borderBottom: '1px solid var(--border)'
                             }}
                           >
-                            <td style={{ fontWeight: 800, padding: '7px 12px', direction: 'ltr', textAlign: 'right' }}>
+                            <td style={{ fontWeight: 800, padding: '7px 8px', direction: 'ltr', textAlign: 'center', boxSizing: 'border-box' }}>
                               <span style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '11.5px', color: '#475569' }}>
                                 {day.dateStr}
                               </span>
                             </td>
 
-                            <td style={{ fontWeight: 800, padding: '7px 12px' }}>
-                              <span style={{ display: 'inline-block', width: '18px' }}>{isOff ? '🏖️' : '🟢'}</span>
+                            <td style={{ fontWeight: 800, padding: '7px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
+                              <span style={{ display: 'inline-block', marginLeft: '4px' }}>{isOff ? '🏖️' : '🟢'}</span>
                               <span style={{ color: isFri ? '#b45309' : 'inherit' }}>{day.dayLabel}</span>
                             </td>
 
-                            <td style={{ padding: '6px 12px' }}>
+                            <td style={{ padding: '6px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
                               <select
                                 value={isOff ? 'off' : 'shift'}
                                 onChange={(e) => handleMonthlyDayChange(day.dateStr, 'type', e.target.value)}
                                 style={{
                                   width: '100%',
+                                  boxSizing: 'border-box',
                                   padding: '5px 8px',
                                   borderRadius: '6px',
                                   border: `1.5px solid ${isOff ? '#fde68a' : 'var(--border)'}`,
@@ -1015,12 +1229,12 @@ export default function EmployeeRosterEditModal({
                                   color: isOff ? '#92400e' : 'var(--text)'
                                 }}
                               >
-                                <option value="shift">🟢 وردية عمل (Shift)</option>
-                                <option value="off">🏖️ راحة أسبوعية (OFF)</option>
+                                <option value="shift">🟢 وردية (Shift)</option>
+                                <option value="off">🏖️ راحة (OFF)</option>
                               </select>
                             </td>
 
-                            <td style={{ padding: '6px 12px' }}>
+                            <td style={{ padding: '6px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
                               {isOff ? (
                                 <span style={{ color: 'var(--muted)', fontSize: '11.5px' }}>— راحة</span>
                               ) : (
@@ -1035,13 +1249,15 @@ export default function EmployeeRosterEditModal({
                                     border: '1px solid var(--border)',
                                     fontSize: '12px',
                                     fontWeight: 700,
-                                    width: '115px'
+                                    width: '100%',
+                                    boxSizing: 'border-box',
+                                    textAlign: 'center'
                                   }}
                                 />
                               )}
                             </td>
 
-                            <td style={{ padding: '6px 12px' }}>
+                            <td style={{ padding: '6px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
                               {isOff ? (
                                 <span style={{ color: 'var(--muted)', fontSize: '11.5px' }}>— راحة</span>
                               ) : (
@@ -1056,13 +1272,15 @@ export default function EmployeeRosterEditModal({
                                     border: '1px solid var(--border)',
                                     fontSize: '12px',
                                     fontWeight: 700,
-                                    width: '115px'
+                                    width: '100%',
+                                    boxSizing: 'border-box',
+                                    textAlign: 'center'
                                   }}
                                 />
                               )}
                             </td>
 
-                            <td style={{ textAlign: 'center', fontWeight: 800, padding: '6px 12px' }}>
+                            <td style={{ textAlign: 'center', fontWeight: 800, padding: '6px 8px', boxSizing: 'border-box' }}>
                               {isOff ? (
                                 <span style={{ color: '#b45309', fontSize: '11.5px' }}>0 س</span>
                               ) : (
@@ -1130,14 +1348,14 @@ export default function EmployeeRosterEditModal({
 
                 {/* جدول الأيام السبعة */}
                 <div className="table-responsive" style={{ border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden', marginBottom: '16px' }}>
-                  <table className="bylaws-table" style={{ margin: 0, fontSize: '13px', width: '100%', borderCollapse: 'collapse' }}>
+                  <table className="bylaws-table" style={{ margin: 0, fontSize: '13px', width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                     <thead>
                       <tr style={{ background: 'var(--surface-muted)' }}>
-                        <th style={{ width: '120px', padding: '10px 12px' }}>اليوم</th>
-                        <th style={{ width: '170px', padding: '10px 12px' }}>نوع اليوم</th>
-                        <th style={{ padding: '10px 12px' }}>موعد البداية (دخول)</th>
-                        <th style={{ padding: '10px 12px' }}>موعد النهاية (خروج)</th>
-                        <th style={{ width: '110px', textAlign: 'center', padding: '10px 12px' }}>ساعات العمل</th>
+                        <th style={{ width: '18%', padding: '10px 10px', textAlign: 'center', boxSizing: 'border-box' }}>اليوم</th>
+                        <th style={{ width: '26%', padding: '10px 10px', textAlign: 'center', boxSizing: 'border-box' }}>نوع اليوم</th>
+                        <th style={{ width: '22%', padding: '10px 10px', textAlign: 'center', boxSizing: 'border-box' }}>موعد البداية (دخول)</th>
+                        <th style={{ width: '22%', padding: '10px 10px', textAlign: 'center', boxSizing: 'border-box' }}>موعد النهاية (خروج)</th>
+                        <th style={{ width: '12%', textAlign: 'center', padding: '10px 10px', boxSizing: 'border-box' }}>ساعات العمل</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1153,17 +1371,18 @@ export default function EmployeeRosterEditModal({
                               borderBottom: '1px solid var(--border)'
                             }}
                           >
-                            <td style={{ fontWeight: 800, padding: '10px 12px' }}>
-                              <span style={{ display: 'inline-block', width: '22px' }}>{isOff ? '🏖️' : '🟢'}</span>
+                            <td style={{ fontWeight: 800, padding: '10px 10px', textAlign: 'center', boxSizing: 'border-box' }}>
+                              <span style={{ display: 'inline-block', marginLeft: '6px' }}>{isOff ? '🏖️' : '🟢'}</span>
                               {d.label}
                             </td>
 
-                            <td style={{ padding: '8px 12px' }}>
+                            <td style={{ padding: '8px 10px', textAlign: 'center', boxSizing: 'border-box' }}>
                               <select
                                 value={isOff ? 'off' : 'shift'}
                                 onChange={(e) => handleDayChange(d.label, 'type', e.target.value)}
                                 style={{
                                   width: '100%',
+                                  boxSizing: 'border-box',
                                   padding: '6px 10px',
                                   borderRadius: '8px',
                                   border: `1.5px solid ${isOff ? '#fde68a' : 'var(--border)'}`,
@@ -1172,12 +1391,12 @@ export default function EmployeeRosterEditModal({
                                   color: isOff ? '#92400e' : 'var(--text)'
                                 }}
                               >
-                                <option value="shift">🟢 وردية عمل (Shift)</option>
-                                <option value="off">🏖️ راحة أسبوعية (OFF)</option>
+                                <option value="shift">🟢 وردية (Shift)</option>
+                                <option value="off">🏖️ راحة (OFF)</option>
                               </select>
                             </td>
 
-                            <td style={{ padding: '8px 12px' }}>
+                            <td style={{ padding: '8px 10px', textAlign: 'center', boxSizing: 'border-box' }}>
                               {isOff ? (
                                 <span style={{ color: 'var(--muted)', fontSize: '12px' }}>— غير محدد</span>
                               ) : (
@@ -1192,13 +1411,15 @@ export default function EmployeeRosterEditModal({
                                     border: '1px solid var(--border)',
                                     fontSize: '13px',
                                     fontWeight: 700,
-                                    width: '130px'
+                                    width: '100%',
+                                    boxSizing: 'border-box',
+                                    textAlign: 'center'
                                   }}
                                 />
                               )}
                             </td>
 
-                            <td style={{ padding: '8px 12px' }}>
+                            <td style={{ padding: '8px 10px', textAlign: 'center', boxSizing: 'border-box' }}>
                               {isOff ? (
                                 <span style={{ color: 'var(--muted)', fontSize: '12px' }}>— غير محدد</span>
                               ) : (
@@ -1213,13 +1434,15 @@ export default function EmployeeRosterEditModal({
                                     border: '1px solid var(--border)',
                                     fontSize: '13px',
                                     fontWeight: 700,
-                                    width: '130px'
+                                    width: '100%',
+                                    boxSizing: 'border-box',
+                                    textAlign: 'center'
                                   }}
                                 />
                               )}
                             </td>
 
-                            <td style={{ textAlign: 'center', fontWeight: 800, padding: '8px 12px' }}>
+                            <td style={{ textAlign: 'center', fontWeight: 800, padding: '8px 10px', boxSizing: 'border-box' }}>
                               {isOff ? (
                                 <span style={{ color: '#b45309', fontSize: '12px' }}>0 س</span>
                               ) : (

@@ -234,24 +234,7 @@ export function isDualApprovalRequest(reqOrType, state = null) {
   const type = typeof reqOrType === 'string' ? reqOrType : reqOrType.type;
   const normType = normalizeRequestType(type);
 
-  // 1. Inherently Single-Level Admin-Only requests (NEVER dual approval)
-  const adminOnlyTypes = [
-    'loan',
-    'advance',
-    'credit_medicine',
-    'meds',
-    'complaint',
-    'eval_edit_request',
-    'profile_update',
-    'penalty_objection',
-    'biometric_registration',
-    'biometric_reset'
-  ];
-  if (adminOnlyTypes.includes(normType)) {
-    return false;
-  }
-
-  // 2. Check Higher Management double approval rules in state
+  // 1. Check Higher Management double approval rules in state FIRST (Dynamic & Authoritative)
   const rules = state?.approvalRules || [];
   if (Array.isArray(rules) && rules.length > 0) {
     // Specific rule match
@@ -271,8 +254,10 @@ export function isDualApprovalRequest(reqOrType, state = null) {
       const days = typeof reqOrType === 'object' ? parseFloat(reqOrType.daysCount || reqOrType.days || 1) : 1;
       if (days > 3) {
         const longRule = rules.find(r => r.id === 'rule_leave_over_3_days' || r.id === 'rule_long_leave');
-        if (longRule && (longRule.reqBranch === false || longRule.requiresBranchManager === false)) {
-          return false;
+        if (longRule) {
+          const needsBranch = longRule.reqBranch !== false && longRule.requiresBranchManager !== false;
+          const needsAdmin = longRule.reqAdmin !== false && longRule.requiresSuperAdmin !== false;
+          return needsBranch && needsAdmin;
         }
       } else {
         const shortRule = rules.find(r => r.id === 'rule_leave');
@@ -283,6 +268,23 @@ export function isDualApprovalRequest(reqOrType, state = null) {
         }
       }
     }
+  }
+
+  // 2. Inherently Single-Level Admin-Only requests (Fallback when no rule is defined)
+  const adminOnlyTypes = [
+    'loan',
+    'advance',
+    'credit_medicine',
+    'meds',
+    'complaint',
+    'eval_edit_request',
+    'profile_update',
+    'penalty_objection',
+    'biometric_registration',
+    'biometric_reset'
+  ];
+  if (adminOnlyTypes.includes(normType)) {
+    return false;
   }
 
   // 3. Default Operational Requests requiring Dual Approval:

@@ -711,11 +711,37 @@ export function DataProvider({ children, showToast = () => {} }) {
             };
 
             const map = new Map((prev.requests || []).filter((r) => !isReqDeleted(r)).map((r) => [String(r.id), r]));
+            const toUpdateInDb = [];
             localReqs.forEach((lr) => {
               if (lr && lr.id && !isReqDeleted(lr)) {
-                map.set(String(lr.id), { ...(map.get(String(lr.id)) || {}), ...lr });
+                const idStr = String(lr.id);
+                const srv = map.get(idStr);
+                if (srv) {
+                  // السيرفر هو المصدر الموثوق للحالات النهائية (approved, rejected, cancelled, completed)
+                  const isSrvFinal = srv.status === 'approved' || srv.status === 'rejected' || srv.status === 'completed' || srv.status === 'cancelled' || srv.adminApproved || srv.branchApproved;
+                  const isLrFinal = lr.status === 'approved' || lr.status === 'rejected' || lr.status === 'completed' || lr.status === 'cancelled';
+                  
+                  if (isSrvFinal) {
+                    // السيرفر معتمد أو مرفوض أو به اعتماد، نعتمد بيانات السيرفر ونحدث IndexedDB
+                    toUpdateInDb.push({ ...lr, ...srv });
+                    map.set(idStr, { ...lr, ...srv });
+                  } else if (isLrFinal) {
+                    map.set(idStr, { ...srv, ...lr });
+                  } else {
+                    // كلاهما معلق - ندمج مع إعطاء الأولوية للبيانات القادمة من السيرفر
+                    map.set(idStr, { ...lr, ...srv });
+                  }
+                } else {
+                  // طلب محلي غير موجود بالسيرفر: يقبل فقط إذا كان تم إنشاؤه محلياً أو بحاجة للمزامنة
+                  if (lr._isLocal || lr._offline || lr.sync_status === 'pending') {
+                    map.set(idStr, lr);
+                  }
+                }
               }
             });
+            if (toUpdateInDb.length > 0) {
+              putRequestsBatch(toUpdateInDb).catch(() => {});
+            }
             return { ...prev, requests: Array.from(map.values()) };
           });
         }
@@ -812,8 +838,26 @@ export function DataProvider({ children, showToast = () => {} }) {
                   const lrStatus = String(lr.status || '').toLowerCase();
                   // إذا كان الطلب في الحالة الحالية معتمداً أو مرفوضاً، والوارد معلقاً، لا يتم الرجوع للحالة المعلقة أبداً
                   if (TERMINAL_STATUSES.has(curStatus) && !TERMINAL_STATUSES.has(lrStatus)) {
-                    map.set(idStr, { ...lr, ...current, status: current.status, adminApproved: current.adminApproved });
+                    map.set(idStr, {
+                      ...lr,
+                      ...current,
+                      status: current.status,
+                      adminApproved: current.adminApproved,
+                      branchApproved: current.branchApproved ?? lr.branchApproved,
+                      branchDecision: current.branchDecision ?? lr.branchDecision
+                    });
                     return;
+                  }
+                  // حماية قرار مدير الفرع إذا كان معتمداً حالياً لمنع مسحه بالمزامنة التزايدية
+                  if (current.branchApproved && !lr.branchApproved) {
+                    lr.branchApproved = true;
+                    lr.branchDecision = current.branchDecision || 'approved';
+                    lr.branchApprovedAt = current.branchApprovedAt || lr.branchApprovedAt;
+                  }
+                  if (current.branchRejected && !lr.branchRejected) {
+                    lr.branchRejected = true;
+                    lr.branchDecision = current.branchDecision || 'rejected';
+                    lr.branchRejectedAt = current.branchRejectedAt || lr.branchRejectedAt;
                   }
                 }
                 map.set(idStr, { ...(current || {}), ...lr });

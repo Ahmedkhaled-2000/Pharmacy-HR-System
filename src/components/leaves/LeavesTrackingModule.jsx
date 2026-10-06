@@ -55,6 +55,46 @@ export default function LeavesTrackingModule({
     setShowCompOffSettings(false);
   };
 
+  // إعدادات المعاملة المالية لكافة أنواع الإجازات
+  const [showLeaveFinancialPolicies, setShowLeaveFinancialPolicies] = useState(false);
+  const [leaveFinancialPolicies, setLeaveFinancialPolicies] = useState(() => {
+    return state.orgSettings?.leaveFinancialPolicies || {
+      annual: 'deduct_balance',      // 'deduct_balance' | 'paid' | 'unpaid'
+      sick: 'paid',                  // 'deduct_balance' | 'paid' | 'unpaid'
+      casual: 'deduct_balance',      // 'deduct_balance' | 'paid' | 'unpaid'
+      unpaid: 'unpaid',              // 'deduct_balance' | 'paid' | 'unpaid'
+      marriage: 'paid',              // 'deduct_balance' | 'paid' | 'unpaid'
+      maternity: 'paid',             // 'deduct_balance' | 'paid' | 'unpaid'
+      bereavement: 'paid',           // 'deduct_balance' | 'paid' | 'unpaid'
+      comp_off: 'paid'               // 'deduct_balance' | 'paid' | 'unpaid'
+    };
+  });
+
+  const handleSaveLeaveFinancialPolicies = async (e) => {
+    if (e) e.preventDefault();
+    const updatedOrgSettings = {
+      ...(state.orgSettings || {}),
+      leaveFinancialPolicies
+    };
+    const updatedState = normalizeState({
+      ...state,
+      orgSettings: updatedOrgSettings
+    });
+
+    if (setState) setState(updatedState);
+    if (saveState) {
+      try {
+        await saveState(updatedState);
+      } catch (err) {
+        console.warn('Error saving leave financial policies:', err);
+      }
+    }
+    if (showToast) {
+      showToast('✅ تم حفظ وتحديث المعاملة المالية لكافة أنواع الإجازات بنجاح');
+    }
+    setShowLeaveFinancialPolicies(false);
+  };
+
   const handleOpenEditBalance = (emp, currentBalance, type = 'annual') => {
     setEditingLeaveBalanceEmp(emp);
     setEditingBalanceType(type);
@@ -327,22 +367,41 @@ export default function LeavesTrackingModule({
           </p>
         </div>
 
-        <button
-          type="button"
-          className="btn btn-ghost"
-          onClick={() => setShowCompOffSettings(!showCompOffSettings)}
-          style={{
-            border: '1.5px solid #a855f7',
-            background: compOffPolicy.enabled ? 'rgba(168, 85, 247, 0.08)' : 'var(--surface)',
-            color: '#7e22ce',
-            fontWeight: 800,
-            fontSize: '13px',
-            padding: '7px 16px',
-            borderRadius: '10px'
-          }}
-        >
-          ⚙️ إعدادات وشروط إجازات بدل الراحة {compOffPolicy.enabled ? '🟢 (مفعل)' : '⚪ (معطل)'}
-        </button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => setShowLeaveFinancialPolicies(!showLeaveFinancialPolicies)}
+            style={{
+              border: '1.5px solid #0d9488',
+              background: showLeaveFinancialPolicies ? 'rgba(13, 148, 136, 0.15)' : 'rgba(13, 148, 136, 0.06)',
+              color: '#0f766e',
+              fontWeight: 800,
+              fontSize: '13px',
+              padding: '7px 16px',
+              borderRadius: '10px'
+            }}
+          >
+            ⚙️ المعاملة والسياسة المالية للإجازات
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => setShowCompOffSettings(!showCompOffSettings)}
+            style={{
+              border: '1.5px solid #a855f7',
+              background: compOffPolicy.enabled ? 'rgba(168, 85, 247, 0.08)' : 'var(--surface)',
+              color: '#7e22ce',
+              fontWeight: 800,
+              fontSize: '13px',
+              padding: '7px 16px',
+              borderRadius: '10px'
+            }}
+          >
+            ⚙️ إعدادات وشروط إجازات بدل الراحة {compOffPolicy.enabled ? '🟢 (مفعل)' : '⚪ (معطل)'}
+          </button>
+        </div>
       </div>
 
       {/* ── بطاقات مؤشرات الأداء الإحصائية للأرصدة وبدل الراحة ── */}
@@ -595,6 +654,79 @@ export default function LeavesTrackingModule({
             <button type="button" className="btn btn-ghost" onClick={() => setShowCompOffSettings(false)}>إلغاء</button>
             <button type="submit" className="btn btn-start" style={{ background: '#7e22ce', borderColor: '#7e22ce', padding: '7px 20px' }}>
               💾 حفظ السياسة
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* ── لوحة تخصيص المعاملة المالية لكافة أنواع الإجازات ── */}
+      {showLeaveFinancialPolicies && (
+        <form onSubmit={handleSaveLeaveFinancialPolicies} className="card settings-card fade-in" style={{
+          background: 'linear-gradient(135deg, rgba(204, 251, 241, 0.4), rgba(240, 253, 250, 0.7))',
+          border: '1.5px solid #2dd4bf',
+          borderRadius: '14px',
+          padding: '18px 22px',
+          marginBottom: '20px'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid #99f6e4', paddingBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '22px' }}>⚖️</span>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 900, color: '#0f766e' }}>
+                  تحديد المعاملة والسياسة المالية لكافة أنواع الإجازات
+                </h4>
+                <span style={{ fontSize: '12px', color: '#115e59' }}>
+                  حدد لكل نوع إجازة هل يتم خصمه من رصيد السنوي أم مدفوع الأجر بالكامل أم غير مدفوع (خصم من الراتب)
+                </span>
+              </div>
+            </div>
+            <button type="button" className="btn btn-ghost" onClick={() => setShowLeaveFinancialPolicies(false)} style={{ padding: '2px 8px' }}>✕</button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginBottom: '16px' }}>
+            {[
+              { key: 'annual', label: '🌴 إجازة سنوية اعتيادية', defaultDesc: 'تُخصم من رصيد الإجازات السنوي' },
+              { key: 'sick', label: '🏥 إجازة مرضية (بتقرير طبي)', defaultDesc: 'مدفوعة الأجر أو حسب لائحة العمل' },
+              { key: 'casual', label: '🌴 إجازة عارضة', defaultDesc: 'تُخصم من رصيد السنوي أو مدفوعة' },
+              { key: 'unpaid', label: '💸 إجازة بدون أجر', defaultDesc: 'تخصم من الراتب الشهري تلقائياً' },
+              { key: 'marriage', label: '💍 إجازة زواج', defaultDesc: 'إجازة مناسبة مدفوعة الأجر' },
+              { key: 'maternity', label: '👶 إجازة وضع ورعاية طفل', defaultDesc: 'إجازة أمومة مدفوعة الأجر' },
+              { key: 'bereavement', label: '🖤 إجازة وفاة / حداد', defaultDesc: 'إجازة عزاء مدفوعة الأجر' },
+              { key: 'comp_off', label: '🛋️ إجازة بدل راحة', defaultDesc: 'مدفوعة الأجر مقابل يوم راحة' }
+            ].map((item) => (
+              <div key={item.key} style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #ccfbf1', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, marginBottom: '4px', color: '#134e4a' }}>
+                  {item.label}
+                </label>
+                <span style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '6px' }}>
+                  {item.defaultDesc}
+                </span>
+                <select
+                  value={leaveFinancialPolicies[item.key] || 'paid'}
+                  onChange={(e) => setLeaveFinancialPolicies({ ...leaveFinancialPolicies, [item.key]: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '7px 10px',
+                    borderRadius: '8px',
+                    border: '1.5px solid #5eead4',
+                    fontWeight: 700,
+                    fontSize: '12.5px',
+                    background: leaveFinancialPolicies[item.key] === 'deduct_balance' ? '#f0fdf4' : leaveFinancialPolicies[item.key] === 'unpaid' ? '#fef2f2' : '#eff6ff',
+                    color: leaveFinancialPolicies[item.key] === 'deduct_balance' ? '#15803d' : leaveFinancialPolicies[item.key] === 'unpaid' ? '#b91c1c' : '#1d4ed8'
+                  }}
+                >
+                  <option value="deduct_balance">📉 خصم من رصيد الإجازات السنوي (مدفوعة الأجر)</option>
+                  <option value="paid">🟢 مدفوعة الأجر بالكامل (لا تؤثر على الرصيد أو الراتب)</option>
+                  <option value="unpaid">🔴 غير مدفوعة الأجر (خصم قيمة اليوم من الراتب)</option>
+                </select>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            <button type="button" className="btn btn-ghost" onClick={() => setShowLeaveFinancialPolicies(false)}>إلغاء</button>
+            <button type="submit" className="btn btn-start" style={{ background: '#0d9488', borderColor: '#0d9488', padding: '7px 22px' }}>
+              💾 حفظ المعاملة المالية للإجازات
             </button>
           </div>
         </form>

@@ -13,6 +13,7 @@ import {
 import { useUI } from '../../context/UIContext';
 import { isBranchMatch } from '../../utils/branchMatcher';
 import { apiSaveSettingsSlice } from '../../utils/apiClient';
+import DayDetailsModal from './DayDetailsModal';
 
 export default function AttendancePunchesModal({
   employee,
@@ -31,6 +32,7 @@ export default function AttendancePunchesModal({
 }) {
   const { showConfirm } = useUI();
   const [isStoppingShift, setIsStoppingShift] = useState(false);
+  const [selectedDayDetails, setSelectedDayDetails] = useState(null);
 
   const [editingPunch, setEditingPunch] = useState(null);
   const [isAddingNewPunch, setIsAddingNewPunch] = useState(false);
@@ -1156,15 +1158,14 @@ export default function AttendancePunchesModal({
                           <th style={{ textAlign: 'center' }}>وقت الخروج</th>
                           <th style={{ textAlign: 'center' }}>ساعات البريك</th>
                           <th style={{ textAlign: 'center' }}>صافي ساعات العمل</th>
-                          <th style={{ textAlign: 'center' }}>المبلغ المستحق</th>
-                          <th>الملاحظات</th>
+                          <th style={{ textAlign: 'center' }}>الملاحظات</th>
                           <th style={{ textAlign: 'center' }}>الإجراءات</th>
                         </tr>
                       </thead>
                       <tbody>
                         {bPunches.length === 0 ? (
                           <tr>
-                            <td colSpan="11" style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px' }}>
+                            <td colSpan="10" style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px' }}>
                               لا توجد بصمات مسجلة بهذا الفرع في هذا الشهر.
                             </td>
                           </tr>
@@ -1293,123 +1294,54 @@ export default function AttendancePunchesModal({
                                 <td style={{ textAlign: 'center' }}>
                                   {breakH ? <span style={{ background: '#fef3c7', color: '#b45309', padding: '4px 8px', borderRadius: '10px', fontWeight: '700', fontSize: '12px' }}>{breakH} س</span> : <span style={{ color: 'var(--muted)' }}>—</span>}
                                 </td>
-                                <td style={{ textAlign: 'center', color: isRejectedPhoto ? '#dc2626' : '#0d9488', fontWeight: '800' }}>
-                                  {isRejectedPhoto ? (
-                                    <div>
-                                      <span style={{ textDecoration: 'line-through', opacity: 0.65 }}>0.00 ساعة</span>
-                                      <div style={{ fontSize: '10.5px', color: '#b91c1c', fontWeight: 800 }}>مستبعدة من الأجور</div>
-                                    </div>
-                                  ) : (
-                                    <>
-                                      <div style={{ fontSize: '13px' }}>{totalH} ساعة</div>
-                                      {shiftMetrics.overtimeHours > 0 && (
-                                        <div style={{ fontSize: '10.5px', marginTop: '2px', fontWeight: 700, color: shiftMetrics.isOvertimeApproved ? '#16a34a' : shiftMetrics.overtimeStatus === 'rejected' ? '#dc2626' : '#b45309' }}>
-                                          {shiftMetrics.isOvertimeApproved && `(أساسي: ${regH.toFixed(2)} س + إضافي: ${shiftMetrics.overtimeHours.toFixed(2)} س)`}
-                                          {shiftMetrics.overtimeStatus === 'pending' && `(أساسي: ${regH.toFixed(2)} س + إضافي: ${shiftMetrics.overtimeHours.toFixed(2)} س قيد الاعتماد)`}
-                                          {shiftMetrics.overtimeStatus === 'rejected' && `(معتمد: ${regH.toFixed(2)} س | إضافي مرفوض: ${shiftMetrics.overtimeHours.toFixed(2)} س)`}
-                                        </div>
-                                      )}
-                                      {hasPerm && permHours > 0 && (
-                                        <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
-                                          (فعلي: {(Math.max(0, regH - permHours)).toFixed(2)} س + إذن: {permHours} س)
-                                        </div>
-                                      )}
-                                      {shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeHours > 0 && (
-                                        <div style={{ marginTop: '3px' }}>
-                                          <span style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
-                                            ✅ إضافي معتمد (+{shiftMetrics.overtimeHours.toFixed(2)} س)
-                                          </span>
-                                        </div>
-                                      )}
-                                      {shiftMetrics.overtimeStatus === 'rejected' && (
-                                        <div style={{ marginTop: '3px' }}>
-                                          <span style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
-                                            ❌ إضافي مرفوض ({shiftMetrics.overtimeHours.toFixed(2)} س)
-                                          </span>
-                                        </div>
-                                      )}
-                                      {shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0 && (
-                                        <div style={{ marginTop: '3px' }}>
-                                          <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
-                                            ⏳ إضافي قيد الاعتماد (+{shiftMetrics.overtimeHours.toFixed(2)} س)
-                                          </span>
-                                        </div>
-                                      )}
-                                    </>
-                                  )}
+                                <td style={{ textAlign: 'center', color: isRejectedPhoto ? '#dc2626' : '#0d9488', fontWeight: '800', fontSize: '13.5px' }}>
+                                  {isRejectedPhoto ? '0.00 س' : `${parseFloat(totalH).toFixed(2)} س`}
                                 </td>
-                                <td style={{ textAlign: 'center', color: isRejectedPhoto ? '#dc2626' : '#16a34a', fontWeight: '700' }}>
-                                  {isRejectedPhoto ? (
-                                    <div>
-                                      <span style={{ fontWeight: 800 }}>0.00 ج.م</span>
-                                      <div style={{ fontSize: '10px', color: '#dc2626' }}>ملغاة من الراتب</div>
-                                    </div>
-                                  ) : (
-                                    <>
-                                      <div style={{ fontWeight: 800 }}>{shiftEarned} ج.م</div>
-                                      {pendingOtAmount && (
-                                        <div style={{ fontSize: '9.5px', color: '#b45309', fontWeight: 700, marginTop: '2px' }} title="مبلغ الوقت الإضافي بانتظار اعتماد الإدارة">
-                                          (+{pendingOtAmount} ج.م معلق)
-                                        </div>
-                                      )}
-                                    </>
-                                  )}
-                                </td>
-                                <td style={{ fontSize: '12px', color: isRejectedPhoto ? '#b91c1c' : (hasPerm ? '#047857' : 'var(--muted)') }}>
-                                  {isRejectedPhoto ? (
-                                    <div>
-                                      <strong style={{ color: '#dc2626', display: 'block' }}>⚠️ تم رفض البصمة بسبب رفض الصورة</strong>
-                                      <span style={{ fontSize: '11px', color: '#7f1d1d' }}>{cleanNotes || 'مستبعدة تماماً من احتساب الأجور'}</span>
-                                    </div>
-                                  ) : hasPerm ? (
-                                    <div>
-                                      <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
-                                      {cleanNotes && !cleanNotes.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{cleanNotes}</div>}
-                                    </div>
-                                  ) : (
-                                    <div>
-                                      {/* Penalty status badges */}
-                                      {effectivePenaltyStatus === 'approved' && (
-                                        <div style={{ marginBottom: '4px' }}>
-                                          <span style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #f87171', padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800, display: 'inline-block' }}>
-                                            ⚖️ جزاء معتمد {linkedPenaltyReq?.details?.penaltyDays ? `(${linkedPenaltyReq.details.penaltyDays} يوم)` : linkedPenaltyReq?.amount ? `(${linkedPenaltyReq.amount} ج.م)` : ''}
-                                          </span>
-                                          {linkedPenaltyReq?.details?.penaltyReason && (
-                                            <div style={{ fontSize: '10px', color: '#991b1b', marginTop: '1px' }}>{linkedPenaltyReq.details.penaltyReason}</div>
-                                          )}
-                                        </div>
-                                      )}
-                                      {effectivePenaltyStatus === 'rejected' && (
-                                        <div style={{ marginBottom: '4px' }}>
-                                          <span style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800, display: 'inline-block' }}>
-                                            🛡️ تم رفض / إلغاء الجزاء من الإدارة
-                                          </span>
-                                        </div>
-                                      )}
-                                      {effectivePenaltyStatus === 'pending' && (
-                                        <div style={{ marginBottom: '4px' }}>
-                                          <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800, display: 'inline-block' }}>
-                                            ⏳ جزاء قيد المراجعة والاعتماد
-                                          </span>
-                                        </div>
-                                      )}
-
-                                      {/* Overtime status messages */}
-                                      {effectiveOtStatus === 'rejected' ? (
-                                        <div>
-                                          <strong style={{ color: '#dc2626', display: 'block' }}>❌ تم رفض الساعات الإضافية من قِبل الإدارة</strong>
-                                          <span style={{ fontSize: '11px', color: '#7f1d1d' }}>{cleanNotes || `احتساب ساعات الوردية الأساسية فقط (${p.regularHours || p.hours} س)`}</span>
-                                        </div>
-                                      ) : effectiveOtStatus === 'approved' && effectiveOtHours > 0 ? (
-                                        <div>
-                                          <strong style={{ color: '#16a34a', display: 'block' }}>✅ ساعات إضافية معتمدة (+{effectiveOtHours.toFixed(2)} س)</strong>
-                                          <span style={{ fontSize: '11px', color: '#047857' }}>{cleanNotes || 'تمت إضافة الساعات لصافي الاستحقاق'}</span>
-                                        </div>
-                                      ) : (
-                                        <span>{cleanNotes || 'تسجيل بصمة عادية'}</span>
-                                      )}
-                                    </div>
-                                  )}
+                                <td style={{ textAlign: 'center' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedDayDetails({
+                                      punch: p,
+                                      date: dateStr,
+                                      dayName,
+                                      employee,
+                                      hourlyRate: bRate,
+                                      regH,
+                                      otH,
+                                      totalH,
+                                      breakH,
+                                      shiftEarned,
+                                      pendingOtAmount,
+                                      hasPerm,
+                                      perm,
+                                      permHours,
+                                      effectiveOtStatus,
+                                      effectiveOtHours,
+                                      effectivePenaltyStatus,
+                                      linkedPenaltyReq,
+                                      linkedOtReq,
+                                      isManualShift: isShiftManualPunch(p),
+                                      isRejectedPhoto,
+                                      cleanNotes,
+                                      source: p.source || 'kiosk'
+                                    })}
+                                    title="عرض تفاصيل اليوم"
+                                    style={{
+                                      padding: '5px 10px',
+                                      borderRadius: '8px',
+                                      border: '1px solid #cbd5e1',
+                                      background: '#f8fafc',
+                                      cursor: 'pointer',
+                                      fontSize: '15px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      color: '#0f766e',
+                                      boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                                    }}
+                                  >
+                                    📋
+                                  </button>
                                 </td>
                                 <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                                   <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
@@ -1548,15 +1480,14 @@ export default function AttendancePunchesModal({
                   <th style={{ textAlign: 'center' }}>وقت الخروج</th>
                   <th style={{ textAlign: 'center' }}>ساعات البريك</th>
                   <th style={{ textAlign: 'center' }}>صافي ساعات العمل</th>
-                  <th style={{ textAlign: 'center' }}>المبلغ المستحق</th>
-                  <th>الملاحظات</th>
+                  <th style={{ textAlign: 'center' }}>الملاحظات</th>
                   <th style={{ textAlign: 'center' }}>الإجراءات</th>
                 </tr>
               </thead>
               <tbody>
                 {monthPunches.length === 0 ? (
                   <tr>
-                    <td colSpan="11" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>
+                    <td colSpan="10" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>
                       لا توجد بصمات مسجلة لهذا الموظف في هذا الشهر.
                     </td>
                   </tr>
@@ -1696,96 +1627,56 @@ export default function AttendancePunchesModal({
                         </td>
 
                         {/* Net Hours */}
-                        <td style={{ textAlign: 'center', color: isRejectedPhoto ? '#dc2626' : '#0d9488', fontWeight: '800' }}>
-                          {isRejectedPhoto ? (
-                            <div>
-                              <span style={{ textDecoration: 'line-through', opacity: 0.65 }}>0.00 ساعة</span>
-                              <div style={{ fontSize: '10.5px', color: '#b91c1c', fontWeight: 800 }}>مستبعدة من الأجور</div>
-                            </div>
-                          ) : (
-                            <>
-                              <div style={{ fontSize: '13px' }}>{totalH} ساعة</div>
-                              {shiftMetrics.overtimeHours > 0 && (
-                                <div style={{ fontSize: '10.5px', marginTop: '2px', fontWeight: 700, color: shiftMetrics.isOvertimeApproved ? '#16a34a' : shiftMetrics.overtimeStatus === 'rejected' ? '#dc2626' : '#b45309' }}>
-                                  {shiftMetrics.isOvertimeApproved && `(أساسي: ${regH.toFixed(2)} س + إضافي: ${shiftMetrics.overtimeHours.toFixed(2)} س)`}
-                                  {shiftMetrics.overtimeStatus === 'pending' && `(أساسي: ${regH.toFixed(2)} س + إضافي: ${shiftMetrics.overtimeHours.toFixed(2)} س قيد الاعتماد)`}
-                                  {shiftMetrics.overtimeStatus === 'rejected' && `(معتمد: ${regH.toFixed(2)} س | إضافي مرفوض: ${shiftMetrics.overtimeHours.toFixed(2)} س)`}
-                                </div>
-                              )}
-                              {hasPerm && permHours > 0 && (
-                                <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
-                                  (فعلي: {(Math.max(0, regH - permHours)).toFixed(2)} س + إذن: {permHours} س)
-                                </div>
-                              )}
-                              {shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeHours > 0 && (
-                                <div style={{ marginTop: '3px' }}>
-                                  <span style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
-                                    ✅ إضافي معتمد (+{shiftMetrics.overtimeHours.toFixed(2)} س)
-                                  </span>
-                                </div>
-                              )}
-                              {shiftMetrics.overtimeStatus === 'rejected' && (
-                                <div style={{ marginTop: '3px' }}>
-                                  <span style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
-                                    ❌ إضافي مرفوض ({shiftMetrics.overtimeHours.toFixed(2)} س)
-                                  </span>
-                                </div>
-                              )}
-                              {shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0 && (
-                                <div style={{ marginTop: '3px' }}>
-                                  <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800, display: 'inline-block' }}>
-                                    ⏳ إضافي قيد الاعتماد (+{shiftMetrics.overtimeHours.toFixed(2)} س)
-                                  </span>
-                                </div>
-                              )}
-                            </>
-                          )}
+                        <td style={{ textAlign: 'center', color: isRejectedPhoto ? '#dc2626' : '#0d9488', fontWeight: '800', fontSize: '13.5px' }}>
+                          {isRejectedPhoto ? '0.00 س' : `${parseFloat(totalH).toFixed(2)} س`}
                         </td>
 
-                        {/* Amount Due */}
-                        <td style={{ textAlign: 'center', color: isRejectedPhoto ? '#dc2626' : '#16a34a', fontWeight: '700' }}>
-                          {isRejectedPhoto ? (
-                            <div>
-                              <span style={{ fontWeight: 800 }}>0.00 ج.م</span>
-                              <div style={{ fontSize: '10px', color: '#dc2626' }}>ملغاة من الراتب</div>
-                            </div>
-                          ) : (
-                            <>
-                              <div style={{ fontWeight: 800 }}>{shiftEarned} ج.م</div>
-                              {pendingOtAmount && (
-                                <div style={{ fontSize: '9.5px', color: '#b45309', fontWeight: 700, marginTop: '2px' }} title="مبلغ الوقت الإضافي بانتظار اعتماد الإدارة">
-                                  (+{pendingOtAmount} ج.م معلق)
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </td>
-
-                        {/* Notes */}
-                        <td style={{ fontSize: '12px', color: isRejectedPhoto ? '#b91c1c' : (hasPerm ? '#047857' : 'var(--muted)') }}>
-                          {isRejectedPhoto ? (
-                            <div>
-                              <strong style={{ color: '#dc2626', display: 'block' }}>⚠️ تم رفض البصمة بسبب رفض الصورة</strong>
-                              <span style={{ fontSize: '11px', color: '#7f1d1d' }}>{p.notes || p.note || 'مستبعدة تماماً من احتساب الأجور'}</span>
-                            </div>
-                          ) : hasPerm ? (
-                            <div>
-                              <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
-                              {p.notes && !p.notes.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{p.notes}</div>}
-                            </div>
-                          ) : p.overtimeStatus === 'rejected' ? (
-                            <div>
-                              <strong style={{ color: '#dc2626', display: 'block' }}>❌ تم رفض الساعات الإضافية من قِبل الإدارة</strong>
-                              <span style={{ fontSize: '11px', color: '#7f1d1d' }}>{p.notes || p.note || `احتساب ساعات الوردية الأساسية فقط (${p.regularHours || p.hours} س)`}</span>
-                            </div>
-                          ) : p.overtimeStatus === 'approved' && parseFloat(p.overtimeHours) > 0 ? (
-                            <div>
-                              <strong style={{ color: '#16a34a', display: 'block' }}>✅ ساعات إضافية معتمدة (+{parseFloat(p.overtimeHours).toFixed(2)} س)</strong>
-                              <span style={{ fontSize: '11px', color: '#047857' }}>{p.notes || p.note || 'تمت إضافة الساعات لصافي الاستحقاق'}</span>
-                            </div>
-                          ) : (
-                            p.notes || p.note || p.statusLabel || 'تسجيل بصمة عادية'
-                          )}
+                        {/* Notes - Icon-only button to open DayDetailsModal */}
+                        <td style={{ textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDayDetails({
+                              punch: p,
+                              date: dateStr,
+                              dayName,
+                              employee,
+                              hourlyRate: shiftRate,
+                              regH,
+                              otH,
+                              totalH,
+                              breakH,
+                              shiftEarned,
+                              pendingOtAmount,
+                              hasPerm,
+                              perm,
+                              permHours,
+                              effectiveOtStatus: p.overtimeStatus,
+                              effectiveOtHours: parseFloat(p.overtimeHours || otH || 0),
+                              effectivePenaltyStatus: p.penaltyStatus,
+                              linkedPenaltyReq: null,
+                              linkedOtReq: null,
+                              isManualShift: isShiftManualPunch(p),
+                              isRejectedPhoto,
+                              cleanNotes: p.notes || p.note || p.statusLabel || '',
+                              source: p.source || 'kiosk'
+                            })}
+                            title="عرض تفاصيل اليوم"
+                            style={{
+                              padding: '5px 10px',
+                              borderRadius: '8px',
+                              border: '1px solid #cbd5e1',
+                              background: '#f8fafc',
+                              cursor: 'pointer',
+                              fontSize: '15px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#0f766e',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                            }}
+                          >
+                            📋
+                          </button>
                         </td>
 
                         {/* Actions */}
@@ -2018,6 +1909,9 @@ export default function AttendancePunchesModal({
             </div>
           </div>
         )}
+
+        {/* ── Day Details Modal (نافذة تفاصيل اليوم) ── */}
+        <DayDetailsModal details={selectedDayDetails} onClose={() => setSelectedDayDetails(null)} />
       </div>
     </div>
   );

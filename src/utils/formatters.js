@@ -18,6 +18,7 @@ export function arabicWeekday(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   return AR_WEEKDAYS[d.getDay()];
 }
+export const getArabicWeekday = arabicWeekday;
 
 export function todayStr() {
   const d = new Date();
@@ -1447,15 +1448,31 @@ export function getPunchMethodDetails(p) {
 
   const src = String(p.punchSource || p.source || p.checkInSource || p.method || '').toLowerCase();
   const verify = String(p.verifyType || p.verify_type || p.verificationType || '').toUpperCase();
-  const devSn = p.biometricDeviceSerial || p.deviceSerial || p.device_serial || '';
+  const devSn = String(p.biometricDeviceSerial || p.deviceSerial || p.device_serial || '').trim();
+  const isKioskSource = src === 'kiosk' || src === 'kiosk_offline' || src === 'kiosk_photo' || devSn === 'KIOSK_APP' || verify === 'KIOSK';
 
-  // 1. بصمة ماكينة البصمة الفعلية (Hardware Biometric Device ZKTeco MB20)
+  // 1. كشك البصمة الإلكتروني (Electronic Kiosk) - الأسبقية الأولى عند وسم الكشك لمنع التداخل مع أجهزة MB20
+  if (isKioskSource) {
+    const isFaceKiosk = p.faceVerified || (verify === 'FACE' && src === 'kiosk') || (typeof p.note === 'string' && p.note.includes('وجه'));
+    return {
+      label: isFaceKiosk ? 'كشك البصمة (بصمة الوجه)' : 'كشك البصمة الإلكتروني',
+      shortLabel: 'كشك البصمة',
+      subText: p.branchName ? `كشك فرع ${p.branchName}` : 'كشك الفرع الذكي',
+      icon: '📱',
+      type: 'kiosk',
+      bg: '#f0fdfa',
+      color: '#0f766e',
+      border: '#99f6e4'
+    };
+  }
+
+  // 2. بصمة ماكينة البصمة الفعلية (Hardware Biometric Device ZKTeco MB20)
   if (
     src === 'biometric_device' ||
     src === 'hardware' ||
     src === 'device' ||
     src === 'zkteco' ||
-    Boolean(devSn) ||
+    (Boolean(devSn) && devSn !== 'KIOSK_APP' && devSn !== 'kiosk') ||
     verify === 'FINGERPRINT' ||
     (verify === 'FACE' && src !== 'kiosk')
   ) {
@@ -1463,7 +1480,7 @@ export function getPunchMethodDetails(p) {
       return {
         label: 'جهاز بصمة الوجه',
         shortLabel: 'جهاز الوجه',
-        subText: devSn ? `ماكينة MB20 (${devSn})` : 'ماكينة البصمة',
+        subText: (devSn && devSn !== 'KIOSK_APP') ? `ماكينة MB20 (${devSn})` : 'ماكينة البصمة',
         icon: '👤',
         type: 'biometric_face',
         bg: '#f0fdf4',
@@ -1474,7 +1491,7 @@ export function getPunchMethodDetails(p) {
     return {
       label: 'جهاز بصمة الإصبع',
       shortLabel: 'جهاز البصمة',
-      subText: devSn ? `ماكينة MB20 (${devSn})` : 'ماكينة البصمة',
+      subText: (devSn && devSn !== 'KIOSK_APP') ? `ماكينة MB20 (${devSn})` : 'ماكينة البصمة',
       icon: '👆',
       type: 'biometric_fingerprint',
       bg: '#ecfdf5',

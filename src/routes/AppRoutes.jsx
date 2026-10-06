@@ -340,6 +340,7 @@ export default function AppRoutes() {
     recruitment: 'بوابة التوظيف وفرز السير الذاتية',
     whatsapp_center: 'مركز مراسلات الواتساب التلقائي',
     outstock: 'نظام متابعة نواقص وطلبات أدوية العملاء والفروع (OutStock Handling)',
+    'branch-whatsapp': '💬 مركز مراسلات وتوجيهات واتساب الفرع',
     'owner-permissions': '👑 صلاحيات الموظفين وهوية المنظومة السيادية'
   }), []);
 
@@ -2563,6 +2564,7 @@ export default function AppRoutes() {
                   'adjustments-module',
                   'admin-directives',
                   'branch-directives',
+                  'branch-whatsapp',
                   'financial-reports',
                   'whatsapp-center',
                   'bylaws',

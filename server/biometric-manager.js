@@ -748,6 +748,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
   const alertedOfflineDevices = new Set();
   let cdataProcessingQueue = Promise.resolve();
+  // 🛰️ ذاكرة التتبع الجغرافي للموظفين بين الأجهزة لكشف التنقل المستحيل
+  const employeeLastDevicePunch = new Map(); // empId -> { serial, branchId, branchName, epoch, timeStr }
 
   // 🛡️ المكنسة الذكية لسلامة الورديات ومراقبة الأجهزة (Watchdog & Shift Safety Sweeper: كل 60 ثانية)
   const watchdogInterval = setInterval(async () => {
@@ -1505,11 +1507,12 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
               }
             }
 
-            // جلب بيانات النظام الحالية (الموظفين والورديات)
+            // جلب بيانات النظام الحالية (الموظفين والورديات والفروع)
             const state = await getSettingsFromStorage(STORAGE_KEY);
             const org = state?.orgSettings || {};
             const alertConfig = org.biometricWhatsAppAlerts || {};
             const employees = Array.isArray(state?.employees) ? state.employees : [];
+            const branches = Array.isArray(state?.branches) ? state.branches : [];
             const currentActiveShifts = { ...(state?.activeShifts || {}) };
             let currentShifts = [...(state?.shifts || [])];
 
@@ -1633,14 +1636,15 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         // 1. البحث الفوري في جدول أكواد الفروع المتعددة أولاً (Multi-Branch Multi-PIN Resolver)
         let matchedEmpId = null;
         let matchedEmpName = null;
-        let matchedBranchId = devObj?.branch_id || '';
+        const physicalBranchId = devObj?.branch_id || '';
+        let matchedBranchId = physicalBranchId;
 
         try {
           const branchPinQ = await db.query(
             `SELECT employee_id, branch_id FROM public.employee_branch_pins 
              WHERE device_user_pin = $1 AND (branch_id = $2 OR $2 = '' OR branch_id IS NULL) 
              LIMIT 1`,
-            [pin, matchedBranchId]
+            [pin, physicalBranchId]
           );
           if (branchPinQ.rows && branchPinQ.rows.length > 0) {
             matchedEmpId = branchPinQ.rows[0].employee_id;
@@ -1668,15 +1672,75 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             matchedEmpObj = emp;
             matchedEmpId = emp.id;
             matchedEmpName = emp.name;
-            if (emp.branchId) matchedBranchId = emp.branchId;
+            if (!matchedBranchId && emp.branchId && emp.branchId !== 'floating' && emp.branchId !== 'all') {
+              matchedBranchId = emp.branchId;
+            }
           }
         } else {
           const emp = employees.find(e => String(e.id) === String(matchedEmpId));
           if (emp) {
             matchedEmpObj = emp;
             matchedEmpName = emp.name;
-            if (emp.branchId && !matchedBranchId) matchedBranchId = emp.branchId;
+            if (!matchedBranchId && emp.branchId && emp.branchId !== 'floating' && emp.branchId !== 'all') {
+              matchedBranchId = emp.branchId;
+            }
           }
+        }
+
+        // ── 3.1. التوجيه الجغرافي الذكي (Multi-Branch & Floating Staff Resolver) ──
+        const primaryBranchId = (matchedEmpObj?.branchId && matchedEmpObj.branchId !== 'floating' && matchedEmpObj.branchId !== 'all')
+          ? String(matchedEmpObj.branchId)
+          : null;
+        const isFloatingEmp = Boolean(
+          matchedEmpObj?.isFloating ||
+          matchedEmpObj?.branchId === 'floating' ||
+          matchedEmpObj?.branchId === 'all' ||
+          !primaryBranchId
+        );
+        const effectiveShiftBranchId = physicalBranchId || primaryBranchId || matchedBranchId || '';
+        const isCrossBranch = Boolean(physicalBranchId && primaryBranchId && String(physicalBranchId) !== String(primaryBranchId));
+        const isCoverageShift = isCrossBranch || isFloatingEmp;
+
+        // أسماء الفروع
+        const effBranchObj = branches.find(b => String(b.id) === String(effectiveShiftBranchId) || String(b.code) === String(effectiveShiftBranchId));
+        const effectiveBranchName = effBranchObj?.name || devObj?.branch_name || 'فرع غير محدد';
+
+        const physBranchObj = physicalBranchId ? branches.find(b => String(b.id) === String(physicalBranchId) || String(b.code) === String(physicalBranchId)) : null;
+        const physicalBranchName = physBranchObj?.name || devObj?.branch_name || effectiveBranchName;
+
+        const priBranchObj = primaryBranchId ? branches.find(b => String(b.id) === String(primaryBranchId) || String(b.code) === String(primaryBranchId)) : null;
+        const primaryBranchName = priBranchObj?.name || (isFloatingEmp ? 'قوة مركزية عائمة' : '');
+
+        // ── 3.2. درع الانتقال المستحيل (Impossible Travel Protection) ──
+        let isSuspiciousTravel = false;
+        let suspiciousTravelNote = '';
+        if (matchedEmpId) {
+          const lastDevPunch = employeeLastDevicePunch.get(String(matchedEmpId));
+          if (lastDevPunch && lastDevPunch.serial !== sn && physicalBranchId && lastDevPunch.branchId && String(lastDevPunch.branchId) !== String(physicalBranchId)) {
+            const elapsedMins = Math.abs(punchEpoch - lastDevPunch.epoch) / (1000 * 60);
+            if (elapsedMins < 10) {
+              isSuspiciousTravel = true;
+              suspiciousTravelNote = `⚠️ اشتباه انتقال مستحيل بين فرعين (${Math.round(elapsedMins)} دقيقة فقط بين جهاز ${lastDevPunch.branchName || lastDevPunch.serial} وجهاز ${physicalBranchName || sn})`;
+              console.warn(`[Biometric Impossible Travel Guard]: ${matchedEmpName} - ${suspiciousTravelNote}`);
+              io.emit('biometric:impossible_travel_alert', {
+                employeeId: matchedEmpId,
+                employeeName: matchedEmpName,
+                prevDevice: lastDevPunch.serial,
+                prevBranch: lastDevPunch.branchName,
+                currentDevice: sn,
+                currentBranch: physicalBranchName,
+                elapsedMinutes: Math.round(elapsedMins),
+                time: `${datePart} ${timePart}`
+              });
+            }
+          }
+          employeeLastDevicePunch.set(String(matchedEmpId), {
+            serial: sn,
+            branchId: physicalBranchId,
+            branchName: physicalBranchName,
+            epoch: punchEpoch,
+            timeStr: `${datePart} ${timePart}`
+          });
         }
 
         // إذا كان الموظف غير معرف بعد في النظام:
@@ -1835,19 +1899,37 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             date: datePart,
             timeIn: timePart,
             timeOut: '',
-            branchId: matchedBranchId,
+            branchId: effectiveShiftBranchId,
+            branchName: effectiveBranchName,
+            actualBranchId: physicalBranchId || effectiveShiftBranchId,
+            actualBranchName: physicalBranchName,
+            primaryBranchId: primaryBranchId || '',
+            primaryBranchName: primaryBranchName || '',
+            isCrossBranch,
+            isCoverageShift,
+            isFloatingEmp,
+            isSuspiciousTravel,
             isLiveActive: true,
             status: 'active',
             punchSource: 'biometric_device',
             source: 'biometric_device',
             biometricDeviceSerial: sn,
+            biometricDeviceName: devObj?.device_name || 'ZKTeco MB20',
             verifyType,
             startEpoch: safePunchEpoch
           };
 
           const activePayload = {
             shiftId: newShiftId,
-            branchId: matchedBranchId,
+            branchId: effectiveShiftBranchId,
+            branchName: effectiveBranchName,
+            actualBranchId: physicalBranchId || effectiveShiftBranchId,
+            actualBranchName: physicalBranchName,
+            primaryBranchId: primaryBranchId || '',
+            primaryBranchName: primaryBranchName || '',
+            isCrossBranch,
+            isCoverageShift,
+            isFloatingEmp,
             date: datePart,
             timeIn: timePart,
             startEpoch: safePunchEpoch,
@@ -1857,7 +1939,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             source: 'biometric_device',
             punchSource: 'biometric_device',
             verifyType,
-            biometricDeviceSerial: sn
+            biometricDeviceSerial: sn,
+            biometricDeviceName: devObj?.device_name || 'ZKTeco MB20'
           };
           possibleEmpKeys.forEach(k => {
             currentActiveShifts[k] = activePayload;
@@ -1928,11 +2011,21 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             employeeId: matchedEmpId,
             employeeCode: matchedEmpObj?.code || origShift?.employeeCode || '',
             employeeName: matchedEmpName,
-            branchId: matchedBranchId || origShift?.branchId || effectiveActive?.branchId,
+            branchId: origShift?.branchId || effectiveShiftBranchId,
+            branchName: origShift?.branchName || effectiveBranchName,
+            actualBranchId: origShift?.actualBranchId || physicalBranchId || effectiveShiftBranchId,
+            actualBranchName: origShift?.actualBranchName || physicalBranchName,
+            primaryBranchId: origShift?.primaryBranchId || primaryBranchId || '',
+            primaryBranchName: origShift?.primaryBranchName || primaryBranchName || '',
+            isCrossBranch: origShift?.isCrossBranch ?? isCrossBranch,
+            isCoverageShift: origShift?.isCoverageShift ?? isCoverageShift,
+            isFloatingEmp: origShift?.isFloatingEmp ?? isFloatingEmp,
             date: effectiveDate,
             timeIn: inTime,
             timeOut: outTime,
             timeOutDate: datePart,
+            punchOutBranchId: physicalBranchId || effectiveShiftBranchId,
+            punchOutBranchName: physicalBranchName,
             hours: calcHours,
             actualWorkedHours: calcHours,
             netHours: calcHours,
@@ -1946,6 +2039,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             statusLabel: isOvernight ? 'حضور حي (وردية عابرة لمنتصف الليل)' : 'حضور حي',
             punchOutSource: 'biometric_device',
             punchOutDeviceSerial: sn,
+            punchOutDeviceName: devObj?.device_name || 'ZKTeco MB20',
             punchOutVerifyType: verifyType,
             updatedAt: new Date().toISOString()
           };
@@ -1961,9 +2055,16 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         // 5. حساب فارق زمن وصول البصمة لتحديد إذا كانت مزامنة أوفلاين (Offline Sync Latency)
         const latencyMinutes = Math.round((Date.now() - punchEpoch) / 60000);
         const isOfflineSync = latencyMinutes > 5;
-        const processNotes = isOfflineSync
+        let processNotes = isOfflineSync
           ? `معالجة بنجاح [📶 مزامنة أوفلاين - تأخير ${latencyMinutes} دقيقة]`
           : 'معالجة بنجاح';
+
+        if (suspiciousTravelNote) {
+          processNotes += ` | ${suspiciousTravelNote}`;
+        }
+        if (isCoverageShift) {
+          processNotes += isFloatingEmp ? ' [⚡ موظف عائم]' : ` [⚡ تغطية فرع - أساسي: ${primaryBranchName}]`;
+        }
 
         // تجميع إحصائيات تقرير التسوية
         if (actionType === 'check_in') checkInCount++;
@@ -1977,19 +2078,29 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           empActionMap.get(matchedEmpId).actions.push(actionLabelAr);
         }
 
-        // حفظ في الـ Raw Log
+        // حفظ في الـ Raw Log مع الفرع الفعلي للماكينة
+        const rawPunchBranchId = physicalBranchId || effectiveShiftBranchId || null;
         await db.query(
           `INSERT INTO public.biometric_raw_punches 
            (device_serial, device_user_pin, punch_time, verify_type, raw_punch_state, employee_id, employee_name, branch_id, action_type, process_status, process_notes, raw_payload)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'PROCESSED', $10, $11)`,
-          [sn, pin, `${datePart} ${timePart}:00`, verifyType, rawState, matchedEmpId, matchedEmpName, matchedBranchId, actionType, processNotes, line]
+          [sn, pin, `${datePart} ${timePart}:00`, verifyType, rawState, matchedEmpId, matchedEmpName, rawPunchBranchId, actionType, processNotes, line]
         );
 
         // 6. بث لحظي فائق الخفة عبر Socket.io (Micro-Event Broadcast < 1KB)
         const punchPayload = {
           employeeId: matchedEmpId,
           employeeName: matchedEmpName,
-          branchId: matchedBranchId,
+          branchId: effectiveShiftBranchId,
+          branchName: effectiveBranchName,
+          physicalBranchId,
+          physicalBranchName,
+          primaryBranchId: primaryBranchId || '',
+          primaryBranchName: primaryBranchName || '',
+          isCrossBranch,
+          isCoverageShift,
+          isFloatingEmp,
+          isSuspiciousTravel,
           actionType,
           date: datePart,
           time: timePart,
@@ -2006,8 +2117,12 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           timestamp: new Date().toISOString()
         };
 
-        if (matchedBranchId) {
-          io.to(`room:branch:${matchedBranchId}`).emit('punch:recorded', punchPayload);
+        // بث مزدوج: للفرع المستضيف للوردية وللفرع الأساسي للموظف
+        if (effectiveShiftBranchId) {
+          io.to(`room:branch:${effectiveShiftBranchId}`).emit('punch:recorded', punchPayload);
+        }
+        if (primaryBranchId && String(primaryBranchId) !== String(effectiveShiftBranchId)) {
+          io.to(`room:branch:${primaryBranchId}`).emit('punch:recorded', punchPayload);
         }
         io.to(`room:employee:${matchedEmpId}`).emit('punch:recorded', punchPayload);
         io.to('room:admin:live').emit('punch:recorded', punchPayload);
@@ -2017,7 +2132,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           entityType: 'activeShifts',
           action: actionType,
           employeeId: matchedEmpId,
-          branchId: matchedBranchId,
+          branchId: effectiveShiftBranchId,
+          primaryBranchId: primaryBranchId || '',
           timestamp: new Date().toISOString()
         });
 

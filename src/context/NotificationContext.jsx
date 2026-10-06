@@ -62,6 +62,7 @@ export function NotificationProvider({ children }) {
   const pendingRequestsCount = useMemo(() => {
     if (!state) return 0;
     const deletedIdsSet = new Set((state._deletedIds || []).map(String));
+    const adminHiddenSet = new Set((state.adminHiddenRequestIds || []).map(String));
     const loansList = state.loans || [];
 
     // دالة فحص ما إذا كان الطلب جزاءً تلقائياً معتمداً من النظام (مكانه في شاشة اللائحة وليس الطلبات)
@@ -122,14 +123,15 @@ export function NotificationProvider({ children }) {
         const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_)/, '');
         if (seen.has(idStr) || seen.has(rawId) || seen.has(`req_${rawId}`)) return;
 
+        const isPending = !r.status || r.status === 'pending';
         const empKey = String(r.employeeId || r.employeeCode || '');
         const typeKey = String(r.type || defaultType || 'gen');
         const dateKey = String(r.date || r.startDate || (r.createdAt ? r.createdAt.substring(0, 10) : ''));
-        const timeKey = r.time ? String(r.time).substring(0, 4) : (r.createdAt ? r.createdAt.substring(11, 16) : '');
+        const timeKey = r.time ? String(r.time).trim() : (r.createdAt ? r.createdAt.substring(11, 19) : '');
         const amtKey = String(r.amount || r.totalAmount || r.leaveType || r.targetEmployeeId || '');
         const sigKey = `${empKey}_${typeKey}_${dateKey}_${timeKey}_${amtKey}`;
 
-        if (sigKey.length > 8 && seenSignatures.has(sigKey)) return;
+        if (!isPending && sigKey.length > 8 && seenSignatures.has(sigKey)) return;
 
         seen.add(idStr);
         seen.add(rawId);
@@ -181,14 +183,15 @@ export function NotificationProvider({ children }) {
       const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_)/, '');
       if (seen.has(idStr) || seen.has(rawId) || seen.has(`req_${rawId}`)) return;
 
+      const isPending = !r.status || r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_target' || r.status === 'pending_local' || r.status === 'queued' || r.status === 'syncing';
       const empKey = String(r.employeeId || r.employeeCode || '');
       const typeKey = String(r.type || defaultType || 'gen');
       const dateKey = String(r.date || r.startDate || (r.createdAt ? r.createdAt.substring(0, 10) : ''));
-      const timeKey = r.time ? String(r.time).substring(0, 4) : (r.createdAt ? r.createdAt.substring(11, 16) : '');
+      const timeKey = r.time ? String(r.time).trim() : (r.createdAt ? r.createdAt.substring(11, 19) : '');
       const amtKey = String(r.amount || r.totalAmount || r.leaveType || r.targetEmployeeId || '');
       const sigKey = `${empKey}_${typeKey}_${dateKey}_${timeKey}_${amtKey}`;
 
-      if (sigKey.length > 8 && seenSignaturesAdmin.has(sigKey)) return;
+      if (!isPending && sigKey.length > 8 && seenSignaturesAdmin.has(sigKey)) return;
 
       seen.add(idStr);
       seen.add(rawId);
@@ -237,7 +240,7 @@ export function NotificationProvider({ children }) {
       if (deletedIdsSet.has(idStr)) return false;
       // Resignations are managed exclusively in their dedicated module
       if (r.type === 'resignation' || r.type === 'withdraw' || r.isResignation || idStr.startsWith('res_')) return false;
-      if (r.hiddenFromAdmin) return false;
+      if (r.hiddenFromAdmin || adminHiddenSet.has(idStr)) return false;
       if (isSystemAutoPenalty(r, idStr)) return false;
       if (isLoanReconciledApproved(r, idStr)) return false;
 

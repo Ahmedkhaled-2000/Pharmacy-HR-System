@@ -367,15 +367,17 @@ export default function RequestsModule({
         return;
       }
 
-      // Semantic deduplication for double submissions / rapid multi-clicks
+      // حماية صارمة: يمنع منعاً باتاً استبعاد أو إخفاء أي طلب معلق (Pending) من العرض
+      // إخفاء الطلب المعلق يجعله طلباً وهمياً يظهر في العدادات ويختفي من جدول الإدارة
+      const isPending = isPendingRequest(r);
       const empKey = String(r.employeeId || r.employeeCode || '');
       const typeKey = String(r.type || defaultType || 'gen');
       const dateKey = String(r.date || r.startDate || (r.createdAt ? r.createdAt.substring(0, 10) : ''));
-      const timeKey = r.time ? String(r.time).substring(0, 4) : (r.createdAt ? r.createdAt.substring(11, 16) : '');
+      const timeKey = r.time ? String(r.time).trim() : (r.createdAt ? r.createdAt.substring(11, 19) : '');
       const amtKey = String(r.amount || r.totalAmount || r.leaveType || r.targetEmployeeId || '');
       const sigKey = `${empKey}_${typeKey}_${dateKey}_${timeKey}_${amtKey}`;
 
-      if (sigKey.length > 8 && seenSignatures.has(sigKey)) {
+      if (!isPending && sigKey.length > 8 && seenSignatures.has(sigKey)) {
         return;
       }
 
@@ -588,6 +590,7 @@ export default function RequestsModule({
 
   const REQUEST_TYPE_LABELS = {
     all: 'كافة الطلبات',
+    from_branch_manager: 'طلبات مرسلة من مدير الفرع',
     leave: 'طلبات الإجازات (كافة الأنواع)',
     long_leave: 'طلبات الإجازات',
     schedule_deviation: 'عدم الالتزام بالجدول',
@@ -689,7 +692,17 @@ export default function RequestsModule({
 
   const isRequestMatchingFilterType = (r, type) => {
     if (!r || !type || type === 'all') return true;
-    if (type === 'leave' || type === 'long_leave') {
+    if (type === 'from_branch_manager' || type === 'branch_manager') {
+      return Boolean(
+        r.submittedByBranchManager ||
+        r.createdRole === 'branch' ||
+        r.createdRole === 'branch_manager' ||
+        r.creatorRole === 'branch' ||
+        r.creatorRole === 'branch_manager' ||
+        r.createdBy === 'branch' ||
+        r.senderRole === 'branch'
+      );
+    } else if (type === 'leave' || type === 'long_leave') {
       return (
         r.type === 'leave' ||
         r.type === 'leave_request' ||
@@ -1404,6 +1417,28 @@ export default function RequestsModule({
         const empId = approvedTargetReq.employeeId;
         const reqDate = approvedTargetReq.date || (approvedTargetReq.createdAt ? approvedTargetReq.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
         const actionType = approvedTargetReq.targetAction || approvedTargetReq.actionType;
+
+        // Auto-reconcile and approve any duplicate pending biometric requests for the same employee, date, and action
+        updatedRequests = updatedRequests.map((r) => {
+          if (
+            r.id !== approvedTargetReq.id &&
+            (String(r.employeeId) === String(empId) || (approvedTargetReq.employeeCode && String(r.employeeCode) === String(approvedTargetReq.employeeCode))) &&
+            (r.date === reqDate || (r.createdAt && r.createdAt.slice(0, 10) === reqDate)) &&
+            (r.type === 'biometric_verification' || r.requestType === 'biometric_verification' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد') &&
+            (!actionType || (r.targetAction || r.actionType) === actionType) &&
+            isPendingRequest(r)
+          ) {
+            return {
+              ...r,
+              status: 'approved',
+              adminApproved: true,
+              approvedAt: new Date().toISOString(),
+              supersededBy: approvedTargetReq.id,
+              note: (r.note ? r.note + ' | ' : '') + 'تم الاعتماد تلقائياً لتوثيق واعتماد البصمة المعتمدة للوردية'
+            };
+          }
+          return r;
+        });
 
         updatedShifts = updatedShifts.map(s => {
           const isMatch = (s.id === approvedTargetReq.shiftId) ||
@@ -3742,6 +3777,7 @@ export default function RequestsModule({
           <label style={{ fontSize: '13px', fontWeight: 'bold' }}>نوع الطلب:</label>
           <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ padding: '7px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}>
             <option value="all">-- جميع أنواع الطلبات --</option>
+            <option value="from_branch_manager">🏢 طلبات مرسلة من مدير الفرع</option>
             <option value="leave">🏖️ طلبات الإجازات (كافة الأنواع)</option>
             <option value="schedule_deviation">⚠️ عدم الالتزام بالجدول</option>
             <option value="manual_punch">🖐️ طلب تسجيل بصمة يدوي</option>
@@ -3895,7 +3931,38 @@ export default function RequestsModule({
                     <td style={{ fontWeight: '800' }}>
                       {(() => {
                         const emp = employees.find(e => e.id === req.employeeId || e.code === req.employeeCode);
-                        return emp ? getEmpDisplayName(emp) : (req.employeeName || 'موظف');
+                        const empName = emp ? getEmpDisplayName(emp) : (req.employeeName || 'موظف');
+                        const isFromBranchMgr = Boolean(
+                          req.submittedByBranchManager ||
+                          req.createdRole === 'branch' ||
+                          req.createdRole === 'branch_manager' ||
+                          req.creatorRole === 'branch' ||
+                          req.creatorRole === 'branch_manager' ||
+                          req.createdBy === 'branch' ||
+                          req.senderRole === 'branch'
+                        );
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            <span>{empName}</span>
+                            {isFromBranchMgr && (
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontSize: '11px',
+                                fontWeight: '800',
+                                color: '#047857',
+                                background: '#ecfdf5',
+                                border: '1px solid #a7f3d0',
+                                borderRadius: '6px',
+                                padding: '2px 6px',
+                                width: 'fit-content'
+                              }}>
+                                🏢 مرسل من مدير الفرع
+                              </span>
+                            )}
+                          </div>
+                        );
                       })()}
                     </td>
                     <td>
@@ -3947,10 +4014,19 @@ export default function RequestsModule({
                             </span>
                           );
                         }
-                        if (req.type === 'disciplinary_penalty' || req.createdRole === 'branch' || req.createdRole === 'branch_manager' || req.submittedByBranchManager) {
+                        const isFromBranchMgr = Boolean(
+                          req.submittedByBranchManager ||
+                          req.createdRole === 'branch' ||
+                          req.createdRole === 'branch_manager' ||
+                          req.creatorRole === 'branch' ||
+                          req.creatorRole === 'branch_manager' ||
+                          req.createdBy === 'branch' ||
+                          req.senderRole === 'branch'
+                        );
+                        if (req.type === 'disciplinary_penalty' || isFromBranchMgr) {
                           return (
                             <span style={{ color: '#15803d', fontWeight: '800', background: '#f0fdf4', padding: '4px 8px', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '12px' }}>
-                              ✓ مرسل من مدير الفرع
+                              🏢 مرسل من مدير الفرع
                             </span>
                           );
                         }
@@ -4190,6 +4266,25 @@ export default function RequestsModule({
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {getFormattedRequestBadge(previewModalReq)}
+                  {Boolean(
+                    previewModalReq.submittedByBranchManager ||
+                    previewModalReq.createdRole === 'branch' ||
+                    previewModalReq.createdRole === 'branch_manager' ||
+                    previewModalReq.creatorRole === 'branch' ||
+                    previewModalReq.creatorRole === 'branch_manager' ||
+                    previewModalReq.createdBy === 'branch' ||
+                    previewModalReq.senderRole === 'branch' ||
+                    previewModalReq.submittedBy === 'branch_manager' ||
+                    previewModalReq.submittedBy === 'branch' ||
+                    previewModalReq.type === 'roster_update' ||
+                    previewModalReq.type === 'roster_edit' ||
+                    previewModalReq.type === 'roster_edit_request' ||
+                    (typeof previewModalReq.details === 'string' && (previewModalReq.details.includes('قام مدير فرع') || previewModalReq.details.includes('مدير الفرع')))
+                  ) && (
+                    <span className="badge" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', fontWeight: '800' }}>
+                      🏢 مرسل من مدير الفرع
+                    </span>
+                  )}
                   <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '14px' }} onClick={() => setPreviewModalReq(null)}>✕ إغلاق</button>
                 </div>
               </div>
@@ -4206,7 +4301,7 @@ export default function RequestsModule({
                     <div>
                       <span style={{ color: 'var(--muted)', fontSize: '12px' }}>{isExpense ? 'مقدم الفاتورة / المسؤول:' : isRecruitmentNeed ? 'مقدم الطلب (مدير الفرع):' : 'اسم الموظف:'}</span>
                       <div style={{ fontWeight: 'bold', color: 'var(--text)', fontSize: '14px' }}>
-                        {previewModalReq.submittedBy || (empObj ? getEmpDisplayName(empObj) : (previewModalReq.employeeName || (isExpense || isRecruitmentNeed ? 'مدير الفرع' : 'غير معروف')))}
+                        {empObj ? getEmpDisplayName(empObj) : ((previewModalReq.employeeName && previewModalReq.employeeName !== 'branch_manager' && previewModalReq.employeeName !== 'branch') ? previewModalReq.employeeName : (previewModalReq.submittedBy && previewModalReq.submittedBy !== 'branch_manager' && previewModalReq.submittedBy !== 'branch' ? previewModalReq.submittedBy : (isExpense || isRecruitmentNeed ? 'مدير الفرع' : 'غير معروف')))}
                       </div>
                     </div>
                     <div>
@@ -4241,7 +4336,26 @@ export default function RequestsModule({
                   <div style={{ background: 'var(--surface)', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
                     <span style={{ fontSize: '12px', color: 'var(--muted)' }}>موقف موافقة مدير الفرع:</span>
                     <div style={{ marginTop: '4px', fontWeight: 'bold', fontSize: '13.5px' }}>
-                      {previewModalReq.managerComment === 'الفرع بدون مدير' || previewModalReq.managerStatus === 'skipped' || previewModalReq.branchApprovalStatus === 'skipped' || isBranchWithoutManager(effectiveReqBranchId, state) ? (
+                      {Boolean(
+                        previewModalReq.submittedByBranchManager ||
+                        previewModalReq.createdRole === 'branch' ||
+                        previewModalReq.createdRole === 'branch_manager' ||
+                        previewModalReq.creatorRole === 'branch' ||
+                        previewModalReq.creatorRole === 'branch_manager' ||
+                        previewModalReq.createdBy === 'branch' ||
+                        previewModalReq.senderRole === 'branch' ||
+                        previewModalReq.submittedBy === 'branch_manager' ||
+                        previewModalReq.submittedBy === 'branch' ||
+                        previewModalReq.type === 'roster_update' ||
+                        previewModalReq.type === 'roster_edit' ||
+                        previewModalReq.type === 'roster_edit_request' ||
+                        (typeof previewModalReq.details === 'string' && (previewModalReq.details.includes('قام مدير فرع') || previewModalReq.details.includes('مدير الفرع')))
+                      ) ? (
+                        <span style={{ color: '#15803d', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                          <span>🏢</span>
+                          <span>مرسل من مدير الفرع</span>
+                        </span>
+                      ) : (previewModalReq.managerComment === 'الفرع بدون مدير' || previewModalReq.managerStatus === 'skipped' || previewModalReq.branchApprovalStatus === 'skipped' || isBranchWithoutManager(effectiveReqBranchId, state)) ? (
                         <span style={{ color: '#0284c7' }}>🏢 الفرع بدون مدير (محال للإدارة العليا مباشرة)</span>
                       ) : isBranchNotReq ? (
                         <span style={{ color: 'var(--muted)' }}>🔒 موجهة للإدارة العليا فقط (لا تتطلب موافقة الفرع)</span>
