@@ -172,20 +172,29 @@ export default function NewCustomerOrderModal({
   // ── 4. بنود الأدوية (العلبة كاملة فقط 📦 - مع تصنيف لكل صنف وإرفاق صورة ورابط لكل صنف) ──
   const [items, setItems] = useState(() => {
     if (editingOrder?.items?.length > 0) {
-      return editingOrder.items.map((it) => ({
-        id: it.id,
-        medicationName: it.medicationName || it.medication_name || '',
-        unitType: 'pack',
-        quantity: parseInt(it.quantity || 1, 10),
-        unitPrice: String(it.unitPrice || it.unit_price || ''),
-        isPriceEstimated: Boolean(it.is_price_estimated || it.isPriceEstimated),
-        priceMin: it.price_min || it.priceMin || '',
-        priceMax: it.price_max || it.priceMax || '',
-        selectedMed: null,
-        itemType: it.item_type || it.itemType || 'medication',
-        imageUrl: it.image_url || it.imageUrl || '',
-        itemLink: it.item_link || it.itemLink || ''
-      }));
+      return editingOrder.items.map((it) => {
+        const s = String(it.item_status || it.itemStatus || it.status || '').toLowerCase();
+        const isApproved = s === 'available_by_procurement' || s === 'available' || s === 'delivered';
+        const isUnavailable = s === 'unavailable_in_market' || s === 'unavailable' || Boolean(it.pruned_from_bill || it.prunedFromBill);
+
+        return {
+          id: it.id,
+          medicationName: it.medicationName || it.medication_name || '',
+          unitType: 'pack',
+          quantity: parseInt(it.quantity || 1, 10),
+          unitPrice: String(it.unitPrice || it.unit_price || ''),
+          isPriceEstimated: Boolean(it.is_price_estimated || it.isPriceEstimated),
+          priceMin: it.price_min || it.priceMin || '',
+          priceMax: it.price_max || it.priceMax || '',
+          selectedMed: null,
+          itemType: it.item_type || it.itemType || 'medication',
+          imageUrl: it.image_url || it.imageUrl || '',
+          itemLink: it.item_link || it.itemLink || '',
+          itemStatus: it.item_status || it.itemStatus || it.status || 'pending',
+          isLocked: isApproved, // الصنف المتوفر معتمد ومحمي من التعديل
+          isUnavailable: isUnavailable // الصنف غير المتوفر متاح للتعديل والاستبدال
+        };
+      });
     }
     return [
       {
@@ -199,7 +208,10 @@ export default function NewCustomerOrderModal({
         selectedMed: null,
         itemType: '',
         imageUrl: '',
-        itemLink: ''
+        itemLink: '',
+        itemStatus: 'pending',
+        isLocked: false,
+        isUnavailable: false
       }
     ];
   });
@@ -389,6 +401,115 @@ export default function NewCustomerOrderModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
+  // ── حالات البحث الذكي اللحظي عن العميل واقتراحات النتائج ──
+  const [customerSuggestions, setCustomerSuggestions] = useState([]);
+  const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false);
+  const customerSearchDebounceRef = useRef(null);
+  const customerSearchBoxRef = useRef(null);
+
+  // دالة تفريغ بيانات العميل فوراً عند تغير أي حرف/رقم في مربع البحث
+  const resetCustomerData = () => {
+    setSelectedCustomer(null);
+    setCustomerName('');
+    setWhatsappPhone('');
+    setLandlinePhone('');
+    setAddress('');
+    setSelectedZone('');
+    setCustomerPermanentNotes('');
+    setIsNewCustomer(false);
+  };
+
+  // اعتماد واختيار عميل من قائمة الاقتراحات الذكية
+  const handleSelectCustomer = (customer) => {
+    setSelectedCustomer(customer);
+    setCustomerName(customer.full_name || '');
+    const cleanPh = String(customer.whatsapp_phone || '').replace(/\D/g, '');
+    setWhatsappPhone(cleanPh);
+    setLandlinePhone(customer.landline_phone || '');
+    setAddress(customer.address || '');
+    if (customer.zone) setSelectedZone(customer.zone);
+    setCustomerPermanentNotes(customer.notes || '');
+    setIsNewCustomer(false);
+    setShowCustomerSuggestions(false);
+    setSearchPhone(customer.full_name ? `${customer.full_name} (${cleanPh})` : cleanPh);
+  };
+
+  // بحث ذكي مباشر ولحظي مع مسح فوري للبيانات السابقة بمجرد التغيير
+  const handleCustomerSearchChange = (val) => {
+    setSearchPhone(val);
+
+    // الشرط المطلوب: تختفي البيانات السابقة بمجرد تغير أي شيء في مربع البحث
+    resetCustomerData();
+
+    const trimmed = String(val || '').trim();
+    if (!trimmed) {
+      setCustomerSuggestions([]);
+      setShowCustomerSuggestions(false);
+      if (customerSearchDebounceRef.current) clearTimeout(customerSearchDebounceRef.current);
+      return;
+    }
+
+    if (customerSearchDebounceRef.current) {
+      clearTimeout(customerSearchDebounceRef.current);
+    }
+
+    setIsSearchingCustomer(true);
+    customerSearchDebounceRef.current = setTimeout(async () => {
+      try {
+        const cleanDigits = trimmed.replace(/\D/g, '');
+        const searchTerm = cleanDigits.length >= 2 ? cleanDigits : trimmed;
+        const res = await outstockGetCustomers({ search: searchTerm });
+        if (res?.success && Array.isArray(res.customers)) {
+          const qLower = trimmed.toLowerCase();
+          const filtered = res.customers.filter((c) => {
+            const ph = String(c.whatsapp_phone || '').replace(/\D/g, '');
+            const name = String(c.full_name || '').toLowerCase();
+            const code = String(c.customer_code || '').toLowerCase();
+            return ph.includes(cleanDigits || qLower) || name.includes(qLower) || code.includes(qLower);
+          });
+
+          setCustomerSuggestions(filtered);
+          setShowCustomerSuggestions(true);
+
+          // إذا كان المدخل 11 رقماً وتطابق عميل واحد تماماً، يتم اختياره وتعبئته تلقائياً
+          if (cleanDigits.length === 11) {
+            const exactMatch = filtered.find(
+              (c) => String(c.whatsapp_phone || '').replace(/\D/g, '') === cleanDigits
+            );
+            if (exactMatch) {
+              handleSelectCustomer(exactMatch);
+            } else {
+              setIsNewCustomer(true);
+              setWhatsappPhone(cleanDigits);
+            }
+          }
+        } else {
+          setCustomerSuggestions([]);
+          setShowCustomerSuggestions(true);
+          if (cleanDigits.length === 11) {
+            setIsNewCustomer(true);
+            setWhatsappPhone(cleanDigits);
+          }
+        }
+      } catch (err) {
+        console.warn('Customer smart search error:', err);
+      } finally {
+        setIsSearchingCustomer(false);
+      }
+    }, 220);
+  };
+
+  // إغلاق قائمة اقتراحات البحث عند الضغط خارج المربع
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (customerSearchBoxRef.current && !customerSearchBoxRef.current.contains(e.target)) {
+        setShowCustomerSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
   // دالة مساعدة لتنبيه الحقل الخاطئ وتحريك الشاشة إليه بمربع أحمر نابض
   const highlightAndScrollTo = (elementId, message) => {
     setErrorMsg(message);
@@ -400,42 +521,6 @@ export default function NewCustomerOrderModal({
       setTimeout(() => {
         el.classList.remove('outstock-pulse-error');
       }, 4500);
-    }
-  };
-
-  // بحث دقيق عن العميل عند اكتمال 11 رقماً
-  const handleSearchCustomer = async (term) => {
-    const clean = String(term || '').replace(/\D/g, '').trim();
-    if (clean.length !== 11) return;
-
-    setIsSearchingCustomer(true);
-    setErrorMsg('');
-    try {
-      const res = await outstockGetCustomers({ search: clean });
-      if (res?.success && Array.isArray(res.customers)) {
-        const found = res.customers.find(
-          (c) => String(c.whatsapp_phone || '').replace(/\D/g, '') === clean
-        );
-        if (found) {
-          setSelectedCustomer(found);
-          setCustomerName(found.full_name || '');
-          setWhatsappPhone(clean);
-          setLandlinePhone(found.landline_phone || '');
-          setAddress(found.address || '');
-          if (found.zone) setSelectedZone(found.zone);
-          setCustomerPermanentNotes(found.notes || '');
-          setIsNewCustomer(false);
-          return;
-        }
-      }
-      // إذا لم يتطابق، نعينه كعميل جديد ونفرغ الاسم القديم لمنع الخلط بين العملاء
-      setSelectedCustomer(null);
-      setIsNewCustomer(true);
-      setCustomerPermanentNotes('');
-    } catch (e) {
-      console.warn('Search customer error:', e);
-    } finally {
-      setIsSearchingCustomer(false);
     }
   };
 
@@ -625,12 +710,19 @@ export default function NewCustomerOrderModal({
   };
 
   const handleRemoveItem = (index) => {
+    if (items[index]?.isLocked) {
+      setErrorMsg('لا يمكن حذف صنف تم توفيره واعتماده من إدارة المشتريات 🔒');
+      return;
+    }
     if (items.length === 1) return;
     setItems((prev) => prev.filter((_, idx) => idx !== index));
     if (editingItemIndex === index) setEditingItemIndex(null);
   };
 
   const handleItemChange = (index, field, value) => {
+    if (items[index]?.isLocked && field !== 'id') {
+      return; // محمي من التعديل
+    }
     setItems((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value };
@@ -1304,40 +1396,243 @@ export default function NewCustomerOrderModal({
               </div>
             )}
 
-            {/* مربع البحث السريع */}
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-              <input
-                type="text"
-                placeholder="ابحث برقم هاتف الواتساب أو اسم العميل..."
-                value={searchPhone}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSearchPhone(val);
-                  if (!val.trim()) {
-                    setWhatsappPhone('');
-                    setSelectedCustomer(null);
-                    setCustomerName('');
-                    setAddress('');
-                    setSelectedZone('');
-                    setCustomerPermanentNotes('');
-                    setLandlinePhone('');
-                    setIsNewCustomer(false);
-                  } else {
-                    handleSearchCustomer(val);
-                  }
-                }}
-                className="outstock-form-input"
-                style={{ flex: 1, borderColor: '#0d9488' }}
-              />
-              <button
-                type="button"
-                onClick={() => handleSearchCustomer(searchPhone)}
-                className="outstock-btn outstock-btn-primary"
-                style={{ padding: '0 18px', flexShrink: 0 }}
-              >
-                <Search size={16} />
-                <span>{isSearchingCustomer ? '...' : 'بحث'}</span>
-              </button>
+            {/* مربع البحث السريع الذكي للعميل مع قائمة اقتراحات فورية ومسح لحظي للبيانات */}
+            <div ref={customerSearchBoxRef} style={{ position: 'relative', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    placeholder="🔍 ابحث برقم هاتف الواتساب أو اسم العميل (بحث ذكي فوري)..."
+                    value={searchPhone}
+                    onChange={(e) => handleCustomerSearchChange(e.target.value)}
+                    onFocus={() => {
+                      if (customerSuggestions.length > 0) setShowCustomerSuggestions(true);
+                    }}
+                    className="outstock-form-input"
+                    style={{
+                      width: '100%',
+                      paddingLeft: searchPhone ? '36px' : '12px',
+                      borderColor: selectedCustomer ? '#10b981' : '#0d9488',
+                      backgroundColor: selectedCustomer ? '#f0fdf4' : '#ffffff',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                    }}
+                  />
+                  {/* زر مسح البحث السريع وتفريغ البيانات فوراً */}
+                  {searchPhone && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchPhone('');
+                        resetCustomerData();
+                        setCustomerSuggestions([]);
+                        setShowCustomerSuggestions(false);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: '8px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: '#f1f5f9',
+                        border: 'none',
+                        borderRadius: '50%',
+                        width: '22px',
+                        height: '22px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        color: '#64748b'
+                      }}
+                      title="مسح البحث وتفريغ البيانات"
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleCustomerSearchChange(searchPhone)}
+                  className="outstock-btn outstock-btn-primary"
+                  style={{ padding: '0 18px', flexShrink: 0 }}
+                >
+                  <Search size={16} />
+                  <span>{isSearchingCustomer ? '...' : 'بحث ذكي'}</span>
+                </button>
+              </div>
+
+              {/* بطاقة تأكيد اعتماد العميل المختار */}
+              {selectedCustomer && (
+                <div
+                  style={{
+                    marginTop: '6px',
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    background: '#f0fdf4',
+                    border: '1px solid #86efac',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: '12px',
+                    color: '#166534',
+                    fontWeight: '800'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <UserCheck size={14} color="#16a34a" />
+                    <span>تم اعتماد العميل: <strong>{selectedCustomer.full_name}</strong> ({selectedCustomer.whatsapp_phone}) {selectedCustomer.zone ? `- حي ${selectedCustomer.zone}` : ''}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchPhone('');
+                      resetCustomerData();
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#dc2626',
+                      cursor: 'pointer',
+                      fontSize: '11.5px',
+                      fontWeight: '800',
+                      textDecoration: 'underline'
+                    }}
+                  >
+                    تغيير العميل ✕
+                  </button>
+                </div>
+              )}
+
+              {/* القائمة العائمة للاقتراحات الذكية المباشرة (Smart Live Dropdown) */}
+              {showCustomerSuggestions && !selectedCustomer && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    left: 0,
+                    right: 0,
+                    background: '#ffffff',
+                    borderRadius: '12px',
+                    boxShadow: '0 12px 30px rgba(0, 0, 0, 0.15)',
+                    border: '1.5px solid #0d9488',
+                    zIndex: 99999,
+                    maxHeight: '280px',
+                    overflowY: 'auto'
+                  }}
+                >
+                  {customerSuggestions.length > 0 ? (
+                    <div>
+                      <div
+                        style={{
+                          padding: '6px 12px',
+                          background: '#f0fdfa',
+                          borderBottom: '1px solid #ccfbf1',
+                          fontSize: '11.5px',
+                          fontWeight: '800',
+                          color: '#0f766e',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between'
+                        }}
+                      >
+                        <span>🎯 نتائج مطابقة للبحث ({customerSuggestions.length}) - اضغط لاختيار العميل:</span>
+                        <span style={{ fontSize: '10.5px', color: '#64748b' }}>اختيار تلقائي وتعبئة فورية</span>
+                      </div>
+                      {customerSuggestions.map((cust, sIdx) => {
+                        const cleanPh = String(cust.whatsapp_phone || '').replace(/\D/g, '');
+                        return (
+                          <div
+                            key={cust.id || sIdx}
+                            onClick={() => handleSelectCustomer(cust)}
+                            style={{
+                              padding: '10px 14px',
+                              borderBottom: sIdx < customerSuggestions.length - 1 ? '1px solid #f1f5f9' : 'none',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              transition: 'background 0.15s ease'
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f8fafc')}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#ffffff')}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <div
+                                style={{
+                                  width: '34px',
+                                  height: '34px',
+                                  borderRadius: '50%',
+                                  background: '#e0f2fe',
+                                  color: '#0369a1',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontWeight: '900',
+                                  fontSize: '13px'
+                                }}
+                              >
+                                {cust.full_name ? cust.full_name.charAt(0) : 'ع'}
+                              </div>
+                              <div>
+                                <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#0f172a' }}>
+                                  {cust.full_name || 'عميل بدون اسم'}
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+                                  <span style={{ color: '#0d9488', fontWeight: '700' }} dir="ltr">📱 {cleanPh}</span>
+                                  {cust.zone && <span style={{ color: '#475569' }}>📍 حي {cust.zone}</span>}
+                                  {cust.notes && <span style={{ color: '#d97706', fontSize: '11px', fontWeight: 'bold' }}>⚠️ ملحوظة خاصة</span>}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              {Number(cust.real_orders_count || cust.total_orders_count || 0) > 0 && (
+                                <span style={{ fontSize: '10.5px', background: '#f1f5f9', color: '#475569', padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold' }}>
+                                  {cust.real_orders_count || cust.total_orders_count} طلبات سابقة
+                                </span>
+                              )}
+                              <span style={{ fontSize: '11.5px', color: '#0d9488', fontWeight: '800' }}>اختيار ←</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div style={{ padding: '16px', textAlign: 'center', color: '#64748b' }}>
+                      <div style={{ fontSize: '13px', fontWeight: '700', color: '#475569', marginBottom: '8px' }}>
+                        لا يوجد عميل مسجل يطابق هذا البحث
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#0d9488' }}>
+                        يمكنك إكمال كتابة بيانات العميل الجديد بالأسفل مباشرة
+                      </div>
+                      {searchPhone.replace(/\D/g, '').length >= 10 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const digits = searchPhone.replace(/\D/g, '');
+                            setWhatsappPhone(digits);
+                            setIsNewCustomer(true);
+                            setShowCustomerSuggestions(false);
+                            document.getElementById('order-customer-name')?.focus();
+                          }}
+                          style={{
+                            marginTop: '10px',
+                            padding: '6px 14px',
+                            background: '#0d9488',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            fontWeight: '800',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          ➕ اعتماد الرقم ({searchPhone.replace(/\D/g, '')}) كعميل جديد وتسجيل بياناته
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* حقول بيانات العميل */}
@@ -1556,6 +1851,49 @@ export default function NewCustomerOrderModal({
                       zIndex: items.length - idx
                     }}
                   >
+                    {/* شريط حالة اعتماد وتوفر الصنف من المشتريات */}
+                    {it.isLocked && (
+                      <div
+                        style={{
+                          background: '#f0fdf4',
+                          border: '1px solid #86efac',
+                          borderRadius: '8px',
+                          padding: '6px 12px',
+                          marginBottom: '10px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          color: '#166534'
+                        }}
+                      >
+                        <Lock size={14} color="#16a34a" />
+                        <span>🔒 تم توفير هذا الصنف واعتماده رسمياً من إدارة المشتريات (محمي ومقفل من التعديل أو الحذف)</span>
+                      </div>
+                    )}
+
+                    {it.isUnavailable && !it.isLocked && (
+                      <div
+                        style={{
+                          background: '#fff7ed',
+                          border: '1px solid #fed7aa',
+                          borderRadius: '8px',
+                          padding: '6px 12px',
+                          marginBottom: '10px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          color: '#c2410c'
+                        }}
+                      >
+                        <AlertCircle size={14} color="#ea580c" />
+                        <span>✏️ هذا الصنف غير متوفر بالسوق (متاح للتعديل أو استبداله بصنف دوائي بديل معتمد)</span>
+                      </div>
+                    )}
+
                     {/* الصف الأول: حقل اسم الصنف بعرض كامل وفسيح مع تصنيف نوع الصنف */}
                     <div style={{ width: '100%', marginBottom: '12px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
@@ -1563,7 +1901,7 @@ export default function NewCustomerOrderModal({
                           <Pill size={14} />
                           <span>اسم الصنف الدوائي / المستحضر * :</span>
                         </label>
-                        {/* تصنيف الصنف: دوائي أو مستحضرات تجميل (إلزامي بدون اختيار افتراضي) */}
+                        {/* تصنيف الصنف: دوائي أو مستحضرات تجميل */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           {!it.itemType && (
                             <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: '800', background: '#fef2f2', padding: '2px 8px', borderRadius: '6px', border: '1px dashed #f87171' }}>
@@ -1580,12 +1918,13 @@ export default function NewCustomerOrderModal({
                                 handleItemChange(idx, 'itemType', 'medication');
                                 setErrorMsg('');
                               }}
+                              disabled={it.isLocked}
                               style={{
                                 padding: '3px 10px',
                                 borderRadius: '6px',
                                 fontSize: '11.5px',
                                 fontWeight: '800',
-                                cursor: 'pointer',
+                                cursor: it.isLocked ? 'not-allowed' : 'pointer',
                                 border: 'none',
                                 display: 'inline-flex',
                                 alignItems: 'center',
@@ -1605,12 +1944,13 @@ export default function NewCustomerOrderModal({
                                 handleItemChange(idx, 'itemType', 'cosmetics');
                                 setErrorMsg('');
                               }}
+                              disabled={it.isLocked}
                               style={{
                                 padding: '3px 10px',
                                 borderRadius: '6px',
                                 fontSize: '11.5px',
                                 fontWeight: '800',
-                                cursor: 'pointer',
+                                cursor: it.isLocked ? 'not-allowed' : 'pointer',
                                 border: 'none',
                                 display: 'inline-flex',
                                 alignItems: 'center',
@@ -1637,14 +1977,15 @@ export default function NewCustomerOrderModal({
                         onAddNewMedication={(typedText) => handleOpenAddMedModal(idx, typedText)}
                         placeholder="ابحث باسم الدواء، المادة الفعالة، أو الباركود..."
                         required
+                        disabled={it.isLocked}
                       />
                     </div>
 
-                    {/* الصف الثاني: تفاصيل الصنف (الوحدة، الكمية، سعر العلبة الرسمي (يُخفى بالسعر التقريبي لمنع التكرار)، إجمالي الصنف، وزر الحذف) */}
+                    {/* الصف الثاني: تفاصيل الصنف (الوحدة، الكمية، سعر العلبة وزر وضع السعر التقريبي كأيقونة فقط، إجمالي الصنف، وزر الحذف) */}
                     <div
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: it.isPriceEstimated ? '1.2fr 1fr 1.6fr auto' : '1.2fr 1fr 1.4fr 1.4fr auto',
+                        gridTemplateColumns: '1.1fr 1fr 1.6fr 1.3fr auto',
                         gap: '10px',
                         alignItems: 'end'
                       }}
@@ -1685,17 +2026,102 @@ export default function NewCustomerOrderModal({
                           placeholder="الكمية"
                           value={it.quantity}
                           onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
+                          disabled={it.isLocked}
                           className="outstock-form-input"
                           style={{ minHeight: '40px', textAlign: 'center', fontWeight: 'bold' }}
                         />
                       </div>
 
-                      {/* سعر العلبة الرسمي (يُخفى عند تفعيل السعر التقريبي لمنع التكرار مع نطاق من-إلى) */}
-                      {!it.isPriceEstimated && (
-                        <div>
-                          <label style={{ fontSize: '11px', color: '#0369a1', fontWeight: '800', marginBottom: '3px', display: 'block' }}>
-                            سعر العلبة الرسمي:
+                      {/* سعر العلبة الرسمي / التقريبي مع زر تحويل السعر التقريبي كأيقونة فقط تعبر عن وظيفتها */}
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
+                          <label style={{ fontSize: '11px', color: it.isPriceEstimated ? '#b45309' : '#0369a1', fontWeight: '800', margin: 0 }}>
+                            {it.isPriceEstimated ? 'سعر تقريبي (من - إلى):' : 'سعر العلبة الرسمي:'}
                           </label>
+                          {/* أيقونة تفعيل / إلغاء وضع السعر التقريبي */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleEstimatePrice(idx)}
+                            disabled={it.isLocked}
+                            style={{
+                              background: it.isPriceEstimated ? '#fef3c7' : '#f1f5f9',
+                              border: it.isPriceEstimated ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
+                              color: it.isPriceEstimated ? '#b45309' : '#64748b',
+                              borderRadius: '6px',
+                              padding: '2px 6px',
+                              cursor: it.isLocked ? 'not-allowed' : 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              lineHeight: 1,
+                              transition: 'all 0.15s ease'
+                            }}
+                            title={it.isPriceEstimated ? 'إلغاء وضع السعر التقريبي والعودة للسعر المعتمد' : 'تفعيل وضع سعر تقريبي (من - إلى)'}
+                          >
+                            <Sparkles size={12} color={it.isPriceEstimated ? '#b45309' : '#64748b'} />
+                          </button>
+                        </div>
+
+                        {it.isPriceEstimated ? (
+                          <div
+                            style={{
+                              height: '40px',
+                              background: '#fffbeb',
+                              border: '1.5px solid #f59e0b',
+                              borderRadius: '8px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '4px',
+                              padding: '0 4px'
+                            }}
+                          >
+                            <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#92400e' }}>من:</span>
+                            <input
+                              type="number"
+                              step="any"
+                              min="0"
+                              placeholder="0"
+                              value={it.priceMin}
+                              onChange={(e) => handleItemChange(idx, 'priceMin', e.target.value)}
+                              disabled={it.isLocked}
+                              style={{
+                                width: '48px',
+                                height: '28px',
+                                textAlign: 'center',
+                                fontWeight: '900',
+                                color: '#b45309',
+                                border: '1px solid #fcd34d',
+                                borderRadius: '5px',
+                                fontSize: '11px',
+                                padding: '0 2px'
+                              }}
+                              required
+                            />
+                            <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#92400e' }}>إلى:</span>
+                            <input
+                              type="number"
+                              step="any"
+                              min="0"
+                              placeholder="0"
+                              value={it.priceMax}
+                              onChange={(e) => handleItemChange(idx, 'priceMax', e.target.value)}
+                              disabled={it.isLocked}
+                              style={{
+                                width: '48px',
+                                height: '28px',
+                                textAlign: 'center',
+                                fontWeight: '900',
+                                color: '#b45309',
+                                border: '1px solid #fcd34d',
+                                borderRadius: '5px',
+                                fontSize: '11px',
+                                padding: '0 2px'
+                              }}
+                              required
+                            />
+                          </div>
+                        ) : (
                           <div
                             style={{
                               height: '40px',
@@ -1718,8 +2144,8 @@ export default function NewCustomerOrderModal({
                               <span style={{ color: '#d97706', fontSize: '11px' }}>بانتظار تسعير المشتريات</span>
                             )}
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
 
                       {/* إجمالي الصنف */}
                       <div>
@@ -1736,43 +2162,43 @@ export default function NewCustomerOrderModal({
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontWeight: '900',
-                            fontSize: it.isPriceEstimated ? '11.5px' : '13px',
+                            fontSize: it.isPriceEstimated ? '11px' : '13px',
                             color: '#0f172a',
                             padding: '0 4px'
                           }}
                         >
                           {it.isPriceEstimated
-                            ? `من ${(Number(it.quantity || 1) * Number(it.priceMin || 0)).toFixed(2)} إلى ${(Number(it.quantity || 1) * Number(it.priceMax || it.priceMin || 0)).toFixed(2)} ج.م`
+                            ? `من ${(Number(it.quantity || 1) * Number(it.priceMin || 0)).toFixed(1)} إلى ${(Number(it.quantity || 1) * Number(it.priceMax || it.priceMin || 0)).toFixed(1)} ج.م`
                             : `${((Number(it.quantity) || 1) * Number(it.unitPrice || it.selectedMed?.public_price || 0)).toFixed(2)} ج.م`}
                         </div>
                       </div>
 
-                      {/* زر حذف الصنف */}
+                      {/* زر حذف الصنف (يُعطل ويُخفى تماماً إذا كان الصنف معتمداً ومتوفراً من المشتريات) */}
                       <div>
                         <button
                           type="button"
                           onClick={() => handleRemoveItem(idx)}
-                          disabled={items.length === 1}
+                          disabled={items.length === 1 || it.isLocked}
                           style={{
                             width: '40px',
                             height: '40px',
                             borderRadius: '8px',
                             border: '1px solid #fecaca',
-                            background: '#fef2f2',
-                            cursor: items.length === 1 ? 'not-allowed' : 'pointer',
-                            opacity: items.length === 1 ? 0.35 : 1,
+                            background: it.isLocked ? '#f1f5f9' : '#fef2f2',
+                            cursor: (items.length === 1 || it.isLocked) ? 'not-allowed' : 'pointer',
+                            opacity: (items.length === 1 || it.isLocked) ? 0.35 : 1,
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center'
                           }}
-                          title="حذف هذا الصنف"
+                          title={it.isLocked ? 'لا يمكن حذف صنف تم اعتماده وتوفيره من إدارة المشتريات' : 'حذف هذا الصنف'}
                         >
-                          <Trash2 size={16} color="#ef4444" />
+                          {it.isLocked ? <Lock size={16} color="#94a3b8" /> : <Trash2 size={16} color="#ef4444" />}
                         </button>
                       </div>
                     </div>
 
-                    {/* شريط المرفقات الخاص بالصنف: إرفاق صورة مباشرة أو رابط ويب خارجي (أسفل بيانات الصنف وسعر الصنف والكمية مباشرة) */}
+                    {/* شريط المرفقات الخاص بالصنف: إرفاق صورة مباشرة أو رابط ويب خارجي (موضع أسفل جزء بيانات الصنف والكمية والسعر مباشرة) */}
                     <div
                       style={{
                         marginTop: '10px',
@@ -1796,10 +2222,11 @@ export default function NewCustomerOrderModal({
                             background: it.imageUrl ? '#f0fdf4' : '#f8fafc',
                             border: it.imageUrl ? '1.5px solid #86efac' : '1.5px dashed #cbd5e1',
                             borderRadius: '8px',
-                            cursor: 'pointer',
+                            cursor: it.isLocked ? 'not-allowed' : 'pointer',
                             fontSize: '12px',
                             fontWeight: '700',
-                            color: it.imageUrl ? '#166534' : '#475569'
+                            color: it.imageUrl ? '#166534' : '#475569',
+                            opacity: it.isLocked ? 0.6 : 1
                           }}
                         >
                           <Camera size={14} color={it.imageUrl ? '#16a34a' : '#64748b'} />
@@ -1807,6 +2234,7 @@ export default function NewCustomerOrderModal({
                           <input
                             type="file"
                             accept="image/*"
+                            disabled={it.isLocked}
                             style={{ display: 'none' }}
                             onChange={(e) => {
                               const file = e.target.files?.[0];
@@ -1848,26 +2276,28 @@ export default function NewCustomerOrderModal({
                               <img src={it.imageUrl} alt="الصنف" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                             </div>
                             <span style={{ fontSize: '11px', fontWeight: '800', color: '#16a34a' }}>تم الإرفاق ✅</span>
-                            <button
-                              type="button"
-                              onClick={() => handleItemChange(idx, 'imageUrl', '')}
-                              style={{
-                                background: '#fee2e2',
-                                border: '1px solid #fca5a5',
-                                borderRadius: '6px',
-                                color: '#b91c1c',
-                                padding: '3px 8px',
-                                cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '3px',
-                                fontSize: '11px'
-                              }}
-                              title="حذف صورة الصنف"
-                            >
-                              <Trash2 size={12} />
-                              <span>حذف</span>
-                            </button>
+                            {!it.isLocked && (
+                              <button
+                                type="button"
+                                onClick={() => handleItemChange(idx, 'imageUrl', '')}
+                                style={{
+                                  background: '#fee2e2',
+                                  border: '1px solid #fca5a5',
+                                  borderRadius: '6px',
+                                  color: '#b91c1c',
+                                  padding: '3px 8px',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                  fontSize: '11px'
+                                }}
+                                title="حذف صورة الصنف"
+                              >
+                                <Trash2 size={12} />
+                                <span>حذف</span>
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1884,110 +2314,11 @@ export default function NewCustomerOrderModal({
                           placeholder="https://..."
                           value={it.itemLink || ''}
                           onChange={(e) => handleItemChange(idx, 'itemLink', e.target.value)}
+                          disabled={it.isLocked}
                           className="outstock-form-input"
                           style={{ height: '32px', fontSize: '12px', flex: 1 }}
                         />
                       </div>
-                    </div>
-
-                    {/* شريط السعر التقريبي وزر التفعيل/الإلغاء */}
-                    <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                      {/* زر تفعيل / إلغاء تفعيل السعر التقريبي */}
-                      <button
-                        type="button"
-                        onClick={() => handleToggleEstimatePrice(idx)}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          padding: '6px 14px',
-                          borderRadius: '8px',
-                          fontSize: '12px',
-                          fontWeight: '800',
-                          cursor: 'pointer',
-                          transition: 'all 0.2s ease',
-                          border: it.isPriceEstimated ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
-                          background: it.isPriceEstimated ? '#fef3c7' : '#f8fafc',
-                          color: it.isPriceEstimated ? '#92400e' : '#475569'
-                        }}
-                      >
-                        <Sparkles size={14} color={it.isPriceEstimated ? '#b45309' : '#64748b'} />
-                        <span>{it.isPriceEstimated ? '✓ إلغاء السعر التقريبي' : '+ تفعيل وضع سعر تقريبي (من - إلى)'}</span>
-                      </button>
-
-                      {/* حقول إدخال من سعر وإلى سعر تظهر عند التفعيل */}
-                      {it.isPriceEstimated ? (
-                        <div
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            background: '#fffbeb',
-                            border: '1px solid #fde68a',
-                            borderRadius: '8px',
-                            padding: '4px 12px'
-                          }}
-                        >
-                          <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#92400e' }}>من:</span>
-                          <input
-                            type="number"
-                            step="any"
-                            min="0"
-                            placeholder="0.00"
-                            value={it.priceMin}
-                            onChange={(e) => handleItemChange(idx, 'priceMin', e.target.value)}
-                            className="outstock-form-input"
-                            style={{
-                              width: '85px',
-                              height: '32px',
-                              padding: '2px 6px',
-                              textAlign: 'center',
-                              fontWeight: '900',
-                              color: '#b45309',
-                              background: '#ffffff',
-                              border: '1px solid #fcd34d'
-                            }}
-                            required
-                          />
-                          <span style={{ fontSize: '11px', color: '#92400e', fontWeight: '700' }}>ج.م</span>
-
-                          <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#92400e', marginRight: '6px' }}>إلى:</span>
-                          <input
-                            type="number"
-                            step="any"
-                            min="0"
-                            placeholder="0.00"
-                            value={it.priceMax}
-                            onChange={(e) => handleItemChange(idx, 'priceMax', e.target.value)}
-                            className="outstock-form-input"
-                            style={{
-                              width: '85px',
-                              height: '32px',
-                              padding: '2px 6px',
-                              textAlign: 'center',
-                              fontWeight: '900',
-                              color: '#b45309',
-                              background: '#ffffff',
-                              border: '1px solid #fcd34d'
-                            }}
-                            required
-                          />
-                          <span style={{ fontSize: '11px', color: '#92400e', fontWeight: '700' }}>ج.م للعلبة</span>
-                        </div>
-                      ) : (
-                        /* معلومة استرشادية عند عدم تفعيل السعر التقريبي */
-                        (() => {
-                          const p = Number(it.unitPrice || it.selectedMed?.public_price || 0);
-                          if (p <= 0) return null;
-                          const minP = Math.round(p * 0.95 * 10) / 10;
-                          const maxP = Math.round(p * 1.05 * 10) / 10;
-                          return (
-                            <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '600' }}>
-                              (متوسط النطاق التقديري: من {minP.toFixed(2)} إلى {maxP.toFixed(2)} ج.م)
-                            </span>
-                          );
-                        })()
-                      )}
                     </div>
                   </div>
                 );

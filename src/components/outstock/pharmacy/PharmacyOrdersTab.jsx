@@ -312,6 +312,11 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
 
   // حذف الطلب بالكامل قبل رد المشتريات
   const handleDeleteOrder = async (orderId, orderNum) => {
+    const targetOrder = orders.find((o) => o.id === orderId) || transferredOrders.find((o) => o.id === orderId);
+    if (targetOrder && isOrderReplied(targetOrder)) {
+      showToast?.('⚠️ لا يمكن حذف الطلب بعد أن قامت إدارة المشتريات بالرد عليه (كلياً أو جزئياً)');
+      return;
+    }
     if (!window.confirm(`هل أنت متأكد من حذف الطلب رقم (${orderNum}) بالكامل؟ لا يمكن التراجع عن هذا الإجراء.`)) {
       return;
     }
@@ -378,24 +383,41 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     }
   };
 
+  // فحص دقيق وشامل هل تم الرد من إدارة المشتريات على الطلب (كلياً أو جزئياً)
+  const isOrderReplied = useCallback((order) => {
+    if (!order) return false;
+    // 1. تسجيل تاريخ رد المشتريات على الطلب
+    if (order.procurement_replied_at || order.procurementRepliedAt) return true;
+
+    // 2. حالة الطلب تشير إلى الرد أو التجهيز
+    const ordStatus = String(order.order_status || order.status || '').toLowerCase();
+    if (['replied', 'partially_available', 'all_available', 'all_unavailable', 'ready_for_pickup', 'completed', 'delivered'].includes(ordStatus)) {
+      return true;
+    }
+
+    // 3. فحص كافة بنود الطلب (بما فيها المشطوبة لعدم التوفر بالسوق)
+    const items = order.items || [];
+    return items.some((it) => {
+      const hasItemReplyDate = Boolean(it.procurement_replied_at || it.procurementRepliedAt);
+      const isPruned = Boolean(it.pruned_from_bill || it.prunedFromBill);
+      const st = String(it.itemStatus || it.item_status || it.status || '').toLowerCase();
+      return (
+        hasItemReplyDate ||
+        isPruned ||
+        ['available', 'available_by_procurement', 'unavailable', 'unavailable_in_market', 'delivered'].includes(st)
+      );
+    });
+  }, []);
+
   // فلترة الطلبات النشطة
   const filteredActiveOrders = useMemo(() => {
     let result = orders;
 
-    // فلتر الحالة الفرعي
+    // فلتر الحالة الفرعي: أي رد (ولو جزئي) يذهب مباشرة لتبويبة تم الرد ولا يظهر في قيد انتظار المشتريات
     if (activeSubFilter === 'waiting_procurement') {
-      result = result.filter((o) => {
-        if (o.procurement_replied_at) return false;
-        const items = o.items || [];
-        const hasReplied = items.some((it) => it.status === 'available' || it.status === 'unavailable' || it.itemStatus === 'available_by_procurement');
-        return !hasReplied;
-      });
+      result = result.filter((o) => !isOrderReplied(o));
     } else if (activeSubFilter === 'replied') {
-      result = result.filter((o) => {
-        if (o.procurement_replied_at) return true;
-        const items = o.items || [];
-        return items.some((it) => it.status === 'available' || it.status === 'unavailable' || it.itemStatus === 'available_by_procurement');
-      });
+      result = result.filter((o) => isOrderReplied(o));
     }
 
     // فلتر البحث النصي
@@ -414,7 +436,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     }
 
     return result;
-  }, [orders, activeSubFilter, searchQuery]);
+  }, [orders, activeSubFilter, searchQuery, isOrderReplied]);
 
   // فلترة الطلبات المسلمة
   const filteredDeliveredOrders = useMemo(() => {
@@ -444,9 +466,12 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     let readyCount = 0;
 
     orders.forEach((o) => {
+      const hasReplied = isOrderReplied(o);
       const items = o.items || [];
-      const hasReplied = Boolean(o.procurement_replied_at) || items.some((it) => it.status === 'available' || it.status === 'unavailable' || it.itemStatus === 'available_by_procurement');
-      const hasReady = items.some((it) => it.status === 'available' || it.itemStatus === 'available_by_procurement');
+      const hasReady = items.some((it) =>
+        (!it.pruned_from_bill && !it.prunedFromBill) &&
+        (it.status === 'available' || it.itemStatus === 'available_by_procurement' || it.status === 'delivered')
+      );
       if (!hasReplied) waitingCount++;
       if (hasReplied) repliedCount++;
       if (hasReady) readyCount++;
@@ -458,7 +483,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
       replied: repliedCount,
       ready: readyCount
     };
-  }, [orders]);
+  }, [orders, isOrderReplied]);
 
   // فلترة الطلبات المحولة (من وإلى الفرع)
   const filteredTransferredOrders = useMemo(() => {
@@ -673,7 +698,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                 }}
               >
                 <Clock size={13} color={activeSubFilter === 'waiting_procurement' ? '#f59e0b' : '#64748b'} />
-                <span>قيد انتظار المشتريات ⏳</span>
+                <span>قيد رد إدارة المشتريات ⏳</span>
                 <span style={{ background: '#f59e0b', color: '#ffffff', fontSize: '10.5px', padding: '1px 6px', borderRadius: '8px' }}>
                   {activeStats.waiting}
                 </span>
@@ -697,7 +722,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                 }}
               >
                 <MessageSquare size={13} color={activeSubFilter === 'replied' ? '#0284c7' : '#64748b'} />
-                <span>تم الرد من المشتريات 💬</span>
+                <span>تم الرد من قبل مدير المشتريات 💬</span>
                 <span style={{ background: '#0284c7', color: '#ffffff', fontSize: '10.5px', padding: '1px 6px', borderRadius: '8px' }}>
                   {activeStats.replied}
                 </span>
@@ -874,9 +899,15 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                 const activeItems = itemsList.filter((i) => !i.prunedFromBill && !i.pruned_from_bill);
                 const prunedItems = itemsList.filter((i) => i.prunedFromBill || i.pruned_from_bill);
 
-                const allAvailable = activeItems.length > 0 && activeItems.every((i) => i.itemStatus === 'available_by_procurement' || i.status === 'available');
-                const isPendingProcurement = activeItems.some((i) => !i.status || i.status === 'pending' || i.itemStatus === 'pending');
-                const isReplied = Boolean(order.procurement_replied_at || activeItems.some((i) => i.status === 'available' || i.status === 'unavailable' || i.itemStatus === 'available_by_procurement'));
+                const hasReplied = isOrderReplied(order);
+                const allAvailable = activeItems.length > 0 && prunedItems.length === 0 && activeItems.every((i) => i.itemStatus === 'available_by_procurement' || i.status === 'available');
+                const isPendingProcurement = !hasReplied;
+                const hasUnavailableOrPending = itemsList.some((i) => {
+                  const s = String(i.itemStatus || i.item_status || i.status || '').toLowerCase();
+                  const isP = Boolean(i.prunedFromBill || i.pruned_from_bill);
+                  return isP || s === 'unavailable' || s === 'unavailable_in_market' || s === 'pending';
+                });
+                const isPartiallyAvailable = (activeItems.some((i) => i.itemStatus === 'available_by_procurement' || i.status === 'available') && (prunedItems.length > 0 || activeItems.some((i) => i.status === 'pending' || i.itemStatus === 'pending')));
                 const slaTime = calculateResponseTime(order.sent_to_procurement_at || order.created_at, order.procurement_replied_at);
 
                 return (
@@ -927,15 +958,15 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                             <CheckCircle size={13} />
                             <span>متوفر بالكامل - جاهز للتسليم 🟢</span>
                           </span>
-                        ) : isReplied ? (
+                        ) : hasReplied ? (
                           <span className="outstock-badge" style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd' }}>
                             <MessageSquare size={13} />
-                            <span>تم رد المشتريات 💬</span>
+                            <span>تم رد مدير المشتريات {isPartiallyAvailable ? '(متوفر جزئياً 🔵)' : '💬'}</span>
                           </span>
                         ) : isPendingProcurement ? (
                           <span className="outstock-badge pending">
                             <Clock size={13} />
-                            <span>قيد انتظار المشتريات 🟡</span>
+                            <span>قيد انتظار رد إدارة المشتريات 🟡</span>
                           </span>
                         ) : (
                           <span className="outstock-badge partial">
@@ -1074,7 +1105,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                                 <span style={{ color: '#d97706', fontSize: '11px' }}>⏳ قيد الشراء</span>
                               )}
 
-                              {!isReplied && activeItems.length > 1 && (
+                              {!hasReplied && activeItems.length > 1 && (
                                 <button
                                   type="button"
                                   onClick={() => handleDeleteOrderItem(order.id, item.id || idx, item.medicationName || item.medication_name)}
@@ -1216,8 +1247,32 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                         </button>
 
                         <div className="outstock-order-sub-actions">
-                          {/* تعديل وحذف الطلب قبل رد المشتريات */}
-                          {!isReplied && (
+                          {/* في حال ردت المشتريات (كلياً أو جزئياً): لا يمكن حذف الطلب إطلاقاً، بل يمكن فقط تعديل الأصناف غير المتوفرة */}
+                          {hasReplied ? (
+                            hasUnavailableOrPending && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingOrder(order)}
+                                className="outstock-btn"
+                                style={{
+                                  padding: '7px 11px',
+                                  fontSize: '12px',
+                                  fontWeight: '800',
+                                  background: '#fffbeb',
+                                  color: '#b45309',
+                                  border: '1px solid #fde68a',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                                title="تعديل الأصناف غير المتوفرة فقط أو استبدالها بصنف بديل (الأصناف المعتمدة مقفلة ومحمية)"
+                              >
+                                <Edit size={14} />
+                                <span>تعديل الصنف غير المتوفر ✏️</span>
+                              </button>
+                            )
+                          ) : (
+                            /* قبل رد المشتريات: متاح تعديل الطلب بالكامل أو حذفه */
                             <>
                               <button
                                 type="button"

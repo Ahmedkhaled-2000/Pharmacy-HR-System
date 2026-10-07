@@ -2610,13 +2610,18 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const existingOrder = orderCheck.rows[0];
 
       // فحص هل ردت المشتريات على الطلب
-      const itemsCheck = await db.query("SELECT COUNT(*) as replied_count FROM public.outstock_order_items WHERE order_id = $1 AND (item_status <> 'pending' OR procurement_replied_at IS NOT NULL)", [orderId]);
+      const itemsCheck = await db.query("SELECT COUNT(*) as replied_count FROM public.outstock_order_items WHERE order_id = $1 AND (item_status <> 'pending' OR procurement_replied_at IS NOT NULL OR pruned_from_bill = true)", [orderId]);
       const repliedCount = parseInt(itemsCheck.rows[0]?.replied_count || 0, 10);
       if (existingOrder.procurement_replied_at || repliedCount > 0) {
-        // إذا ردت المشتريات بالفعل: لا نلغي أو نعيد إنشاء الأصناف المعتمدة، بل نحدث العربون والملاحظات والبيانات المالية والعميل
+        // إذا ردت المشتريات بالفعل (كلياً أو جزئياً):
+        // 1. الأصناف المعتمدة مقفلة تماماً ومحمية من أي تعديل أو حذف
+        // 2. الأصناف غير المتوفرة (أو المعلقة) يسمح بتعديلها أو استبدالها بصنف بديل وإعادة إرسالها للمشتريات
         const {
           customer,
+          items,
           paidAmount = 0,
+          discountType,
+          discountValue,
           expectedPickupDate,
           expectedPickupTime,
           responsiblePharmacist,
@@ -2627,8 +2632,114 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           paymentSplits
         } = req.body || {};
 
+        // معالجة تعديل الأصناف غير المتوفرة إن أُرسلت في الطلب
+        if (Array.isArray(items) && items.length > 0) {
+          const existingItemsRes = await db.query(
+            'SELECT * FROM public.outstock_order_items WHERE order_id = $1',
+            [orderId]
+          );
+          const existingItems = existingItemsRes.rows;
+
+          const isApproved = (itm) => {
+            const s = String(itm.item_status || '').toLowerCase();
+            return s === 'available_by_procurement' || s === 'delivered' || s === 'available';
+          };
+
+          const submittedWithId = items.filter((it) => it.id).map((it) => String(it.id));
+
+          // أ) تحديث أو إضافة الأصناف المرسلة
+          for (const it of items) {
+            const qty = parseInt(it.quantity || 1, 10);
+            const isEst = Boolean(it.isPriceEstimated);
+            const pMin = (it.priceMin !== undefined && it.priceMin !== null && it.priceMin !== '') ? parseFloat(it.priceMin) : null;
+            const pMax = (it.priceMax !== undefined && it.priceMax !== null && it.priceMax !== '') ? parseFloat(it.priceMax) : null;
+            let price = parseFloat(it.unitPrice || 0);
+            if (isEst && (pMin > 0 || pMax > 0)) {
+              price = (pMin + (pMax || pMin)) / 2;
+            }
+            const total = qty * price;
+            const itemType = it.itemType || it.item_type || 'medication';
+            const imgUrl = it.imageUrl || it.image_url || null;
+            const itmLink = it.itemLink || it.item_link || null;
+
+            if (it.id) {
+              const matchedExisting = existingItems.find((ex) => String(ex.id) === String(it.id));
+              if (matchedExisting) {
+                // إذا كان الصنف معتمداً، نتركه كما هو دون تعديل حماية للطلب
+                if (isApproved(matchedExisting)) {
+                  continue;
+                }
+                // الصنف غير متوفر أو معلق: نحدثه ونعيده كـ pending لإدارة المشتريات
+                await db.query(`
+                  UPDATE public.outstock_order_items
+                  SET medication_name = $1,
+                      unit_type = $2,
+                      quantity = $3,
+                      unit_price = $4,
+                      total_price = $5,
+                      item_status = 'pending',
+                      pruned_from_bill = false,
+                      pruned_at = NULL,
+                      is_price_estimated = $6,
+                      price_min = $7,
+                      price_max = $8,
+                      item_type = $9,
+                      image_url = $10,
+                      item_link = $11,
+                      sent_to_procurement_at = CURRENT_TIMESTAMP,
+                      procurement_replied_at = NULL,
+                      procurement_replied_by = NULL,
+                      procurement_notes = NULL,
+                      updated_at = CURRENT_TIMESTAMP
+                  WHERE id = $12 AND order_id = $13
+                `, [
+                  String(it.medicationName).trim(),
+                  it.unitType || 'pack',
+                  qty, price, total,
+                  isEst, pMin, pMax,
+                  itemType, imgUrl, itmLink,
+                  matchedExisting.id, orderId
+                ]);
+              }
+            } else {
+              // صنف بديل جديد أضيف في الطلب
+              const newId = `item_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+              await db.query(`
+                INSERT INTO public.outstock_order_items (
+                  id, order_id, medication_name, unit_type, quantity, unit_price, total_price, item_status,
+                  pruned_from_bill, is_price_estimated, price_min, price_max, item_type, image_url, item_link, sent_to_procurement_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', false, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP)
+              `, [
+                newId, orderId, String(it.medicationName).trim(), it.unitType || 'pack',
+                qty, price, total, isEst, pMin, pMax, itemType, imgUrl, itmLink
+              ]);
+            }
+          }
+
+          // ب) حذف أي صنف غير معتمد تم حذفه من قبل المستخدم
+          for (const ex of existingItems) {
+            if (!isApproved(ex) && !submittedWithId.includes(String(ex.id))) {
+              await db.query('DELETE FROM public.outstock_order_items WHERE id = $1 AND order_id = $2', [ex.id, orderId]);
+            }
+          }
+
+          if (discountType !== undefined || discountValue !== undefined) {
+            await db.query(`
+              UPDATE public.outstock_orders
+              SET discount_type = COALESCE($1, discount_type),
+                  discount_value = COALESCE($2, discount_value)
+              WHERE id = $3
+            `, [discountType || 'none', parseFloat(discountValue || 0), orderId]);
+          }
+
+          // إعادة احتساب الإجماليات وحالة الطلب
+          await recalculateOrderTotals(db, orderId);
+          await updateOrderStatusByItems(db, orderId);
+        }
+
         const paid = Math.max(0, parseFloat(paidAmount !== undefined ? paidAmount : (existingOrder.paid_amount || 0)));
-        const netAmount = parseFloat(existingOrder.net_amount || existingOrder.total_amount || 0);
+        const ordCurrent = await db.query('SELECT net_amount, total_amount FROM public.outstock_orders WHERE id = $1', [orderId]);
+        const netAmount = parseFloat(ordCurrent.rows[0]?.net_amount || ordCurrent.rows[0]?.total_amount || 0);
         const remaining = Math.max(0, netAmount - paid);
 
         await db.query(`
@@ -2689,7 +2800,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
         return res.json({
           success: true,
-          message: 'تم تحديث مبلغ العربون وبيانات الطلب بنجاح مع الحفاظ على أصناف المشتريات المعتمدة',
+          message: 'تم تحديث بيانات الطلب بنجاح وتعديل الأصناف غير المتوفرة مع حماية الأصناف المعتمدة',
           orderId
         });
       }
@@ -2886,11 +2997,12 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       if (orderRes.rows.length === 0) return res.status(404).json({ success: false, error: 'الطلب غير موجود' });
       const order = orderRes.rows[0];
 
-      // فحص هل ردت المشتريات
-      const itemsCheck = await db.query("SELECT COUNT(*) as replied_count FROM public.outstock_order_items WHERE order_id = $1 AND (item_status <> 'pending' OR procurement_replied_at IS NOT NULL)", [orderId]);
+      // فحص هل ردت المشتريات (كلياً أو جزئياً)
+      const itemsCheck = await db.query("SELECT COUNT(*) as replied_count FROM public.outstock_order_items WHERE order_id = $1 AND (item_status <> 'pending' OR procurement_replied_at IS NOT NULL OR pruned_from_bill = true)", [orderId]);
       const repliedCount = parseInt(itemsCheck.rows[0]?.replied_count || 0, 10);
-      if (order.procurement_replied_at || repliedCount > 0) {
-        return res.status(400).json({ success: false, error: 'لا يمكن حذف الطلب بعد أن قامت إدارة المشتريات بالرد عليه' });
+      const isRepliedStatus = ['replied', 'partially_available', 'all_available', 'all_unavailable', 'ready_for_pickup', 'completed'].includes(order.order_status);
+      if (order.procurement_replied_at || repliedCount > 0 || isRepliedStatus) {
+        return res.status(400).json({ success: false, error: 'لا يمكن حذف الطلب بعد أن قامت إدارة المشتريات بالرد عليه (كلياً أو جزئياً)' });
       }
 
       await db.query('DELETE FROM public.outstock_orders WHERE id = $1', [orderId]);
@@ -7775,17 +7887,24 @@ async function updateOrderStatusByItems(db, orderId) {
       'SELECT item_status, pruned_from_bill FROM public.outstock_order_items WHERE order_id = $1',
       [orderId]
     );
-    const validItems = itemsRes.rows.filter(i => !i.pruned_from_bill);
-    if (validItems.length === 0) return;
+    const allItems = itemsRes.rows;
+    if (allItems.length === 0) return;
 
-    const allAvailable = validItems.every(i => i.item_status === 'available_by_procurement' || i.item_status === 'delivered');
-    const someAvailable = validItems.some(i => i.item_status === 'available_by_procurement' || i.item_status === 'delivered');
-
+    const validItems = allItems.filter(i => !i.pruned_from_bill);
     let newStatus = 'pending_procurement';
-    if (allAvailable) {
-      newStatus = 'ready_for_pickup';
-    } else if (someAvailable) {
-      newStatus = 'partially_available';
+
+    if (validItems.length === 0) {
+      newStatus = 'all_unavailable';
+    } else {
+      const allAvailable = validItems.every(i => i.item_status === 'available_by_procurement' || i.item_status === 'delivered');
+      const someAvailable = validItems.some(i => i.item_status === 'available_by_procurement' || i.item_status === 'delivered');
+      const hasUnavailable = allItems.some(i => i.pruned_from_bill || i.item_status === 'unavailable_in_market' || i.item_status === 'unavailable');
+
+      if (allAvailable && !hasUnavailable) {
+        newStatus = 'ready_for_pickup';
+      } else if (someAvailable || hasUnavailable) {
+        newStatus = 'partially_available';
+      }
     }
 
     await db.query(
