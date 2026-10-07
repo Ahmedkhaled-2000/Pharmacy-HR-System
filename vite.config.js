@@ -6,7 +6,7 @@ const isElectron = process.env.ELECTRON === 'true';
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: isElectron ? './' : '/',
+  base: '/',
   define: {
     __APP_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },

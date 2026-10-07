@@ -95,8 +95,14 @@ function getActiveElapsedStr(activeShift) {
   try {
     const now = new Date();
     const [h, m] = activeShift.timeIn.split(':').map(Number);
-    const start = new Date();
-    start.setHours(h, m, 0, 0);
+    let start;
+    if (activeShift.date && /^\d{4}-\d{2}-\d{2}$/.test(activeShift.date)) {
+      const [y, mon, d] = activeShift.date.split('-').map(Number);
+      start = new Date(y, mon - 1, d, h, m, 0, 0);
+    } else {
+      start = new Date();
+      start.setHours(h, m, 0, 0);
+    }
     let diffMs = now - start;
     if (diffMs < 0) diffMs += 24 * 3600 * 1000;
     const hrs = Math.floor(diffMs / 3600000);

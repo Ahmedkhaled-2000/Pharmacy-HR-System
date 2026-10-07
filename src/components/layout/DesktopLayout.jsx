@@ -2095,7 +2095,21 @@ export default function DesktopLayout({
   // دالة تحميل وتنزيل تطبيق سطح المكتب للويندوز مباشرة بأحدث إصدار
   const handleDownloadWindowsApp = useCallback(async () => {
     try {
-      // 1. محاولة جلب رابط التنزيل المباشر لملف .exe من GitHub API
+      // 1. الأولوية القصوى: التنزيل المباشر لأحدث مثبت من السيرفر السحابي المركزي
+      const cloudSetupUrl = '/downloads/pharmacy-setup.exe';
+      const a = document.createElement('a');
+      a.href = cloudSetupUrl;
+      a.download = 'pharmacy-setup.exe';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    } catch (err) {
+      console.warn('Direct cloud setup download error:', err);
+    }
+
+    try {
+      // 2. احتياطي: جلب أحدث ملف .exe من GitHub API
       const res = await fetch('https://api.github.com/repos/Ahmedkhaled-2000/Pharmacy-HR-System/releases/latest', {
         headers: { 'Accept': 'application/vnd.github.v3+json' }
       });
@@ -2115,8 +2129,8 @@ export default function DesktopLayout({
     } catch (e) {
       console.warn('Error fetching latest release from GitHub API:', e);
     }
-    // Fallback: الانتقال لصفحة أحدث إصدار على GitHub
-    window.open('https://github.com/Ahmedkhaled-2000/Pharmacy-HR-System/releases/latest', '_blank');
+    // Fallback: الانتقال لصفحة أحدث إصدار
+    window.location.href = '/downloads/pharmacy-setup.exe';
   }, []);
 
 function handleMenuClick(menu) {

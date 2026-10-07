@@ -1,4 +1,5 @@
 import { loadExcelJS } from './excelExport';
+import { calcRawDurationMinutes } from './workHoursEngine';
 
 const STYLES = {
   headerBg: 'FF0F766E',       // Deep Royal Teal
@@ -401,57 +402,117 @@ export async function exportBiometricPunchesExcel({
 
       eRow++; // سطر فراغ
 
-      // تجميع بصمات الموظف حسب الأيام لحساب أول دخول وآخر خروج
-      const daysMap = new Map(); // dateKey => { dateStr, dayName, checkIn, checkOut, device }
-      empPunches.forEach(p => {
-        const pTimeRaw = p.punch_time || `${p.date || ''} ${p.time || ''}`;
+      // محرك التزاوج الزمني الذكي للورديات (Intelligent Punch Pairing Engine)
+      // يدعم الورديات الليلية العابرة لمنتصف الليل والورديات المنقسمة Split Shifts
+      const parsedPunches = (empPunches || []).map(p => {
+        const pTimeRaw = p.punch_time || `${p.date || ''} ${p.time || ''}`.trim();
         let dateStr = p.date || '';
         let timeStr = p.time || '';
         let dayName = '-';
-        let timeEpoch = 0;
+        let epoch = 0;
 
         try {
           const d = new Date(pTimeRaw);
           if (!isNaN(d.getTime())) {
             dateStr = d.toISOString().slice(0, 10);
-            timeStr = d.toTimeString().slice(0, 8);
-            dayName = arabicDays[d.getDay()];
-            timeEpoch = d.getTime();
+            timeStr = d.toTimeString().slice(0, 5);
+            dayName = arabicDays[d.getDay()] || '-';
+            epoch = d.getTime();
           }
         } catch {}
 
-        if (!dateStr) return;
-
-        const dayEntry = daysMap.get(dateStr) || {
-          dateStr,
-          dayName,
-          firstIn: null,
-          lastOut: null,
-          firstInEpoch: Infinity,
-          lastOutEpoch: -Infinity,
-          device: p.device_serial || p.deviceSerial || ''
-        };
+        if (!dateStr && p.date) dateStr = p.date;
+        if (!timeStr && p.time) timeStr = String(p.time).slice(0, 5);
 
         const action = p._normalizedAction || p.action_type || p.actionType;
         const isCheckIn = action === 'check_in' || action === 'shift_start' || p.raw_punch_state === 0;
 
-        if (isCheckIn) {
-          if (timeEpoch < dayEntry.firstInEpoch) {
-            dayEntry.firstInEpoch = timeEpoch;
-            dayEntry.firstIn = timeStr;
+        return {
+          ...p,
+          dateStr,
+          timeStr,
+          dayName,
+          epoch: epoch || (dateStr && timeStr ? new Date(`${dateStr}T${timeStr}:00`).getTime() : 0),
+          isCheckIn,
+          device: p.device_serial || p.deviceSerial || 'MB20'
+        };
+      }).filter(p => p.dateStr && p.timeStr).sort((a, b) => a.epoch - b.epoch);
+
+      const pairedSessions = [];
+      let pendingIn = null;
+
+      parsedPunches.forEach(p => {
+        if (p.isCheckIn) {
+          if (pendingIn) {
+            const diffMin = (p.epoch - pendingIn.epoch) / 60000;
+            if (diffMin <= 1) {
+              // بصمة مزدوجة مكررة لحظياً: تجاهل التكرار الزائد
+              return;
+            }
+            pairedSessions.push({
+              dateStr: pendingIn.dateStr,
+              dayName: pendingIn.dayName,
+              firstIn: pendingIn.timeStr,
+              lastOut: null,
+              actualHours: 0,
+              isOrphan: true,
+              device: pendingIn.device,
+              note: 'دخول بدون انصراف'
+            });
           }
+          pendingIn = p;
         } else {
-          if (timeEpoch > dayEntry.lastOutEpoch) {
-            dayEntry.lastOutEpoch = timeEpoch;
-            dayEntry.lastOut = timeStr;
+          if (pendingIn) {
+            const rawMins = calcRawDurationMinutes(pendingIn.timeStr, p.timeStr, {
+              startDate: pendingIn.dateStr,
+              endDate: p.dateStr,
+              startEpoch: pendingIn.epoch,
+              endEpoch: p.epoch
+            });
+            const actH = Math.round((rawMins / 60) * 100) / 100;
+            const isOvernight = pendingIn.dateStr !== p.dateStr;
+
+            pairedSessions.push({
+              dateStr: pendingIn.dateStr,
+              dayName: pendingIn.dayName,
+              firstIn: pendingIn.timeStr,
+              lastOut: isOvernight ? `${p.timeStr} (+1)` : p.timeStr,
+              actualHours: actH,
+              isOvernight,
+              device: p.device || pendingIn.device,
+              note: isOvernight ? 'وردية ليلية (+1)' : (rawMins === 0 ? 'بصمة مكررة (0 س)' : '')
+            });
+            pendingIn = null;
+          } else {
+            pairedSessions.push({
+              dateStr: p.dateStr,
+              dayName: p.dayName,
+              firstIn: null,
+              lastOut: p.timeStr,
+              actualHours: 0,
+              isOrphan: true,
+              device: p.device,
+              note: 'انصراف بدون دخول'
+            });
           }
         }
-
-        daysMap.set(dateStr, dayEntry);
       });
 
-      // ترتيب الأيام تصاعدياً
-      const sortedDays = Array.from(daysMap.values()).sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+      if (pendingIn) {
+        pairedSessions.push({
+          dateStr: pendingIn.dateStr,
+          dayName: pendingIn.dayName,
+          firstIn: pendingIn.timeStr,
+          lastOut: null,
+          actualHours: 0,
+          isOrphan: true,
+          device: pendingIn.device,
+          note: 'دخول بدون انصراف'
+        });
+      }
+
+      // ترتيب الجلسات تصاعدياً بحسب التاريخ
+      const sortedDays = pairedSessions.sort((a, b) => a.dateStr.localeCompare(b.dateStr));
 
       // أعمدة جدول الموظف التفصيلي
       const empHeaders = [
@@ -529,17 +590,9 @@ export async function exportBiometricPunchesExcel({
         cE.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: outTime ? STYLES.checkOutRedBg : rowBg } };
         cE.font = { name: 'Arial', bold: !!outTime, color: { argb: outTime ? STYLES.checkOutRedText : STYLES.textMuted } };
 
-        // عمود F: ساعات العمل الفعلية (معادلة إكسيل الذكية لحساب الفرق بين الدخول والخروج)
+        // عمود F: ساعات العمل الفعلية المعتمدة والمحسوبة برمجياً بدقة فائقة
         const cF = wsEmp.getCell(`F${rowNum}`);
-        if (inTime && outTime) {
-          // معادلة إكسيل تحسب الفرق بالدقائق والساعات مع دعم المناوبات المسائية:
-          // =ROUND(IF(TIMEVALUE(E{r})>=TIMEVALUE(D{r}), (TIMEVALUE(E{r})-TIMEVALUE(D{r}))*24, (TIMEVALUE(E{r})+1-TIMEVALUE(D{r}))*24), 2)
-          cF.value = {
-            formula: `ROUND(IF(TIMEVALUE(E${rowNum})>=TIMEVALUE(D${rowNum}), (TIMEVALUE(E${rowNum})-TIMEVALUE(D${rowNum}))*24, (TIMEVALUE(E${rowNum})+1-TIMEVALUE(D${rowNum}))*24), 2)`
-          };
-        } else {
-          cF.value = 0;
-        }
+        cF.value = parseFloat(day.actualHours || 0);
         cF.numFmt = '0.00';
         cF.alignment = { horizontal: 'center', vertical: 'middle' };
         cF.border = CELL_BORDER;
@@ -568,7 +621,7 @@ export async function exportBiometricPunchesExcel({
 
         // عمود I: الماكينة / ملاحظات
         const cI = wsEmp.getCell(`I${rowNum}`);
-        cI.value = day.device || 'MB20';
+        cI.value = day.note ? `${day.device || 'MB20'} (${day.note})` : (day.device || 'MB20');
         cI.alignment = { horizontal: 'center', vertical: 'middle' };
         cI.border = CELL_BORDER;
         cI.font = { name: 'Arial', size: 9, color: { argb: STYLES.textMuted } };

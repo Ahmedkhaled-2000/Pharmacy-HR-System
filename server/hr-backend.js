@@ -4,6 +4,10 @@
  * صُمم لتحمل الضغط العالي جداً، كثرة الاستعلامات، والتحديث اللحظي الفوري بين الأجهزة
  */
 
+if (typeof process !== 'undefined' && process.env) {
+  process.env.TZ = 'Africa/Cairo';
+}
+
 import express from 'express';
 import http from 'http';
 import https from 'https';
@@ -19,6 +23,14 @@ import crypto from 'crypto';
 import { initSaasTables, registerSaasRoutes, DEFAULT_DEV_USER, DEFAULT_DEV_PASS } from './saas-manager.js';
 import { initOutstockTables, registerOutstockRoutes } from './outstock-manager.js';
 import { initBiometricTables, registerBiometricRoutes, sendUniversalAttendanceWhatsAppAlert } from './biometric-manager.js';
+import {
+  getEgyptDate,
+  getEgyptTime,
+  getEgyptTimeWithSeconds,
+  getEgyptDateTime,
+  parseEgyptTimeToEpoch,
+  calculatePunchMinutesDiff
+} from './egypt-time.js';
 
 dotenv.config();
 
@@ -603,7 +615,8 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
 
         if (existingActiveShifts && typeof existingActiveShifts === 'object') {
           const incomingActiveShifts = stateValue.activeShifts || {};
-          const today = new Date().toISOString().slice(0, 10);
+          const today = getEgyptDate();
+          const nowTime = getEgyptTime();
           let shiftsProtected = 0;
 
           // قائمة الموظفين لفحص الأكواد والمعرفات
@@ -648,12 +661,15 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
               continue;
             }
 
-            // الوردية النشطة: لها date اليوم، ولها timeIn، وليس لها timeOut صريح، وليست مكتملة
-            const isActiveToday = existingShift.date === today;
+            // الوردية النشطة: بدأت خلال آخر 24 ساعة (مع دعم الورديات الليلية والعابرة لمنتصف الليل)، ولها timeIn، وليس لها timeOut صريح، وليست مكتملة
+            const sDate = existingShift.date || today;
+            const sTime = (existingShift.timeIn || '09:00').slice(0, 5);
+            const shiftAgeHours = calculatePunchMinutesDiff(sDate, sTime, today, nowTime) / 60;
+            const isWithin24Hours = shiftAgeHours >= 0 && shiftAgeHours < 24;
             const hasCheckIn = Boolean(existingShift.timeIn && existingShift.timeIn !== '');
             const noCheckOut = !existingShift.timeOut || existingShift.timeOut === '' || existingShift.timeOut === '—' || existingShift.timeOut === '-';
             const isNotCompleted = existingShift.status !== 'completed' && existingShift.isLiveActive !== false;
-            const isGenuinelyActive = isActiveToday && hasCheckIn && noCheckOut && isNotCompleted;
+            const isGenuinelyActive = isWithin24Hours && hasCheckIn && noCheckOut && isNotCompleted;
 
             if (isGenuinelyActive) {
               const incomingShift = incomingActiveShifts[empId] || incomingActiveShifts[String(empId)] || (empCode && incomingActiveShifts[empCode]);
@@ -958,6 +974,8 @@ app.post('/api/punches/record', async (req, res) => {
     }
 
     const clientIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
+    const egyptNowDate = getEgyptDate();
+    const egyptNowTime = getEgyptTime();
     const now = new Date().toISOString();
 
     // جلب الحالة الحالية من الذاكرة السريعة أو قاعدة البيانات
@@ -986,7 +1004,7 @@ app.post('/api/punches/record', async (req, res) => {
 
     if (actionType === 'check_in' || actionType === 'start_shift') {
       // ── تسجيل حضور ذري ───────────────────────────────────────────
-      // إذا كان الموظف لديه وردية نشطة بالفعل لليوم → نرجع خطأ للكشك
+      // إذا كان الموظف لديه وردية نشطة بالفعل خلال آخر 24 ساعة ولم يغلقها بعد → تنبيه للكشك
       let existingActive = null;
       for (const k of possibleKeys) {
         if (currentActiveShifts[k]) {
@@ -994,21 +1012,26 @@ app.post('/api/punches/record', async (req, res) => {
           break;
         }
       }
-      if (existingActive && existingActive.date === date) {
-        return res.status(409).json({
-          success: false,
-          alreadyCheckedIn: true,
-          existingShift: existingActive,
-          message: 'الموظف لديه وردية نشطة بالفعل لهذا اليوم'
-        });
+      if (existingActive) {
+        const sDate = existingActive.date || date || egyptNowDate;
+        const sTime = (existingActive.timeIn || '09:00').slice(0, 5);
+        const elapsedH = calculatePunchMinutesDiff(sDate, sTime, date || egyptNowDate, time || egyptNowTime) / 60;
+        if (elapsedH >= 0 && elapsedH < 24) {
+          return res.status(409).json({
+            success: false,
+            alreadyCheckedIn: true,
+            existingShift: existingActive,
+            message: 'الموظف لديه وردية نشطة بالفعل لم يتم تسجيل انصرافها بعد'
+          });
+        }
       }
 
       // إدخال الوردية الجديدة في activeShifts بكافة المفاتيح
       const newShiftData = shiftData || {
         shiftId: shiftId || `shift_${employeeId}_${Date.now()}`,
         branchId: branchId || '',
-        date,
-        timeIn: time || now.slice(11, 16),
+        date: date || egyptNowDate,
+        timeIn: time || egyptNowTime,
         startEpoch: Date.now(),
         isPaused: false,
         isOnBreak: false,
@@ -1027,7 +1050,7 @@ app.post('/api/punches/record', async (req, res) => {
       // إضافة سجل الوردية في shifts[]
       if (shiftRecord) {
         currentShifts = [shiftRecord, ...currentShifts.filter(s =>
-          !(possibleKeys.has(String(s.employeeId)) && s.date === date && (!s.timeOut || s.timeOut === '' || s.isLiveActive))
+          !(possibleKeys.has(String(s.employeeId)) && s.date === (date || egyptNowDate) && (!s.timeOut || s.timeOut === '' || s.isLiveActive))
         )];
       }
 
@@ -1079,7 +1102,25 @@ app.post('/api/punches/record', async (req, res) => {
       const targetShiftId = activeShift?.shiftId || shiftId || shiftRecord?.id;
       let existingIdx = currentShifts.findIndex(s => targetShiftId && s.id === targetShiftId);
       if (existingIdx < 0) {
-        existingIdx = currentShifts.findIndex(s => isEmpShiftMatch(s) && (s.date === date || isShiftOpen(s)));
+        existingIdx = currentShifts.findIndex(s => isEmpShiftMatch(s) && (s.date === (date || egyptNowDate) || isShiftOpen(s)));
+      }
+
+      // ⚡ حساب وتأكيد ساعات العمل الفعلية على مستوى الخادم لضمان سلامة البيانات ومنع البصمات الصفرية
+      const sIn = (shiftRecord && shiftRecord.timeIn) || (existingIdx >= 0 && currentShifts[existingIdx].timeIn) || '09:00';
+      const sOut = time || (existingIdx >= 0 && currentShifts[existingIdx].timeOut) || egyptNowTime;
+      const sInDate = (existingIdx >= 0 && currentShifts[existingIdx].date) || activeShift?.date || date || egyptNowDate;
+      const sOutDate = date || egyptNowDate;
+
+      let calculatedHours = shiftRecord && shiftRecord.actualWorkedHours !== undefined ? parseFloat(shiftRecord.actualWorkedHours) : (shiftRecord && shiftRecord.hours !== undefined ? parseFloat(shiftRecord.hours) : null);
+
+      if (calculatedHours === null || isNaN(calculatedHours) || (sInDate === sOutDate && sIn === sOut)) {
+        if (sInDate === sOutDate && sIn === sOut) {
+          calculatedHours = 0;
+        } else {
+          const bH = parseFloat((shiftRecord && shiftRecord.breakHours) || (existingIdx >= 0 && currentShifts[existingIdx].breakHours) || 0);
+          const diffMinutes = calculatePunchMinutesDiff(sInDate, sIn, sOutDate, sOut);
+          calculatedHours = Math.max(0, Math.round(((diffMinutes / 60) - bH) * 100) / 100);
+        }
       }
 
       closedRecord = {
@@ -1088,7 +1129,10 @@ app.post('/api/punches/record', async (req, res) => {
         employeeId: empObj?.id || employeeId,
         employeeCode: empObj?.code || shiftRecord?.employeeCode || '',
         employeeName: empObj?.name || shiftRecord?.employeeName || '',
-        timeOut: time || (existingIdx >= 0 && currentShifts[existingIdx].timeOut) || now.slice(11, 16),
+        timeIn: sIn,
+        timeOut: sOut,
+        hours: calculatedHours,
+        actualWorkedHours: calculatedHours,
         isLiveActive: false,
         status: 'completed',
         updatedAt: now
@@ -1103,9 +1147,19 @@ app.post('/api/punches/record', async (req, res) => {
       // إغلاق أي ورديات مفتوحة إضافية مكررة لنفس الموظف
       currentShifts = currentShifts.map((s, idx) => {
         if (idx !== existingIdx && isEmpShiftMatch(s) && isShiftOpen(s)) {
+          const dupIn = s.timeIn || '09:00';
+          const dupOut = time || egyptNowTime;
+          let dupHours = 0;
+          if (dupIn !== dupOut) {
+            const bH = parseFloat(s.breakHours || 0);
+            const diffMinutes = calculatePunchMinutesDiff(s.date || egyptNowDate, dupIn, sOutDate, dupOut);
+            dupHours = Math.max(0, Math.round(((diffMinutes / 60) - bH) * 100) / 100);
+          }
           return {
             ...s,
-            timeOut: time || now.slice(11, 16),
+            timeOut: dupOut,
+            hours: dupHours,
+            actualWorkedHours: dupHours,
             isLiveActive: false,
             status: 'completed',
             updatedAt: now
@@ -1115,7 +1169,7 @@ app.post('/api/punches/record', async (req, res) => {
       });
     } else if (actionType === 'break_start' || actionType === 'pause_shift') {
       const punchEpoch = req.body?.deviceLocalEpoch || Date.now();
-      const punchTime = time || now.slice(11, 16);
+      const punchTime = time || egyptNowTime;
       possibleKeys.forEach(k => {
         if (currentActiveShifts[k]) {
           currentActiveShifts[k] = {
@@ -1129,7 +1183,7 @@ app.post('/api/punches/record', async (req, res) => {
         }
       });
 
-      let targetIdx = currentShifts.findIndex(s => s && (s.id === shiftId || (possibleKeys.has(String(s.employeeId)) && s.date === date && (!s.timeOut || s.timeOut === '' || s.isLiveActive))));
+      let targetIdx = currentShifts.findIndex(s => s && (s.id === shiftId || (possibleKeys.has(String(s.employeeId)) && s.date === (date || egyptNowDate) && (!s.timeOut || s.timeOut === '' || s.isLiveActive))));
       if (targetIdx >= 0) {
         currentShifts[targetIdx] = {
           ...currentShifts[targetIdx],
@@ -1142,7 +1196,7 @@ app.post('/api/punches/record', async (req, res) => {
       }
     } else if (actionType === 'break_end' || actionType === 'resume_shift') {
       const punchEpoch = req.body?.deviceLocalEpoch || Date.now();
-      const punchTime = time || now.slice(11, 16);
+      const punchTime = time || egyptNowTime;
       possibleKeys.forEach(k => {
         const act = currentActiveShifts[k];
         if (act) {
@@ -1315,7 +1369,8 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
     });
 
     const syncedIds = [];
-    const todayStr = now.slice(0, 10);
+    const todayStr = getEgyptDate();
+    const nowTimeStr = getEgyptTime();
 
     for (const p of sortedPunches) {
       if (!p || !p.employeeId) continue;
@@ -1331,7 +1386,7 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
 
       const actionType = p.actionType || 'check_in';
       const punchDate = p.punchDate || p.date || todayStr;
-      const punchTime = p.punchTime || p.time || now.slice(11, 16);
+      const punchTime = p.punchTime || p.time || nowTimeStr;
       const shiftId = p.shiftId || `shift_${empIdStr}_${p.deviceLocalEpoch || Date.now()}`;
       const clientPunchId = p.clientPunchId || `${empIdStr}_${actionType}_${punchDate}_${punchTime}`;
 
@@ -1363,8 +1418,9 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
           updatedAt: Date.now()
         };
 
-        // إذا كانت البصمة لتاريخ اليوم، نعتمدها في activeShifts بكافة المفاتيح
-        if (punchDate === todayStr) {
+        // إذا كانت البصمة ضمن آخر 24 ساعة (مع دعم الورديات العابرة لمنتصف الليل)، نعتمدها في activeShifts بكافة المفاتيح
+        const punchAgeHours = calculatePunchMinutesDiff(punchDate, punchTime, todayStr, nowTimeStr) / 60;
+        if (punchAgeHours >= 0 && punchAgeHours < 24) {
           possibleKeys.forEach(k => {
             currentActiveShifts[k] = newShiftData;
           });
@@ -1527,17 +1583,9 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
           let workedHrs = 0;
 
           try {
-            // حساب الفارق الزمني اعتماداً على التوقيت المحلي بدقة بالغة مع دعم الورديات الليلية العابرة لمنتصف الليل
-            const [inH, inM] = String(timeInStr).split(':').map(Number);
-            const [outH, outM] = String(punchTime).split(':').map(Number);
-            if (!isNaN(inH) && !isNaN(outH)) {
-              let diffMins = (outH * 60 + (outM || 0)) - (inH * 60 + (inM || 0));
-              // إذا كان وقت الانصراف أقل من أو يساوي وقت الحضور أو تغير التاريخ -> الوردية عابرة لمنتصف الليل
-              if (diffMins <= 0 || (shiftDate && punchDate && shiftDate !== punchDate)) {
-                diffMins += 24 * 60;
-              }
-              totalElapsedHrs = parseFloat((diffMins / 60).toFixed(2));
-            }
+            // حساب الفارق الزمني اعتماداً على التوقيت المصري المحلي بدقة بالغة مع دعم الورديات الليلية العابرة لمنتصف الليل
+            const diffMins = calculatePunchMinutesDiff(shiftDate, timeInStr, punchDate, punchTime);
+            totalElapsedHrs = Math.max(0, parseFloat((diffMins / 60).toFixed(2)));
           } catch {}
 
           const effectiveBreak = parseFloat(
@@ -4176,11 +4224,11 @@ app.post('/api/drive/backup', async (req, res) => {
     const version = stored?.version || stored?._version || 1;
 
     if (!backupJson) {
-      const dateStr = now.toISOString().slice(0, 10);
-      const timeStr = now.toTimeString().slice(0, 5).replace(':', '-');
+      const dateStr = getEgyptDate(now);
+      const timeStr = getEgyptTime(now).replace(':', '-');
       fileName = fileName || `Backup_${dateStr}_${timeStr}_v${version}.json`;
       const payload = {
-        export_date: now.toISOString(),
+        export_date: getEgyptDateTime(now),
         version,
         state: stored
       };
@@ -4190,7 +4238,7 @@ app.post('/api/drive/backup', async (req, res) => {
     const forwardRes = await forwardToGoogleDrive(driveConfig.serviceUrl, {
       action: 'upload_system_backup',
       parentFolderId: driveConfig.parentFolderId || '',
-      fileName: fileName || `Backup_${now.toISOString().slice(0, 10)}_v${version}.json`,
+      fileName: fileName || `Backup_${getEgyptDate(now)}_v${version}.json`,
       backupJson,
       retentionLimit: driveConfig.retentionCount || 20
     });
@@ -4308,31 +4356,11 @@ app.post('/api/drive/schedule', async (req, res) => {
 let isRunningAutoBackup = false;
 
 function getSchedulerHourMinute(date = new Date()) {
-  try {
-    return new Intl.DateTimeFormat('en-GB', {
-      timeZone: process.env.TZ || 'Africa/Cairo',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    }).format(date);
-  } catch {
-    const h = String(date.getHours()).padStart(2, '0');
-    const m = String(date.getMinutes()).padStart(2, '0');
-    return `${h}:${m}`;
-  }
+  return getEgyptTime(date);
 }
 
 function getSchedulerDateKey(date = new Date()) {
-  try {
-    return new Intl.DateTimeFormat('en-CA', {
-      timeZone: process.env.TZ || 'Africa/Cairo',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    }).format(date);
-  } catch {
-    return date.toISOString().slice(0, 10);
-  }
+  return getEgyptDate(date);
 }
 
 async function checkAndRunScheduledDriveBackup() {

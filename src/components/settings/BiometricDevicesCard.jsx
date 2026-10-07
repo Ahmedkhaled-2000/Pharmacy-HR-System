@@ -1,6 +1,30 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { getSocket } from '../../utils/socketClient';
 import { exportBiometricPunchesExcel, deduplicatePunches } from '../../utils/biometricExcelExporter';
+import { API_BASE_URL } from '../../utils/apiClient';
+import LocalBiometricInspectorModal from './LocalBiometricInspectorModal';
+
+const getBioUrl = (path) => {
+  if (typeof path === 'string' && path.startsWith('http')) return path;
+  const p = typeof path === 'string' ? (path.startsWith('/') ? path : `/${path}`) : '';
+  const cleanPath = p.startsWith('/api/') ? p.slice(4) : p;
+  return `${API_BASE_URL}${cleanPath}`;
+};
+
+const bioFetch = async (url, options = {}) => {
+  const targetUrl = getBioUrl(url);
+  const token = (typeof localStorage !== 'undefined' && (localStorage.getItem('app_auth_token') || localStorage.getItem('archive_token'))) || '';
+  const role = (typeof localStorage !== 'undefined' && localStorage.getItem('app_auth_role')) || 'owner';
+  const pass = (typeof localStorage !== 'undefined' && (localStorage.getItem('app_owner_password_snapshot') || localStorage.getItem('app_admin_password_snapshot'))) || 'owner123';
+  
+  const headers = {
+    ...(options.headers || {}),
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    'X-App-Role': role,
+    'X-App-Password': pass,
+  };
+  return fetch(targetUrl, { ...options, headers });
+};
 
 export default function BiometricDevicesCard({ state, showToast }) {
   const branches = state?.branches || [];
@@ -216,7 +240,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     antiBounceSeconds: 90,
     autoTimeSyncOnReconnect: true,
     universalShiftEngine: true,
-    shiftMaxHoursSafetyValve: 15,
+    shiftMaxHoursSafetyValve: 24,
     minCheckoutMinutes: 15,
     templates: { ...DEFAULT_ATTENDANCE_TEMPLATES },
     adminMessageTemplate: DEFAULT_ATTENDANCE_TEMPLATES.admin_check_in
@@ -307,6 +331,9 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const [deleteFingerId, setDeleteFingerId] = useState(0);
   const [isDeletingUserScope, setIsDeletingUserScope] = useState(false);
 
+  // نافذة فحص جهاز البصمة المحلي وخادم الوسيط
+  const [showLocalInspectorModal, setShowLocalInspectorModal] = useState(false);
+
   // حقول البحث والفلترة لربط PIN
   const [pinSearchTerm, setPinSearchTerm] = useState('');
   const [pinBranchFilter, setPinBranchFilter] = useState('ALL');
@@ -314,7 +341,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   // جلب قائمة الأجهزة
   const fetchDevices = useCallback(async () => {
     try {
-      const res = await fetch('/api/biometrics/devices');
+      const res = await bioFetch('/api/biometrics/devices');
       const data = await res.json();
       if (data.success) {
         setDevices(data.devices || []);
@@ -327,7 +354,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   // جلب سجلات البصمات الحية
   const fetchLogs = useCallback(async () => {
     try {
-      const res = await fetch('/api/biometrics/logs?limit=50');
+      const res = await bioFetch('/api/biometrics/logs?limit=50');
       const data = await res.json();
       if (data.success) {
         setLogs(data.logs || []);
@@ -340,7 +367,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   // جلب ملفات ربط الموظفين
   const fetchProfiles = useCallback(async () => {
     try {
-      const res = await fetch('/api/biometrics/profiles');
+      const res = await bioFetch('/api/biometrics/profiles');
       const data = await res.json();
       if (data.success) {
         setProfiles(data.profiles || []);
@@ -353,7 +380,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   // جلب قوالب البصمات الحيوية المحفوظة في الخزنة السحابية
   const fetchTemplates = useCallback(async () => {
     try {
-      const res = await fetch('/api/biometrics/templates');
+      const res = await bioFetch('/api/biometrics/templates');
       const data = await res.json();
       if (data.success) {
         setTemplates(data.templates || []);
@@ -366,7 +393,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   // جلب سجلات الترحيل والتوزيع السابقة
   const fetchDispatchLogs = useCallback(async () => {
     try {
-      const res = await fetch('/api/biometrics/dispatch-logs?limit=30');
+      const res = await bioFetch('/api/biometrics/dispatch-logs?limit=30');
       const data = await res.json();
       if (data.success) {
         setDispatchLogs(data.logs || []);
@@ -381,7 +408,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     if (!sn) return;
     setIsLoadingDeviceUsers(true);
     try {
-      const res = await fetch(`/api/biometrics/devices/${sn}/users`);
+      const res = await bioFetch(`/api/biometrics/devices/${sn}/users`);
       const data = await res.json();
       if (data.success) {
         setDeviceUsers(data.users || []);
@@ -396,7 +423,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   // جلب كافة مستخدمي الأجهزة المسجلين عبر كافة الماكينات
   const fetchAllDeviceUsers = useCallback(async () => {
     try {
-      const res = await fetch('/api/biometrics/device-users');
+      const res = await bioFetch('/api/biometrics/device-users');
       const data = await res.json();
       if (data.success) {
         setAllDeviceUsers(data.users || []);
@@ -409,7 +436,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   // جلب أكواد الفروع المتعددة
   const fetchBranchPins = useCallback(async () => {
     try {
-      const res = await fetch('/api/biometrics/branch-pins');
+      const res = await bioFetch('/api/biometrics/branch-pins');
       const data = await res.json();
       if (data.success) {
         setBranchPins(data.branchPins || []);
@@ -422,7 +449,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   // جلب إعدادات إشعارات واتساب
   const fetchWaConfig = useCallback(async () => {
     try {
-      const res = await fetch('/api/biometrics/whatsapp-config');
+      const res = await bioFetch('/api/biometrics/whatsapp-config');
       const data = await res.json();
       if (data.success && data.config) {
         setWaConfig(prev => ({
@@ -457,16 +484,25 @@ export default function BiometricDevicesCard({ state, showToast }) {
           const idx = prev.findIndex(d => d.serial_number === statusPayload.serialNumber);
           if (idx >= 0) {
             const updated = [...prev];
-            updated[idx] = { ...updated[idx], status: 'ONLINE', last_heartbeat: statusPayload.lastHeartbeat };
-            return updated;
-          } else {
-            return [{
-              id: `dev_${statusPayload.serialNumber.toLowerCase()}`,
-              device_name: `جهاز بصمة ZKTeco (${statusPayload.serialNumber})`,
-              serial_number: statusPayload.serialNumber,
+            updated[idx] = {
+              ...updated[idx],
               status: 'ONLINE',
               last_heartbeat: statusPayload.lastHeartbeat,
-              device_type: 'MB20',
+              ip_address: statusPayload.ip || updated[idx].ip_address,
+              firmware_version: statusPayload.firmware || updated[idx].firmware_version
+            };
+            return updated;
+          } else {
+            const matchingBranch = branches.find(b => b.biometricDeviceSerial === statusPayload.serialNumber || b.biometricSerial === statusPayload.serialNumber || b.name === statusPayload.branch);
+            return [{
+              id: `dev_${statusPayload.serialNumber.toLowerCase()}`,
+              device_name: matchingBranch ? `جهاز بصمة (${matchingBranch.name})` : (statusPayload.name || `جهاز بصمة ZKTeco (${statusPayload.serialNumber})`),
+              branch: matchingBranch ? matchingBranch.name : (statusPayload.branch || 'غير محدد'),
+              serial_number: statusPayload.serialNumber,
+              ip_address: statusPayload.ip || '127.0.0.1',
+              status: 'ONLINE',
+              last_heartbeat: statusPayload.lastHeartbeat,
+              device_type: statusPayload.deviceType || 'MB20',
               protocol: 'ADMS'
             }, ...prev];
           }
@@ -536,7 +572,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
 
     try {
       const branchObj = branches.find(b => String(b.id) === String(newDeviceBranchId));
-      const res = await fetch('/api/biometrics/devices', {
+      const res = await bioFetch('/api/biometrics/devices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -578,7 +614,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     if (!selectedDeviceForManage) return;
     try {
       const branchObj = branches.find(b => String(b.id) === String(editDeviceBranchId));
-      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(selectedDeviceForManage.serial_number)}`, {
+      const res = await bioFetch(`/api/biometrics/devices/${encodeURIComponent(selectedDeviceForManage.serial_number)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -602,7 +638,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const handleDeleteDevice = async (serialNumber) => {
     if (!window.confirm(`هل أنت متأكد من رغبتك في حذف جهاز البصمة (${serialNumber})؟`)) return;
     try {
-      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}`, {
+      const res = await bioFetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}`, {
         method: 'DELETE'
       });
       const data = await res.json();
@@ -620,7 +656,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const handlePushUsersToDevice = async (serialNumber, scope = 'branch') => {
     setIsPushingUsers(true);
     try {
-      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}/push-users`, {
+      const res = await bioFetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}/push-users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -643,7 +679,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   // إرسال أمر مزامنة التوقيت للجهاز
   const handleSyncTime = async (serialNumber) => {
     try {
-      const res = await fetch(`/api/biometrics/sync-time/${encodeURIComponent(serialNumber)}`, {
+      const res = await bioFetch(`/api/biometrics/sync-time/${encodeURIComponent(serialNumber)}`, {
         method: 'POST'
       });
       const data = await res.json();
@@ -659,7 +695,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const handleRebootDevice = async (serialNumber) => {
     if (!window.confirm(`هل ترغب في إرسال أمر إعادة تشغيل (Reboot) لجهاز البصمة (${serialNumber})؟`)) return;
     try {
-      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}/reboot`, {
+      const res = await bioFetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}/reboot`, {
         method: 'POST'
       });
       const data = await res.json();
@@ -675,7 +711,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const handleClearDeviceLogs = async (serialNumber) => {
     if (!window.confirm(`تنبيه: سيتم مسح سجل الحركات من ذاكرة جهاز البصمة الداخلي. هل تود المتابعة؟`)) return;
     try {
-      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}/clear-log`, {
+      const res = await bioFetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}/clear-log`, {
         method: 'POST'
       });
       const data = await res.json();
@@ -705,7 +741,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
         ? '/api/biometrics/devices/all/clear-commands'
         : `/api/biometrics/devices/${encodeURIComponent(serialNumber)}/clear-commands`;
 
-      const res = await fetch(endpoint, { method: 'POST' });
+      const res = await bioFetch(endpoint, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         showToast?.(`✨ ${data.message || 'تم تفريغ الأوامر المعلقة وفك تعليق الجهاز بنجاح'}`);
@@ -724,7 +760,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const handlePullTemplates = async (serialNumber, pin = null) => {
     try {
       const url = `/api/biometrics/devices/${encodeURIComponent(serialNumber)}/pull-templates${pin ? `?pin=${encodeURIComponent(pin)}` : ''}`;
-      const res = await fetch(url, {
+      const res = await bioFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin: pin || undefined })
@@ -737,6 +773,37 @@ export default function BiometricDevicesCard({ state, showToast }) {
       }
     } catch {
       showToast?.('❌ فشل إرسال أمر سحب القوالب');
+    }
+  };
+
+  // تنزيل ملفات وحزمة تهيئة الفلاشة السريعة للماكينة (USB Quick Config)
+  const handleDownloadUsbConfig = async (serialNumber) => {
+    try {
+      showToast?.(`⏳ جاري إنشاء ملفات التهيئة التلقائية للفلاشة (${serialNumber})...`);
+      const res = await bioFetch(`/api/biometrics/devices/${encodeURIComponent(serialNumber)}/usb-config`);
+      const data = await res.json();
+      if (!data.success || !data.files) {
+        throw new Error(data.error || 'تعذر جلب ملفات التهيئة');
+      }
+
+      // تنزيل الملفات تباعاً للمستخدم
+      Object.entries(data.files).forEach(([filename, content], idx) => {
+        setTimeout(() => {
+          const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, idx * 250);
+      });
+
+      showToast?.('✨ تم تنزيل ملفات التهيئة (zkhost.cfg, sys.cfg, options.cfg, COMM.CFG). انسخها إلى فلاشة USB وضعها في الماكينة.');
+    } catch (err) {
+      showToast?.(`⚠️ فشل تحميل ملفات الفلاشة: ${err.message}`);
     }
   };
 
@@ -756,7 +823,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
 
     setIsDispatching(true);
     try {
-      const res = await fetch('/api/biometrics/dispatch', {
+      const res = await bioFetch('/api/biometrics/dispatch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -793,7 +860,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
 
     setIsHqSubmitting(true);
     try {
-      const res = await fetch('/api/biometrics/hq-enroll', {
+      const res = await bioFetch('/api/biometrics/hq-enroll', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -821,7 +888,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const handleMapPin = async (empId, pinVal) => {
     if (!pinVal) return;
     try {
-      const res = await fetch('/api/biometrics/map-pin', {
+      const res = await bioFetch('/api/biometrics/map-pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -843,7 +910,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const handleSimulatePunch = async () => {
     setIsSimulating(true);
     try {
-      const res = await fetch('/api/biometrics/simulate-punch', {
+      const res = await bioFetch('/api/biometrics/simulate-punch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -872,7 +939,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     if (!selectedDeviceSnForUsers) return;
     setIsLoadingDeviceUsers(true);
     try {
-      const res = await fetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/users/sync`, { method: 'POST' });
+      const res = await bioFetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/users/sync`, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         showToast?.('🔄 تم إرسال أمر فحص ذاكرة الجهاز بنجاح. جاري قراءة وتحديث قائمة المستخدمين...');
@@ -900,7 +967,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     e.preventDefault();
     if (!editingDeviceUser || !selectedDeviceSnForUsers) return;
     try {
-      const res = await fetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/users/update`, {
+      const res = await bioFetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/users/update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editingDeviceUser)
@@ -935,7 +1002,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     const { user } = deleteUserModalData;
     setIsDeletingUserScope(true);
     try {
-      const res = await fetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/users/delete`, {
+      const res = await bioFetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/users/delete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -970,7 +1037,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     if (!confirm('هل أنت متأكد من رغبتك في مسح وتفريغ السجل الحي للحركات بالكامل؟ لا يمكن التراجع عن هذا الإجراء.')) return;
     setIsClearingLogs(true);
     try {
-      const res = await fetch('/api/biometrics/logs', { method: 'DELETE' });
+      const res = await bioFetch('/api/biometrics/logs', { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         setLogs([]);
@@ -990,7 +1057,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     setIsPingingDevices(true);
     showToast?.('📡 جاري إرسال نبض فحص الاتصال وتأكيد حالة الأونلاين للماكينات...');
     try {
-      const res = await fetch('/api/biometrics/devices/ping-all', { method: 'POST' });
+      const res = await bioFetch('/api/biometrics/devices/ping-all', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         showToast?.('⚡ ' + data.message);
@@ -1008,7 +1075,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     setIsPullingTemplates(true);
     showToast?.('⏳ جاري إرسال أوامر استيراد كافة قوالب البصمة والوجه من الماكينات للسحابة...');
     try {
-      const res = await fetch('/api/biometrics/pull-all-templates', { method: 'POST' });
+      const res = await bioFetch('/api/biometrics/pull-all-templates', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         showToast?.('📥 ' + data.message);
@@ -1031,7 +1098,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     setIsRepairingShifts(true);
     showToast?.('🔍 جاري فحص سجل البصمات وترميم الورديات الليلية المتأثرة بعد منتصف الليل...');
     try {
-      const res = await fetch('/api/biometrics/repair-overnight-shifts', { method: 'POST' });
+      const res = await bioFetch('/api/biometrics/repair-overnight-shifts', { method: 'POST' });
       const data = await res.json();
       if (data.success || data.repairedCount !== undefined) {
         if (data.repairedCount > 0) {
@@ -1058,7 +1125,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     }
     setIsTestingDevice(true);
     try {
-      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(sn)}/test-command`, {
+      const res = await bioFetch(`/api/biometrics/devices/${encodeURIComponent(sn)}/test-command`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ testType, pin: '1' })
@@ -1084,7 +1151,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
       return;
     }
     try {
-      const res = await fetch(`/api/biometrics/devices/${encodeURIComponent(sn)}/wallpaper`, {
+      const res = await bioFetch(`/api/biometrics/devices/${encodeURIComponent(sn)}/wallpaper`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wallpaperType: theme || selectedWallpaperTheme })
@@ -1104,7 +1171,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const handleToggleDeviceUserActive = async (pin, currentActive) => {
     const nextActive = !currentActive;
     try {
-      const res = await fetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/users/toggle-active`, {
+      const res = await bioFetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/users/toggle-active`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin, isActive: nextActive })
@@ -1127,7 +1194,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     setIsLoadingUsbConfig(true);
     setShowUsbConfigModal(true);
     try {
-      const res = await fetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/usb-config`);
+      const res = await bioFetch(`/api/biometrics/devices/${selectedDeviceSnForUsers}/usb-config`);
       const data = await res.json();
       if (data.success) {
         setUsbConfigData(data);
@@ -1176,7 +1243,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     }
     setIsSavingBranchPin(true);
     try {
-      const res = await fetch('/api/biometrics/branch-pins', {
+      const res = await bioFetch('/api/biometrics/branch-pins', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1204,7 +1271,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const handleDeleteBranchPin = async (id) => {
     if (!confirm('هل أنت متأكد من حذف كود هذا الفرع للموظف؟')) return;
     try {
-      const res = await fetch(`/api/biometrics/branch-pins/${id}`, { method: 'DELETE' });
+      const res = await bioFetch(`/api/biometrics/branch-pins/${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         showToast?.('🗑️ تم حذف كود الفرع بنجاح');
@@ -1219,7 +1286,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
   const handleSaveWaConfig = async () => {
     setIsSavingWaConfig(true);
     try {
-      const res = await fetch('/api/biometrics/whatsapp-config', {
+      const res = await bioFetch('/api/biometrics/whatsapp-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config: waConfig })
@@ -1252,7 +1319,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
         defaultTargetPhone = waConfig.reconciliationRecipientPhones?.[0] || waConfig.recipientPhones?.[0] || '';
       }
 
-      const res = await fetch('/api/biometrics/whatsapp-test', {
+      const res = await bioFetch('/api/biometrics/whatsapp-test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1281,7 +1348,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     setIsSyncingVault(true);
     showToast?.('⏳ جاري إرسال أوامر فحص الأجهزة ومزامنة قوالب البصمات السحابية...');
     try {
-      const res = await fetch('/api/biometrics/sync-vault', { method: 'POST' });
+      const res = await bioFetch('/api/biometrics/sync-vault', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         showToast?.('⚡ ' + data.message);
@@ -1315,7 +1382,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
 
     try {
       showToast?.(`🌐 جاري تعميم البصمة للموظف (${empName}) على كافة الفروع...`);
-      const res = await fetch(`/api/biometrics/templates/${tpl.id}/dispatch`, {
+      const res = await bioFetch(`/api/biometrics/templates/${tpl.id}/dispatch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetDeviceSerials: targetSerials })
@@ -1345,7 +1412,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     }
     setIsDispatchingSingleTpl(true);
     try {
-      const res = await fetch(`/api/biometrics/templates/${dispatchModalTpl.id}/dispatch`, {
+      const res = await bioFetch(`/api/biometrics/templates/${dispatchModalTpl.id}/dispatch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetDeviceSerials: [dispatchTargetDeviceSn] })
@@ -1377,7 +1444,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     if (!editingTemplate) return;
     setIsSavingTplEdit(true);
     try {
-      const res = await fetch(`/api/biometrics/templates/${editingTemplate.id}`, {
+      const res = await bioFetch(`/api/biometrics/templates/${editingTemplate.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1410,7 +1477,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
       return;
     }
     try {
-      const res = await fetch(`/api/biometrics/templates/${tpl.id}`, { method: 'DELETE' });
+      const res = await bioFetch(`/api/biometrics/templates/${tpl.id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         showToast?.('🗑️ تم حذف القالب من الخزنة السحابية بنجاح');
@@ -1446,7 +1513,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
     setIsSubmittingReEnroll(true);
     try {
       showToast?.(`🔄 جاري إرسال أمر فتح حساس البصمة لإعادة التسجيل على الجهاز (${reEnrollTargetDeviceSn})...`);
-      const res = await fetch(`/api/biometrics/templates/${reEnrollModalTpl.id}/re-enroll`, {
+      const res = await bioFetch(`/api/biometrics/templates/${reEnrollModalTpl.id}/re-enroll`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -1766,6 +1833,28 @@ export default function BiometricDevicesCard({ state, showToast }) {
                 <span>➕</span> إضافة جهاز بصمة جديد
               </button>
 
+              <button
+                type="button"
+                onClick={() => setShowLocalInspectorModal(true)}
+                style={{
+                  padding: '9px 16px',
+                  borderRadius: '10px',
+                  background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontWeight: 800,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontFamily: 'Cairo',
+                  boxShadow: '0 2px 8px rgba(13, 148, 136, 0.25)'
+                }}
+                title="فحص كابل وجهاز البصمة المحلي، كشف IP على الشبكة وتشغيل خادم الوسيط المحلي port 7005"
+              >
+                <span>🖥️</span> خادم فحص البصمة المحلي (Inspector & Bridge)
+              </button>
 
               <button
                 type="button"
@@ -1918,8 +2007,55 @@ export default function BiometricDevicesCard({ state, showToast }) {
                         <div>⏱️ <strong>آخر نبض (Heartbeat):</strong> {dev.last_heartbeat ? new Date(dev.last_heartbeat).toLocaleTimeString('ar-EG') : 'غير متوفر'}</div>
 
                         {!isDevOnline && (
-                          <div style={{ marginTop: '8px', padding: '8px 10px', borderRadius: '8px', background: '#fffbeb', border: '1px solid #fef3c7', color: '#b45309', fontSize: '0.78rem', fontWeight: 700, lineHeight: '1.6' }}>
-                            ⚠️ الماكينة غير متصلة بالسحابة حالياً. اضبط إعداد Cloud Server في الماكينة على IP السيرفر: <strong style={{ color: '#0369a1' }}>63.183.147.199</strong> مع إغلاق البروكسي (Proxy OFF).
+                          <div style={{ marginTop: '10px', padding: '12px 14px', borderRadius: '10px', background: '#fffbeb', border: '1px solid #fef3c7', color: '#92400e', fontSize: '0.8rem', lineHeight: '1.6' }}>
+                            <div style={{ fontWeight: 800, marginBottom: '6px', color: '#b45309', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>⚠️</span> <strong>الماكينة غير متصلة بالسحابة حالياً — خطوات الاستعادة الفورية:</strong>
+                            </div>
+                            <ol style={{ margin: '0 0 10px 0', paddingRight: '18px', display: 'flex', flexDirection: 'column', gap: '5px', fontSize: '0.78rem' }}>
+                              <li><strong>شاشة الماكينة:</strong> تأكد من أيقونة الشبكة بأعلى الشاشة (يجب ظهور شاشة كمبيوتر متصلة بدون علامة X). إذا وُجدت X فالكابل غير متصل بالراوتر.</li>
+                              <li><strong>قائمة الإيثرنت (Comm. ➔ Ethernet):</strong> فعّل DHCP أو اكتب البوابة (Gateway: 192.168.1.1) و DNS: 8.8.8.8.</li>
+                              <li><strong>خادم السحابة (Cloud Server):</strong> اكتب IP: <strong style={{ color: '#0369a1' }}>63.183.147.199</strong> والمنفذ: <strong style={{ color: '#0369a1' }}>80</strong> (أو جرب <strong style={{ color: '#0369a1' }}>5000</strong>) مع إغلاق تام لـ <strong>(Domain: OFF)</strong> و <strong>(Proxy: OFF)</strong>.</li>
+                              <li><strong>إعادة التشغيل (Reboot):</strong> اطفئ الماكينة وشغّلها من زر الباور لتطبيق الإعدادات في الذاكرة.</li>
+                            </ol>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadUsbConfig(dev.serial_number)}
+                                style={{
+                                  padding: '6px 12px',
+                                  borderRadius: '6px',
+                                  background: '#0284c7',
+                                  color: '#fff',
+                                  border: 'none',
+                                  fontWeight: 700,
+                                  fontSize: '0.76rem',
+                                  cursor: 'pointer',
+                                  fontFamily: 'Cairo',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                💾 تحميل ملفات التهيئة لفلاشة USB (تلقائي)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => fetchDevices()}
+                                style={{
+                                  padding: '6px 12px',
+                                  borderRadius: '6px',
+                                  background: '#f1f5f9',
+                                  color: '#334155',
+                                  border: '1px solid #cbd5e1',
+                                  fontWeight: 700,
+                                  fontSize: '0.76rem',
+                                  cursor: 'pointer',
+                                  fontFamily: 'Cairo'
+                                }}
+                              >
+                                🔄 إعادة فحص حالة الاتصال
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -4208,15 +4344,15 @@ export default function BiometricDevicesCard({ state, showToast }) {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <input
                           type="number"
-                          min="8"
-                          max="24"
+                          min="12"
+                          max="36"
                           step="1"
-                          value={waConfig.shiftMaxHoursSafetyValve || 15}
-                          onChange={(e) => setWaConfig({ ...waConfig, shiftMaxHoursSafetyValve: parseFloat(e.target.value) || 15 })}
+                          value={waConfig.shiftMaxHoursSafetyValve || 24}
+                          onChange={(e) => setWaConfig({ ...waConfig, shiftMaxHoursSafetyValve: parseFloat(e.target.value) || 24 })}
                           style={{ width: '70px', padding: '6px 8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', fontWeight: 700, textAlign: 'center' }}
                         />
                         <span style={{ fontSize: '0.76rem', color: '#64748b' }}>
-                          ساعة (تغلق الوردية بعدها تلقائياً بالمجدول)
+                          ساعة (صمام الأمان الذكي الموحد: تُغلق الوردية بعد 24 ساعة وتُسند نهاية الوردية من جدول الموظف)
                         </span>
                       </div>
                     </div>
@@ -6808,6 +6944,14 @@ export default function BiometricDevicesCard({ state, showToast }) {
           </div>
         );
       })()}
+
+      {/* ── نافذة فاحص وخادم جهاز البصمة المحلي ── */}
+      {showLocalInspectorModal && (
+        <LocalBiometricInspectorModal
+          isOpen={showLocalInspectorModal}
+          onClose={() => setShowLocalInspectorModal(false)}
+        />
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics, recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
+import { calcRawDurationMinutes } from '../../utils/workHoursEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import {
   getEmployeeManualPunchesCount,
@@ -288,10 +289,11 @@ export default function AttendancePunchesModal({
       }
 
       const inTime = p?.timeIn || '09:00';
-      const [iH, iM] = String(inTime).split(':').map(Number);
-      const [oH, oM] = String(calculatedTimeOut).split(':').map(Number);
-      let durMins = (oH * 60 + (oM || 0)) - (iH * 60 + (iM || 0));
-      if (durMins <= 0) durMins += 24 * 60;
+      const durMins = calcRawDurationMinutes(inTime, calculatedTimeOut, {
+        startDate: p?.date,
+        endDate: p?.timeOutDate || p?.date,
+        isOvernight: p?.isOvernight
+      });
       const bHours = parseFloat(p?.breakHours) || 0;
       const calcHours = Math.max(0, Math.round(((durMins / 60) - bHours) * 100) / 100);
       const profileHours = parseFloat(employee.workHoursPerDay || employee.workHours || 8);
@@ -815,10 +817,11 @@ export default function AttendancePunchesModal({
       const inTime = punch.timeIn || punch.checkIn || punch.inTime || '09:00';
       const outTime = punch.timeOut && punch.timeOut !== '—' && punch.timeOut !== '' ? (punch.timeOut || punch.checkOut || punch.outTime) : '17:00';
 
-      const inParts = inTime.split(':').map(Number);
-      const outParts = outTime.split(':').map(Number);
-      let diffMinutes = ((outParts[0] || 0) * 60 + (outParts[1] || 0)) - ((inParts[0] || 0) * 60 + (inParts[1] || 0));
-      if (diffMinutes <= 0) diffMinutes += 24 * 60;
+      const diffMinutes = calcRawDurationMinutes(inTime, outTime, {
+        startDate: punchDate,
+        endDate: punch.timeOutDate || punchDate,
+        isOvernight: punch.isOvernight
+      });
       const totalElapsed = diffMinutes / 60;
       const bH = Math.max(0, parseFloat(punch.breakHours) || 0);
       const netHours = Math.max(0, Math.round((totalElapsed - bH) * 100) / 100);

@@ -93,5 +93,19 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   getAutoLaunch: () => ipcRenderer.invoke('desktop:get-auto-launch'),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('desktop:set-auto-launch', enabled),
   clearDesktopCache: () => ipcRenderer.invoke('desktop:clear-cache'),
-  syncDesktopShortcut: () => ipcRenderer.invoke('desktop:sync-desktop-shortcut')
+  syncDesktopShortcut: () => ipcRenderer.invoke('desktop:sync-desktop-shortcut'),
+
+  // 10. خادم فحص واكتشاف أجهزة البصمة المحلي (Local Biometric Inspector)
+  biometricGetNetworkInfo: () => ipcRenderer.invoke('biometric:get-network-info'),
+  biometricTestCloud: () => ipcRenderer.invoke('biometric:test-cloud'),
+  biometricPingDevice: (ip, port) => ipcRenderer.invoke('biometric:ping-device', ip, port),
+  biometricScanLan: (subnet) => ipcRenderer.invoke('biometric:scan-lan', subnet),
+  biometricGetLocalServerStatus: () => ipcRenderer.invoke('biometric:get-local-server-status'),
+  biometricToggleLocalServer: (enable, port) => ipcRenderer.invoke('biometric:toggle-local-server', enable, port),
+  onBiometricLocalPacket: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('biometric:local-packet', listener);
+    return () => ipcRenderer.removeListener('biometric:local-packet', listener);
+  }
 });

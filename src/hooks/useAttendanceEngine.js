@@ -3,6 +3,7 @@ import { uid, arabicWeekday, nowTimeStr, parseArabicFloat } from '../utils/forma
 import { getRealTodayStr } from '../utils/timeEngine';
 import { getEmployeeDaySchedule } from '../utils/rosterEngine';
 import { playFingerprintChime } from './useAudio';
+import { calcRawDurationMinutes } from '../utils/workHoursEngine';
 import {
   recalculateEmployeeCycleLateness,
   getScheduledShiftForDate,
@@ -51,31 +52,47 @@ export function useAttendanceEngine() {
     return () => clearInterval(timer);
   }, []);
 
-  // 1. حساب الوقت المنقضي للوردية الحية
+  // 1. حساب الوقت المنقضي للوردية الحية بدقة تامة ومناعة من فروق التوقيت والورديات الليلية
   const getActiveElapsedStr = useCallback((empId) => {
     const active = state.activeShifts?.[empId];
     if (!active) return '—';
     const accumulatedPauseMs = active.accumulatedPauseMs || 0;
 
-    // درع استخراج الطابع الزمني للبدء بدقة وحمايته من التوقيتات المستقبلية أو فروق المناطق الزمنية
-    let startEpoch = Number(active.startEpoch);
-    if (!startEpoch || isNaN(startEpoch) || startEpoch > now) {
-      if (active.timeIn) {
-        const [h, m] = String(active.timeIn).split(':').map(Number);
-        if (!isNaN(h) && !isNaN(m)) {
+    let startEpoch = 0;
+
+    // أ. الاعتماد المباشر على تاريخ وتوقيت بدء الوردية الموثق (Authoritative Shift Start)
+    if (active.timeIn && active.timeIn !== '—' && active.timeIn !== 'قيد العمل الآن') {
+      const [h, m] = String(active.timeIn).split(':').map(Number);
+      if (!isNaN(h) && !isNaN(m)) {
+        if (active.date && /^\d{4}-\d{2}-\d{2}$/.test(active.date)) {
+          const [y, mon, d] = active.date.split('-').map(Number);
+          const t = new Date(y, mon - 1, d, h, m, 0, 0);
+          startEpoch = t.getTime();
+        } else {
+          // إذا لم يتوفر تاريخ صريح، يتم فحص اليوم أو الأمس للورديات العابرة لمنتصف الليل
           const t = new Date();
           t.setHours(h, m, 0, 0);
           if (t.getTime() <= now) {
             startEpoch = t.getTime();
           } else {
-            // وردية ليلية بدأت قبل منتصف الليل بالأمس
             t.setDate(t.getDate() - 1);
             startEpoch = t.getTime();
           }
         }
       }
     }
-    if (!startEpoch || isNaN(startEpoch)) startEpoch = now;
+
+    // ب. إذا لم يتوفر timeIn صريح، الاعتماد على startEpoch إن وجد وكان صالحاً
+    if (!startEpoch || isNaN(startEpoch)) {
+      const parsedEpoch = Number(active.startEpoch);
+      if (parsedEpoch && !isNaN(parsedEpoch) && parsedEpoch <= now) {
+        startEpoch = parsedEpoch;
+      }
+    }
+
+    if (!startEpoch || isNaN(startEpoch) || startEpoch > now) {
+      startEpoch = now;
+    }
 
     let elapsedMs = 0;
     if (active.isPaused && active.pauseStartEpoch) {
@@ -84,10 +101,10 @@ export function useAttendanceEngine() {
       elapsedMs = now - startEpoch - accumulatedPauseMs;
     }
     if (elapsedMs < 0) elapsedMs = 0;
-    const h = Math.floor(elapsedMs / 3600000);
-    const m = Math.floor((elapsedMs % 3600000) / 60000);
-    const s = Math.floor((elapsedMs % 60000) / 1000);
-    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    const hrs = Math.floor(elapsedMs / 3600000);
+    const mins = Math.floor((elapsedMs % 3600000) / 60000);
+    const secs = Math.floor((elapsedMs % 60000) / 1000);
+    return String(hrs).padStart(2, '0') + ':' + String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
   }, [state.activeShifts, now]);
 
   // 2. حساب وقت الاستراحة (البريك) الحالي
@@ -967,19 +984,19 @@ export function useAttendanceEngine() {
     }
     let totalElapsedHours = 0;
     if (active.startEpoch && nowMs >= active.startEpoch) {
-      totalElapsedHours = Math.round(((nowMs - active.startEpoch) / 3600000) * 100) / 100;
+      const elapsedMins = Math.round((nowMs - Number(active.startEpoch)) / 60000);
+      totalElapsedHours = elapsedMins > 0 ? Math.round((elapsedMins / 60) * 100) / 100 : 0;
     } else {
-      const [inH, inM] = String(active.timeIn || '09:00').split(':').map(Number);
-      const [outH, outM] = String(timeOut).split(':').map(Number);
-      let diffMinutes = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
-      if (diffMinutes <= 0 || (active.date && active.date !== getRealTodayStr())) {
-        diffMinutes += 24 * 60;
-      }
+      const diffMinutes = calcRawDurationMinutes(active.timeIn || '09:00', timeOut, {
+        startDate: active.date,
+        endDate: getRealTodayStr(),
+        isOvernight: active.isOvernight
+      });
       totalElapsedHours = Math.round((diffMinutes / 60) * 100) / 100;
     }
     const trackedBreak = Math.round((currentPauseMs / 3600000) * 100) / 100;
     const configuredBreak = parseFloat(emp?.breakHours || emp?.defaultBreakHours || emp?.branchesDetails?.[0]?.breakHours) || 0;
-    const effectiveBreak = trackedBreak > 0 ? trackedBreak : (totalElapsedHours > configuredBreak ? configuredBreak : 0);
+    const effectiveBreak = trackedBreak > 0 ? trackedBreak : (totalElapsedHours >= 4.5 && !emp?.noMonthlySchedule ? Math.min(configuredBreak, Math.max(0, totalElapsedHours - 1)) : 0);
     const breakHours = effectiveBreak;
     const netHours = Math.max(0, Math.round((totalElapsedHours - effectiveBreak) * 100) / 100);
 

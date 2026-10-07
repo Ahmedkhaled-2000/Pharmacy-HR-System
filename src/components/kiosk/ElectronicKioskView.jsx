@@ -22,6 +22,7 @@ import {
 } from '../../utils/kioskOutbox';
 import { subscribeToPunchRecorded } from '../../utils/socketClient';
 import { playFingerprintChime } from '../../hooks/useAudio';
+import { calcRawDurationMinutes } from '../../utils/workHoursEngine';
 import '../../kiosk-modern.css';
 
 export default function ElectronicKioskView({
@@ -1235,12 +1236,14 @@ export default function ElectronicKioskView({
       let totalElapsedHours = 0;
       const startMs = active?.startEpoch || (openShiftIdx >= 0 && updatedShifts[openShiftIdx].startEpoch);
       if (startMs && now.getTime() >= startMs) {
-        totalElapsedHours = Math.round(((now.getTime() - startMs) / 3600000) * 100) / 100;
+        const elapsedMins = Math.round((now.getTime() - startMs) / 60000);
+        totalElapsedHours = elapsedMins > 0 ? Math.round((elapsedMins / 60) * 100) / 100 : 0;
       } else {
-        const [inH, inM] = String(effectiveTimeIn || '09:00').split(':').map(Number);
-        const [outH, outM] = String(punchTime).split(':').map(Number);
-        let diffMinutes = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
-        if (diffMinutes <= 0 || (effectiveShiftDate && effectiveShiftDate !== dateStr)) diffMinutes += 24 * 60;
+        const diffMinutes = calcRawDurationMinutes(effectiveTimeIn || '09:00', punchTime, {
+          startDate: effectiveShiftDate,
+          endDate: dateStr,
+          isOvernight: active?.isOvernight
+        });
         totalElapsedHours = Math.round((diffMinutes / 60) * 100) / 100;
       }
 
@@ -1250,7 +1253,7 @@ export default function ElectronicKioskView({
       }
       const trackedBreak = Math.round((currentPauseMs / 3600000) * 100) / 100;
       const configuredBreak = parseFloat(currentEmp?.breakHours || currentEmp?.defaultBreakHours || currentEmp?.branchesDetails?.[0]?.breakHours) || 0;
-      const effectiveBreak = trackedBreak > 0 ? trackedBreak : (totalElapsedHours > configuredBreak ? configuredBreak : 0);
+      const effectiveBreak = trackedBreak > 0 ? trackedBreak : (totalElapsedHours >= 4.5 && !currentEmp?.noMonthlySchedule ? Math.min(configuredBreak, Math.max(0, totalElapsedHours - 1)) : 0);
       const netHours = Math.max(0, Math.round((totalElapsedHours - effectiveBreak) * 100) / 100);
 
       let scheduledHours = parseFloat(currentEmp?.workHoursPerDay) || 8;

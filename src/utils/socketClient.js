@@ -7,6 +7,20 @@
 import { io } from 'socket.io-client';
 
 const getSocketUrl = () => {
+  // 1. أولوية الرابط المخصص المحفوظ في التخزين المحلي
+  if (typeof window !== 'undefined') {
+    try {
+      const customApi = localStorage.getItem('app_custom_cloud_api_url');
+      if (customApi && customApi.startsWith('http')) {
+        let clean = customApi.replace(/\/+$/, '').replace(/\/api$/, '');
+        if (window.location?.protocol === 'https:' && clean.startsWith('http:')) {
+          clean = clean.replace(/^http:/, 'https:');
+        }
+        return clean;
+      }
+    } catch {}
+  }
+
   if (typeof window !== 'undefined' && window.location) {
     const { hostname, origin, protocol } = window.location;
     const isLocalhost = !hostname || hostname === 'localhost' || hostname === '127.0.0.1';

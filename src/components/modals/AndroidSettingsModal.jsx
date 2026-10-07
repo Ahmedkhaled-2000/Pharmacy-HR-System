@@ -48,6 +48,8 @@ import {
  * - إشعارات أندرويد 13+: تفعيل، خدمة الخلفية 24/7، رنين واهتزاز، وزر فحص تجريبي
  * - الأمان والبطارية: قفل البصمة، التغذية اللمسية، وتحديث الـ APK المدمج
  */
+const DEFAULT_APP_LOGO = '/icons/logo_192x192.png';
+
 export default function AndroidSettingsModal({ isOpen, onClose, onConfigSaved }) {
   const [activeTab, setActiveTab] = useState('branding'); // 'branding' | 'display' | 'notifications' | 'security'
   const [loading, setLoading] = useState(true);
@@ -104,7 +106,7 @@ export default function AndroidSettingsModal({ isOpen, onClose, onConfigSaved })
       setLogoPreview(cfg.customLogoBase64);
       setHasCustomLogo(true);
     } else {
-      setLogoPreview('./assets/icon.png');
+      setLogoPreview(DEFAULT_APP_LOGO);
       setHasCustomLogo(false);
     }
 
@@ -149,7 +151,7 @@ export default function AndroidSettingsModal({ isOpen, onClose, onConfigSaved })
   // استعادة الشعار الافتراضي
   const handleResetLogo = () => {
     triggerHaptic('light');
-    setLogoPreview('./assets/icon.png');
+    setLogoPreview(DEFAULT_APP_LOGO);
     setHasCustomLogo(false);
   };
 
@@ -524,9 +526,13 @@ export default function AndroidSettingsModal({ isOpen, onClose, onConfigSaved })
                         }}
                       >
                         <img
-                          src={logoPreview || './assets/icon.png'}
+                          src={logoPreview || DEFAULT_APP_LOGO}
                           alt="Logo Preview"
-                          onError={(e) => { e.target.src = './assets/icon.png'; }}
+                          onError={(e) => {
+                            if (e.target.src !== '/favicon.png') {
+                              e.target.src = '/favicon.png';
+                            }
+                          }}
                           style={{ width: '100%', height: '100%', objectFit: 'contain', padding: '6px' }}
                         />
                       </div>

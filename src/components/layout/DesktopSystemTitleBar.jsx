@@ -309,9 +309,11 @@ export default function DesktopSystemTitleBar() {
       >
         {/* أيقونة المنظومة الرسمية المصغرة / الشعار المخصص */}
         <img
-          src={desktopConfig?.logoBase64 || './assets/icon.png'}
+          src={desktopConfig?.logoBase64 || '/icons/logo_192x192.png'}
           onError={(e) => {
-            e.target.src = './assets/icon.png';
+            if (e.target.src !== '/favicon.png') {
+              e.target.src = '/favicon.png';
+            }
           }}
           alt=""
           style={{

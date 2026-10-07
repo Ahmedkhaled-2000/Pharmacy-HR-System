@@ -26,6 +26,8 @@ import {
  * - سلوك النظام: التشغيل مع إقلاع ويندوز وتنظيف الكاش
  * - الحفظ مع إعادة التشغيل النظيفة للبرنامج (Save & Relaunch)
  */
+const DEFAULT_APP_LOGO = '/icons/logo_192x192.png';
+
 export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved }) {
   const [activeTab, setActiveTab] = useState('branding'); // 'branding' | 'display' | 'notifications' | 'system'
   const [loading, setLoading] = useState(true);
@@ -73,7 +75,7 @@ export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved })
           setLogoPreview(cfg.logoBase64);
           setHasCustomLogo(true);
         } else {
-          setLogoPreview('./assets/icon.png');
+          setLogoPreview(DEFAULT_APP_LOGO);
           setHasCustomLogo(Boolean(cfg.customLogoPath));
         }
         setLoading(false);
@@ -124,10 +126,14 @@ export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved })
 
   // استعادة الشعار الافتراضي
   const handleResetLogo = async () => {
-    if (!window.desktopAPI?.resetLogo) return;
+    if (!window.desktopAPI?.resetLogo) {
+      setLogoPreview(DEFAULT_APP_LOGO);
+      setHasCustomLogo(false);
+      return;
+    }
     try {
       await window.desktopAPI.resetLogo();
-      setLogoPreview('./assets/icon.png');
+      setLogoPreview(DEFAULT_APP_LOGO);
       setHasCustomLogo(false);
     } catch (err) {
       console.error('Failed to reset logo:', err);
@@ -457,10 +463,12 @@ export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved })
                         }}
                       >
                         <img
-                          src={logoPreview || './assets/icon.png'}
+                          src={logoPreview || DEFAULT_APP_LOGO}
                           alt="Logo Preview"
                           onError={(e) => {
-                            e.target.src = './assets/icon.png';
+                            if (e.target.src !== '/favicon.png') {
+                              e.target.src = '/favicon.png';
+                            }
                           }}
                           style={{ width: '100%', height: '100%', objectFit: 'contain', padding: '6px' }}
                         />
@@ -536,8 +544,13 @@ export default function DesktopSettingsModal({ isOpen, onClose, onConfigSaved })
                     </span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <img
-                        src={logoPreview || './assets/icon.png'}
+                        src={logoPreview || DEFAULT_APP_LOGO}
                         alt=""
+                        onError={(e) => {
+                          if (e.target.src !== '/favicon.png') {
+                            e.target.src = '/favicon.png';
+                          }
+                        }}
                         style={{ width: '16px', height: '16px', borderRadius: '3px', objectFit: 'contain' }}
                       />
                       <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#f8fafc' }}>

@@ -9,6 +9,9 @@ const path = require('path');
 const fs = require('fs');
 const url = require('url');
 const http = require('http');
+const https = require('https');
+const zlib = require('zlib');
+const os = require('os');
 const { execFile } = require('child_process');
 
 // ── تسجيل معرّف التطبيق في نظام ويندوز لتثبيت إشعارات Action Center و Toast بالصوت والشعار ──
@@ -468,8 +471,22 @@ function startLocalStaticServer(distDir) {
             res.writeHead(404);
             return res.end('Not Found');
           }
-          res.writeHead(200);
-          res.end(data);
+          // دعم ضغط GZIP فائق الخفة للملفات المحلية الكبيرة (.js, .wasm, .json, .css)
+          const acceptEncoding = req.headers['accept-encoding'] || '';
+          if (/\bgzip\b/.test(acceptEncoding) && data.length > 2048) {
+            zlib.gzip(data, (zErr, compressed) => {
+              if (!zErr && compressed) {
+                res.setHeader('Content-Encoding', 'gzip');
+                res.writeHead(200);
+                return res.end(compressed);
+              }
+              res.writeHead(200);
+              res.end(data);
+            });
+          } else {
+            res.writeHead(200);
+            res.end(data);
+          }
         });
       } catch (err) {
         res.writeHead(500);
@@ -494,25 +511,86 @@ function startLocalStaticServer(distDir) {
   });
 }
 
-// دالة جلب البيانات المركزية المباشرة من خادم VPS السحابي
+// دالة جلب البيانات المركزية المباشرة من خادم VPS السحابي مع ضغط GZIP وفك الضغط التلقائي
 function fetchCloudDataDirect() {
   return new Promise((resolve, reject) => {
-    const req = http.get('http://63.183.147.199/api/settings?key=pharmacy-tracker-data', { timeout: 2500 }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          let val = json?.value;
-          if (typeof val === 'string') val = JSON.parse(val);
-          resolve(val);
-        } catch (e) {
-          reject(e);
+    const targetUrl = 'https://63-183-147-199.sslip.io/api/settings?key=pharmacy-tracker-data';
+    const fallbackUrl = 'http://63.183.147.199/api/settings?key=pharmacy-tracker-data';
+
+    const executeFetch = (urlToUse) => {
+      const isHttps = urlToUse.startsWith('https');
+      const client = isHttps ? https : http;
+      const parsedUrl = new URL(urlToUse);
+
+      const options = {
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || (isHttps ? 443 : 80),
+        path: parsedUrl.pathname + parsedUrl.search,
+        method: 'GET',
+        headers: {
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Accept': 'application/json, text/plain, */*',
+          'User-Agent': 'PharmaDesktopClient/1.2.61 (Windows NT 10.0; Win64; x64)',
+          'Connection': 'close'
+        },
+        timeout: 15000
+      };
+
+      const req = client.request(options, (res) => {
+        let stream = res;
+        const encoding = (res.headers['content-encoding'] || '').toLowerCase();
+
+        if (encoding === 'gzip') {
+          stream = res.pipe(zlib.createGunzip());
+        } else if (encoding === 'deflate') {
+          stream = res.pipe(zlib.createInflate());
+        } else if (encoding === 'br' && typeof zlib.createBrotliDecompress === 'function') {
+          stream = res.pipe(zlib.createBrotliDecompress());
+        }
+
+        let rawText = '';
+        stream.setEncoding('utf8');
+        stream.on('data', chunk => { rawText += chunk; });
+        stream.on('end', () => {
+          try {
+            const json = JSON.parse(rawText);
+            let val = json?.value;
+            if (typeof val === 'string') val = JSON.parse(val);
+            resolve(val);
+          } catch (parseErr) {
+            reject(parseErr);
+          }
+        });
+        stream.on('error', (err) => {
+          if (urlToUse !== fallbackUrl) {
+            executeFetch(fallbackUrl);
+          } else {
+            reject(err);
+          }
+        });
+      });
+
+      req.on('error', (err) => {
+        if (urlToUse !== fallbackUrl) {
+          executeFetch(fallbackUrl);
+        } else {
+          reject(err);
         }
       });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+
+      req.on('timeout', () => {
+        req.destroy();
+        if (urlToUse !== fallbackUrl) {
+          executeFetch(fallbackUrl);
+        } else {
+          reject(new Error('Cloud fetch timeout after 15s'));
+        }
+      });
+
+      req.end();
+    };
+
+    executeFetch(targetUrl);
   });
 }
 
@@ -1018,7 +1096,6 @@ ipcMain.handle('app:is-admin', async () => {
 });
 
 // ── 5.5. إدارة خادم الواتساب التلقائي على مدار 24 ساعة (Auto 24/7 WhatsApp Gateway) ──
-const os = require('os');
 const { spawn, exec } = require('child_process');
 
 function getSystemNetworkInfo() {
@@ -1463,6 +1540,313 @@ ipcMain.handle('print:generate-pdf-base64', async (_event, htmlContent, printOpt
   }
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// 🛰️ خادم فحص جهاز البصمة المحلي ووساطة الاتصال السحابي (Local Biometric Inspector & Bridge)
+// ══════════════════════════════════════════════════════════════════════════════
+let localBiometricServer = null;
+let localBiometricPort = 7005;
+const localBiometricLogs = [];
+
+function getLocalNetworkDetails() {
+  const interfaces = os.networkInterfaces();
+  const results = [];
+  for (const [name, addrs] of Object.entries(interfaces)) {
+    for (const addr of addrs) {
+      if (addr.family === 'IPv4' && !addr.internal) {
+        const parts = addr.address.split('.');
+        const subnetBase = `${parts[0]}.${parts[1]}.${parts[2]}`;
+        const gatewayGuess = `${subnetBase}.1`;
+        results.push({
+          interfaceName: name,
+          ip: addr.address,
+          netmask: addr.netmask,
+          mac: addr.mac,
+          subnetBase,
+          gatewayGuess
+        });
+      }
+    }
+  }
+  return results;
+}
+
+function probeTcpSocket(host, port, timeoutMs = 800) {
+  return new Promise((resolve) => {
+    const s = new net.Socket();
+    let settled = false;
+    const start = Date.now();
+    s.setTimeout(timeoutMs);
+    s.on('connect', () => {
+      settled = true;
+      const latency = Date.now() - start;
+      s.destroy();
+      resolve({ host, port, open: true, latency });
+    });
+    s.on('timeout', () => {
+      settled = true;
+      s.destroy();
+      resolve({ host, port, open: false, error: 'TIMEOUT' });
+    });
+    s.on('error', (err) => {
+      if (!settled) {
+        settled = true;
+        s.destroy();
+        resolve({ host, port, open: false, error: err.code || err.message });
+      }
+    });
+    s.connect(port, host);
+  });
+}
+
+function startLocalBiometricServer(port = 7005) {
+  return new Promise((resolve) => {
+    if (localBiometricServer) {
+      return resolve({ success: true, port: localBiometricPort, message: 'الخادم يعمل بالفعل' });
+    }
+    localBiometricPort = port;
+    localBiometricServer = http.createServer((req, res) => {
+      const clientIp = req.socket?.remoteAddress || '127.0.0.1';
+      const cleanIp = clientIp.replace(/^.*:/, '');
+      const reqUrl = req.url || '';
+      const parsedUrl = new URL(reqUrl, `http://localhost:${localBiometricPort}`);
+      const sn = parsedUrl.searchParams.get('SN') || parsedUrl.searchParams.get('sn') || 'UNKNOWN';
+
+      const logItem = {
+        time: new Date().toLocaleTimeString('ar-EG'),
+        timestamp: Date.now(),
+        clientIp: cleanIp,
+        method: req.method,
+        url: reqUrl,
+        serialNumber: sn
+      };
+
+      localBiometricLogs.unshift(logItem);
+      if (localBiometricLogs.length > 50) localBiometricLogs.pop();
+
+      try {
+        mainWindow?.webContents?.send('biometric:local-packet', logItem);
+      } catch {}
+
+      // توجيه ذكي فوري للسيرفر السحابي VPS
+      const cloudUrl = `http://63.183.147.199:5000${reqUrl}`;
+      const proxyReq = http.request(cloudUrl, {
+        method: req.method,
+        headers: { ...req.headers, host: '63.183.147.199:5000' },
+        timeout: 6000
+      }, (proxyRes) => {
+        res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+        proxyRes.pipe(res);
+      });
+
+      proxyReq.on('error', () => {
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('OK');
+      });
+
+      proxyReq.on('timeout', () => {
+        proxyReq.destroy();
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('OK');
+      });
+
+      req.pipe(proxyReq);
+    });
+
+    localBiometricServer.on('error', (err) => {
+      console.warn('[LocalBiometricServer Error]:', err.message);
+      localBiometricServer = null;
+      resolve({ success: false, error: err.message });
+    });
+
+    localBiometricServer.listen(localBiometricPort, '0.0.0.0', () => {
+      console.log(`[LocalBiometricServer] 📡 خادم فحص واستقبال البصمات المحلي يعمل على المنفذ: ${localBiometricPort}`);
+      resolve({ success: true, port: localBiometricPort });
+    });
+  });
+}
+
+function stopLocalBiometricServer() {
+  return new Promise((resolve) => {
+    if (!localBiometricServer) return resolve({ success: true });
+    localBiometricServer.close(() => {
+      localBiometricServer = null;
+      resolve({ success: true });
+    });
+  });
+}
+
+// ── IPC Handlers لخادم فحص البصمات المحلي ──
+ipcMain.handle('biometric:get-network-info', async () => {
+  return {
+    success: true,
+    interfaces: getLocalNetworkDetails()
+  };
+});
+
+ipcMain.handle('biometric:test-cloud', async () => {
+  const [res80, res5000] = await Promise.all([
+    probeTcpSocket('63.183.147.199', 80, 2000),
+    probeTcpSocket('63.183.147.199', 5000, 2000)
+  ]);
+  return {
+    success: true,
+    port80: res80,
+    port5000: res5000
+  };
+});
+
+function pingIcmp(host, timeoutMs = 800) {
+  return new Promise((resolve) => {
+    const isWin = process.platform === 'win32';
+    const cmd = isWin ? `ping -n 1 -w ${timeoutMs} ${host}` : `ping -c 1 -W 1 ${host}`;
+    const { exec } = require('child_process');
+    exec(cmd, { timeout: timeoutMs + 500 }, (err, stdout) => {
+      if (!err && stdout && (stdout.includes('TTL=') || stdout.includes('ttl=') || stdout.includes('bytes='))) {
+        const match = stdout.match(/(?:time|temps|tiempo)[=<]([0-9]+)\s*ms/i);
+        const latency = match ? parseInt(match[1], 10) : 1;
+        resolve({ open: true, latency });
+      } else {
+        resolve({ open: false, error: 'NO_RESPONSE' });
+      }
+    });
+  });
+}
+
+function getArpTable() {
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    exec('arp -a', { timeout: 2000 }, (err, stdout) => {
+      if (err || !stdout) return resolve([]);
+      const entries = [];
+      const lines = stdout.split(/\r?\n/);
+      const ipRegex = /\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/;
+      const macRegex = /([0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2})/;
+
+      for (const line of lines) {
+        const ipMatch = line.match(ipRegex);
+        const macMatch = line.match(macRegex);
+        if (ipMatch && macMatch) {
+          const ip = ipMatch[1];
+          const mac = macMatch[1].toLowerCase().replace(/:/g, '-');
+          if (!ip.startsWith('224.') && !ip.startsWith('239.') && !ip.endsWith('.255') && ip !== '255.255.255.255') {
+            entries.push({ ip, mac, type: line.includes('static') ? 'static' : 'dynamic' });
+          }
+        }
+      }
+      resolve(entries);
+    });
+  });
+}
+
+ipcMain.handle('biometric:ping-device', async (_event, ip, port = 4370) => {
+  const [icmpRes, tcp4370, tcp80] = await Promise.all([
+    pingIcmp(ip, 800),
+    probeTcpSocket(ip, 4370, 800),
+    probeTcpSocket(ip, 80, 800)
+  ]);
+  const isOpen = icmpRes.open || tcp4370.open || tcp80.open;
+  const latency = icmpRes.latency || tcp4370.latency || tcp80.latency || null;
+  return {
+    success: true,
+    host: ip,
+    open: isOpen,
+    icmp: icmpRes.open,
+    port4370: tcp4370.open,
+    port80: tcp80.open,
+    latency,
+    error: !isOpen ? 'لا توجد أي استجابة من هذا العنوان' : null
+  };
+});
+
+ipcMain.handle('biometric:scan-lan', async (_event, customSubnet = null) => {
+  const netInfo = getLocalNetworkDetails();
+  const subnet = customSubnet || netInfo[0]?.subnetBase || '192.168.1';
+
+  // 1. نبضة بث سريعة لتحديث جدول الـ ARP الخاص بنظام ويندوز
+  try {
+    await new Promise((res) => {
+      const { exec } = require('child_process');
+      exec(`ping -n 1 -w 250 ${subnet}.255`, { timeout: 500 }, () => res());
+    });
+  } catch {}
+
+  // 2. قراءة جدول الـ ARP لنظام ويندوز
+  const arpEntries = await getArpTable();
+
+  // 3. تجميع قائمة العناوين المحتملة على الشبكة المحلية
+  const candidateIps = new Set();
+  for (const entry of arpEntries) {
+    if (entry.ip.startsWith(subnet + '.')) {
+      candidateIps.add(entry.ip);
+    }
+  }
+
+  // إضافة العناوين الافتراضية والشائعة لماكينات ZKTeco MB20
+  [
+    `${subnet}.201`,
+    '192.168.1.201',
+    '192.168.0.201',
+    `${subnet}.220`,
+    `${subnet}.200`,
+    `${subnet}.100`,
+    `${subnet}.2`,
+    `${subnet}.1`
+  ].forEach(ip => candidateIps.add(ip));
+
+  const ZK_MAC_PREFIXES = ['00-17-61', '00-0b-91', 'e0-dc-ff', '00-1a-8c', '00-50-c2', '00-e0-4c'];
+  const results = [];
+  const ipList = [...candidateIps];
+
+  // فحص متوازي على دفعات لتفادي بطء الاستجابة
+  const batchSize = 6;
+  for (let i = 0; i < ipList.length; i += batchSize) {
+    const batch = ipList.slice(i, i + batchSize);
+    await Promise.all(batch.map(async (host) => {
+      const arpMatch = arpEntries.find(a => a.ip === host);
+      const mac = arpMatch?.mac || '';
+      const isZkMac = ZK_MAC_PREFIXES.some(prefix => mac.startsWith(prefix));
+
+      const [icmp, p4370, p80] = await Promise.all([
+        pingIcmp(host, 400),
+        probeTcpSocket(host, 4370, 400),
+        probeTcpSocket(host, 80, 400)
+      ]);
+
+      if (icmp.open || p4370.open || p80.open || isZkMac) {
+        results.push({
+          ip: host,
+          mac: mac || '—',
+          icmp: icmp.open,
+          port4370: p4370.open,
+          port80: p80.open,
+          latency: icmp.latency || p4370.latency || p80.latency || 0,
+          isLikelyZk: p4370.open || isZkMac || host.endsWith('.201') || (p80.open && host.endsWith('.201'))
+        });
+      }
+    }));
+  }
+
+  results.sort((a, b) => (b.isLikelyZk ? 1 : 0) - (a.isLikelyZk ? 1 : 0));
+  return { success: true, subnet, devices: results };
+});
+
+ipcMain.handle('biometric:get-local-server-status', async () => {
+  return {
+    success: true,
+    isRunning: Boolean(localBiometricServer),
+    port: localBiometricPort,
+    logs: localBiometricLogs
+  };
+});
+
+ipcMain.handle('biometric:toggle-local-server', async (_event, enable, port = 7005) => {
+  if (enable) {
+    return await startLocalBiometricServer(port);
+  } else {
+    return await stopLocalBiometricServer();
+  }
+});
+
 // ── 5.5. إدارة إعدادات وتخصيصات تطبيق الويندوز وإشعارات النظام (Desktop Settings & Native Windows Notifications) ──
 
 // 1. استرجاع إعدادات المنظومة المكتبية
@@ -1796,6 +2180,9 @@ app.whenReady().then(async () => {
 
   createMainWindow();
   setupAutoUpdater();
+
+  // تشغيل خادم فحص واستقبال أجهزة البصمة المحلي تلقائياً على المنفذ 7005 لخدمة الشبكة المحلية
+  startLocalBiometricServer(7005).catch(e => console.warn('[LocalBiometricServer Init Warn]:', e.message));
 
   // استشعار استيقاظ الحاسوب من السكون وتنبيه الواجهة وفحص التحديثات الفورية
   try {

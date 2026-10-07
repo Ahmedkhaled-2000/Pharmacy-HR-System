@@ -7,7 +7,30 @@
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
+if (typeof process !== 'undefined' && process.env) {
+  process.env.TZ = 'Africa/Cairo';
+}
+
 import express from 'express';
+import {
+  getEgyptDate,
+  getEgyptTime,
+  getEgyptTimeWithSeconds,
+  getEgyptDateTime,
+  parseEgyptTimeToEpoch,
+  parseDevicePunchEpoch,
+  calculatePunchMinutesDiff
+} from './egypt-time.js';
+
+export {
+  getEgyptDate,
+  getEgyptTime,
+  getEgyptTimeWithSeconds,
+  getEgyptDateTime,
+  parseEgyptTimeToEpoch,
+  parseDevicePunchEpoch,
+  calculatePunchMinutesDiff
+};
 
 const STORAGE_KEY = 'pharmacy-tracker-data';
 let globalDb = null;
@@ -740,6 +763,8 @@ export async function sendUniversalAttendanceWhatsAppAlert(punchPayload, state) 
 // الاسم المستعار للتوافق العكسي
 export const sendBiometricWhatsAppAlert = sendUniversalAttendanceWhatsAppAlert;
 
+
+
 // ══════════════════════════════════════════════════════════════════════════════
 // 🚀 تسجيل مسارات ADMS ومسارات الواجهة البرمجية (Routes Registration)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -751,6 +776,92 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
   // 🛰️ ذاكرة التتبع الجغرافي للموظفين بين الأجهزة لكشف التنقل المستحيل
   const employeeLastDevicePunch = new Map(); // empId -> { serial, branchId, branchName, epoch, timeStr }
 
+  // 🗓️ دالة استخراج نهاية الوردية المقررة للموظف من جدوله المعتمد (Roster Table)
+  function getEmployeeScheduledShiftEnd(empObj, dateStr, stateData) {
+    if (!empObj || !dateStr) return null;
+    const empId = String(empObj.id || '');
+    const empCode = String(empObj.code || '');
+
+    // 1. فحص طلبات تعديل الشيفت المعتمدة (Shift Adjustments)
+    const approvedReq = (stateData?.requests || []).find(r => {
+      if (!r) return false;
+      const isAdj = r.type === 'shift_adjustment' || r.type === 'roster_edit' || r.type === 'roster_update';
+      if (!isAdj) return false;
+      const isApproved = r.status === 'approved' || r.adminApproved === true;
+      if (!isApproved) return false;
+      const isEmp = String(r.employeeId) === empId || (empCode && String(r.employeeCode) === empCode);
+      if (!isEmp) return false;
+      return r.date === dateStr || (Array.isArray(r.dates) && r.dates.includes(dateStr)) || (r.schedule && r.schedule[dateStr]) || (r.newSchedule && r.newSchedule[dateStr]);
+    });
+
+    if (approvedReq) {
+      const item = (approvedReq.schedule && approvedReq.schedule[dateStr]) || (approvedReq.newSchedule && approvedReq.newSchedule[dateStr]);
+      if (item?.end && item.end !== '—') {
+        return { end: item.end.slice(0, 5), hours: parseFloat(item.hours || 8) };
+      }
+    }
+
+    // 2. فحص جداول العمل المعتمدة في state.rosters
+    const approvedRosters = (stateData?.rosters || []).filter(r => {
+      if (!r) return false;
+      const isApproved = r.status === 'approved' || r.adminApproved === true || !r.status;
+      if (!isApproved) return false;
+      const isEmp = String(r.employeeId) === empId || (empCode && String(r.employeeCode) === empCode);
+      if (!isEmp) return false;
+      if (r.fromDate && r.toDate) return dateStr >= r.fromDate && dateStr <= r.toDate;
+      if (r.month && dateStr.startsWith(r.month)) return true;
+      return false;
+    });
+
+    for (const r of approvedRosters) {
+      if (r.schedule) {
+        if (r.schedule[dateStr]?.end && r.schedule[dateStr].end !== '—') {
+          return { end: r.schedule[dateStr].end.slice(0, 5), hours: parseFloat(r.schedule[dateStr].hours || 8) };
+        }
+        try {
+          const dObj = new Date(dateStr + 'T12:00:00Z');
+          const dayIdx = dObj.getUTCDay();
+          const AR_DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+          const arDay = AR_DAYS[dayIdx];
+          const dayItem = r.schedule[arDay] || r.schedule[String(dayIdx)];
+          if (dayItem?.end && dayItem.end !== '—') {
+            return { end: dayItem.end.slice(0, 5), hours: parseFloat(dayItem.hours || 8) };
+          }
+        } catch {}
+      }
+    }
+
+    // 3. فحص جدول الموظف الافتراضي empObj.roster
+    if (empObj?.roster?.schedule) {
+      const sMap = empObj.roster.schedule;
+      if (sMap[dateStr]?.end && sMap[dateStr].end !== '—') {
+        return { end: sMap[dateStr].end.slice(0, 5), hours: parseFloat(sMap[dateStr].hours || 8) };
+      }
+      try {
+        const dObj = new Date(dateStr + 'T12:00:00Z');
+        const dayIdx = dObj.getUTCDay();
+        const AR_DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+        const arDay = AR_DAYS[dayIdx];
+        const dayItem = sMap[arDay] || sMap[String(dayIdx)];
+        if (dayItem?.end && dayItem.end !== '—') {
+          return { end: dayItem.end.slice(0, 5), hours: parseFloat(dayItem.hours || 8) };
+        }
+      } catch {}
+    }
+
+    return null;
+  }
+
+  function getNextDateStr(dateStr) {
+    try {
+      const d = new Date(dateStr + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() + 1);
+      return d.toISOString().slice(0, 10);
+    } catch {
+      return dateStr;
+    }
+  }
+
   // 🛡️ المكنسة الذكية لسلامة الورديات ومراقبة الأجهزة (Watchdog & Shift Safety Sweeper: كل 60 ثانية)
   const watchdogInterval = setInterval(async () => {
     try {
@@ -761,8 +872,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       const now = Date.now();
 
       // 🧹 1. فحص سلامة الورديات المفتوحة (Shift Safety Sweeper)
-      // إغلاق أي وردية نشطة تجاوزت صمام الأمان (الافتراضي 15 ساعة) تلقائياً لحماية النظام من الورديات المعلقة
-      const maxSafetyHours = parseFloat(alertConfig.shiftMaxHoursSafetyValve) || 15;
+      // إغلاق أي وردية نشطة تجاوزت صمام الأمان الموحد (24 ساعة كاملة) بدون انصراف
+      const maxSafetyHours = Math.max(24, parseFloat(alertConfig.shiftMaxHoursSafetyValve) || 24);
       const activeShiftsMap = { ...(state?.activeShifts || {}) };
       const activeKeys = Object.keys(activeShiftsMap);
       let sweptCount = 0;
@@ -771,25 +882,47 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         let shiftsList = [...(state?.shifts || [])];
         const employeesList = Array.isArray(state?.employees) ? state.employees : [];
         const sweptEmpIds = new Set();
+        const todayStr = getEgyptDate();
+        const nowTimeStr = getEgyptTime();
 
         for (const empKey of activeKeys) {
           const aShift = activeShiftsMap[empKey];
           if (!aShift) continue;
 
-          const shiftStartEpoch = Number(aShift.startEpoch) || (aShift.date && aShift.timeIn ? new Date(`${aShift.date}T${aShift.timeIn}:00`).getTime() : 0);
-          if (!shiftStartEpoch) continue;
+          const sDate = aShift.date || todayStr;
+          const sTime = (aShift.timeIn || '09:00').slice(0, 5);
+          const elapsedMins = calculatePunchMinutesDiff(sDate, sTime, todayStr, nowTimeStr);
+          const elapsedHours = elapsedMins / 60;
 
-          const elapsedHours = (now - shiftStartEpoch) / (1000 * 60 * 60);
-          if (elapsedHours >= maxSafetyHours) {
+          // 🛡️ صمام الأمان الذكي الموحد: إغلاق تلقائي موحد لأي وردية بعد 24 ساعة كاملة
+          const shouldSweep = elapsedHours >= maxSafetyHours;
+          if (shouldSweep) {
             const empObj = employeesList.find(e => String(e.id) === String(empKey) || String(e.code) === String(empKey));
             const schedH = parseFloat(empObj?.workHoursPerDay || empObj?.workHours || 8);
             const inTimeStr = (aShift.timeIn || '09:00').slice(0, 5);
-            const [inH, inM] = inTimeStr.split(':').map(Number);
-            let estOutTime = '';
-            if (!isNaN(inH)) {
-              const outTotalMins = (inH * 60 + (inM || 0) + Math.round(schedH * 60)) % (24 * 60);
-              estOutTime = `${String(Math.floor(outTotalMins / 60)).padStart(2, '0')}:${String(outTotalMins % 60).padStart(2, '0')}`;
+
+            // 🎯 استخراج نهاية الوردية المقررة من جدول الموظف المعتمد
+            const schedEnd = getEmployeeScheduledShiftEnd(empObj, sDate, state);
+            let finalOutTime = '';
+            let finalHours = schedH;
+
+            if (schedEnd?.end) {
+              finalOutTime = schedEnd.end;
+              if (schedEnd.hours) finalHours = schedEnd.hours;
+            } else {
+              // حساب تقديري بالاعتماد على ساعات العمل المقررة للموظف
+              const [inH, inM] = inTimeStr.split(':').map(Number);
+              if (!isNaN(inH)) {
+                const outTotalMins = (inH * 60 + (inM || 0) + Math.round(schedH * 60)) % (24 * 60);
+                finalOutTime = `${String(Math.floor(outTotalMins / 60)).padStart(2, '0')}:${String(outTotalMins % 60).padStart(2, '0')}`;
+              } else {
+                finalOutTime = '17:00';
+              }
             }
+
+            // تحديد تاريخ الانصراف (إذا كان وقت الخروج أقل من الدخول فالوردية عابرة لمنتصف الليل)
+            const isCrossingMidnight = finalOutTime <= inTimeStr;
+            const finalOutDate = isCrossingMidnight ? getNextDateStr(sDate) : sDate;
 
             const targetShiftId = aShift.shiftId || aShift.id;
             let shiftIdx = -1;
@@ -808,15 +941,16 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
                 ...shiftsList[shiftIdx],
                 timeOut: (shiftsList[shiftIdx].timeOut && shiftsList[shiftIdx].timeOut !== '—' && shiftsList[shiftIdx].timeOut !== 'قيد العمل الآن')
                   ? shiftsList[shiftIdx].timeOut
-                  : (estOutTime || '—'),
-                hours: (shiftsList[shiftIdx].hours && shiftsList[shiftIdx].hours > 0) ? shiftsList[shiftIdx].hours : schedH,
-                actualWorkedHours: (shiftsList[shiftIdx].actualWorkedHours && shiftsList[shiftIdx].actualWorkedHours > 0) ? shiftsList[shiftIdx].actualWorkedHours : schedH,
-                netHours: (shiftsList[shiftIdx].netHours && shiftsList[shiftIdx].netHours > 0) ? shiftsList[shiftIdx].netHours : schedH,
-                regularHours: (shiftsList[shiftIdx].regularHours && shiftsList[shiftIdx].regularHours > 0) ? shiftsList[shiftIdx].regularHours : schedH,
+                  : (finalOutTime || '—'),
+                timeOutDate: finalOutDate,
+                hours: (shiftsList[shiftIdx].hours && shiftsList[shiftIdx].hours > 0) ? shiftsList[shiftIdx].hours : finalHours,
+                actualWorkedHours: (shiftsList[shiftIdx].actualWorkedHours && shiftsList[shiftIdx].actualWorkedHours > 0) ? shiftsList[shiftIdx].actualWorkedHours : finalHours,
+                netHours: (shiftsList[shiftIdx].netHours && shiftsList[shiftIdx].netHours > 0) ? shiftsList[shiftIdx].netHours : finalHours,
+                regularHours: (shiftsList[shiftIdx].regularHours && shiftsList[shiftIdx].regularHours > 0) ? shiftsList[shiftIdx].regularHours : finalHours,
                 isLiveActive: false,
                 status: 'completed',
-                statusLabel: 'حضور مكتمل (مكنسة الأمان)',
-                notes: ((shiftsList[shiftIdx].notes || '') + ` [أغلقت بواسطة مكنسة الأمان لتجاوز ${maxSafetyHours} ساعة بدون انصراف]`).trim()
+                statusLabel: 'حضور مكتمل (صمام الأمان - 24 ساعة)',
+                notes: ((shiftsList[shiftIdx].notes || '') + ` [أغلقت بواسطة صمام الأمان لتجاوز ${maxSafetyHours} ساعة بدون انصراف - نهاية الجدول: ${finalOutTime}]`).trim()
               };
             }
 
@@ -825,7 +959,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             if (empObj?.id) sweptEmpIds.add(String(empObj.id));
             if (empObj?.code) sweptEmpIds.add(String(empObj.code));
             sweptCount++;
-            console.log(`[Safety Sweeper] 🧹 تم إغلاق وردية الموظف (${empKey}) تلقائياً لتجاوزها ${elapsedHours.toFixed(1)} س`);
+            console.log(`[Safety Sweeper] 🧹 تم إغلاق وردية الموظف (${empKey}) تلقائياً لتجاوزها ${elapsedHours.toFixed(1)} س - وضع نهاية الجدول (${finalOutTime})`);
           }
         }
 
@@ -947,6 +1081,19 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             lastHeartbeat: nowIso
           });
 
+          // 🛡️ 1. درع حماية البصمات: إلغاء وتطهير أي أوامر CLEAR LOG معلقة قديمة لمنع مسح ذاكرة الماكينة عند عودة الاتصال
+          try {
+            await db.query(`
+              UPDATE public.biometric_device_commands 
+              SET status = 'CANCELLED', response_payload = 'تم الإلغاء تلقائياً لحماية بصمات الموظفين عند استعادة الاتصال (Auto Clear-Log Guard)'
+              WHERE device_serial = $1 AND status = 'PENDING' AND command_text LIKE '%CLEAR LOG%'
+            `, [sn]);
+          } catch (_) {}
+
+          // 🛡️ 2. أمر الاسترداد والتفريغ الفوري (Auto-Flush On Reconnect): إجبار الماكينة على دفع كل البصمات المسجلة أوفلاين
+          queueDeviceCommand(sn, 'CHECK', 'DEVICE_CHECK');
+          console.log(`[Watchdog Reconnect Guard] 🔄 تم إرسال أمر استرداد وتفريغ البصمات المعلقة (CHECK) للجهاز ${sn}`);
+
           // مزامنة التوقيت التلقائية عند عودة الاتصال لمنع انزلاق الساعة (Clock Drift Guard)
           const state = await getSettingsFromStorage(STORAGE_KEY).catch(() => null);
           const alertConfig = state?.orgSettings?.biometricWhatsAppAlerts || {};
@@ -964,8 +1111,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
               device_name: oldDevice.device_name || `جهاز ZKTeco MB20 (${sn})`,
               branch_name: oldDevice.branch_name || 'الفرع الرئيسي',
               device_serial: sn,
-              time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
-              date: new Date().toISOString().slice(0, 10),
+              time: getEgyptTime(),
+              date: getEgyptDate(),
               client_ip: clientIp || oldDevice.ip_address || '—',
               time_sync_status: timeSyncStatusText,
               company_name: state?.orgSettings?.companyName || state?.orgSettings?.orgName || 'مجموعة الصيدليات'
@@ -1549,21 +1696,15 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
         if (!pin || !punchDateTimeStr) return null;
 
-        let punchEpoch = Date.now();
-        try {
-          const parsed = new Date(punchDateTimeStr.replace(' ', 'T'));
-          if (!isNaN(parsed.getTime())) {
-            punchEpoch = parsed.getTime();
-          }
-        } catch {}
+        const punchEpoch = parseDevicePunchEpoch(punchDateTimeStr);
 
         let datePart = punchDateTimeStr.slice(0, 10);
         let timePart = punchDateTimeStr.slice(11, 16);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-          datePart = new Date().toISOString().slice(0, 10);
+          datePart = getEgyptDate();
         }
         if (!/^\d{2}:\d{2}$/.test(timePart)) {
-          timePart = new Date().toTimeString().slice(0, 5);
+          timePart = getEgyptTime();
         }
 
         return {
@@ -1596,12 +1737,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         // تصنيف وسيلة التحقق
         const verifyType = rawVerifyType === 15 || rawVerifyType === 20 ? 'FACE' : 'FINGERPRINT';
 
-        // ضمان عدم وجود أي طابع زمني مستقبلي بسبب فروق المنطقة الزمنية بين الماكينة والسيرفر
-        const realCurrentNow = Date.now();
+        // الطابع الزمني الموحد للبصمة (محايد تماماً لفروق التوقيت)
         let safePunchEpoch = punchEpoch;
-        if (!safePunchEpoch || isNaN(safePunchEpoch) || safePunchEpoch > realCurrentNow) {
-          safePunchEpoch = realCurrentNow;
-        }
 
         // 0. درع التحقق من حالة الموظف على الجهاز (هل تم إيقافه مؤقتاً؟)
         try {
@@ -1811,44 +1948,57 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           const shiftStartEpoch = Number(effectiveActive.startEpoch) ||
             new Date(`${shiftStartDate}T${shiftStartTime}:00`).getTime();
 
-          const shiftDurationMs = punchEpoch - shiftStartEpoch;
-          const shiftDurationHours = shiftDurationMs / (1000 * 60 * 60);
-
-          const startHour = parseInt(shiftStartTime.split(':')[0], 10) || 0;
-          const punchHour = parseInt((timePart || '00:00').split(':')[0], 10) || 0;
+          // ⚡ حساب الفارق الزمني الحقيقي بالدقائق بين بصمة الدخول والبصمة الحالية بدقة تامة
+          const shiftDurationMins = calculatePunchMinutesDiff(shiftStartDate, shiftStartTime, datePart, timePart);
+          const shiftDurationHours = shiftDurationMins / 60;
           const isDifferentDate = shiftStartDate !== datePart;
 
-          const shiftDurationMins = shiftDurationMs / (1000 * 60);
+          // 🛡️ الحد الأدنى لمنع البصمة المزدوجة السريعة العرضية (Anti-Bounce: دقيقتين)
+          const minCheckoutMins = parseFloat(alertConfig.minCheckoutMinutes) || 2;
 
-          // 🛡️ معايير محرك الورديات الذكي العابر للزمن (Universal Event-Driven Shift Engine)
-          const maxShiftHours = parseFloat(alertConfig.shiftMaxHoursSafetyValve) || 15;
-          const minCheckoutMins = parseFloat(alertConfig.minCheckoutMinutes) || 15;
+          // 🛡️ صمام الأمان للورديات المتروكة التي لم يغلقها الموظف إطلاقاً (24 ساعة كاملة)
+          // لا يتم إنهاء الوردية حتى بعد منتصف الليل إلا ببصمة الخروج الخاصة به؛ فقط إذا مرت 24 ساعة كاملة
+          const maxShiftHours = Math.max(24, parseFloat(alertConfig.shiftMaxHoursSafetyValve) || 24);
 
-          // 🛡️ صمام الأمان الذكي: إذا تجاوزت الوردية الحد الأقصى (الافتراضي 15 ساعة)
-          // يتم إغلاق الوردية السابقة تلقائياً لحماية النظام من تداخل الأيام، وتُعامل البصمة الحالية كحضور جديد (Check-In)
+          // 1. إذا تجاوزت الوردية 24 ساعة كاملة دون أي انصراف: تغلق الوردية السابقة وتبدأ وردية حضور جديدة
           if (shiftDurationHours >= maxShiftHours) {
-            console.log(`[Biometric Resolver] ⏱️ صمام الأمان الذكي: وردية الموظف ${matchedEmpName} تجاوزت ${maxShiftHours} ساعة (${shiftDurationHours.toFixed(1)} س) - تغلق تلقائياً ويبدأ حضور جديد.`);
+            console.log(`[Biometric Resolver] ⏱️ صمام الأمان للورديات المتروكة: وردية الموظف ${matchedEmpName} تجاوزت ${maxShiftHours} ساعة (${shiftDurationHours.toFixed(1)} س) - تغلق للمراجعة ويبدأ حضور جديد.`);
             if (openShiftIdx >= 0) {
               const schedH = parseFloat(matchedEmpObj?.workHoursPerDay || matchedEmpObj?.workHours || 8);
-              const [inH, inM] = String(shiftStartTime || '09:00').split(':').map(Number);
-              let estOutTime = '';
-              if (!isNaN(inH)) {
-                const outTotalMins = (inH * 60 + (inM || 0) + Math.round(schedH * 60)) % (24 * 60);
-                estOutTime = `${String(Math.floor(outTotalMins / 60)).padStart(2, '0')}:${String(outTotalMins % 60).padStart(2, '0')}`;
+              const schedEnd = getEmployeeScheduledShiftEnd(matchedEmpObj, shiftStartDate, state);
+              let finalOutTime = '';
+              let finalHours = schedH;
+
+              if (schedEnd?.end) {
+                finalOutTime = schedEnd.end;
+                if (schedEnd.hours) finalHours = schedEnd.hours;
+              } else {
+                const [inH, inM] = shiftStartTime.split(':').map(Number);
+                if (!isNaN(inH)) {
+                  const outTotalMins = (inH * 60 + (inM || 0) + Math.round(schedH * 60)) % (24 * 60);
+                  finalOutTime = `${String(Math.floor(outTotalMins / 60)).padStart(2, '0')}:${String(outTotalMins % 60).padStart(2, '0')}`;
+                } else {
+                  finalOutTime = '17:00';
+                }
               }
+
+              const isCrossingMidnight = finalOutTime <= shiftStartTime;
+              const finalOutDate = isCrossingMidnight ? getNextDateStr(shiftStartDate) : shiftStartDate;
+
               currentShifts[openShiftIdx] = {
                 ...currentShifts[openShiftIdx],
                 timeOut: (currentShifts[openShiftIdx].timeOut && currentShifts[openShiftIdx].timeOut !== '—' && currentShifts[openShiftIdx].timeOut !== 'قيد العمل الآن')
                   ? currentShifts[openShiftIdx].timeOut
-                  : (estOutTime || '—'),
-                hours: (currentShifts[openShiftIdx].hours && currentShifts[openShiftIdx].hours > 0) ? currentShifts[openShiftIdx].hours : schedH,
-                actualWorkedHours: (currentShifts[openShiftIdx].actualWorkedHours && currentShifts[openShiftIdx].actualWorkedHours > 0) ? currentShifts[openShiftIdx].actualWorkedHours : schedH,
-                netHours: (currentShifts[openShiftIdx].netHours && currentShifts[openShiftIdx].netHours > 0) ? currentShifts[openShiftIdx].netHours : schedH,
-                regularHours: (currentShifts[openShiftIdx].regularHours && currentShifts[openShiftIdx].regularHours > 0) ? currentShifts[openShiftIdx].regularHours : schedH,
+                  : (finalOutTime || '—'),
+                timeOutDate: finalOutDate,
+                hours: currentShifts[openShiftIdx].hours || finalHours,
+                actualWorkedHours: currentShifts[openShiftIdx].actualWorkedHours || finalHours,
+                netHours: currentShifts[openShiftIdx].netHours || finalHours,
+                regularHours: currentShifts[openShiftIdx].regularHours || finalHours,
                 isLiveActive: false,
                 status: 'completed',
-                statusLabel: 'حضور مكتمل (صمام الأمان)',
-                notes: ((currentShifts[openShiftIdx].notes || '') + ` [أغلقت تلقائياً لتجاوز ${maxShiftHours} ساعة بدون تسجيل انصراف]`).trim()
+                statusLabel: 'حضور مكتمل (صمام الأمان - 24 ساعة)',
+                notes: ((currentShifts[openShiftIdx].notes || '') + ` [أغلقت تلقائياً لتجاوز ${maxShiftHours} ساعة بدون تسجيل انصراف - نهاية الجدول: ${finalOutTime}]`).trim()
               };
             }
             possibleEmpKeys.forEach(k => {
@@ -1858,11 +2008,9 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             activeShift = null;
             actionType = 'check_in';
           }
-          // 🛡️ منع الحركات الوهمية المتكررة (Bounce / False Punch Protection):
-          // إذا كانت البصمة بعد الحضور بأقل من minCheckoutMins ولم يضغط الموظف صراحة على زر انصراف (rawState !== 1)
-          // يتم اعتبارها تأكيد حضور متكرر (CONFIRMED) وليس انصرافاً، لتفادي إغلاق الوردية بعد دقيقة أو دقيقتين بالخطأ
+          // 2. منع النقر المزدوج المتكرر السريع في أقل من دقيقتين (Anti-Bounce Protection)
           else if (shiftDurationMins < minCheckoutMins && rawState !== 1) {
-            console.log(`[Biometric Resolver] 🔄 بصمة تأكيد حضور متكررة للموظف ${matchedEmpName} بعد مرور ${Math.round(shiftDurationMins)} دقيقة فقط (أقل من ${minCheckoutMins} دقيقة) - يتم تسجيلها كتأكيد حضور دون تغيير حالة الوردية.`);
+            console.log(`[Biometric Resolver] 🔄 بصمة تأكيد حضور مكررة للموظف ${matchedEmpName} بعد مرور ${Math.round(shiftDurationMins)} دقيقة فقط (أقل من ${minCheckoutMins} دقيقة) - يتم تسجيلها كتأكيد حضور دون تغيير حالة الوردية.`);
             await db.query(
               `INSERT INTO public.biometric_raw_punches 
                (device_serial, device_user_pin, punch_time, verify_type, raw_punch_state, employee_id, employee_name, branch_id, action_type, process_status, process_notes, raw_payload)
@@ -1872,9 +2020,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             processedCount++;
             continue;
           }
-          // 🌟 المحرك الذكي العابر للزمن (Universal Event-Driven Shift Engine):
-          // أي بصمة بعد الدخول بـ minCheckoutMins وأقل من maxShiftHours هي يقيناً وبلا أي قيود على ساعات اليوم: تسجيل انصراف (Check-Out)!
-          // سواء كانت في نفس اليوم، أو عبرت منتصف الليل (Overnight)، مثل 12 ظهراً إلى 12 ليلاً، أو 12 ليلاً إلى 12 ظهراً، أو أي توقيت.
+          // 3. 🌟 النظام المعتمد الحر: أي بصمة بعد الدخول هي انصراف (Check-Out) حتماً ويقيناً!
+          // لا يتم إنهاء الوردية حتى بعد منتصف الليل إلا ببصمة الخروج الخاصة به
           else {
             actionType = 'check_out';
             if (isDifferentDate) {
@@ -1978,25 +2125,16 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           const inTime = origShift?.timeIn || effectiveActive?.timeIn || timePart;
           const outTime = timePart;
 
-          // ⚡ حساب دقيق لساعات العمل الصافية مع استيعاب الورديات الليلية العابرة لمنتصف الليل
+          // ⚡ حساب دقيق لساعات العمل الصافية من الفارق الفعلي بين بصمة الدخول وبصمة الخروج
           let calcHours = 0;
-          const shiftStartEpochForCalc = Number(origShift?.startEpoch || effectiveActive?.startEpoch) ||
-            (effectiveDate && inTime ? new Date(`${effectiveDate}T${String(inTime).slice(0, 5)}:00`).getTime() : 0);
+          const durationMins = calculatePunchMinutesDiff(effectiveDate, inTime, datePart, outTime);
 
-          if (punchEpoch && shiftStartEpochForCalc && punchEpoch > shiftStartEpochForCalc) {
+          if (durationMins <= 1) {
+            calcHours = 0; // حماية البصمة المزدوجة المتطابقة
+          } else {
             const bHours = parseFloat(origShift?.breakHours || 0);
-            const rawElapsed = (punchEpoch - shiftStartEpochForCalc) / (1000 * 60 * 60);
+            const rawElapsed = durationMins / 60;
             calcHours = Math.max(0, Math.round((rawElapsed - bHours) * 100) / 100);
-          } else if (inTime && outTime) {
-            const [inH, inM] = String(inTime).split(':').map(Number);
-            const [outH, outM] = String(outTime).split(':').map(Number);
-            if (!isNaN(inH) && !isNaN(outH)) {
-              let startM = inH * 60 + (inM || 0);
-              let endM = outH * 60 + (outM || 0);
-              if (endM <= startM || isOvernight) endM += 24 * 60;
-              const bHours = parseFloat(origShift?.breakHours || 0);
-              calcHours = Math.max(0, Math.round(((endM - startM) / 60 - bHours) * 100) / 100);
-            }
           }
 
           const schedH = parseFloat(origShift?.scheduledHours || matchedEmpObj?.workHoursPerDay || matchedEmpObj?.workHours || 8);
@@ -2166,8 +2304,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           dispatchReconciliationWhatsAppAlert({
             branch_name: devObj?.branch_name || (matchedBranchId ? `فرع (${matchedBranchId})` : 'الفرع الرئيسي'),
             device_name: devObj?.device_name || `جهاز ZKTeco MB20 (${sn})`,
-            sync_time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
-            sync_date: new Date().toISOString().slice(0, 10),
+            sync_time: getEgyptTime(),
+            sync_date: getEgyptDate(),
             total_punches: parsedPunchList.length,
             period_from: periodFrom,
             period_to: periodTo,
@@ -2420,6 +2558,14 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         return res.status(200).send(`OK: ${count}`);
       }
 
+      // 🛡️ إذا كانت البيانات تخص الحركات والتسجيلات (ATTLOG Ingestion via QueryData)
+      if (tablename === 'ATTLOG' || tablename.includes('ATT') || (!isTemplateData && (rawBody.includes('\t') || rawBody.includes('2026-') || rawBody.includes('2025-')))) {
+        console.log(`[Biometric Manager] 📥 [querydata] توجيه ${rawBody.length} بايت من حركات ATTLOG لمعالج البصمات الموحد لجهاز ${sn}`);
+        req.query.table = 'ATTLOG';
+        req.body = rawBody;
+        return handleAdmsPostCData(req, res);
+      }
+
       return res.status(200).send('OK');
     } catch (err) {
       console.error('[ADMS querydata Error]:', err);
@@ -2641,13 +2787,128 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     }
   });
 
-  // 1.4 أمر مسح سجلات الحركات القديمة من ذاكرة الجهاز (Clear Device Logs)
+  // 1.4 أمر مسح سجلات الحركات القديمة من ذاكرة الجهاز (Clear Device Logs - Protected)
   app.post('/api/biometrics/devices/:serialNumber/clear-log', async (req, res) => {
     try {
       const { serialNumber } = req.params;
+      const { force } = req.body || {};
+
+      // 🛡️ درع أمان ثلاثي: حماية حركات الموظفين من المسح العرضي غير المقصود
+      const devRes = await db.query('SELECT branch_id, status, last_heartbeat FROM public.biometric_devices WHERE serial_number = $1', [serialNumber]);
+      const branchId = devRes.rows[0]?.branch_id;
+
+      const state = await getSettingsFromStorage(STORAGE_KEY).catch(() => null);
+      const activeShifts = state?.activeShifts || {};
+      const hasActiveBranchShifts = Object.values(activeShifts).some(s => s && String(s.branchId) === String(branchId));
+
+      if (hasActiveBranchShifts && !force) {
+        return res.status(400).json({
+          success: false,
+          error: 'تحذير أمان: توجد ورديات نشطة مفتوحة حالياً في هذا الفرع. لمنع فقدان بصمات الموظفين، يجب إنهاء الورديات أولاً أو تفعيل خيار المسح الإجباري (Force Clear).'
+        });
+      }
+
+      // إلغاء أي أوامر مسح معلقة سابقة
+      await db.query(`
+        UPDATE public.biometric_device_commands 
+        SET status = 'CANCELLED' 
+        WHERE device_serial = $1 AND status = 'PENDING' AND command_text LIKE '%CLEAR LOG%'
+      `, [serialNumber]);
+
       const cmd = `C:${Date.now()}:CLEAR LOG`;
-      queueDeviceCommand(serialNumber, cmd);
-      res.json({ success: true, message: 'تم إرسال أمر مسح سجلات الحركات القديمة من الجهاز' });
+      queueDeviceCommand(serialNumber, cmd, 'CLEAR_LOG');
+      res.json({ success: true, message: 'تم إرسال أمر مسح سجلات الحركات للماكينة بعد التحقق من معايير الأمان' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 1.4.1 مسار التسوية الذكية التلقائية للورديات العالقة في الفروع (Auto Shift Reconciliation)
+  app.post('/api/biometrics/reconcile-stuck-shifts', async (req, res) => {
+    try {
+      const { branchId, employeeId, maxHours = 12 } = req.body || {};
+      const state = await getSettingsFromStorage(STORAGE_KEY);
+      if (!state) return res.status(500).json({ success: false, error: 'State not available' });
+
+      const activeShiftsMap = { ...(state.activeShifts || {}) };
+      let shiftsList = [...(state.shifts || [])];
+      const employeesList = Array.isArray(state.employees) ? state.employees : [];
+      const todayStr = getEgyptDate();
+      const nowTimeStr = getEgyptTime();
+      let reconciledCount = 0;
+      const sweptEmpIds = new Set();
+
+      for (const empKey of Object.keys(activeShiftsMap)) {
+        const aShift = activeShiftsMap[empKey];
+        if (!aShift) continue;
+        if (branchId && String(aShift.branchId) !== String(branchId)) continue;
+        if (employeeId && String(empKey) !== String(employeeId) && String(aShift.employeeId) !== String(employeeId)) continue;
+
+        const sDate = aShift.date || todayStr;
+        const sTime = (aShift.timeIn || '09:00').slice(0, 5);
+        const elapsedMins = calculatePunchMinutesDiff(sDate, sTime, todayStr, nowTimeStr);
+        const elapsedHours = elapsedMins / 60;
+
+        if (elapsedHours >= parseFloat(maxHours)) {
+          const empObj = employeesList.find(e => String(e.id) === String(empKey) || String(e.code) === String(empKey));
+          const schedH = parseFloat(empObj?.workHoursPerDay || empObj?.workHours || 8);
+          const inTimeStr = (aShift.timeIn || '09:00').slice(0, 5);
+          const [inH, inM] = inTimeStr.split(':').map(Number);
+          let estOutTime = '';
+          if (!isNaN(inH)) {
+            const outTotalMins = (inH * 60 + (inM || 0) + Math.round(schedH * 60)) % (24 * 60);
+            estOutTime = `${String(Math.floor(outTotalMins / 60)).padStart(2, '0')}:${String(outTotalMins % 60).padStart(2, '0')}`;
+          }
+
+          const targetShiftId = aShift.shiftId || aShift.id;
+          let shiftIdx = -1;
+          if (targetShiftId) {
+            shiftIdx = shiftsList.findIndex(s => s.id === targetShiftId);
+          }
+          if (shiftIdx < 0) {
+            shiftIdx = shiftsList.findIndex(s =>
+              (String(s.employeeId) === String(empKey) || (s.employeeCode && String(s.employeeCode) === String(empKey))) &&
+              (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive)
+            );
+          }
+
+          const isOvernight = Boolean(sDate && sDate !== todayStr);
+          if (shiftIdx >= 0) {
+            shiftsList[shiftIdx] = {
+              ...shiftsList[shiftIdx],
+              timeOut: estOutTime || '—',
+              timeOutDate: isOvernight ? todayStr : sDate,
+              hours: schedH,
+              actualWorkedHours: schedH,
+              netHours: schedH,
+              regularHours: schedH,
+              isOvernight,
+              isLiveActive: false,
+              status: 'completed',
+              statusLabel: isOvernight ? 'حضور مكتمل (تسوية وردية عابرة لمنتصف الليل)' : 'حضور مكتمل (تسوية ذكية)',
+              notes: ((shiftsList[shiftIdx].notes || '') + ` [تمت التسوية الإدارية التلقائية (${schedH} ساعات)]`).trim()
+            };
+          }
+
+          delete activeShiftsMap[empKey];
+          sweptEmpIds.add(String(empKey));
+          if (empObj?.id) sweptEmpIds.add(String(empObj.id));
+          if (empObj?.code) sweptEmpIds.add(String(empObj.code));
+          reconciledCount++;
+        }
+      }
+
+      if (reconciledCount > 0) {
+        state.activeShifts = activeShiftsMap;
+        state.shifts = shiftsList;
+        state._punchSource = 'manual_reconciliation';
+        state._endedShiftEmpIds = Array.from(sweptEmpIds);
+        await saveSettingsToStorage(STORAGE_KEY, state, 'reconciliation-worker');
+        io.emit('state:updated', { activeShifts: activeShiftsMap, reconciledCount, timestamp: new Date().toISOString() });
+        io.emit('entity:changed', { entityType: 'activeShifts', action: 'reconciled', reconciledCount });
+      }
+
+      res.json({ success: true, reconciledCount, message: `تم تسوية وإغلاق ${reconciledCount} وردية معلقة بنجاح` });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -3355,7 +3616,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       const { serialNumber, pin, actionType, verifyType } = req.body;
       const sn = serialNumber || 'EUF7242701836';
       const userPin = pin || '107';
-      const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 19);
+      const nowStr = getEgyptDateTime();
 
       // صياغة سطر ATTLOG قياسي
       const simulatedAttlog = `${userPin}\t${nowStr}\t${actionType === 'check_out' ? 1 : 0}\t${verifyType === 'FACE' ? 15 : 1}\t0\t0`;
@@ -3728,8 +3989,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         const deviceName = req.query.deviceName || `جهاز بصمة (${serialNumber})`;
         await db.query(
           `INSERT INTO public.biometric_devices 
-           (serial_number, device_name, model, branch_id, is_active, status, updated_at)
-           VALUES ($1, $2, 'ZKTeco MB20 / ADMS', $3, TRUE, 'CONFIGURED_PENDING_CONNECT', CURRENT_TIMESTAMP)
+           (serial_number, device_name, device_type, branch_id, is_active, status, updated_at)
+           VALUES ($1, $2, 'MB20', $3, TRUE, 'CONFIGURED_PENDING_CONNECT', CURRENT_TIMESTAMP)
            ON CONFLICT (serial_number) DO UPDATE SET
              branch_id = COALESCE(EXCLUDED.branch_id, public.biometric_devices.branch_id),
              device_name = COALESCE(NULLIF(EXCLUDED.device_name, ''), public.biometric_devices.device_name),
@@ -4117,8 +4378,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           device_serial: 'EUF7242701836',
           last_seen: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
           offline_duration: '15 دقيقة',
-          time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
-          date: new Date().toISOString().slice(0, 10),
+          time: getEgyptTime(),
+          date: getEgyptDate(),
           client_ip: req.ip || '192.168.1.150',
           time_sync_status: '✅ تم ضبط توقيت الماكينة تلقائياً بدقة',
           company_name: org.companyName || org.orgName || 'مجموعة الصيدليات'
@@ -4148,8 +4409,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         const msg = formatAttendanceAlert(template, {
           branch_name: 'فرع المدينة الجامعية',
           device_name: 'جهاز بصمة ZKTeco MB20',
-          sync_time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
-          sync_date: new Date().toISOString().slice(0, 10),
+          sync_time: getEgyptTime(),
+          sync_date: getEgyptDate(),
           total_punches: '12 حركة',
           period_from: '09:00 ص',
           period_to: '04:30 م',
@@ -4174,8 +4435,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         employeeId: 'emp_test',
         branchName: 'الفرع الرئيسي',
         actionType,
-        time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
-        date: new Date().toISOString().slice(0, 10),
+        time: getEgyptTime(),
+        date: getEgyptDate(),
         verifyType: isKiosk ? 'KIOSK' : 'FINGERPRINT',
         deviceName: isKiosk ? 'كشك البصمة الإلكترونية الذكي 📱' : 'ZKTeco MB20 (تجريبي) 🧬',
         punchSource: isKiosk ? 'kiosk' : 'biometric_device',
@@ -4298,36 +4559,37 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
         const pA = empPunches[i];
         const dtA = new Date(pA.punch_time);
         const dateA = pA.raw_payload && pA.raw_payload.includes('-') 
-          ? (pA.raw_payload.split(/[\t\s]+/)[1] || dtA.toISOString().slice(0, 10))
-          : dtA.toISOString().slice(0, 10);
+          ? (pA.raw_payload.split(/[\t\s]+/)[1] || getEgyptDate(dtA))
+          : getEgyptDate(dtA);
         const timeA = pA.raw_payload && pA.raw_payload.includes(':')
-          ? (pA.raw_payload.split(/[\t\s]+/)[2]?.slice(0, 5) || `${String(dtA.getHours()).padStart(2, '0')}:${String(dtA.getMinutes()).padStart(2, '0')}`)
-          : `${String(dtA.getHours()).padStart(2, '0')}:${String(dtA.getMinutes()).padStart(2, '0')}`;
+          ? (pA.raw_payload.split(/[\t\s]+/)[2]?.slice(0, 5) || getEgyptTime(dtA))
+          : getEgyptTime(dtA);
 
         if (i + 1 < empPunches.length) {
           const pB = empPunches[i + 1];
           const dtB = new Date(pB.punch_time);
           const dateB = pB.raw_payload && pB.raw_payload.includes('-')
-            ? (pB.raw_payload.split(/[\t\s]+/)[1] || dtB.toISOString().slice(0, 10))
-            : dtB.toISOString().slice(0, 10);
+            ? (pB.raw_payload.split(/[\t\s]+/)[1] || getEgyptDate(dtB))
+            : getEgyptDate(dtB);
           const timeB = pB.raw_payload && pB.raw_payload.includes(':')
-            ? (pB.raw_payload.split(/[\t\s]+/)[2]?.slice(0, 5) || `${String(dtB.getHours()).padStart(2, '0')}:${String(dtB.getMinutes()).padStart(2, '0')}`)
-            : `${String(dtB.getHours()).padStart(2, '0')}:${String(dtB.getMinutes()).padStart(2, '0')}`;
+            ? (pB.raw_payload.split(/[\t\s]+/)[2]?.slice(0, 5) || getEgyptTime(dtB))
+            : getEgyptTime(dtB);
 
-          const diffHours = (dtB.getTime() - dtA.getTime()) / (1000 * 60 * 60);
+          const diffMinutes = calculatePunchMinutesDiff(dateA, timeA, dateB, timeB);
+          const diffHours = diffMinutes / 60;
 
           const hourA = parseInt(timeA.split(':')[0], 10) || 0;
           const hourB = parseInt(timeB.split(':')[0], 10) || 0;
 
-          // 🛡️ معايير الوردية الليلية الحقيقية والمحرك العابر للزمن:
-          // 1. ورديات منتصف اليوم والمساء/الإغلاق: تبدأ بين 10:00 صباحاً و 20:59 مساءً وتنتهي بعد منتصف الليل ومدتها حتى 15 ساعة
-          const isMiddayOrEveningOvernight = hourA >= 10 && hourA <= 20 && hourB <= 6 && diffHours >= 0.25 && diffHours <= 15;
+          // 🛡️ معايير الوردية الليلية الحقيقية والمحرك العابر للزمن (الاعتماد التام على التوقيت المصري ودعم كامل حتى 24 ساعة):
+          // 1. ورديات منتصف اليوم والمساء/الإغلاق: تبدأ بين 10:00 صباحاً و 20:59 مساءً وتنتهي بعد منتصف الليل ومدتها حتى 24 ساعة
+          const isMiddayOrEveningOvernight = hourA >= 10 && hourA <= 20 && hourB <= 6 && diffHours >= 0.25 && diffHours <= 24;
           // 2. ورديات الليل الكاملة: تبدأ ليلاً (21:00 - 04:00 فجراً) وتنتهي صباحاً أو ظهراً (لتغطية وردية 12 ليلاً إلى 12 ظهراً)
-          const isNightOvernight = (hourA >= 21 || hourA <= 4) && hourB <= 14 && diffHours >= 0.25 && diffHours <= 15;
-          // 3. أي بصمة في الساعات الأولى من اليوم التالي (hourB <= 6) بعد وردية بدأت بالأمس ولم تتجاوز 15 ساعة
-          const isEarlyMorningOvernight = hourB <= 6 && diffHours >= 0.25 && diffHours <= 15;
-          // 4. المحرك العابر للزمن: أي بصمة عبرت لليوم التالي ومدتها بين 15 دقيقة و 15 ساعة
-          const isUniversalCrossDate = diffHours >= 0.25 && diffHours <= 15;
+          const isNightOvernight = (hourA >= 21 || hourA <= 4) && hourB <= 14 && diffHours >= 0.25 && diffHours <= 24;
+          // 3. أي بصمة في الساعات الأولى من اليوم التالي (hourB <= 6) بعد وردية بدأت بالأمس ولم تتجاوز 24 ساعة
+          const isEarlyMorningOvernight = hourB <= 6 && diffHours >= 0.25 && diffHours <= 24;
+          // 4. المحرك العابر للزمن: أي بصمة عبرت لليوم التالي ومدتها بين 15 دقيقة و 24 ساعة
+          const isUniversalCrossDate = diffHours >= 0.25 && diffHours <= 24;
           const isOvernightPair = dateB > dateA && (isMiddayOrEveningOvernight || isNightOvernight || isEarlyMorningOvernight || isUniversalCrossDate);
 
           if (isOvernightPair) {
@@ -4337,8 +4599,8 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
               if (idxC <= i + 1) return false;
               const dtC = new Date(pC.punch_time);
               const dateC = pC.raw_payload && pC.raw_payload.includes('-') 
-                ? (pC.raw_payload.split(/[\t\s]+/)[1] || dtC.toISOString().slice(0, 10))
-                : dtC.toISOString().slice(0, 10);
+                ? (pC.raw_payload.split(/[\t\s]+/)[1] || getEgyptDate(dtC))
+                : getEgyptDate(dtC);
               const diffMsBC = dtC.getTime() - dtB.getTime();
               return dateC === dateB && diffMsBC > 2 * 60 * 60 * 1000;
             });
