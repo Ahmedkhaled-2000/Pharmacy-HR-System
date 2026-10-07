@@ -17,7 +17,8 @@ import {
   Receipt,
   Sparkles,
   Phone,
-  MapPin
+  MapPin,
+  AlertTriangle
 } from 'lucide-react';
 import {
   outstockGetBranches,
@@ -26,7 +27,8 @@ import {
   outstockSaveUser,
   outstockChangePassword,
   outstockGetSettings,
-  outstockSaveSettings
+  outstockSaveSettings,
+  outstockPurgeOrders
 } from '../../../utils/outstockApiClient';
 import {
   getActiveShortcuts,
@@ -57,7 +59,8 @@ const SETTINGS_SECTIONS = [
   { id: 'branches', title: 'إدارة وتفعيل الفروع والصيدليات', iconText: '🏢' },
   { id: 'procurement_users', title: 'يوزرات إدارة المشتريات والصلاحيات', iconText: '👥' },
   { id: 'security', title: 'تأمين حساب المالك وكلمة المرور', iconText: '🔑' },
-  { id: 'shortcuts', title: 'تخصيص اختصارات لوحة المفاتيح', iconText: '⌨️' }
+  { id: 'shortcuts', title: 'تخصيص اختصارات لوحة المفاتيح', iconText: '⌨️' },
+  { id: 'danger_zone', title: 'منطقة الخطر وتصفير الطلبات', iconText: '🚨' }
 ];
 
 export default function OwnerSettingsTab({
@@ -132,6 +135,37 @@ export default function OwnerSettingsTab({
   const [newOwnerPassword, setNewOwnerPassword] = useState('');
   const [confirmOwnerPassword, setConfirmOwnerPassword] = useState('');
   const [isSavingPassword, setIsSavingPassword] = useState(false);
+
+  // حالة منطقة الخطر وتصفير الطلبات
+  const [purgeConfirmationText, setPurgeConfirmationText] = useState('');
+  const [isPurging, setIsPurging] = useState(false);
+
+  const handlePurgeOrders = async (e) => {
+    e?.preventDefault();
+    if (purgeConfirmationText !== 'تأكيد تصفير كافة الطلبات') {
+      showToast?.('⚠️ يرجى كتابة عبارة التأكيد المطابقة تماماً: "تأكيد تصفير كافة الطلبات"');
+      return;
+    }
+
+    if (!window.confirm('⚠️ تحذير نهائي: هل أنت متأكد تماماً من رغبتك في مسح كافة طلبات وبنود الأدوية بالنظام وتصفير عداد طلبات العملاء؟ هذا الإجراء لا يمكن التراجع عنه.')) {
+      return;
+    }
+
+    setIsPurging(true);
+    try {
+      const res = await outstockPurgeOrders('تأكيد تصفير كافة الطلبات');
+      if (res?.success) {
+        showToast?.(res?.message || '✅ تم تصفير ومسح كافة طلبات النظام بنجاح مع الحفاظ على العملاء');
+        setPurgeConfirmationText('');
+      } else {
+        showToast?.(res?.error || 'تعذر تصفير الطلبات');
+      }
+    } catch (err) {
+      showToast?.('حدث خطأ في الاتصال أثناء تصفير الطلبات');
+    } finally {
+      setIsPurging(false);
+    }
+  };
 
   const fetchSettingsData = async () => {
     setIsLoading(true);
@@ -1540,6 +1574,152 @@ export default function OwnerSettingsTab({
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── 7. منطقة الخطر وتصفير طلبات النظام (Danger Zone) ── */}
+      {activeSubSection === 'danger_zone' && (
+        <div className="outstock-card" style={{ border: '2px solid #fecaca', background: '#fff' }}>
+          <div
+            className="outstock-card-header"
+            style={{
+              background: 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+              borderBottom: '1px solid #fca5a5',
+              padding: '16px 20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div
+                style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  background: '#dc2626',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#ffffff'
+                }}
+              >
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, color: '#991b1b', fontSize: '16px', fontWeight: '900' }}>
+                  منطقة الخطر وتصفير طلبات النظام 🚨
+                </h3>
+                <small style={{ color: '#b91c1c', fontSize: '12px' }}>
+                  إجراء خاص بالمالك والمشرف العام فقط لمسح وتصفير دورة العمل السابقة
+                </small>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ padding: '24px' }}>
+            <div
+              style={{
+                background: '#fef2f2',
+                border: '1.5px solid #fecaca',
+                borderRadius: '12px',
+                padding: '18px 20px',
+                marginBottom: '24px'
+              }}
+            >
+              <h4 style={{ margin: '0 0 10px', color: '#991b1b', fontSize: '14.5px', fontWeight: '900' }}>
+                ⚠️ ماذا يحدث عند تنفيذ تصفير طلبات النظام؟
+              </h4>
+              <ul style={{ margin: 0, paddingRight: '20px', color: '#7f1d1d', fontSize: '13px', lineHeight: '1.8' }}>
+                <li>
+                  <strong>مسح كافة الطلبات السابقة:</strong> سيتم حذف جميع طلبات النواقص الواردة من الصيدليات (Outstock Orders).
+                </li>
+                <li>
+                  <strong>مسح بنود الأدوية:</strong> سيتم تفريغ كافة بنود الأدوية والمستحضرات المطلوبة (Order Items).
+                </li>
+                <li>
+                  <strong>مسح سجلات التوريد والشكاوى:</strong> سيتم مسح الإيصالات، الشكاوى المصعدة، ومبيعات الفرع المرتبطة بها.
+                </li>
+                <li>
+                  <strong>تصفير عداد طلبات العملاء:</strong> سيتم إعادة تعيين إجمالي عدد الطلبات لكل عميل إلى (0).
+                </li>
+                <li style={{ color: '#065f46', background: '#ecfdf5', padding: '6px 10px', borderRadius: '6px', marginTop: '8px', border: '1px solid #a7f3d0' }}>
+                  🛡️ <strong>حماية بيانات العملاء والمحافظ:</strong> لن يتم حذف أي عميل مسجل (Customer Directory)؛ ستبقى أرقام الهواتف، الأسماء، العناوين، وأرصدة المحافظ الإلكترونية كما هي تماماً بأمان.
+                </li>
+              </ul>
+            </div>
+
+            <div
+              style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '12px',
+                padding: '20px',
+                maxWidth: '600px'
+              }}
+            >
+              <label style={{ display: 'block', fontWeight: '800', color: '#1e293b', fontSize: '13.5px', marginBottom: '8px' }}>
+                لتأكيد التصفير، يرجى كتابة العبارة التالية بالضبط:
+              </label>
+              <div
+                style={{
+                  background: '#fee2e2',
+                  color: '#991b1b',
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  fontWeight: '900',
+                  fontSize: '14px',
+                  textAlign: 'center',
+                  marginBottom: '14px',
+                  border: '1px dashed #f87171',
+                  userSelect: 'all'
+                }}
+              >
+                تأكيد تصفير كافة الطلبات
+              </div>
+
+              <input
+                type="text"
+                value={purgeConfirmationText}
+                onChange={(e) => setPurgeConfirmationText(e.target.value)}
+                placeholder="اكتب العبارة هنا للتأكيد..."
+                className="outstock-form-input"
+                style={{
+                  fontSize: '14px',
+                  textAlign: 'center',
+                  fontWeight: '800',
+                  marginBottom: '16px',
+                  borderColor: purgeConfirmationText === 'تأكيد تصفير كافة الطلبات' ? '#22c55e' : '#cbd5e1'
+                }}
+              />
+
+              <button
+                type="button"
+                disabled={isPurging || purgeConfirmationText !== 'تأكيد تصفير كافة الطلبات'}
+                onClick={handlePurgeOrders}
+                className="outstock-btn"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  fontSize: '14px',
+                  fontWeight: '900',
+                  borderRadius: '10px',
+                  background: purgeConfirmationText === 'تأكيد تصفير كافة الطلبات' ? '#dc2626' : '#cbd5e1',
+                  color: '#ffffff',
+                  border: 'none',
+                  cursor: purgeConfirmationText === 'تأكيد تصفير كافة الطلبات' ? 'pointer' : 'not-allowed',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <Trash2 size={16} />
+                <span>{isPurging ? 'جاري تصفير الطلبات...' : 'تصفير ومسح كافة الطلبات نهائياً 🗑️'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

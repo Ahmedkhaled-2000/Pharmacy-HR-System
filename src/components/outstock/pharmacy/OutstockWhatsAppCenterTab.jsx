@@ -19,7 +19,7 @@ import {
   Info
 } from 'lucide-react';
 import { getResolvedWhatsAppServerUrl } from '../../../utils/systemUrlHelper';
-import { outstockGetOrders, outstockGetCustomers } from '../../../utils/outstockApiClient';
+import { outstockGetOrders, outstockGetCustomers, outstockGetSettings, outstockSaveSettings } from '../../../utils/outstockApiClient';
 import { buildInvoicePdfHtml } from '../../../utils/invoicePdfGenerator';
 
 /**
@@ -58,6 +58,81 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
   const [recentOrders, setRecentOrders] = useState([]);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [attachPdf, setAttachPdf] = useState(true);
+
+  // رقم واتساب إدارة المشتريات المعتمد لإشعارات الطلبات الجديدة
+  const [procurementPhone, setProcurementPhone] = useState('');
+  const [isSavingProcPhone, setIsSavingProcPhone] = useState(false);
+  const [isTestingProcPhone, setIsTestingProcPhone] = useState(false);
+
+  // جلب إعدادات المشتريات المحفوظة
+  useEffect(() => {
+    outstockGetSettings()
+      .then(res => {
+        if (res?.success && res.settings?.procurementWhatsappPhone) {
+          setProcurementPhone(res.settings.procurementWhatsappPhone);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // حفظ رقم واتساب إدارة المشتريات
+  const handleSaveProcurementPhone = async (e) => {
+    if (e) e.preventDefault();
+    const clean = String(procurementPhone || '').replace(/\D/g, '');
+    if (clean && clean.length !== 11) {
+      showToast?.('⚠️ رقم هاتف المشتريات يجب أن يتكون من 11 رقماً (مثال: 01012345678)');
+      return;
+    }
+    setIsSavingProcPhone(true);
+    try {
+      const res = await outstockSaveSettings({ procurementWhatsappPhone: clean });
+      if (res?.success) {
+        showToast?.('✅ تم حفظ رقم واتساب إدارة المشتريات بنجاح. سيتم إرسال إشعار فوري له عند أي طلب جديد!');
+      } else {
+        showToast?.(res?.error || 'تعذر حفظ رقم المشتريات');
+      }
+    } catch (err) {
+      showToast?.('حدث خطأ أثناء حفظ الرقم');
+    } finally {
+      setIsSavingProcPhone(false);
+    }
+  };
+
+  // إرسال رسالة تجريبية لرقم المشتريات
+  const handleTestProcurementPhone = async () => {
+    const clean = String(procurementPhone || '').replace(/\D/g, '');
+    if (!clean || clean.length !== 11) {
+      showToast?.('⚠️ يرجى كتابة وحفظ رقم هاتف صحيح من 11 رقماً أولاً');
+      return;
+    }
+    setIsTestingProcPhone(true);
+    try {
+      const normalized = clean.startsWith('01') ? ('2' + clean) : clean;
+      const testMsg = `🧪 *رسالة اختبار اتصال واتساب لإدارة المشتريات*\n` +
+        `🏢 *المرسل:* صيدلية ${branch?.name || branchId}\n` +
+        `👤 *المحرر:* ${currentPharmacist || 'صيدلي الفرع'}\n` +
+        `✅ الربط الآلي وتنبيهات طلبات النواقص تعمل بنجاح!`;
+
+      const res = await fetch(`${waServerUrl}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: normalized,
+          message: testMsg
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success) {
+        showToast?.('🎉 تم إرسال الرسالة التجريبية إلى رقم إدارة المشتريات بنجاح!');
+      } else {
+        showToast?.(`⚠️ لم يتم التسليم: ${data?.error || 'تأكد من اتصال خادم الواتساب'}`);
+      }
+    } catch (err) {
+      showToast?.('تعذر إرسال الرسالة التجريبية لخادم الواتساب');
+    } finally {
+      setIsTestingProcPhone(false);
+    }
+  };
 
   // عنوان سيرفر الواتساب المعتمد
   const waServerUrl = useMemo(() => getResolvedWhatsAppServerUrl(), []);
@@ -457,6 +532,116 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
             </div>
           </div>
         )}
+      </div>
+
+      {/* ── 1.5 بطاقة إعدادات واتساب إدارة المشتريات للتنبيهات الآلية بالطلبات الجديدة ── */}
+      <div style={{
+        background: '#ffffff',
+        border: '1.5px solid #0d9488',
+        borderRadius: '16px',
+        padding: '18px 20px',
+        boxShadow: '0 4px 14px rgba(13, 148, 136, 0.06)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '10px',
+              background: '#f0fdfa',
+              color: '#0d9488',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <Sparkles size={22} />
+            </div>
+            <div>
+              <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '900', color: '#0f172a' }}>
+                رقم واتساب إدارة المشتريات للتنبيهات التلقائية 📦📲
+              </h4>
+              <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
+                يتم إرسال إشعار فوري وتلقائي عبر الواتساب إلى هذا الرقم فور تسجيل أي طلب عميل جديد بالفرع لإبلاغ إدارة المشتريات بالبدء في توفير الأصناف.
+              </p>
+            </div>
+          </div>
+
+          {procurementPhone && procurementPhone.length === 11 ? (
+            <span style={{
+              background: '#dcfce7',
+              color: '#15803d',
+              border: '1px solid #86efac',
+              padding: '3px 10px',
+              borderRadius: '20px',
+              fontSize: '11.5px',
+              fontWeight: '800',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}>
+              <ShieldCheck size={13} />
+              <span>مُفعّل ومحفوظ بنجاح</span>
+            </span>
+          ) : (
+            <span style={{
+              background: '#fff7ed',
+              color: '#c2410c',
+              border: '1px solid #fed7aa',
+              padding: '3px 10px',
+              borderRadius: '20px',
+              fontSize: '11.5px',
+              fontWeight: '800'
+            }}>
+              ⚠️ غير محدد بعد
+            </span>
+          )}
+        </div>
+
+        <form onSubmit={handleSaveProcurementPhone} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1', minWidth: '240px' }}>
+            <input
+              type="tel"
+              value={procurementPhone}
+              onChange={(e) => setProcurementPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+              placeholder="أدخل رقم هاتف إدارة المشتريات (مثال: 01012345678)..."
+              className="outstock-form-input"
+              dir="ltr"
+              style={{
+                textAlign: 'right',
+                height: '42px',
+                fontWeight: 'bold',
+                borderColor: procurementPhone && procurementPhone.length !== 11 ? '#f87171' : undefined
+              }}
+            />
+            {procurementPhone && procurementPhone.length > 0 && procurementPhone.length < 11 && (
+              <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: '800', marginTop: '4px' }}>
+                ⚠️ رقم الهاتف غير مكتمل (أدخل 11 رقماً - تم إدخال {procurementPhone.length} من 11)
+              </div>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={isSavingProcPhone}
+            className="outstock-btn outstock-btn-primary"
+            style={{ height: '42px', padding: '0 18px', fontSize: '13px', fontWeight: '800' }}
+          >
+            <Check size={16} />
+            <span>{isSavingProcPhone ? 'جاري الحفظ...' : 'حفظ رقم المشتريات 💾'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleTestProcurementPhone}
+            disabled={isTestingProcPhone || !procurementPhone || procurementPhone.length !== 11}
+            className="outstock-btn outstock-btn-secondary"
+            style={{ height: '42px', padding: '0 14px', fontSize: '12.5px', fontWeight: '700' }}
+            title="إرسال رسالة تجريبية فورية للرقم للتحقق من الاتصال"
+          >
+            <Send size={14} />
+            <span>{isTestingProcPhone ? 'جاري الإرسال...' : 'إرسال رسالة تجريبية 🧪'}</span>
+          </button>
+        </form>
       </div>
 
       {/* ── 2. قسم إرسال الرسائل التلقائية لعملاء الصيدلية ── */}

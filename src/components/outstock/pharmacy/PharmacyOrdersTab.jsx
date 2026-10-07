@@ -22,9 +22,19 @@ import {
   Sparkles,
   Archive,
   AlertTriangle,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Edit,
+  Trash2,
+  DollarSign
 } from 'lucide-react';
-import { outstockGetOrders, outstockDeliverOrder, outstockMarkWhatsappNotified } from '../../../utils/outstockApiClient';
+import {
+  outstockGetOrders,
+  outstockDeliverOrder,
+  outstockMarkWhatsappNotified,
+  outstockDeleteOrder,
+  outstockDeleteOrderItem,
+  outstockUpdateOrderDeposit
+} from '../../../utils/outstockApiClient';
 import NewCustomerOrderModal from './NewCustomerOrderModal';
 import DualCashierReceiptModal from './DualCashierReceiptModal';
 import OrderDeliverySettlementModal from './OrderDeliverySettlementModal';
@@ -81,6 +91,12 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
   // 🔒 حالة التحقق من كود الموظف المستلم لإنشاء الطلب
   const [isReceiverAuthOpen, setIsReceiverAuthOpen] = useState(false);
   const [authenticatedReceiver, setAuthenticatedReceiver] = useState(null);
+
+  // ✏️ حالة تعديل الطلب وحذف الأصناف والعربون
+  const [editingOrder, setEditingOrder] = useState(null);
+  const [depositModalOrder, setDepositModalOrder] = useState(null);
+  const [newDepositAmount, setNewDepositAmount] = useState('');
+  const [isSavingDeposit, setIsSavingDeposit] = useState(false);
 
   // 🔒 حالة التحقق من كود الموظف المسلّم لتسليم الطلب
   const [deliveryAuthOrder, setDeliveryAuthOrder] = useState(null);
@@ -258,6 +274,73 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     window.open(url, '_blank');
 
     outstockMarkWhatsappNotified(order.id).catch(() => {});
+  };
+
+  // فتح نافذة تعديل العربون
+  const handleOpenDepositModal = (order) => {
+    setDepositModalOrder(order);
+    setNewDepositAmount(String(order.paid_amount || order.paidAmount || 0));
+  };
+
+  // حفظ العربون الجديد
+  const handleSaveDepositAmount = async () => {
+    if (!depositModalOrder) return;
+    const depVal = parseFloat(newDepositAmount);
+    if (isNaN(depVal) || depVal < 0) {
+      showToast?.('يرجى إدخال مبلغ عربون صالح');
+      return;
+    }
+    setIsSavingDeposit(true);
+    try {
+      const res = await outstockUpdateOrderDeposit(depositModalOrder.id, depVal);
+      if (res?.success) {
+        showToast?.('✅ تم تحديث مبلغ العربون بنجاح');
+        setDepositModalOrder(null);
+        fetchOrders();
+      } else {
+        showToast?.(res?.error || 'تعذر تحديث مبلغ العربون');
+      }
+    } catch {
+      showToast?.('تعذر تحديث مبلغ العربون');
+    } finally {
+      setIsSavingDeposit(false);
+    }
+  };
+
+  // حذف الطلب بالكامل قبل رد المشتريات
+  const handleDeleteOrder = async (orderId, orderNum) => {
+    if (!window.confirm(`هل أنت متأكد من حذف الطلب رقم (${orderNum}) بالكامل؟ لا يمكن التراجع عن هذا الإجراء.`)) {
+      return;
+    }
+    try {
+      const res = await outstockDeleteOrder(orderId);
+      if (res?.success) {
+        showToast?.('✅ تم حذف الطلب بنجاح');
+        fetchOrders();
+      } else {
+        showToast?.(res?.error || 'تعذر حذف الطلب');
+      }
+    } catch {
+      showToast?.('تعذر حذف الطلب، تحقق من الاتصال');
+    }
+  };
+
+  // حذف صنف واحد من الطلب قبل رد المشتريات
+  const handleDeleteOrderItem = async (orderId, itemId, itemName) => {
+    if (!window.confirm(`هل أنت متأكد من حذف الصنف "${itemName}" من هذا الطلب؟`)) {
+      return;
+    }
+    try {
+      const res = await outstockDeleteOrderItem(orderId, itemId);
+      if (res?.success) {
+        showToast?.('✅ تم حذف الصنف بنجاح');
+        fetchOrders();
+      } else {
+        showToast?.(res?.error || 'تعذر حذف الصنف');
+      }
+    } catch {
+      showToast?.('تعذر حذف الصنف');
+    }
   };
 
   const formatDateTime = (isoString) => {
@@ -472,31 +555,6 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
             <span>📋 الطلبات النشطة والمعلقة</span>
             <span style={{ background: '#0d9488', color: '#ffffff', fontSize: '11px', padding: '1px 7px', borderRadius: '10px' }}>
               {activeStats.total}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveInnerTab('transferred')}
-            style={{
-              padding: '8px 18px',
-              borderRadius: '10px',
-              fontSize: '13.5px',
-              fontWeight: '900',
-              cursor: 'pointer',
-              border: activeInnerTab === 'transferred' ? '2px solid #8b5cf6' : '1px solid #cbd5e1',
-              background: activeInnerTab === 'transferred' ? '#f5f3ff' : '#ffffff',
-              color: activeInnerTab === 'transferred' ? '#6d28d9' : '#64748b',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: activeInnerTab === 'transferred' ? '0 2px 6px rgba(139, 92, 246, 0.2)' : 'none'
-            }}
-          >
-            <ArrowRightLeft size={16} color={activeInnerTab === 'transferred' ? '#8b5cf6' : '#64748b'} />
-            <span>طلبات محولة من وإلى 🔄</span>
-            <span style={{ background: '#8b5cf6', color: '#ffffff', fontSize: '11px', padding: '1px 7px', borderRadius: '10px' }}>
-              {transferredStats.total}
             </span>
           </button>
 
@@ -1012,6 +1070,28 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                               ) : (
                                 <span style={{ color: '#d97706', fontSize: '11px' }}>⏳ قيد الشراء</span>
                               )}
+
+                              {!isReplied && activeItems.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteOrderItem(order.id, item.id || idx, item.medicationName || item.medication_name)}
+                                  style={{
+                                    background: '#fee2e2',
+                                    border: '1px solid #fecaca',
+                                    borderRadius: '5px',
+                                    color: '#dc2626',
+                                    cursor: 'pointer',
+                                    padding: '2px 5px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '2px',
+                                    fontSize: '11px'
+                                  }}
+                                  title="حذف هذا الصنف من الطلب قبل رد المشتريات"
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              )}
                             </div>
                           );
                         })}
@@ -1114,6 +1194,77 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                         </button>
 
                         <div className="outstock-order-sub-actions">
+                          {/* تعديل وحذف الطلب قبل رد المشتريات */}
+                          {!isReplied && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setEditingOrder(order)}
+                                className="outstock-btn"
+                                style={{
+                                  padding: '7px 11px',
+                                  fontSize: '12px',
+                                  fontWeight: '800',
+                                  background: '#eff6ff',
+                                  color: '#1d4ed8',
+                                  border: '1px solid #bfdbfe',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                                title="تعديل بيانات وأصناف الطلب بالكامل قبل رد المشتريات"
+                              >
+                                <Edit size={14} />
+                                <span>تعديل الطلب ✏️</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteOrder(order.id, order.order_number || order.orderNumber)}
+                                className="outstock-btn"
+                                style={{
+                                  padding: '7px 11px',
+                                  fontSize: '12px',
+                                  fontWeight: '800',
+                                  background: '#fef2f2',
+                                  color: '#b91c1c',
+                                  border: '1px solid #fecaca',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                                title="حذف الطلب بالكامل قبل رد المشتريات"
+                              >
+                                <Trash2 size={14} />
+                                <span>حذف الطلب 🗑️</span>
+                              </button>
+                            </>
+                          )}
+
+                          {/* تعديل العربون فقط بعد رد المشتريات */}
+                          {isReplied && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenDepositModal(order)}
+                              className="outstock-btn"
+                              style={{
+                                padding: '7px 11px',
+                                fontSize: '12px',
+                                fontWeight: '800',
+                                background: '#f0fdf4',
+                                color: '#15803d',
+                                border: '1px solid #bbf7d0',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                              title="تعديل مبلغ العربون / المدفوع بعد رد المشتريات"
+                            >
+                              <DollarSign size={14} />
+                              <span>تعديل العربون 💵</span>
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             onClick={() => setComplaintOrder(order)}
@@ -1169,357 +1320,6 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                           </button>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      ) : activeInnerTab === 'transferred' ? (
-        /* قسم طلبات محولة من وإلى */
-        <div className="outstock-card">
-          <div className="outstock-card-header">
-            <h3 className="outstock-card-title">
-              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <ArrowRightLeft size={18} color="#6d28d9" />
-                <span>الطلبات المحولة بين الفروع (استلام من فرع آخر)</span>
-              </span>
-              <span style={{ fontSize: '13px', color: '#6d28d9', fontWeight: '800' }}>
-                ({filteredTransferredOrders.length} طلب محوّل)
-              </span>
-            </h3>
-          </div>
-
-          {isTransferredLoading ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
-              <RefreshCw size={26} className="animate-spin" style={{ margin: '0 auto 10px auto', color: '#8b5cf6' }} />
-              <div>جاري تحميل الطلبات المحولة بين الفروع...</div>
-            </div>
-          ) : filteredTransferredOrders.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '48px 20px', color: '#64748b' }}>
-              <ArrowRightLeft size={42} color="#c4b5fd" style={{ margin: '0 auto 10px auto' }} />
-              <h4 style={{ margin: '0 0 6px', color: '#1e293b', fontSize: '16px', fontWeight: '800' }}>
-                لا توجد طلبات محولة تطابق هذا الفلتر
-              </h4>
-              <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
-                {searchQuery ? 'لم يتم العثور على طلبات محولة تطابق مدخلات البحث' : 'عند تسجيل طلب مع اختيار استلام من فرع آخر، سيظهر الطلب هنا تلقائياً لكلا الفرعين'}
-              </p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {filteredTransferredOrders.map((order) => {
-                const itemsList = order.items || [];
-                const activeItems = itemsList.filter((i) => !i.prunedFromBill && !i.pruned_from_bill);
-
-                const isTarget = String(order.delivery_target_branch_id) === String(branchId) ||
-                  (order.delivery_target_branch && branch?.name && order.delivery_target_branch === branch.name);
-                const isSource = String(order.branch_id) === String(branchId);
-                const isIncoming = isTarget && !isSource;
-                const isDelivered = order.status === 'delivered';
-
-                const allAvailable = activeItems.length > 0 && activeItems.every((i) => i.itemStatus === 'available_by_procurement' || i.status === 'available');
-                const isReplied = Boolean(order.procurement_replied_at || activeItems.some((i) => i.status === 'available' || i.status === 'unavailable' || i.itemStatus === 'available_by_procurement'));
-
-                const totalAmount = parseFloat(order.total_amount || order.totalAmount || 0);
-                const advancePaid = parseFloat(order.paid_amount || order.paidAmount || order.advance_payment || order.advancePayment || 0);
-                const remaining = parseFloat(order.remaining_amount || order.remainingAmount || 0);
-
-                return (
-                  <div
-                    key={order.id}
-                    style={{
-                      background: '#ffffff',
-                      border: isIncoming ? '2px solid #8b5cf6' : '1.5px solid #fed7aa',
-                      borderRadius: '16px',
-                      padding: '16px 20px',
-                      boxShadow: isIncoming ? '0 3px 10px rgba(139, 92, 246, 0.08)' : '0 2px 6px rgba(0,0,0,0.02)'
-                    }}
-                  >
-                    {/* رأس بطاقة الطلب المحول */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                        <span
-                          style={{
-                            background: isIncoming ? '#f5f3ff' : '#fffbeb',
-                            color: isIncoming ? '#6d28d9' : '#b45309',
-                            border: isIncoming ? '1px solid #ddd6fe' : '1px solid #fde68a',
-                            padding: '4px 10px',
-                            borderRadius: '8px',
-                            fontWeight: '900',
-                            fontSize: '13px'
-                          }}
-                        >
-                          {order.order_number || order.orderNumber}
-                        </span>
-
-                        <strong style={{ fontSize: '16px', color: '#0f172a' }}>
-                          {order.customer_name || order.customerName}
-                        </strong>
-
-                        <span style={{ fontSize: '13px', color: '#0284c7', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <Phone size={13} />
-                          <span>{order.customer_phone || order.customerPhone}</span>
-                        </span>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        {/* بادج جهة التحويل */}
-                        {isIncoming ? (
-                          <span
-                            style={{
-                              background: '#ede9fe',
-                              color: '#6d28d9',
-                              border: '1.5px solid #c4b5fd',
-                              padding: '5px 12px',
-                              borderRadius: '8px',
-                              fontWeight: '900',
-                              fontSize: '12.5px',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '6px'
-                            }}
-                          >
-                            <span>📥 طلب وارد للاستلام بفرعنا</span>
-                            <span style={{ fontSize: '11px', color: '#4c1d95', background: '#ddd6fe', padding: '1px 6px', borderRadius: '4px' }}>
-                              محول من: {order.branch_name || order.branchName || 'فرع آخر'}
-                            </span>
-                          </span>
-                        ) : (
-                          <span
-                            style={{
-                              background: '#fff7ed',
-                              color: '#c2410c',
-                              border: '1.5px solid #fed7aa',
-                              padding: '5px 12px',
-                              borderRadius: '8px',
-                              fontWeight: '900',
-                              fontSize: '12.5px',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '6px'
-                            }}
-                          >
-                            <span>📤 صادر للاستلام بفرع:</span>
-                            <span style={{ fontSize: '11.5px', color: '#9a3412', background: '#ffedd5', padding: '1px 6px', borderRadius: '4px' }}>
-                              {order.delivery_target_branch || order.target_branch_name || 'فرع محدد'}
-                            </span>
-                          </span>
-                        )}
-
-                        {/* حالة التسليم */}
-                        {isDelivered ? (
-                          <span className="outstock-badge ready">
-                            <CheckCircle2 size={13} />
-                            <span>تم التسليم بنجاح ✅</span>
-                          </span>
-                        ) : allAvailable ? (
-                          <span className="outstock-badge ready">
-                            <CheckCircle size={13} />
-                            <span>متوفر - جاهز للتسليم 🟢</span>
-                          </span>
-                        ) : isReplied ? (
-                          <span className="outstock-badge" style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd' }}>
-                            <MessageSquare size={13} />
-                            <span>تم رد المشتريات 💬</span>
-                          </span>
-                        ) : (
-                          <span className="outstock-badge pending">
-                            <Clock size={13} />
-                            <span>قيد المتابعة ⏳</span>
-                          </span>
-                        )}
-
-                        <span
-                          style={{
-                            background: '#f8fafc',
-                            border: '1px dashed #cbd5e1',
-                            borderRadius: '6px',
-                            padding: '3px 8px',
-                            fontSize: '11px',
-                            fontWeight: 'bold',
-                            color: '#64748b'
-                          }}
-                        >
-                          <Barcode size={12} style={{ display: 'inline' }} /> {order.barcode_data || order.barcodeData}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* سطر المعلومات والماليات والتوقيت */}
-                    <div
-                      style={{
-                        background: '#f8fafc',
-                        borderRadius: '10px',
-                        padding: '10px 14px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        flexWrap: 'wrap',
-                        gap: '12px',
-                        fontSize: '12.5px',
-                        marginBottom: '12px',
-                        border: '1px solid #f1f5f9'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', color: '#475569' }}>
-                        <span>
-                          <Calendar size={13} style={{ display: 'inline', verticalAlign: 'middle', marginLeft: '3px' }} />
-                          تاريخ الطلب: <strong>{formatDateTime(order.created_at)}</strong>
-                        </span>
-
-                        {order.pharmacist_name && (
-                          <span>
-                            الموظف المسجل: <strong>{order.pharmacist_name}</strong>
-                          </span>
-                        )}
-
-                        {order.delivered_at && (
-                          <span style={{ color: '#15803d', fontWeight: '800' }}>
-                            <CheckCircle2 size={13} style={{ display: 'inline', verticalAlign: 'middle', marginLeft: '3px' }} />
-                            تم التسليم في: {formatDateTime(order.delivered_at)}
-                            {order.delivered_by && ` (${order.delivered_by})`}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* ملخص الحساب المالي للمحول */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', fontSize: '13px' }}>
-                        <span style={{ color: '#64748b' }}>
-                          الإجمالي: <strong style={{ color: '#0f172a' }}>{totalAmount.toFixed(2)} ج.م</strong>
-                        </span>
-                        <span style={{ color: '#0f766e' }}>
-                          العربون المدفوع: <strong>{advancePaid.toFixed(2)} ج.م</strong>
-                        </span>
-                        <span
-                          style={{
-                            background: isDelivered ? '#dcfce7' : '#fee2e2',
-                            color: isDelivered ? '#15803d' : '#b91c1c',
-                            padding: '3px 8px',
-                            borderRadius: '6px',
-                            fontWeight: '900',
-                            border: isDelivered ? '1px solid #bbf7d0' : '1px solid #fecaca'
-                          }}
-                        >
-                          {isDelivered ? 'المسدد عند الاستلام:' : 'المتبقي للتحصيل عند الاستلام:'} {remaining.toFixed(2)} ج.م
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* قائمة الأصناف المطلوبة */}
-                    <div style={{ marginBottom: '12px' }}>
-                      <div style={{ fontSize: '12px', fontWeight: '800', color: '#475569', marginBottom: '6px' }}>
-                        الأصناف الدوائية بالطلب ({activeItems.length}):
-                      </div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                        {activeItems.map((it, idx) => (
-                          <div
-                            key={idx}
-                            style={{
-                              background: it.status === 'available' || it.itemStatus === 'available_by_procurement' ? '#f0fdf4' : '#f8fafc',
-                              border: it.status === 'available' || it.itemStatus === 'available_by_procurement' ? '1px solid #bbf7d0' : '1px solid #e2e8f0',
-                              borderRadius: '8px',
-                              padding: '5px 10px',
-                              fontSize: '12px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px'
-                            }}
-                          >
-                            <span style={{ fontSize: '10px', background: it.item_type === 'cosmetics' ? '#fce7f3' : '#e0f2fe', color: it.item_type === 'cosmetics' ? '#be185d' : '#0369a1', padding: '1px 5px', borderRadius: '4px', fontWeight: '800' }}>
-                              {it.item_type === 'cosmetics' ? '💄 مستحضر' : '💊 دواء'}
-                            </span>
-                            <strong>{it.medicationName || it.medication_name}</strong>
-                            <span style={{ color: '#64748b' }}>({it.quantity} علبة)</span>
-
-                            {it.status === 'available' || it.itemStatus === 'available_by_procurement' ? (
-                              <span style={{ color: '#15803d', fontWeight: '800', fontSize: '11px' }}>✓ متوفر</span>
-                            ) : it.status === 'unavailable' ? (
-                              <span style={{ color: '#ef4444', fontWeight: '800', fontSize: '11px' }}>✗ نواقص سوق</span>
-                            ) : (
-                              <span style={{ color: '#d97706', fontSize: '11px' }}>⏳ قيد البحث</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* أزرار الإجراءات */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', paddingTop: '10px', borderTop: '1px solid #f1f5f9' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        {/* إرسال واتساب للعميل */}
-                        <button
-                          type="button"
-                          onClick={() => handleSendWhatsapp(order)}
-                          className="outstock-btn outstock-btn-secondary"
-                          style={{ padding: '6px 12px', fontSize: '12px' }}
-                          title="إرسال رسالة واتساب للعميل بأن طلبه جاهز للاستلام"
-                        >
-                          <MessageSquare size={13} color="#25D366" />
-                          <span>إشعار واتساب 💬</span>
-                        </button>
-
-                        {/* اتصال هاتفي */}
-                        <a
-                          href={`tel:${order.customer_phone || order.customerPhone}`}
-                          className="outstock-btn outstock-btn-secondary"
-                          style={{ padding: '6px 12px', fontSize: '12px', textDecoration: 'none' }}
-                        >
-                          <Phone size={13} />
-                          <span>اتصال بالعميل</span>
-                        </a>
-
-                        {/* طباعة إيصال كاشير */}
-                        <button
-                          type="button"
-                          onClick={() => setPrintingOrder(order)}
-                          className="outstock-btn outstock-btn-secondary"
-                          style={{ padding: '6px 12px', fontSize: '12px' }}
-                          title="طباعة إيصال الاستلام الكاشير"
-                        >
-                          <Printer size={13} />
-                          <span>طباعة إيصال</span>
-                        </button>
-
-                        {/* تصعيد شكوى للمالك إذا لزم الأمر */}
-                        <button
-                          type="button"
-                          onClick={() => setComplaintOrder(order)}
-                          className="outstock-btn outstock-btn-secondary"
-                          style={{ padding: '6px 12px', fontSize: '12px', color: '#b91c1c' }}
-                          title="تصعيد شكوى للمالك مباشرة"
-                        >
-                          <AlertTriangle size={13} color="#b91c1c" />
-                          <span>شكوى للمالك ⚠️</span>
-                        </button>
-                      </div>
-
-                      {/* زر تسليم الطلب للعميل واستلام المتبقي */}
-                      {!isDelivered ? (
-                        <button
-                          type="button"
-                          className="outstock-btn outstock-btn-primary"
-                          onClick={() => handleDeliver(order)}
-                          style={{
-                            padding: '8px 18px',
-                            fontWeight: '900',
-                            fontSize: '13px',
-                            background: isIncoming ? 'linear-gradient(135deg, #7c3aed, #6d28d9)' : undefined
-                          }}
-                        >
-                          <CheckCircle2 size={16} />
-                          <span>
-                            {isIncoming
-                              ? `تسليم للعميل واستلام المتبقي (${remaining.toFixed(2)} ج.م) 📦`
-                              : `تسليم للعميل بالفرع 📦`}
-                          </span>
-                        </button>
-                      ) : (
-                        <span style={{ color: '#15803d', fontWeight: '800', fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          <CheckCircle2 size={16} />
-                          <span>تم تسليم هذا الطلب للعميل بالكامل ✅</span>
-                        </span>
-                      )}
                     </div>
                   </div>
                 );
@@ -1730,10 +1530,77 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
             setAuthenticatedReceiver(null);
             showToast?.('✅ تم تسجيل الطلب وإرساله بنجاح');
             fetchOrders();
-            fetchTransferredOrders();
             setPrintingOrder(newOrder);
           }}
         />
+      )}
+
+      {/* نافذة تعديل طلب قائم قبل رد المشتريات */}
+      {editingOrder && (
+        <NewCustomerOrderModal
+          branchId={branchId}
+          defaultPharmacist={currentPharmacist}
+          editingOrder={editingOrder}
+          onClose={() => setEditingOrder(null)}
+          onOrderUpdated={(updatedOrder) => {
+            setEditingOrder(null);
+            showToast?.('✅ تم تحديث بيانات الطلب بنجاح');
+            fetchOrders();
+          }}
+        />
+      )}
+
+      {/* نافذة تعديل مبلغ العربون / المدفوع بعد رد المشتريات */}
+      {depositModalOrder && (
+        <div
+          className="outstock-modal-backdrop"
+          style={{ zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setDepositModalOrder(null)}
+        >
+          <div
+            style={{ background: '#ffffff', borderRadius: '16px', padding: '24px', maxWidth: '420px', width: '90%', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 12px', fontSize: '16px', fontWeight: '900', color: '#1e293b' }}>
+              💵 تعديل مبلغ العربون / المدفوع
+            </h3>
+            <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#64748b' }}>
+              طلب رقم: <strong>{depositModalOrder.order_number || depositModalOrder.orderNumber}</strong> لعميل: <strong>{depositModalOrder.customer_name || depositModalOrder.customerName}</strong>
+            </p>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ fontSize: '13px', fontWeight: '700', color: '#334155', display: 'block', marginBottom: '6px' }}>
+                مبلغ العربون الجديد (ج.م) *
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={newDepositAmount}
+                onChange={(e) => setNewDepositAmount(e.target.value)}
+                className="outstock-form-input"
+                style={{ fontSize: '16px', fontWeight: 'bold', textAlign: 'center' }}
+                autoFocus
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setDepositModalOrder(null)}
+                className="outstock-btn outstock-btn-secondary"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveDepositAmount}
+                disabled={isSavingDeposit}
+                className="outstock-btn outstock-btn-primary"
+              >
+                {isSavingDeposit ? 'جاري الحفظ...' : 'حفظ العربون الجديد'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* نافذة طباعة إيصال الكاشير الحراري */}

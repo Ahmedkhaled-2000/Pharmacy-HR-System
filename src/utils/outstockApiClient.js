@@ -991,3 +991,59 @@ export async function outstockMarkRestockedContacted(deficiencyId, payload = {})
   });
 }
 
+// ── 16. تعديل وحذف الطلبات والبنود ──────────────────────────────────────────
+export async function outstockUpdateOrder(orderId, payload) {
+  return outstockRequest(`orders/${encodeURIComponent(orderId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function outstockUpdateOrderDeposit(orderId, payload) {
+  return outstockRequest(`orders/${encodeURIComponent(orderId)}/deposit`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function outstockDeleteOrder(orderId) {
+  return outstockRequest(`orders/${encodeURIComponent(orderId)}`, {
+    method: 'DELETE'
+  });
+}
+
+export async function outstockDeleteOrderItem(orderId, itemId) {
+  return outstockRequest(`orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(itemId)}`, {
+    method: 'DELETE'
+  });
+}
+
+// ── 17. تصعيد شكوى استعلام صنف ──────────────────────────────────────────────
+export async function outstockSendInquiryComplaint(inquiryId, payload) {
+  return outstockRequest(`inquiries/${encodeURIComponent(inquiryId)}/complaint`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+// ── 18. محفظة العميل الإلكترونية ─────────────────────────────────────────────
+export async function outstockAdjustCustomerWallet(customerId, payload) {
+  return outstockRequest(`customers/${encodeURIComponent(customerId)}/wallet/adjust`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function outstockGetCustomerWalletTransactions(customerId) {
+  return outstockRequest(`customers/${encodeURIComponent(customerId)}/wallet/transactions`);
+}
+
+// ── 19. تصفير ومسح طلبات النظام ─────────────────────────────────────────────
+export async function outstockPurgeOrders(confirmationPhrase) {
+  return outstockRequest('admin/purge-orders', {
+    method: 'POST',
+    body: JSON.stringify({ confirmationPhrase })
+  });
+}
+
+

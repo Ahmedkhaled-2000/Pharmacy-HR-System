@@ -21,6 +21,7 @@ import {
 import { outstockGetProcurementAggregated, outstockProcurementItemAction, listenToOutstockLocalMessages } from '../../../utils/outstockApiClient';
 import { exportProcurementOrdersExcel } from '../../../utils/outstockExcelExporter';
 import OutstockConfirmModal from '../common/OutstockConfirmModal';
+import CosmeticsProductModal from '../common/CosmeticsProductModal';
 import { getSocket } from '../../../utils/socketClient';
 
 /**
@@ -45,6 +46,7 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
   const [isProcessing, setIsProcessing] = useState(false);
   const [previewOrderImageUrl, setPreviewOrderImageUrl] = useState(null);
   const [previewOrderImageTitle, setPreviewOrderImageTitle] = useState('');
+  const [selectedCosmeticsItem, setSelectedCosmeticsItem] = useState(null);
 
   // قرارات الشراء المعلقة قبل الإرسال (Staged Decisions)
   // Map of `${branchId}_${medicationName}_${unitType}` -> 'available' | 'unavailable'
@@ -627,9 +629,26 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
                             {item.medication_name}
                           </div>
                           {item.item_type === 'cosmetics' ? (
-                            <span style={{ fontSize: '11px', background: '#fce7f3', color: '#be185d', padding: '2px 7px', borderRadius: '6px', fontWeight: '800' }}>
-                              💄 مستحضرات
-                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCosmeticsItem(item)}
+                              style={{
+                                fontSize: '11px',
+                                background: '#fce7f3',
+                                color: '#be185d',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                fontWeight: '800',
+                                border: '1px solid #fbcfe8',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                              title="عرض وتعديل مواصفات مستحضر التجميل، الماركة، وطريقة الاستخدام 💄"
+                            >
+                              <span>💄 بطاقة المستحضر</span>
+                            </button>
                           ) : (
                             <span style={{ fontSize: '11px', background: '#e0f2fe', color: '#0369a1', padding: '2px 7px', borderRadius: '6px', fontWeight: '800' }}>
                               💊 دواء
@@ -855,6 +874,16 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
             />
           </div>
         </div>
+      )}
+
+      {/* ── نافذة بطاقة ومواصفات مستحضر التجميل الفاخرة ── */}
+      {selectedCosmeticsItem && (
+        <CosmeticsProductModal
+          isOpen={Boolean(selectedCosmeticsItem)}
+          item={selectedCosmeticsItem}
+          onClose={() => setSelectedCosmeticsItem(null)}
+          showToast={showToast}
+        />
       )}
     </div>
   );

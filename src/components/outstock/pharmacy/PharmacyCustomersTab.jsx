@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Phone, MapPin, Calendar, Clock, Edit2, History, X, User, CheckCircle, Trash2, AlertTriangle, Building2 } from 'lucide-react';
+import { Search, Plus, Phone, MapPin, Calendar, Clock, Edit2, History, X, User, CheckCircle, Trash2, AlertTriangle, Building2, Wallet } from 'lucide-react';
 import { outstockGetCustomers, outstockSaveCustomer, outstockGetCustomerHistory, outstockDeleteCustomer, outstockGetBranches } from '../../../utils/outstockApiClient';
+import CustomerWalletModal from '../common/CustomerWalletModal';
 
 /**
  * PharmacyCustomersTab.jsx
@@ -53,6 +54,9 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
   const [historyCustomer, setHistoryCustomer] = useState(null);
   const [customerOrders, setCustomerOrders] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  // نافذة محفظة العميل الإلكترونية
+  const [walletCustomer, setWalletCustomer] = useState(null);
 
   // جلب العملاء عبر كافة الفروع ومزامنة الفروع
   const fetchCustomers = async () => {
@@ -280,6 +284,7 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                 <tr>
                   <th>كود العميل</th>
                   <th>اسم العميل</th>
+                  <th>رصيد المحفظة</th>
                   <th>فرع التسجيل</th>
                   <th>رقم الواتساب</th>
                   <th>الهاتف الأرضي</th>
@@ -300,6 +305,25 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                     </td>
                     <td>
                       <strong style={{ color: '#0f172a', fontSize: '13.5px' }}>{cust.full_name}</strong>
+                    </td>
+                    <td>
+                      <span
+                        style={{
+                          background: Number(cust.wallet_balance || 0) > 0 ? '#ecfdf5' : '#f8fafc',
+                          color: Number(cust.wallet_balance || 0) > 0 ? '#059669' : '#64748b',
+                          border: `1px solid ${Number(cust.wallet_balance || 0) > 0 ? '#a7f3d0' : '#e2e8f0'}`,
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                      >
+                        <Wallet size={12} />
+                        {Number(cust.wallet_balance || 0).toFixed(2)} ج.م
+                      </span>
                     </td>
                     <td>
                       <span style={{
@@ -367,6 +391,27 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '5px' }}>
+                        <button
+                          type="button"
+                          className="outstock-btn"
+                          style={{
+                            padding: '5px 8px',
+                            fontSize: '11.5px',
+                            background: '#ecfdf5',
+                            color: '#065f46',
+                            border: '1px solid #a7f3d0',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                          onClick={() => setWalletCustomer(cust)}
+                          title="إدارة وشحن محفظة العميل"
+                        >
+                          <Wallet size={12} />
+                          <span>المحفظة</span>
+                        </button>
+
                         <button
                           type="button"
                           className="outstock-btn outstock-btn-secondary"
@@ -561,6 +606,28 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                 <div>كود العميل: <strong>{historyCustomer.customer_code}</strong></div>
                 <div>الواتساب: <strong>{historyCustomer.whatsapp_phone}</strong></div>
                 <div>العنوان: <span>{historyCustomer.address || 'غير محدد'}</span></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>رصيد المحفظة: <strong style={{ color: '#059669' }}>{Number(historyCustomer.wallet_balance || 0).toFixed(2)} ج.م</strong></span>
+                  <button
+                    type="button"
+                    className="outstock-btn"
+                    style={{
+                      padding: '3px 8px',
+                      fontSize: '11px',
+                      background: '#ecfdf5',
+                      color: '#065f46',
+                      border: '1px solid #a7f3d0',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                    onClick={() => setWalletCustomer(historyCustomer)}
+                  >
+                    <Wallet size={11} />
+                    <span>شحن / تسوية المحفظة</span>
+                  </button>
+                </div>
               </div>
 
               {isLoadingHistory ? (
@@ -713,6 +780,22 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── نافذة إدارة وشحن محفظة العميل ── */}
+      {walletCustomer && (
+        <CustomerWalletModal
+          customer={walletCustomer}
+          isOpen={Boolean(walletCustomer)}
+          onClose={() => setWalletCustomer(null)}
+          onBalanceUpdated={(custId, newBal) => {
+            setCustomers(prev => prev.map(c => c.id === custId ? { ...c, wallet_balance: newBal } : c));
+            if (historyCustomer && historyCustomer.id === custId) {
+              setHistoryCustomer(prev => ({ ...prev, wallet_balance: newBal }));
+            }
+          }}
+          showToast={showToast}
+        />
       )}
     </div>
   );

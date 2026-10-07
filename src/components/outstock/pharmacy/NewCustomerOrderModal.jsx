@@ -38,6 +38,7 @@ import {
 import {
   outstockGetCustomers,
   outstockCreateOrder,
+  outstockUpdateOrder,
   outstockGetEmployees,
   outstockGetBranches,
   outstockGetBranchPermissions,
@@ -70,16 +71,16 @@ const DELIVERY_ROLE_REGEX = /(طيار|دليفري|توصيل|سائق|مندو
 
 /**
  * NewCustomerOrderModal.jsx
- * نافذة تسجيل طلب عميل جديد مع:
+ * نافذة تسجيل / تعديل طلب عميل جديد مع:
  * - تصميم فسيح وعصري (880px)
  * - كود الموظف المستلم مستور مثل الباسورد ومثبت في رأس الطلب 🔒
  * - تصنيف الطلب: دوائي / مستحضرات تجميل
- * - إمكانية رفع صورة للدواء أو الروشتة مع معاينة فورية 📷
+ * - إرفاق صورة ولينك لكل صنف على حدة 📷
  * - إلغاء التعامل بالشريط: الوحدة هي العلبة كاملة فقط 📦
  * - السعر التقديري (من ... إلى ... ج.م) دون حساب متوسط حسابي رياضي
  * - طرق دفع متعددة ومقسمة (كاش، فيزا، محفظة إلكترونية/إنستاباي)
- * - تحديد المنطقة / الحي من إعدادات المالك
- * - تحديد الصيدلي المسؤول من موظفي الفرع باستثناء عمال الدليفري
+ * - تحديد المنطقة / الحي إجبارياً بدون اختيار افتراضي
+ * - قصر رقم هاتف العميل على 11 رقماً حصراً وتنبيه فوري عند النقصان
  */
 export default function NewCustomerOrderModal({
   branchId,
@@ -87,8 +88,10 @@ export default function NewCustomerOrderModal({
   defaultPharmacist = '',
   orderReceiver = null, // { code: string, name: string }
   initialCustomerPhone = '',
+  editingOrder = null,
   onClose,
   onOrderCreated,
+  onOrderUpdated,
   onSuccess,
   showToast,
   availableBranches: propBranches = []
@@ -96,17 +99,29 @@ export default function NewCustomerOrderModal({
   // ── 0. كود الموظف المستلم ──
 
   // ── 1. حالة العميل ──
-  const [searchPhone, setSearchPhone] = useState(initialCustomerPhone || '');
+  const [searchPhone, setSearchPhone] = useState(
+    editingOrder?.customer_phone || editingOrder?.customerPhone || initialCustomerPhone || ''
+  );
   const [isSearchingCustomer, setIsSearchingCustomer] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [isNewCustomer, setIsNewCustomer] = useState(false);
 
-  // حقول العميل الجديد
-  const [customerName, setCustomerName] = useState('');
-  const [whatsappPhone, setWhatsappPhone] = useState(initialCustomerPhone || '');
-  const [landlinePhone, setLandlinePhone] = useState('');
-  const [address, setAddress] = useState('');
-  const [customerPermanentNotes, setCustomerPermanentNotes] = useState('');
+  // حقول العميل
+  const [customerName, setCustomerName] = useState(
+    editingOrder?.customer_name || editingOrder?.customerName || ''
+  );
+  const [whatsappPhone, setWhatsappPhone] = useState(
+    String(editingOrder?.customer_phone || editingOrder?.customerPhone || initialCustomerPhone || '').replace(/\D/g, '').slice(0, 11)
+  );
+  const [landlinePhone, setLandlinePhone] = useState(
+    editingOrder?.customer_landline || editingOrder?.customerLandline || ''
+  );
+  const [address, setAddress] = useState(
+    editingOrder?.customer_address || editingOrder?.customerAddress || ''
+  );
+  const [customerPermanentNotes, setCustomerPermanentNotes] = useState(
+    editingOrder?.customer_permanent_notes || editingOrder?.customerPermanentNotes || ''
+  );
 
   // ── 2. قائمة المناطق / الأحياء المعتمدة من إعدادات المالك ──
   const [deliveryZones] = useState(() => {
@@ -121,31 +136,55 @@ export default function NewCustomerOrderModal({
     } catch (e) {}
     return ['وسط البلد', 'حي الجامعة', 'المنطقة الأولى', 'المنطقة الثانية', 'حي النزهة', 'أخرى / خارج النطاق'];
   });
-  const [selectedZone, setSelectedZone] = useState('');
+  // المنطقة خالية افتراضياً لإجبار الصيدلي على الاختيار
+  const [selectedZone, setSelectedZone] = useState(
+    editingOrder?.zone || editingOrder?.customer_zone || ''
+  );
 
   // ── 3. صورة الدواء / الروشتة ──
-  const [medicationImageUrl, setMedicationImageUrl] = useState('');
+  const [medicationImageUrl, setMedicationImageUrl] = useState(editingOrder?.medication_image_url || '');
   const [medicationImageName, setMedicationImageName] = useState('');
+  const [previewModalImageUrl, setPreviewModalImageUrl] = useState('');
   const [isPreviewImageOpen, setIsPreviewImageOpen] = useState(false);
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [showImageUrlInput, setShowImageUrlInput] = useState(false);
   const [directImageUrl, setDirectImageUrl] = useState('');
   const fileInputRef = useRef(null);
 
-  // ── 4. بنود الأدوية (العلبة كاملة فقط 📦 - مع تصنيف لكل صنف ودعم السعر التقديري) ──
-  const [items, setItems] = useState([
-    {
-      medicationName: '',
-      unitType: 'pack', // إلغاء الشريط والتعامل بالعلبة كاملة فقط
-      quantity: 1,
-      unitPrice: '',
-      isPriceEstimated: false,
-      priceMin: '',
-      priceMax: '',
-      selectedMed: null,
-      itemType: '' // لا يوجد اختيار افتراضي - يتم تحديده مع كل صنف
+  // ── 4. بنود الأدوية (العلبة كاملة فقط 📦 - مع تصنيف لكل صنف وإرفاق صورة ورابط لكل صنف) ──
+  const [items, setItems] = useState(() => {
+    if (editingOrder?.items?.length > 0) {
+      return editingOrder.items.map((it) => ({
+        id: it.id,
+        medicationName: it.medicationName || it.medication_name || '',
+        unitType: 'pack',
+        quantity: parseInt(it.quantity || 1, 10),
+        unitPrice: String(it.unitPrice || it.unit_price || ''),
+        isPriceEstimated: Boolean(it.is_price_estimated || it.isPriceEstimated),
+        priceMin: it.price_min || it.priceMin || '',
+        priceMax: it.price_max || it.priceMax || '',
+        selectedMed: null,
+        itemType: it.item_type || it.itemType || 'medication',
+        imageUrl: it.image_url || it.imageUrl || '',
+        itemLink: it.item_link || it.itemLink || ''
+      }));
     }
-  ]);
+    return [
+      {
+        medicationName: '',
+        unitType: 'pack',
+        quantity: 1,
+        unitPrice: '',
+        isPriceEstimated: false,
+        priceMin: '',
+        priceMax: '',
+        selectedMed: null,
+        itemType: '',
+        imageUrl: '',
+        itemLink: ''
+      }
+    ];
+  });
   const [editingItemIndex, setEditingItemIndex] = useState(null);
   const [inlineEditData, setInlineEditData] = useState({ pack_size: 1, unit_name: 'علبة', public_price: '' });
 
@@ -297,42 +336,49 @@ export default function NewCustomerOrderModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // تعيين أول منطقة افتراضية
-  useEffect(() => {
-    if (!selectedZone && deliveryZones.length > 0) {
-      setSelectedZone(deliveryZones[0]);
+  // دالة مساعدة لتنبيه الحقل الخاطئ وتحريك الشاشة إليه بمربع أحمر نابض
+  const highlightAndScrollTo = (elementId, message) => {
+    setErrorMsg(message);
+    const el = document.getElementById(elementId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.focus?.();
+      el.classList.add('outstock-pulse-error');
+      setTimeout(() => {
+        el.classList.remove('outstock-pulse-error');
+      }, 4500);
     }
-  }, [deliveryZones, selectedZone]);
+  };
 
-  // بحث ذكي عن العميل عند كتابة رقم الهاتف أو الاسم
+  // بحث دقيق عن العميل عند اكتمال 11 رقماً
   const handleSearchCustomer = async (term) => {
-    const clean = String(term || '').trim();
-    if (!clean || clean.length < 3) return;
+    const clean = String(term || '').replace(/\D/g, '').trim();
+    if (clean.length !== 11) return;
 
     setIsSearchingCustomer(true);
     setErrorMsg('');
     try {
       const res = await outstockGetCustomers({ search: clean });
-      if (res?.success && Array.isArray(res.customers) && res.customers.length > 0) {
-        const found = res.customers[0];
-        setSelectedCustomer(found);
-        setCustomerName(found.full_name);
-        setWhatsappPhone(found.whatsapp_phone);
-        setLandlinePhone(found.landline_phone || '');
-        setAddress(found.address || '');
-        if (found.zone) setSelectedZone(found.zone);
-        setCustomerPermanentNotes(found.notes || '');
-        setIsNewCustomer(false);
-      } else {
-        setSelectedCustomer(null);
-        setIsNewCustomer(true);
-        setCustomerPermanentNotes('');
-        if (/^\d+$/.test(clean)) {
+      if (res?.success && Array.isArray(res.customers)) {
+        const found = res.customers.find(
+          (c) => String(c.whatsapp_phone || '').replace(/\D/g, '') === clean
+        );
+        if (found) {
+          setSelectedCustomer(found);
+          setCustomerName(found.full_name || '');
           setWhatsappPhone(clean);
-        } else {
-          setCustomerName(clean);
+          setLandlinePhone(found.landline_phone || '');
+          setAddress(found.address || '');
+          if (found.zone) setSelectedZone(found.zone);
+          setCustomerPermanentNotes(found.notes || '');
+          setIsNewCustomer(false);
+          return;
         }
       }
+      // إذا لم يتطابق، نعينه كعميل جديد ونفرغ الاسم القديم لمنع الخلط بين العملاء
+      setSelectedCustomer(null);
+      setIsNewCustomer(true);
+      setCustomerPermanentNotes('');
     } catch (e) {
       console.warn('Search customer error:', e);
     } finally {
@@ -340,11 +386,38 @@ export default function NewCustomerOrderModal({
     }
   };
 
+  // معالجة كتابة رقم الهاتف (أرقام فقط + تنبيه فوري + تفريغ الحقول عند التغيير)
+  const handlePhoneChange = (val) => {
+    const digitsOnly = String(val || '').replace(/\D/g, '').slice(0, 11);
+    setWhatsappPhone(digitsOnly);
+    setSearchPhone(digitsOnly);
+    setErrorMsg('');
+
+    // تفريغ بيانات العميل السابق فوراً إذا تم تعديل الرقم
+    if (selectedCustomer && digitsOnly !== String(selectedCustomer.whatsapp_phone || '').replace(/\D/g, '')) {
+      setSelectedCustomer(null);
+      setCustomerName('');
+      setAddress('');
+      setSelectedZone('');
+      setCustomerPermanentNotes('');
+      setLandlinePhone('');
+    }
+
+    // بحث فوري وتلقائي عند اكتمال 11 رقماً
+    if (digitsOnly.length === 11) {
+      handleSearchCustomer(digitsOnly);
+    }
+  };
+
   // بحث تلقائي برقم العميل الممرر عند الفتح
   useEffect(() => {
     if (initialCustomerPhone) {
-      setSearchPhone(initialCustomerPhone);
-      handleSearchCustomer(initialCustomerPhone);
+      const clean = String(initialCustomerPhone).replace(/\D/g, '').slice(0, 11);
+      setSearchPhone(clean);
+      setWhatsappPhone(clean);
+      if (clean.length === 11) {
+        handleSearchCustomer(clean);
+      }
     }
   }, [initialCustomerPhone]);
 
@@ -354,7 +427,7 @@ export default function NewCustomerOrderModal({
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       if (!it.itemType) {
-        setErrorMsg(`يرجى تحديد نوع الصنف #${i + 1} (${it.medicationName || 'الصنف الحالي'}) (دوائي 💊 أو مستحضرات 💄) أولاً قبل إضافة صنف جديد`);
+        highlightAndScrollTo(`field-item-type-${i}`, `يرجى تحديد نوع الصنف #${i + 1} (${it.medicationName || 'الصنف الحالي'}) (دوائي 💊 أو مستحضرات 💄) أولاً قبل إضافة صنف جديد`);
         return;
       }
     }
@@ -625,7 +698,7 @@ export default function NewCustomerOrderModal({
   const remainingMin = Math.max(0, netMin - effectivePaid);
   const remainingMax = Math.max(0, netMax - effectivePaid);
 
-  // إرسال الطلب
+  // إرسال / تحديث الطلب
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -633,12 +706,24 @@ export default function NewCustomerOrderModal({
     const finalName = String(customerName || '').trim();
     const finalPhone = String(whatsappPhone || '').replace(/\D/g, '');
 
-    if (!finalName) {
-      setErrorMsg('يرجى إدخال اسم العميل');
+    // 1. التحقق من رقم الهاتف (إجباري 11 رقماً حصراً)
+    if (!finalPhone || finalPhone.length !== 11) {
+      highlightAndScrollTo(
+        'order-customer-phone',
+        `رقم هاتف العميل غير مكتمل! يجب أن يتكون من 11 رقماً بالضبط (المُدخل حالياً: ${finalPhone.length} أرقام).`
+      );
       return;
     }
-    if (!finalPhone || finalPhone.length < 9) {
-      setErrorMsg('يرجى إدخال رقم هاتف واتساب صالح للعميل (9 أرقام على الأقل)');
+
+    // 2. التحقق من اسم العميل
+    if (!finalName) {
+      highlightAndScrollTo('order-customer-name', 'يرجى إدخال اسم العميل');
+      return;
+    }
+
+    // 3. التحقق من اختيار المنطقة / الحي إجبارياً
+    if (!selectedZone) {
+      highlightAndScrollTo('order-customer-zone', 'يرجى اختيار المنطقة / الحي للعميل إجبارياً قبل حفظ الطلب');
       return;
     }
 
@@ -653,10 +738,14 @@ export default function NewCustomerOrderModal({
       return;
     }
 
-    // التحقق من تحديد نوع الصنف لكل صنف مضاف
-    for (const it of validItems) {
+    // 4. التحقق من تحديد نوع الصنف لكل صنف مضاف
+    for (let i = 0; i < validItems.length; i++) {
+      const it = validItems[i];
       if (!it.itemType) {
-        setErrorMsg(`يرجى تحديد نوع الصنف (دوائي 💊 أو مستحضرات 💄) للصنف "${it.medicationName}"`);
+        highlightAndScrollTo(
+          `field-item-type-${i}`,
+          `يرجى تحديد نوع الصنف #${i + 1} (${it.medicationName || 'الصنف'}) (دوائي 💊 أو مستحضرات 💄) إجبارياً`
+        );
         return;
       }
     }
@@ -687,7 +776,7 @@ export default function NewCustomerOrderModal({
         orderCategory: computedCategory, // 'medication' | 'cosmetics' | 'mixed'
         orderReceiverCode: orderReceiver?.code || null,
         orderReceiverName: orderReceiver?.name || finalPharmacist,
-        medicationImageUrl: medicationImageUrl || null,
+        medicationImageUrl: validItems[0]?.imageUrl || medicationImageUrl || null,
         paymentSplits: useSplitPayment ? paymentSplits : null,
         customer: {
           id: selectedCustomer?.id || null,
@@ -704,6 +793,7 @@ export default function NewCustomerOrderModal({
           const pMax = isEst ? parseFloat(it.priceMax || 0) : null;
           const avgP = isEst ? ((pMin + (pMax || pMin)) / 2) : parseFloat(it.unitPrice || 0);
           return {
+            id: it.id || undefined,
             medicationName: String(it.medicationName).trim(),
             unitType: 'pack', // إلغاء الشريط: العلبة كاملة دائماً 📦
             quantity: parseInt(it.quantity || 1, 10),
@@ -711,7 +801,9 @@ export default function NewCustomerOrderModal({
             isPriceEstimated: isEst,
             priceMin: pMin,
             priceMax: pMax,
-            itemType: it.itemType || 'medication'
+            itemType: it.itemType || 'medication',
+            imageUrl: it.imageUrl || null,
+            itemLink: it.itemLink || null
           };
         }),
         paidAmount: effectivePaid,
@@ -727,22 +819,33 @@ export default function NewCustomerOrderModal({
         deliveryTargetBranchId: deliveryType === 'other_branch_pickup' ? deliveryTargetBranchId : null
       };
 
-      const res = await outstockCreateOrder(payload);
-      if (res?.success && res.order) {
+      const res = editingOrder
+        ? await outstockUpdateOrder(editingOrder.id, payload)
+        : await outstockCreateOrder(payload);
+
+      if (res?.success && (res.order || editingOrder)) {
+        const orderData = res.order || { ...editingOrder, ...payload };
         try {
           broadcastOutstockLocalMessage({
-            type: 'outstock:order_created',
-            orderId: res.order.id,
+            type: editingOrder ? 'outstock:order_updated' : 'outstock:order_created',
+            orderId: orderData.id,
             branchId: payload.branchId,
             timestamp: new Date().toISOString()
           });
-          window.dispatchEvent(new CustomEvent('outstock:order_created', { detail: res.order }));
+          window.dispatchEvent(
+            new CustomEvent(editingOrder ? 'outstock:order_updated' : 'outstock:order_created', { detail: orderData })
+          );
         } catch (_) {}
-        if (typeof onOrderCreated === 'function') {
-          onOrderCreated(res.order);
-        } else if (typeof onSuccess === 'function') {
-          onSuccess(res.order);
+
+        if (editingOrder) {
+          onOrderUpdated?.(orderData);
+          showToast?.('✅ تم تحديث بيانات الطلب بنجاح');
+        } else {
+          onOrderCreated?.(orderData);
+          showToast?.('✅ تم تسجيل الطلب وإرساله لإدارة المشتريات بنجاح');
         }
+        onSuccess?.(orderData);
+        onClose();
       } else {
         setErrorMsg(res?.error || 'حدث خطأ أثناء حفظ الطلب، يرجى المحاولة ثانية');
       }
@@ -930,195 +1033,6 @@ export default function NewCustomerOrderModal({
                 </div>
               ) : null}
             </div>
-
-            {/* رفع صورة الدواء أو الروشتة (رفع، إفلات، لصق، أو رابط) */}
-            <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setIsDraggingImage(true);
-              }}
-              onDragLeave={() => setIsDraggingImage(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setIsDraggingImage(false);
-                const file = e.dataTransfer.files?.[0];
-                if (file && file.type.startsWith('image/')) {
-                  handleProcessImageFile(file);
-                } else {
-                  setErrorMsg('الملف المُفلت ليس صورة صالحة');
-                }
-              }}
-              style={{
-                background: isDraggingImage ? '#ecfdf5' : '#ffffff',
-                border: isDraggingImage ? '2px dashed #0d9488' : '1.5px dashed #cbd5e1',
-                borderRadius: '12px',
-                padding: '12px 16px',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  flexWrap: 'wrap',
-                  gap: '12px'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div
-                    style={{
-                      width: '38px',
-                      height: '38px',
-                      borderRadius: '10px',
-                      background: medicationImageUrl ? '#f0fdf4' : '#f1f5f9',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
-                  >
-                    {medicationImageUrl ? (
-                      <ImageIcon size={20} color="#16a34a" />
-                    ) : (
-                      <Camera size={20} color="#64748b" />
-                    )}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: '800', color: '#1e293b' }}>
-                      صورة الدواء أو الروشتة (اختياري)
-                    </div>
-                    <div style={{ fontSize: '11px', color: '#64748b' }}>
-                      يمكنك <strong style={{ color: '#0f766e' }}>اختيار ملف</strong> أو <strong style={{ color: '#0f766e' }}>سحب وإفلات الصورة</strong> أو <strong style={{ color: '#0f766e' }}>لصقها (Ctrl+V)</strong> أو وضع رابط
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    ref={fileInputRef}
-                    onChange={handleImageChange}
-                    style={{ display: 'none' }}
-                  />
-
-                  {medicationImageUrl ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      {/* مصغرة الصورة مع إمكانية المعاينة */}
-                      <div
-                        onClick={() => setIsPreviewImageOpen(true)}
-                        style={{
-                          position: 'relative',
-                          width: '42px',
-                          height: '42px',
-                          borderRadius: '8px',
-                          overflow: 'hidden',
-                          border: '2px solid #0d9488',
-                          cursor: 'pointer'
-                        }}
-                        title="اضغط لمعاينة الصورة بالحجم الكامل"
-                      >
-                        <img
-                          src={medicationImageUrl}
-                          alt="Medication"
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
-                        <div
-                          style={{
-                            position: 'absolute',
-                            inset: 0,
-                            background: 'rgba(0,0,0,0.25)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                          }}
-                        >
-                          <Eye size={16} color="#ffffff" />
-                        </div>
-                      </div>
-
-                      <span style={{ fontSize: '12px', fontWeight: '700', color: '#059669' }}>
-                        تم إرفاق الصورة ✅
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={handleRemoveImage}
-                        className="outstock-btn"
-                        style={{
-                          background: '#fee2e2',
-                          color: '#b91c1c',
-                          border: '1px solid #fca5a5',
-                          padding: '5px 10px',
-                          fontSize: '11.5px',
-                          borderRadius: '6px'
-                        }}
-                      >
-                        <Trash2 size={13} />
-                        <span>حذف الصورة</span>
-                      </button>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="outstock-btn outstock-btn-secondary"
-                        style={{ fontSize: '12px', padding: '6px 14px', fontWeight: '800' }}
-                      >
-                        <Camera size={14} />
-                        <span>اختيار صورة 📷</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setShowImageUrlInput(!showImageUrlInput)}
-                        className="outstock-btn outstock-btn-secondary"
-                        style={{ fontSize: '12px', padding: '6px 12px', fontWeight: '700' }}
-                        title="إضافة رابط صورة خارجي مباشر"
-                      >
-                        <LinkIcon size={14} />
-                        <span>رابط صورة 🔗</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* حقل إدخال الرابط عند تفعيله */}
-              {showImageUrlInput && !medicationImageUrl && (
-                <div style={{ display: 'flex', gap: '8px', marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #e2e8f0' }}>
-                  <input
-                    type="url"
-                    className="outstock-form-input"
-                    placeholder="ضع رابط الصورة المباشر هنا (https://...)..."
-                    value={directImageUrl}
-                    onChange={(e) => setDirectImageUrl(e.target.value)}
-                    style={{ fontSize: '12.5px', height: '36px' }}
-                    dir="ltr"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleApplyDirectImageUrl}
-                    className="outstock-btn outstock-btn-primary"
-                    style={{ fontSize: '12px', padding: '6px 14px', whiteSpace: 'nowrap' }}
-                  >
-                    تطبيق الرابط
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowImageUrlInput(false);
-                      setDirectImageUrl('');
-                    }}
-                    className="outstock-btn outstock-btn-secondary"
-                    style={{ fontSize: '12px', padding: '6px 10px' }}
-                  >
-                    إلغاء
-                  </button>
-                </div>
-              )}
-            </div>
           </div>
 
           {/* ── 1. بيانات العميل والبحث الذكي ── */}
@@ -1257,8 +1171,10 @@ export default function NewCustomerOrderModal({
                   اسم العميل * :
                 </label>
                 <input
+                  id="order-customer-name"
                   type="text"
                   required
+                  autoComplete="off"
                   placeholder="الاسم ثلاثي أو ثنائي"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
@@ -1271,15 +1187,59 @@ export default function NewCustomerOrderModal({
                   رقم هاتف الواتساب (فريد) * :
                 </label>
                 <input
+                  id="order-customer-phone"
                   type="tel"
+                  inputMode="numeric"
                   required
-                  placeholder="01xxxxxxxxx"
+                  autoComplete="off"
+                  placeholder="01xxxxxxxxx (11 رقماً)"
                   value={whatsappPhone}
-                  onChange={(e) => setWhatsappPhone(e.target.value)}
+                  onChange={(e) => handlePhoneChange(e.target.value)}
                   className="outstock-form-input"
                   dir="ltr"
-                  style={{ textAlign: 'right' }}
+                  style={{
+                    textAlign: 'right',
+                    borderColor: whatsappPhone && whatsappPhone.length < 11 ? '#ef4444' : whatsappPhone.length === 11 ? '#10b981' : undefined
+                  }}
                 />
+                {whatsappPhone && whatsappPhone.length < 11 && (
+                  <div
+                    style={{
+                      fontSize: '11.5px',
+                      fontWeight: '800',
+                      color: '#dc2626',
+                      background: '#fef2f2',
+                      border: '1px solid #fecaca',
+                      borderRadius: '6px',
+                      padding: '4px 8px',
+                      marginTop: '5px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <span>⚠️ رقم الهاتف ناقص (يجب إدخال 11 رقماً - المتبقي {11 - whatsappPhone.length} أرقام)</span>
+                  </div>
+                )}
+                {whatsappPhone && whatsappPhone.length === 11 && (
+                  <div
+                    style={{
+                      fontSize: '11.5px',
+                      fontWeight: '800',
+                      color: '#16a34a',
+                      background: '#f0fdf4',
+                      border: '1px solid #bbf7d0',
+                      borderRadius: '6px',
+                      padding: '4px 8px',
+                      marginTop: '5px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <span>✓ رقم الهاتف مكتمل وصحيح (11 رقماً)</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1305,11 +1265,13 @@ export default function NewCustomerOrderModal({
                   <MapPin size={13} style={{ display: 'inline', verticalAlign: 'middle' }} /> المنطقة / الحي * :
                 </label>
                 <select
+                  id="order-customer-zone"
                   value={selectedZone}
                   onChange={(e) => setSelectedZone(e.target.value)}
                   className="outstock-form-select"
                   style={{ fontWeight: '700' }}
                 >
+                  <option value="" disabled>-- اختر المنطقة / الحي إجبارياً --</option>
                   {deliveryZones.map((zoneName) => (
                     <option key={zoneName} value={zoneName}>
                       {zoneName}
@@ -1432,7 +1394,10 @@ export default function NewCustomerOrderModal({
                               ⚠️ حدد النوع *
                             </span>
                           )}
-                          <div style={{ display: 'flex', gap: '4px', background: !it.itemType ? '#fff7ed' : '#f1f5f9', padding: '2px', borderRadius: '8px', border: !it.itemType ? '1.5px dashed #f97316' : '1px solid #cbd5e1' }}>
+                          <div
+                            id={"field-item-type-" + idx}
+                            style={{ display: 'flex', gap: '4px', background: !it.itemType ? '#fff7ed' : '#f1f5f9', padding: '2px', borderRadius: '8px', border: !it.itemType ? '1.5px dashed #f97316' : '1px solid #cbd5e1' }}
+                          >
                             <button
                               type="button"
                               onClick={() => {
@@ -1729,6 +1694,124 @@ export default function NewCustomerOrderModal({
                           );
                         })()
                       )}
+                    </div>
+
+                    {/* شريط المرفقات الخاص بالصنف: إرفاق صورة مباشرة أو رابط ويب خارجي */}
+                    <div
+                      style={{
+                        marginTop: '12px',
+                        paddingTop: '10px',
+                        borderTop: '1px dashed #e2e8f0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '12px'
+                      }}
+                    >
+                      {/* إرفاق صورة للصنف */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <label
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '5px 12px',
+                            background: it.imageUrl ? '#f0fdf4' : '#f8fafc',
+                            border: it.imageUrl ? '1.5px solid #86efac' : '1.5px dashed #cbd5e1',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: '700',
+                            color: it.imageUrl ? '#166534' : '#475569'
+                          }}
+                        >
+                          <Camera size={14} color={it.imageUrl ? '#16a34a' : '#64748b'} />
+                          <span>{it.imageUrl ? '📷 تغيير صورة الصنف' : '📷 إرفاق صورة لهذا الصنف'}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                if (file.size > 5 * 1024 * 1024) {
+                                  setErrorMsg('حجم صورة الصنف كبير جداً، يرجى اختيار صورة أقل من 5 ميجابايت');
+                                  return;
+                                }
+                                const reader = new FileReader();
+                                reader.onload = (ev) => {
+                                  handleItemChange(idx, 'imageUrl', ev.target.result);
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                          />
+                        </label>
+
+                        {it.imageUrl && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div
+                              onClick={() => {
+                                setPreviewModalImageUrl(it.imageUrl);
+                                setIsPreviewImageOpen(true);
+                              }}
+                              style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '6px',
+                                overflow: 'hidden',
+                                border: '1.5px solid #0d9488',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                              }}
+                              title="اضغط لمعاينة الصورة بالحجم الكامل"
+                            >
+                              <img src={it.imageUrl} alt="الصنف" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            </div>
+                            <span style={{ fontSize: '11px', fontWeight: '800', color: '#16a34a' }}>تم الإرفاق ✅</span>
+                            <button
+                              type="button"
+                              onClick={() => handleItemChange(idx, 'imageUrl', '')}
+                              style={{
+                                background: '#fee2e2',
+                                border: '1px solid #fca5a5',
+                                borderRadius: '6px',
+                                color: '#b91c1c',
+                                padding: '3px 8px',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                fontSize: '11px'
+                              }}
+                              title="حذف صورة الصنف"
+                            >
+                              <Trash2 size={12} />
+                              <span>حذف</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* رابط الصنف على موقع/إنترنت */}
+                      <div style={{ flex: 1, minWidth: '220px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
+                          <LinkIcon size={13} color="#0284c7" />
+                          <span>رابط الصنف (إن وجد):</span>
+                        </label>
+                        <input
+                          type="url"
+                          dir="ltr"
+                          placeholder="https://..."
+                          value={it.itemLink || ''}
+                          onChange={(e) => handleItemChange(idx, 'itemLink', e.target.value)}
+                          className="outstock-form-input"
+                          style={{ height: '32px', fontSize: '12px', flex: 1 }}
+                        />
+                      </div>
                     </div>
                   </div>
                 );
@@ -2145,11 +2228,14 @@ export default function NewCustomerOrderModal({
       />
 
       {/* نافذة معاينة صورة الدواء بالحجم الكامل */}
-      {isPreviewImageOpen && medicationImageUrl && (
+      {isPreviewImageOpen && (previewModalImageUrl || medicationImageUrl) && (
         <div
           className="outstock-modal-backdrop"
           style={{ zIndex: 100000, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
-          onClick={() => setIsPreviewImageOpen(false)}
+          onClick={() => {
+            setIsPreviewImageOpen(false);
+            setPreviewModalImageUrl('');
+          }}
         >
           <div
             style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}
@@ -2157,7 +2243,10 @@ export default function NewCustomerOrderModal({
           >
             <button
               type="button"
-              onClick={() => setIsPreviewImageOpen(false)}
+              onClick={() => {
+                setIsPreviewImageOpen(false);
+                setPreviewModalImageUrl('');
+              }}
               style={{
                 position: 'absolute',
                 top: '-14px',
@@ -2178,7 +2267,7 @@ export default function NewCustomerOrderModal({
               <X size={18} />
             </button>
             <img
-              src={medicationImageUrl}
+              src={previewModalImageUrl || medicationImageUrl}
               alt="Medication full size"
               style={{ maxWidth: '100%', maxHeight: '85vh', borderRadius: '12px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', objectFit: 'contain' }}
             />

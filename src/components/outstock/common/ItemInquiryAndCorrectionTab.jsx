@@ -21,14 +21,16 @@ import {
   ShieldCheck,
   Tag,
   Camera,
-  UploadCloud
+  UploadCloud,
+  AlertTriangle
 } from 'lucide-react';
 import {
   outstockGetMedicationRequests,
   outstockCreateMedicationRequest,
   outstockReplyMedicationRequest,
   outstockApproveNewItemRequest,
-  outstockSearchMedications
+  outstockSearchMedications,
+  outstockSendInquiryComplaint
 } from '../../../utils/outstockApiClient';
 import MedicationAutocompleteInput from '../pharmacy/MedicationAutocompleteInput';
 import EmployeeCodeAuthModal from './EmployeeCodeAuthModal';
@@ -84,6 +86,12 @@ export default function ItemInquiryAndCorrectionTab({
   const [replyNotes, setReplyNotes] = useState('');
   const [replyStatus, setReplyStatus] = useState('resolved');
   const [isReplying, setIsReplying] = useState(false);
+
+  // تصعيد شكوى لعدم الرد على الاستعلام
+  const [complaintTargetInquiry, setComplaintTargetInquiry] = useState(null);
+  const [complaintNotes, setComplaintNotes] = useState('');
+  const [isEscalating, setIsEscalating] = useState(false);
+  const [escalatedInquiryIds, setEscalatedInquiryIds] = useState(new Set());
 
   // جلب الطلبات
   const fetchRequests = async () => {
@@ -218,6 +226,32 @@ export default function ItemInquiryAndCorrectionTab({
       }
     } catch (err) {
       showToast(`❌ خطأ: ${err.message}`);
+    }
+  };
+
+  // تصعيد شكوى لعدم الرد على الاستعلام للمالك والمشتريات
+  const handleSendComplaint = async (e) => {
+    e?.preventDefault();
+    if (!complaintTargetInquiry) return;
+    setIsEscalating(true);
+    try {
+      const pharmacist = currentUser?.name || authenticatedEmployee?.name || 'صيدلي الفرع';
+      const res = await outstockSendInquiryComplaint(complaintTargetInquiry.id, {
+        notes: complaintNotes,
+        pharmacistName: pharmacist
+      });
+      if (res?.success) {
+        setEscalatedInquiryIds((prev) => new Set(prev).add(complaintTargetInquiry.id));
+        showToast?.(res?.message || '🚨 تم تصعيد شكوى عدم الرد للمالك وإدارة المشتريات بنجاح');
+        setComplaintTargetInquiry(null);
+        setComplaintNotes('');
+      } else {
+        showToast?.(res?.error || 'تعذر تصعيد الشكوى');
+      }
+    } catch (err) {
+      showToast?.('حدث خطأ في الاتصال أثناء تصعيد الشكوى');
+    } finally {
+      setIsEscalating(false);
     }
   };
 
@@ -594,7 +628,58 @@ export default function ItemInquiryAndCorrectionTab({
                             </button>
                           </div>
                         ) : (
-                          <span style={{ fontSize: '12px', color: '#94a3b8' }}>-</span>
+                          <div>
+                            {reqItem.status === 'pending' ? (
+                              reqItem.has_complaint || escalatedInquiryIds.has(reqItem.id) ? (
+                                <span
+                                  style={{
+                                    fontSize: '11px',
+                                    background: '#fef2f2',
+                                    color: '#dc2626',
+                                    border: '1px solid #fecaca',
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    fontWeight: '800',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                  }}
+                                  title="تم تصعيد شكوى للمالك وإدارة المشتريات لعدم الرد"
+                                >
+                                  <AlertTriangle size={12} />
+                                  <span>تم التصعيد 🚨</span>
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setComplaintTargetInquiry(reqItem);
+                                    setComplaintNotes('');
+                                  }}
+                                  style={{
+                                    background: '#fff1f2',
+                                    color: '#e11d48',
+                                    border: '1px solid #fecdd3',
+                                    borderRadius: '6px',
+                                    padding: '5px 9px',
+                                    fontSize: '11.5px',
+                                    fontWeight: '800',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                  title="تصعيد شكوى للمالك والمشتريات لعدم الرد على هذا الاستعلام"
+                                >
+                                  <AlertTriangle size={13} color="#e11d48" />
+                                  <span>تصعيد شكوى لعدم الرد 🚨</span>
+                                </button>
+                              )
+                            ) : (
+                              <span style={{ fontSize: '12px', color: '#94a3b8' }}>-</span>
+                            )}
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -1061,6 +1146,98 @@ export default function ItemInquiryAndCorrectionTab({
                 boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
               }}
             />
+          </div>
+        </div>
+      )}
+
+      {/* ── نافذة تصعيد شكوى لعدم الرد ── */}
+      {complaintTargetInquiry && (
+        <div
+          className="outstock-modal-backdrop"
+          onClick={() => !isEscalating && setComplaintTargetInquiry(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.75)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
+        >
+          <div
+            className="outstock-modal-panel"
+            style={{ maxWidth: '480px', width: '92%' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="outstock-modal-drag-handle" />
+            <div className="outstock-modal-header" style={{ background: '#fff1f2', borderBottom: '1px solid #fecdd3' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertTriangle size={20} color="#e11d48" />
+                <h3 style={{ margin: 0, color: '#9f1239', fontSize: '15px', fontWeight: '900' }}>
+                  تصعيد شكوى لعدم الرد (للمالك والمشتريات) 🚨
+                </h3>
+              </div>
+              <button
+                type="button"
+                className="outstock-modal-close"
+                onClick={() => !isEscalating && setComplaintTargetInquiry(null)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSendComplaint}>
+              <div className="outstock-modal-body" style={{ padding: '16px 20px', fontSize: '13px' }}>
+                <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', padding: '10px 12px', color: '#9a3412', marginBottom: '14px', fontSize: '12.5px' }}>
+                  ⚠️ سيتم تصعيد هذا الاستعلام فوراً إلى <strong>المالك والمشرف العام</strong> مع إشعار إدارة المشتريات للتنبيه على التأخر في الرد.
+                </div>
+
+                <div style={{ marginBottom: '12px' }}>
+                  <div>الصنف: <strong style={{ color: '#0f172a' }}>{complaintTargetInquiry.medication_name}</strong></div>
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                    تاريخ إرسال الاستعلام: {complaintTargetInquiry.created_at ? new Date(complaintTargetInquiry.created_at).toLocaleString('ar-EG') : 'غير محدد'}
+                  </div>
+                </div>
+
+                <div className="outstock-form-group">
+                  <label style={{ fontWeight: '700', color: '#1e293b', fontSize: '12.5px' }}>
+                    ملاحظات إضافية على الشكوى (اختياري):
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={complaintNotes}
+                    onChange={(e) => setComplaintNotes(e.target.value)}
+                    placeholder="مثال: العميل متواجد بالصيدلية ومستعجل جداً ولم يتم الرد منذ ساعتين..."
+                    className="outstock-form-textarea"
+                    style={{ fontSize: '13px' }}
+                  />
+                </div>
+              </div>
+
+              <div className="outstock-modal-footer" style={{ padding: '12px 20px', display: 'flex', justifyContent: 'space-between' }}>
+                <button
+                  type="button"
+                  className="outstock-btn outstock-btn-secondary"
+                  onClick={() => setComplaintTargetInquiry(null)}
+                  disabled={isEscalating}
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isEscalating}
+                  className="outstock-btn"
+                  style={{
+                    background: '#e11d48',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '8px 18px',
+                    fontWeight: '800',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <AlertTriangle size={15} />
+                  <span>{isEscalating ? 'جاري التصعيد...' : 'تأكيد تصعيد الشكوى 🚨'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

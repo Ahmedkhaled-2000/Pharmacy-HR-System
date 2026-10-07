@@ -386,6 +386,8 @@ export async function exportProcurementOrdersExcel(aggregatedData = [], options 
   else if (category === 'cosmetics') baseFileName = 'طلبات-مستحضرات-التجميل-المجمعة';
 
   const fileNameClean = `${baseFileName}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const anchor = document.createElement('a');
+  anchor.href = url;
   anchor.download = fileNameClean;
   document.body.appendChild(anchor);
   anchor.click();

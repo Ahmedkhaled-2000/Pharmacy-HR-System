@@ -35,8 +35,10 @@ export default function OrderDeliverySettlementModal({
   const totalAmount = parseFloat(order?.net_amount || order?.netAmount || order?.total_amount || 0);
   const paidAdvance = parseFloat(order?.paid_amount || order?.paidAmount || 0);
   const initialRemaining = Math.max(0, totalAmount - paidAdvance);
+  const refundDue = Math.max(0, paidAdvance - totalAmount);
 
   const [collectedAmount, setCollectedAmount] = useState(String(initialRemaining > 0 ? initialRemaining : 0));
+  const [refundOption, setRefundOption] = useState('cash'); // 'cash' | 'wallet'
   const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' | 'card' | 'wallet' | 'credit'
   const [cashierName, setCashierName] = useState(deliveredBy?.name || currentPharmacist || 'د. الصيدلي');
   const [receiptNumber, setReceiptNumber] = useState(`REC-${order?.order_number || Date.now().toString().slice(-6)}`);
@@ -73,6 +75,7 @@ export default function OrderDeliverySettlementModal({
         deliveredByCode: deliveredBy?.code || null,
         deliveredByName: deliveredBy?.name || cashierName,
         receiptNumber,
+        refundToWallet: refundOption === 'wallet',
         notes: notes.trim() || `تسليم طلب العميل ${order.customer_name || ''}`
       });
 
@@ -358,13 +361,60 @@ export default function OrderDeliverySettlementModal({
 
               <div style={{ background: '#ffffff', padding: '10px', borderRadius: '8px', border: '1px solid #d1fae5' }}>
                 <span style={{ fontSize: '11.5px', color: '#b91c1c', display: 'block', fontWeight: '600' }}>
-                  المتبقي المطلوب
+                  {refundDue > 0 ? 'فائض مسترد للعميل' : 'المتبقي المطلوب'}
                 </span>
-                <strong className="tabular-nums" style={{ fontSize: '16px', color: '#dc2626', fontFamily: 'var(--outstock-font-mono)' }}>
-                  {initialRemaining.toFixed(2)} <span style={{ fontSize: '11px' }}>ج.م</span>
+                <strong className="tabular-nums" style={{ fontSize: '16px', color: refundDue > 0 ? '#059669' : '#dc2626', fontFamily: 'var(--outstock-font-mono)' }}>
+                  {refundDue > 0 ? `+${refundDue.toFixed(2)}` : initialRemaining.toFixed(2)} <span style={{ fontSize: '11px' }}>ج.م</span>
                 </strong>
               </div>
             </div>
+
+            {/* تنبيه وخيارات استرداد الفائض للعميل (كاش أو محفظة) */}
+            {refundDue > 0 && (
+              <div
+                style={{
+                  background: '#fffbeb',
+                  border: '1.5px solid #f59e0b',
+                  borderRadius: '10px',
+                  padding: '12px 14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <AlertCircle size={18} color="#b45309" />
+                  <span style={{ fontSize: '13px', fontWeight: '800', color: '#92400e' }}>
+                    يوجد فارغ مستحق استرداده للعميل بقيمة ({refundDue.toFixed(2)} ج.م)
+                  </span>
+                </div>
+                <div style={{ fontSize: '12px', color: '#78350f' }}>
+                  العربون المدفوع سابقاً أكبر من إجمالي الأصناف المسلمة. يرجى اختيار طريقة التسوية:
+                </div>
+                <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: '700', cursor: 'pointer', color: '#78350f' }}>
+                    <input
+                      type="radio"
+                      name="settlementRefundChoice"
+                      value="cash"
+                      checked={refundOption === 'cash'}
+                      onChange={() => setRefundOption('cash')}
+                    />
+                    <span>💵 إرجاع نقدي للعميل كاش من الدرج</span>
+                  </label>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: '800', cursor: 'pointer', color: '#047857' }}>
+                    <input
+                      type="radio"
+                      name="settlementRefundChoice"
+                      value="wallet"
+                      checked={refundOption === 'wallet'}
+                      onChange={() => setRefundOption('wallet')}
+                    />
+                    <span>👛 إيداع في محفظة العميل كرصيد دائم</span>
+                  </label>
+                </div>
+              </div>
+            )}
 
             {/* حقل إدخال المبلغ المحصل الآن */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>

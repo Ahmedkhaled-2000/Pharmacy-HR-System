@@ -61,7 +61,7 @@ export default function BranchStockOrdersTab({
   };
 
   useEffect(() => {
-    if (branchId) fetchBranchOrders();
+    fetchBranchOrders();
   }, [branchId]);
 
   // استماع المزامنة اللحظية والردود على طلبات الفرع
@@ -102,6 +102,14 @@ export default function BranchStockOrdersTab({
   };
 
   // تصفية الطلبات بناءً على الفلتر والبحث
+  const getItemStatus = (it) => {
+    const s = it?.itemStatus || it?.status;
+    if (s === 'available' || s === 'available_by_procurement') return 'available';
+    if (s === 'unavailable') return 'unavailable';
+    return 'pending';
+  };
+
+  // تصفية الطلبات بناءً على الفلتر والبحث
   const filteredOrders = useMemo(() => {
     let result = orders;
 
@@ -109,19 +117,19 @@ export default function BranchStockOrdersTab({
     if (statusFilter === 'pending_procurement') {
       result = result.filter((o) => {
         const items = o.items || [];
-        return items.some((it) => !it.status || it.status === 'pending');
+        return items.some((it) => getItemStatus(it) === 'pending');
       });
     } else if (statusFilter === 'sent') {
-      result = result.filter((o) => o.sent_to_procurement_at || o.created_at);
+      result = result.filter((o) => o.sent_to_procurement_at || o.sentToProcurementAt || o.created_at || o.createdAt);
     } else if (statusFilter === 'available') {
       result = result.filter((o) => {
         const items = o.items || [];
-        return items.some((it) => it.status === 'available');
+        return items.some((it) => getItemStatus(it) === 'available');
       });
     } else if (statusFilter === 'unavailable') {
       result = result.filter((o) => {
         const items = o.items || [];
-        return items.some((it) => it.status === 'unavailable');
+        return items.some((it) => getItemStatus(it) === 'unavailable');
       });
     }
 
@@ -130,11 +138,11 @@ export default function BranchStockOrdersTab({
       const q = searchQuery.toLowerCase().trim();
       result = result.filter((o) => {
         const matchId = String(o.id || '').includes(q);
-        const matchCode = String(o.barcode || '').toLowerCase().includes(q);
+        const matchCode = String(o.barcode || o.barcode_data || '').toLowerCase().includes(q);
         const matchReason = String(o.branch_request_reason || '').toLowerCase().includes(q);
-        const matchPharmacist = String(o.order_receiver_name || '').toLowerCase().includes(q);
+        const matchPharmacist = String(o.order_receiver_name || o.orderReceiverName || '').toLowerCase().includes(q);
         const matchItem = (o.items || []).some((it) =>
-          String(it.medication_name || '').toLowerCase().includes(q)
+          String(it.medicationName || it.medication_name || '').toLowerCase().includes(q)
         );
         return matchId || matchCode || matchReason || matchPharmacist || matchItem;
       });
@@ -151,9 +159,9 @@ export default function BranchStockOrdersTab({
 
     orders.forEach((o) => {
       const items = o.items || [];
-      if (items.some((it) => !it.status || it.status === 'pending')) pendingCount++;
-      if (items.some((it) => it.status === 'available')) availableCount++;
-      if (items.some((it) => it.status === 'unavailable')) unavailableCount++;
+      if (items.some((it) => getItemStatus(it) === 'pending')) pendingCount++;
+      if (items.some((it) => getItemStatus(it) === 'available')) availableCount++;
+      if (items.some((it) => getItemStatus(it) === 'unavailable')) unavailableCount++;
     });
 
     return {
@@ -574,8 +582,9 @@ export default function BranchStockOrdersTab({
                 {/* أصناف الطلب */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {items.map((it, idx) => {
-                    const itStatus = it.status || 'pending';
-                    const isCosmetics = it.item_type === 'cosmetics';
+                    const itStatus = getItemStatus(it);
+                    const isCosmetics = (it.itemType || it.item_type) === 'cosmetics';
+                    const medName = it.medicationName || it.medication_name || 'صنف غير محدد';
 
                     return (
                       <div
@@ -605,7 +614,7 @@ export default function BranchStockOrdersTab({
                           </span>
 
                           <strong style={{ fontSize: '13.5px', color: '#0f172a' }}>
-                            {it.medication_name}
+                            {medName}
                           </strong>
 
                           <span style={{ fontSize: '12px', color: '#64748b' }}>
@@ -621,9 +630,9 @@ export default function BranchStockOrdersTab({
 
                         {/* حالة الصنف بالمشتريات وملاحظاتها وتوقيت الرد */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          {it.procurement_replied_at && (
+                          {(it.procurementRepliedAt || it.procurement_replied_at) && (
                             <span style={{ fontSize: '11px', color: '#64748b' }}>
-                              رد: {formatDateTime(it.procurement_replied_at)}
+                              رد: {formatDateTime(it.procurementRepliedAt || it.procurement_replied_at)}
                             </span>
                           )}
 
@@ -642,7 +651,7 @@ export default function BranchStockOrdersTab({
                               }}
                             >
                               <CheckCircle size={13} />
-                              <span>متوفر {it.procurement_source_name ? `(${it.procurement_source_name})` : ''}</span>
+                              <span>متوفر {(it.procurementSourceName || it.procurement_source_name) ? `(${it.procurementSourceName || it.procurement_source_name})` : ''}</span>
                             </span>
                           ) : itStatus === 'unavailable' ? (
                             <span

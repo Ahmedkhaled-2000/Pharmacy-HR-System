@@ -143,8 +143,8 @@ export default function OrderComplaintModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className="outstock-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '20px' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          <div className="outstock-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '20px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
             {errorMsg && (
               <div
                 style={{

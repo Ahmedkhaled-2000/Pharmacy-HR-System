@@ -568,9 +568,28 @@ export async function initOutstockTables(db) {
         ALTER TABLE public.outstock_branch_withdrawals ADD COLUMN IF NOT EXISTS invoice_file_data TEXT NULL;
 
         ALTER TABLE public.outstock_customers ADD COLUMN IF NOT EXISTS zone VARCHAR(100) NULL;
+        ALTER TABLE public.outstock_customers ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
         ALTER TABLE public.outstock_orders ADD COLUMN IF NOT EXISTS has_complaint BOOLEAN DEFAULT false;
         ALTER TABLE public.outstock_orders ADD COLUMN IF NOT EXISTS complaint_notes TEXT NULL;
         ALTER TABLE public.outstock_orders ALTER COLUMN customer_id DROP NOT NULL;
+
+        ALTER TABLE public.outstock_order_items ADD COLUMN IF NOT EXISTS image_url TEXT NULL;
+        ALTER TABLE public.outstock_order_items ADD COLUMN IF NOT EXISTS item_link TEXT NULL;
+
+        CREATE TABLE IF NOT EXISTS public.outstock_customer_wallet_transactions (
+          id VARCHAR(64) PRIMARY KEY,
+          customer_id VARCHAR(36) NOT NULL REFERENCES public.outstock_customers(id) ON DELETE CASCADE,
+          order_id VARCHAR(36) NULL,
+          transaction_type VARCHAR(50) NOT NULL,
+          amount NUMERIC(10, 2) NOT NULL,
+          previous_balance NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+          new_balance NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+          notes TEXT NULL,
+          created_by_code VARCHAR(50) NULL,
+          created_by_name VARCHAR(100) NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_outstock_wallet_cust ON public.outstock_customer_wallet_transactions (customer_id);
 
         ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS contacted_customer_at TIMESTAMPTZ NULL;
         ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS contacted_by VARCHAR(100) NULL;
@@ -1471,6 +1490,39 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     }
   });
 
+  // ── إعدادات وهوية نظام النواقص العامة ومناطق التوصيل وواتساب المشتريات ──
+  app.get('/api/outstock/settings', authMiddleware, async (req, res) => {
+    try {
+      const row = await db.query("SELECT setting_value FROM public.outstock_settings WHERE setting_key = 'general_settings'");
+      const settings = row.rows[0]?.setting_value || {};
+      res.json({ success: true, settings });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/outstock/settings', authMiddleware, async (req, res) => {
+    try {
+      const incoming = req.body || {};
+      const existing = await db.query("SELECT setting_value FROM public.outstock_settings WHERE setting_key = 'general_settings'");
+      const prev = existing.rows[0]?.setting_value || {};
+      const merged = { ...prev, ...incoming };
+
+      await db.query(`
+        INSERT INTO public.outstock_settings (setting_key, setting_value, updated_at)
+        VALUES ('general_settings', $1::jsonb, CURRENT_TIMESTAMP)
+        ON CONFLICT (setting_key) DO UPDATE SET
+          setting_value = EXCLUDED.setting_value,
+          updated_at = CURRENT_TIMESTAMP
+      `, [JSON.stringify(merged)]);
+
+      broadcastOutstock('outstock:settings_updated', { settings: merged });
+      res.json({ success: true, settings: merged, message: 'تم حفظ وتحديث الإعدادات بنجاح' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // ───────────────────────────────────────────────────────────────────────────
   // 2. إدارة الفروع ومزامنتها من منظومة الرواتب
   // ───────────────────────────────────────────────────────────────────────────
@@ -1884,14 +1936,27 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
                  json_build_object(
                    'id', i.id,
                    'medicationName', i.medication_name,
+                   'medication_name', i.medication_name,
                    'unitType', i.unit_type,
+                   'unit_type', i.unit_type,
                    'itemType', COALESCE(i.item_type, 'medication'),
+                   'item_type', COALESCE(i.item_type, 'medication'),
                    'quantity', i.quantity,
                    'unitPrice', i.unit_price,
+                   'unit_price', i.unit_price,
                    'totalPrice', i.total_price,
+                   'total_price', i.total_price,
                    'itemStatus', i.item_status,
+                   'item_status', i.item_status,
+                   'status', i.item_status,
+                   'imageUrl', i.image_url,
+                   'image_url', i.image_url,
+                   'itemLink', i.item_link,
+                   'item_link', i.item_link,
                    'procurementNotes', i.procurement_notes,
+                   'procurement_notes', i.procurement_notes,
                    'prunedFromBill', i.pruned_from_bill,
+                   'pruned_from_bill', i.pruned_from_bill,
                    'isPriceEstimated', COALESCE(i.is_price_estimated, false),
                    'priceMin', i.price_min,
                    'priceMax', i.price_max,
@@ -1972,7 +2037,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         query += ` AND COALESCE(o.order_type, 'customer') = $${params.length}`;
       }
 
-      if (status) {
+      if (status && status !== 'all') {
         if (status === 'active') {
           query += ` AND o.order_status <> 'delivered' AND o.order_status <> 'cancelled'`;
         } else {
@@ -2192,15 +2257,17 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         }
         const total = qty * price;
         const itemType = it.itemType || it.item_type || 'medication';
+        const imgUrl = it.imageUrl || it.image_url || null;
+        const itmLink = it.itemLink || it.item_link || null;
 
         await db.query(`
           INSERT INTO public.outstock_order_items (
             id, order_id, medication_name, unit_type, quantity, unit_price, total_price, item_status,
-            is_price_estimated, price_min, price_max, item_type, sent_to_procurement_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10, $11, CURRENT_TIMESTAMP)
+            is_price_estimated, price_min, price_max, item_type, image_url, item_link, sent_to_procurement_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP)
         `, [
           itemId, orderId, it.medicationName, it.unitType || 'pack',
-          qty, price, total, isEst, pMin, pMax, itemType
+          qty, price, total, isEst, pMin, pMax, itemType, imgUrl, itmLink
         ]);
 
         insertedItems.push({
@@ -2216,6 +2283,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           isPriceEstimated: isEst,
           priceMin: pMin,
           priceMax: pMax,
+          imageUrl: imgUrl,
+          itemLink: itmLink,
           sentToProcurementAt: new Date().toISOString()
         });
       }
@@ -2281,6 +2350,47 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           timestamp: new Date().toISOString()
         });
       }
+
+      // إرسال إشعار واتساب تلقائي لإدارة المشتريات بالطلب الجديد
+      (async () => {
+        try {
+          const setRow = await db.query("SELECT setting_value FROM public.outstock_settings WHERE setting_key = 'general_settings'");
+          const pPhone = setRow.rows[0]?.setting_value?.procurementWhatsappPhone;
+          if (pPhone) {
+            let cleanProcPhone = String(pPhone).replace(/\D/g, '');
+            if (cleanProcPhone.length >= 9) {
+              const itmsSummary = insertedItems.map((it, idx) => `  ${idx + 1}. ${it.medicationName} (${it.quantity} علبة)`).join('\n');
+              const waMsg = `📦 *طلب نواقص جديد وارد لإدارة المشتريات!*\n` +
+                `🏢 *الفرع:* ${fullOrder.branchName || fullOrder.branchId}\n` +
+                `📋 *رقم الطلب:* #${fullOrder.orderNumber}\n` +
+                `👤 *الصيدلي:* ${fullOrder.orderReceiverName || fullOrder.responsiblePharmacist || 'صيدلي الفرع'}\n` +
+                `💊 *الأصناف المطلوبة:*\n${itmsSummary}\n` +
+                `📱 *العميل:* ${fullOrder.customerName} (${fullOrder.customerPhone || 'بدون هاتف'})\n` +
+                `⏰ *التوقيت:* ${new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}`;
+
+              const normalizedPhone = (cleanProcPhone.startsWith('01') && cleanProcPhone.length === 11) ? ('2' + cleanProcPhone) : cleanProcPhone;
+              const waUrls = ['http://hr-whatsapp-server:3100/send', 'http://127.0.0.1:3100/send'];
+              for (const u of waUrls) {
+                try {
+                  const wRes = await fetch(u, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      sessionId: 'hr_main',
+                      phone: normalizedPhone,
+                      message: waMsg
+                    }),
+                    signal: AbortSignal.timeout(5000)
+                  });
+                  if (wRes.ok) break;
+                } catch (_) {}
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[Auto WhatsApp to Procurement Warning]:', e.message);
+        }
+      })();
 
       res.json({
         success: true,
@@ -2353,6 +2463,22 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         WHERE order_id = $1 AND pruned_from_bill = false
       `, [orderId]);
 
+      // في حال وجود فائض مدفوع (عربون أكثر من الإجمالي) واختيار إضافته للمحفظة
+      if (req.body.refundToWallet && order.customer_id && previousPaid > netTotal) {
+        const refundAmt = previousPaid - netTotal;
+        await db.query(`
+          UPDATE public.outstock_customers
+          SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2
+        `, [refundAmt, order.customer_id]);
+        const transId = `wtx_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        await db.query(`
+          INSERT INTO public.outstock_customer_wallet_transactions
+          (id, customer_id, order_id, amount, transaction_type, notes, created_by)
+          VALUES ($1, $2, $3, $4, 'deposit', $5, $6)
+        `, [transId, order.customer_id, orderId, refundAmt, `استرداد فائض عربون طلب رقم ${order.order_number || ''}`, cashierName || 'صيدلي الفرع']);
+      }
+
       // خصم الكميات من رصيد الفرع المؤقت
       const itemsRes = await db.query(
         'SELECT * FROM public.outstock_order_items WHERE order_id = $1 AND pruned_from_bill = false',
@@ -2416,6 +2542,30 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         console.warn('[HR BranchSales Sync Warning]:', hrSaleErr.message);
       }
 
+      // إيداع باقي المبلغ في محفظة العميل إن وجد
+      const refundToWallet = parseFloat(req.body.refundToWallet || 0);
+      if (refundToWallet > 0 && order.customer_id) {
+        try {
+          await db.query(`
+            UPDATE public.outstock_customers
+            SET wallet_balance = COALESCE(wallet_balance, 0) + $1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $2
+          `, [refundToWallet, order.customer_id]);
+
+          const txId = `wtx_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+          await db.query(`
+            INSERT INTO public.outstock_customer_wallet_transactions (
+              id, customer_id, order_id, transaction_type, amount, notes, created_by_code, created_by_name
+            ) VALUES ($1, $2, $3, 'refund_to_wallet', $4, $5, $6, $7)
+          `, [txId, order.customer_id, orderId, refundToWallet, `إيداع باقي حساب طلب #${order.order_number}`, deliveredByCode || null, cashier]);
+
+          broadcastOutstock('outstock:customer_wallet_updated', { customerId: order.customer_id });
+        } catch (wErr) {
+          console.warn('[Wallet Refund Warning]:', wErr.message);
+        }
+      }
+
       // ⚡ بث فوري للأحداث
       broadcastOutstock('outstock:order_delivered', {
         orderId,
@@ -2443,6 +2593,387 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       });
     } catch (err) {
       console.error('[Deliver Order Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // تعديل الطلب بالكامل (متاح فقط قبل رد إدارة المشتريات)
+  // ───────────────────────────────────────────────────────────────────────────
+  app.put('/api/outstock/orders/:id', authMiddleware, async (req, res) => {
+    try {
+      const orderId = req.params.id;
+      const orderCheck = await db.query('SELECT * FROM public.outstock_orders WHERE id = $1', [orderId]);
+      if (orderCheck.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'الطلب غير موجود' });
+      }
+      const existingOrder = orderCheck.rows[0];
+
+      // فحص هل ردت المشتريات على الطلب
+      const itemsCheck = await db.query("SELECT COUNT(*) as replied_count FROM public.outstock_order_items WHERE order_id = $1 AND (item_status <> 'pending' OR procurement_replied_at IS NOT NULL)", [orderId]);
+      const repliedCount = parseInt(itemsCheck.rows[0]?.replied_count || 0, 10);
+      if (existingOrder.procurement_replied_at || repliedCount > 0) {
+        return res.status(400).json({ success: false, error: 'لا يمكن تعديل بنود الطلب بعد رد إدارة المشتريات عليه. يمكن فقط تعديل العربون المدفوع.' });
+      }
+
+      const {
+        customer,
+        items,
+        paidAmount = 0,
+        discountType = 'none',
+        discountValue = 0,
+        expectedPickupDate,
+        expectedPickupTime,
+        responsiblePharmacist,
+        customerNotes,
+        deliveryType = 'branch_pickup',
+        deliveryTargetBranch,
+        deliveryTargetBranchId,
+        orderCategory = 'medication',
+        paymentSplits
+      } = req.body || {};
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ success: false, error: 'يرجى إدخال صنف واحد على الأقل في الطلب' });
+      }
+
+      // حساب الإجماليات
+      let totalAmount = 0;
+      for (const it of items) {
+        const qty = parseInt(it.quantity || 1, 10);
+        const isEst = Boolean(it.isPriceEstimated);
+        const pMin = (it.priceMin !== undefined && it.priceMin !== null && it.priceMin !== '') ? parseFloat(it.priceMin) : null;
+        const pMax = (it.priceMax !== undefined && it.priceMax !== null && it.priceMax !== '') ? parseFloat(it.priceMax) : null;
+        let price = parseFloat(it.unitPrice || 0);
+        if (isEst && (pMin > 0 || pMax > 0)) {
+          price = (pMin + (pMax || pMin)) / 2;
+        }
+        totalAmount += qty * price;
+      }
+
+      const discVal = parseFloat(discountValue || 0);
+      let netAmount = totalAmount;
+      if (discountType === 'amount') netAmount = Math.max(0, totalAmount - discVal);
+      else if (discountType === 'percentage') netAmount = Math.max(0, totalAmount - (totalAmount * discVal / 100));
+
+      const paid = parseFloat(paidAmount || 0);
+      const remaining = Math.max(0, netAmount - paid);
+
+      // تحديث بيانات العميل
+      if (existingOrder.customer_id && customer) {
+        await db.query(`
+          UPDATE public.outstock_customers
+          SET full_name = COALESCE($1, full_name),
+              whatsapp_phone = COALESCE($2, whatsapp_phone),
+              landline_phone = COALESCE($3, landline_phone),
+              address = COALESCE($4, address),
+              zone = COALESCE($5, zone),
+              notes = COALESCE($6, notes),
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $7
+        `, [
+          customer.fullName ? String(customer.fullName).trim() : null,
+          customer.whatsappPhone ? String(customer.whatsappPhone).replace(/\\D/g, '') : null,
+          customer.landlinePhone ? String(customer.landlinePhone).trim() : null,
+          customer.address ? String(customer.address).trim() : null,
+          customer.zone ? String(customer.zone).trim() : null,
+          customer.notes ? String(customer.notes).trim() : null,
+          existingOrder.customer_id
+        ]);
+      }
+
+      // تحديث الطلب
+      await db.query(`
+        UPDATE public.outstock_orders
+        SET total_amount = $1,
+            paid_amount = $2,
+            remaining_amount = $3,
+            discount_type = $4,
+            discount_value = $5,
+            net_amount = $6,
+            expected_pickup_date = $7,
+            expected_pickup_time = $8,
+            responsible_pharmacist = COALESCE($9, responsible_pharmacist),
+            customer_notes = $10,
+            delivery_type = $11,
+            delivery_target_branch = $12,
+            delivery_target_branch_id = $13,
+            order_category = $14,
+            payment_splits = $15::jsonb,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $16
+      `, [
+        totalAmount, paid, remaining,
+        discountType || 'none', discVal, netAmount,
+        expectedPickupDate || null, expectedPickupTime || null,
+        responsiblePharmacist || null, customerNotes || null,
+        deliveryType || 'branch_pickup', deliveryTargetBranch || null, deliveryTargetBranchId || null,
+        orderCategory || 'medication',
+        paymentSplits ? JSON.stringify(paymentSplits) : null,
+        orderId
+      ]);
+
+      // حذف البنود القديمة وإعادة إدراج الجديدة
+      await db.query('DELETE FROM public.outstock_order_items WHERE order_id = $1', [orderId]);
+
+      const insertedItems = [];
+      for (const it of items) {
+        const itemId = `item_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        const qty = parseInt(it.quantity || 1, 10);
+        const isEst = Boolean(it.isPriceEstimated);
+        const pMin = (it.priceMin !== undefined && it.priceMin !== null && it.priceMin !== '') ? parseFloat(it.priceMin) : null;
+        const pMax = (it.priceMax !== undefined && it.priceMax !== null && it.priceMax !== '') ? parseFloat(it.priceMax) : null;
+        let price = parseFloat(it.unitPrice || 0);
+        if (isEst && (pMin > 0 || pMax > 0)) {
+          price = (pMin + (pMax || pMin)) / 2;
+        }
+        const total = qty * price;
+        const itemType = it.itemType || it.item_type || 'medication';
+        const imgUrl = it.imageUrl || it.image_url || null;
+        const itmLink = it.itemLink || it.item_link || null;
+
+        await db.query(`
+          INSERT INTO public.outstock_order_items (
+            id, order_id, medication_name, unit_type, quantity, unit_price, total_price, item_status,
+            is_price_estimated, price_min, price_max, item_type, image_url, item_link, sent_to_procurement_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP)
+        `, [
+          itemId, orderId, it.medicationName, it.unitType || 'pack',
+          qty, price, total, isEst, pMin, pMax, itemType, imgUrl, itmLink
+        ]);
+
+        insertedItems.push({
+          id: itemId, orderId, medicationName: it.medicationName, unitType: it.unitType || 'pack',
+          itemType, quantity: qty, unitPrice: price, totalPrice: total, itemStatus: 'pending',
+          isPriceEstimated: isEst, priceMin: pMin, priceMax: pMax, imageUrl: imgUrl, itemLink: itmLink
+        });
+      }
+
+      broadcastOutstock('outstock:order_updated', { orderId, branchId: existingOrder.branch_id });
+      res.json({ success: true, message: 'تم تحديث بيانات الطلب بنجاح', orderId });
+    } catch (err) {
+      console.error('[Update Order Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // تعديل العربون / المبلغ المدفوع فقط (متاح حتى بعد رد المشتريات)
+  // ───────────────────────────────────────────────────────────────────────────
+  app.put('/api/outstock/orders/:id/deposit', authMiddleware, async (req, res) => {
+    try {
+      const orderId = req.params.id;
+      const { paidAmount, paymentSplits, notes } = req.body || {};
+      const orderRes = await db.query('SELECT * FROM public.outstock_orders WHERE id = $1', [orderId]);
+      if (orderRes.rows.length === 0) return res.status(404).json({ success: false, error: 'الطلب غير موجود' });
+      const order = orderRes.rows[0];
+
+      const newPaid = Math.max(0, parseFloat(paidAmount || 0));
+      const netTotal = parseFloat(order.net_amount || 0);
+      const newRemaining = Math.max(0, netTotal - newPaid);
+
+      await db.query(`
+        UPDATE public.outstock_orders
+        SET paid_amount = $1,
+            remaining_amount = $2,
+            payment_splits = COALESCE($3::jsonb, payment_splits),
+            customer_notes = CASE WHEN $4::text IS NOT NULL THEN COALESCE(customer_notes || ' - ' || $4, $4) ELSE customer_notes END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $5
+      `, [newPaid, newRemaining, paymentSplits ? JSON.stringify(paymentSplits) : null, notes || null, orderId]);
+
+      broadcastOutstock('outstock:order_updated', { orderId, branchId: order.branch_id, paidAmount: newPaid, remainingAmount: newRemaining });
+      res.json({ success: true, message: 'تم تحديث مبلغ العربون بنجاح', paidAmount: newPaid, remainingAmount: newRemaining });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // حذف الطلب بالكامل (متاح فقط قبل رد المشتريات)
+  // ───────────────────────────────────────────────────────────────────────────
+  app.delete('/api/outstock/orders/:id', authMiddleware, async (req, res) => {
+    try {
+      const orderId = req.params.id;
+      const orderRes = await db.query('SELECT * FROM public.outstock_orders WHERE id = $1', [orderId]);
+      if (orderRes.rows.length === 0) return res.status(404).json({ success: false, error: 'الطلب غير موجود' });
+      const order = orderRes.rows[0];
+
+      // فحص هل ردت المشتريات
+      const itemsCheck = await db.query("SELECT COUNT(*) as replied_count FROM public.outstock_order_items WHERE order_id = $1 AND (item_status <> 'pending' OR procurement_replied_at IS NOT NULL)", [orderId]);
+      const repliedCount = parseInt(itemsCheck.rows[0]?.replied_count || 0, 10);
+      if (order.procurement_replied_at || repliedCount > 0) {
+        return res.status(400).json({ success: false, error: 'لا يمكن حذف الطلب بعد أن قامت إدارة المشتريات بالرد عليه' });
+      }
+
+      await db.query('DELETE FROM public.outstock_orders WHERE id = $1', [orderId]);
+      if (order.customer_id) {
+        await db.query('UPDATE public.outstock_customers SET total_orders_count = GREATEST(0, total_orders_count - 1) WHERE id = $1', [order.customer_id]);
+      }
+
+      broadcastOutstock('outstock:order_deleted', { orderId, branchId: order.branch_id });
+      res.json({ success: true, message: 'تم حذف الطلب نهائياً بنجاح' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // حذف صنف من الطلب (متاح فقط قبل رد المشتريات عليه)
+  // ───────────────────────────────────────────────────────────────────────────
+  app.delete('/api/outstock/orders/:orderId/items/:itemId', authMiddleware, async (req, res) => {
+    try {
+      const { orderId, itemId } = req.params;
+      const itmRes = await db.query('SELECT * FROM public.outstock_order_items WHERE id = $1 AND order_id = $2', [itemId, orderId]);
+      if (itmRes.rows.length === 0) return res.status(404).json({ success: false, error: 'الصنف غير موجود في هذا الطلب' });
+      const itm = itmRes.rows[0];
+
+      if (itm.item_status !== 'pending' || itm.procurement_replied_at) {
+        return res.status(400).json({ success: false, error: 'لا يمكن حذف الصنف بعد رد إدارة المشتريات عليه' });
+      }
+
+      await db.query('DELETE FROM public.outstock_order_items WHERE id = $1', [itemId]);
+
+      // إعادة احتساب إجمالي الطلب
+      const sumRes = await db.query('SELECT COALESCE(SUM(total_price), 0) as new_total FROM public.outstock_order_items WHERE order_id = $1', [orderId]);
+      const newTotal = parseFloat(sumRes.rows[0]?.new_total || 0);
+
+      const ordRes = await db.query('SELECT * FROM public.outstock_orders WHERE id = $1', [orderId]);
+      if (ordRes.rows.length > 0) {
+        const ord = ordRes.rows[0];
+        const discVal = parseFloat(ord.discount_value || 0);
+        let net = newTotal;
+        if (ord.discount_type === 'amount') net = Math.max(0, newTotal - discVal);
+        else if (ord.discount_type === 'percentage') net = Math.max(0, newTotal - (newTotal * discVal / 100));
+        const rem = Math.max(0, net - parseFloat(ord.paid_amount || 0));
+
+        await db.query(`
+          UPDATE public.outstock_orders
+          SET total_amount = $1, net_amount = $2, remaining_amount = $3, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $4
+        `, [newTotal, net, rem, orderId]);
+      }
+
+      broadcastOutstock('outstock:order_updated', { orderId });
+      res.json({ success: true, message: 'تم حذف الصنف من الطلب بنجاح' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // تصعيد شكوى لعدم الرد على استعلام صنف
+  // ───────────────────────────────────────────────────────────────────────────
+  app.post('/api/outstock/inquiries/:id/complaint', authMiddleware, async (req, res) => {
+    try {
+      const inqId = req.params.id;
+      const inqRes = await db.query('SELECT * FROM public.outstock_medication_requests WHERE id = $1', [inqId]);
+      if (inqRes.rows.length === 0) return res.status(404).json({ success: false, error: 'الاستعلام غير موجود' });
+      const inq = inqRes.rows[0];
+
+      const { notes = '', pharmacistName = '' } = req.body || {};
+      const complaintId = `comp_inq_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+      await db.query(`
+        INSERT INTO public.outstock_order_complaints (
+          id, order_id, order_number, branch_id, branch_name, complaint_type,
+          pharmacist_name, notes, order_created_at, status, created_at
+        ) VALUES ($1, $2, $3, $4, $5, 'delayed_inquiry_response', $6, $7, $8, 'pending', CURRENT_TIMESTAMP)
+      `, [
+        complaintId, inqId, `INQ-${inq.request_number || inqId.slice(-6)}`,
+        inq.branch_id, inq.branch_name || inq.branch_id,
+        pharmacistName || inq.pharmacist_name || 'صيدلي الفرع',
+        notes || `تصعيد لعدم الرد على استعلام صنف: ${inq.medication_name}`,
+        inq.created_at
+      ]);
+
+      broadcastOutstock('outstock:complaint_created', { complaintId, branchId: inq.branch_id });
+      res.json({ success: true, message: '🚨 تم تصعيد شكوى عدم الرد للمالك وإدارة المشتريات بنجاح' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // محفظة العميل: شحن / خصم / تسوية رصيد
+  // ───────────────────────────────────────────────────────────────────────────
+  app.post('/api/outstock/customers/:id/wallet/adjust', authMiddleware, async (req, res) => {
+    try {
+      const customerId = req.params.id;
+      const { amount, type = 'deposit', notes = '', employeeCode = '', employeeName = '' } = req.body || {};
+      const delta = Math.abs(parseFloat(amount || 0));
+      if (delta <= 0) return res.status(400).json({ success: false, error: 'يرجى إدخال مبلغ صالح للمحفظة' });
+
+      const custRes = await db.query('SELECT * FROM public.outstock_customers WHERE id = $1', [customerId]);
+      if (custRes.rows.length === 0) return res.status(404).json({ success: false, error: 'العميل غير موجود' });
+      const cust = custRes.rows[0];
+      const prevBal = parseFloat(cust.wallet_balance || 0);
+
+      let newBal = prevBal;
+      if (type === 'deposit' || type === 'refund_to_wallet') {
+        newBal = prevBal + delta;
+      } else if (type === 'withdrawal' || type === 'charge') {
+        if (delta > prevBal) return res.status(400).json({ success: false, error: `الرصيد المتاح (${prevBal.toFixed(2)} ج.م) لا يكفي لخصم ${delta.toFixed(2)} ج.م` });
+        newBal = Math.max(0, prevBal - delta);
+      }
+
+      await db.query('UPDATE public.outstock_customers SET wallet_balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newBal, customerId]);
+
+      const txId = `wtx_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      await db.query(`
+        INSERT INTO public.outstock_customer_wallet_transactions (
+          id, customer_id, transaction_type, amount, previous_balance, new_balance, notes, created_by_code, created_by_name
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `, [txId, customerId, type, delta, prevBal, newBal, notes || null, employeeCode || null, employeeName || req.outstockUser?.username || 'المسؤول']);
+
+      broadcastOutstock('outstock:customer_wallet_updated', { customerId, newBalance: newBal });
+      res.json({ success: true, message: 'تم تحديث رصيد محفظة العميل بنجاح', newBalance: newBal });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/outstock/customers/:id/wallet/transactions', authMiddleware, async (req, res) => {
+    try {
+      const customerId = req.params.id;
+      const result = await db.query(`
+        SELECT * FROM public.outstock_customer_wallet_transactions
+        WHERE customer_id = $1
+        ORDER BY created_at DESC
+        LIMIT 100
+      `, [customerId]);
+      res.json({ success: true, transactions: result.rows });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // مسح وتصفير طلبات النظام بالكامل مع الحفاظ التام على سجل العملاء (للمالك فقط)
+  // ───────────────────────────────────────────────────────────────────────────
+  app.post('/api/outstock/admin/purge-orders', authMiddleware, async (req, res) => {
+    try {
+      if (req.outstockUser.role !== 'owner') {
+        return res.status(403).json({ success: false, error: 'غير مصرح - عملية تصفير الطلبات متاحة للمالك والمشرف العام فقط' });
+      }
+
+      const { confirmationPhrase } = req.body || {};
+      if (confirmationPhrase !== 'تأكيد تصفير كافة الطلبات') {
+        return res.status(400).json({ success: false, error: 'يرجى كتابة عبارة التأكيد المطابقة تماماً: "تأكيد تصفير كافة الطلبات"' });
+      }
+
+      await db.query('DELETE FROM public.outstock_order_complaints');
+      await db.query('DELETE FROM public.outstock_order_receipts');
+      await db.query('DELETE FROM public.outstock_branch_sales');
+      await db.query('DELETE FROM public.outstock_deficiencies');
+      await db.query('DELETE FROM public.outstock_order_items');
+      await db.query('DELETE FROM public.outstock_orders');
+      await db.query('UPDATE public.outstock_customers SET total_orders_count = 0');
+
+      broadcastOutstock('outstock:orders_purged', { timestamp: new Date().toISOString() });
+      res.json({ success: true, message: '✅ تم مسح وتصفير كافة طلبات النظام بنجاح مع الحفاظ التام على سجل العملاء ومحافظهم' });
+    } catch (err) {
+      console.error('[Purge Orders Error]:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -2934,7 +3465,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
                END as branch_name,
                SUM(i.quantity) as total_requested_qty,
                COUNT(DISTINCT o.id) as orders_count,
-               MAX(NULLIF(o.medication_image_url, '')) as medication_image_url,
+               MAX(NULLIF(COALESCE(i.image_url, o.medication_image_url), '')) as medication_image_url,
+               MAX(NULLIF(i.item_link, '')) as item_link,
                json_agg(json_build_object(
                  'itemId', i.id,
                  'orderId', o.id,
@@ -2955,7 +3487,9 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
                  'sentToProcurementAt', COALESCE(i.sent_to_procurement_at, o.created_at),
                  'customerName', CASE WHEN o.order_type = 'branch' THEN 'طلب خاص برصيد الفرع' ELSE COALESCE(c.full_name, 'عميل نقدي') END,
                  'customerPhone', CASE WHEN o.order_type = 'branch' THEN 'الفرع' ELSE COALESCE(c.whatsapp_phone, '') END,
-                 'medicationImageUrl', o.medication_image_url
+                 'imageUrl', i.image_url,
+                 'itemLink', i.item_link,
+                 'medicationImageUrl', COALESCE(i.image_url, o.medication_image_url)
                )) as item_details
         FROM public.outstock_order_items i
         JOIN public.outstock_orders o ON i.order_id = o.id

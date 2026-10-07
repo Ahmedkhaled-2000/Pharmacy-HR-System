@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Building2, Phone, Calendar, Clock, History, X, Users, RefreshCw } from 'lucide-react';
+import { Search, Building2, Phone, Calendar, Clock, History, X, Users, RefreshCw, Wallet } from 'lucide-react';
 import { outstockGetCustomers, outstockGetCustomerHistory, outstockGetBranches } from '../../../utils/outstockApiClient';
+import CustomerWalletModal from '../common/CustomerWalletModal';
 
 /**
  * OwnerCustomersDirectoryTab.jsx
@@ -9,7 +10,7 @@ import { outstockGetCustomers, outstockGetCustomerHistory, outstockGetBranches }
  * - تقسيم وتصفية العملاء حسب الفرع المسجلين فيه
  * - نافذة منبثقة تفاعلية عند النقر على أي عميل تعرض كامل طلباته وتواريخها
  */
-export default function OwnerCustomersDirectoryTab() {
+export default function OwnerCustomersDirectoryTab({ showToast }) {
   const [customers, setCustomers] = useState([]);
   const [branches, setBranches] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -20,6 +21,9 @@ export default function OwnerCustomersDirectoryTab() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerOrders, setCustomerOrders] = useState([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+
+  // نافذة محفظة العميل الإلكترونية
+  const [walletCustomer, setWalletCustomer] = useState(null);
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -151,6 +155,7 @@ export default function OwnerCustomersDirectoryTab() {
                 <tr>
                   <th>كود العميل</th>
                   <th>اسم العميل</th>
+                  <th>رصيد المحفظة</th>
                   <th>رقم الواتساب</th>
                   <th>الفرع المسجل فيه</th>
                   <th>العنوان</th>
@@ -169,6 +174,25 @@ export default function OwnerCustomersDirectoryTab() {
                     </td>
                     <td>
                       <strong style={{ fontSize: '14px', color: '#0f172a' }}>{cust.full_name}</strong>
+                    </td>
+                    <td>
+                      <span
+                        style={{
+                          background: Number(cust.wallet_balance || 0) > 0 ? '#ecfdf5' : '#f8fafc',
+                          color: Number(cust.wallet_balance || 0) > 0 ? '#059669' : '#64748b',
+                          border: `1px solid ${Number(cust.wallet_balance || 0) > 0 ? '#a7f3d0' : '#e2e8f0'}`,
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                      >
+                        <Wallet size={12} />
+                        {Number(cust.wallet_balance || 0).toFixed(2)} ج.م
+                      </span>
                     </td>
                     <td>
                       <span style={{ color: '#0284c7', fontWeight: '700', direction: 'ltr', display: 'inline-block' }}>
@@ -196,18 +220,44 @@ export default function OwnerCustomersDirectoryTab() {
                     </td>
                     <td>{new Date(cust.created_at).toLocaleDateString('ar-EG')}</td>
                     <td>
-                      <button
-                        type="button"
-                        className="outstock-btn outstock-btn-secondary"
-                        style={{ padding: '5px 12px', fontSize: '12px' }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenCustomerOrders(cust);
-                        }}
-                      >
-                        <History size={13} />
-                        <span>استعراض الطلبات والتواريخ</span>
-                      </button>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          className="outstock-btn"
+                          style={{
+                            padding: '5px 10px',
+                            fontSize: '12px',
+                            background: '#ecfdf5',
+                            color: '#065f46',
+                            border: '1px solid #a7f3d0',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setWalletCustomer(cust);
+                          }}
+                          title="إدارة وشحن محفظة العميل"
+                        >
+                          <Wallet size={13} />
+                          <span>المحفظة</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="outstock-btn outstock-btn-secondary"
+                          style={{ padding: '5px 12px', fontSize: '12px' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenCustomerOrders(cust);
+                          }}
+                        >
+                          <History size={13} />
+                          <span>الطلبات</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -246,6 +296,29 @@ export default function OwnerCustomersDirectoryTab() {
                 <div>الواتساب: <strong dir="ltr">{selectedCustomer.whatsapp_phone}</strong></div>
                 <div>الهاتف الأرضي: <span>{selectedCustomer.landline_phone || '—'}</span></div>
                 <div>العنوان: <span>{selectedCustomer.address || '—'}</span></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', gridColumn: '1 / -1', background: '#ffffff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <span>رصيد محفظة العميل: <strong style={{ color: '#059669', fontSize: '14px' }}>{Number(selectedCustomer.wallet_balance || 0).toFixed(2)} ج.م</strong></span>
+                  <button
+                    type="button"
+                    className="outstock-btn"
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: '12px',
+                      background: '#ecfdf5',
+                      color: '#065f46',
+                      border: '1px solid #a7f3d0',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      marginRight: 'auto'
+                    }}
+                    onClick={() => setWalletCustomer(selectedCustomer)}
+                  >
+                    <Wallet size={12} />
+                    <span>إدارة وشحن المحفظة 👛</span>
+                  </button>
+                </div>
               </div>
 
               <div style={{ fontSize: '14px', fontWeight: '900', color: '#1e293b', marginTop: '10px' }}>
@@ -343,6 +416,22 @@ export default function OwnerCustomersDirectoryTab() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── نافذة إدارة وشحن محفظة العميل ── */}
+      {walletCustomer && (
+        <CustomerWalletModal
+          customer={walletCustomer}
+          isOpen={Boolean(walletCustomer)}
+          onClose={() => setWalletCustomer(null)}
+          onBalanceUpdated={(custId, newBal) => {
+            setCustomers(prev => prev.map(c => c.id === custId ? { ...c, wallet_balance: newBal } : c));
+            if (selectedCustomer && selectedCustomer.id === custId) {
+              setSelectedCustomer(prev => ({ ...prev, wallet_balance: newBal }));
+            }
+          }}
+          showToast={showToast}
+        />
       )}
     </div>
   );
