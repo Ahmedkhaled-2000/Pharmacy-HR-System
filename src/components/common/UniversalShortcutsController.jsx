@@ -178,7 +178,7 @@ export default function UniversalShortcutsController() {
         // B) Find all visible modal overlays / backdrops across the entire application
         const visibleModals = Array.from(
           document.querySelectorAll(
-            '.modal-overlay, .modal-backdrop, .central-modal-backdrop, .acc-modal-overlay, .portal-modal-overlay, [role="dialog"], [aria-modal="true"]'
+            '.modal-overlay, .modal-backdrop, .central-modal-backdrop, .acc-modal-overlay, .portal-modal-overlay, .outstock-modal-backdrop, .outstock-settlement-modal, .outstock-modal-panel, .outstock-modal-card, [role="dialog"], [aria-modal="true"]'
           )
         ).filter((el) => {
           const style = window.getComputedStyle(el);
@@ -191,7 +191,7 @@ export default function UniversalShortcutsController() {
           // Try clicking close / cancel button
           const closeBtn =
             topModal.querySelector(
-              '.modal-close-circle-btn, .modal-close-btn, .del-btn, [data-action="close"], [aria-label*="إغلاق"], [aria-label*="Close"], .btn-close, .acc-action-icon-btn'
+              '.modal-close-circle-btn, .modal-close-btn, .del-btn, [data-action="close"], [aria-label*="إغلاق"], [aria-label*="Close"], .btn-close, .acc-action-icon-btn, .outstock-modal-close-btn, .outstock-btn-close, .outstock-modal-close'
             ) ||
             Array.from(topModal.querySelectorAll('button')).find((b) => {
               const text = (b.textContent || '').trim();
@@ -213,6 +213,9 @@ export default function UniversalShortcutsController() {
 
           window.dispatchEvent(
             new CustomEvent('app:modal-close-request', { detail: { source: 'escape' } })
+          );
+          window.dispatchEvent(
+            new CustomEvent('outstock:close_modal', { detail: { source: 'escape' } })
           );
           return;
         }

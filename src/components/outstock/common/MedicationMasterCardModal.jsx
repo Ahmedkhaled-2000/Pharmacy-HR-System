@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   FileText,
@@ -37,6 +37,30 @@ export default function MedicationMasterCardModal({
   const [copiedBarcode, setCopiedBarcode] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
+  // إغلاق النافذة بزر Escape
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' || e.keyCode === 27) {
+        if (isEditModalOpen) {
+          setIsEditModalOpen(false);
+          return;
+        }
+        onClose?.();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, isEditModalOpen]);
+
+  // منع تمرير خلفية الصفحة
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
   if (!medicationId) return null;
 
   const med = masterCardData?.medication;
@@ -62,7 +86,8 @@ export default function MedicationMasterCardModal({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '16px'
+        padding: '16px',
+        overscrollBehavior: 'contain'
       }}
     >
       <div
@@ -77,7 +102,8 @@ export default function MedicationMasterCardModal({
           flexDirection: 'column',
           boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.35)',
           direction: 'rtl',
-          border: '1px solid rgba(226, 232, 240, 0.8)'
+          border: '1px solid rgba(226, 232, 240, 0.8)',
+          overscrollBehavior: 'contain'
         }}
       >
         {/* ── رأس النافذة الأنيق ── */}

@@ -130,6 +130,30 @@ export default function AddMedicationModal({
     prevIsOpenRef.current = isOpen;
   }, [isOpen, initialData]);
 
+  // إغلاق النافذة بزر Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' || e.keyCode === 27) {
+        if (!isSaving) {
+          onClose?.();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isSaving, onClose]);
+
+  // منع تمرير خلفية الصفحة أثناء فتح النافذة
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isOpen]);
+
   // تغيير الشكل الدوائي وتحديث الوحدة وحجم العبوة تلقائياً
   const handleDosageFormChange = (e) => {
     const selectedForm = e.target.value;
@@ -272,7 +296,8 @@ export default function AddMedicationModal({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '16px'
+        padding: '16px',
+        overscrollBehavior: 'contain'
       }}
     >
       <div
@@ -287,7 +312,8 @@ export default function AddMedicationModal({
           flexDirection: 'column',
           boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.35)',
           direction: 'rtl',
-          border: '1px solid rgba(226, 232, 240, 0.8)'
+          border: '1px solid rgba(226, 232, 240, 0.8)',
+          overscrollBehavior: 'contain'
         }}
       >
         {/* رأس النافذة */}
@@ -365,7 +391,7 @@ export default function AddMedicationModal({
         {/* جسم النموذج */}
         <form
           onSubmit={handleSubmit}
-          style={{ padding: '22px 24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}
+          style={{ padding: '22px 24px', overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: '16px' }}
         >
           {errorMsg && (
             <div

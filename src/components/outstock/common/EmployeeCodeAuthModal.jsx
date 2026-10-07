@@ -43,6 +43,30 @@ export default function EmployeeCodeAuthModal({
     }
   }, [isOpen]);
 
+  // إغلاق النافذة بزر Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' || e.keyCode === 27) {
+        if (!isVerifying) {
+          onClose?.();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isVerifying, onClose]);
+
+  // منع تمرير خلفية الصفحة
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleVerify = async (e) => {
@@ -85,7 +109,8 @@ export default function EmployeeCodeAuthModal({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '16px'
+        padding: '16px',
+        overscrollBehavior: 'contain'
       }}
     >
       <div
@@ -98,7 +123,8 @@ export default function EmployeeCodeAuthModal({
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
           direction: 'rtl',
           border: '1px solid #e2e8f0',
-          animation: 'outstockFadeIn 0.2s ease-out'
+          animation: 'outstockFadeIn 0.2s ease-out',
+          overscrollBehavior: 'contain'
         }}
       >
         {/* رأس النافذة - مظهر فاتح مؤسسي راقي */}

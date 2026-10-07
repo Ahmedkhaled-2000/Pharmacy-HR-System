@@ -912,8 +912,9 @@ export default function OutstockSystemView({
         setIsSuppliersMenuOpen(false);
         setIsSettingsMenuOpen(false);
         setIsCommandPaletteOpen(false);
-        window.dispatchEvent(new CustomEvent('outstock:close_modal'));
-        const closeBtn = document.querySelector('.outstock-modal-card .outstock-btn-close, .outstock-modal-panel .outstock-btn-close, .outstock-btn-close');
+        const closeBtn = document.querySelector(
+          '.outstock-modal-backdrop .outstock-modal-close, .outstock-modal-backdrop .outstock-modal-close-btn, .outstock-modal-backdrop .outstock-btn-close, .outstock-modal-card .outstock-btn-close, .outstock-modal-panel .outstock-btn-close, .outstock-btn-close'
+        );
         if (closeBtn) closeBtn.click();
         return;
       }

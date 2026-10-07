@@ -59,6 +59,30 @@ export default function CustomerWalletModal({
     }
   }, [isOpen, customer, fetchTransactions]);
 
+  // إغلاق النافذة بزر Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' || e.keyCode === 27) {
+        if (!isSubmitting) {
+          onClose?.();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isSubmitting, onClose]);
+
+  // منع تمرير خلفية الصفحة
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isOpen]);
+
   if (!isOpen || !customer) return null;
 
   const handleAdjust = async (e) => {
@@ -110,7 +134,8 @@ export default function CustomerWalletModal({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '16px'
+        padding: '16px',
+        overscrollBehavior: 'contain'
       }}
       onClick={onClose}
     >
@@ -127,7 +152,8 @@ export default function CustomerWalletModal({
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          direction: 'rtl'
+          direction: 'rtl',
+          overscrollBehavior: 'contain'
         }}
         onClick={(e) => e.stopPropagation()}
       >

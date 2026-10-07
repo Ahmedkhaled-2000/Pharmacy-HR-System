@@ -1000,9 +1000,19 @@ export async function outstockUpdateOrder(orderId, payload) {
 }
 
 export async function outstockUpdateOrderDeposit(orderId, payload) {
+  let bodyData = payload;
+  if (typeof payload === 'number' || typeof payload === 'string') {
+    bodyData = { paidAmount: parseFloat(payload || 0) };
+  } else if (payload && typeof payload === 'object') {
+    if (!('paidAmount' in payload)) {
+      if ('amount' in payload) bodyData = { ...payload, paidAmount: payload.amount };
+      else if ('newDepositAmount' in payload) bodyData = { ...payload, paidAmount: payload.newDepositAmount };
+      else if ('depositAmount' in payload) bodyData = { ...payload, paidAmount: payload.depositAmount };
+    }
+  }
   return outstockRequest(`orders/${encodeURIComponent(orderId)}/deposit`, {
     method: 'PUT',
-    body: JSON.stringify(payload)
+    body: JSON.stringify(bodyData)
   });
 }
 

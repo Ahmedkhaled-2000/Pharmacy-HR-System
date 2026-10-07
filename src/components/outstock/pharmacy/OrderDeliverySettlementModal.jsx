@@ -56,6 +56,28 @@ export default function OrderDeliverySettlementModal({
     }
   }, [order]);
 
+  // منع تمرير خلفية الصفحة أثناء فتح النافذة
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
+  // إغلاق النافذة بزر Escape
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' || e.keyCode === 27) {
+        if (!isSubmitting) {
+          onClose?.();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, isSubmitting]);
+
   if (!order) return null;
 
   // احتساب المتبقي بعد التحصيل الحالي
@@ -129,7 +151,8 @@ export default function OrderDeliverySettlementModal({
         alignItems: 'center',
         justifyContent: 'center',
         padding: '16px',
-        animation: 'fadeIn 0.2s ease-out'
+        animation: 'fadeIn 0.2s ease-out',
+        overscrollBehavior: 'contain'
       }}
     >
       <div
@@ -145,7 +168,8 @@ export default function OrderDeliverySettlementModal({
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
           border: '1px solid #e2e8f0',
           overflow: 'hidden',
-          direction: 'rtl'
+          direction: 'rtl',
+          overscrollBehavior: 'contain'
         }}
       >
         {/* ── الرأس المؤسسي ── */}
@@ -207,7 +231,7 @@ export default function OrderDeliverySettlementModal({
         </div>
 
         {/* ── جسم النافذة القابل للتمرير ── */}
-        <form onSubmit={handleSubmit} style={{ overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+        <form onSubmit={handleSubmit} style={{ overflowY: 'auto', overscrollBehavior: 'contain', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
           {deliveredBy && (
             <div
               style={{
@@ -297,25 +321,97 @@ export default function OrderDeliverySettlementModal({
                 </thead>
                 <tbody>
                   {Array.isArray(order.items) && order.items.length > 0 ? (
-                    order.items.map((it, idx) => (
-                      <tr key={it.id || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '8px 12px', fontWeight: '600', color: '#1e293b' }}>
-                          {it.medication_name || it.medicationName}
-                          <span style={{ fontSize: '11px', color: '#64748b', marginRight: '6px' }}>
-                            ({it.unit_type === 'pack' ? 'عبوة' : 'شريط'})
-                          </span>
-                        </td>
-                        <td style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 'bold' }}>
-                          {it.quantity}
-                        </td>
-                        <td style={{ padding: '8px 12px', textAlign: 'left', color: '#475569' }}>
-                          {parseFloat(it.unit_price || it.unitPrice || 0).toFixed(2)}
-                        </td>
-                        <td style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 'bold', color: '#047857' }}>
-                          {parseFloat(it.total_price || it.totalPrice || 0).toFixed(2)} ج.م
-                        </td>
-                      </tr>
-                    ))
+                    order.items.map((it, idx) => {
+                      const isUnavailable = Boolean(
+                        it?.status === 'unavailable' ||
+                        it?.status === 'unavailable_in_market' ||
+                        it?.itemStatus === 'unavailable_in_market' ||
+                        it?.item_status === 'unavailable_in_market' ||
+                        it?.decision === 'unavailable' ||
+                        it?.procurement_status === 'unavailable' ||
+                        it?.prunedFromBill === true ||
+                        it?.pruned_from_bill === true ||
+                        it?.is_available === false ||
+                        it?.available === false
+                      );
+
+                      return (
+                        <tr
+                          key={it.id || idx}
+                          style={{
+                            borderBottom: '1px solid #f1f5f9',
+                            background: isUnavailable ? '#fef2f2' : 'transparent',
+                            transition: 'background-color 0.15s ease'
+                          }}
+                        >
+                          <td style={{ padding: '8px 12px', fontWeight: '600', color: isUnavailable ? '#991b1b' : '#1e293b' }}>
+                            <span style={{ textDecoration: isUnavailable ? 'line-through' : 'none' }}>
+                              {it.medication_name || it.medicationName}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                color: isUnavailable ? '#b91c1c' : '#64748b',
+                                marginRight: '6px',
+                                textDecoration: isUnavailable ? 'line-through' : 'none'
+                              }}
+                            >
+                              ({it.unit_type === 'pack' ? 'عبوة' : 'شريط'})
+                            </span>
+                            {isUnavailable && (
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  marginRight: '8px',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  background: '#fee2e2',
+                                  border: '1px solid #fca5a5',
+                                  color: '#dc2626',
+                                  fontSize: '11px',
+                                  fontWeight: '800',
+                                  textDecoration: 'none'
+                                }}
+                              >
+                                ✕ غير متوفر من المشتريات
+                              </span>
+                            )}
+                          </td>
+                          <td
+                            style={{
+                              padding: '8px 12px',
+                              textAlign: 'center',
+                              fontWeight: 'bold',
+                              color: isUnavailable ? '#991b1b' : 'inherit',
+                              textDecoration: isUnavailable ? 'line-through' : 'none'
+                            }}
+                          >
+                            {it.quantity}
+                          </td>
+                          <td
+                            style={{
+                              padding: '8px 12px',
+                              textAlign: 'left',
+                              color: isUnavailable ? '#991b1b' : '#475569',
+                              textDecoration: isUnavailable ? 'line-through' : 'none'
+                            }}
+                          >
+                            {parseFloat(it.unit_price || it.unitPrice || 0).toFixed(2)}
+                          </td>
+                          <td
+                            style={{
+                              padding: '8px 12px',
+                              textAlign: 'left',
+                              fontWeight: 'bold',
+                              color: isUnavailable ? '#991b1b' : '#047857',
+                              textDecoration: isUnavailable ? 'line-through' : 'none'
+                            }}
+                          >
+                            {parseFloat(it.total_price || it.totalPrice || 0).toFixed(2)} ج.م
+                          </td>
+                        </tr>
+                      );
+                    })
                   ) : (
                     <tr>
                       <td colSpan={4} style={{ padding: '12px', textAlign: 'center', color: '#64748b' }}>

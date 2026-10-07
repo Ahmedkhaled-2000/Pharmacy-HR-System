@@ -292,7 +292,10 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     }
     setIsSavingDeposit(true);
     try {
-      const res = await outstockUpdateOrderDeposit(depositModalOrder.id, depVal);
+      const res = await outstockUpdateOrderDeposit(depositModalOrder.id, {
+        paidAmount: depVal,
+        notes: `تعديل عربون من الصيدلية إلى ${depVal} ج.م`
+      });
       if (res?.success) {
         showToast?.('✅ تم تحديث مبلغ العربون بنجاح');
         setDepositModalOrder(null);
@@ -1151,8 +1154,20 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                           const dVal = parseFloat(order.discount_value || order.discountValue || 0);
                           const isPct = (order.discount_type || order.discountType) === 'percentage';
                           const paid = parseFloat(order.paid_amount || order.paidAmount || 0);
-                          const rMin = Math.max(0, tMin - (isPct ? (tMin * dVal) / 100 : dVal) - paid);
-                          const rMax = Math.max(0, tMax - (isPct ? (tMax * dVal) / 100 : dVal) - paid);
+                          const discMin = isPct ? (tMin * dVal) / 100 : dVal;
+                          const discMax = isPct ? (tMax * dVal) / 100 : dVal;
+                          const discAvg = isPct ? (tAvg * dVal) / 100 : dVal;
+                          const netMin = Math.max(0, tMin - discMin);
+                          const netMax = Math.max(0, tMax - discMax);
+                          const netAmount = parseFloat(order.net_amount ?? order.netAmount ?? (tAvg - discAvg) ?? 0);
+
+                          const rMin = Math.max(0, netMin - paid);
+                          const rMax = Math.max(0, netMax - paid);
+                          const remAmount = Math.max(0, netAmount - paid);
+
+                          const refundDue = Math.max(0, paid - netAmount);
+                          const refundMin = Math.max(0, paid - netMax);
+                          const refundMax = Math.max(0, paid - netMin);
 
                           return (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
@@ -1166,9 +1181,16 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                               </div>
                               <div style={{ fontSize: '14px' }}>
                                 المتبقي: <strong style={{ color: '#dc2626' }}>
-                                  {hasEst ? `من ${rMin.toFixed(2)} إلى ${rMax.toFixed(2)} ج.م` : `${parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2)} ج.م`}
+                                  {hasEst ? `من ${rMin.toFixed(2)} إلى ${rMax.toFixed(2)} ج.م` : `${parseFloat(order.remaining_amount || order.remainingAmount || remAmount || 0).toFixed(2)} ج.م`}
                                 </strong>
                               </div>
+                              {((!hasEst && refundDue > 0) || (hasEst && refundMax > 0)) && (
+                                <div style={{ fontSize: '13.5px', background: '#ecfdf5', padding: '2px 8px', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
+                                  المتبقي للعميل (مستحق رده): <strong style={{ color: '#059669' }}>
+                                    {hasEst ? `من ${refundMin.toFixed(2)} إلى ${refundMax.toFixed(2)} ج.م` : `${refundDue.toFixed(2)} ج.م`}
+                                  </strong>
+                                </div>
+                              )}
                             </div>
                           );
                         })()}
@@ -1241,29 +1263,27 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                             </>
                           )}
 
-                          {/* تعديل العربون فقط بعد رد المشتريات */}
-                          {isReplied && (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenDepositModal(order)}
-                              className="outstock-btn"
-                              style={{
-                                padding: '7px 11px',
-                                fontSize: '12px',
-                                fontWeight: '800',
-                                background: '#f0fdf4',
-                                color: '#15803d',
-                                border: '1px solid #bbf7d0',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px'
-                              }}
-                              title="تعديل مبلغ العربون / المدفوع بعد رد المشتريات"
-                            >
-                              <DollarSign size={14} />
-                              <span>تعديل العربون 💵</span>
-                            </button>
-                          )}
+                          {/* تعديل العربون متاح دائماً */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDepositModal(order)}
+                            className="outstock-btn"
+                            style={{
+                              padding: '7px 11px',
+                              fontSize: '12px',
+                              fontWeight: '800',
+                              background: '#f0fdf4',
+                              color: '#15803d',
+                              border: '1px solid #bbf7d0',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                            title="تعديل مبلغ العربون / المدفوع"
+                          >
+                            <DollarSign size={14} />
+                            <span>تعديل العربون 💵</span>
+                          </button>
 
                           <button
                             type="button"

@@ -136,10 +136,28 @@ export default function NewCustomerOrderModal({
     } catch (e) {}
     return ['وسط البلد', 'حي الجامعة', 'المنطقة الأولى', 'المنطقة الثانية', 'حي النزهة', 'أخرى / خارج النطاق'];
   });
-  // المنطقة خالية افتراضياً لإجبار الصيدلي على الاختيار
-  const [selectedZone, setSelectedZone] = useState(
-    editingOrder?.zone || editingOrder?.customer_zone || ''
-  );
+  // المنطقة خالية افتراضياً لإجبار الصيدلي على الاختيار، أو تسترجع من الطلب المعدل أو العميل
+  const [selectedZone, setSelectedZone] = useState(() => {
+    return (
+      editingOrder?.zone ||
+      editingOrder?.customer_zone ||
+      editingOrder?.customerZone ||
+      editingOrder?.customer?.zone ||
+      editingOrder?.delivery_zone ||
+      editingOrder?.area ||
+      editingOrder?.district ||
+      ''
+    );
+  });
+
+  // دمج المنطقة المحددة مع قائمة المناطق المعتمدة لضمان ظهورها بالقائمة المنسدلة دائماً
+  const allDeliveryZones = useMemo(() => {
+    const list = Array.isArray(deliveryZones) ? [...deliveryZones] : [];
+    if (selectedZone && !list.includes(selectedZone)) {
+      list.unshift(selectedZone);
+    }
+    return list;
+  }, [deliveryZones, selectedZone]);
 
   // ── 3. صورة الدواء / الروشتة ──
   const [medicationImageUrl, setMedicationImageUrl] = useState(editingOrder?.medication_image_url || '');
@@ -311,20 +329,55 @@ export default function NewCustomerOrderModal({
   }, [serverEmployees, branchId]);
 
   // ── 6. الحسابات المالية وموعد الاستلام ──
-  const [paidAmount, setPaidAmount] = useState('');
-  const [discountType, setDiscountType] = useState('none'); // 'none' | 'amount' | 'percentage'
-  const [discountValue, setDiscountValue] = useState('');
+  const [paidAmount, setPaidAmount] = useState(() => {
+    if (editingOrder) {
+      const p = editingOrder.paid_amount ?? editingOrder.paidAmount;
+      return (p !== undefined && p !== null) ? String(p) : '';
+    }
+    return '';
+  });
+  const [discountType, setDiscountType] = useState(() => {
+    return editingOrder?.discount_type || editingOrder?.discountType || 'none';
+  });
+  const [discountValue, setDiscountValue] = useState(() => {
+    const d = editingOrder?.discount_value ?? editingOrder?.discountValue;
+    return (d !== undefined && d !== null && d > 0) ? String(d) : '';
+  });
+  const [useSplitPayment, setUseSplitPayment] = useState(() => {
+    const splits = editingOrder?.payment_splits || editingOrder?.paymentSplits;
+    return Boolean(splits && typeof splits === 'object' && Object.values(splits).some(v => parseFloat(v) > 0));
+  });
+  const [paymentSplits, setPaymentSplits] = useState(() => {
+    const splits = editingOrder?.payment_splits || editingOrder?.paymentSplits;
+    if (splits && typeof splits === 'object') {
+      return {
+        cash: splits.cash ? String(splits.cash) : '',
+        card: splits.card ? String(splits.card) : '',
+        wallet: splits.wallet ? String(splits.wallet) : '',
+        instapay: splits.instapay ? String(splits.instapay) : ''
+      };
+    }
+    return { cash: '', card: '', wallet: '', instapay: '' };
+  });
   const [expectedPickupDate, setExpectedPickupDate] = useState(() => {
+    if (editingOrder?.expected_pickup_date || editingOrder?.expectedPickupDate) {
+      const d = String(editingOrder.expected_pickup_date || editingOrder.expectedPickupDate).split('T')[0];
+      if (d) return d;
+    }
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     return tomorrow.toISOString().slice(0, 10);
   });
-  const [expectedPickupTime, setExpectedPickupTime] = useState('مساءً (بعد 5:00 عصراً)');
+  const [expectedPickupTime, setExpectedPickupTime] = useState(() => {
+    return editingOrder?.expected_pickup_time || editingOrder?.expectedPickupTime || 'مساءً (بعد 5:00 عصراً)';
+  });
   const [responsiblePharmacist, setResponsiblePharmacist] = useState(
-    defaultPharmacist || (eligiblePharmacists.length > 0 ? eligiblePharmacists[0].name : 'د. صيدلي الفرع')
+    editingOrder?.responsible_pharmacist || editingOrder?.responsiblePharmacist || defaultPharmacist || (eligiblePharmacists.length > 0 ? eligiblePharmacists[0].name : 'د. صيدلي الفرع')
   );
   const [customPharmacist, setCustomPharmacist] = useState('');
-  const [customerNotes, setCustomerNotes] = useState('');
+  const [customerNotes, setCustomerNotes] = useState(() => {
+    return editingOrder?.customer_notes || editingOrder?.customerNotes || '';
+  });
 
   // تحديث الصيدلي المسؤول الافتراضي فور تحميل الموظفين
   useEffect(() => {
@@ -386,12 +439,52 @@ export default function NewCustomerOrderModal({
     }
   };
 
-  // معالجة كتابة رقم الهاتف (أرقام فقط + تنبيه فوري + تفريغ الحقول عند التغيير)
+  // ── قفل تمرير خلفية الصفحة أثناء فتح النافذة لمنع أي تأثير على الصفحة الخلفية ──
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
+  // ── إغلاق النافذة بزر Escape ──
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        if (isPreviewImageOpen) {
+          setIsPreviewImageOpen(false);
+          return;
+        }
+        if (isAddMedModalOpen) {
+          setIsAddMedModalOpen(false);
+          return;
+        }
+        onClose?.();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPreviewImageOpen, isAddMedModalOpen, onClose]);
+
+  // معالجة كتابة رقم الهاتف (أرقام فقط + تنبيه فوري + تفريغ الحقول عند مسح أو تغيير الرقم)
   const handlePhoneChange = (val) => {
     const digitsOnly = String(val || '').replace(/\D/g, '').slice(0, 11);
     setWhatsappPhone(digitsOnly);
     setSearchPhone(digitsOnly);
     setErrorMsg('');
+
+    // عند مسح رقم العميل بالكامل: تفريغ كافة بيانات العميل المدخلة تلقائياً
+    if (!digitsOnly) {
+      setSelectedCustomer(null);
+      setCustomerName('');
+      setAddress('');
+      setSelectedZone('');
+      setCustomerPermanentNotes('');
+      setLandlinePhone('');
+      setIsNewCustomer(false);
+      return;
+    }
 
     // تفريغ بيانات العميل السابق فوراً إذا تم تعديل الرقم
     if (selectedCustomer && digitsOnly !== String(selectedCustomer.whatsapp_phone || '').replace(/\D/g, '')) {
@@ -420,6 +513,83 @@ export default function NewCustomerOrderModal({
       }
     }
   }, [initialCustomerPhone]);
+
+  // استرجاع المنطقة / الحي وبيانات العميل عند تعديل طلب مسجل
+  useEffect(() => {
+    if (editingOrder) {
+      const savedZone =
+        editingOrder.zone ||
+        editingOrder.customer_zone ||
+        editingOrder.customerZone ||
+        editingOrder.customer?.zone ||
+        editingOrder.delivery_zone ||
+        editingOrder.area ||
+        editingOrder.district ||
+        '';
+
+      if (savedZone) {
+        setSelectedZone(savedZone);
+      }
+
+      const phone = editingOrder.customer_phone || editingOrder.customerPhone;
+      if (phone) {
+        const clean = String(phone).replace(/\D/g, '').slice(0, 11);
+        if (clean.length === 11) {
+          outstockGetCustomers({ search: clean })
+            .then((res) => {
+              if (res?.success && Array.isArray(res.customers)) {
+                const found = res.customers.find(
+                  (c) => String(c.whatsapp_phone || '').replace(/\D/g, '') === clean
+                );
+                if (found) {
+                  setSelectedCustomer(found);
+                  if (!savedZone && found.zone) {
+                    setSelectedZone(found.zone);
+                  }
+                }
+              }
+            })
+            .catch(() => {});
+        }
+      }
+
+      // استرجاع الحسابات المالية وبيانات العربون
+      const savedPaid = editingOrder.paid_amount ?? editingOrder.paidAmount;
+      if (savedPaid !== undefined && savedPaid !== null) {
+        setPaidAmount(String(savedPaid));
+      }
+      if (editingOrder.discount_type || editingOrder.discountType) {
+        setDiscountType(editingOrder.discount_type || editingOrder.discountType || 'none');
+      }
+      const savedDisc = editingOrder.discount_value ?? editingOrder.discountValue;
+      if (savedDisc !== undefined && savedDisc !== null) {
+        setDiscountValue(savedDisc > 0 ? String(savedDisc) : '');
+      }
+      if (editingOrder.customer_notes !== undefined || editingOrder.customerNotes !== undefined) {
+        setCustomerNotes(editingOrder.customer_notes || editingOrder.customerNotes || '');
+      }
+      if (editingOrder.delivery_type || editingOrder.deliveryType) {
+        setDeliveryType(editingOrder.delivery_type || editingOrder.deliveryType || 'branch_pickup');
+      }
+      if (editingOrder.delivery_target_branch || editingOrder.deliveryTargetBranch) {
+        setDeliveryTargetBranch(editingOrder.delivery_target_branch || editingOrder.deliveryTargetBranch || '');
+      }
+      if (editingOrder.delivery_target_branch_id || editingOrder.deliveryTargetBranchId) {
+        setDeliveryTargetBranchId(editingOrder.delivery_target_branch_id || editingOrder.deliveryTargetBranchId || '');
+      }
+      const splits = editingOrder.payment_splits || editingOrder.paymentSplits;
+      if (splits && typeof splits === 'object') {
+        const hasSplits = Object.values(splits).some((v) => parseFloat(v) > 0);
+        setUseSplitPayment(hasSplits);
+        setPaymentSplits({
+          cash: splits.cash ? String(splits.cash) : '',
+          card: splits.card ? String(splits.card) : '',
+          wallet: splits.wallet ? String(splits.wallet) : '',
+          instapay: splits.instapay ? String(splits.instapay) : ''
+        });
+      }
+    }
+  }, [editingOrder]);
 
   // التحكم في قائمة الأصناف مع التركيز التلقائي
   const handleAddItem = () => {
@@ -641,15 +811,6 @@ export default function NewCustomerOrderModal({
     }
   };
 
-  // ── طرق الدفع المتعددة والمقسمة ──
-  const [useSplitPayment, setUseSplitPayment] = useState(false);
-  const [paymentSplits, setPaymentSplits] = useState({
-    cash: '',
-    card: '',
-    wallet: '',
-    instapay: ''
-  });
-
   // ── الحسابات المالية الدقيقة مع دعم السعر التقديري (من ... إلى ... ج.م) دون متوسط حسابي ──
   const hasEstimatedItems = items.some(
     (it) => it.isPriceEstimated && (parseFloat(it.priceMin || 0) > 0 || parseFloat(it.priceMax || 0) > 0)
@@ -868,7 +1029,8 @@ export default function NewCustomerOrderModal({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '16px'
+        padding: '16px',
+        overscrollBehavior: 'contain'
       }}
     >
       <div
@@ -883,7 +1045,8 @@ export default function NewCustomerOrderModal({
           flexDirection: 'column',
           boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.3)',
           direction: 'rtl',
-          border: '1px solid var(--outstock-border-subtle, #e2e8f0)'
+          border: '1px solid var(--outstock-border-subtle, #e2e8f0)',
+          overscrollBehavior: 'contain'
         }}
       >
         {/* رأس النافذة العصري - تصميم مؤسسي فائق الأناقة */}
@@ -953,6 +1116,7 @@ export default function NewCustomerOrderModal({
             flexDirection: 'column',
             flex: 1,
             overflowY: 'auto',
+            overscrollBehavior: 'contain',
             padding: '22px 26px',
             gap: '18px'
           }}
@@ -1147,8 +1311,20 @@ export default function NewCustomerOrderModal({
                 placeholder="ابحث برقم هاتف الواتساب أو اسم العميل..."
                 value={searchPhone}
                 onChange={(e) => {
-                  setSearchPhone(e.target.value);
-                  handleSearchCustomer(e.target.value);
+                  const val = e.target.value;
+                  setSearchPhone(val);
+                  if (!val.trim()) {
+                    setWhatsappPhone('');
+                    setSelectedCustomer(null);
+                    setCustomerName('');
+                    setAddress('');
+                    setSelectedZone('');
+                    setCustomerPermanentNotes('');
+                    setLandlinePhone('');
+                    setIsNewCustomer(false);
+                  } else {
+                    handleSearchCustomer(val);
+                  }
                 }}
                 className="outstock-form-input"
                 style={{ flex: 1, borderColor: '#0d9488' }}
@@ -1272,7 +1448,7 @@ export default function NewCustomerOrderModal({
                   style={{ fontWeight: '700' }}
                 >
                   <option value="" disabled>-- اختر المنطقة / الحي إجبارياً --</option>
-                  {deliveryZones.map((zoneName) => (
+                  {allDeliveryZones.map((zoneName) => (
                     <option key={zoneName} value={zoneName}>
                       {zoneName}
                     </option>
@@ -1596,110 +1772,10 @@ export default function NewCustomerOrderModal({
                       </div>
                     </div>
 
-                    {/* شريط السعر التقريبي وزر التفعيل/الإلغاء */}
-                    <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                      {/* زر تفعيل / إلغاء تفعيل السعر التقريبي */}
-                      <button
-                        type="button"
-                        onClick={() => handleToggleEstimatePrice(idx)}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          padding: '6px 14px',
-                          borderRadius: '8px',
-                          fontSize: '12px',
-                          fontWeight: '800',
-                          cursor: 'pointer',
-                          transition: 'all 0.2s ease',
-                          border: it.isPriceEstimated ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
-                          background: it.isPriceEstimated ? '#fef3c7' : '#f8fafc',
-                          color: it.isPriceEstimated ? '#92400e' : '#475569'
-                        }}
-                      >
-                        <Sparkles size={14} color={it.isPriceEstimated ? '#b45309' : '#64748b'} />
-                        <span>{it.isPriceEstimated ? '✓ إلغاء السعر التقريبي' : '+ تفعيل وضع سعر تقريبي (من - إلى)'}</span>
-                      </button>
-
-                      {/* حقول إدخال من سعر وإلى سعر تظهر عند التفعيل */}
-                      {it.isPriceEstimated ? (
-                        <div
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            background: '#fffbeb',
-                            border: '1px solid #fde68a',
-                            borderRadius: '8px',
-                            padding: '4px 12px'
-                          }}
-                        >
-                          <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#92400e' }}>من:</span>
-                          <input
-                            type="number"
-                            step="any"
-                            min="0"
-                            placeholder="0.00"
-                            value={it.priceMin}
-                            onChange={(e) => handleItemChange(idx, 'priceMin', e.target.value)}
-                            className="outstock-form-input"
-                            style={{
-                              width: '85px',
-                              height: '32px',
-                              padding: '2px 6px',
-                              textAlign: 'center',
-                              fontWeight: '900',
-                              color: '#b45309',
-                              background: '#ffffff',
-                              border: '1px solid #fcd34d'
-                            }}
-                            required
-                          />
-                          <span style={{ fontSize: '11px', color: '#92400e', fontWeight: '700' }}>ج.م</span>
-
-                          <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#92400e', marginRight: '6px' }}>إلى:</span>
-                          <input
-                            type="number"
-                            step="any"
-                            min="0"
-                            placeholder="0.00"
-                            value={it.priceMax}
-                            onChange={(e) => handleItemChange(idx, 'priceMax', e.target.value)}
-                            className="outstock-form-input"
-                            style={{
-                              width: '85px',
-                              height: '32px',
-                              padding: '2px 6px',
-                              textAlign: 'center',
-                              fontWeight: '900',
-                              color: '#b45309',
-                              background: '#ffffff',
-                              border: '1px solid #fcd34d'
-                            }}
-                            required
-                          />
-                          <span style={{ fontSize: '11px', color: '#92400e', fontWeight: '700' }}>ج.م للعلبة</span>
-                        </div>
-                      ) : (
-                        /* معلومة استرشادية عند عدم تفعيل السعر التقريبي */
-                        (() => {
-                          const p = Number(it.unitPrice || it.selectedMed?.public_price || 0);
-                          if (p <= 0) return null;
-                          const minP = Math.round(p * 0.95 * 10) / 10;
-                          const maxP = Math.round(p * 1.05 * 10) / 10;
-                          return (
-                            <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '600' }}>
-                              (متوسط النطاق التقديري: من {minP.toFixed(2)} إلى {maxP.toFixed(2)} ج.م)
-                            </span>
-                          );
-                        })()
-                      )}
-                    </div>
-
-                    {/* شريط المرفقات الخاص بالصنف: إرفاق صورة مباشرة أو رابط ويب خارجي */}
+                    {/* شريط المرفقات الخاص بالصنف: إرفاق صورة مباشرة أو رابط ويب خارجي (أسفل بيانات الصنف وسعر الصنف والكمية مباشرة) */}
                     <div
                       style={{
-                        marginTop: '12px',
+                        marginTop: '10px',
                         paddingTop: '10px',
                         borderTop: '1px dashed #e2e8f0',
                         display: 'flex',
@@ -1812,6 +1888,106 @@ export default function NewCustomerOrderModal({
                           style={{ height: '32px', fontSize: '12px', flex: 1 }}
                         />
                       </div>
+                    </div>
+
+                    {/* شريط السعر التقريبي وزر التفعيل/الإلغاء */}
+                    <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      {/* زر تفعيل / إلغاء تفعيل السعر التقريبي */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleEstimatePrice(idx)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '6px 14px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          border: it.isPriceEstimated ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
+                          background: it.isPriceEstimated ? '#fef3c7' : '#f8fafc',
+                          color: it.isPriceEstimated ? '#92400e' : '#475569'
+                        }}
+                      >
+                        <Sparkles size={14} color={it.isPriceEstimated ? '#b45309' : '#64748b'} />
+                        <span>{it.isPriceEstimated ? '✓ إلغاء السعر التقريبي' : '+ تفعيل وضع سعر تقريبي (من - إلى)'}</span>
+                      </button>
+
+                      {/* حقول إدخال من سعر وإلى سعر تظهر عند التفعيل */}
+                      {it.isPriceEstimated ? (
+                        <div
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            background: '#fffbeb',
+                            border: '1px solid #fde68a',
+                            borderRadius: '8px',
+                            padding: '4px 12px'
+                          }}
+                        >
+                          <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#92400e' }}>من:</span>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            placeholder="0.00"
+                            value={it.priceMin}
+                            onChange={(e) => handleItemChange(idx, 'priceMin', e.target.value)}
+                            className="outstock-form-input"
+                            style={{
+                              width: '85px',
+                              height: '32px',
+                              padding: '2px 6px',
+                              textAlign: 'center',
+                              fontWeight: '900',
+                              color: '#b45309',
+                              background: '#ffffff',
+                              border: '1px solid #fcd34d'
+                            }}
+                            required
+                          />
+                          <span style={{ fontSize: '11px', color: '#92400e', fontWeight: '700' }}>ج.م</span>
+
+                          <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#92400e', marginRight: '6px' }}>إلى:</span>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            placeholder="0.00"
+                            value={it.priceMax}
+                            onChange={(e) => handleItemChange(idx, 'priceMax', e.target.value)}
+                            className="outstock-form-input"
+                            style={{
+                              width: '85px',
+                              height: '32px',
+                              padding: '2px 6px',
+                              textAlign: 'center',
+                              fontWeight: '900',
+                              color: '#b45309',
+                              background: '#ffffff',
+                              border: '1px solid #fcd34d'
+                            }}
+                            required
+                          />
+                          <span style={{ fontSize: '11px', color: '#92400e', fontWeight: '700' }}>ج.م للعلبة</span>
+                        </div>
+                      ) : (
+                        /* معلومة استرشادية عند عدم تفعيل السعر التقريبي */
+                        (() => {
+                          const p = Number(it.unitPrice || it.selectedMed?.public_price || 0);
+                          if (p <= 0) return null;
+                          const minP = Math.round(p * 0.95 * 10) / 10;
+                          const maxP = Math.round(p * 1.05 * 10) / 10;
+                          return (
+                            <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '600' }}>
+                              (متوسط النطاق التقديري: من {minP.toFixed(2)} إلى {maxP.toFixed(2)} ج.م)
+                            </span>
+                          );
+                        })()
+                      )}
                     </div>
                   </div>
                 );

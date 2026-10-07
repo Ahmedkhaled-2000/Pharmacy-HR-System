@@ -416,6 +416,15 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handlePrintDualAutoCut, onClose]);
 
+  // منع تمرير خلفية الصفحة أثناء فتح الفاتورة
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
   if (!order) return null;
 
   return (
@@ -774,6 +783,30 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                           )}
                         </span>
                       </div>
+                      {(() => {
+                        const netTotal = parseFloat(order.net_amount ?? order.netAmount ?? netAvg ?? 0);
+                        const refundDue = Math.max(0, paid - netTotal);
+                        const refundMin = Math.max(0, paid - netMax);
+                        const refundMax = Math.max(0, paid - netMin);
+
+                        if ((!hasEstimated && refundDue > 0) || (hasEstimated && refundMax > 0)) {
+                          return (
+                            <div className="row" style={{ fontWeight: '900', color: '#059669', background: '#ecfdf5', padding: '3px 6px', borderRadius: '4px', border: '1px dashed #10b981', margin: '3px 0' }}>
+                              <span>المتبقي للعميل من مبلغ العربون (مستحق رده):</span>
+                              <span>
+                                {hasEstimated ? (
+                                  <strong style={{ color: '#059669' }}>
+                                    من {refundMin.toFixed(2)} إلى {refundMax.toFixed(2)} ج.م
+                                  </strong>
+                                ) : (
+                                  `${refundDue.toFixed(2)} ج.م`
+                                )}
+                              </span>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
                     </>
                   );
                 })()}
@@ -831,43 +864,56 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                         ? `🔄 تحويل استلام لفرع: ${order.delivery_target_branch || order.deliveryTargetBranch || ''}`
                         : '🏪 استلام من الفرع')}
                 </strong></div>
-                <div>المتبقي تحصيله: <strong style={{ color: '#dc2626', fontSize: '12.5px' }}>
-                  {(() => {
-                    const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill);
-                    let tMin = 0, tMax = 0, tAvg = 0, hasEst = false;
-                    activeItems.forEach(it => {
-                      const qty = parseInt(it.quantity || 1, 10);
-                      const isEst = it.is_price_estimated || it.isPriceEstimated;
-                      const pMin = parseFloat(it.price_min || it.priceMin || 0);
-                      const pMax = parseFloat(it.price_max || it.priceMax || pMin || 0);
-                      const p = parseFloat(it.unitPrice || it.unit_price || 0);
-                      if (isEst && (pMin > 0 || pMax > 0)) {
-                        hasEst = true;
-                        tMin += qty * pMin;
-                        tMax += qty * pMax;
-                        tAvg += qty * ((pMin + pMax) / 2);
-                      } else {
-                        tMin += qty * p;
-                        tMax += qty * p;
-                        tAvg += qty * p;
-                      }
-                    });
-                    const dVal = parseFloat(order.discount_value || order.discountValue || 0);
-                    const isPct = (order.discount_type || order.discountType) === 'percentage';
-                    let dMin = isPct ? (tMin * dVal) / 100 : (dVal > 0 ? dVal : 0);
-                    let dMax = isPct ? (tMax * dVal) / 100 : (dVal > 0 ? dVal : 0);
-                    let dAvg = isPct ? (tAvg * dVal) / 100 : (dVal > 0 ? dVal : 0);
-                    const paid = parseFloat(order.paid_amount || order.paidAmount || 0);
-                    const rMin = Math.max(0, tMin - dMin - paid);
-                    const rMax = Math.max(0, tMax - dMax - paid);
-                    const rAvg = Math.max(0, tAvg - dAvg - paid);
-
-                    if (hasEst) {
-                      return `من ${rMin.toFixed(2)} إلى ${rMax.toFixed(2)} ج.م`;
+                {(() => {
+                  const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill);
+                  let tMin = 0, tMax = 0, tAvg = 0, hasEst = false;
+                  activeItems.forEach(it => {
+                    const qty = parseInt(it.quantity || 1, 10);
+                    const isEst = it.is_price_estimated || it.isPriceEstimated;
+                    const pMin = parseFloat(it.price_min || it.priceMin || 0);
+                    const pMax = parseFloat(it.price_max || it.priceMax || pMin || 0);
+                    const p = parseFloat(it.unitPrice || it.unit_price || 0);
+                    if (isEst && (pMin > 0 || pMax > 0)) {
+                      hasEst = true;
+                      tMin += qty * pMin;
+                      tMax += qty * pMax;
+                      tAvg += qty * ((pMin + pMax) / 2);
+                    } else {
+                      tMin += qty * p;
+                      tMax += qty * p;
+                      tAvg += qty * p;
                     }
-                    return `${parseFloat(order.remaining_amount || order.remainingAmount || rAvg || 0).toFixed(2)} ج.م`;
-                  })()}
-                </strong></div>
+                  });
+                  const dVal = parseFloat(order.discount_value || order.discountValue || 0);
+                  const isPct = (order.discount_type || order.discountType) === 'percentage';
+                  let dMin = isPct ? (tMin * dVal) / 100 : (dVal > 0 ? dVal : 0);
+                  let dMax = isPct ? (tMax * dVal) / 100 : (dVal > 0 ? dVal : 0);
+                  let dAvg = isPct ? (tAvg * dVal) / 100 : (dVal > 0 ? dVal : 0);
+                  const netTotal = parseFloat(order.net_amount ?? order.netAmount ?? (tAvg - dAvg) ?? 0);
+                  const paid = parseFloat(order.paid_amount || order.paidAmount || 0);
+                  const rMin = Math.max(0, tMin - dMin - paid);
+                  const rMax = Math.max(0, tMax - dMax - paid);
+                  const rAvg = Math.max(0, tAvg - dAvg - paid);
+
+                  const refundDue = Math.max(0, paid - netTotal);
+                  const refundMin = Math.max(0, paid - (tMax - dMax));
+                  const refundMax = Math.max(0, paid - (tMin - dMin));
+
+                  return (
+                    <>
+                      <div>المتبقي تحصيله: <strong style={{ color: '#dc2626', fontSize: '12.5px' }}>
+                        {hasEst ? `من ${rMin.toFixed(2)} إلى ${rMax.toFixed(2)} ج.م` : `${parseFloat(order.remaining_amount || order.remainingAmount || rAvg || 0).toFixed(2)} ج.م`}
+                      </strong></div>
+                      {((!hasEst && refundDue > 0) || (hasEst && refundMax > 0)) && (
+                        <div style={{ color: '#059669', fontWeight: 'bold', background: '#ecfdf5', padding: '3px 6px', borderRadius: '4px', border: '1px dashed #10b981', marginTop: '3px', fontSize: '11px' }}>
+                          المتبقي للعميل من مبلغ العربون (مستحق رده): <strong>
+                            {hasEst ? `من ${refundMin.toFixed(2)} إلى ${refundMax.toFixed(2)} ج.م` : `${refundDue.toFixed(2)} ج.م`}
+                          </strong>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               <table className="receipt-table">

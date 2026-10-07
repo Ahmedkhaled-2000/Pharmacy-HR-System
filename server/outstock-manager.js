@@ -2613,7 +2613,85 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const itemsCheck = await db.query("SELECT COUNT(*) as replied_count FROM public.outstock_order_items WHERE order_id = $1 AND (item_status <> 'pending' OR procurement_replied_at IS NOT NULL)", [orderId]);
       const repliedCount = parseInt(itemsCheck.rows[0]?.replied_count || 0, 10);
       if (existingOrder.procurement_replied_at || repliedCount > 0) {
-        return res.status(400).json({ success: false, error: 'لا يمكن تعديل بنود الطلب بعد رد إدارة المشتريات عليه. يمكن فقط تعديل العربون المدفوع.' });
+        // إذا ردت المشتريات بالفعل: لا نلغي أو نعيد إنشاء الأصناف المعتمدة، بل نحدث العربون والملاحظات والبيانات المالية والعميل
+        const {
+          customer,
+          paidAmount = 0,
+          expectedPickupDate,
+          expectedPickupTime,
+          responsiblePharmacist,
+          customerNotes,
+          deliveryType = 'branch_pickup',
+          deliveryTargetBranch,
+          deliveryTargetBranchId,
+          paymentSplits
+        } = req.body || {};
+
+        const paid = Math.max(0, parseFloat(paidAmount !== undefined ? paidAmount : (existingOrder.paid_amount || 0)));
+        const netAmount = parseFloat(existingOrder.net_amount || existingOrder.total_amount || 0);
+        const remaining = Math.max(0, netAmount - paid);
+
+        await db.query(`
+          UPDATE public.outstock_orders
+          SET paid_amount = $1,
+              remaining_amount = $2,
+              customer_notes = COALESCE($3, customer_notes),
+              expected_pickup_date = COALESCE($4, expected_pickup_date),
+              expected_pickup_time = COALESCE($5, expected_pickup_time),
+              responsible_pharmacist = COALESCE($6, responsible_pharmacist),
+              delivery_type = COALESCE($7, delivery_type),
+              delivery_target_branch = COALESCE($8, delivery_target_branch),
+              delivery_target_branch_id = COALESCE($9, delivery_target_branch_id),
+              payment_splits = COALESCE($10::jsonb, payment_splits),
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $11
+        `, [
+          paid, remaining,
+          customerNotes || null,
+          expectedPickupDate || null,
+          expectedPickupTime || null,
+          responsiblePharmacist || null,
+          deliveryType || null,
+          deliveryTargetBranch || null,
+          deliveryTargetBranchId || null,
+          paymentSplits ? JSON.stringify(paymentSplits) : null,
+          orderId
+        ]);
+
+        if (existingOrder.customer_id && customer) {
+          await db.query(`
+            UPDATE public.outstock_customers
+            SET full_name = COALESCE($1, full_name),
+                whatsapp_phone = COALESCE($2, whatsapp_phone),
+                landline_phone = COALESCE($3, landline_phone),
+                address = COALESCE($4, address),
+                zone = COALESCE($5, zone),
+                notes = COALESCE($6, notes),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $7
+          `, [
+            customer.fullName ? String(customer.fullName).trim() : null,
+            customer.whatsappPhone ? String(customer.whatsappPhone).replace(/\\D/g, '') : null,
+            customer.landlinePhone ? String(customer.landlinePhone).trim() : null,
+            customer.address ? String(customer.address).trim() : null,
+            customer.zone ? String(customer.zone).trim() : null,
+            customer.notes ? String(customer.notes).trim() : null,
+            existingOrder.customer_id
+          ]);
+        }
+
+        broadcastOutstock('outstock:order_updated', {
+          orderId,
+          branchId: existingOrder.branch_id,
+          paidAmount: paid,
+          remainingAmount: remaining
+        });
+
+        return res.json({
+          success: true,
+          message: 'تم تحديث مبلغ العربون وبيانات الطلب بنجاح مع الحفاظ على أصناف المشتريات المعتمدة',
+          orderId
+        });
       }
 
       const {
@@ -2763,13 +2841,22 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   app.put('/api/outstock/orders/:id/deposit', authMiddleware, async (req, res) => {
     try {
       const orderId = req.params.id;
-      const { paidAmount, paymentSplits, notes } = req.body || {};
+      let rawPaid = req.body?.paidAmount ?? req.body?.amount ?? req.body?.newDepositAmount ?? req.body?.depositAmount;
+      if (rawPaid === undefined && typeof req.body === 'number') {
+        rawPaid = req.body;
+      }
+      if (rawPaid === undefined && typeof req.body === 'string' && !isNaN(parseFloat(req.body))) {
+        rawPaid = parseFloat(req.body);
+      }
+      const paymentSplits = req.body?.paymentSplits || null;
+      const notes = req.body?.notes || null;
+
       const orderRes = await db.query('SELECT * FROM public.outstock_orders WHERE id = $1', [orderId]);
       if (orderRes.rows.length === 0) return res.status(404).json({ success: false, error: 'الطلب غير موجود' });
       const order = orderRes.rows[0];
 
-      const newPaid = Math.max(0, parseFloat(paidAmount || 0));
-      const netTotal = parseFloat(order.net_amount || 0);
+      const newPaid = Math.max(0, parseFloat(rawPaid !== undefined && rawPaid !== null ? rawPaid : 0));
+      const netTotal = parseFloat(order.net_amount || order.total_amount || 0);
       const newRemaining = Math.max(0, netTotal - newPaid);
 
       await db.query(`

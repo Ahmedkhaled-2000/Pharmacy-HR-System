@@ -503,6 +503,10 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, 
           const remMax = Math.max(0, netMax - paidNum);
           const remAvg = Math.max(0, netAvg - paidNum);
 
+          const refundDue = Math.max(0, paidNum - parseFloat(netAmount || netAvg || 0));
+          const refundMin = Math.max(0, paidNum - netMax);
+          const refundMax = Math.max(0, paidNum - netMin);
+
           const totDisplay = hasEstimated
             ? `<strong style="color:#b45309;">من ${totalMin.toFixed(2)} إلى ${totalMax.toFixed(2)} ج.م</strong>`
             : `${totalAmount} ج.م`;
@@ -538,6 +542,12 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, 
               <span>المتبقي عند الاستلام:</span>
               <span>${remDisplay}</span>
             </div>
+            ${((!hasEstimated && refundDue > 0) || (hasEstimated && refundMax > 0)) ? `
+              <div class="totals-row" style="color: #059669; font-weight: bold; background: #ecfdf5; padding: 4px 6px; border-radius: 4px; border: 1px dashed #10b981; margin: 4px 0;">
+                <span>المتبقي للعميل من مبلغ العربون (مستحق رده):</span>
+                <span>${hasEstimated ? `من ${refundMin.toFixed(2)} إلى ${refundMax.toFixed(2)} ج.م` : `${refundDue.toFixed(2)} ج.م`}</span>
+              </div>
+            ` : ''}
           `;
         })()}
       </div>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { X, AlertTriangle, Clock, Send, CheckCircle2, Package, User, Phone, Building2 } from 'lucide-react';
 import { outstockSendOrderComplaint } from '../../../utils/outstockApiClient';
 
@@ -27,6 +27,28 @@ export default function OrderComplaintModal({
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // إغلاق النافذة بزر Escape
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' || e.keyCode === 27) {
+        if (!isSubmitting) {
+          onClose?.();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSubmitting, onClose]);
+
+  // منع تمرير خلفية الصفحة
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
 
   // 1. حساب توقيتات الطلب ومدة التأخير
   const timingInfo = useMemo(() => {

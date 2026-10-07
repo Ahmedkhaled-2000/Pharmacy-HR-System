@@ -49,6 +49,7 @@ import OutstockOwnerGate from '../components/outstock/OutstockOwnerGate';
 import AdminSuspensionView from '../components/auth/AdminSuspensionView';
 import StaffSuspensionView from '../components/auth/StaffSuspensionView';
 import GhostModeBanner from '../components/common/GhostModeBanner';
+import SovereignSimulationBar from '../components/common/SovereignSimulationBar';
 import SystemLockScreen from '../components/common/SystemLockScreen';
 import ScreenMaintenanceView from '../components/common/ScreenMaintenanceView';
 
@@ -161,6 +162,22 @@ export default function AppRoutes() {
     }
   });
 
+  // ── حالة محاكاة المالك السيادي لأي فرع أو دور ميداني (Sovereign Simulation Mode) ──
+  const [isOwnerSimulating, setIsOwnerSimulating] = useState(() => {
+    try {
+      return sessionStorage.getItem('app_owner_simulation_active') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [ownerSimulationTitle, setOwnerSimulationTitle] = useState(() => {
+    try {
+      return sessionStorage.getItem('app_owner_simulation_title') || '';
+    } catch {
+      return '';
+    }
+  });
+
   // تطبيق هوية المنظومة تلقائياً عند الإقلاع أو تحديث الإعدادات
   useEffect(() => {
     const brand = getEffectiveBrandIdentity(state?.orgSettings);
@@ -198,9 +215,209 @@ export default function AppRoutes() {
     };
   }, [currentEmpUser, switcherUser, authRole, currentBranch, state?.employees, state?.orgSettings]);
 
-  const handleSelectOwnerSystem = useCallback((systemId) => {
+  // إنهاء وضع محاكاة المالك والعودة الفورية لبوابة قيادة المالك المركزية
+  const handleExitOwnerSimulation = useCallback(() => {
+    try {
+      const backupStr = localStorage.getItem('app_owner_sim_backup');
+      const backup = backupStr ? JSON.parse(backupStr) : null;
+
+      localStorage.setItem('app_auth_role', 'owner');
+      localStorage.setItem('app_owner_authenticated', 'true');
+      sessionStorage.setItem('app_owner_authenticated', 'true');
+
+      if (backup?.passwordSnapshot) {
+        localStorage.setItem('app_owner_password_snapshot', backup.passwordSnapshot);
+      }
+      if (backup?.displayName) {
+        localStorage.setItem('app_owner_display_name', backup.displayName);
+      }
+      if (backup?.sessionVersion) {
+        localStorage.setItem('app_owner_session_version', backup.sessionVersion);
+      }
+
+      sessionStorage.removeItem('app_owner_simulation_active');
+      sessionStorage.removeItem('app_owner_simulation_title');
+      sessionStorage.removeItem('app_owner_simulation_type');
+      localStorage.removeItem('app_owner_sim_backup');
+      localStorage.removeItem('outstock_user');
+      localStorage.removeItem('outstock_branch');
+    } catch (e) {
+      console.warn('Error restoring owner simulation:', e);
+    }
+
+    setIsOwnerSimulating(false);
+    setOwnerSimulationTitle('');
+    handleUnifiedLogin({ role: 'owner', redirectTab: 'dashboard' });
+    setActiveNavTab('dashboard');
+    setShowOwnerLaunchpad(true);
+  }, [handleUnifiedLogin, setActiveNavTab]);
+
+  const handleSelectOwnerSystem = useCallback((systemAction) => {
     setShowOwnerLaunchpad(false);
 
+    // دالة مساعدة لحفظ بيانات جلسة المالك قبل تفعيل المحاكاة
+    const backupOwnerSession = (simTitle, simType) => {
+      try {
+        const ownerBackup = {
+          authenticated: 'true',
+          displayName: localStorage.getItem('app_owner_display_name') || ownerDisplayName || 'سيف',
+          passwordSnapshot: localStorage.getItem('app_owner_password_snapshot') || '',
+          sessionVersion: localStorage.getItem('app_owner_session_version') || '1'
+        };
+        localStorage.setItem('app_owner_sim_backup', JSON.stringify(ownerBackup));
+        sessionStorage.setItem('app_owner_simulation_active', 'true');
+        sessionStorage.setItem('app_owner_simulation_title', simTitle);
+        sessionStorage.setItem('app_owner_simulation_type', simType);
+        setIsOwnerSimulating(true);
+        setOwnerSimulationTitle(simTitle);
+      } catch {}
+    };
+
+    // 1. التعامل مع بوابات المحاكاة الثلاثة (صيدلية فرع / مدير فرع / فريق المشتريات والتجميل)
+    if (typeof systemAction === 'object' && systemAction !== null) {
+      const { type, branch, member, role } = systemAction;
+
+      // 1.1 صيدلية نواقص لفرع محدد (OutStock Pharmacy)
+      if (type === 'outstock_pharmacy') {
+        const bId = branch?.id || branch?.code;
+        const bName = branch?.name || branch?.branchName || bId;
+        backupOwnerSession(`صيدلية فرع: ${bName}`, 'outstock_pharmacy');
+
+        const simUser = {
+          id: `sim_pharmacy_${bId}`,
+          name: `صيدلية ${bName}`,
+          role: 'pharmacy',
+          branch_id: bId,
+          branch: branch,
+          isOwnerSimulating: true
+        };
+
+        try {
+          localStorage.setItem('outstock_branch', JSON.stringify(branch));
+          localStorage.setItem('outstock_user', JSON.stringify(simUser));
+        } catch {}
+
+        handleUnifiedLogin({
+          role: 'outstock_pharmacy',
+          branch: branch,
+          user: simUser,
+          redirectTab: 'outstock'
+        });
+        setActiveNavTab('outstock');
+        return;
+      }
+
+      // 1.2 لوحة مدير فرع محدد (Branch Manager View)
+      if (type === 'branch_manager') {
+        const bId = branch?.id || branch?.code;
+        const bName = branch?.name || branch?.branchName || bId;
+        backupOwnerSession(`مدير فرع: ${bName}`, 'branch_manager');
+
+        const mgrEmp = (state?.employees || []).find(e => e && (
+          String(e.id) === String(branch?.managerId) ||
+          (String(e.branchId) === String(bId) && (e.role === 'branch_manager' || e.isBranchManager))
+        ));
+
+        const simUser = {
+          ...(mgrEmp || {}),
+          id: mgrEmp?.id || `sim_mgr_${bId}`,
+          name: mgrEmp?.name || `مدير فرع ${bName}`,
+          role: 'branch',
+          branchId: bId,
+          branch: branch,
+          isOwnerSimulating: true
+        };
+
+        handleUnifiedLogin({
+          role: 'branch',
+          branch: branch,
+          user: simUser,
+          redirectTab: 'branch'
+        });
+        setActiveNavTab('branch');
+        return;
+      }
+
+      // 1.3 إدارة المشتريات ومسؤولو التجميل (Procurement & Cosmetics Team)
+      if (type === 'procurement_member') {
+        const targetRole = role || member?.role || 'procurement_manager';
+
+        if (targetRole === 'procurement_manager') {
+          backupOwnerSession('مدير المشتريات العام (كافة الفروع 🌐)', 'procurement_manager');
+          const simUser = {
+            ...(member || {}),
+            id: member?.id || 'sim_proc_mgr',
+            name: member?.name || 'مدير المشتريات العام',
+            role: 'procurement_manager',
+            allBranchesAccess: true,
+            isOwnerSimulating: true
+          };
+
+          try {
+            localStorage.setItem('outstock_user', JSON.stringify(simUser));
+            localStorage.setItem('outstock_branch', JSON.stringify({ id: 'all', name: 'كافة الفروع' }));
+          } catch {}
+
+          handleUnifiedLogin({
+            role: 'outstock_procurement_manager',
+            branch: { id: 'all', name: 'كافة الفروع' },
+            user: simUser,
+            redirectTab: 'outstock'
+          });
+          setActiveNavTab('outstock');
+          return;
+        }
+
+        if (targetRole === 'cosmetics_officer') {
+          const memName = member?.name || member?.username || 'مسؤول التجميل';
+          backupOwnerSession(`${memName} (مسؤول تجميل 💄)`, 'cosmetics_officer');
+          const simUser = {
+            ...(member || {}),
+            role: 'cosmetics_officer',
+            category_scope: 'cosmetics',
+            isOwnerSimulating: true
+          };
+
+          try {
+            localStorage.setItem('outstock_user', JSON.stringify(simUser));
+          } catch {}
+
+          handleUnifiedLogin({
+            role: 'outstock_cosmetics_officer',
+            branch: { id: 'all', name: 'كافة الفروع' },
+            user: simUser,
+            redirectTab: 'outstock'
+          });
+          setActiveNavTab('outstock');
+          return;
+        }
+
+        // أخصائي مشتريات عام
+        const memName = member?.name || member?.username || 'أخصائي مشتريات';
+        backupOwnerSession(`${memName} (فريق المشتريات 📦)`, 'procurement_officer');
+        const simUser = {
+          ...(member || {}),
+          role: 'procurement_officer',
+          isOwnerSimulating: true
+        };
+
+        try {
+          localStorage.setItem('outstock_user', JSON.stringify(simUser));
+        } catch {}
+
+        handleUnifiedLogin({
+          role: 'outstock_procurement_officer',
+          branch: { id: 'all', name: 'كافة الفروع' },
+          user: simUser,
+          redirectTab: 'outstock'
+        });
+        setActiveNavTab('outstock');
+        return;
+      }
+    }
+
+    // 2. التعامل مع المنظومات السيادية الأربعة الأصلية
+    const systemId = systemAction;
     let targetTab = 'dashboard';
     if (systemId === 'hr') {
       targetTab = 'dashboard';
@@ -231,7 +448,7 @@ export default function AppRoutes() {
     }
 
     setActiveNavTab(targetTab);
-  }, [isOwnerLoginGateActive, pendingOwnerAuth, handleUnifiedLogin, setActiveNavTab]);
+  }, [isOwnerLoginGateActive, pendingOwnerAuth, handleUnifiedLogin, setActiveNavTab, ownerDisplayName, state?.employees]);
 
   const handleCancelOwnerLaunchpad = useCallback(() => {
     setShowOwnerLaunchpad(false);
@@ -1567,6 +1784,14 @@ export default function AppRoutes() {
         />
       )}
 
+      {/* ── شريط العودة السيادي اللحظي للمالك في وضع المحاكاة ── */}
+      {isOwnerSimulating && (
+        <SovereignSimulationBar
+          simulationTitle={ownerSimulationTitle}
+          onExitSimulation={handleExitOwnerSimulation}
+        />
+      )}
+
       {/* ── 1. Standalone Systems ── */}
       {viewMode === 'archive' && (
         isScreenInMaintenance('pharmacy_archive') ? (
@@ -2615,7 +2840,7 @@ export default function AppRoutes() {
         )
       )}
 
-      {/* 🌟 بوابة قيادة المالك للتبديل بين المنظومات الأربعة */}
+      {/* 🌟 بوابة قيادة المالك للتبديل بين المنظومات الأربعة وبوابات المحاكاة الميدانية */}
       <OwnerCommandLaunchpadModal
         isOpen={showOwnerLaunchpad}
         onClose={handleCancelOwnerLaunchpad}
@@ -2623,6 +2848,8 @@ export default function AppRoutes() {
         ownerName={ownerDisplayName}
         brandIdentity={getEffectiveBrandIdentity(state?.orgSettings)}
         isGateMode={isOwnerLoginGateActive}
+        branches={state?.branches || []}
+        employees={state?.employees || []}
       />
 
       {/* 🌟 محول مسارات العمل الموحد للموظف متعدد الصلاحيات */}
