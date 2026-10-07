@@ -5,35 +5,48 @@ services:
     container_name: hr-postgres
     image: postgres:16-alpine
     restart: unless-stopped
+    command: >
+      postgres -c shared_buffers=64MB
+               -c work_mem=2MB
+               -c maintenance_work_mem=16MB
+               -c max_connections=50
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres_hr_2026
+      POSTGRES_PASSWORD: postgres_hr_2026_super_secure
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      - ./docker-data/postgres:/var/lib/postgresql/data
-      - ./database/schema_postgresql.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/schema_postgresql.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 450M
 
   redis:
     container_name: hr-redis
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning
+    command: redis-server --save 120 1 --loglevel warning --maxmemory 80mb --maxmemory-policy allkeys-lru
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
-      - ./docker-data/redis:/data
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 120M
 
   hr-backend:
     container_name: hr-backend-server
@@ -48,9 +61,13 @@ services:
       POSTGRES_PORT: 5432
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres_hr_2026
+      POSTGRES_PASSWORD: postgres_hr_2026_super_secure
+      DB_SSL: "false"
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      JWT_SECRET: "pharmacy_jwt_secret_key_2026_pharmacore_site_secure"
+      AUTH_SECRET: "pharmacy_auth_secret_key_2026_pharmacore_site_secure"
+      NODE_OPTIONS: "--max-old-space-size=384"
     ports:
       - "5000:5000"
     depends_on:
@@ -58,3 +75,32 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 450M
+
+  hr-whatsapp:
+    container_name: hr-whatsapp-server
+    build:
+      context: .
+      dockerfile: server/Dockerfile.whatsapp
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+      WA_AUTH_PATH: /app/server/whatsapp-auth
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - whatsapp-auth-data:/app/server/whatsapp-auth
+      - ./server/whatsapp-server.js:/app/server/whatsapp-server.js:ro
+    deploy:
+      resources:
+        limits:
+          memory: 150M
+
+volumes:
+  postgres-data:
+  redis-data:
+  whatsapp-auth-data:

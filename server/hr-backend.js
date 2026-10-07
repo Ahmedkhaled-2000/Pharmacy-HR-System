@@ -568,16 +568,17 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
     try { stateValue = JSON.parse(stateValue); } catch {}
   }
 
-  // فصل المرفقات والصور فقط إذا تم الإشارة الصريحة لوجود مرفقات جديدة لمنع إجهاد المعالج على 4.2MB في الحفظ العادي
+  // 🛡️ فحص واستخراج تلقائي فوري لأي صور أو مرفقات Base64 لحفظها في app_attachments ومنع تضخم الـ State
   if (stateValue && typeof stateValue === 'object') {
-    if (stateValue._hasNewAttachments || stateValue._attachmentsPending) {
-      stateValue = await autoExtractStateAttachments(stateValue);
+    const rawCheck = JSON.stringify(stateValue);
+    if (rawCheck.includes('data:image/') || rawCheck.includes('data:application/pdf') || stateValue._hasNewAttachments || stateValue._attachmentsPending) {
+      stateValue = await autoExtractStateAttachments(stateValue, [key]);
       delete stateValue._hasNewAttachments;
       delete stateValue._attachmentsPending;
     }
 
-    if (Array.isArray(stateValue._deletedIds) && stateValue._deletedIds.length > 25000) {
-      stateValue._deletedIds = stateValue._deletedIds.slice(-25000);
+    if (Array.isArray(stateValue._deletedIds) && stateValue._deletedIds.length > 500) {
+      stateValue._deletedIds = stateValue._deletedIds.slice(-500);
     }
 
     // حماية ضد المسح العرضي للكوادر والموظفين (Accidental Wipe Protection)
