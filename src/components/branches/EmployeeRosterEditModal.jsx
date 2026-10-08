@@ -132,6 +132,35 @@ export default function EmployeeRosterEditModal({
     return filteredEmployees[0] || employee || null;
   }, [selectedEmpId, filteredEmployees, employee]);
 
+  // ── تحديد صفة الموظف: متعدد الفروع أو موظف حر طوارئ ──
+  const isMultiBranchEmp = Boolean(
+    targetEmp?.isMultiBranch ||
+    targetEmp?.isFloatingStaff ||
+    (Array.isArray(targetEmp?.branchesDetails) && targetEmp.branchesDetails.length > 1)
+  );
+
+  const availableBranchesForEmp = useMemo(() => {
+    if (!targetEmp) return allBranches;
+    if (Array.isArray(targetEmp.branchesDetails) && targetEmp.branchesDetails.length > 0) {
+      return targetEmp.branchesDetails.map((bd, idx) => {
+        const bObj = allBranches.find(b => String(b.id) === String(bd.branchId));
+        const roleLabel = targetEmp.isFloatingStaff
+          ? 'تغطية طوارئ'
+          : (idx === 0 || bd.isPrimary ? 'الأساسي' : 'منتدب');
+        return {
+          id: bd.branchId,
+          name: bObj ? bObj.name : (bd.branchName || `فرع ${bd.branchId}`),
+          roleLabel
+        };
+      });
+    }
+    return allBranches;
+  }, [targetEmp, allBranches]);
+
+  const defaultBranchId = useMemo(() => {
+    return targetEmp?.primaryBranchId || (targetEmp?.branchesDetails?.[0]?.branchId) || targetEmp?.branchId || branchId || allBranches[0]?.id || '';
+  }, [targetEmp, branchId, allBranches]);
+
   useEffect(() => {
     if (employee?.id && (!selectedEmpId || !filteredEmployees.some(e => String(e.id) === String(selectedEmpId)))) {
       setSelectedEmpId(employee.id);
@@ -269,15 +298,33 @@ export default function EmployeeRosterEditModal({
     if (!cycleDays || cycleDays.length === 0) return;
     setMonthlyDaysSchedule((prev) => {
       const updated = {};
+      const defBId = defaultBranchId;
+      const defBObj = allBranches.find(b => String(b.id) === String(defBId));
+      const defBName = defBObj ? defBObj.name : (branchName || '');
+
       cycleDays.forEach((day) => {
         if (existingRoster?.schedule && existingRoster.schedule[day.dateStr]) {
-          updated[day.dateStr] = { ...existingRoster.schedule[day.dateStr] };
+          const rawItem = existingRoster.schedule[day.dateStr];
+          const bObj = allBranches.find(b => String(b.id) === String(rawItem.branchId));
+          updated[day.dateStr] = {
+            branchId: rawItem.branchId || defBId,
+            branchName: rawItem.branchName || (bObj ? bObj.name : defBName),
+            ...rawItem
+          };
         } else if (prev[day.dateStr]) {
-          updated[day.dateStr] = { ...prev[day.dateStr] };
+          updated[day.dateStr] = {
+            branchId: prev[day.dateStr].branchId || defBId,
+            branchName: prev[day.dateStr].branchName || defBName,
+            ...prev[day.dateStr]
+          };
         } else {
           const weeklyConf = (existingRoster?.schedule && existingRoster.schedule[day.dayLabel]) || scheduleInputs[day.dayLabel] || DEFAULT_SCHEDULE[day.dayLabel];
           if (weeklyConf) {
-            updated[day.dateStr] = { ...weeklyConf };
+            updated[day.dateStr] = {
+              branchId: weeklyConf.branchId || defBId,
+              branchName: weeklyConf.branchName || defBName,
+              ...weeklyConf
+            };
           } else {
             const isFri = day.dayLabel === 'الجمعة';
             updated[day.dateStr] = {
@@ -285,19 +332,21 @@ export default function EmployeeRosterEditModal({
               isOff: isFri,
               start: isFri ? '' : '08:00',
               end: isFri ? '' : '16:00',
-              hours: isFri ? 0 : 8
+              hours: isFri ? 0 : 8,
+              branchId: defBId,
+              branchName: defBName
             };
           }
         }
       });
       return updated;
     });
-  }, [cycleDays, existingRoster, targetEmp?.id]);
+  }, [cycleDays, existingRoster, targetEmp?.id, defaultBranchId, allBranches]);
 
   // تعديل يوم محدد في التقويم الشهري
   const handleMonthlyDayChange = (dateStr, field, value) => {
     setMonthlyDaysSchedule((prev) => {
-      const current = prev[dateStr] || { type: 'shift', start: '08:00', end: '16:00', hours: 8 };
+      const current = prev[dateStr] || { type: 'shift', start: '08:00', end: '16:00', hours: 8, branchId: defaultBranchId };
       let updated = { ...current };
 
       if (field === 'type') {
@@ -328,6 +377,10 @@ export default function EmployeeRosterEditModal({
           if (diff <= 0) diff += 24 * 60;
           updated.hours = Math.round((diff / 60) * 10) / 10;
         }
+      } else if (field === 'branchId') {
+        const bObj = allBranches.find(b => String(b.id) === String(value));
+        updated.branchId = value;
+        updated.branchName = bObj ? bObj.name : '';
       }
 
       return {
@@ -579,8 +632,12 @@ export default function EmployeeRosterEditModal({
         ...scheduleInputs,
         ...monthlyDaysSchedule
       };
-      const effectiveBranchId = targetEmp.branchId || branchId || '';
-      const effectiveBranchName = branchName || allBranches.find(b => String(b.id) === String(effectiveBranchId))?.name || 'الفرع الرئيسي';
+      const effectiveBranchId = targetEmp.isFloatingStaff
+        ? (defaultBranchId || 'floating')
+        : (targetEmp.primaryBranchId || targetEmp.branchId || branchId || '');
+      const effectiveBranchName = targetEmp.isFloatingStaff
+        ? 'موظف متنقل حر (كافة الفروع)'
+        : (branchName || allBranches.find(b => String(b.id) === String(effectiveBranchId))?.name || 'الفرع الرئيسي');
 
       if (!isBranchManager) {
         // ─────────────────────────────────────────────────────────────
@@ -591,7 +648,7 @@ export default function EmployeeRosterEditModal({
           (r) =>
             (String(r.employeeId) === String(targetEmp.id) || (targetEmp.code && String(r.employeeCode) === String(targetEmp.code))) &&
             (r.month === selectedMonth || !r.month) &&
-            (String(r.branchId || '') === String(effectiveBranchId) || !r.branchId)
+            (String(r.branchId || '') === String(effectiveBranchId) || (!r.branchId && !effectiveBranchId) || r.isFloatingStaff || targetEmp.isFloatingStaff)
         );
 
         const rosterId = existingIdx >= 0 ? updatedRosters[existingIdx].id : `roster_${targetEmp.id}_${selectedMonth}_${Date.now()}`;
@@ -602,6 +659,7 @@ export default function EmployeeRosterEditModal({
           employeeName: targetEmp.name,
           branchId: effectiveBranchId,
           branchName: effectiveBranchName,
+          isFloatingStaff: Boolean(targetEmp.isFloatingStaff),
           month: selectedMonth,
           fromDate: fromDate || cycleRange?.startDate,
           toDate: toDate || cycleRange?.endDate,
@@ -1183,17 +1241,22 @@ export default function EmployeeRosterEditModal({
                   <table className="bylaws-table" style={{ margin: 0, fontSize: '12.5px', width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                     <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--surface-muted, #f1f5f9)', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
                       <tr>
-                        <th style={{ width: '16%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>التاريخ</th>
-                        <th style={{ width: '14%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>اليوم</th>
-                        <th style={{ width: '22%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>نوع اليوم</th>
-                        <th style={{ width: '20%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>موعد البداية (دخول)</th>
-                        <th style={{ width: '20%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>موعد النهاية (خروج)</th>
+                        <th style={{ width: isMultiBranchEmp ? '14%' : '16%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>التاريخ</th>
+                        <th style={{ width: isMultiBranchEmp ? '12%' : '14%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>اليوم</th>
+                        {isMultiBranchEmp && (
+                          <th style={{ width: '22%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box', color: '#0369a1' }}>
+                            🏢 الفرع المخصص
+                          </th>
+                        )}
+                        <th style={{ width: isMultiBranchEmp ? '18%' : '22%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>نوع اليوم</th>
+                        <th style={{ width: isMultiBranchEmp ? '17%' : '20%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>موعد البداية (دخول)</th>
+                        <th style={{ width: isMultiBranchEmp ? '17%' : '20%', padding: '9px 10px', textAlign: 'center', boxSizing: 'border-box' }}>موعد النهاية (خروج)</th>
                         <th style={{ width: '8%', textAlign: 'center', padding: '9px 10px', boxSizing: 'border-box' }}>الساعات</th>
                       </tr>
                     </thead>
                     <tbody>
                       {cycleDays.map((day) => {
-                        const conf = monthlyDaysSchedule[day.dateStr] || { type: 'shift', start: '08:00', end: '16:00', hours: 8 };
+                        const conf = monthlyDaysSchedule[day.dateStr] || { type: 'shift', start: '08:00', end: '16:00', hours: 8, branchId: defaultBranchId };
                         const isOff = conf.type === 'off' || conf.isOff === true;
                         const isFri = day.dayLabel === 'الجمعة';
 
@@ -1217,6 +1280,34 @@ export default function EmployeeRosterEditModal({
                               </span>
                               {isOff && <span style={{ marginRight: '4px', fontSize: '11px' }}>🏖️</span>}
                             </td>
+
+                            {isMultiBranchEmp && (
+                              <td style={{ padding: '6px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
+                                <select
+                                  value={conf.branchId || defaultBranchId}
+                                  onChange={(e) => handleMonthlyDayChange(day.dateStr, 'branchId', e.target.value)}
+                                  disabled={isOff}
+                                  style={{
+                                    width: '100%',
+                                    boxSizing: 'border-box',
+                                    padding: '5px 8px',
+                                    borderRadius: '6px',
+                                    border: `1.5px solid ${isOff ? '#e2e8f0' : '#0284c7'}`,
+                                    background: isOff ? '#f8fafc' : '#f0f9ff',
+                                    fontWeight: 800,
+                                    fontSize: '11.5px',
+                                    color: isOff ? '#94a3b8' : '#0369a1'
+                                  }}
+                                  title={isOff ? 'اليوم محدد كراحة' : 'اختر الفرع الذي سيعمل به الموظف في هذا اليوم'}
+                                >
+                                  {availableBranchesForEmp.map((b) => (
+                                    <option key={b.id} value={b.id}>
+                                      {b.name} {b.roleLabel ? `(${b.roleLabel})` : ''}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                            )}
 
                             <td style={{ padding: '6px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
                               <select

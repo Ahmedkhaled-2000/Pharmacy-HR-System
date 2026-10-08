@@ -18,6 +18,7 @@ import EmployeeRosterEditModal from '../branches/EmployeeRosterEditModal';
 import BranchSalesEntryModal from '../branches/BranchSalesEntryModal';
 import BranchDirectivesModule from '../branches/BranchDirectivesModule';
 import BranchRecruitmentNeedModal from './BranchRecruitmentNeedModal';
+import BranchEmergencyCoverModal from './BranchEmergencyCoverModal';
 import BranchWhatsAppModule from './BranchWhatsAppModule';
 import DayDetailsModal from '../attendance/DayDetailsModal';
 import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, isShiftManualPunch, calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, fmt, getRealTodayStr, getRealDate, getRealNowTimeStr } from '../../utils/formatters';
@@ -559,6 +560,9 @@ export default function BranchManagerView({
 
   // 6. Branch Recruitment Need Request State
   const [showRecruitmentModal, setShowRecruitmentModal] = useState(false);
+
+  // 7. Branch Emergency Coverage Request State (تغطية طوارئ وبدلاء الفروع)
+  const [showEmergencyCoverModal, setShowEmergencyCoverModal] = useState(false);
 
   // ── State for "طلبات الفرع المرسلة للإدارة" Tab ──
   const [sentCategoryFilter, setSentCategoryFilter] = useState('all');
@@ -1225,6 +1229,9 @@ export default function BranchManagerView({
     }
     if (type === 'recruitment_need' || type === 'staff_recruitment_request' || type.includes('recruit') || title.includes('توظيف') || title.includes('احتياج')) {
       return { cat: 'recruitment', label: `👥 طلب احتياج توظيف (${r.jobTitle || 'موظف'})`, icon: '👥', bg: '#f0f9ff', border: '#bae6fd', text: '#0369a1' };
+    }
+    if (type === 'emergency_cover' || title.includes('تغطية طوارئ') || title.includes('تغطية بديل') || title.includes('بديل طارئ')) {
+      return { cat: 'emergency_cover', label: `🚨 طلب تغطية طوارئ (${r.shiftLabel || r.role || 'شفت'})`, icon: '🚨', bg: '#fff1f2', border: '#fecdd3', text: '#e11d48' };
     }
     return { cat: 'other', label: r.typeLabel || '📋 طلب إداري', icon: '📋', bg: '#f8fafc', border: '#e2e8f0', text: '#334155' };
   };
@@ -2939,6 +2946,25 @@ export default function BranchManagerView({
                 onClick={() => setShowRecruitmentModal(true)}
               >
                 👥 طلب احتياج توظيف
+              </button>
+              <button
+                className="btn btn-start"
+                style={{
+                  padding: isMobileScreen ? '8px 10px' : '8px 16px',
+                  fontSize: isMobileScreen ? '12px' : '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '5px',
+                  background: 'linear-gradient(135deg, #e11d48, #be123c)',
+                  fontWeight: 800,
+                  boxShadow: '0 2px 8px rgba(225, 29, 72, 0.35)',
+                  border: '1px solid rgba(255,255,255,0.2)'
+                }}
+                onClick={() => setShowEmergencyCoverModal(true)}
+                title="طلب تغطية فورية أو استدعاء موظف بديل / متنقل لتغطية عجز أو طوارئ بالفرع"
+              >
+                🚨 طلب تغطية طوارئ
               </button>
               {Boolean(state?.branchSalesSettings?.allowBranchManagersEntry) && (
                 <button
@@ -7001,6 +7027,14 @@ export default function BranchManagerView({
               >
                 👥 طلب احتياج توظيف
               </button>
+              <button
+                type="button"
+                className="btn btn-start"
+                style={{ padding: '7px 14px', fontSize: '12.5px', background: 'linear-gradient(135deg, #e11d48, #be123c)', color: '#fff', display: 'flex', alignItems: 'center', gap: '5px', boxShadow: '0 2px 8px rgba(225,29,72,0.3)', fontWeight: 'bold' }}
+                onClick={() => setShowEmergencyCoverModal(true)}
+              >
+                🚨 طلب تغطية طوارئ
+              </button>
             </div>
           </div>
 
@@ -7033,6 +7067,7 @@ export default function BranchManagerView({
           <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '16px', borderBottom: '1px solid var(--border)' }}>
             {[
               { id: 'all', label: '🌐 جميع الطلبات', count: branchSentRequests.length },
+              { id: 'emergency_cover', label: '🚨 تغطية طوارئ', count: branchSentRequests.filter(r => r.type === 'emergency_cover' || getSentReqMeta(r).cat === 'emergency_cover').length },
               { id: 'punch', label: '🖐️ بصمات يدوية', count: branchSentRequests.filter(r => getSentReqMeta(r).cat === 'punch').length },
               { id: 'permission', label: '⏰ أذونات الموظفين', count: branchSentRequests.filter(r => getSentReqMeta(r).cat === 'permission').length },
               { id: 'leave', label: '🏖️ طلبات الإجازات', count: branchSentRequests.filter(r => getSentReqMeta(r).cat === 'leave').length },
@@ -9301,6 +9336,20 @@ export default function BranchManagerView({
         <BranchRecruitmentNeedModal
           isOpen={showRecruitmentModal}
           onClose={() => setShowRecruitmentModal(false)}
+          currentBranch={currentBranch}
+          managerEmp={managerEmp}
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+        />
+      )}
+
+      {/* ── Branch Emergency Cover Modal (طلب تغطية طوارئ وبدلاء الفروع) ── */}
+      {showEmergencyCoverModal && (
+        <BranchEmergencyCoverModal
+          isOpen={showEmergencyCoverModal}
+          onClose={() => setShowEmergencyCoverModal(false)}
           currentBranch={currentBranch}
           managerEmp={managerEmp}
           state={state}

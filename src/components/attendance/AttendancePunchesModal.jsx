@@ -34,6 +34,7 @@ export default function AttendancePunchesModal({
   const { showConfirm } = useUI();
   const [isStoppingShift, setIsStoppingShift] = useState(false);
   const [selectedDayDetails, setSelectedDayDetails] = useState(null);
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState('all');
 
   const [editingPunch, setEditingPunch] = useState(null);
   const [isAddingNewPunch, setIsAddingNewPunch] = useState(false);
@@ -453,9 +454,57 @@ export default function AttendancePunchesModal({
     return b ? b.name : `فرع ${bId}`;
   };
 
-  const isMultiBranch = Boolean(employee.branchesDetails && employee.branchesDetails.length > 1);
+  // حصر كافة فروع الموظف سواء المعينة في ملفه أو التي سجل بها ورديات وبصمات
+  const employeeBranchesList = React.useMemo(() => {
+    const map = new Map();
+    // 1. من تفاصيل الفروع المتعددة
+    (employee.branchesDetails || []).forEach(bd => {
+      const bObj = (branches || []).find(b => isBranchMatch(bd.branchId, b));
+      const bId = bObj ? bObj.id : bd.branchId;
+      const bName = bObj ? bObj.name : (bd.branchName || `فرع ${bId}`);
+      if (bId) map.set(String(bId), { branchId: bId, branchName: bName, ...bd });
+    });
+    // 2. من مصفوفة الفروع المصرح بها
+    (employee.branches || []).forEach(bId => {
+      const bObj = (branches || []).find(b => isBranchMatch(bId, b));
+      const resolvedId = bObj ? bObj.id : bId;
+      const bName = bObj ? bObj.name : `فرع ${resolvedId}`;
+      if (resolvedId && !map.has(String(resolvedId))) {
+        map.set(String(resolvedId), { branchId: resolvedId, branchName: bName });
+      }
+    });
+    // 3. الفرع الأساسي أو فرع الموظف
+    const baseBranchId = employee.primaryBranchId || employee.branchId;
+    if (baseBranchId) {
+      const bObj = (branches || []).find(b => isBranchMatch(baseBranchId, b));
+      const resolvedId = bObj ? bObj.id : baseBranchId;
+      if (resolvedId && !map.has(String(resolvedId))) {
+        map.set(String(resolvedId), { branchId: resolvedId, branchName: bObj ? bObj.name : `فرع ${resolvedId}` });
+      }
+    }
+    // 4. أي فروع سجل بها ورديات أو بصمات خلال الشهر
+    (monthPunches || []).forEach(p => {
+      if (p.branchId) {
+        const bObj = (branches || []).find(b => isBranchMatch(p.branchId, b));
+        const resolvedId = bObj ? bObj.id : p.branchId;
+        const bName = bObj ? bObj.name : (p.branchName || `فرع ${resolvedId}`);
+        if (resolvedId && !map.has(String(resolvedId))) {
+          map.set(String(resolvedId), { branchId: resolvedId, branchName: bName });
+        }
+      }
+    });
+    return Array.from(map.values());
+  }, [employee, branches, monthPunches]);
+
+  const isMultiBranch = Boolean(
+    employeeBranchesList.length > 1 ||
+    (employee.branchesDetails && employee.branchesDetails.length > 1) ||
+    employee.isFloatingStaff ||
+    (employee.branches && employee.branches.length > 1)
+  );
+
   const employeeBranchName = isMultiBranch
-    ? employee.branchesDetails.map(bd => bd.branchName || getBranchName(bd.branchId)).filter(Boolean).join(' + ')
+    ? employeeBranchesList.map(bd => bd.branchName || getBranchName(bd.branchId)).filter(Boolean).join(' + ')
     : (getBranchName(employee.branchId || employee.branchesDetails?.[0]?.branchId) || employee.branchName || employee.branch || 'الفرع الرئيسي');
 
   // Helper to calculate hourly rate for employee per branch
@@ -1111,19 +1160,69 @@ export default function AttendancePunchesModal({
 
         {isMultiBranch ? (
           <div>
-            {employee.branchesDetails.map((bd) => {
-              const bId = bd.branchId;
-              const bObj = (state.branches || []).find((b) => isBranchMatch(bId, b));
-              const bName = bObj ? bObj.name : (bd.branchName || `فرع ${bId}`);
-              const targetB = bObj || { id: bId, branchId: bId, name: bd.branchName };
-              const bPunches = monthPunches.filter((p) => {
-                const isMatch = isBranchMatch(p.branchId, targetB) || (p.branchName && bObj?.name && p.branchName.trim() === bObj.name.trim());
-                if (isMatch) return true;
-                if (!p.branchId && !p.branchName) {
-                  return isBranchMatch(employee.branchesDetails[0]?.branchId, targetB);
-                }
-                return false;
-              });
+            {/* شريط تصفية الفروع للموظف متعدد الفروع / حر */}
+            {employeeBranchesList.length > 1 && (
+              <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '18px', borderBottom: '1.5px solid var(--border)', alignItems: 'center' }}>
+                <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                  🏢 تصفية حسب الفرع:
+                </span>
+                <button
+                  type="button"
+                  style={{
+                    padding: '6px 14px',
+                    fontSize: '12.5px',
+                    borderRadius: '20px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    background: selectedBranchFilter === 'all' ? 'linear-gradient(135deg, #0d9488, #0f766e)' : '#f1f5f9',
+                    color: selectedBranchFilter === 'all' ? '#fff' : '#475569',
+                    border: selectedBranchFilter === 'all' ? 'none' : '1px solid #cbd5e1'
+                  }}
+                  onClick={() => setSelectedBranchFilter('all')}
+                >
+                  🌐 كافة الفروع ({monthPunches.length})
+                </button>
+                {employeeBranchesList.map(b => {
+                  const bPCount = monthPunches.filter(p => isBranchMatch(p.branchId, { id: b.branchId, branchId: b.branchId }) || (p.branchName && p.branchName.trim() === b.branchName.trim())).length;
+                  const isSelected = selectedBranchFilter === String(b.branchId);
+                  return (
+                    <button
+                      key={b.branchId}
+                      type="button"
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: '12.5px',
+                        borderRadius: '20px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        background: isSelected ? 'linear-gradient(135deg, #0284c7, #0369a1)' : '#f8fafc',
+                        color: isSelected ? '#fff' : '#334155',
+                        border: isSelected ? 'none' : '1px solid #e2e8f0'
+                      }}
+                      onClick={() => setSelectedBranchFilter(String(b.branchId))}
+                    >
+                      🏢 {b.branchName} ({bPCount})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {employeeBranchesList
+              .filter(bd => selectedBranchFilter === 'all' || String(bd.branchId) === String(selectedBranchFilter))
+              .map((bd) => {
+                const bId = bd.branchId;
+                const bObj = (state.branches || []).find((b) => isBranchMatch(bId, b));
+                const bName = bObj ? bObj.name : (bd.branchName || `فرع ${bId}`);
+                const targetB = bObj || { id: bId, branchId: bId, name: bd.branchName };
+                const bPunches = monthPunches.filter((p) => {
+                  const isMatch = isBranchMatch(p.branchId, targetB) || (p.branchName && bObj?.name && p.branchName.trim() === bObj.name.trim());
+                  if (isMatch) return true;
+                  if (!p.branchId && !p.branchName) {
+                    return isBranchMatch(employeeBranchesList[0]?.branchId, targetB);
+                  }
+                  return false;
+                });
 
               const bShiftsCount = bPunches.length;
               const bTotalBreak = bPunches.reduce((acc, p) => acc + (parseFloat(p.breakHours) || 0), 0).toFixed(2);
@@ -1244,6 +1343,11 @@ export default function AttendancePunchesModal({
                                   {p.isOfflineSynced && (
                                     <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }} title="سُجلت في وضع عدم الاتصال وموزامنة لاحقاً">
                                       📴 مزامنة أوفلاين {p.syncedAt ? `(${p.syncedAt.slice(11, 16)})` : ''}
+                                    </span>
+                                  )}
+                                  {p.isEmergencyCover && (
+                                    <span style={{ display: 'block', marginTop: '2px', background: '#ffe4e6', color: '#be123c', border: '1px solid #fecdd3', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                      🚨 تغطية طوارئ {p.surgeAllowance ? `(+${p.surgeAllowance} ج.م)` : ''}
                                     </span>
                                   )}
                                 </td>
@@ -1538,6 +1642,16 @@ export default function AttendancePunchesModal({
                           {p.isOfflineSynced && (
                             <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }} title="سُجلت في وضع عدم الاتصال وموزامنة لاحقاً">
                               📴 مزامنة أوفلاين {p.syncedAt ? `(${p.syncedAt.slice(11, 16)})` : ''}
+                            </span>
+                          )}
+                          {(p.branchId || p.branchName) && (
+                            <span style={{ display: 'block', marginTop: '2px', background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                              🏢 {getBranchName(p.branchId) || p.branchName}
+                            </span>
+                          )}
+                          {p.isEmergencyCover && (
+                            <span style={{ display: 'block', marginTop: '2px', background: '#ffe4e6', color: '#be123c', border: '1px solid #fecdd3', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                              🚨 تغطية طوارئ {p.surgeAllowance ? `(+${p.surgeAllowance} ج.م)` : ''}
                             </span>
                           )}
                         </td>
@@ -1877,14 +1991,20 @@ export default function AttendancePunchesModal({
                         value={editBranchId}
                         onChange={(e) => setEditBranchId(e.target.value)}
                       >
-                        {employee.branchesDetails.map((bd) => {
-                          const br = (state.branches || []).find((b) => isBranchMatch(bd.branchId, b));
-                          return (
+                        <option value="">-- اختر الفرع --</option>
+                        {employeeBranchesList.length > 0 ? (
+                          employeeBranchesList.map((bd) => (
                             <option key={bd.branchId} value={bd.branchId}>
-                              {br?.name || bd.branchName || `فرع ${bd.branchId}`}
+                              {bd.branchName || getBranchName(bd.branchId)}
                             </option>
-                          );
-                        })}
+                          ))
+                        ) : (
+                          (state.branches || []).map((br) => (
+                            <option key={br.id} value={br.id}>
+                              {br.name}
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
                   )}

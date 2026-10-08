@@ -203,6 +203,9 @@ export function getFormattedRequestBadge(type, leaveType, targetAction, fullReq 
   if (cleanType === 'recruitment_need' || cleanType === 'staff_recruitment_request' || cleanType === 'طلب احتياج توظيف') {
     return <span className="badge" style={{ background: '#4f46e5', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>👥 طلب احتياج توظيف</span>;
   }
+  if (cleanType === 'emergency_cover' || cleanType === 'طلب تغطية طوارئ') {
+    return <span className="badge" style={{ background: '#e11d48', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🚨 طلب تغطية طوارئ</span>;
+  }
 
 
   // إذا كان النص يحتوي على حروف إنجليزية ولم يطابق ما سبق
@@ -1784,6 +1787,105 @@ export default function RequestsModule({
           }
           return e;
         });
+      }
+
+      // Emergency Cover Approval: Assign candidate to roster on that date + credit surge allowance + dispatch biometrics
+      if (approvedTargetReq.type === 'emergency_cover') {
+        const coveredEmpId = approvedTargetReq.candidateEmpId || approvedTargetReq.employeeId;
+        const targetDate = approvedTargetReq.date || approvedTargetReq.targetDate;
+        const targetMonth = approvedTargetReq.month || (targetDate ? targetDate.slice(0, 7) : new Date().toISOString().slice(0, 7));
+        const targetBranchId = approvedTargetReq.branchId;
+        const targetBranchName = approvedTargetReq.branchName;
+        const startTime = approvedTargetReq.startTime || '09:00';
+        const endTime = approvedTargetReq.endTime || '17:00';
+
+        if (coveredEmpId && targetDate) {
+          const singleDaySch = {
+            [targetDate]: {
+              start: startTime,
+              end: endTime,
+              isOff: false,
+              branchId: targetBranchId,
+              branchName: targetBranchName,
+              isEmergencyCover: true,
+              surgeAllowance: parseFloat(approvedTargetReq.surgeAllowance) || 0
+            }
+          };
+
+          const existingRosterIdx = updatedRosters.findIndex(
+            (ros) => String(ros.employeeId) === String(coveredEmpId) &&
+                     (ros.month === targetMonth || !ros.month)
+          );
+
+          if (existingRosterIdx >= 0) {
+            updatedRosters[existingRosterIdx] = {
+              ...updatedRosters[existingRosterIdx],
+              schedule: {
+                ...(updatedRosters[existingRosterIdx].schedule || {}),
+                ...singleDaySch
+              },
+              updatedAt: new Date().toISOString()
+            };
+          } else {
+            updatedRosters.unshift({
+              id: `roster_${Date.now()}_cov`,
+              employeeId: coveredEmpId,
+              branchId: targetBranchId || null,
+              month: targetMonth,
+              schedule: singleDaySch,
+              status: 'approved',
+              approvedAt: new Date().toISOString()
+            });
+          }
+
+          // If surge allowance incentive exists, credit as bonus adjustment
+          const surgeAmt = parseFloat(approvedTargetReq.surgeAllowance);
+          if (surgeAmt > 0) {
+            const surgeAdjId = `adj_surge_${approvedTargetReq.id || Date.now()}`;
+            const existingAdj = updatedAdjustments.find(a => a.id === surgeAdjId);
+            if (!existingAdj) {
+              updatedAdjustments.unshift({
+                id: surgeAdjId,
+                employeeId: coveredEmpId,
+                type: 'bonus',
+                amount: surgeAmt,
+                reason: `بدل طوارئ وتغطية فورية لفرع ${targetBranchName || targetBranchId} في ${targetDate}`,
+                date: targetDate,
+                month: targetMonth,
+                status: 'approved',
+                approvedAt: new Date().toISOString()
+              });
+            }
+          }
+
+          // Pre-emptive biometric template push to branch device
+          try {
+            const targetDevs = (state.biometricDevices || []).filter(d =>
+              d.branchId && String(d.branchId) === String(targetBranchId) && d.serial_number
+            );
+            if (targetDevs.length > 0) {
+              const matchedEmp = (state.employees || []).find(e => String(e.id) === String(coveredEmpId));
+              const empPin = matchedEmp?.biometric_pin || matchedEmp?.nationalId || matchedEmp?.code || coveredEmpId;
+              const pushPayload = {
+                deviceSerials: targetDevs.map(d => d.serial_number),
+                users: [{
+                  pin: String(empPin),
+                  name: matchedEmp?.name || approvedTargetReq.candidateName || 'موظف طوارئ',
+                  privilege: 0
+                }]
+              };
+              if (window?.apiClient?.post) {
+                window.apiClient.post('/api/biometrics/dispatch-users', pushPayload).catch(() => {});
+              } else {
+                fetch('/api/biometrics/dispatch-users', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(pushPayload)
+                }).catch(() => {});
+              }
+            }
+          } catch (_) {}
+        }
       }
 
       let updatedLeaveRequests = [...(state.leaveRequests || [])];

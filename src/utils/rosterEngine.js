@@ -74,7 +74,9 @@ function normalizeScheduleItem(item, jsDayIndex) {
     isOff,
     start: isOff ? '' : (item.start || ''),
     end: isOff ? '' : (item.end || ''),
-    hours: item.hours !== undefined ? item.hours : (isOff ? 0 : (item.start && item.end ? 8 : 0))
+    hours: item.hours !== undefined ? item.hours : (isOff ? 0 : (item.start && item.end ? 8 : 0)),
+    branchId: item.branchId || null,
+    branchName: item.branchName || null
   };
 }
 
@@ -113,8 +115,14 @@ export function findEmployeeRoster(empId, monthOrDate, state, targetBranchId = n
   const matchesBranch = (item) => {
     if (!targetBranchId) return true;
     const bStr = String(item.branchId || '').trim();
-    if (!bStr) return true;
-    return bStr === String(targetBranchId).trim();
+    if (!bStr || bStr === 'all' || bStr === 'floating' || item.isFloatingStaff) return true;
+    if (bStr === String(targetBranchId).trim()) return true;
+    // التحقق من تعيين الفرع في تاريخ محدد داخل جدول الموظف متعدد الفروع
+    if (dateStr && item.schedule && item.schedule[dateStr]) {
+      const dayBId = String(item.schedule[dateStr].branchId || '').trim();
+      if (dayBId && dayBId === String(targetBranchId).trim()) return true;
+    }
+    return false;
   };
 
   const matchesDateOrMonth = (item) => {
@@ -188,8 +196,15 @@ export function getEmployeeBaseDaySchedule(empId, dateStr, state) {
     return null;
   }
   const jsDay = new Date(dateStr + 'T00:00:00').getDay();
-  // Pass null for dateStr so we query the recurring base weekly schedule, avoiding any stored swap overrides!
-  return getDayScheduleFromMap(roster.schedule, jsDay, null);
+  // الاستعلام بالتاريخ أولاً لجلب تعيينات الفروع والورديات المحددة ليوم بعينه، ثم التراجع للجدول الأسبوعي
+  const sched = getDayScheduleFromMap(roster.schedule, jsDay, dateStr) || getDayScheduleFromMap(roster.schedule, jsDay, null);
+  if (!sched) return null;
+
+  return {
+    ...sched,
+    branchId: sched.branchId || roster.branchId || emp?.branchId || null,
+    branchName: sched.branchName || roster.branchName || null
+  };
 }
 
 /**

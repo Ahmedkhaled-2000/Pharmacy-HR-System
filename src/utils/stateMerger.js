@@ -326,6 +326,16 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
       }
     }
 
+    // مزامنة حالة الموظف الحر وتفاصيل الفروع
+    const activeFloating = (localTime >= remoteTime ? localItem.isFloatingStaff : remoteItem.isFloatingStaff);
+    if (activeFloating !== undefined) {
+      mergedEmp.isFloatingStaff = Boolean(activeFloating);
+    }
+    const activePrimaryBId = (localTime >= remoteTime ? localItem.primaryBranchId : remoteItem.primaryBranchId);
+    if (activePrimaryBId !== undefined) {
+      mergedEmp.primaryBranchId = activePrimaryBId;
+    }
+
     // مزامنة الفرع الأساسي إذا كان متاحاً في تفاصيل الفروع
     if (!mergedEmp.branchId && Array.isArray(mergedEmp.branchesDetails) && mergedEmp.branchesDetails[0]?.branchId) {
       mergedEmp.branchId = mergedEmp.branchesDetails[0].branchId;

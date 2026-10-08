@@ -488,15 +488,37 @@ export function generateOfficialPayslipHTML({
   const gmName = orgSettings.generalManagerName || 'د. أحمد خالد - المدير العام للصيدليات';
   const printDate = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
 
-  const isMultiBranch = emp?.branchesDetails && emp.branchesDetails.length > 1;
-  const assignedBranches = (emp?.branchesDetails && emp.branchesDetails.length > 0)
+  const branchIdsWithData = Object.keys(summary.perBranch || {}).filter(Boolean);
+  const rawAssigned = (emp?.branchesDetails && emp.branchesDetails.length > 0)
     ? emp.branchesDetails
     : (emp?.branchId ? [{ branchId: emp.branchId, salary: emp.salary, workHoursPerDay: emp.workHoursPerDay, workDaysPerMonth: emp.workDaysPerMonth }] : []);
+
+  const assignedBranches = [...rawAssigned];
+  const seenBIds = new Set(assignedBranches.map(b => String(b.branchId)));
+  branchIdsWithData.forEach(bId => {
+    if (!seenBIds.has(String(bId))) {
+      seenBIds.add(String(bId));
+      assignedBranches.push({
+        branchId: bId,
+        salary: emp?.salary,
+        workHoursPerDay: emp?.workHoursPerDay || 8,
+        workDaysPerMonth: emp?.workDaysPerMonth || 26
+      });
+    }
+  });
+
+  const isMultiBranch = Boolean(
+    assignedBranches.length > 1 ||
+    (emp?.branchesDetails && emp.branchesDetails.length > 1) ||
+    emp?.isFloatingStaff ||
+    (emp?.branches && emp.branches.length > 1) ||
+    branchIdsWithData.length > 1
+  );
   const showPerBranchBreakdown = isMultiBranch && !selectedBranchId;
 
   const targetBranchDetails = selectedBranchId
-    ? emp.branchesDetails?.find((b) => String(b.branchId) === String(selectedBranchId))
-    : (emp.branchesDetails?.[0] || null);
+    ? (emp.branchesDetails?.find((b) => String(b.branchId) === String(selectedBranchId)) || assignedBranches.find((b) => String(b.branchId) === String(selectedBranchId)))
+    : (emp.branchesDetails?.[0] || assignedBranches[0] || null);
 
   const baseSalary = targetBranchDetails ? (parseFloat(targetBranchDetails.salary) || 0) : (parseFloat(emp?.salary) || 0);
   const workHoursPerDay = targetBranchDetails ? (parseFloat(targetBranchDetails.workHoursPerDay) || 8) : (parseFloat(emp?.workHoursPerDay) || 8);
@@ -511,7 +533,7 @@ export function generateOfficialPayslipHTML({
   const branchNames = selectedBranchId
     ? getBranchName(selectedBranchId)
     : (isMultiBranch
-      ? emp.branchesDetails.map(bd => getBranchName(bd.branchId)).join(' + ')
+      ? assignedBranches.map(bd => getBranchName(bd.branchId)).join(' + ')
       : (emp?.branchName || 'المركز الرئيسي'));
 
   const totalHours = summary.hours || 0;

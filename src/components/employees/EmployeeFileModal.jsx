@@ -140,6 +140,7 @@ export default function EmployeeFileModal({
   const [department, setDepartment] = useState('الصيدلية');
   
   // 3. Financial & Branches & Schedule (Multi-Branch Support)
+  const [isFloatingStaff, setIsFloatingStaff] = useState(false); // موظف حر / بدون فرع أساسي (Floating Pool Staff)
   const [branchesDetails, setBranchesDetails] = useState([
     { id: Date.now().toString(), branchId: '', salary: '', workHours: '', workDays: '', breakHours: '' }
   ]);
@@ -514,6 +515,7 @@ export default function EmployeeFileModal({
           };
         });
       setArchivedBranchesDetails(cleanArchived);
+      setIsFloatingStaff(Boolean(editingEmp.isFloatingStaff || editingEmp.isFloating || editingEmp.isRoaming || (editingEmp.isMultiBranch && editingEmp.primaryBranchId === null)));
 
       setHireDate(editingEmp.hireDate || '');
       setContractType(editingEmp.contractType || 'دوام كامل');
@@ -580,6 +582,7 @@ export default function EmployeeFileModal({
         { id: Math.random().toString(), branchId: branches[0]?.id || '', salary: '', workHours: '', workDays: '', breakHours: '' }
       ]);
       setArchivedBranchesDetails([]);
+      setIsFloatingStaff(false);
       
       setHireDate(new Date().toISOString().slice(0, 10));
       setContractType('دوام كامل');
@@ -954,7 +957,10 @@ export default function EmployeeFileModal({
           amount: parseFloat(a.amount) || 0
         })),
       // For backwards compatibility and main branch logic, use the first branch's details with safe fallbacks
+      isFloatingStaff: Boolean(isFloatingStaff),
+      primaryBranchId: isFloatingStaff ? null : (finalBranchesDetails[0]?.branchId || defaultBranchAssignmentId || ''),
       branchId: finalBranchesDetails[0]?.branchId || editingEmp?.branchId || defaultBranchAssignmentId || '',
+      isMultiBranch: finalBranchesDetails.length > 1 || Boolean(isFloatingStaff),
       salary: finalSalary,
       workHoursPerDay: finalWorkHours,
       workDaysPerMonth: finalWorkDays,
@@ -1811,12 +1817,71 @@ export default function EmployeeFileModal({
               </div>
 
               <div className="field" style={{ gridColumn: 'span 2' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label>الفروع المعين بها (متعدد الفروع)</label>
+                <div style={{ background: '#f8fafc', padding: '12px 16px', borderRadius: '12px', border: '1.5px solid #cbd5e1', marginBottom: '14px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b', marginBottom: '8px', display: 'block' }}>
+                    🏢 نمط التعيين بالفروع (Multi-Branch Mode)
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsFloatingStaff(false)}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        border: !isFloatingStaff ? '2px solid #0f766e' : '1px solid #cbd5e1',
+                        background: !isFloatingStaff ? '#f0fdfa' : '#ffffff',
+                        color: !isFloatingStaff ? '#0f766e' : '#64748b',
+                        fontWeight: 800,
+                        fontSize: '12.5px',
+                        cursor: 'pointer',
+                        textAlign: 'right',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '3px',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span style={{ fontSize: '13px' }}>🏠 موظف بفرع أساسي</span>
+                      <span style={{ fontSize: '11px', fontWeight: 400, opacity: 0.85 }}>
+                        (الفرع الأول هو الفرع الرئيسي، مع إمكانية الانتداب الجزئي لفروع أخرى)
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsFloatingStaff(true)}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        border: isFloatingStaff ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                        background: isFloatingStaff ? '#f0f9ff' : '#ffffff',
+                        color: isFloatingStaff ? '#0284c7' : '#64748b',
+                        fontWeight: 800,
+                        fontSize: '12.5px',
+                        cursor: 'pointer',
+                        textAlign: 'right',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '3px',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span style={{ fontSize: '13px' }}>🌐 موظف حر متنقل / تغطية طوارئ</span>
+                      <span style={{ fontSize: '11px', fontWeight: 400, opacity: 0.85 }}>
+                        (ليس له فرع أساسي، متاح للتغطية السريعة والتحرك بين كافة الفروع المعينة)
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <label style={{ fontWeight: 800 }}>
+                    {isFloatingStaff ? '🌐 الفروع المؤهل للتغطية بها (نطاق العمل الحر):' : '🏢 الفروع المعين بها الموظف:'}
+                  </label>
                   <button 
                     type="button" 
                     className="btn btn-ghost" 
-                    style={{ fontSize: '12px' }}
+                    style={{ fontSize: '12px', background: '#f1f5f9', fontWeight: 700 }}
                     onClick={() => {
                       setBranchesDetails([...branchesDetails, { id: Math.random().toString(), branchId: '', salary: '', workHours: '', workDays: '', breakHours: '' }]);
                     }}
@@ -1827,6 +1892,19 @@ export default function EmployeeFileModal({
                 
                 {branchesDetails.map((bd, idx) => (
                   <div key={bd.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+                    <span style={{
+                      minWidth: '110px',
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      padding: '5px 8px',
+                      borderRadius: '6px',
+                      textAlign: 'center',
+                      background: isFloatingStaff ? '#e0f2fe' : (idx === 0 ? '#f0fdf4' : '#fef3c7'),
+                      color: isFloatingStaff ? '#0369a1' : (idx === 0 ? '#166534' : '#b45309'),
+                      border: `1px solid ${isFloatingStaff ? '#bae6fd' : (idx === 0 ? '#bbf7d0' : '#fde68a')}`
+                    }}>
+                      {isFloatingStaff ? `🌐 تغطية #${idx + 1}` : (idx === 0 ? '🏠 الفرع الأساسي' : `🔄 فرع منتدب #${idx}`)}
+                    </span>
                     <select 
                       value={bd.branchId} 
                       onChange={(e) => handleBranchSelectChange(idx, e.target.value)}

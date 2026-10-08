@@ -46,16 +46,15 @@ export default function PayslipPrintModal({
   const fullMonthLabel = `${monthName} ${y}`;
 
   // Branches list for multi-branch employee
-  const isMultiBranch = (emp.branchesDetails && emp.branchesDetails.length > 1);
   const currentBranchId = activeBranchFilter === 'all' ? null : activeBranchFilter;
 
-  const assignedBranches = (emp.branchesDetails && emp.branchesDetails.length > 0)
+  const rawAssignedBranches = (emp.branchesDetails && emp.branchesDetails.length > 0)
     ? emp.branchesDetails
-    : [{ branchId: emp.branchId || 'default', salary: emp.salary, workHoursPerDay: emp.workHoursPerDay || 8, workDaysPerMonth: emp.workDaysPerMonth || 26 }];
+    : (emp.branchId ? [{ branchId: emp.branchId, salary: emp.salary, workHoursPerDay: emp.workHoursPerDay || 8, workDaysPerMonth: emp.workDaysPerMonth || 26 }] : []);
 
   const targetBranchDetails = currentBranchId
-    ? emp.branchesDetails?.find((b) => String(b.branchId) === String(currentBranchId))
-    : (emp.branchesDetails?.[0] || null);
+    ? (emp.branchesDetails?.find((b) => String(b.branchId) === String(currentBranchId)) || rawAssignedBranches.find((b) => String(b.branchId) === String(currentBranchId)))
+    : (emp.branchesDetails?.[0] || rawAssignedBranches[0] || null);
 
   const baseSalary = targetBranchDetails ? (parseFloat(targetBranchDetails.salary) || 0) : (parseFloat(emp.salary) || 0);
   const workHoursPerDay = targetBranchDetails ? (parseFloat(targetBranchDetails.workHoursPerDay) || 8) : (parseFloat(emp.workHoursPerDay) || 8);
@@ -115,6 +114,35 @@ export default function PayslipPrintModal({
 
   const totalAllowances = summary.totalAllowances !== undefined ? summary.totalAllowances : (mgmtAllowance + transAllowance + extAllowance + dailyAllowanceTotal);
 
+  const branchIdsWithData = Object.keys(summary.perBranch || {}).filter(Boolean);
+  const assignedBranches = React.useMemo(() => {
+    const list = [...rawAssignedBranches];
+    const seen = new Set(list.map(b => String(b.branchId)));
+    branchIdsWithData.forEach(bId => {
+      if (!seen.has(String(bId))) {
+        seen.add(String(bId));
+        list.push({
+          branchId: bId,
+          salary: emp.salary,
+          workHoursPerDay: emp.workHoursPerDay || 8,
+          workDaysPerMonth: emp.workDaysPerMonth || 26
+        });
+      }
+    });
+    if (list.length === 0) {
+      list.push({ branchId: emp.branchId || 'default', salary: emp.salary, workHoursPerDay: emp.workHoursPerDay || 8, workDaysPerMonth: emp.workDaysPerMonth || 26 });
+    }
+    return list;
+  }, [rawAssignedBranches, branchIdsWithData, emp]);
+
+  const isMultiBranch = Boolean(
+    assignedBranches.length > 1 ||
+    (emp.branchesDetails && emp.branchesDetails.length > 1) ||
+    emp.isFloatingStaff ||
+    (emp.branches && emp.branches.length > 1) ||
+    branchIdsWithData.length > 1
+  );
+
   const getBranchName = (bId) => {
     if (!bId || bId === 'undefined' || bId === 'null') return emp?.branchName || 'الفرع الرئيسي';
     const b = (branches || orgSettings.branches || state?.branches || []).find((br) => String(br.id) === String(bId));
@@ -124,7 +152,7 @@ export default function PayslipPrintModal({
   const branchNames = currentBranchId
     ? getBranchName(currentBranchId)
     : (isMultiBranch
-      ? emp.branchesDetails.map(bd => getBranchName(bd.branchId)).join(' + ')
+      ? assignedBranches.map(bd => getBranchName(bd.branchId)).join(' + ')
       : (emp.branchName || 'المركز الرئيسي'));
 
   const showPerBranchBreakdown = isMultiBranch && !currentBranchId;
