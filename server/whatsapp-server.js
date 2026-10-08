@@ -671,15 +671,48 @@ app.post(['/render-pdf', '/api/render-pdf'], async (req, res) => {
   }
 });
 
-// 6. إرسال رسالة فردية أو فاتورة PDF عبر جلسة محددة
-app.post(['/send', '/api/send', '/send-message', '/api/send-message'], async (req, res) => {
+// ── حل وتجهيز Buffer الصورة من رابط أو Base64 أو Data URI ───────────────────────
+async function resolveImageBuffer(input) {
+  if (!input) return null;
+  if (Buffer.isBuffer(input)) return input;
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (trimmed.startsWith('data:image')) {
+      const parts = trimmed.split(',');
+      if (parts[1]) {
+        return Buffer.from(parts[1], 'base64');
+      }
+    }
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      try {
+        const resp = await fetch(trimmed, { signal: AbortSignal.timeout(12000) });
+        if (resp.ok) {
+          const arr = await resp.arrayBuffer();
+          return Buffer.from(arr);
+        }
+      } catch (err) {
+        console.warn('[Resolve Image Error]:', err.message);
+      }
+    }
+    // Base64 raw string
+    if (trimmed.length > 100 && !trimmed.includes(' ') && !trimmed.startsWith('{')) {
+      try {
+        return Buffer.from(trimmed, 'base64');
+      } catch {}
+    }
+  }
+  return null;
+}
+
+// 6. إرسال رسالة فردية أو فاتورة PDF أو وسائط وصور عبر جلسة محددة
+app.post(['/send', '/api/send', '/send-message', '/api/send-message', '/send-media', '/api/send-media'], async (req, res) => {
   const sId = extractSessionId(req);
   const session = getOrCreateSession(sId, false);
 
-  const { phone, message, pdfBase64, pdfHtml, fileName } = req.body;
+  const { phone, message, pdfBase64, pdfHtml, fileName, imageUrl, imageBase64, images } = req.body;
 
-  if (!phone || (!message && !pdfBase64 && !pdfHtml)) {
-    return res.status(400).json({ success: false, error: 'رقم الهاتف ونص الرسالة أو ملف PDF مطلوبان.' });
+  if (!phone || (!message && !pdfBase64 && !pdfHtml && !imageUrl && !imageBase64 && (!Array.isArray(images) || images.length === 0))) {
+    return res.status(400).json({ success: false, error: 'رقم الهاتف ونص الرسالة أو ملف الميديا مطلوبان.' });
   }
 
   if (session.status !== 'CONNECTED' || !session.sock) {
@@ -713,6 +746,25 @@ app.post(['/send', '/api/send', '/send-message', '/api/send-message'], async (re
       }
     }
 
+    // تجميع الصور والوسائط المرفقة
+    const imageBuffers = [];
+    if (imageBase64) {
+      const b = await resolveImageBuffer(imageBase64);
+      if (b) imageBuffers.push(b);
+    } else if (imageUrl) {
+      const b = await resolveImageBuffer(imageUrl);
+      if (b) imageBuffers.push(b);
+    }
+
+    if (Array.isArray(images) && images.length > 0) {
+      for (const item of images) {
+        const b = await resolveImageBuffer(item);
+        if (b && !imageBuffers.some(prev => prev.equals(b))) {
+          imageBuffers.push(b);
+        }
+      }
+    }
+
     // محاكاة كتابة بشرية لمنع خوارزميات الحظر
     try {
       await session.sock.sendPresenceUpdate('composing', jid);
@@ -728,30 +780,51 @@ app.post(['/send', '/api/send', '/send-message', '/api/send-message'], async (re
         fileName: fileName || 'مستند_رسمي.pdf',
         caption: message || ''
       });
+    } else if (imageBuffers.length > 0) {
+      // إرسال الصورة الأولى مع نص الرسالة
+      sent = await session.sock.sendMessage(jid, {
+        image: imageBuffers[0],
+        caption: message || ''
+      });
+
+      // إرسال باقي الصور المرفقة تباعاً إن وجدت
+      for (let i = 1; i < imageBuffers.length; i++) {
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          await session.sock.sendMessage(jid, {
+            image: imageBuffers[i]
+          });
+        } catch (extraErr) {
+          console.warn(`[WhatsApp:${sId}] Extra image send warning:`, extraErr.message);
+        }
+      }
     } else {
       sent = await session.sock.sendMessage(jid, { text: message });
     }
     session.sentCount++;
 
+    const logSnippet = message || (pdfBuffer ? '📎 [ملف PDF مرفق]' : (imageBuffers.length > 0 ? '🖼️ [صورة مرفقة]' : ''));
     const logEntry = {
-      id: sent.key?.id || 'WAM_' + Date.now(),
+      id: sent?.key?.id || 'WAM_' + Date.now(),
       phone: jid.split('@')[0],
-      messageSnippet: (message || (pdfBuffer ? '📎 [ملف PDF مرفق]' : '')).slice(0, 60),
+      messageSnippet: logSnippet.slice(0, 60),
       timestamp: new Date().toLocaleTimeString('ar-EG'),
       status: 'DELIVERED',
       hasPdf: Boolean(pdfBuffer),
+      hasImage: imageBuffers.length > 0,
       sessionId: sId
     };
     session.logs.push(logEntry);
 
-    console.log(`[WhatsApp:${sId}] ✅ Sent to +${jid.split('@')[0]} ${pdfBuffer ? '📎 [مع PDF]' : ''}`);
+    console.log(`[WhatsApp:${sId}] ✅ Sent to +${jid.split('@')[0]} ${pdfBuffer ? '📎 [مع PDF]' : (imageBuffers.length > 0 ? '🖼️ [مع صور]' : '')}`);
     res.json({
       success: true,
       sessionId: sId,
-      messageId: sent.key?.id,
+      messageId: sent?.key?.id,
       phone: jid.split('@')[0],
       status: 'DELIVERED',
-      hasPdf: Boolean(pdfBuffer)
+      hasPdf: Boolean(pdfBuffer),
+      hasImage: imageBuffers.length > 0
     });
   } catch (err) {
     console.error(`[WhatsApp:${sId}] Error sending to +${jid}:`, err);

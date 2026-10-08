@@ -185,8 +185,19 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
     setIsMemberModalOpen(true);
   };
 
+  const isOwner = Boolean(
+    currentUser?.role === 'owner' ||
+    currentUser?.isOwner ||
+    currentUser?.isOwnerSimulating ||
+    currentUser?.originalRole === 'owner' ||
+    localStorage.getItem('app_auth_role') === 'owner' ||
+    localStorage.getItem('app_owner_authenticated') === 'true' ||
+    sessionStorage.getItem('app_owner_authenticated') === 'true' ||
+    sessionStorage.getItem('app_outstock_owner_unlocked') === 'true'
+  );
+
   const handleOpenEditMember = (member) => {
-    if (member.is_hr_integrated || member.role === 'procurement_manager') {
+    if (!isOwner && (member.is_hr_integrated || member.role === 'procurement_manager')) {
       showToast?.('هذا الحساب مرتبط بمنظومة الموارد البشرية، ويتم تعديل بياناته وصلاحياته من شاشة إدارة صلاحيات الموظفين للمالك.');
       return;
     }
@@ -292,7 +303,7 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
   };
 
   const handleDeleteMember = async (member) => {
-    if (member.is_hr_integrated || member.role === 'procurement_manager') {
+    if (!isOwner && (member.is_hr_integrated || member.role === 'procurement_manager')) {
       showToast?.('لا يمكن حذف حساب مرتبط بالموارد البشرية من هنا. يرجى تعديله أو إلغاء صلاحياته من شاشة صلاحيات الموظفين للمالك.');
       return;
     }
@@ -713,7 +724,7 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                         </td>
                         <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                            {(m.is_hr_integrated || m.role === 'procurement_manager') ? (
+                            {(!isOwner && (m.is_hr_integrated || m.role === 'procurement_manager')) ? (
                               <span style={{ fontSize: '11px', color: '#0369a1', background: '#f0f9ff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #bae6fd', fontWeight: 'bold' }}>
                                 حساب مدار من شاشة الموظفين
                               </span>

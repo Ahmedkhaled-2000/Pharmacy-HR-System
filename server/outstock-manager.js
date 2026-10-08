@@ -1506,6 +1506,20 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const incoming = req.body || {};
       const existing = await db.query("SELECT setting_value FROM public.outstock_settings WHERE setting_key = 'general_settings'");
       const prev = existing.rows[0]?.setting_value || {};
+
+      const isOwner = req.outstockUser?.role === 'owner';
+
+      // 🔒 حماية أمنية مشددة: لا يمكن تعديل رقم مدير المشتريات أو رقم مسؤول مستحضرات التجميل إلا بحساب المالك فقط
+      const isModifyingProcPhone = incoming.procurementWhatsappPhone !== undefined && String(incoming.procurementWhatsappPhone).trim() !== String(prev.procurementWhatsappPhone || '').trim();
+      const isModifyingCosmPhone = incoming.cosmeticsWhatsappPhone !== undefined && String(incoming.cosmeticsWhatsappPhone).trim() !== String(prev.cosmeticsWhatsappPhone || '').trim();
+
+      if ((isModifyingProcPhone || isModifyingCosmPhone) && !isOwner) {
+        return res.status(403).json({
+          success: false,
+          error: 'غير مصرح - تعديل رقم واتساب إدارة المشتريات أو رقم مسؤول مستحضرات التجميل متاح لحساب المالك فقط 🔒'
+        });
+      }
+
       const merged = { ...prev, ...incoming };
 
       await db.query(`
@@ -1996,9 +2010,9 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
             if (targetBranchName) {
               params.push(targetBranchName);
               const pName = params.length;
-              query += ` AND (o.delivery_target_branch_id = $${pId} OR o.delivery_target_branch = $${pName}) AND o.branch_id <> $${pId}`;
+              query += ` AND (o.delivery_target_branch_id = $${pId} OR o.delivery_target_branch = $${pName} OR o.delivery_target_branch ILIKE '%' || $${pName} || '%') AND o.branch_id <> $${pId}`;
             } else {
-              query += ` AND o.delivery_target_branch_id = $${pId} AND o.branch_id <> $${pId}`;
+              query += ` AND (o.delivery_target_branch_id = $${pId} OR o.delivery_target_branch ILIKE '%' || $${pId} || '%') AND o.branch_id <> $${pId}`;
             }
           } else if (transferDirection === 'from') {
             // محولة من هذا الفرع (صادرة لفرع آخر)
@@ -2011,13 +2025,15 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
             if (targetBranchName) {
               params.push(targetBranchName);
               const pName = params.length;
-              query += ` AND (o.branch_id = $${pId} OR o.delivery_target_branch_id = $${pId} OR o.delivery_target_branch = $${pName})`;
+              query += ` AND (o.branch_id = $${pId} OR o.delivery_target_branch_id = $${pId} OR o.delivery_target_branch = $${pName} OR o.delivery_target_branch ILIKE '%' || $${pName} || '%')`;
             } else {
-              query += ` AND (o.branch_id = $${pId} OR o.delivery_target_branch_id = $${pId})`;
+              query += ` AND (o.branch_id = $${pId} OR o.delivery_target_branch_id = $${pId} OR o.delivery_target_branch ILIKE '%' || $${pId} || '%')`;
             }
           }
         }
       } else {
+        // استبعاد الطلبات المحولة بين الفروع من طلبات الفرع العادية
+        query += ` AND (o.delivery_type <> 'other_branch_pickup' OR o.delivery_type IS NULL)`;
         // إذا كان المستخدم فرع صيدلية فيرى طلبات فرعه فقط
         if (req.outstockUser.role === 'outstock_branch' || req.outstockUser.role === 'branch') {
           params.push(req.outstockUser.branchId || req.outstockUser.id);
@@ -2026,7 +2042,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           // موظف مشتريات محدد بفروع معينة
           params.push(req.outstockUser.allowedBranches);
           query += ` AND o.branch_id = ANY($${params.length}::text[])`;
-        } else if (branchId) {
+        } else if (branchId && branchId !== 'all') {
           params.push(branchId);
           query += ` AND o.branch_id = $${params.length}`;
         }
@@ -2294,10 +2310,20 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         await db.query('UPDATE public.outstock_customers SET total_orders_count = total_orders_count + 1 WHERE id = $1', [customerId]);
       }
 
+      // حل اسم الفرع الحقيقي لعرضه بالاسم بدلاً من الرمز
+      let currentBranchName = branchId;
+      try {
+        const bRes = await db.query('SELECT name FROM public.outstock_branches WHERE id = $1', [branchId]);
+        if (bRes.rows.length > 0 && bRes.rows[0].name) {
+          currentBranchName = bRes.rows[0].name;
+        }
+      } catch (_) {}
+
       const fullOrder = {
         id: orderId,
         orderNumber,
         branchId,
+        branchName: currentBranchName,
         customerId,
         customerName: isBranchOrder ? 'طلب خاص برصيد الفرع' : (customer?.fullName || 'عميل نقدي'),
         customerPhone: cleanPhone,
@@ -2331,18 +2357,12 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       // إذا كان الطلب محولاً إلى فرع آخر، يتم بث إشعار مخصص للفرع المحول إليه والفرع المصدر
       if (deliveryType === 'other_branch_pickup') {
-        let srcBranchName = branchId;
-        try {
-          const srcRes = await db.query('SELECT name FROM public.outstock_branches WHERE id = $1', [branchId]);
-          if (srcRes.rows.length > 0) srcBranchName = srcRes.rows[0].name;
-        } catch (_) {}
-
         broadcastOutstock('outstock:order_transferred', {
           order: fullOrder,
           orderId,
           orderNumber,
           fromBranchId: branchId,
-          fromBranchName: srcBranchName,
+          fromBranchName: currentBranchName,
           toBranchId: finalTargetBranchId,
           toBranchName: finalTargetBranchName,
           customerName: customer?.fullName,
@@ -2351,44 +2371,127 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         });
       }
 
-      // إرسال إشعار واتساب تلقائي لإدارة المشتريات بالطلب الجديد
+      // إرسال إشعار واتساب تلقائي لإدارة المشتريات ومسؤول مستحضرات التجميل بالطلب الجديد مع صيانة الخصوصية
       (async () => {
         try {
           const setRow = await db.query("SELECT setting_value FROM public.outstock_settings WHERE setting_key = 'general_settings'");
-          const pPhone = setRow.rows[0]?.setting_value?.procurementWhatsappPhone;
-          if (pPhone) {
-            let cleanProcPhone = String(pPhone).replace(/\D/g, '');
-            if (cleanProcPhone.length >= 9) {
-              const itmsSummary = insertedItems.map((it, idx) => `  ${idx + 1}. ${it.medicationName} (${it.quantity} علبة)`).join('\n');
-              const waMsg = `📦 *طلب نواقص جديد وارد لإدارة المشتريات!*\n` +
-                `🏢 *الفرع:* ${fullOrder.branchName || fullOrder.branchId}\n` +
-                `📋 *رقم الطلب:* #${fullOrder.orderNumber}\n` +
-                `👤 *الصيدلي:* ${fullOrder.orderReceiverName || fullOrder.responsiblePharmacist || 'صيدلي الفرع'}\n` +
-                `💊 *الأصناف المطلوبة:*\n${itmsSummary}\n` +
-                `📱 *العميل:* ${fullOrder.customerName} (${fullOrder.customerPhone || 'بدون هاتف'})\n` +
-                `⏰ *التوقيت:* ${new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}`;
+          const generalSettings = setRow.rows[0]?.setting_value || {};
+          const procPhone = generalSettings.procurementWhatsappPhone;
+          const cosmPhone = generalSettings.cosmeticsWhatsappPhone;
 
-              const normalizedPhone = (cleanProcPhone.startsWith('01') && cleanProcPhone.length === 11) ? ('2' + cleanProcPhone) : cleanProcPhone;
-              const waUrls = ['http://hr-whatsapp-server:3100/send', 'http://127.0.0.1:3100/send'];
+          const hasCosmetics = (orderCategory === 'cosmetics') || insertedItems.some(it => it.itemType === 'cosmetics' || it.item_type === 'cosmetics');
+          const hasMedications = (orderCategory !== 'cosmetics') || insertedItems.some(it => it.itemType !== 'cosmetics' && it.item_type !== 'cosmetics');
+
+          // تجميع صور الروشتات والمنتجات لإرسالها
+          const orderImages = [];
+          if (medicationImageUrl) orderImages.push(medicationImageUrl);
+          insertedItems.forEach(it => {
+            if (it.imageUrl && !orderImages.includes(it.imageUrl)) {
+              orderImages.push(it.imageUrl);
+            }
+          });
+
+          const targets = [];
+
+          // 1) إذا كان الطلب يحتوي على أصناف مستحضرات تجميل، يرسل لمسؤول التجميل
+          if (hasCosmetics) {
+            const cosmItems = insertedItems.filter(it => it.itemType === 'cosmetics' || it.item_type === 'cosmetics');
+            const targetCosmPhone = cosmPhone || procPhone;
+            if (targetCosmPhone) {
+              targets.push({
+                roleType: 'cosmetics',
+                phone: targetCosmPhone,
+                title: '💄 *طلب نواقص مستحضرات تجميل جديد وارد!*',
+                items: cosmItems.length > 0 ? cosmItems : insertedItems
+              });
+            }
+          }
+
+          // 2) إذا كان الطلب يحتوي على أدوية أو طلب عام، يرسل لإدارة المشتريات
+          if (hasMedications || !hasCosmetics) {
+            const medItems = insertedItems.filter(it => it.itemType !== 'cosmetics' && it.item_type !== 'cosmetics');
+            if (procPhone) {
+              const alreadyCovered = hasCosmetics && !hasMedications && (cosmPhone === procPhone);
+              if (!alreadyCovered) {
+                targets.push({
+                  roleType: 'procurement',
+                  phone: procPhone,
+                  title: '💊 *طلب نواقص أدوية جديد وارد لإدارة المشتريات!*',
+                  items: medItems.length > 0 ? medItems : insertedItems
+                });
+              }
+            }
+          }
+
+          // جلسة الواتساب المعتمدة للإرسال (جلسة الفرع المقترن أولاً ثم الإدارة كـ Fallback)
+          const branchSession = branchId.startsWith('branch_') ? branchId : `branch_${branchId}`;
+
+          for (const target of targets) {
+            let cleanPhone = String(target.phone).replace(/\D/g, '');
+            if (cleanPhone.length < 9) continue;
+            const normalizedPhone = (cleanPhone.startsWith('01') && cleanPhone.length === 11) ? ('2' + cleanPhone) : cleanPhone;
+
+            const itmsSummary = target.items.map((it, idx) => {
+              const unitLabel = it.unitType === 'strip' ? 'شريط' : 'علبة';
+              const typeBadge = (it.itemType === 'cosmetics' || it.item_type === 'cosmetics') ? ' [مستحضر تجميل]' : '';
+              return `  ${idx + 1}. ${it.medicationName} (${it.quantity} ${unitLabel})${typeBadge}`;
+            }).join('\n');
+
+            const paidNum = parseFloat(fullOrder.paidAmount || 0);
+            const remainingNum = parseFloat(fullOrder.remainingAmount || 0);
+            const totalNum = parseFloat(fullOrder.netAmount || fullOrder.totalAmount || 0);
+
+            // صياغة الرسالة الخالية تماماً من بيانات العميل الحساسة مع إبراز العربون والفرع
+            const waMsg = `${target.title}\n` +
+              `🏢 *الفرع:* ${currentBranchName}\n` +
+              `📋 *رقم الطلب:* #${fullOrder.orderNumber}\n` +
+              `👤 *الصيدلي المسجل:* ${fullOrder.orderReceiverName || fullOrder.responsiblePharmacist || 'صيدلي الفرع'}\n` +
+              `📦 *الأصناف المطلوبة:*\n${itmsSummary}\n` +
+              `💰 *العربون المدفوع:* ${paidNum.toFixed(2)} ج.م\n` +
+              `💵 *المبلغ المتبقي:* ${remainingNum.toFixed(2)} ج.م\n` +
+              `🏷️ *إجمالي الطلب:* ${totalNum.toFixed(2)} ج.م\n` +
+              (fullOrder.customerNotes ? `📝 *ملاحظات الطلب:* ${fullOrder.customerNotes}\n` : '') +
+              `⏰ *التوقيت:* ${new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}`;
+
+            const sessionsToTry = [branchSession, 'hr_main'];
+            const waUrls = ['http://hr-whatsapp-server:3100/send', 'http://127.0.0.1:3100/send'];
+
+            let sentSuccessfully = false;
+            for (const sId of sessionsToTry) {
+              if (sentSuccessfully) break;
               for (const u of waUrls) {
                 try {
+                  const bodyPayload = {
+                    sessionId: sId,
+                    phone: normalizedPhone,
+                    message: waMsg
+                  };
+                  if (orderImages.length > 0) {
+                    bodyPayload.imageUrl = orderImages[0];
+                    if (orderImages.length > 1) {
+                      bodyPayload.images = orderImages.slice(1);
+                    }
+                  }
+
                   const wRes = await fetch(u, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      sessionId: 'hr_main',
-                      phone: normalizedPhone,
-                      message: waMsg
-                    }),
-                    signal: AbortSignal.timeout(5000)
+                    body: JSON.stringify(bodyPayload),
+                    signal: AbortSignal.timeout(6000)
                   });
-                  if (wRes.ok) break;
+                  if (wRes.ok) {
+                    const resData = await wRes.json().catch(() => ({}));
+                    if (resData?.success) {
+                      sentSuccessfully = true;
+                      break;
+                    }
+                  }
                 } catch (_) {}
               }
             }
           }
         } catch (e) {
-          console.warn('[Auto WhatsApp to Procurement Warning]:', e.message);
+          console.warn('[Auto WhatsApp Order Notification Warning]:', e.message);
         }
       })();
 
@@ -2598,7 +2701,170 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // تعديل الطلب بالكامل (متاح فقط قبل رد إدارة المشتريات)
+  // إرسال إشعار واتساب لإدارة المشتريات عند تعديل الصيدلية لأي صنف في طلب العميل
+  // ───────────────────────────────────────────────────────────────────────────
+  async function sendOrderModificationWhatsAppNotification({
+    order,
+    branchId,
+    branchName,
+    responsiblePharmacist,
+    customerNotes,
+    modifiedItems = [],
+    allItems = []
+  }) {
+    try {
+      if (!Array.isArray(modifiedItems) || modifiedItems.length === 0) {
+        return;
+      }
+
+      const setRow = await db.query("SELECT setting_value FROM public.outstock_settings WHERE setting_key = 'general_settings'");
+      const generalSettings = setRow.rows[0]?.setting_value || {};
+      const procPhone = generalSettings.procurementWhatsappPhone;
+      const cosmPhone = generalSettings.cosmeticsWhatsappPhone;
+
+      const hasCosmetics = modifiedItems.some(it => it.itemType === 'cosmetics' || it.item_type === 'cosmetics');
+      const hasMedications = modifiedItems.some(it => it.itemType !== 'cosmetics' && it.item_type !== 'cosmetics');
+
+      const targets = [];
+      if (hasCosmetics) {
+        const targetCosmPhone = cosmPhone || procPhone;
+        if (targetCosmPhone) {
+          targets.push({
+            roleType: 'cosmetics',
+            phone: targetCosmPhone,
+            title: '💄 *تنبيه: تم تعديل صنف مستحضرات تجميل في طلب العميل!*'
+          });
+        }
+      }
+      if (hasMedications || !hasCosmetics) {
+        if (procPhone) {
+          const alreadyCovered = hasCosmetics && !hasMedications && (cosmPhone === procPhone);
+          if (!alreadyCovered) {
+            targets.push({
+              roleType: 'procurement',
+              phone: procPhone,
+              title: '🔄 *تنبيه: تم تعديل صنف في طلب نواقص عميل من قِبل الصيدلية!*'
+            });
+          }
+        }
+      }
+
+      if (targets.length === 0) return;
+
+      // تجميع صور الأصناف المعدلة
+      const itemImages = [];
+      modifiedItems.forEach(it => {
+        const img = it.imageUrl || it.image_url;
+        if (img && !itemImages.includes(img)) {
+          itemImages.push(img);
+        }
+      });
+
+      // صياغة تفاصيل البنود المعدلة
+      const modifiedDetails = modifiedItems.map((it, idx) => {
+        const unitLabel = it.unitType === 'strip' ? 'شريط' : 'علبة';
+        const typeBadge = (it.itemType === 'cosmetics' || it.item_type === 'cosmetics') ? ' [مستحضر تجميل]' : '';
+        
+        if (it.changeType === 'removed') {
+          return `  ${idx + 1}. ❌ *تم حذف هذا الصنف من الطلب:* ~${it.medicationName}~ (${it.quantity} ${unitLabel})`;
+        }
+
+        let line = `  ${idx + 1}. *الصنف الجديد المعدل:* ${it.medicationName}${typeBadge}\n`;
+        line += `     📦 الكمية المطلوبة: ${it.quantity} ${unitLabel}\n`;
+        if (it.previousMedicationName && it.previousMedicationName.trim().toLowerCase() !== it.medicationName.trim().toLowerCase()) {
+          line += `     ↩️ الصنف السابق قبل التعديل: ~${it.previousMedicationName}~\n`;
+          line += `     ✏️ الإجراء: [تم تغيير اسم الصنف من قِبل الصيدلية]\n`;
+        } else if (it.changeType === 'substitute' || it.changeType === 'added') {
+          line += `     ✨ الإجراء: [صنف بديل / مضاف جديد]\n`;
+        } else if (it.changeType === 'quantity_changed') {
+          line += `     🔢 الإجراء: [تعديل الكمية: كانت ${it.previousQuantity} وأصبحت ${it.quantity}]\n`;
+        } else {
+          line += `     ✏️ الإجراء: [تعديل صنف]\n`;
+        }
+        if (it.unitPrice > 0) {
+          line += `     💵 السعر: ${parseFloat(it.unitPrice).toFixed(2)} ج.م\n`;
+        }
+        return line;
+      }).join('\n');
+
+      // ملخص كامل أصناف الطلب الحالية
+      const currentItemsSummary = (Array.isArray(allItems) && allItems.length > 0)
+        ? allItems.map((it, idx) => {
+            const uLabel = it.unitType === 'strip' ? 'شريط' : 'علبة';
+            return `  ${idx + 1}. ${it.medicationName} (${it.quantity} ${uLabel})`;
+          }).join('\n')
+        : '  (لا توجد أصناف)';
+
+      const paidNum = parseFloat(order.paid_amount || order.paidAmount || 0);
+      const remainingNum = parseFloat(order.remaining_amount || order.remainingAmount || 0);
+      const totalNum = parseFloat(order.net_amount || order.total_amount || order.totalAmount || 0);
+      const branchSession = branchId ? (branchId.startsWith('branch_') ? branchId : `branch_${branchId}`) : 'hr_main';
+
+      for (const target of targets) {
+        let cleanPhone = String(target.phone).replace(/\D/g, '');
+        if (cleanPhone.length < 9) continue;
+        const normalizedPhone = (cleanPhone.startsWith('01') && cleanPhone.length === 11) ? ('2' + cleanPhone) : cleanPhone;
+
+        const waMsg = `${target.title}\n` +
+          `━━━━━━━━━━━━━━━━━━━\n` +
+          `🏢 *الفرع:* ${branchName || branchId}\n` +
+          `📋 *رقم الطلب:* #${order.order_number || order.orderNumber}\n` +
+          `👤 *الصيدلي المسؤول:* ${responsiblePharmacist || 'صيدلي الفرع'}\n` +
+          `⏰ *وقت التعديل:* ${new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })} (${new Date().toLocaleDateString('ar-EG')})\n` +
+          (order.delivery_type === 'other_branch_pickup' && order.delivery_target_branch ? `🔄 *التسليم في فرع:* ${order.delivery_target_branch}\n` : '') +
+          `━━━━━━━━━━━━━━━━━━━\n` +
+          `✏️ *بيانات الصنف الذي تم تغييره / تعديله:*\n${modifiedDetails}\n` +
+          `━━━━━━━━━━━━━━━━━━━\n` +
+          `📦 *قائمة أصناف الطلب كاملة بعد التعديل:*\n${currentItemsSummary}\n` +
+          `💰 *العربون:* ${paidNum.toFixed(2)} ج.م | *المتبقي:* ${remainingNum.toFixed(2)} ج.م | *الإجمالي:* ${totalNum.toFixed(2)} ج.م\n` +
+          (customerNotes ? `📝 *ملاحظات الطلب:* ${customerNotes}\n` : '') +
+          `━━━━━━━━━━━━━━━━━━━\n` +
+          `⚠️ *تنبيه لإدارة المشتريات:* تم تعديل صنف في هذا الطلب وإعادة إرساله من قِبل الصيدلية، يرجى اعتماده وتوفيره بناءً على الصنف الجديد المعدل.`;
+
+        const sessionsToTry = [branchSession, 'hr_main'];
+        const waUrls = ['http://hr-whatsapp-server:3100/send', 'http://127.0.0.1:3100/send'];
+
+        let sentSuccessfully = false;
+        for (const sId of sessionsToTry) {
+          if (sentSuccessfully) break;
+          for (const u of waUrls) {
+            try {
+              const bodyPayload = {
+                sessionId: sId,
+                phone: normalizedPhone,
+                message: waMsg
+              };
+              if (itemImages.length > 0) {
+                bodyPayload.imageUrl = itemImages[0];
+                if (itemImages.length > 1) {
+                  bodyPayload.images = itemImages.slice(1);
+                }
+              }
+
+              const wRes = await fetch(u, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(bodyPayload),
+                signal: AbortSignal.timeout(6000)
+              });
+              if (wRes.ok) {
+                const resData = await wRes.json().catch(() => ({}));
+                if (resData?.success) {
+                  sentSuccessfully = true;
+                  break;
+                }
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Order Modification WhatsApp Alert Warning]:', err.message);
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // تعديل الطلب بالكامل أو تعديل أصناف الطلب
   // ───────────────────────────────────────────────────────────────────────────
   app.put('/api/outstock/orders/:id', authMiddleware, async (req, res) => {
     try {
@@ -2631,6 +2897,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           deliveryTargetBranchId,
           paymentSplits
         } = req.body || {};
+
+        const modifiedItems = [];
 
         // معالجة تعديل الأصناف غير المتوفرة إن أُرسلت في الطلب
         if (Array.isArray(items) && items.length > 0) {
@@ -2669,6 +2937,25 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
                 if (isApproved(matchedExisting)) {
                   continue;
                 }
+                const oldName = String(matchedExisting.medication_name || '').trim();
+                const newName = String(it.medicationName || '').trim();
+                const oldQty = parseInt(matchedExisting.quantity || 1, 10);
+                const isNameDiff = oldName.toLowerCase() !== newName.toLowerCase();
+                const isQtyDiff = oldQty !== qty;
+                if (isNameDiff || isQtyDiff) {
+                  modifiedItems.push({
+                    changeType: isNameDiff ? 'modified' : 'quantity_changed',
+                    medicationName: newName,
+                    previousMedicationName: isNameDiff ? oldName : null,
+                    quantity: qty,
+                    previousQuantity: oldQty,
+                    unitType: it.unitType || 'pack',
+                    itemType: it.itemType || matchedExisting.item_type || 'medication',
+                    unitPrice: price,
+                    imageUrl: imgUrl
+                  });
+                }
+
                 // الصنف غير متوفر أو معلق: نحدثه ونعيده كـ pending لإدارة المشتريات
                 await db.query(`
                   UPDATE public.outstock_order_items
@@ -2704,6 +2991,18 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
             } else {
               // صنف بديل جديد أضيف في الطلب
               const newId = `item_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+              modifiedItems.push({
+                changeType: 'substitute',
+                medicationName: String(it.medicationName).trim(),
+                previousMedicationName: null,
+                quantity: qty,
+                previousQuantity: null,
+                unitType: it.unitType || 'pack',
+                itemType: itemType,
+                unitPrice: price,
+                imageUrl: imgUrl
+              });
+
               await db.query(`
                 INSERT INTO public.outstock_order_items (
                   id, order_id, medication_name, unit_type, quantity, unit_price, total_price, item_status,
@@ -2719,6 +3018,14 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           // ب) حذف أي صنف غير معتمد تم حذفه من قبل المستخدم
           for (const ex of existingItems) {
             if (!isApproved(ex) && !submittedWithId.includes(String(ex.id))) {
+              modifiedItems.push({
+                changeType: 'removed',
+                medicationName: ex.medication_name,
+                previousMedicationName: ex.medication_name,
+                quantity: ex.quantity,
+                unitType: ex.unit_type || 'pack',
+                itemType: ex.item_type || 'medication'
+              });
               await db.query('DELETE FROM public.outstock_order_items WHERE id = $1 AND order_id = $2', [ex.id, orderId]);
             }
           }
@@ -2782,13 +3089,49 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
             WHERE id = $7
           `, [
             customer.fullName ? String(customer.fullName).trim() : null,
-            customer.whatsappPhone ? String(customer.whatsappPhone).replace(/\\D/g, '') : null,
+            customer.whatsappPhone ? String(customer.whatsappPhone).replace(/\D/g, '') : null,
             customer.landlinePhone ? String(customer.landlinePhone).trim() : null,
             customer.address ? String(customer.address).trim() : null,
             customer.zone ? String(customer.zone).trim() : null,
             customer.notes ? String(customer.notes).trim() : null,
             existingOrder.customer_id
           ]);
+        }
+
+        // إرسال إشعار واتساب وبث فوري للمشتريات بالصنف المعدل
+        if (modifiedItems.length > 0) {
+          let branchDisplayName = existingOrder.branch_id;
+          try {
+            const bRes = await db.query('SELECT name FROM public.outstock_branches WHERE id = $1', [existingOrder.branch_id]);
+            if (bRes.rows.length > 0 && bRes.rows[0].name) {
+              branchDisplayName = bRes.rows[0].name;
+            }
+          } catch (_) {}
+
+          const allCurrentRes = await db.query(
+            'SELECT medication_name, quantity, unit_type, item_type FROM public.outstock_order_items WHERE order_id = $1 AND (pruned_from_bill = false OR pruned_from_bill IS NULL) ORDER BY created_at ASC',
+            [orderId]
+          );
+
+          sendOrderModificationWhatsAppNotification({
+            order: { ...existingOrder, paid_amount: paid, remaining_amount: remaining, net_amount: netAmount },
+            branchId: existingOrder.branch_id,
+            branchName: branchDisplayName,
+            responsiblePharmacist: responsiblePharmacist || existingOrder.responsible_pharmacist || req.outstockUser?.name || 'صيدلي الفرع',
+            customerNotes: customerNotes !== undefined ? customerNotes : existingOrder.customer_notes,
+            modifiedItems,
+            allItems: allCurrentRes.rows.map(r => ({ medicationName: r.medication_name, quantity: r.quantity, unitType: r.unit_type, itemType: r.item_type }))
+          }).catch(e => console.warn('[Order Mod WA Alert Error]:', e.message));
+
+          broadcastOutstock('outstock:procurement_alert', {
+            type: 'item_modified',
+            orderId,
+            orderNumber: existingOrder.order_number,
+            branchId: existingOrder.branch_id,
+            branchName: branchDisplayName,
+            modifiedItems,
+            message: `🔄 قامت الصيدلية بتعديل صنف في طلب نواقص عميل #${existingOrder.order_number}`
+          });
         }
 
         broadcastOutstock('outstock:order_updated', {
@@ -2800,11 +3143,12 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
         return res.json({
           success: true,
-          message: 'تم تحديث بيانات الطلب بنجاح وتعديل الأصناف غير المتوفرة مع حماية الأصناف المعتمدة',
+          message: 'تم تحديث بيانات الطلب بنجاح وتعديل الأصناف غير المتوفرة وإرسال إشعار للمشتريات',
           orderId
         });
       }
 
+      // إذا لم تكن المشتريات قد ردت بعد: تعديل الطلب بالكامل
       const {
         customer,
         items,
@@ -2825,6 +3169,75 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ success: false, error: 'يرجى إدخال صنف واحد على الأقل في الطلب' });
       }
+
+      // 1. جلب الأصناف السابقة قبل التعديل للمقارنة واكتشاف البنود المعدلة
+      const prevItemsRes = await db.query(
+        'SELECT * FROM public.outstock_order_items WHERE order_id = $1 ORDER BY created_at ASC',
+        [orderId]
+      );
+      const previousItems = prevItemsRes.rows;
+
+      const modifiedItems = [];
+      const matchedPrevIds = [];
+
+      items.forEach((it, idx) => {
+        const newName = String(it.medicationName || '').trim();
+        const newQty = parseInt(it.quantity || 1, 10);
+        let matchedPrev = null;
+        if (it.id) {
+          matchedPrev = previousItems.find((p) => String(p.id) === String(it.id));
+        } else if (idx < previousItems.length) {
+          matchedPrev = previousItems[idx];
+        }
+
+        if (matchedPrev) {
+          matchedPrevIds.push(String(matchedPrev.id));
+          const oldName = String(matchedPrev.medication_name || '').trim();
+          const oldQty = parseInt(matchedPrev.quantity || 1, 10);
+          const isNameDiff = oldName.toLowerCase() !== newName.toLowerCase();
+          const isQtyDiff = oldQty !== newQty;
+          if (isNameDiff || isQtyDiff) {
+            modifiedItems.push({
+              changeType: isNameDiff ? 'modified' : 'quantity_changed',
+              medicationName: newName,
+              previousMedicationName: isNameDiff ? oldName : null,
+              quantity: newQty,
+              previousQuantity: oldQty,
+              unitType: it.unitType || 'pack',
+              itemType: it.itemType || matchedPrev.item_type || 'medication',
+              unitPrice: parseFloat(it.unitPrice || 0),
+              imageUrl: it.imageUrl || null
+            });
+          }
+        } else {
+          // صنف جديد تماماً أضيف للطلب
+          modifiedItems.push({
+            changeType: 'added',
+            medicationName: newName,
+            previousMedicationName: null,
+            quantity: newQty,
+            previousQuantity: null,
+            unitType: it.unitType || 'pack',
+            itemType: it.itemType || 'medication',
+            unitPrice: parseFloat(it.unitPrice || 0),
+            imageUrl: it.imageUrl || null
+          });
+        }
+      });
+
+      // رصد أي صنف سابق تم حذفه
+      previousItems.forEach(prev => {
+        if (!matchedPrevIds.includes(String(prev.id))) {
+          modifiedItems.push({
+            changeType: 'removed',
+            medicationName: prev.medication_name,
+            previousMedicationName: prev.medication_name,
+            quantity: prev.quantity,
+            unitType: prev.unit_type || 'pack',
+            itemType: prev.item_type || 'medication'
+          });
+        }
+      });
 
       // حساب الإجماليات
       let totalAmount = 0;
@@ -2862,7 +3275,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           WHERE id = $7
         `, [
           customer.fullName ? String(customer.fullName).trim() : null,
-          customer.whatsappPhone ? String(customer.whatsappPhone).replace(/\\D/g, '') : null,
+          customer.whatsappPhone ? String(customer.whatsappPhone).replace(/\D/g, '') : null,
           customer.landlinePhone ? String(customer.landlinePhone).trim() : null,
           customer.address ? String(customer.address).trim() : null,
           customer.zone ? String(customer.zone).trim() : null,
@@ -2938,8 +3351,39 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         });
       }
 
+      // إرسال إشعار واتساب وبث فوري للمشتريات بالصنف المعدل
+      if (modifiedItems.length > 0) {
+        let branchDisplayName = existingOrder.branch_id;
+        try {
+          const bRes = await db.query('SELECT name FROM public.outstock_branches WHERE id = $1', [existingOrder.branch_id]);
+          if (bRes.rows.length > 0 && bRes.rows[0].name) {
+            branchDisplayName = bRes.rows[0].name;
+          }
+        } catch (_) {}
+
+        sendOrderModificationWhatsAppNotification({
+          order: { ...existingOrder, paid_amount: paid, remaining_amount: remaining, net_amount: netAmount },
+          branchId: existingOrder.branch_id,
+          branchName: branchDisplayName,
+          responsiblePharmacist: responsiblePharmacist || existingOrder.responsible_pharmacist || req.outstockUser?.name || 'صيدلي الفرع',
+          customerNotes: customerNotes !== undefined ? customerNotes : existingOrder.customer_notes,
+          modifiedItems,
+          allItems: insertedItems.map(r => ({ medicationName: r.medicationName, quantity: r.quantity, unitType: r.unitType, itemType: r.itemType }))
+        }).catch(e => console.warn('[Order Mod WA Alert Error]:', e.message));
+
+        broadcastOutstock('outstock:procurement_alert', {
+          type: 'item_modified',
+          orderId,
+          orderNumber: existingOrder.order_number,
+          branchId: existingOrder.branch_id,
+          branchName: branchDisplayName,
+          modifiedItems,
+          message: `🔄 قامت الصيدلية بتعديل صنف في طلب نواقص عميل #${existingOrder.order_number}`
+        });
+      }
+
       broadcastOutstock('outstock:order_updated', { orderId, branchId: existingOrder.branch_id });
-      res.json({ success: true, message: 'تم تحديث بيانات الطلب بنجاح', orderId });
+      res.json({ success: true, message: 'تم تحديث بيانات الطلب بنجاح وإرسال إشعار للمشتريات بالصنف المعدل', orderId });
     } catch (err) {
       console.error('[Update Order Error]:', err);
       res.status(500).json({ success: false, error: err.message });
@@ -3295,26 +3739,55 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
               const complaintTypeLabel = complaintType === 'delayed_response'
                 ? 'تأخر رد المشتريات على طلب العميل'
                 : 'صنف لم يتوفر بالرغم من موافقة المشتريات';
+
+              const itmsSummary = (Array.isArray(itemsRes.rows) && itemsRes.rows.length > 0)
+                ? itemsRes.rows.map((it, idx) => {
+                    const uLabel = it.unit_type === 'strip' ? 'شريط' : 'علبة';
+                    return `  ${idx + 1}. ${it.medication_name} (${it.quantity} ${uLabel})`;
+                  }).join('\n')
+                : '  (لا توجد أصناف مسجلة)';
+
+              const paidNum = parseFloat(order.paid_amount || 0);
+              const remainingNum = parseFloat(order.remaining_amount || 0);
+
+              // استبعاد بيانات العميل الحساسة تماماً مع إبراز بنود الطلب والعربون
               const waMsg = `🚨 *تنبيه شكوى عاجلة مصعدة من فرع (${order.branch_name})*\n` +
-                            `📋 *الطلب:* #${order.order_number}\n` +
-                            `👤 *الصيدلي:* ${reporter}\n` +
+                            `📋 *رقم الطلب:* #${order.order_number}\n` +
+                            `👤 *الصيدلي محرر الشكوى:* ${reporter}\n` +
                             `⚠️ *نوع الشكوى:* ${complaintTypeLabel}\n` +
-                            `📝 *ملاحظات الفرع:* ${notes || 'لا يوجد تفاصيل إضافية'}\n` +
-                            `⏳ *الحالة:* بانتظار رد وتوضيح مدير المشتريات وقراركم بالمنظومة.`;
+                            `💊 *الأصناف المطلوبة بالطلب:*\n${itmsSummary}\n` +
+                            `💰 *العربون المدفوع:* ${paidNum.toFixed(2)} ج.م\n` +
+                            `💵 *المبلغ المتبقي:* ${remainingNum.toFixed(2)} ج.م\n` +
+                            `📝 *ملاحظات وتفاصيل الشكوى:* ${notes || 'لا يوجد تفاصيل إضافية'}\n` +
+                            `⏳ *الحالة:* بانتظار رد وتوضيح مسؤول المشتريات وتوجيهاتكم بالمنظومة.`;
 
               const cleanPh = String(ownerPhone).replace(/\D/g, '');
               const normalizedPhone = (cleanPh.startsWith('01') && cleanPh.length === 11) ? ('2' + cleanPh) : cleanPh;
+              const branchSession = order.branch_id ? (order.branch_id.startsWith('branch_') ? order.branch_id : `branch_${order.branch_id}`) : 'hr_main';
+
+              const sessionsToTry = [branchSession, 'hr_main'];
               const waUrls = ['http://hr-whatsapp-server:3100/send', 'http://127.0.0.1:3100/send'];
-              for (const u of waUrls) {
-                try {
-                  const wRes = await fetch(u, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone: normalizedPhone, message: waMsg }),
-                    signal: AbortSignal.timeout(5000)
-                  });
-                  if (wRes.ok) break;
-                } catch {}
+
+              let sent = false;
+              for (const sId of sessionsToTry) {
+                if (sent) break;
+                for (const u of waUrls) {
+                  try {
+                    const wRes = await fetch(u, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ sessionId: sId, phone: normalizedPhone, message: waMsg }),
+                      signal: AbortSignal.timeout(5000)
+                    });
+                    if (wRes.ok) {
+                      const resData = await wRes.json().catch(() => ({}));
+                      if (resData?.success) {
+                        sent = true;
+                        break;
+                      }
+                    }
+                  } catch {}
+                }
               }
             }
           }
@@ -3370,6 +3843,71 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         complaint: updatedComplaint,
         message: `💬 رد مدير المشتريات على شكوى طلب #${updatedComplaint.order_number} وبانتظار قراركم`
       });
+
+      // 📲 إرسال إشعار فوري لهاتف المالك عبر واتساب برد وتوضيح إدارة المشتريات
+      (async () => {
+        try {
+          if (typeof getSettingsFromStorage === 'function') {
+            const mainState = await getSettingsFromStorage('pharmacy-tracker-data');
+            const alertsConfig = mainState?.orgSettings?.biometricWhatsAppAlerts || {};
+            const ownerPhone = alertsConfig.ownerWhatsAppNumber || mainState?.orgSettings?.ownerPhone;
+
+            if (ownerPhone) {
+              let itmsSummary = '';
+              try {
+                const itmRes = await db.query(
+                  'SELECT medication_name, quantity, unit_type FROM public.outstock_order_items WHERE order_id = $1 ORDER BY created_at ASC',
+                  [updatedComplaint.order_id]
+                );
+                if (itmRes.rows.length > 0) {
+                  itmsSummary = itmRes.rows.map((it, idx) => {
+                    const uLabel = it.unit_type === 'strip' ? 'شريط' : 'علبة';
+                    return `  ${idx + 1}. ${it.medication_name} (${it.quantity} ${uLabel})`;
+                  }).join('\n');
+                }
+              } catch (_) {}
+
+              const waMsg = `💬 *رد وتوضيح إدارة المشتريات على شكوى الفرع*\n` +
+                            `🏢 *الفرع المصعد:* ${updatedComplaint.branch_name}\n` +
+                            `📋 *رقم الطلب:* #${updatedComplaint.order_number}\n` +
+                            `👤 *مسؤول المشتريات المجيب:* ${responderName || req.user?.fullName || req.user?.name || 'مدير المشتريات'}\n` +
+                            (itmsSummary ? `💊 *الأصناف المطلوبة:*\n${itmsSummary}\n` : '') +
+                            `📝 *رد وتوضيح المشتريات:*\n"${procurementReply.trim()}"\n` +
+                            `⚖️ *الحالة الآن:* الشكوى بانتظار قراركم النهائي كمالك للمنظومة.`;
+
+              const cleanPh = String(ownerPhone).replace(/\D/g, '');
+              const normalizedPhone = (cleanPh.startsWith('01') && cleanPh.length === 11) ? ('2' + cleanPh) : cleanPh;
+              const branchSession = updatedComplaint.branch_id ? (updatedComplaint.branch_id.startsWith('branch_') ? updatedComplaint.branch_id : `branch_${updatedComplaint.branch_id}`) : 'hr_main';
+
+              const sessionsToTry = [branchSession, 'hr_main'];
+              const waUrls = ['http://hr-whatsapp-server:3100/send', 'http://127.0.0.1:3100/send'];
+              let sent = false;
+              for (const sId of sessionsToTry) {
+                if (sent) break;
+                for (const u of waUrls) {
+                  try {
+                    const wRes = await fetch(u, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ sessionId: sId, phone: normalizedPhone, message: waMsg }),
+                      signal: AbortSignal.timeout(5000)
+                    });
+                    if (wRes.ok) {
+                      const resData = await wRes.json().catch(() => ({}));
+                      if (resData?.success) {
+                        sent = true;
+                        break;
+                      }
+                    }
+                  } catch {}
+                }
+              }
+            }
+          }
+        } catch (waErr) {
+          console.warn('[Complaint Reply WhatsApp Alert Error]:', waErr?.message);
+        }
+      })();
 
       res.json({
         success: true,

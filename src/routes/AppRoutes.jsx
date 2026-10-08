@@ -2731,7 +2731,7 @@ export default function AppRoutes() {
                         />
                       ) : (
                         <OutstockSystemView
-                          key={outstockUnlockedEpoch}
+                          key={`${outstockUnlockedEpoch}_${currentBranch?.id || currentBranch?.code || 'default'}_${authRole}`}
                           initialRole={
                             authRole === 'owner' ? 'outstock_owner' :
                             (authRole === 'outstock_procurement_manager' || authRole === 'procurement_manager' || currentEmpUser?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager') ? 'procurement_manager' :

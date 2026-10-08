@@ -409,9 +409,17 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     });
   }, []);
 
-  // فلترة الطلبات النشطة
+  // فحص هل الطلب محول بين الفروع
+  const isTransferredOrder = useCallback((o) => Boolean(
+    o?.delivery_type === 'other_branch_pickup' ||
+    o?.deliveryType === 'other_branch_pickup' ||
+    o?.delivery_target_branch_id ||
+    o?.deliveryTargetBranchId
+  ), []);
+
+  // فلترة الطلبات النشطة (استبعاد المحولة بين الفروع لتظهر فقط في تبويبة المحولة)
   const filteredActiveOrders = useMemo(() => {
-    let result = orders;
+    let result = orders.filter((o) => !isTransferredOrder(o));
 
     // فلتر الحالة الفرعي: أي رد (ولو جزئي) يذهب مباشرة لتبويبة تم الرد ولا يظهر في قيد انتظار المشتريات
     if (activeSubFilter === 'waiting_procurement') {
@@ -436,11 +444,11 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     }
 
     return result;
-  }, [orders, activeSubFilter, searchQuery, isOrderReplied]);
+  }, [orders, activeSubFilter, searchQuery, isOrderReplied, isTransferredOrder]);
 
-  // فلترة الطلبات المسلمة
+  // فلترة الطلبات المسلمة (استبعاد المحولة)
   const filteredDeliveredOrders = useMemo(() => {
-    let result = deliveredOrders;
+    let result = deliveredOrders.filter((o) => !isTransferredOrder(o));
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
@@ -457,15 +465,16 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     }
 
     return result;
-  }, [deliveredOrders, searchQuery]);
+  }, [deliveredOrders, searchQuery, isTransferredOrder]);
 
-  // إحصائيات سريعة للطلبات النشطة
+  // إحصائيات سريعة للطلبات النشطة (بدون المحولة)
   const activeStats = useMemo(() => {
     let waitingCount = 0;
     let repliedCount = 0;
     let readyCount = 0;
 
-    orders.forEach((o) => {
+    const nonTransferred = orders.filter((o) => !isTransferredOrder(o));
+    nonTransferred.forEach((o) => {
       const hasReplied = isOrderReplied(o);
       const items = o.items || [];
       const hasReady = items.some((it) =>
@@ -478,12 +487,12 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     });
 
     return {
-      total: orders.length,
+      total: nonTransferred.length,
       waiting: waitingCount,
       replied: repliedCount,
       ready: readyCount
     };
-  }, [orders, isOrderReplied]);
+  }, [orders, isOrderReplied, isTransferredOrder]);
 
   // فلترة الطلبات المحولة (من وإلى الفرع)
   const filteredTransferredOrders = useMemo(() => {
@@ -583,6 +592,31 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
             <span>📋 الطلبات النشطة والمعلقة</span>
             <span style={{ background: '#0d9488', color: '#ffffff', fontSize: '11px', padding: '1px 7px', borderRadius: '10px' }}>
               {activeStats.total}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveInnerTab('transferred')}
+            style={{
+              padding: '8px 18px',
+              borderRadius: '10px',
+              fontSize: '13.5px',
+              fontWeight: '900',
+              cursor: 'pointer',
+              border: activeInnerTab === 'transferred' ? '2px solid #7c3aed' : '1px solid #cbd5e1',
+              background: activeInnerTab === 'transferred' ? '#f5f3ff' : '#ffffff',
+              color: activeInnerTab === 'transferred' ? '#6d28d9' : '#64748b',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: activeInnerTab === 'transferred' ? '0 2px 6px rgba(124, 58, 237, 0.2)' : 'none'
+            }}
+          >
+            <ArrowRightLeft size={16} color={activeInnerTab === 'transferred' ? '#6d28d9' : '#64748b'} />
+            <span>🔄 طلبات محولة من وإلى</span>
+            <span style={{ background: '#7c3aed', color: '#ffffff', fontSize: '11px', padding: '1px 7px', borderRadius: '10px' }}>
+              {transferredStats.total}
             </span>
           </button>
 
@@ -1402,6 +1436,251 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
             </div>
           )}
         </div>
+      ) : activeInnerTab === 'transferred' ? (
+        /* قسم الطلبات المحولة بين الفروع (من وإلى) */
+        <div className="outstock-card">
+          <div className="outstock-card-header">
+            <h3 className="outstock-card-title">
+              <span>🔄 طلبات محولة من وإلى هذا الفرع</span>
+              <span style={{ fontSize: '13px', color: '#7c3aed', fontWeight: '800' }}>
+                ({filteredTransferredOrders.length} طلب محول)
+              </span>
+            </h3>
+          </div>
+
+          {isTransferredLoading ? (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+              <RefreshCw size={26} className="animate-spin" style={{ margin: '0 auto 10px auto', color: '#7c3aed' }} />
+              <div>جاري تحميل الطلبات المحولة...</div>
+            </div>
+          ) : filteredTransferredOrders.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '48px 20px', color: '#64748b' }}>
+              <ArrowRightLeft size={42} color="#94a3b8" style={{ margin: '0 auto 10px auto' }} />
+              <h4 style={{ margin: '0 0 6px', color: '#1e293b', fontSize: '16px', fontWeight: '800' }}>
+                لا توجد طلبات محولة تطابق هذا الفلتر حالياً
+              </h4>
+              <p style={{ margin: 0, fontSize: '13px' }}>
+                {searchQuery ? 'لم يتم العثور على طلبات تطابق مدخلات البحث' : 'تظهر هنا الطلبات المحولة بين الفروع للاستلام والتجهيز والتسليم.'}
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {filteredTransferredOrders.map((order) => {
+                const itemsList = order.items || [];
+                const activeItems = itemsList.filter((i) => !i.prunedFromBill && !i.pruned_from_bill);
+                const prunedItems = itemsList.filter((i) => i.prunedFromBill || i.pruned_from_bill);
+
+                const isTargetBranch = String(order.delivery_target_branch_id) === String(branchId) ||
+                  (order.delivery_target_branch && branch?.name && order.delivery_target_branch === branch.name);
+                const isSourceBranch = String(order.branch_id) === String(branchId);
+                const isDelivered = order.order_status === 'delivered';
+
+                const hasReplied = isOrderReplied(order);
+                const allAvailable = activeItems.length > 0 && prunedItems.length === 0 && activeItems.every((i) => i.itemStatus === 'available_by_procurement' || i.status === 'available');
+
+                return (
+                  <div
+                    key={order.id}
+                    className="outstock-order-card"
+                    style={{
+                      borderRight: isTargetBranch ? '4px solid #16a34a' : '4px solid #d97706',
+                      background: '#ffffff'
+                    }}
+                  >
+                    {/* رأس بطاقة الطلب المحول */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                        <span
+                          style={{
+                            background: '#f1f5f9',
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                            fontWeight: '900',
+                            fontSize: '13px',
+                            color: '#334155'
+                          }}
+                        >
+                          {order.order_number || order.orderNumber}
+                        </span>
+
+                        {/* شارة اتجاه التحويل */}
+                        {isTargetBranch ? (
+                          <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '3px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <span>📥 وارد للاستلام لدينا</span>
+                            <span style={{ fontSize: '11px', color: '#166534' }}>(من فرع: {order.branch_name || 'الفرع المصدر'})</span>
+                          </span>
+                        ) : (
+                          <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '3px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <span>📤 صادر لفرع آخر</span>
+                            <span style={{ fontSize: '11px', color: '#78350f' }}>(إلى فرع: {order.delivery_target_branch || order.target_branch_name || 'فرع الاستلام'})</span>
+                          </span>
+                        )}
+
+                        <span style={{ fontWeight: '900', fontSize: '15.5px', color: '#0f172a' }}>
+                          {order.customer_name || order.customerName}
+                        </span>
+
+                        <span style={{ fontSize: '13px', color: '#0284c7', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <Phone size={13} />
+                          <span>{order.customer_phone || order.customerPhone}</span>
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        {isDelivered ? (
+                          <span className="outstock-badge" style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac' }}>
+                            تم التسليم بنجاح ✅
+                          </span>
+                        ) : allAvailable ? (
+                          <span className="outstock-badge" style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac' }}>
+                            جاهز للتسليم 📦
+                          </span>
+                        ) : hasReplied ? (
+                          <span className="outstock-badge" style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd' }}>
+                            تم رد المشتريات 💬
+                          </span>
+                        ) : (
+                          <span className="outstock-badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' }}>
+                            بانتظار المشتريات ⏳
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* الأصناف المطلوبة في الطلب المحول */}
+                    <div style={{ margin: '14px 0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {itemsList.map((item, idx) => {
+                        const isPruned = Boolean(item.prunedFromBill || item.pruned_from_bill);
+                        const itmStatus = String(item.itemStatus || item.item_status || item.status || '').toLowerCase();
+                        const isAvail = itmStatus === 'available_by_procurement' || itmStatus === 'available';
+
+                        return (
+                          <div
+                            key={item.id || idx}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              background: isPruned ? '#f8fafc' : isAvail ? '#f0fdf4' : '#fffbeb',
+                              border: `1px solid ${isPruned ? '#e2e8f0' : isAvail ? '#bbf7d0' : '#fef3c7'}`,
+                              opacity: isPruned ? 0.6 : 1
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: '800', color: isPruned ? '#94a3b8' : '#1e293b', textDecoration: isPruned ? 'line-through' : 'none' }}>
+                                {item.medicationName || item.medication_name}
+                              </span>
+                              <span style={{ fontSize: '12px', color: '#64748b' }}>
+                                × {item.quantity} {item.unitType === 'pack' ? 'علبة' : 'شريط'}
+                              </span>
+                              {item.procurementNotes && (
+                                <span style={{ fontSize: '11px', color: '#0284c7', background: '#f0f9ff', padding: '1px 6px', borderRadius: '4px' }}>
+                                  ملاحظة المشتريات: {item.procurementNotes}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '13px' }}>
+                                {parseFloat(item.totalPrice || item.total_price || 0).toFixed(2)} ج.م
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* المبالغ والتفاصيل المالية */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', background: '#f8fafc', padding: '10px 14px', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', fontSize: '13px' }}>
+                        <div>
+                          الإجمالي: <strong>{parseFloat(order.total_amount || order.totalAmount || 0).toFixed(2)} ج.م</strong>
+                        </div>
+                        <div>
+                          المدفوع (العربون): <strong style={{ color: '#059669' }}>{parseFloat(order.paid_amount || order.paidAmount || 0).toFixed(2)} ج.م</strong>
+                        </div>
+                        <div>
+                          المتبقي: <strong style={{ color: '#dc2626' }}>{parseFloat(order.remaining_amount || order.remainingAmount || 0).toFixed(2)} ج.م</strong>
+                        </div>
+                      </div>
+
+                      {/* أزرار الإجراءات للطلب المحول */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        {!isDelivered && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeliver(order.id)}
+                            className="outstock-btn outstock-btn-success"
+                            style={{ padding: '6px 14px', fontSize: '12.5px' }}
+                            title="تسليم الطلب للعميل وتصفية الحساب"
+                          >
+                            <Check size={14} />
+                            <span>تسليم للعميل 📦</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDepositModal(order)}
+                          className="outstock-btn"
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: '12px',
+                            fontWeight: '800',
+                            background: '#f0fdf4',
+                            color: '#15803d',
+                            border: '1px solid #bbf7d0',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                          title="تعديل مبلغ العربون / المدفوع"
+                        >
+                          <DollarSign size={13} />
+                          <span>تعديل العربون</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setPrintingOrder(order)}
+                          className="outstock-btn outstock-btn-whatsapp"
+                          style={{ padding: '6px 10px', fontSize: '12px' }}
+                          title="إرسال الفاتورة الرسمية PDF للعميل عبر الواتساب"
+                        >
+                          <FileText size={13} />
+                          <span>فاتورة PDF</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleSendWhatsapp(order)}
+                          className="outstock-btn outstock-btn-secondary"
+                          style={{ padding: '6px 10px', fontSize: '12px' }}
+                          title="إرسال رسالة واتساب للعميل بإشعار التوفر والاستلام"
+                        >
+                          <MessageSquare size={13} />
+                          <span>إشعار واتساب</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setPrintingOrder(order)}
+                          className="outstock-btn outstock-btn-secondary"
+                          style={{ padding: '6px 10px', fontSize: '12px' }}
+                          title="طباعة إيصال للعميل"
+                        >
+                          <Printer size={13} />
+                          <span>طباعة</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       ) : (
         /* قسم أرشيف الطلبات المسلّمة */
         <div className="outstock-card">
@@ -1619,7 +1898,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
           onClose={() => setEditingOrder(null)}
           onOrderUpdated={(updatedOrder) => {
             setEditingOrder(null);
-            showToast?.('✅ تم تحديث بيانات الطلب بنجاح');
+            showToast?.('✅ تم حفظ التعديلات وإشعار إدارة المشتريات بالصنف المعدل عبر واتساب');
             fetchOrders();
           }}
         />

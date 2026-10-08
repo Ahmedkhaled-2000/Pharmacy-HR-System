@@ -455,17 +455,17 @@ export default function AttendancePunchesModal({
   };
 
   // حصر كافة فروع الموظف سواء المعينة في ملفه أو التي سجل بها ورديات وبصمات
-  const employeeBranchesList = React.useMemo(() => {
+  const employeeBranchesList = (() => {
     const map = new Map();
     // 1. من تفاصيل الفروع المتعددة
-    (employee.branchesDetails || []).forEach(bd => {
+    (employee?.branchesDetails || []).forEach(bd => {
       const bObj = (branches || []).find(b => isBranchMatch(bd.branchId, b));
       const bId = bObj ? bObj.id : bd.branchId;
       const bName = bObj ? bObj.name : (bd.branchName || `فرع ${bId}`);
       if (bId) map.set(String(bId), { branchId: bId, branchName: bName, ...bd });
     });
     // 2. من مصفوفة الفروع المصرح بها
-    (employee.branches || []).forEach(bId => {
+    (employee?.branches || []).forEach(bId => {
       const bObj = (branches || []).find(b => isBranchMatch(bId, b));
       const resolvedId = bObj ? bObj.id : bId;
       const bName = bObj ? bObj.name : `فرع ${resolvedId}`;
@@ -474,7 +474,7 @@ export default function AttendancePunchesModal({
       }
     });
     // 3. الفرع الأساسي أو فرع الموظف
-    const baseBranchId = employee.primaryBranchId || employee.branchId;
+    const baseBranchId = employee?.primaryBranchId || employee?.branchId;
     if (baseBranchId) {
       const bObj = (branches || []).find(b => isBranchMatch(baseBranchId, b));
       const resolvedId = bObj ? bObj.id : baseBranchId;
@@ -494,7 +494,7 @@ export default function AttendancePunchesModal({
       }
     });
     return Array.from(map.values());
-  }, [employee, branches, monthPunches]);
+  })();
 
   const isMultiBranch = Boolean(
     employeeBranchesList.length > 1 ||

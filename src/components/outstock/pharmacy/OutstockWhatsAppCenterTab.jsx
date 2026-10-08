@@ -16,7 +16,8 @@ import {
   Smartphone,
   ShieldCheck,
   Check,
-  Info
+  Info,
+  Lock
 } from 'lucide-react';
 import { getResolvedWhatsAppServerUrl } from '../../../utils/systemUrlHelper';
 import { outstockGetOrders, outstockGetCustomers, outstockGetSettings, outstockSaveSettings } from '../../../utils/outstockApiClient';
@@ -31,7 +32,20 @@ import { buildInvoicePdfHtml } from '../../../utils/invoicePdfGenerator';
  * 3. إرسال رسائل مخصصة مع إمكانية إرفاق ملفات الـ PDF
  * 4. التحويل المباشر لـ WhatsApp Web كخيار بديل فوري
  */
-export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPharmacist = '', showToast }) {
+export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPharmacist = '', showToast, userRole = '', currentUser = null }) {
+  // التحقق من صلاحية المالك (تعديل أرقام المشتريات ومسؤول التجميل مقتصر على المالك فقط)
+  const isOwner = useMemo(() => {
+    if (userRole === 'owner') return true;
+    if (currentUser?.role === 'owner' || currentUser?.role === 'outstock_owner') return true;
+    try {
+      const stored = JSON.parse(localStorage.getItem('outstock_user') || '{}');
+      if (stored?.role === 'owner' || stored?.role === 'outstock_owner') return true;
+      const appUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+      if (appUser?.role === 'owner') return true;
+    } catch (_) {}
+    return false;
+  }, [userRole, currentUser]);
+
   // حالة اتصال خادم الواتساب
   const [waState, setWaState] = useState({
     status: 'CHECKING', // 'CHECKING' | 'CONNECTED' | 'QR_READY' | 'DISCONNECTED'
@@ -59,80 +73,12 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [attachPdf, setAttachPdf] = useState(true);
 
-  // رقم واتساب إدارة المشتريات المعتمد لإشعارات الطلبات الجديدة
+  // أرقام واتساب التوجيه الآلي (إدارة المشتريات ومسؤول مستحضرات التجميل)
   const [procurementPhone, setProcurementPhone] = useState('');
-  const [isSavingProcPhone, setIsSavingProcPhone] = useState(false);
+  const [cosmeticsPhone, setCosmeticsPhone] = useState('');
+  const [isSavingPhones, setIsSavingPhones] = useState(false);
   const [isTestingProcPhone, setIsTestingProcPhone] = useState(false);
-
-  // جلب إعدادات المشتريات المحفوظة
-  useEffect(() => {
-    outstockGetSettings()
-      .then(res => {
-        if (res?.success && res.settings?.procurementWhatsappPhone) {
-          setProcurementPhone(res.settings.procurementWhatsappPhone);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  // حفظ رقم واتساب إدارة المشتريات
-  const handleSaveProcurementPhone = async (e) => {
-    if (e) e.preventDefault();
-    const clean = String(procurementPhone || '').replace(/\D/g, '');
-    if (clean && clean.length !== 11) {
-      showToast?.('⚠️ رقم هاتف المشتريات يجب أن يتكون من 11 رقماً (مثال: 01012345678)');
-      return;
-    }
-    setIsSavingProcPhone(true);
-    try {
-      const res = await outstockSaveSettings({ procurementWhatsappPhone: clean });
-      if (res?.success) {
-        showToast?.('✅ تم حفظ رقم واتساب إدارة المشتريات بنجاح. سيتم إرسال إشعار فوري له عند أي طلب جديد!');
-      } else {
-        showToast?.(res?.error || 'تعذر حفظ رقم المشتريات');
-      }
-    } catch (err) {
-      showToast?.('حدث خطأ أثناء حفظ الرقم');
-    } finally {
-      setIsSavingProcPhone(false);
-    }
-  };
-
-  // إرسال رسالة تجريبية لرقم المشتريات
-  const handleTestProcurementPhone = async () => {
-    const clean = String(procurementPhone || '').replace(/\D/g, '');
-    if (!clean || clean.length !== 11) {
-      showToast?.('⚠️ يرجى كتابة وحفظ رقم هاتف صحيح من 11 رقماً أولاً');
-      return;
-    }
-    setIsTestingProcPhone(true);
-    try {
-      const normalized = clean.startsWith('01') ? ('2' + clean) : clean;
-      const testMsg = `🧪 *رسالة اختبار اتصال واتساب لإدارة المشتريات*\n` +
-        `🏢 *المرسل:* صيدلية ${branch?.name || branchId}\n` +
-        `👤 *المحرر:* ${currentPharmacist || 'صيدلي الفرع'}\n` +
-        `✅ الربط الآلي وتنبيهات طلبات النواقص تعمل بنجاح!`;
-
-      const res = await fetch(`${waServerUrl}/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: normalized,
-          message: testMsg
-        })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data?.success) {
-        showToast?.('🎉 تم إرسال الرسالة التجريبية إلى رقم إدارة المشتريات بنجاح!');
-      } else {
-        showToast?.(`⚠️ لم يتم التسليم: ${data?.error || 'تأكد من اتصال خادم الواتساب'}`);
-      }
-    } catch (err) {
-      showToast?.('تعذر إرسال الرسالة التجريبية لخادم الواتساب');
-    } finally {
-      setIsTestingProcPhone(false);
-    }
-  };
+  const [isTestingCosmPhone, setIsTestingCosmPhone] = useState(false);
 
   // عنوان سيرفر الواتساب المعتمد
   const waServerUrl = useMemo(() => getResolvedWhatsAppServerUrl(), []);
@@ -142,6 +88,133 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
     const raw = String(branchId || branch?.id || 'default');
     return raw.startsWith('branch_') ? raw : `branch_${raw}`;
   }, [branchId, branch?.id]);
+
+  // جلب إعدادات المشتريات ومستحضرات التجميل المحفوظة
+  useEffect(() => {
+    outstockGetSettings()
+      .then(res => {
+        if (res?.success && res.settings) {
+          if (res.settings.procurementWhatsappPhone) {
+            setProcurementPhone(res.settings.procurementWhatsappPhone);
+          }
+          if (res.settings.cosmeticsWhatsappPhone) {
+            setCosmeticsPhone(res.settings.cosmeticsWhatsappPhone);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // حفظ أرقام واتساب المشتريات ومستحضرات التجميل (للمالك فقط)
+  const handleSaveRoutingPhones = async (e) => {
+    if (e) e.preventDefault();
+    if (!isOwner) {
+      showToast?.('🔒 عذراً: تعديل رقم إدارة المشتريات أو مسؤول مستحضرات التجميل متاح لحساب المالك فقط!');
+      return;
+    }
+    const cleanProc = String(procurementPhone || '').replace(/\D/g, '');
+    const cleanCosm = String(cosmeticsPhone || '').replace(/\D/g, '');
+
+    if (cleanProc && cleanProc.length !== 11) {
+      showToast?.('⚠️ رقم هاتف المشتريات يجب أن يتكون من 11 رقماً (مثال: 01012345678)');
+      return;
+    }
+    if (cleanCosm && cleanCosm.length !== 11) {
+      showToast?.('⚠️ رقم هاتف مسؤول التجميل يجب أن يتكون من 11 رقماً (مثال: 01012345678)');
+      return;
+    }
+
+    setIsSavingPhones(true);
+    try {
+      const res = await outstockSaveSettings({
+        procurementWhatsappPhone: cleanProc,
+        cosmeticsWhatsappPhone: cleanCosm
+      });
+      if (res?.success) {
+        showToast?.('✅ تم حفظ وتأمين أرقام واتساب المشتريات ومستحضرات التجميل بنجاح!');
+      } else {
+        showToast?.(res?.error || 'تعذر حفظ الأرقام');
+      }
+    } catch (err) {
+      showToast?.('حدث خطأ أثناء حفظ الأرقام');
+    } finally {
+      setIsSavingPhones(false);
+    }
+  };
+
+  // إرسال رسالة تجريبية لرقم إدارة المشتريات عبر جلسة واتساب الفرع المقترنة
+  const handleTestProcurementPhone = async () => {
+    const clean = String(procurementPhone || '').replace(/\D/g, '');
+    if (!clean || clean.length !== 11) {
+      showToast?.('⚠️ يرجى كتابة وحفظ رقم هاتف صحيح من 11 رقماً للمشتريات أولاً');
+      return;
+    }
+    setIsTestingProcPhone(true);
+    try {
+      const normalized = clean.startsWith('01') ? ('2' + clean) : clean;
+      const testMsg = `💊 *رسالة اختبار اتصال واتساب لإدارة المشتريات*\n` +
+        `🏢 *المرسل:* صيدلية ${branch?.name || branchId}\n` +
+        `👤 *المحرر:* ${currentPharmacist || 'صيدلي الفرع'}\n` +
+        `✅ الربط الآلي وتوجيه طلبات الأدوية يعمل بنجاح!`;
+
+      const res = await fetch(`${waServerUrl}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: branchSessionId,
+          phone: normalized,
+          message: testMsg
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success) {
+        showToast?.('🎉 تم إرسال الرسالة التجريبية إلى رقم إدارة المشتريات بنجاح عبر واتساب الصيدلية!');
+      } else {
+        showToast?.(`⚠️ لم يتم التسليم: ${data?.error || 'تأكد من اقتران واتساب الصيدلية أولاً'}`);
+      }
+    } catch (err) {
+      showToast?.('تعذر إرسال الرسالة التجريبية لخادم الواتساب');
+    } finally {
+      setIsTestingProcPhone(false);
+    }
+  };
+
+  // إرسال رسالة تجريبية لرقم مسؤول مستحضرات التجميل عبر جلسة واتساب الفرع المقترنة
+  const handleTestCosmeticsPhone = async () => {
+    const clean = String(cosmeticsPhone || '').replace(/\D/g, '');
+    if (!clean || clean.length !== 11) {
+      showToast?.('⚠️ يرجى كتابة وحفظ رقم هاتف صحيح من 11 رقماً لمسؤول مستحضرات التجميل أولاً');
+      return;
+    }
+    setIsTestingCosmPhone(true);
+    try {
+      const normalized = clean.startsWith('01') ? ('2' + clean) : clean;
+      const testMsg = `💄 *رسالة اختبار اتصال واتساب لمسؤول مستحضرات التجميل*\n` +
+        `🏢 *المرسل:* صيدلية ${branch?.name || branchId}\n` +
+        `👤 *المحرر:* ${currentPharmacist || 'صيدلي الفرع'}\n` +
+        `✅ الربط الآلي وتوجيه طلبات مستحضرات التجميل يعمل بنجاح!`;
+
+      const res = await fetch(`${waServerUrl}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: branchSessionId,
+          phone: normalized,
+          message: testMsg
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success) {
+        showToast?.('🎉 تم إرسال الرسالة التجريبية إلى مسؤول مستحضرات التجميل بنجاح عبر واتساب الصيدلية!');
+      } else {
+        showToast?.(`⚠️ لم يتم التسليم: ${data?.error || 'تأكد من اقتران واتساب الصيدلية أولاً'}`);
+      }
+    } catch (err) {
+      showToast?.('تعذر إرسال الرسالة التجريبية لخادم الواتساب');
+    } finally {
+      setIsTestingCosmPhone(false);
+    }
+  };
 
   // ── 1. فحص حالة الاتصال واسترجاع الـ QR الخاص بجلسة هذا الفرع ───────────────
   const fetchWhatsAppStatus = useCallback(async (silent = false) => {
@@ -534,114 +607,263 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
         )}
       </div>
 
-      {/* ── 1.5 بطاقة إعدادات واتساب إدارة المشتريات للتنبيهات الآلية بالطلبات الجديدة ── */}
+      {/* ── 1.5 بطاقات إعدادات وتوجيه إشعارات الواتساب الآلية (المشتريات & مستحضرات التجميل) ── */}
       <div style={{
         background: '#ffffff',
         border: '1.5px solid #0d9488',
-        borderRadius: '16px',
-        padding: '18px 20px',
-        boxShadow: '0 4px 14px rgba(13, 148, 136, 0.06)'
+        borderRadius: '18px',
+        padding: '20px 22px',
+        boxShadow: '0 4px 18px rgba(13, 148, 136, 0.08)'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        {/* ترويسة القسم وحالة صلاحيات التعديل */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px', marginBottom: '18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '10px',
+              width: '44px',
+              height: '44px',
+              borderRadius: '12px',
               background: '#f0fdfa',
               color: '#0d9488',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(13, 148, 136, 0.15)'
             }}>
-              <Sparkles size={22} />
+              <Sparkles size={24} />
             </div>
             <div>
-              <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '900', color: '#0f172a' }}>
-                رقم واتساب إدارة المشتريات للتنبيهات التلقائية 📦📲
+              <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>توجيه إشعارات الواتساب الآلية للطلبات الجديدة</span>
+                <span style={{ fontSize: '12px', color: '#0d9488', fontWeight: '800' }}>[فصل التجميل عن الأدوية 🎯]</span>
               </h4>
-              <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
-                يتم إرسال إشعار فوري وتلقائي عبر الواتساب إلى هذا الرقم فور تسجيل أي طلب عميل جديد بالفرع لإبلاغ إدارة المشتريات بالبدء في توفير الأصناف.
+              <p style={{ margin: '3px 0 0', fontSize: '12.5px', color: '#64748b' }}>
+                توجيه طلبات الأدوية تلقائياً لإدارة المشتريات، وطلبات مستحضرات التجميل والعناية لمسؤول التجميل مع ضمان سرية بيانات العميل.
               </p>
             </div>
           </div>
 
-          {procurementPhone && procurementPhone.length === 11 ? (
+          {/* شارة الصلاحيات الأمنية للمالك */}
+          {isOwner ? (
             <span style={{
               background: '#dcfce7',
               color: '#15803d',
               border: '1px solid #86efac',
-              padding: '3px 10px',
+              padding: '5px 12px',
               borderRadius: '20px',
-              fontSize: '11.5px',
-              fontWeight: '800',
+              fontSize: '12px',
+              fontWeight: '900',
               display: 'flex',
               alignItems: 'center',
-              gap: '4px'
+              gap: '6px'
             }}>
-              <ShieldCheck size={13} />
-              <span>مُفعّل ومحفوظ بنجاح</span>
+              <ShieldCheck size={15} />
+              <span>👑 صلاحية المالك: متاح لتعديل الأرقام وحفظها</span>
             </span>
           ) : (
             <span style={{
-              background: '#fff7ed',
-              color: '#c2410c',
-              border: '1px solid #fed7aa',
-              padding: '3px 10px',
+              background: '#fef2f2',
+              color: '#b91c1c',
+              border: '1px solid #fecaca',
+              padding: '5px 12px',
               borderRadius: '20px',
-              fontSize: '11.5px',
-              fontWeight: '800'
+              fontSize: '12px',
+              fontWeight: '900',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
             }}>
-              ⚠️ غير محدد بعد
+              <Lock size={14} />
+              <span>🔒 محمي: التعديل مقتصر على حساب المالك فقط</span>
             </span>
           )}
         </div>
 
-        <form onSubmit={handleSaveProcurementPhone} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', flexWrap: 'wrap' }}>
-          <div style={{ flex: '1', minWidth: '240px' }}>
-            <input
-              type="tel"
-              value={procurementPhone}
-              onChange={(e) => setProcurementPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
-              placeholder="أدخل رقم هاتف إدارة المشتريات (مثال: 01012345678)..."
-              className="outstock-form-input"
-              dir="ltr"
-              style={{
-                textAlign: 'right',
-                height: '42px',
-                fontWeight: 'bold',
-                borderColor: procurementPhone && procurementPhone.length !== 11 ? '#f87171' : undefined
-              }}
-            />
-            {procurementPhone && procurementPhone.length > 0 && procurementPhone.length < 11 && (
-              <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: '800', marginTop: '4px' }}>
-                ⚠️ رقم الهاتف غير مكتمل (أدخل 11 رقماً - تم إدخال {procurementPhone.length} من 11)
+        {/* شبكة البطاقتين: المشتريات + التجميل */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          gap: '16px',
+          marginBottom: '16px'
+        }}>
+          {/* البطاقة الأولى: إدارة المشتريات (الأدوية) */}
+          <div style={{
+            background: '#f8fafc',
+            border: '1px solid #e2e8f0',
+            borderRadius: '14px',
+            padding: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            gap: '12px'
+          }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontSize: '14px', fontWeight: '900', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>💊</span>
+                  <span>رقم مدير المشتريات (للأدوية)</span>
+                </span>
+                {procurementPhone && procurementPhone.length === 11 ? (
+                  <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '800' }}>
+                    ✓ جاهز
+                  </span>
+                ) : (
+                  <span style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '800' }}>
+                    ⚠️ غير محدد
+                  </span>
+                )}
               </div>
-            )}
+              <p style={{ margin: '0 0 10px', fontSize: '11.5px', color: '#64748b' }}>
+                تصل إليه إشعارات طلبات الأدوية والنواقص العلاجية تلقائياً من جلسة الصيدلية.
+              </p>
+
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="tel"
+                  value={procurementPhone}
+                  onChange={(e) => isOwner && setProcurementPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                  readOnly={!isOwner}
+                  disabled={!isOwner}
+                  placeholder="رقم هاتف المشتريات (01xxxxxxxxx)..."
+                  className="outstock-form-input"
+                  dir="ltr"
+                  style={{
+                    textAlign: 'right',
+                    height: '42px',
+                    fontWeight: 'bold',
+                    background: isOwner ? '#ffffff' : '#f1f5f9',
+                    cursor: isOwner ? 'text' : 'not-allowed',
+                    borderColor: procurementPhone && procurementPhone.length !== 11 ? '#f87171' : undefined
+                  }}
+                />
+                {!isOwner && (
+                  <div style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }}>
+                    <Lock size={15} />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={handleTestProcurementPhone}
+                disabled={isTestingProcPhone || !procurementPhone || procurementPhone.length !== 11}
+                className="outstock-btn outstock-btn-secondary"
+                style={{ flex: '1', height: '36px', padding: '0 10px', fontSize: '12px', fontWeight: '700' }}
+                title="إرسال رسالة تجريبية فورية للرقم للتحقق من الاتصال عبر واتساب الفرع"
+              >
+                <Send size={13} />
+                <span>{isTestingProcPhone ? 'جاري الإرسال...' : 'اختبار اتصال المشتريات 🧪'}</span>
+              </button>
+            </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={isSavingProcPhone}
-            className="outstock-btn outstock-btn-primary"
-            style={{ height: '42px', padding: '0 18px', fontSize: '13px', fontWeight: '800' }}
-          >
-            <Check size={16} />
-            <span>{isSavingProcPhone ? 'جاري الحفظ...' : 'حفظ رقم المشتريات 💾'}</span>
-          </button>
+          {/* البطاقة الثانية: مسؤول مستحضرات التجميل */}
+          <div style={{
+            background: '#fdf4ff',
+            border: '1px solid #f0abfc',
+            borderRadius: '14px',
+            padding: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            gap: '12px'
+          }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontSize: '14px', fontWeight: '900', color: '#86198f', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>💄</span>
+                  <span>رقم مسؤول مستحضرات التجميل</span>
+                </span>
+                {cosmeticsPhone && cosmeticsPhone.length === 11 ? (
+                  <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '800' }}>
+                    ✓ جاهز
+                  </span>
+                ) : (
+                  <span style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '800' }}>
+                    ⚠️ غير محدد
+                  </span>
+                )}
+              </div>
+              <p style={{ margin: '0 0 10px', fontSize: '11.5px', color: '#a21caf' }}>
+                تصل إليه حصرياً طلبات العملاء التي تحتوي على أصناف ومستحضرات تجميل وعناية.
+              </p>
 
-          <button
-            type="button"
-            onClick={handleTestProcurementPhone}
-            disabled={isTestingProcPhone || !procurementPhone || procurementPhone.length !== 11}
-            className="outstock-btn outstock-btn-secondary"
-            style={{ height: '42px', padding: '0 14px', fontSize: '12.5px', fontWeight: '700' }}
-            title="إرسال رسالة تجريبية فورية للرقم للتحقق من الاتصال"
-          >
-            <Send size={14} />
-            <span>{isTestingProcPhone ? 'جاري الإرسال...' : 'إرسال رسالة تجريبية 🧪'}</span>
-          </button>
-        </form>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="tel"
+                  value={cosmeticsPhone}
+                  onChange={(e) => isOwner && setCosmeticsPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                  readOnly={!isOwner}
+                  disabled={!isOwner}
+                  placeholder="رقم مسؤول التجميل (01xxxxxxxxx)..."
+                  className="outstock-form-input"
+                  dir="ltr"
+                  style={{
+                    textAlign: 'right',
+                    height: '42px',
+                    fontWeight: 'bold',
+                    background: isOwner ? '#ffffff' : '#f1f5f9',
+                    cursor: isOwner ? 'text' : 'not-allowed',
+                    borderColor: cosmeticsPhone && cosmeticsPhone.length !== 11 ? '#f87171' : undefined
+                  }}
+                />
+                {!isOwner && (
+                  <div style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }}>
+                    <Lock size={15} />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={handleTestCosmeticsPhone}
+                disabled={isTestingCosmPhone || !cosmeticsPhone || cosmeticsPhone.length !== 11}
+                className="outstock-btn outstock-btn-secondary"
+                style={{ flex: '1', height: '36px', padding: '0 10px', fontSize: '12px', fontWeight: '700', borderColor: '#f0abfc', color: '#86198f' }}
+                title="إرسال رسالة تجريبية فورية للرقم للتحقق من الاتصال عبر واتساب الفرع"
+              >
+                <Send size={13} />
+                <span>{isTestingCosmPhone ? 'جاري الإرسال...' : 'اختبار اتصال التجميل 🧪'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* شريط الإجراءات وحفظ التعديلات للمالك */}
+        {isOwner ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid #f1f5f9', paddingTop: '14px' }}>
+            <button
+              type="button"
+              onClick={handleSaveRoutingPhones}
+              disabled={isSavingPhones}
+              className="outstock-btn outstock-btn-primary"
+              style={{ height: '42px', padding: '0 24px', fontSize: '13.5px', fontWeight: '900' }}
+            >
+              <Check size={17} />
+              <span>{isSavingPhones ? 'جاري الحفظ والتأمين...' : 'حفظ وتحديث أرقام التوجيه للمنظومة 💾'}</span>
+            </button>
+          </div>
+        ) : (
+          <div style={{
+            background: '#f8fafc',
+            border: '1px dashed #cbd5e1',
+            borderRadius: '10px',
+            padding: '10px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            fontSize: '12px',
+            color: '#64748b'
+          }}>
+            <Lock size={14} style={{ color: '#dc2626' }} />
+            <span>
+              <strong>تنبيه أمني:</strong> تعديل أرقام هاتف إدارة المشتريات ومسؤول مستحضرات التجميل مقتصر حصرياً على حساب المالك لحماية مسارات توجيه طلبات الفروع.
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ── 2. قسم إرسال الرسائل التلقائية لعملاء الصيدلية ── */}

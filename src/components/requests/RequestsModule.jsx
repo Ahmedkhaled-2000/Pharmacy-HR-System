@@ -1443,21 +1443,80 @@ export default function RequestsModule({
           return r;
         });
 
+        const reqTime = approvedTargetReq.time || (approvedTargetReq.createdAt ? approvedTargetReq.createdAt.slice(11, 16) : '');
+
+        // If this is an approved checkout, clean from activeShifts
+        if (actionType === 'shift_end' && updatedActiveShifts) {
+          delete updatedActiveShifts[empId];
+          delete updatedActiveShifts[String(empId)];
+          if (approvedTargetReq.employeeCode) {
+            delete updatedActiveShifts[approvedTargetReq.employeeCode];
+            delete updatedActiveShifts[String(approvedTargetReq.employeeCode)];
+          }
+        }
+
         updatedShifts = updatedShifts.map(s => {
           const isMatch = (s.id === approvedTargetReq.shiftId) ||
             ((String(s.employeeId) === String(empId) || (approvedTargetReq.employeeCode && String(s.employeeCode) === String(approvedTargetReq.employeeCode))) && s.date === reqDate);
           if (isMatch) {
             const isStart = actionType === 'shift_start';
-            return {
-              ...s,
-              statusLabel: isStart ? 'حضور بالصورة (معتمد)' : 'انصراف بالصورة (معتمد)',
-              adminApproved: true,
-              approvedBy: 'الإدارة العليا',
-              approvedAt: new Date().toISOString(),
-              photoUrl: approvedTargetReq.photoUrl || s.photoUrl,
-              drivePhotoUrl: approvedTargetReq.drivePhotoUrl || s.drivePhotoUrl,
-              note: (s.note ? s.note.replace('بانتظار اعتماد الإدارة', 'معتمد من الإدارة العليا') : '')
-            };
+            if (isStart) {
+              return {
+                ...s,
+                statusLabel: 'حضور بالصورة (معتمد)',
+                adminApproved: true,
+                approvedBy: 'الإدارة العليا',
+                approvedAt: new Date().toISOString(),
+                photoUrl: approvedTargetReq.photoUrl || s.photoUrl,
+                drivePhotoUrl: approvedTargetReq.drivePhotoUrl || s.drivePhotoUrl,
+                note: (s.note ? s.note.replace('بانتظار اعتماد الإدارة', 'معتمد من الإدارة العليا') : '')
+              };
+            } else {
+              // shift_end: calculate hours and finalize timeOut and status
+              const timeInVal = s.timeIn || s.startTime || '09:00';
+              const timeOutVal = reqTime || (s.timeOut && s.timeOut !== '—' ? s.timeOut : '17:00');
+              let calcHours = s.hours || 0;
+              let actualWorked = s.actualWorkedHours || 0;
+              let netHoursVal = s.netHours || 0;
+              let regularHoursVal = s.regularHours || 0;
+
+              if (timeInVal && timeOutVal && timeOutVal !== '—') {
+                const [sH, sM] = String(timeInVal).split(':').map(Number);
+                const [eH, eM] = String(timeOutVal).split(':').map(Number);
+                if (!isNaN(sH) && !isNaN(eH)) {
+                  let diffM = (eH * 60 + (eM || 0)) - (sH * 60 + (sM || 0));
+                  if (diffM < 0) diffM += 24 * 60;
+                  const bH = parseFloat(s.breakHours) || 0;
+                  const netMins = Math.max(0, diffM - Math.round(bH * 60));
+                  const hoursDecimal = Math.round((netMins / 60) * 100) / 100;
+                  calcHours = hoursDecimal;
+                  actualWorked = hoursDecimal;
+                  netHoursVal = hoursDecimal;
+                  regularHoursVal = hoursDecimal;
+                }
+              }
+
+              return {
+                ...s,
+                timeOut: timeOutVal,
+                endTime: timeOutVal,
+                hours: calcHours,
+                actualWorkedHours: actualWorked,
+                netHours: netHoursVal,
+                regularHours: regularHoursVal,
+                status: 'completed',
+                isLiveActive: false,
+                statusLabel: 'انصراف بالصورة (معتمد)',
+                adminApproved: true,
+                approvedBy: 'الإدارة العليا',
+                approvedAt: new Date().toISOString(),
+                photoUrl: approvedTargetReq.photoUrl || s.photoUrl,
+                drivePhotoUrl: approvedTargetReq.drivePhotoUrl || s.drivePhotoUrl,
+                note: (s.note && s.note.includes('انصراف بالصورة'))
+                  ? s.note.replace('بانتظار اعتماد الإدارة', 'معتمد من الإدارة العليا')
+                  : `تسجيل انصراف بالصورة في تمام ${timeOutVal} - الساعات: ${calcHours} س (معتمد من الإدارة العليا)`
+              };
+            }
           }
           return s;
         });

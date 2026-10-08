@@ -1092,7 +1092,7 @@ export default function NewCustomerOrderModal({
 
         if (editingOrder) {
           onOrderUpdated?.(orderData);
-          showToast?.('✅ تم تحديث بيانات الطلب بنجاح');
+          showToast?.('✅ تم تحديث بيانات الطلب وإرسال إشعار فوري لإدارة المشتريات بالصنف المعدل عبر واتساب');
         } else {
           onOrderCreated?.(orderData);
           showToast?.('✅ تم تسجيل الطلب وإرساله لإدارة المشتريات بنجاح');
@@ -1171,10 +1171,12 @@ export default function NewCustomerOrderModal({
             </div>
             <div>
               <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: '#0f172a' }}>
-                تسجيل طلب عميل جديد (نواقص أدوية)
+                {editingOrder ? `تعديل طلب العميل #${editingOrder.order_number || editingOrder.orderNumber || ''}` : 'تسجيل طلب عميل جديد (نواقص أدوية)'}
               </h3>
               <p style={{ margin: 0, fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                ربط ذكي بكتالوج الأدوية، حسابات دقيقة للمقدم والمتبقي، وإرسال فوري للمشتريات
+                {editingOrder
+                  ? '🔄 سيتم إرسال إشعار فوري لإدارة المشتريات عبر واتساب بالصنف الجديد المعدل مع توضيح التعديلات بدقة'
+                  : 'ربط ذكي بكتالوج الأدوية، حسابات دقيقة للمقدم والمتبقي، وإرسال فوري للمشتريات'}
               </p>
             </div>
           </div>
@@ -2720,7 +2722,7 @@ export default function NewCustomerOrderModal({
                 boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)'
               }}
             >
-              <span>{isSubmitting ? 'جاري الإرسال...' : 'حفظ وإرسال للمشتريات وطباعة الإيصال 🖨️'}</span>
+              <span>{isSubmitting ? 'جاري الإرسال...' : (editingOrder ? 'حفظ التعديلات وإشعار المشتريات بالصنف المعدل 🔄' : 'حفظ وإرسال للمشتريات وطباعة الإيصال 🖨️')}</span>
             </button>
           </div>
         </form>

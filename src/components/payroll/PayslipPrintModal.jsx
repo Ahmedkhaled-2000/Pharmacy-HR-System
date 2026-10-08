@@ -115,7 +115,7 @@ export default function PayslipPrintModal({
   const totalAllowances = summary.totalAllowances !== undefined ? summary.totalAllowances : (mgmtAllowance + transAllowance + extAllowance + dailyAllowanceTotal);
 
   const branchIdsWithData = Object.keys(summary.perBranch || {}).filter(Boolean);
-  const assignedBranches = React.useMemo(() => {
+  const assignedBranches = (() => {
     const list = [...rawAssignedBranches];
     const seen = new Set(list.map(b => String(b.branchId)));
     branchIdsWithData.forEach(bId => {
@@ -123,17 +123,17 @@ export default function PayslipPrintModal({
         seen.add(String(bId));
         list.push({
           branchId: bId,
-          salary: emp.salary,
-          workHoursPerDay: emp.workHoursPerDay || 8,
-          workDaysPerMonth: emp.workDaysPerMonth || 26
+          salary: emp?.salary,
+          workHoursPerDay: emp?.workHoursPerDay || 8,
+          workDaysPerMonth: emp?.workDaysPerMonth || 26
         });
       }
     });
     if (list.length === 0) {
-      list.push({ branchId: emp.branchId || 'default', salary: emp.salary, workHoursPerDay: emp.workHoursPerDay || 8, workDaysPerMonth: emp.workDaysPerMonth || 26 });
+      list.push({ branchId: emp?.branchId || 'default', salary: emp?.salary, workHoursPerDay: emp?.workHoursPerDay || 8, workDaysPerMonth: emp?.workDaysPerMonth || 26 });
     }
     return list;
-  }, [rawAssignedBranches, branchIdsWithData, emp]);
+  })();
 
   const isMultiBranch = Boolean(
     assignedBranches.length > 1 ||

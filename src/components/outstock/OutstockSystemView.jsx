@@ -223,7 +223,14 @@ export default function OutstockSystemView({
     };
   });
 
-  const effectiveBranchId = isProcurementManager ? 'all' : (activeBranch?.id || currentUser?.branchId || currentUser?.branch_id || currentUser?.id || 'main');
+  // مزامنة الفرع الفعال فوراً عند اختيار فرع مختلف من شاشة المالك أو المنظومة
+  useEffect(() => {
+    if (currentBranch && currentBranch.id) {
+      setActiveBranch(currentBranch);
+    }
+  }, [currentBranch]);
+
+  const effectiveBranchId = isProcurementManager ? 'all' : (activeBranch?.id || currentBranch?.id || currentUser?.branchId || currentUser?.branch_id || currentUser?.id || 'main');
 
   // التبويب النشط
   const [activeTab, setActiveTab] = useState(() => {
@@ -753,11 +760,11 @@ export default function OutstockSystemView({
     };
   }, [fetchNotificationsSummary, effectiveBranchId, userRole, triggerNotification]);
 
-  // التحقق من صحة المستخدم
+  // التحقق من صحة المستخدم (مع حماية الفرع المختار من الكتابة فوقه أثناء محاكاة المالك)
   useEffect(() => {
     outstockGetMe().then(res => {
       if (res?.success && res.user) {
-        if (res.user.role) {
+        if (res.user.role && !currentUser?.isOwnerSimulating && userRole !== 'owner') {
           let r = res.user.role;
           if (r.startsWith('outstock_')) r = r.replace('outstock_', '');
           if (r === 'pharmacy') r = 'branch';
@@ -766,17 +773,21 @@ export default function OutstockSystemView({
           }
           setUserRole(r);
         }
-        if (res.user.branchData) {
-          setActiveBranch(res.user.branchData);
-        } else if (res.user.branchId) {
-          setActiveBranch(prev => ({
-            id: res.user.branchId,
-            name: res.user.fullName || res.user.name || prev?.name || 'فرع الصيدلية'
-          }));
+        // لا يتم استبدال الفرع إذا كان هناك فرع ممرر صراحة أو إذا كان المالك يحاكي فرعاً
+        const isSimulating = currentUser?.isOwnerSimulating || Boolean(currentBranch && currentBranch.id);
+        if (!isSimulating) {
+          if (res.user.branchData) {
+            setActiveBranch(res.user.branchData);
+          } else if (res.user.branchId) {
+            setActiveBranch(prev => ({
+              id: res.user.branchId,
+              name: res.user.fullName || res.user.name || prev?.name || 'فرع الصيدلية'
+            }));
+          }
         }
       }
     }).catch(() => {});
-  }, []);
+  }, [currentBranch, currentUser?.isOwnerSimulating, userRole]);
 
   // ── 4. حالة المزامنة اللحظية والعمل في وضع عدم الاتصال (Offline & Sync) ────
   const [syncState, setSyncState] = useState({
@@ -1706,6 +1717,8 @@ export default function OutstockSystemView({
                 branch={activeBranch}
                 currentPharmacist={currentUser?.fullName || currentUser?.name || 'د. الصيدلي'}
                 showToast={triggerNotification}
+                userRole={userRole}
+                currentUser={currentUser}
               />
             )}
           </>
@@ -1876,6 +1889,8 @@ export default function OutstockSystemView({
                 branch={activeBranch}
                 currentPharmacist={currentUser?.fullName || currentUser?.name || 'المالك / المدير'}
                 showToast={triggerNotification}
+                userRole="owner"
+                currentUser={currentUser}
               />
             )}
 
