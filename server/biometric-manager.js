@@ -862,6 +862,82 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     }
   }
 
+  // 🗓️ دالة استخراج بداية الوردية المقررة للموظف من جدوله المعتمد لدعم الحضور المبكر للورديات الليلية
+  function getEmployeeScheduledShiftStart(empObj, dateStr, stateData) {
+    if (!empObj || !dateStr) return null;
+    const empId = String(empObj.id || '');
+    const empCode = String(empObj.code || '');
+
+    // 1. فحص طلبات تعديل الشيفت المعتمدة
+    const approvedReq = (stateData?.requests || []).find(r => {
+      if (!r) return false;
+      const isAdj = r.type === 'shift_adjustment' || r.type === 'roster_edit' || r.type === 'roster_update';
+      if (!isAdj) return false;
+      const isApproved = r.status === 'approved' || r.adminApproved === true;
+      if (!isApproved) return false;
+      const isEmp = String(r.employeeId) === empId || (empCode && String(r.employeeCode) === empCode);
+      if (!isEmp) return false;
+      return r.date === dateStr || (Array.isArray(r.dates) && r.dates.includes(dateStr)) || (r.schedule && r.schedule[dateStr]) || (r.newSchedule && r.newSchedule[dateStr]);
+    });
+
+    if (approvedReq) {
+      const item = (approvedReq.schedule && approvedReq.schedule[dateStr]) || (approvedReq.newSchedule && approvedReq.newSchedule[dateStr]);
+      if (item?.start && item.start !== '—' && !item.isOff && item.type !== 'off') {
+        return { start: item.start.slice(0, 5), hours: parseFloat(item.hours || 8) };
+      }
+    }
+
+    // 2. فحص جداول العمل المعتمدة في state.rosters
+    const approvedRosters = (stateData?.rosters || []).filter(r => {
+      if (!r) return false;
+      const isApproved = r.status === 'approved' || r.adminApproved === true || !r.status;
+      if (!isApproved) return false;
+      const isEmp = String(r.employeeId) === empId || (empCode && String(r.employeeCode) === empCode);
+      if (!isEmp) return false;
+      if (r.fromDate && r.toDate) return dateStr >= r.fromDate && dateStr <= r.toDate;
+      if (r.month && dateStr.startsWith(r.month)) return true;
+      return false;
+    });
+
+    for (const r of approvedRosters) {
+      if (r.schedule) {
+        if (r.schedule[dateStr]?.start && r.schedule[dateStr].start !== '—' && !r.schedule[dateStr].isOff && r.schedule[dateStr].type !== 'off') {
+          return { start: r.schedule[dateStr].start.slice(0, 5), hours: parseFloat(r.schedule[dateStr].hours || 8) };
+        }
+        try {
+          const dObj = new Date(dateStr + 'T12:00:00Z');
+          const dayIdx = dObj.getUTCDay();
+          const AR_DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+          const arDay = AR_DAYS[dayIdx];
+          const dayItem = r.schedule[arDay] || r.schedule[String(dayIdx)];
+          if (dayItem?.start && dayItem.start !== '—' && !dayItem.isOff && dayItem.type !== 'off') {
+            return { start: dayItem.start.slice(0, 5), hours: parseFloat(dayItem.hours || 8) };
+          }
+        } catch {}
+      }
+    }
+
+    // 3. فحص جدول الموظف الافتراضي empObj.roster
+    if (empObj?.roster?.schedule) {
+      const sMap = empObj.roster.schedule;
+      if (sMap[dateStr]?.start && sMap[dateStr].start !== '—' && !sMap[dateStr].isOff && sMap[dateStr].type !== 'off') {
+        return { start: sMap[dateStr].start.slice(0, 5), hours: parseFloat(sMap[dateStr].hours || 8) };
+      }
+      try {
+        const dObj = new Date(dateStr + 'T12:00:00Z');
+        const dayIdx = dObj.getUTCDay();
+        const AR_DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+        const arDay = AR_DAYS[dayIdx];
+        const dayItem = sMap[arDay] || sMap[String(dayIdx)];
+        if (dayItem?.start && dayItem.start !== '—' && !dayItem.isOff && dayItem.type !== 'off') {
+          return { start: dayItem.start.slice(0, 5), hours: parseFloat(dayItem.hours || 8) };
+        }
+      } catch {}
+    }
+
+    return null;
+  }
+
   // 🛡️ المكنسة الذكية لسلامة الورديات ومراقبة الأجهزة (Watchdog & Shift Safety Sweeper: كل 60 ثانية)
   const watchdogInterval = setInterval(async () => {
     try {
@@ -2036,6 +2112,25 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         let shiftRecord = null;
 
         if (actionType === 'check_in') {
+          // 🛡️ فحص ذكي للورديات الليلية وعابرة منتصف الليل:
+          // إذا حضر الموظف في المساء المتأخر (من 21:00 فصاعداً) وكان لديه وردية مجدولة تبدأ بعد منتصف الليل مباشرة (00:00 إلى 02:00)
+          // في اليوم التالي: ينسب تاريخ الوردية لليوم التالي ليكون حضوراً مبكراً لوردية الغد، مما يمنع ازدواجية اليوم السابق وفقدان يوم الغد
+          let operationalShiftDate = datePart;
+          let isEarlyOvernightIn = false;
+          const [pInHour] = timePart.split(':').map(Number);
+          if (pInHour >= 21) {
+            const nextDate = getNextDateStr(datePart);
+            const tmrwSched = getEmployeeScheduledShiftStart(matchedEmpObj, nextDate, state);
+            if (tmrwSched && tmrwSched.start) {
+              const [tmrwH] = tmrwSched.start.split(':').map(Number);
+              if (tmrwH <= 2) {
+                operationalShiftDate = nextDate;
+                isEarlyOvernightIn = true;
+                console.log(`[Biometric Resolver] 🌙 حضور مبكر لوردية منتصف الليل: الموظف ${matchedEmpName} حضر ${timePart} لوردية مجدولة تبدأ ${tmrwSched.start} في ${nextDate} - تم تسجيل الوردية بتاريخ ${nextDate}`);
+              }
+            }
+          }
+
           // 🛡️ توليد معرف جديد فريد دائماً لعدم مسح أو استبدال أي وردية سابقة
           const newShiftId = `shift_${matchedEmpId}_${punchEpoch}`;
           shiftRecord = {
@@ -2043,7 +2138,9 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             employeeId: matchedEmpId,
             employeeCode: matchedEmpObj?.code || '',
             employeeName: matchedEmpName,
-            date: datePart,
+            date: operationalShiftDate,
+            actualPunchDate: datePart,
+            isEarlyOvernightIn,
             timeIn: timePart,
             timeOut: '',
             branchId: effectiveShiftBranchId,
@@ -2077,7 +2174,9 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             isCrossBranch,
             isCoverageShift,
             isFloatingEmp,
-            date: datePart,
+            date: operationalShiftDate,
+            actualPunchDate: datePart,
+            isEarlyOvernightIn,
             timeIn: timePart,
             startEpoch: safePunchEpoch,
             isPaused: false,

@@ -571,6 +571,8 @@ export async function outstockGetMedicationRequests(params = {}) {
   if (params.branchId) qs.append('branchId', params.branchId);
   if (params.status) qs.append('status', params.status);
   if (params.requestType) qs.append('requestType', params.requestType);
+  if (params.categoryScope) qs.append('categoryScope', params.categoryScope);
+  if (params.category_scope) qs.append('category_scope', params.category_scope);
   return await outstockRequest(`medication-requests?${qs.toString()}`, { method: 'GET' });
 }
 
@@ -776,11 +778,15 @@ export async function outstockClearISupplySession() {
 }
 
 // ── 22. ملخص الإشعارات والعدادات الحية ─────────────────────────────────────────
-export async function outstockGetNotificationsSummary(branchId = '') {
+export async function outstockGetNotificationsSummary(branchId = '', categoryScope = '') {
   const qs = new URLSearchParams();
   if (branchId) {
     qs.append('branch_id', branchId);
     qs.append('branchId', branchId);
+  }
+  if (categoryScope) {
+    qs.append('category_scope', categoryScope);
+    qs.append('categoryScope', categoryScope);
   }
   return await outstockRequest(`notifications/summary?${qs.toString()}`, { method: 'GET' });
 }
@@ -1048,12 +1054,76 @@ export async function outstockGetCustomerWalletTransactions(customerId) {
   return outstockRequest(`customers/${encodeURIComponent(customerId)}/wallet/transactions`);
 }
 
-// ── 19. تصفير ومسح طلبات النظام ─────────────────────────────────────────────
+export async function outstockRequestWalletOtp(customerId) {
+  return outstockRequest(`customers/${encodeURIComponent(customerId)}/wallet/request-otp`, {
+    method: 'POST'
+  });
+}
+
+export async function outstockVerifyWalletOtp(customerId, payload) {
+  return outstockRequest(`customers/${encodeURIComponent(customerId)}/wallet/verify-otp`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+// ── 19. مرتجعات طلبات العملاء (Order Returns) ─────────────────────────────────
+export async function outstockCreateOrderReturn(orderId, payload) {
+  return outstockRequest(`orders/${encodeURIComponent(orderId)}/returns`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function outstockGetOrderReturns(params = {}) {
+  const query = new URLSearchParams();
+  if (params.branchId) query.append('branchId', params.branchId);
+  if (params.status) query.append('status', params.status);
+  if (params.search) query.append('search', params.search);
+  if (params.dateFrom) query.append('dateFrom', params.dateFrom);
+  if (params.dateTo) query.append('dateTo', params.dateTo);
+  const qStr = query.toString();
+  return outstockRequest(`order-returns${qStr ? `?${qStr}` : ''}`);
+}
+
+export async function outstockReplyOrderReturn(returnId, payload) {
+  return outstockRequest(`order-returns/${encodeURIComponent(returnId)}/reply`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+}
+
+// ── 20. تحويل صنف (دواء <-> مستحضر تجميل) ───────────────────────────────────
+export async function outstockConvertMedicationType(medicationId, itemType) {
+  return outstockRequest(`medications/${encodeURIComponent(medicationId)}/convert-type`, {
+    method: 'POST',
+    body: JSON.stringify({ itemType })
+  });
+}
+
+// ── 21. عملاء مستحضرات التجميل والتسويق الجماعي ──────────────────────────────
+export async function outstockGetCosmeticsCustomers(params = {}) {
+  const query = new URLSearchParams();
+  if (params.search) query.append('search', params.search);
+  if (params.branchId) query.append('branchId', params.branchId);
+  const qStr = query.toString();
+  return outstockRequest(`cosmetics/customers${qStr ? `?${qStr}` : ''}`);
+}
+
+export async function outstockSendCosmeticsPromoWhatsapp(payload) {
+  return outstockRequest('cosmetics/send-promo-whatsapp', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+// ── 22. تصفير ومسح طلبات النظام ─────────────────────────────────────────────
 export async function outstockPurgeOrders(confirmationPhrase) {
   return outstockRequest('admin/purge-orders', {
     method: 'POST',
     body: JSON.stringify({ confirmationPhrase })
   });
 }
+
 
 

@@ -13,8 +13,15 @@ import {
   Save,
   HelpCircle,
   ShieldCheck,
-  Package
+  Package,
+  Pill,
+  Plus,
+  Trash2
 } from 'lucide-react';
+import {
+  outstockConvertMedicationType,
+  outstockSearchActiveIngredients
+} from '../../../utils/outstockApiClient';
 
 /**
  * CosmeticsProductModal.jsx
@@ -39,6 +46,9 @@ export default function CosmeticsProductModal({
   const [skinType, setSkinType] = useState('all'); // all, oily, dry, combo, sensitive, normal
   const [instructions, setInstructions] = useState('');
   const [activeIngredients, setActiveIngredients] = useState('');
+  const [ingredientList, setIngredientList] = useState([{ name: '', concentration: '' }]);
+  const [ingredientSuggestions, setIngredientSuggestions] = useState({});
+  const [isConverting, setIsConverting] = useState(false);
   const [productLink, setProductLink] = useState('');
   const [productImage, setProductImage] = useState('');
   const [isCopied, setIsCopied] = useState(false);
@@ -75,6 +85,14 @@ export default function CosmeticsProductModal({
         setSkinType(parsed.skinType || 'all');
         setInstructions(parsed.instructions || '');
         setActiveIngredients(parsed.activeIngredients || '');
+        if (Array.isArray(parsed.ingredientList) && parsed.ingredientList.length > 0) {
+          setIngredientList(parsed.ingredientList);
+        } else if (parsed.activeIngredients) {
+          const parts = parsed.activeIngredients.split(',').map(p => p.trim()).filter(Boolean);
+          if (parts.length > 0) {
+            setIngredientList(parts.map(p => ({ name: p, concentration: '' })));
+          }
+        }
         if (!attachedLink && parsed.productLink) setProductLink(parsed.productLink);
         if (!attachedImg && parsed.productImage) setProductImage(parsed.productImage);
       } else {
@@ -84,11 +102,84 @@ export default function CosmeticsProductModal({
         setSkinType('all');
         setInstructions('يُستخدم وفقاً لإرشادات الأخصائي أو الصيدلي.');
         setActiveIngredients('');
+        setIngredientList([{ name: '', concentration: '' }]);
       }
     } catch {
       // ignore
     }
   }, [isOpen, productName, item]);
+
+  // دالة تحويل نوع الصنف من مستحضر تجميل إلى دواء
+  const handleConvertTypeToMedication = async () => {
+    const medId = item?.medication_id || item?.id;
+    if (!medId || isConverting) return;
+    if (!window.confirm(`هل أنت متأكد من رغبتك في تحويل صنف التجميل "${productName}" إلى دواء بالكتالوج 💊؟`)) {
+      return;
+    }
+    setIsConverting(true);
+    try {
+      const res = await outstockConvertMedicationType(medId, 'medication');
+      if (res?.success) {
+        showToast?.('✅ تم تحويل الصنف بنجاح إلى دواء 💊🔄');
+        onClose?.();
+      } else {
+        showToast?.(`⚠️ فشل تحويل الصنف: ${res?.error || 'حدث خطأ'}`);
+      }
+    } catch (e) {
+      showToast?.(`❌ خطأ: ${e.message}`);
+    } finally {
+      setIsConverting(false);
+    }
+  };
+
+  // دوال إدارة المواد الفعالة المتعددة (+) والبحث الذكي
+  const handleAddIngredient = () => {
+    setIngredientList(prev => [...prev, { name: '', concentration: '' }]);
+  };
+
+  const handleRemoveIngredient = (index) => {
+    setIngredientList(prev => {
+      const next = prev.filter((_, idx) => idx !== index);
+      return next.length > 0 ? next : [{ name: '', concentration: '' }];
+    });
+  };
+
+  const handleIngredientNameChange = async (index, val) => {
+    setIngredientList(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], name: val };
+      return next;
+    });
+
+    if (val && val.trim().length >= 2) {
+      try {
+        const res = await outstockSearchActiveIngredients(val.trim());
+        if (res?.success && Array.isArray(res.ingredients)) {
+          setIngredientSuggestions(prev => ({ ...prev, [index]: res.ingredients }));
+        }
+      } catch (_) {
+      }
+    } else {
+      setIngredientSuggestions(prev => ({ ...prev, [index]: [] }));
+    }
+  };
+
+  const handleSelectIngredientSuggestion = (index, ing) => {
+    setIngredientList(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], name: ing.scientific_name || ing.name || '' };
+      return next;
+    });
+    setIngredientSuggestions(prev => ({ ...prev, [index]: [] }));
+  };
+
+  const handleIngredientConcentrationChange = (index, val) => {
+    setIngredientList(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], concentration: val };
+      return next;
+    });
+  };
 
   // إغلاق النافذة بزر Escape
   useEffect(() => {
@@ -118,12 +209,18 @@ export default function CosmeticsProductModal({
     e?.preventDefault();
     try {
       const storageKey = `outstock_cosmetic_${encodeURIComponent(productName.trim().toLowerCase())}`;
+      const compositeIngredients = ingredientList
+        .map(i => `${i.name || ''} ${i.concentration || ''}`.trim())
+        .filter(Boolean)
+        .join(', ');
+
       const payload = {
         brand,
         categoryType,
         skinType,
         instructions,
-        activeIngredients,
+        activeIngredients: compositeIngredients || activeIngredients,
+        ingredientList,
         productLink,
         productImage,
         savedAt: new Date().toISOString()
@@ -245,6 +342,31 @@ ${activeIngredients ? `🧪 *المواد الفعالة:* ${activeIngredients}\
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={handleConvertTypeToMedication}
+              disabled={isConverting}
+              className="outstock-btn"
+              style={{
+                background: '#ffffff',
+                border: '1px solid #0d9488',
+                color: '#0f766e',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '800',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                cursor: isConverting ? 'not-allowed' : 'pointer',
+                opacity: isConverting ? 0.7 : 1
+              }}
+              title="تحويل كارتة المستحضر إلى صنف دوائي"
+            >
+              <Pill size={14} color="#0d9488" />
+              <span>تحويل إلى دواء 💊🔄</span>
+            </button>
+
             <button
               type="button"
               onClick={handleCopySummary}
@@ -507,17 +629,119 @@ ${activeIngredients ? `🧪 *المواد الفعالة:* ${activeIngredients}\
           {activeTab === 'usage' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div className="outstock-form-group">
-                <label style={{ fontWeight: '800', color: '#1e293b', fontSize: '13px' }}>
-                  🧪 المواد الفعالة والتركيبة الأساسية (Active Ingredients):
-                </label>
-                <input
-                  type="text"
-                  placeholder="مثال: Niacinamide 10%, Hyaluronic Acid, Zinc PCA, Retinol..."
-                  value={activeIngredients}
-                  onChange={(e) => setActiveIngredients(e.target.value)}
-                  className="outstock-form-input"
-                  style={{ fontWeight: '600' }}
-                />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <label style={{ fontWeight: '800', color: '#1e293b', fontSize: '13px' }}>
+                    🧪 المواد الفعالة والتركيبة الذكية (Active Ingredients):
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleAddIngredient}
+                    style={{
+                      background: '#fdf2f8',
+                      border: '1px solid #f472b6',
+                      color: '#db2777',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '11.5px',
+                      fontWeight: '800',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Plus size={13} />
+                    <span>إضافة مادة فعالة (+)</span>
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {ingredientList.map((ing, idx) => {
+                    const suggestions = ingredientSuggestions[idx] || [];
+                    return (
+                      <div key={idx} style={{ position: 'relative', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <div style={{ flex: 2, position: 'relative' }}>
+                          <input
+                            type="text"
+                            placeholder="اسم المادة الفعالة (مثال: Niacinamide, Hyaluronic Acid...)"
+                            value={ing.name}
+                            onChange={(e) => handleIngredientNameChange(idx, e.target.value)}
+                            className="outstock-form-input"
+                            style={{ fontWeight: '600', fontSize: '13px' }}
+                          />
+                          {suggestions.length > 0 && (
+                            <div
+                              style={{
+                                position: 'absolute',
+                                top: '100%',
+                                right: 0,
+                                left: 0,
+                                background: '#ffffff',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: '8px',
+                                boxShadow: '0 8px 16px rgba(0,0,0,0.12)',
+                                zIndex: 50,
+                                maxHeight: '160px',
+                                overflowY: 'auto'
+                              }}
+                            >
+                              {suggestions.map((s, sIdx) => (
+                                <div
+                                  key={sIdx}
+                                  onClick={() => handleSelectIngredientSuggestion(idx, s)}
+                                  style={{
+                                    padding: '7px 10px',
+                                    fontSize: '12px',
+                                    borderBottom: '1px solid #f1f5f9',
+                                    cursor: 'pointer',
+                                    color: '#0f172a'
+                                  }}
+                                  onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
+                                  onMouseLeave={(e) => e.currentTarget.style.background = '#ffffff'}
+                                >
+                                  <strong>{s.scientific_name || s.name}</strong>
+                                  {s.trade_name && <span style={{ color: '#64748b', marginRight: '6px' }}>({s.trade_name})</span>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ flex: 1 }}>
+                          <input
+                            type="text"
+                            placeholder="التركيز (مثال: 10%, 2mg)"
+                            value={ing.concentration}
+                            onChange={(e) => handleIngredientConcentrationChange(idx, e.target.value)}
+                            className="outstock-form-input"
+                            style={{ fontWeight: '600', fontSize: '13px' }}
+                          />
+                        </div>
+
+                        {ingredientList.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveIngredient(idx)}
+                            style={{
+                              background: '#fef2f2',
+                              border: '1px solid #fecaca',
+                              color: '#dc2626',
+                              borderRadius: '6px',
+                              padding: '7px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                            title="حذف هذه المادة"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="outstock-form-group">

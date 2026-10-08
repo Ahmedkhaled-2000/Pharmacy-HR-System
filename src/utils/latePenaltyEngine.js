@@ -474,7 +474,18 @@ export function calculateLatenessMinutes(scheduledStartTime, actualPunchInTime) 
   const schedTotalMins = sH * 60 + sM;
   const actualTotalMins = aH * 60 + aM;
 
-  return Math.max(0, actualTotalMins - schedTotalMins);
+  let diff = actualTotalMins - schedTotalMins;
+
+  // معالجة الورديات الدائرية وعابرة منتصف الليل (Circular 24-hour clock)
+  // إذا كان الفارق أكثر من 12 ساعة (720 دقيقة):
+  // مثل: بداية الوردية 00:00 وحضر الموظف 23:56 (فارق 1436 دقيقة) -> يعتبر حضوراً مبكراً بـ 4 دقائق (تأخير = 0)
+  if (diff > 720) {
+    diff -= 1440;
+  } else if (diff < -720) {
+    diff += 1440;
+  }
+
+  return Math.max(0, diff);
 }
 
 /**

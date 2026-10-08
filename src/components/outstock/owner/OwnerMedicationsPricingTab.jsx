@@ -27,7 +27,8 @@ import {
   Trash2,
   CheckCircle2,
   FileCheck,
-  Cpu
+  Cpu,
+  FlaskConical
 } from 'lucide-react';
 import {
   outstockSearchMedications,
@@ -49,7 +50,15 @@ import { extractMedicationsWithAi } from '../../../utils/outstockMedicationAiExt
 import MedicationMasterCardModal from '../common/MedicationMasterCardModal';
 import AddMedicationModal from '../common/AddMedicationModal';
 
-export default function OwnerMedicationsPricingTab({ showToast = alert }) {
+export default function OwnerMedicationsPricingTab({
+  showToast = (msg) => {
+    if (typeof window !== 'undefined') {
+      const detail = typeof msg === 'object' ? msg : { message: String(msg) };
+      window.dispatchEvent(new CustomEvent('outstock:notify', { detail }));
+    }
+  },
+  categoryScope = null
+}) {
   // ── 1. الحالات العامة ──
   const [stats, setStats] = useState({
     total_medications: 26633,
@@ -84,8 +93,11 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
   const [barcodeLabelSize, setBarcodeLabelSize] = useState('38x25'); // '38x25' | '50x25'
   const [barcodeCopies, setBarcodeCopies] = useState(1);
 
-  // ── 6. إضافة صنف جديد بالكتالوج ──
+  // ── 6. إضافة صنف جديد بالكتالوج واختيار نوع الكارتة ──
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isChoiceModalOpen, setIsChoiceModalOpen] = useState(false);
+  const [newItemType, setNewItemType] = useState('medication'); // 'medication' | 'cosmetics'
+  const [activeIngredientModalMed, setActiveIngredientModalMed] = useState(null);
   const [newMedForm, setNewMedForm] = useState({
     trade_name_ar: '',
     trade_name_en: '',
@@ -751,7 +763,14 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
 
             <button
               type="button"
-              onClick={() => setIsAddModalOpen(true)}
+              onClick={() => {
+                if (categoryScope === 'cosmetics') {
+                  setNewItemType('cosmetics');
+                  setIsAddModalOpen(true);
+                } else {
+                  setIsChoiceModalOpen(true);
+                }
+              }}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -759,17 +778,21 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
                 padding: '0 18px',
                 minHeight: '46px',
                 borderRadius: '10px',
-                background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                background: categoryScope === 'cosmetics'
+                  ? 'linear-gradient(135deg, #db2777 0%, #be185d 100%)'
+                  : 'linear-gradient(135deg, #059669 0%, #047857 100%)',
                 color: '#ffffff',
                 border: 'none',
                 fontWeight: '700',
                 fontSize: '13px',
                 cursor: 'pointer',
-                boxShadow: '0 2px 8px rgba(5, 150, 105, 0.25)'
+                boxShadow: categoryScope === 'cosmetics'
+                  ? '0 2px 8px rgba(219, 39, 119, 0.25)'
+                  : '0 2px 8px rgba(5, 150, 105, 0.25)'
               }}
             >
               <Plus size={16} />
-              <span>إضافة صنف جديد</span>
+              <span>{categoryScope === 'cosmetics' ? 'إضافة صنف مستحضرات 💄' : 'إضافة صنف جديد'}</span>
             </button>
 
             <button
@@ -857,13 +880,30 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
                             </span>
                           )}
                         </td>
-                        <td style={{ padding: '12px 14px', color: '#334155' }}>
-                          <div style={{ fontWeight: '600', maxWidth: '240px', wordBreak: 'break-word' }}>
-                            {med.generic_name}
-                          </div>
-                          <div style={{ fontSize: '11.5px', color: '#64748b' }}>
-                            {med.manufacturer || 'شركة معتمدة'}
-                          </div>
+                        <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => setActiveIngredientModalMed(med)}
+                            className="outstock-btn"
+                            style={{
+                              padding: '6px 12px',
+                              fontSize: '12px',
+                              fontWeight: '800',
+                              background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+                              color: '#15803d',
+                              border: '1.5px solid #bbf7d0',
+                              borderRadius: '8px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              cursor: 'pointer',
+                              boxShadow: '0 1px 3px rgba(21, 128, 61, 0.1)'
+                            }}
+                            title="عرض قائمة المواد الفعالة والشركة المصنعة"
+                          >
+                            <FlaskConical size={14} color="#15803d" />
+                            <span>المادة الفعالة والشركة 🔬</span>
+                          </button>
                         </td>
                         <td style={{ padding: '12px 14px' }}>
                           <span style={{
@@ -1902,15 +1942,297 @@ export default function OwnerMedicationsPricingTab({ showToast = alert }) {
         </div>
       )}
 
-      {/* ── 7. نافذة إضافة صنف دوائي جديد (Owner Add Medication Modal) ── */}
+      {/* ── 7. نافذة إضافة صنف دوائي / مستحضرات جديد (Owner Add Medication Modal) ── */}
       <AddMedicationModal
         isOpen={isAddModalOpen}
+        initialData={{
+          item_type: newItemType,
+          category: newItemType === 'cosmetics' ? 'مستحضرات تجميل' : 'أدوية علاجية'
+        }}
         onClose={() => setIsAddModalOpen(false)}
         onSaveSuccess={(createdMed) => {
-          showToast?.(`✅ تم إضافة صنف "${createdMed.trade_name_ar}" للكتالوج المركزي بنجاح`);
+          showToast?.(`✅ تم إضافة صنف "${createdMed.trade_name_ar || createdMed.tradeName}" للكتالوج المركزي بنجاح`);
           handleSearch(searchTerm || '');
         }}
       />
+
+      {/* ── 7.1 نافذة التخيير بين كارتة صنف دوائي وكارتة صنف مستحضرات (Choice Modal) ── */}
+      {isChoiceModalOpen && (
+        <div
+          className="outstock-modal-backdrop"
+          onClick={() => setIsChoiceModalOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 130000,
+            padding: '20px'
+          }}
+        >
+          <div
+            className="outstock-modal-panel"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#ffffff',
+              borderRadius: '20px',
+              maxWidth: '520px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.2)',
+              direction: 'rtl',
+              textAlign: 'right'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Layers size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0f172a' }}>
+                    تحديد نوع الصنف الجديد 📦
+                  </h3>
+                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
+                    اختر نوع الكارتة المطلوبة لفتح الحقول والمواصفات المناسبة
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsChoiceModalOpen(false)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
+              {/* خيار 1: كارتة صنف دوائي */}
+              <button
+                type="button"
+                onClick={() => {
+                  setNewItemType('medication');
+                  setIsChoiceModalOpen(false);
+                  setIsAddModalOpen(true);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '14px',
+                  padding: '16px 18px',
+                  borderRadius: '14px',
+                  border: '2px solid #e2e8f0',
+                  background: '#f8fafc',
+                  cursor: 'pointer',
+                  textAlign: 'right',
+                  transition: 'all 0.18s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#059669';
+                  e.currentTarget.style.background = '#f0fdf4';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#e2e8f0';
+                  e.currentTarget.style.background = '#f8fafc';
+                }}
+              >
+                <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#dcfce7', color: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Pill size={24} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: '800', fontSize: '14.5px', color: '#0f172a' }}>
+                    💊 كارتة صنف دوائي (Medication)
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '3px', lineHeight: '1.4' }}>
+                    أقراص، كبسولات، حقن، شراب، والتحكم في الجرعات والتسعيرة الجبرية وجدول المخدرات
+                  </div>
+                </div>
+              </button>
+
+              {/* خيار 2: كارتة صنف مستحضرات */}
+              <button
+                type="button"
+                onClick={() => {
+                  setNewItemType('cosmetics');
+                  setIsChoiceModalOpen(false);
+                  setIsAddModalOpen(true);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '14px',
+                  padding: '16px 18px',
+                  borderRadius: '14px',
+                  border: '2px solid #fce7f3',
+                  background: '#fdf2f8',
+                  cursor: 'pointer',
+                  textAlign: 'right',
+                  transition: 'all 0.18s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#db2777';
+                  e.currentTarget.style.background = '#fce7f3';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#fce7f3';
+                  e.currentTarget.style.background = '#fdf2f8';
+                }}
+              >
+                <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#fbcfe8', color: '#db2777', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Sparkles size={24} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: '800', fontSize: '14.5px', color: '#be185d' }}>
+                    💄 كارتة صنف مستحضرات تجميل (Cosmetics)
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#9d174d', marginTop: '3px', lineHeight: '1.4' }}>
+                    عناية بالبشرة، عناية بالشعر، لوشن، واقي شمس، ومستحضرات تجميلية بأسعار حرة
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 7.2 نافذة تفاصيل المادة الفعالة والشركة المصنعة ── */}
+      {activeIngredientModalMed && (
+        <div
+          className="outstock-modal-backdrop"
+          onClick={() => setActiveIngredientModalMed(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 130000,
+            padding: '20px'
+          }}
+        >
+          <div
+            className="outstock-modal-panel"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#ffffff',
+              borderRadius: '20px',
+              maxWidth: '560px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.2)',
+              direction: 'rtl',
+              textAlign: 'right'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#dcfce7', color: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <FlaskConical size={22} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: '#0f172a' }}>
+                    {activeIngredientModalMed.trade_name_ar || activeIngredientModalMed.trade_name_en}
+                  </h3>
+                  <div style={{ fontSize: '12px', color: '#64748b', direction: 'ltr', textAlign: 'right' }}>
+                    {activeIngredientModalMed.trade_name_en}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveIngredientModalMed(null)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '14px' }}>
+              {/* قسم المادة الفعالة */}
+              <div style={{ background: '#f8fafc', padding: '14px 16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                <div style={{ fontSize: '12px', fontWeight: '800', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                  <FlaskConical size={14} />
+                  <span>المادة الفعالة والتركيب العلمي (Active Ingredients)</span>
+                </div>
+                <div style={{ fontSize: '13.5px', fontWeight: '700', color: '#0f172a', lineHeight: '1.6', wordBreak: 'break-word' }}>
+                  {activeIngredientModalMed.generic_name || 'غير محدد'}
+                </div>
+                {activeIngredientModalMed.strength && (
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                    التركيز الدوائي: <strong>{activeIngredientModalMed.strength}</strong>
+                  </div>
+                )}
+                {Array.isArray(activeIngredientModalMed.active_ingredients_list) && activeIngredientModalMed.active_ingredients_list.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+                    {activeIngredientModalMed.active_ingredients_list.map((ing, i) => (
+                      <span
+                        key={i}
+                        style={{
+                          background: '#e0f2fe',
+                          color: '#0369a1',
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          fontSize: '11.5px',
+                          fontWeight: '700'
+                        }}
+                      >
+                        {typeof ing === 'object' ? `${ing.name || ''} ${ing.concentration || ''}` : String(ing)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* قسم الشركة المصنعة */}
+              <div style={{ background: '#f8fafc', padding: '14px 16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                <div style={{ fontSize: '12px', fontWeight: '800', color: '#b45309', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                  <Building2 size={14} />
+                  <span>الشركة المصنعة وجهة الإنتاج (Manufacturer)</span>
+                </div>
+                <div style={{ fontSize: '13.5px', fontWeight: '700', color: '#0f172a' }}>
+                  {activeIngredientModalMed.manufacturer || 'شركة معتمدة بهيئة الدواء المصرية'}
+                </div>
+                {activeIngredientModalMed.category && (
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                    التصنيف: <strong>{activeIngredientModalMed.category}</strong>
+                  </div>
+                )}
+              </div>
+
+              {/* قسم المواصفات الصيدلية والباركود */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div style={{ background: '#f1f5f9', padding: '10px 12px', borderRadius: '10px' }}>
+                  <span style={{ fontSize: '11.5px', color: '#64748b', display: 'block' }}>الشكل والوحدة:</span>
+                  <strong style={{ fontSize: '12.5px', color: '#1e293b' }}>
+                    {activeIngredientModalMed.dosage_form} ({activeIngredientModalMed.pack_size > 1 ? `${activeIngredientModalMed.pack_size} ${activeIngredientModalMed.unit_name || 'شرائط'}` : 'عبوة كاملة'})
+                  </strong>
+                </div>
+                <div style={{ background: '#f1f5f9', padding: '10px 12px', borderRadius: '10px' }}>
+                  <span style={{ fontSize: '11.5px', color: '#64748b', display: 'block' }}>الباركود الدولي (GTIN):</span>
+                  <strong style={{ fontSize: '12.5px', color: '#1e293b' }}>{activeIngredientModalMed.gtin_barcode || 'لا يوجد'}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setActiveIngredientModalMed(null)}
+                className="outstock-btn outstock-btn-primary"
+                style={{ padding: '8px 22px' }}
+              >
+                إغلاق النافذة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ── 8. نافذة تأكيد حذف الصنف من الكتالوج ── */}
       {medToDelete && (
         <div className="outstock-modal-backdrop" style={{ zIndex: 10005 }}>

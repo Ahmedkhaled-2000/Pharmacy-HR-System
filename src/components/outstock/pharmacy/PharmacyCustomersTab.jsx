@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Phone, MapPin, Calendar, Clock, Edit2, History, X, User, CheckCircle, Trash2, AlertTriangle, Building2, Wallet } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Search, Plus, Phone, MapPin, Calendar, Clock, Edit2, History, X, User, CheckCircle, Trash2, AlertTriangle, Building2, Wallet, Tag } from 'lucide-react';
 import { outstockGetCustomers, outstockSaveCustomer, outstockGetCustomerHistory, outstockDeleteCustomer, outstockGetBranches } from '../../../utils/outstockApiClient';
 import CustomerWalletModal from '../common/CustomerWalletModal';
 
@@ -43,6 +43,10 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
   const [formZone, setFormZone] = useState('');
   const [formAddress, setFormAddress] = useState('');
   const [formNotes, setFormNotes] = useState('');
+  const [formDiscountType, setFormDiscountType] = useState('none'); // 'none' | 'percentage' | 'amount'
+  const [formDiscountValue, setFormDiscountValue] = useState('');
+  const [formMinOrderAmount, setFormMinOrderAmount] = useState('');
+  const [formDiscountScope, setFormDiscountScope] = useState('all'); // 'all' | 'cosmetics' | 'specific_items'
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -92,6 +96,10 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
     setFormZone(deliveryZones[0] || '');
     setFormAddress('');
     setFormNotes('');
+    setFormDiscountType('none');
+    setFormDiscountValue('');
+    setFormMinOrderAmount('');
+    setFormDiscountScope('all');
     setFormError('');
     setIsEditModalOpen(true);
   };
@@ -105,6 +113,10 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
     setFormZone(cust.zone || deliveryZones[0] || '');
     setFormAddress(cust.address || '');
     setFormNotes(cust.notes || '');
+    setFormDiscountType(cust.discount_type || 'none');
+    setFormDiscountValue(cust.discount_value !== undefined && cust.discount_value !== null ? String(cust.discount_value) : '');
+    setFormMinOrderAmount(cust.min_order_amount !== undefined && cust.min_order_amount !== null ? String(cust.min_order_amount) : '');
+    setFormDiscountScope(cust.discount_scope || 'all');
     setFormError('');
     setIsEditModalOpen(true);
   };
@@ -174,7 +186,11 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
         zone: formZone ? String(formZone).trim() : null,
         address: formAddress ? String(formAddress).trim() : null,
         branchId,
-        notes: formNotes ? String(formNotes).trim() : null
+        notes: formNotes ? String(formNotes).trim() : null,
+        discountType: formDiscountType || 'none',
+        discountValue: parseFloat(formDiscountValue || 0),
+        minOrderAmount: parseFloat(formMinOrderAmount || 0),
+        discountScope: formDiscountScope || 'all'
       });
 
       if (res?.success) {
@@ -304,7 +320,19 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                       </span>
                     </td>
                     <td>
-                      <strong style={{ color: '#0f172a', fontSize: '13.5px' }}>{cust.full_name}</strong>
+                      <div>
+                        <strong style={{ color: '#0f172a', fontSize: '13.5px' }}>{cust.full_name}</strong>
+                        {cust.discount_type && cust.discount_type !== 'none' && (
+                          <div style={{ marginTop: '3px' }}>
+                            <span style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                              <Tag size={10} />
+                              <span>خصم {cust.discount_type === 'percentage' ? `${cust.discount_value}%` : `${cust.discount_value} ج.م`}</span>
+                              {parseFloat(cust.min_order_amount || 0) > 0 && <span>(حد أدنى: {cust.min_order_amount} ج.م)</span>}
+                              {cust.discount_scope === 'cosmetics' && <span>(💄 تجميل)</span>}
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <span
@@ -561,6 +589,89 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                     onChange={(e) => setFormNotes(e.target.value)}
                     className="outstock-form-textarea"
                   />
+                </div>
+
+                {/* ── إعدادات الخصم التلقائي المشروط للعميل ── */}
+                <div style={{
+                  background: '#f8fafc',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: '12px',
+                  padding: '14px',
+                  marginTop: '12px',
+                  marginBottom: '6px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '800', color: '#0f172a', marginBottom: '10px' }}>
+                    <Tag size={15} color="#0d9488" />
+                    <span>إعدادات الخصم التلقائي المشروط للعميل:</span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <div>
+                      <label className="outstock-form-label" style={{ fontSize: '11.5px' }}>نوع الخصم:</label>
+                      <select
+                        className="outstock-form-select"
+                        value={formDiscountType}
+                        onChange={(e) => setFormDiscountType(e.target.value)}
+                        style={{ fontSize: '12.5px' }}
+                      >
+                        <option value="none">بدون خصم (افتراضي)</option>
+                        <option value="percentage">نسبة مئوية (%)</option>
+                        <option value="amount">مبلغ ثابت (ج.م)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="outstock-form-label" style={{ fontSize: '11.5px' }}>
+                        قيمة الخصم {formDiscountType === 'percentage' ? '(%)' : '(ج.م)'}:
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        disabled={formDiscountType === 'none'}
+                        value={formDiscountValue}
+                        onChange={(e) => setFormDiscountValue(e.target.value)}
+                        className="outstock-form-input"
+                        placeholder="0.00"
+                        style={{ fontSize: '12.5px' }}
+                      />
+                    </div>
+                  </div>
+
+                  {formDiscountType !== 'none' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                      <div>
+                        <label className="outstock-form-label" style={{ fontSize: '11.5px' }}>
+                          الحد الأدنى لقيمة الطلب لتطبيق الخصم (ج.م):
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={formMinOrderAmount}
+                          onChange={(e) => setFormMinOrderAmount(e.target.value)}
+                          className="outstock-form-input"
+                          placeholder="مثال: 500"
+                          style={{ fontSize: '12.5px' }}
+                        />
+                        <span style={{ fontSize: '10px', color: '#64748b' }}>0 يعني يطبق دائماً دون حد أدنى</span>
+                      </div>
+
+                      <div>
+                        <label className="outstock-form-label" style={{ fontSize: '11.5px' }}>نطاق تطبيق الخصم:</label>
+                        <select
+                          className="outstock-form-select"
+                          value={formDiscountScope}
+                          onChange={(e) => setFormDiscountScope(e.target.value)}
+                          style={{ fontSize: '12.5px' }}
+                        >
+                          <option value="all">على كامل الطلب (كافة الأصناف)</option>
+                          <option value="cosmetics">مستحضرات التجميل فقط 💄</option>
+                          <option value="specific_items">أصناف محددة بالاسم</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

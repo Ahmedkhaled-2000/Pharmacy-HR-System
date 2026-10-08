@@ -184,11 +184,27 @@ export function useRequestsManager() {
             const overtimeStatus = overtimeHours > 0 ? 'approved' : 'none';
 
             const targetShiftId = dayItem.shiftId || (daysToProcess.length === 1 ? target.shiftId : null);
-            const existingShiftIndex = updatedShifts.findIndex(s => 
-              (targetShiftId && s.id === targetShiftId) ||
-              ((String(s.employeeId) === String(target.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
-              s.date === punchDate && (!s.timeOut || s.timeOut === '—' || targetShiftId))
-            );
+            let existingShiftIndex = -1;
+            if (targetShiftId) {
+              existingShiftIndex = updatedShifts.findIndex(s => s.id === targetShiftId);
+            }
+            if (existingShiftIndex < 0) {
+              // ابحث أولاً عن وردية مفتوحة في نفس اليوم
+              existingShiftIndex = updatedShifts.findIndex(s =>
+                (String(s.employeeId) === String(target.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
+                s.date === punchDate &&
+                (!s.timeOut || s.timeOut === '—' || s.isLiveActive) &&
+                s.status !== 'cancelled' && !s.isCancelled
+              );
+            }
+            if (existingShiftIndex < 0) {
+              // إذا لم توجد وردية مفتوحة، ابحث عن أي وردية سابقة في نفس اليوم لتعديلها ومنع تكرار الورديات لنفس الموظف
+              existingShiftIndex = updatedShifts.findIndex(s =>
+                (String(s.employeeId) === String(target.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
+                s.date === punchDate &&
+                s.status !== 'cancelled' && !s.isCancelled
+              );
+            }
 
             if (existingShiftIndex >= 0) {
               const existingShift = updatedShifts[existingShiftIndex];

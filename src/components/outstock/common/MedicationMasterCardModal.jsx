@@ -17,9 +17,11 @@ import {
   ExternalLink,
   Snowflake,
   AlertTriangle,
-  Edit3
+  Edit3,
+  Sparkles
 } from 'lucide-react';
 import AddMedicationModal from './AddMedicationModal';
+import { outstockConvertMedicationType } from '../../../utils/outstockApiClient';
 
 /**
  * MedicationMasterCardModal.jsx
@@ -36,6 +38,14 @@ export default function MedicationMasterCardModal({
 }) {
   const [copiedBarcode, setCopiedBarcode] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isConverting, setIsConverting] = useState(false);
+  const [currentType, setCurrentType] = useState(masterCardData?.medication?.item_type || 'medication');
+
+  useEffect(() => {
+    if (masterCardData?.medication?.item_type) {
+      setCurrentType(masterCardData.medication.item_type);
+    }
+  }, [masterCardData]);
 
   // إغلاق النافذة بزر Escape
   useEffect(() => {
@@ -74,6 +84,37 @@ export default function MedicationMasterCardModal({
     setTimeout(() => setCopiedBarcode(false), 2000);
   };
 
+  const notifySystem = (message, type = 'info', title = null) => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('outstock:notify', {
+        detail: { message, type, title }
+      }));
+    }
+  };
+
+  const handleToggleConvertType = async () => {
+    if (!med?.id || isConverting) return;
+    const target = currentType === 'cosmetics' ? 'medication' : 'cosmetics';
+    const targetLabel = target === 'cosmetics' ? 'مستحضر تجميل 💄' : 'دواء 💊';
+    const medName = med.trade_name_ar || med.trade_name_en || med.medication_name || 'الصنف';
+
+    setIsConverting(true);
+    try {
+      const res = await outstockConvertMedicationType(med.id, target);
+      if (res?.success) {
+        setCurrentType(target);
+        onMedicationUpdated?.({ ...med, item_type: target });
+        notifySystem(`تم تحويل الصنف "${medName}" بنجاح إلى: ${targetLabel}`, 'success', 'نجاح تحويل الصنف ✅');
+      } else {
+        notifySystem(`فشل تحويل الصنف: ${res?.error || 'حدث خطأ'}`, 'error', 'تنبيه خطأ ⚠️');
+      }
+    } catch (e) {
+      notifySystem(`خطأ في الاتصال: ${e.message}`, 'error', 'خطأ في النظام ❌');
+    } finally {
+      setIsConverting(false);
+    }
+  };
+
   return (
     <div
       className="outstock-modal-backdrop"
@@ -110,12 +151,16 @@ export default function MedicationMasterCardModal({
         <div
           style={{
             padding: '18px 24px',
-            background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+            background: currentType === 'cosmetics'
+              ? 'linear-gradient(135deg, #db2777 0%, #9d174d 100%)'
+              : 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
             color: '#ffffff',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)'
+            boxShadow: currentType === 'cosmetics'
+              ? '0 4px 12px rgba(219, 39, 119, 0.25)'
+              : '0 4px 12px rgba(13, 148, 136, 0.25)'
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -131,19 +176,50 @@ export default function MedicationMasterCardModal({
                 justifyContent: 'center'
               }}
             >
-              <FileText size={22} color="#ffffff" />
+              {currentType === 'cosmetics' ? <Sparkles size={22} color="#ffffff" /> : <FileText size={22} color="#ffffff" />}
             </div>
             <div>
               <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '900', letterSpacing: '-0.3px' }}>
-                كارتة الصنف والمواصفات الدوائية
+                {currentType === 'cosmetics' ? 'كارتة مستحضر التجميل والعناية' : 'كارتة الصنف والمواصفات الدوائية'}
               </h3>
               <p style={{ margin: 0, fontSize: '12.5px', opacity: 0.9, marginTop: '2px' }}>
-                دليل هيئة الدواء المصرية (EDA) وقاعدة بيانات دراج آي الشاملة
+                {currentType === 'cosmetics'
+                  ? 'مواصفات مستحضرات العناية والتجميل والتركيبات المعتمدة'
+                  : 'دليل هيئة الدواء المصرية (EDA) وقاعدة بيانات دراج آي الشاملة'}
               </p>
             </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {med && (
+              <button
+                type="button"
+                onClick={handleToggleConvertType}
+                disabled={isConverting}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: 'rgba(255, 255, 255, 0.22)',
+                  border: '1px solid rgba(255, 255, 255, 0.4)',
+                  color: '#ffffff',
+                  borderRadius: '10px',
+                  padding: '7px 14px',
+                  fontSize: '12.5px',
+                  fontWeight: '800',
+                  cursor: isConverting ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.2s ease',
+                  opacity: isConverting ? 0.7 : 1
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.35)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.22)'}
+                title={currentType === 'cosmetics' ? 'تحويل إلى دواء 💊🔄' : 'تحويل إلى مستحضر تجميل 💄🔄'}
+              >
+                <Sparkles size={15} />
+                <span>{currentType === 'cosmetics' ? 'تحويل إلى دواء 💊🔄' : 'تحويل إلى مستحضر تجميل 💄🔄'}</span>
+              </button>
+            )}
+
             {med && (
               <button
                 type="button"

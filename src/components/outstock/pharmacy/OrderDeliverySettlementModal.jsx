@@ -14,9 +14,12 @@ import {
   PackageCheck,
   TrendingUp,
   ShieldCheck,
-  Zap
+  Zap,
+  Wallet,
+  Lock
 } from 'lucide-react';
 import { outstockSettleAndDeliverOrder } from '../../../utils/outstockApiClient';
+import { printCustomerWalletReceipt } from '../../../utils/printCustomerWalletReceipt';
 
 /**
  * OrderDeliverySettlementModal.jsx
@@ -35,10 +38,16 @@ export default function OrderDeliverySettlementModal({
   const totalAmount = parseFloat(order?.net_amount || order?.netAmount || order?.total_amount || 0);
   const paidAdvance = parseFloat(order?.paid_amount || order?.paidAmount || 0);
   const initialRemaining = Math.max(0, totalAmount - paidAdvance);
-  const refundDue = Math.max(0, paidAdvance - totalAmount);
+  const downPaymentExcess = Math.max(0, paidAdvance - totalAmount);
 
   const [collectedAmount, setCollectedAmount] = useState(String(initialRemaining > 0 ? initialRemaining : 0));
-  const [refundOption, setRefundOption] = useState('cash'); // 'cash' | 'wallet'
+  const [tenderedAmount, setTenderedAmount] = useState('');
+  const [refundOption, setRefundOption] = useState('cash'); // 'cash' | 'wallet' | 'ewallet' | 'instapay'
+  const [refundEmployeeCode, setRefundEmployeeCode] = useState('');
+  const [ewalletPhone, setEwalletPhone] = useState(order?.customer_phone || '');
+  const [instapayAccount, setInstapayAccount] = useState(order?.customer_phone || '');
+  const [printWalletReceiptAfter, setPrintWalletReceiptAfter] = useState(true);
+
   const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' | 'card' | 'wallet' | 'credit'
   const [cashierName, setCashierName] = useState(deliveredBy?.name || currentPharmacist || 'د. الصيدلي');
   const [receiptNumber, setReceiptNumber] = useState(`REC-${order?.order_number || Date.now().toString().slice(-6)}`);
@@ -84,12 +93,48 @@ export default function OrderDeliverySettlementModal({
   const currentCollectNum = Math.max(0, parseFloat(collectedAmount) || 0);
   const calculatedRemainingAfter = Math.max(0, totalAmount - (paidAdvance + currentCollectNum));
 
+  // احتساب الباقي والفائض المستحق للعميل (سواء من فائض العربون أو من الكاش المسلم)
+  const tenderedNum = parseFloat(tenderedAmount || 0);
+  const tenderedExcess = (paymentMethod === 'cash' && tenderedNum > currentCollectNum) ? (tenderedNum - currentCollectNum) : 0;
+  const customerChangeDue = downPaymentExcess > 0 ? downPaymentExcess : tenderedExcess;
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isSubmitting) return;
 
+    const finalRefundCode = (deliveredBy?.code || refundEmployeeCode || '').trim();
+
+    // التحقق من خيارات استرداد الباقي للعميل
+    if (customerChangeDue > 0) {
+      if (refundOption === 'wallet' && !finalRefundCode) {
+        showToast('⚠️ يرجى إدخال كود الموظف المشفر لتوثيق إيداع الباقي في محفظة العميل 🔒');
+        return;
+      }
+      if (refundOption === 'ewallet' && !ewalletPhone.trim()) {
+        showToast('⚠️ يرجى إدخال رقم المحفظة الإلكترونية المحول إليها الباقي');
+        return;
+      }
+      if (refundOption === 'instapay' && !instapayAccount.trim()) {
+        showToast('⚠️ يرجى إدخال معرف إنستاباي أو رقم الهاتف المحول إليه الباقي');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
+      const refundAccountDesc = refundOption === 'ewallet' ? ewalletPhone : (refundOption === 'instapay' ? instapayAccount : null);
+      const refundNotesSuffix = customerChangeDue > 0
+        ? `[رد باقي: ${customerChangeDue.toFixed(2)} ج.م عبر ${
+            refundOption === 'cash'
+              ? 'كاش نقدي'
+              : refundOption === 'wallet'
+              ? 'إيداع بالمحفظة'
+              : refundOption === 'ewallet'
+              ? `محفظة إلكترونية (${ewalletPhone})`
+              : `إنستاباي (${instapayAccount})`
+          }]`
+        : '';
+
       const res = await outstockSettleAndDeliverOrder(order.id, {
         collectedAmount: currentCollectNum,
         paymentMethod,
@@ -97,14 +142,40 @@ export default function OrderDeliverySettlementModal({
         deliveredByCode: deliveredBy?.code || null,
         deliveredByName: deliveredBy?.name || cashierName,
         receiptNumber,
-        refundToWallet: refundOption === 'wallet',
-        notes: notes.trim() || `تسليم طلب العميل ${order.customer_name || ''}`
+        refundToWallet: refundOption === 'wallet' ? customerChangeDue : 0,
+        refundMethod: refundOption,
+        refundAccount: refundAccountDesc,
+        refundEmployeeCode: finalRefundCode || null,
+        notes: [notes.trim() || `تسليم طلب العميل ${order.customer_name || ''}`, refundNotesSuffix].filter(Boolean).join(' - ')
       });
 
       if (res?.success) {
         showToast(
           `✅ تم تسليم الطلب بنجاح! تم تحصيل ${currentCollectNum.toFixed(2)} ج.م وإدراجها في مبيعات الفرع اليومية.`
         );
+
+        // طباعة إيصال المحفظة الحراري تلقائياً إذا اختار إيداع الباقي بالمحفظة
+        if (customerChangeDue > 0 && refundOption === 'wallet' && printWalletReceiptAfter) {
+          try {
+            printCustomerWalletReceipt({
+              receiptNumber: `WAL-${order.order_number || Date.now().toString().slice(-6)}`,
+              customer: {
+                id: order.customer_id,
+                full_name: order.customer_name,
+                whatsapp_phone: order.customer_phone
+              },
+              transactionType: 'deposit',
+              amount: customerChangeDue,
+              paymentMethod: 'return_settlement',
+              employeeCode: finalRefundCode || 'PHARMACIST',
+              employeeName: deliveredBy?.name || cashierName,
+              branchName: branch?.name || 'صيدلية الفرع',
+              notes: `إيداع باقي حساب تسليم طلب #${order.order_number || ''}`
+            });
+          } catch (pErr) {
+            console.warn('Wallet receipt print error:', pErr);
+          }
+        }
 
         if (onDeliveredSuccess) {
           onDeliveredSuccess({
@@ -457,65 +528,18 @@ export default function OrderDeliverySettlementModal({
 
               <div style={{ background: '#ffffff', padding: '10px', borderRadius: '8px', border: '1px solid #d1fae5' }}>
                 <span style={{ fontSize: '11.5px', color: '#b91c1c', display: 'block', fontWeight: '600' }}>
-                  {refundDue > 0 ? 'فائض مسترد للعميل' : 'المتبقي المطلوب'}
+                  {customerChangeDue > 0 ? 'باقي / فائض مستحق للعميل' : 'المتبقي المطلوب'}
                 </span>
-                <strong className="tabular-nums" style={{ fontSize: '16px', color: refundDue > 0 ? '#059669' : '#dc2626', fontFamily: 'var(--outstock-font-mono)' }}>
-                  {refundDue > 0 ? `+${refundDue.toFixed(2)}` : initialRemaining.toFixed(2)} <span style={{ fontSize: '11px' }}>ج.م</span>
+                <strong className="tabular-nums" style={{ fontSize: '16px', color: customerChangeDue > 0 ? '#059669' : '#dc2626', fontFamily: 'var(--outstock-font-mono)' }}>
+                  {customerChangeDue > 0 ? `+${customerChangeDue.toFixed(2)}` : initialRemaining.toFixed(2)} <span style={{ fontSize: '11px' }}>ج.م</span>
                 </strong>
               </div>
             </div>
 
-            {/* تنبيه وخيارات استرداد الفائض للعميل (كاش أو محفظة) */}
-            {refundDue > 0 && (
-              <div
-                style={{
-                  background: '#fffbeb',
-                  border: '1.5px solid #f59e0b',
-                  borderRadius: '10px',
-                  padding: '12px 14px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <AlertCircle size={18} color="#b45309" />
-                  <span style={{ fontSize: '13px', fontWeight: '800', color: '#92400e' }}>
-                    يوجد فارغ مستحق استرداده للعميل بقيمة ({refundDue.toFixed(2)} ج.م)
-                  </span>
-                </div>
-                <div style={{ fontSize: '12px', color: '#78350f' }}>
-                  العربون المدفوع سابقاً أكبر من إجمالي الأصناف المسلمة. يرجى اختيار طريقة التسوية:
-                </div>
-                <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: '700', cursor: 'pointer', color: '#78350f' }}>
-                    <input
-                      type="radio"
-                      name="settlementRefundChoice"
-                      value="cash"
-                      checked={refundOption === 'cash'}
-                      onChange={() => setRefundOption('cash')}
-                    />
-                    <span>💵 إرجاع نقدي للعميل كاش من الدرج</span>
-                  </label>
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: '800', cursor: 'pointer', color: '#047857' }}>
-                    <input
-                      type="radio"
-                      name="settlementRefundChoice"
-                      value="wallet"
-                      checked={refundOption === 'wallet'}
-                      onChange={() => setRefundOption('wallet')}
-                    />
-                    <span>👛 إيداع في محفظة العميل كرصيد دائم</span>
-                  </label>
-                </div>
-              </div>
-            )}
-
             {/* حقل إدخال المبلغ المحصل الآن */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
               <label style={{ fontSize: '13px', fontWeight: '700', color: '#065f46' }}>
-                المبلغ المستلم والمحصل الآن من العميل (ج.م):
+                المبلغ المطلوب تحصيله الآن لتسوية الطلب (ج.م):
               </label>
               <div style={{ position: 'relative' }}>
                 <input
@@ -546,6 +570,195 @@ export default function OrderDeliverySettlementModal({
                 </span>
               )}
             </div>
+
+            {/* حقل المبلغ المدفوع كاش لاحتساب الباقي تلقائياً */}
+            {paymentMethod === 'cash' && downPaymentExcess <= 0 && currentCollectNum > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569' }}>
+                  المبلغ المستلم كاش من يد العميل (لحساب الباقي تلقائياً):
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder={`أدخل المبلغ المستلم (مثال: ${(Math.ceil(currentCollectNum / 50) * 50 || currentCollectNum + 50)})`}
+                  value={tenderedAmount}
+                  onChange={(e) => setTenderedAmount(e.target.value)}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #94a3b8',
+                    fontSize: '14px',
+                    fontWeight: '700',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+            )}
+
+            {/* تنبيه وخيارات استرداد الباقي أو الفائض للعميل (4 خيارات معتمدة) */}
+            {customerChangeDue > 0 && (
+              <div
+                style={{
+                  background: '#f0fdf4',
+                  border: '1.5px solid #86efac',
+                  borderRadius: '12px',
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #bbf7d0', paddingBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <AlertCircle size={20} color="#15803d" />
+                    <div>
+                      <span style={{ fontSize: '14px', fontWeight: '800', color: '#166534', display: 'block' }}>
+                        يوجد باقي / فائض مستحق للعميل بقيمة ({customerChangeDue.toFixed(2)} ج.م)
+                      </span>
+                      <span style={{ fontSize: '11.5px', color: '#15803d' }}>
+                        يرجى تحديد الطريقة المعتمدة لرد الباقي للعميل:
+                      </span>
+                    </div>
+                  </div>
+                  <span style={{ background: '#dcfce7', color: '#15803d', padding: '3px 10px', borderRadius: '8px', fontWeight: '900', fontSize: '13px' }}>
+                    {customerChangeDue.toFixed(2)} ج.م
+                  </span>
+                </div>
+
+                {/* شبكة الخيارات الأربعة لرد الباقي */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
+                  {[
+                    { id: 'cash', label: 'كاش نقدي', desc: 'من درج الكاشير', icon: DollarSign, color: '#16a34a' },
+                    { id: 'wallet', label: 'إيداع بالمحفظة', desc: 'رصيد دائم موثق', icon: Wallet, color: '#047857' },
+                    { id: 'ewallet', label: 'محفظة إلكترونية', desc: 'Vodafone / Orange', icon: Smartphone, color: '#7c3aed' },
+                    { id: 'instapay', label: 'إنستاباي', desc: 'InstaPay فوري', icon: Zap, color: '#d97706' }
+                  ].map((opt) => {
+                    const isSel = refundOption === opt.id;
+                    const Icon = opt.icon;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setRefundOption(opt.id)}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '10px 8px',
+                          borderRadius: '10px',
+                          border: isSel ? `2px solid ${opt.color}` : '1px solid #cbd5e1',
+                          background: isSel ? '#ffffff' : '#f8fafc',
+                          boxShadow: isSel ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <Icon size={18} color={isSel ? opt.color : '#64748b'} />
+                        <span style={{ fontSize: '12px', fontWeight: isSel ? '800' : '600', color: isSel ? opt.color : '#334155' }}>
+                          {opt.label}
+                        </span>
+                        <span style={{ fontSize: '10px', color: '#94a3b8' }}>
+                          {opt.desc}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* تفاصيل إضافية عند اختيار إيداع المحفظة */}
+                {refundOption === 'wallet' && (
+                  <div style={{ background: '#ecfdf5', padding: '10px 12px', borderRadius: '8px', border: '1px solid #a7f3d0', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {!deliveredBy?.code && (
+                      <div>
+                        <label style={{ fontSize: '12px', fontWeight: '700', color: '#065f46', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+                          <Lock size={12} />
+                          <span>كود الموظف المشفر (مطلوب لتوثيق الإيداع):</span>
+                        </label>
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          placeholder="أدخل كود الموظف السري"
+                          value={refundEmployeeCode}
+                          onChange={(e) => setRefundEmployeeCode(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            border: '1px solid #059669',
+                            fontSize: '13px',
+                            letterSpacing: '2px',
+                            outline: 'none',
+                            boxSizing: 'border-box'
+                          }}
+                          required
+                        />
+                      </div>
+                    )}
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#047857', fontWeight: '700', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={printWalletReceiptAfter}
+                        onChange={(e) => setPrintWalletReceiptAfter(e.target.checked)}
+                      />
+                      <span>🖨️ طباعة إيصال إيداع حراري للمحفظة (80mm / 58mm) تلقائياً</span>
+                    </label>
+                  </div>
+                )}
+
+                {/* تفاصيل إضافية عند اختيار المحفظة الإلكترونية */}
+                {refundOption === 'ewallet' && (
+                  <div style={{ background: '#f5f3ff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #ddd6fe' }}>
+                    <label style={{ fontSize: '12px', fontWeight: '700', color: '#6d28d9', display: 'block', marginBottom: '4px' }}>
+                      رقم المحفظة الإلكترونية المحول إليها (فودافون كاش / أورنج / اتصالات / وي):
+                    </label>
+                    <input
+                      type="tel"
+                      placeholder="010xxxxxxxx"
+                      value={ewalletPhone}
+                      onChange={(e) => setEwalletPhone(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid #8b5cf6',
+                        fontSize: '13px',
+                        fontWeight: '700',
+                        outline: 'none',
+                        boxSizing: 'border-box'
+                      }}
+                      required
+                    />
+                  </div>
+                )}
+
+                {/* تفاصيل إضافية عند اختيار إنستاباي */}
+                {refundOption === 'instapay' && (
+                  <div style={{ background: '#fffbeb', padding: '10px 12px', borderRadius: '8px', border: '1px solid #fde68a' }}>
+                    <label style={{ fontSize: '12px', fontWeight: '700', color: '#b45309', display: 'block', marginBottom: '4px' }}>
+                      معرف إنستاباي (IPA) أو رقم الهاتف المسجل بـ InstaPay:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="username@instapay أو 01xxxxxxxxx"
+                      value={instapayAccount}
+                      onChange={(e) => setInstapayAccount(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid #f59e0b',
+                        fontSize: '13px',
+                        fontWeight: '700',
+                        outline: 'none',
+                        boxSizing: 'border-box'
+                      }}
+                      required
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* طريقة الدفع والتحصيل */}

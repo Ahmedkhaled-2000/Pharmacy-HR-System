@@ -1203,17 +1203,20 @@ export async function initEdaMedicationTables(db) {
           is_table_drug BOOLEAN NOT NULL DEFAULT false,
           is_refrigerated BOOLEAN NOT NULL DEFAULT false,
           gtin_barcode VARCHAR(50) NULL,
+          item_type VARCHAR(50) NOT NULL DEFAULT 'medication',
           market_status VARCHAR(50) NOT NULL DEFAULT 'available',
           search_normalized TEXT NULL,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
           created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
+      ALTER TABLE public.outstock_medications ADD COLUMN IF NOT EXISTS item_type VARCHAR(50) DEFAULT 'medication';
       CREATE INDEX IF NOT EXISTS idx_outstock_med_ar ON public.outstock_medications (trade_name_ar);
       CREATE INDEX IF NOT EXISTS idx_outstock_med_en ON public.outstock_medications (trade_name_en);
       CREATE INDEX IF NOT EXISTS idx_outstock_med_generic ON public.outstock_medications (generic_name);
       CREATE INDEX IF NOT EXISTS idx_outstock_med_search ON public.outstock_medications (search_normalized);
       CREATE INDEX IF NOT EXISTS idx_outstock_med_barcode ON public.outstock_medications (gtin_barcode);
+      CREATE INDEX IF NOT EXISTS idx_outstock_med_item_type ON public.outstock_medications (item_type);
 
       -- 2. جدول سجل تغيرات الأسعار الرسمية (EDA Price Revision History)
       CREATE TABLE IF NOT EXISTS public.outstock_price_audit_logs (
@@ -2115,19 +2118,21 @@ export async function addNewMedication(db, medData, userRole = 'branch', usernam
     `${nameEn} ${nameAr} ${genericName} ${invoiceDisplayName || ''} ${manufacturer} ${barcode || ''} ${dosageForm}`
   );
 
+  const itemType = (medData.item_type || medData.itemType || (category.includes('تجميل') ? 'cosmetics' : 'medication')).trim();
+
   await db.query(`
     INSERT INTO public.outstock_medications (
       id, eda_reg_no, trade_name_en, trade_name_ar, generic_name, dosage_form,
       strength, pack_size, unit_name, public_price, unit_price, manufacturer,
-      category, is_table_drug, is_refrigerated, gtin_barcode, market_status,
+      category, item_type, is_table_drug, is_refrigerated, gtin_barcode, market_status,
       search_normalized, invoice_display_name, active_ingredients_list, updated_at, created_at
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'available', $17, $18, $19, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'available', $18, $19, $20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
     )
   `, [
     newId, edaRegNo, nameEn, nameAr, genericName, dosageForm,
     medData.strength || '', packSize, unitName, publicPrice, unitPrice,
-    manufacturer, category, isTableDrug, isRefrigerated, barcode, normalized,
+    manufacturer, category, itemType, isTableDrug, isRefrigerated, barcode, normalized,
     invoiceDisplayName, activeIngredientsList ? JSON.stringify(activeIngredientsList) : null
   ]);
 

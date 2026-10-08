@@ -356,7 +356,11 @@ export async function initOutstockTables(db) {
           created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
+      ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS item_type VARCHAR(50) DEFAULT 'medication';
       CREATE INDEX IF NOT EXISTS idx_outstock_med_req_branch ON public.outstock_medication_requests (branch_id, status);
+      CREATE INDEX IF NOT EXISTS idx_outstock_med_req_item_type ON public.outstock_medication_requests (item_type);
+      ALTER TABLE public.outstock_medications ADD COLUMN IF NOT EXISTS item_type VARCHAR(50) DEFAULT 'medication';
+      CREATE INDEX IF NOT EXISTS idx_outstock_med_item_type ON public.outstock_medications (item_type);
 
       -- 18. جدول إعدادات وجلسة بوابة i'SUPPLY المستقلة
       CREATE TABLE IF NOT EXISTS public.outstock_isupply_config (
@@ -626,6 +630,57 @@ export async function initOutstockTables(db) {
         ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS procurement_responder_name VARCHAR(128);
         ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS owner_reply TEXT;
         ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS owner_replied_at TIMESTAMPTZ;
+
+        -- 1. ترقية جدول العملاء لدعم الخصم التلقائي المشروط
+        ALTER TABLE public.outstock_customers ADD COLUMN IF NOT EXISTS discount_type VARCHAR(20) DEFAULT 'none';
+        ALTER TABLE public.outstock_customers ADD COLUMN IF NOT EXISTS discount_value NUMERIC(10, 2) DEFAULT 0.00;
+        ALTER TABLE public.outstock_customers ADD COLUMN IF NOT EXISTS min_order_amount NUMERIC(10, 2) DEFAULT 0.00;
+        ALTER TABLE public.outstock_customers ADD COLUMN IF NOT EXISTS discount_scope VARCHAR(50) DEFAULT 'all';
+        ALTER TABLE public.outstock_customers ADD COLUMN IF NOT EXISTS eligible_items JSONB NULL;
+
+        -- 2. ترقية جدول حركات المحفظة لدعم التوثيق والأمان والوسائل
+        ALTER TABLE public.outstock_customer_wallet_transactions ADD COLUMN IF NOT EXISTS branch_id VARCHAR(64) NULL;
+        ALTER TABLE public.outstock_customer_wallet_transactions ADD COLUMN IF NOT EXISTS branch_name VARCHAR(150) NULL;
+        ALTER TABLE public.outstock_customer_wallet_transactions ADD COLUMN IF NOT EXISTS employee_code VARCHAR(50) NOT NULL DEFAULT 'SYSTEM';
+        ALTER TABLE public.outstock_customer_wallet_transactions ADD COLUMN IF NOT EXISTS employee_name VARCHAR(150) NULL;
+        ALTER TABLE public.outstock_customer_wallet_transactions ADD COLUMN IF NOT EXISTS verification_method VARCHAR(30) DEFAULT 'employee_code';
+        ALTER TABLE public.outstock_customer_wallet_transactions ADD COLUMN IF NOT EXISTS otp_code VARCHAR(10) NULL;
+        ALTER TABLE public.outstock_customer_wallet_transactions ADD COLUMN IF NOT EXISTS qr_token VARCHAR(128) NULL;
+        ALTER TABLE public.outstock_customer_wallet_transactions ADD COLUMN IF NOT EXISTS receipt_number VARCHAR(64) NULL;
+        ALTER TABLE public.outstock_customer_wallet_transactions ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'cash';
+
+        -- 3. إنشاء جدول مرتجعات طلبات العملاء (Customer Order Returns)
+        CREATE TABLE IF NOT EXISTS public.outstock_order_returns (
+          id VARCHAR(64) PRIMARY KEY,
+          order_id VARCHAR(64) NOT NULL REFERENCES public.outstock_orders(id) ON DELETE CASCADE,
+          order_number VARCHAR(50) NOT NULL,
+          branch_id VARCHAR(64) NOT NULL,
+          branch_name VARCHAR(150),
+          customer_id VARCHAR(64) NULL REFERENCES public.outstock_customers(id) ON DELETE SET NULL,
+          customer_name VARCHAR(150),
+          customer_phone VARCHAR(50),
+          return_type VARCHAR(30) NOT NULL,
+          items JSONB NOT NULL,
+          total_refund_amount NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+          down_payment_refund NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+          general_return_reason TEXT NOT NULL,
+          refund_destination VARCHAR(30) DEFAULT 'wallet',
+          created_by_code VARCHAR(50) NOT NULL,
+          created_by_name VARCHAR(150) NOT NULL,
+          status VARCHAR(30) NOT NULL DEFAULT 'pending_procurement',
+          procurement_replied_at TIMESTAMPTZ NULL,
+          procurement_replied_by VARCHAR(150) NULL,
+          procurement_rejection_reason TEXT NULL,
+          wallet_credited BOOLEAN DEFAULT false,
+          wallet_transaction_id VARCHAR(64) NULL,
+          whatsapp_owner_notified_at TIMESTAMPTZ NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_outstock_returns_branch ON public.outstock_order_returns(branch_id, status);
+        CREATE INDEX IF NOT EXISTS idx_outstock_returns_order ON public.outstock_order_returns(order_id);
+        CREATE INDEX IF NOT EXISTS idx_outstock_returns_status ON public.outstock_order_returns(status);
       `);
     } catch (migErr) {
       console.warn('⚠️ [OutStock Schema Migrations Warning]:', migErr.message);
@@ -1858,10 +1913,13 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     }
   });
 
-  // إضافة أو تعديل عميل مع فرض فرادة رقم الواتساب وحفظ المنطقة والملاحظات
+  // إضافة أو تعديل عميل مع فرض فرادة رقم الواتساب وحفظ المنطقة والملاحظات وشروط الخصم
   app.post('/api/outstock/customers', authMiddleware, async (req, res) => {
     try {
-      const { id, fullName, whatsappPhone, landlinePhone, address, branchId, notes, zone } = req.body || {};
+      const {
+        id, fullName, whatsappPhone, landlinePhone, address, branchId, notes, zone,
+        discountType, discountValue, minOrderAmount, discountScope, eligibleItems
+      } = req.body || {};
       if (!fullName || !whatsappPhone) {
         return res.status(400).json({ success: false, error: 'اسم العميل ورقم الواتساب مطلوبان' });
       }
@@ -1889,8 +1947,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const custCode = `CUST-${cleanPhone.slice(-4)}-${Math.floor(100 + Math.random() * 900)}`;
 
       const insertRes = await db.query(`
-        INSERT INTO public.outstock_customers (id, customer_code, full_name, whatsapp_phone, landline_phone, address, primary_branch_id, notes, zone, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+        INSERT INTO public.outstock_customers (
+          id, customer_code, full_name, whatsapp_phone, landline_phone, address, primary_branch_id, notes, zone,
+          discount_type, discount_value, min_order_amount, discount_scope, eligible_items, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
         ON CONFLICT (id) DO UPDATE SET
           full_name = EXCLUDED.full_name,
           whatsapp_phone = EXCLUDED.whatsapp_phone,
@@ -1898,9 +1959,18 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           address = EXCLUDED.address,
           notes = EXCLUDED.notes,
           zone = EXCLUDED.zone,
+          discount_type = COALESCE(EXCLUDED.discount_type, public.outstock_customers.discount_type),
+          discount_value = COALESCE(EXCLUDED.discount_value, public.outstock_customers.discount_value),
+          min_order_amount = COALESCE(EXCLUDED.min_order_amount, public.outstock_customers.min_order_amount),
+          discount_scope = COALESCE(EXCLUDED.discount_scope, public.outstock_customers.discount_scope),
+          eligible_items = COALESCE(EXCLUDED.eligible_items, public.outstock_customers.eligible_items),
           updated_at = CURRENT_TIMESTAMP
         RETURNING *
-      `, [targetId, custCode, fullName, cleanPhone, landlinePhone || null, address || null, branchId || 'main', notes || null, zone || null]);
+      `, [
+        targetId, custCode, fullName, cleanPhone, landlinePhone || null, address || null, branchId || 'main', notes || null, zone || null,
+        discountType || 'none', parseFloat(discountValue || 0), parseFloat(minOrderAmount || 0), discountScope || 'all',
+        eligibleItems ? JSON.stringify(eligibleItems) : null
+      ]);
 
       // ⚡ بث فوري لتحديث بيانات العملاء
       broadcastOutstock('outstock:customer_updated', { customer: insertRes.rows[0], branchId });
@@ -2657,13 +2727,29 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           `, [refundToWallet, order.customer_id]);
 
           const txId = `wtx_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+          const empCode = req.body.refundEmployeeCode || deliveredByCode || 'SYSTEM';
           await db.query(`
             INSERT INTO public.outstock_customer_wallet_transactions (
-              id, customer_id, order_id, transaction_type, amount, notes, created_by_code, created_by_name
-            ) VALUES ($1, $2, $3, 'refund_to_wallet', $4, $5, $6, $7)
-          `, [txId, order.customer_id, orderId, refundToWallet, `إيداع باقي حساب طلب #${order.order_number}`, deliveredByCode || null, cashier]);
+              id, customer_id, order_id, transaction_type, amount, notes,
+              employee_code, employee_name, branch_id, payment_method, verification_method, created_at
+            ) VALUES ($1, $2, $3, 'deposit', $4, $5, $6, $7, $8, 'return_settlement', 'employee_code', CURRENT_TIMESTAMP)
+          `, [
+            txId,
+            order.customer_id,
+            orderId,
+            refundToWallet,
+            `إيداع باقي حساب تسليم طلب #${order.order_number || ''}`,
+            empCode,
+            cashier,
+            order.branch_id
+          ]);
 
-          broadcastOutstock('outstock:customer_wallet_updated', { customerId: order.customer_id });
+          broadcastOutstock('outstock:customer_wallet_updated', {
+            customerId: order.customer_id,
+            transactionId: txId,
+            amount: refundToWallet,
+            type: 'deposit'
+          });
         } catch (wErr) {
           console.warn('[Wallet Refund Warning]:', wErr.message);
         }
@@ -3538,40 +3624,199 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // محفظة العميل: شحن / خصم / تسوية رصيد
+  // محفظة العميل: شحن / خصم / تسوية رصيد مع التوثيق الذري والتحقق المشدد
   // ───────────────────────────────────────────────────────────────────────────
-  app.post('/api/outstock/customers/:id/wallet/adjust', authMiddleware, async (req, res) => {
+  const activeWalletOtps = new Map(); // customerId -> { otp, qrToken, expiresAt, phone }
+
+  app.post('/api/outstock/customers/:id/wallet/request-otp', authMiddleware, async (req, res) => {
     try {
       const customerId = req.params.id;
-      const { amount, type = 'deposit', notes = '', employeeCode = '', employeeName = '' } = req.body || {};
-      const delta = Math.abs(parseFloat(amount || 0));
-      if (delta <= 0) return res.status(400).json({ success: false, error: 'يرجى إدخال مبلغ صالح للمحفظة' });
-
-      const custRes = await db.query('SELECT * FROM public.outstock_customers WHERE id = $1', [customerId]);
+      const custRes = await db.query('SELECT id, full_name, whatsapp_phone FROM public.outstock_customers WHERE id = $1', [customerId]);
       if (custRes.rows.length === 0) return res.status(404).json({ success: false, error: 'العميل غير موجود' });
+      const cust = custRes.rows[0];
+      const phone = cust.whatsapp_phone;
+
+      const otp = Math.floor(1000 + Math.random() * 9000).toString();
+      const qrToken = `SEC-QR-${Date.now()}-${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
+      const expiresAt = Date.now() + 10 * 60 * 1000;
+
+      activeWalletOtps.set(customerId, { otp, qrToken, expiresAt, phone });
+
+      try {
+        const otpMsg = `🔐 *رمز الأمان لعملية السحب من محفظتك الدوائية:*\n\nكود التحقق السريع: *${otp}*\nرمز الـ QR المشفر: *${qrToken}*\n\nيرجى إعطاء الكود للصيدلي أو إظهار شاشة هاتفك لمسحها بالباركود لتأكيد صرف المبلغ بأمان.\nهذا الرمز صالح لمدة 10 دقائق فقط.`;
+        if (typeof sendInternalWhatsAppAlert === 'function') {
+          await sendInternalWhatsAppAlert(phone, otpMsg);
+        }
+      } catch (waErr) {
+        console.warn('[Wallet OTP WA Warn]:', waErr.message);
+      }
+
+      res.json({
+        success: true,
+        message: 'تم إرسال رمز الأمان OTP لرقم واتساب العميل بنجاح',
+        qrToken,
+        expiresInSeconds: 600
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/outstock/customers/:id/wallet/verify-otp', authMiddleware, async (req, res) => {
+    try {
+      const customerId = req.params.id;
+      const { otp, qrToken } = req.body || {};
+      const record = activeWalletOtps.get(customerId);
+      if (!record || record.expiresAt < Date.now()) {
+        return res.status(400).json({ success: false, error: 'انتهت صلاحية رمز الأمان أو لم يتم طلبه بعد، يرجى طلب رمز جديد' });
+      }
+
+      const isOtpValid = otp && String(otp).trim() === record.otp;
+      const isQrValid = qrToken && String(qrToken).trim() === record.qrToken;
+
+      if (!isOtpValid && !isQrValid) {
+        return res.status(400).json({ success: false, error: 'رمز التحقق OTP أو كود الـ QR غير صحيح!' });
+      }
+
+      record.verified = true;
+      res.json({ success: true, verified: true, message: 'تم التحقق من هوية العميل بنجاح' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/outstock/customers/:id/wallet/adjust', authMiddleware, async (req, res) => {
+    const client = await db.connect();
+    try {
+      const customerId = req.params.id;
+      const {
+        amount,
+        type = 'deposit',
+        paymentMethod = 'cash',
+        notes = '',
+        employeeCode = '',
+        employeeName = '',
+        branchId = null,
+        branchName = null,
+        verificationMethod = 'employee_code',
+        otpCode = null,
+        qrToken = null,
+        receiptNumber = null
+      } = req.body || {};
+
+      const delta = Math.abs(parseFloat(amount || 0));
+      if (delta <= 0) {
+        client.release();
+        return res.status(400).json({ success: false, error: 'يرجى إدخال مبلغ صالح للمحفظة' });
+      }
+
+      if (!employeeCode || !String(employeeCode).trim()) {
+        client.release();
+        return res.status(400).json({ success: false, error: '⚠️ إدخال كود الموظف إلزامي لتوثيق وتأكيد المعاملة المالية' });
+      }
+
+      const isWithdrawal = type === 'withdraw' || type === 'withdrawal' || type === 'charge';
+      const isDeposit = type === 'deposit' || type === 'refund_to_wallet';
+
+      if (!isWithdrawal && !isDeposit) {
+        client.release();
+        return res.status(400).json({ success: false, error: 'نوع المعاملة غير صالح' });
+      }
+
+      if (isWithdrawal && (verificationMethod === 'otp' || verificationMethod === 'qr_scanner')) {
+        const record = activeWalletOtps.get(customerId);
+        if (!record || record.expiresAt < Date.now()) {
+          client.release();
+          return res.status(400).json({ success: false, error: 'انتهت صلاحية رمز الأمان، يرجى طلب كود جديد' });
+        }
+        if (verificationMethod === 'otp' && (!otpCode || String(otpCode).trim() !== record.otp)) {
+          client.release();
+          return res.status(400).json({ success: false, error: 'كود الـ OTP المدخل غير مطابق للكود المرسل للعميل' });
+        }
+        if (verificationMethod === 'qr_scanner' && (!qrToken || String(qrToken).trim() !== record.qrToken)) {
+          client.release();
+          return res.status(400).json({ success: false, error: 'رمز الـ QR الممسوح غير صالح' });
+        }
+        activeWalletOtps.delete(customerId);
+      }
+
+      await client.query('BEGIN');
+
+      const custRes = await client.query('SELECT * FROM public.outstock_customers WHERE id = $1 FOR UPDATE', [customerId]);
+      if (custRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(404).json({ success: false, error: 'العميل غير موجود' });
+      }
       const cust = custRes.rows[0];
       const prevBal = parseFloat(cust.wallet_balance || 0);
 
       let newBal = prevBal;
-      if (type === 'deposit' || type === 'refund_to_wallet') {
+      if (isDeposit) {
         newBal = prevBal + delta;
-      } else if (type === 'withdrawal' || type === 'charge') {
-        if (delta > prevBal) return res.status(400).json({ success: false, error: `الرصيد المتاح (${prevBal.toFixed(2)} ج.م) لا يكفي لخصم ${delta.toFixed(2)} ج.م` });
+      } else {
+        if (delta > prevBal) {
+          await client.query('ROLLBACK');
+          client.release();
+          return res.status(400).json({ success: false, error: `الرصيد المتاح (${prevBal.toFixed(2)} ج.م) لا يكفي لخصم ${delta.toFixed(2)} ج.م` });
+        }
         newBal = Math.max(0, prevBal - delta);
       }
 
-      await db.query('UPDATE public.outstock_customers SET wallet_balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newBal, customerId]);
+      await client.query('UPDATE public.outstock_customers SET wallet_balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newBal, customerId]);
 
       const txId = `wtx_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-      await db.query(`
-        INSERT INTO public.outstock_customer_wallet_transactions (
-          id, customer_id, transaction_type, amount, previous_balance, new_balance, notes, created_by_code, created_by_name
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      `, [txId, customerId, type, delta, prevBal, newBal, notes || null, employeeCode || null, employeeName || req.outstockUser?.username || 'المسؤول']);
+      const genReceiptNum = receiptNumber || `RCP-WAL-${Date.now().toString().slice(-6)}`;
+      const effBranchId = branchId || req.outstockUser?.branchId || cust.primary_branch_id || 'main';
+      const effBranchName = branchName || req.outstockUser?.branchData?.name || 'الفرع الرئيسي';
+      const effEmpName = employeeName || req.outstockUser?.fullName || req.outstockUser?.username || 'صيدلي الفرع';
 
-      broadcastOutstock('outstock:customer_wallet_updated', { customerId, newBalance: newBal });
-      res.json({ success: true, message: 'تم تحديث رصيد محفظة العميل بنجاح', newBalance: newBal });
+      await client.query(`
+        INSERT INTO public.outstock_customer_wallet_transactions (
+          id, customer_id, transaction_type, amount, previous_balance, new_balance,
+          notes, created_by_code, created_by_name, branch_id, branch_name,
+          verification_method, otp_code, qr_token, receipt_number, payment_method, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, CURRENT_TIMESTAMP)
+      `, [
+        txId, customerId, type, delta, prevBal, newBal,
+        notes || (isDeposit ? 'شحن رصيد نقدي' : 'سحب / صرف من الرصيد'),
+        employeeCode.trim(), effEmpName, effBranchId, effBranchName,
+        verificationMethod || 'employee_code', otpCode || null, qrToken || null,
+        genReceiptNum, paymentMethod || 'cash'
+      ]);
+
+      await client.query('COMMIT');
+      client.release();
+
+      broadcastOutstock('outstock:customer_wallet_updated', {
+        customerId,
+        newBalance: newBal,
+        transactionId: txId,
+        receiptNumber: genReceiptNum
+      });
+
+      try {
+        const cleanPhone = cust.whatsapp_phone;
+        if (cleanPhone) {
+          const actionText = isDeposit ? 'تم إيداع مبلغ' : 'تم خصم / سحب مبلغ';
+          const waText = `🧾 *إشعار محفظة العميل - ${effBranchName}*\n\nأهلاً بك أ/ ${cust.full_name}\n${actionText}: *${delta.toFixed(2)} ج.م*\nوسيلة المعاملة: *${paymentMethod || 'نقدي'}*\nالرصيد السابق: ${prevBal.toFixed(2)} ج.م\nالرصيد الحالي بالمحفظة: *${newBal.toFixed(2)} ج.م*\nرقم الإيصال: ${genReceiptNum}\nالموظف المسؤول: ${effEmpName}\n\nنسعد دائماً بخدمتكم وتوفير كافة احتياجاتكم!`;
+          if (typeof sendInternalWhatsAppAlert === 'function') {
+            sendInternalWhatsAppAlert(cleanPhone, waText).catch(() => {});
+          }
+        }
+      } catch (_) {}
+
+      res.json({
+        success: true,
+        message: `تم ${isDeposit ? 'إيداع' : 'خصم'} ${delta.toFixed(2)} ج.م بنجاح`,
+        newBalance: newBal,
+        walletBalance: newBal,
+        transactionId: txId,
+        receiptNumber: genReceiptNum
+      });
     } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      client.release();
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -3580,9 +3825,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     try {
       const customerId = req.params.id;
       const result = await db.query(`
-        SELECT * FROM public.outstock_customer_wallet_transactions
-        WHERE customer_id = $1
-        ORDER BY created_at DESC
+        SELECT t.*, c.full_name as customer_name, c.whatsapp_phone as customer_phone
+        FROM public.outstock_customer_wallet_transactions t
+        LEFT JOIN public.outstock_customers c ON t.customer_id = c.id
+        WHERE t.customer_id = $1
+        ORDER BY t.created_at DESC
         LIMIT 100
       `, [customerId]);
       res.json({ success: true, transactions: result.rows });
@@ -3590,6 +3837,356 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       res.status(500).json({ success: false, error: err.message });
     }
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 19. إدارة مرتجعات طلبات العملاء (Customer Order Returns Engine)
+  // ───────────────────────────────────────────────────────────────────────────
+  app.post('/api/outstock/orders/:id/returns', authMiddleware, async (req, res) => {
+    try {
+      const orderId = req.params.id;
+      const {
+        returnType = 'partial',
+        items = [],
+        totalRefundAmount = 0,
+        downPaymentRefund = 0,
+        generalReturnReason = '',
+        refundDestination = 'wallet',
+        employeeCode = '',
+        employeeName = ''
+      } = req.body || {};
+
+      if (!employeeCode || !String(employeeCode).trim()) {
+        return res.status(400).json({ success: false, error: '⚠️ إدخال كود الموظف إلزامي لتسجيل طلب المرتجع' });
+      }
+
+      if (!generalReturnReason || !String(generalReturnReason).trim()) {
+        return res.status(400).json({ success: false, error: '⚠️ يرجى تدوين سبب المرتجع الإجباري' });
+      }
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ success: false, error: '⚠️ يرجى تحديد صنف واحد على الأقل للمرتجع' });
+      }
+
+      const ordRes = await db.query(`
+        SELECT o.*, c.full_name as customer_name, c.whatsapp_phone as customer_phone, b.name as branch_name
+        FROM public.outstock_orders o
+        LEFT JOIN public.outstock_customers c ON o.customer_id = c.id
+        LEFT JOIN public.outstock_branches b ON o.branch_id = b.id
+        WHERE o.id = $1
+      `, [orderId]);
+
+      if (ordRes.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'الطلب غير موجود' });
+      }
+      const order = ordRes.rows[0];
+
+      const returnId = `ret_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const effBranchId = order.branch_id || req.outstockUser?.branchId || 'main';
+      const effBranchName = order.branch_name || req.outstockUser?.branchData?.name || 'الفرع';
+      const effEmpName = employeeName || req.outstockUser?.fullName || 'مسؤول الصيدلية';
+
+      await db.query(`
+        INSERT INTO public.outstock_order_returns (
+          id, order_id, order_number, branch_id, branch_name, customer_id, customer_name, customer_phone,
+          return_type, items, total_refund_amount, down_payment_refund, general_return_reason,
+          refund_destination, created_by_code, created_by_name, status, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14, $15, $16, 'pending_procurement', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `, [
+        returnId, orderId, order.order_number, effBranchId, effBranchName,
+        order.customer_id, order.customer_name, order.customer_phone,
+        returnType, JSON.stringify(items), parseFloat(totalRefundAmount || 0), parseFloat(downPaymentRefund || 0),
+        generalReturnReason.trim(), refundDestination, employeeCode.trim(), effEmpName
+      ]);
+
+      await db.query(`
+        UPDATE public.outstock_orders
+        SET has_complaint = true,
+            complaint_notes = COALESCE(complaint_notes || E'\n', '') || 'طلب مرتجع قيد انتظار المشتريات: ' || $1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+      `, [generalReturnReason.trim(), orderId]);
+
+      broadcastOutstock('outstock:order_return_created', {
+        returnId,
+        orderId,
+        orderNumber: order.order_number,
+        branchId: effBranchId,
+        branchName: effBranchName
+      });
+
+      res.json({
+        success: true,
+        message: '✅ تم إرسال طلب المرتجع لإدارة المشتريات بنجاح، رصيد الأصناف بعهدة الفرع حتى الاعتماد',
+        returnId
+      });
+    } catch (err) {
+      console.error('[Create Order Return Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/outstock/order-returns', authMiddleware, async (req, res) => {
+    try {
+      const { branchId, status, search, dateFrom, dateTo } = req.query || {};
+      let query = `
+        SELECT r.*, o.paid_amount as order_paid_amount, o.net_amount as order_net_amount
+        FROM public.outstock_order_returns r
+        LEFT JOIN public.outstock_orders o ON r.order_id = o.id
+        WHERE 1=1
+      `;
+      const params = [];
+
+      if (req.outstockUser.role === 'outstock_branch' || req.outstockUser.role === 'branch') {
+        params.push(req.outstockUser.branchId || req.outstockUser.id);
+        query += ` AND r.branch_id = $${params.length}`;
+      } else if (branchId && branchId !== 'all') {
+        params.push(branchId);
+        query += ` AND r.branch_id = $${params.length}`;
+      }
+
+      if (status && status !== 'all') {
+        params.push(status);
+        query += ` AND r.status = $${params.length}`;
+      }
+
+      if (search && String(search).trim()) {
+        params.push(`%${String(search).trim()}%`);
+        query += ` AND (r.order_number ILIKE $${params.length} OR r.customer_name ILIKE $${params.length} OR r.customer_phone ILIKE $${params.length})`;
+      }
+
+      if (dateFrom) {
+        params.push(dateFrom);
+        query += ` AND r.created_at >= $${params.length}::date`;
+      }
+      if (dateTo) {
+        params.push(dateTo);
+        query += ` AND r.created_at <= ($${params.length}::date + INTERVAL '1 day')`;
+      }
+
+      query += ' ORDER BY r.created_at DESC LIMIT 200';
+      const result = await db.query(query, params);
+      res.json({ success: true, returns: result.rows });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.put('/api/outstock/order-returns/:id/reply', authMiddleware, async (req, res) => {
+    try {
+      const isProcOrOwner = req.outstockUser.role === 'owner' ||
+                            req.outstockUser.role === 'procurement_manager' ||
+                            req.outstockUser.role === 'procurement_officer' ||
+                            req.outstockUser.role === 'procurement';
+      if (!isProcOrOwner) {
+        return res.status(403).json({ success: false, error: 'غير مصرح - اعتماد أو رفض المرتجعات متاح لإدارة المشتريات والمالك فقط' });
+      }
+
+      const returnId = req.params.id;
+      const { decision, rejectionReason = '' } = req.body || {};
+
+      if (!['approved', 'rejected'].includes(decision)) {
+        return res.status(400).json({ success: false, error: 'القرار يجب أن يكون إما اعتماد (approved) أو رفض (rejected)' });
+      }
+
+      const retRes = await db.query('SELECT * FROM public.outstock_order_returns WHERE id = $1', [returnId]);
+      if (retRes.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'سجل المرتجع غير موجود' });
+      }
+      const returnRecord = retRes.rows[0];
+
+      if (returnRecord.status !== 'pending_procurement') {
+        return res.status(400).json({ success: false, error: `تم الرد مسبقاً على هذا المرتجع بحالة: ${returnRecord.status}` });
+      }
+
+      const responderName = req.outstockUser.fullName || req.outstockUser.username || 'إدارة المشتريات';
+
+      if (decision === 'approved') {
+        let walletTxId = null;
+        let walletCredited = false;
+        const downPayment = parseFloat(returnRecord.down_payment_refund || 0);
+
+        if (downPayment > 0 && returnRecord.customer_id) {
+          try {
+            const custRes = await db.query('SELECT wallet_balance FROM public.outstock_customers WHERE id = $1', [returnRecord.customer_id]);
+            if (custRes.rows.length > 0) {
+              const prevB = parseFloat(custRes.rows[0].wallet_balance || 0);
+              const newB = prevB + downPayment;
+              await db.query('UPDATE public.outstock_customers SET wallet_balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newB, returnRecord.customer_id]);
+
+              walletTxId = `wtx_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+              await db.query(`
+                INSERT INTO public.outstock_customer_wallet_transactions (
+                  id, customer_id, order_id, transaction_type, amount, previous_balance, new_balance,
+                  notes, created_by_code, created_by_name, branch_id, branch_name,
+                  verification_method, payment_method, receipt_number, created_at
+                ) VALUES ($1, $2, $3, 'refund_to_wallet', $4, $5, $6, $7, 'SYSTEM', $8, $9, $10, 'employee_code', 'return_settlement', $11, CURRENT_TIMESTAMP)
+              `, [
+                walletTxId, returnRecord.customer_id, returnRecord.order_id, downPayment, prevB, newB,
+                `تسوية عربون مرتجع الطلب #${returnRecord.order_number}`,
+                responderName, returnRecord.branch_id, returnRecord.branch_name, `RET-RCP-${Date.now().toString().slice(-6)}`
+              ]);
+
+              walletCredited = true;
+              broadcastOutstock('outstock:customer_wallet_updated', { customerId: returnRecord.customer_id, newBalance: newB });
+            }
+          } catch (wErr) {
+            console.error('[Return Wallet Auto-Credit Error]:', wErr);
+          }
+        }
+
+        await db.query(`
+          UPDATE public.outstock_order_returns
+          SET status = 'approved',
+              procurement_replied_at = CURRENT_TIMESTAMP,
+              procurement_replied_by = $1,
+              wallet_credited = $2,
+              wallet_transaction_id = $3,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $4
+        `, [responderName, walletCredited, walletTxId, returnId]);
+
+        if (returnRecord.return_type === 'full') {
+          await db.query("UPDATE public.outstock_orders SET order_status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [returnRecord.order_id]);
+        }
+
+        broadcastOutstock('outstock:order_return_updated', {
+          returnId,
+          orderId: returnRecord.order_id,
+          status: 'approved',
+          walletCredited
+        });
+
+        res.json({
+          success: true,
+          message: `✅ تم اعتماد المرتجع بنجاح وتصحيح العهدة ${walletCredited ? 'وتم تحويل العربون لمحفظة العميل' : ''}`,
+          walletCredited
+        });
+      } else {
+        if (!rejectionReason || !String(rejectionReason).trim()) {
+          return res.status(400).json({ success: false, error: '⚠️ سبب الرفض إلزامي عند رفض المرتجع' });
+        }
+
+        await db.query(`
+          UPDATE public.outstock_order_returns
+          SET status = 'rejected',
+              procurement_replied_at = CURRENT_TIMESTAMP,
+              procurement_replied_by = $1,
+              procurement_rejection_reason = $2,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $3
+        `, [responderName, rejectionReason.trim(), returnId]);
+
+        try {
+          const ownerMsg = `🚨 *تنبيه سيادي - رفض طلب مرتجع عميل*\n\nالطلب: *${returnRecord.order_number}*\nالفرع: *${returnRecord.branch_name}*\nالعميل: ${returnRecord.customer_name || 'نقدي'}\nالمبلغ المرتجع: ${returnRecord.total_refund_amount} ج.م\nالمسؤول القائم بالرفض: *${responderName}*\n\n*سبب الرفض المدون:*\n"${rejectionReason.trim()}"`;
+          const sRes = await db.query("SELECT * FROM public.outstock_settings WHERE key = 'owner_whatsapp_phone'");
+          const ownerPhone = sRes.rows[0]?.value || '01000000000';
+          if (typeof sendInternalWhatsAppAlert === 'function') {
+            await sendInternalWhatsAppAlert(ownerPhone, ownerMsg);
+            await db.query('UPDATE public.outstock_order_returns SET whatsapp_owner_notified_at = CURRENT_TIMESTAMP WHERE id = $1', [returnId]);
+          }
+        } catch (waOwnerErr) {
+          console.warn('[Notify Owner Return Rejection WA Warn]:', waOwnerErr.message);
+        }
+
+        broadcastOutstock('outstock:order_return_updated', {
+          returnId,
+          orderId: returnRecord.order_id,
+          status: 'rejected',
+          rejectionReason: rejectionReason.trim()
+        });
+
+        res.json({
+          success: true,
+          message: 'تم تسجيل رفض المرتجع وإخطار الفرع والمالك بنجاح'
+        });
+      }
+    } catch (err) {
+      console.error('[Reply Order Return Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ── تحويل نوع الصنف (دواء <-> مستحضر تجميل) ──
+  app.post('/api/outstock/medications/:id/convert-type', authMiddleware, async (req, res) => {
+    try {
+      const medId = req.params.id;
+      const { itemType = 'cosmetics' } = req.body || {};
+      const targetType = itemType === 'cosmetics' ? 'cosmetics' : 'medication';
+      const targetCategory = targetType === 'cosmetics' ? 'مستحضرات تجميل' : 'أدوية';
+
+      await db.query(`
+        UPDATE public.outstock_medications
+        SET item_type = $1, category = $2, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+      `, [targetType, targetCategory, medId]);
+
+      res.json({ success: true, message: `تم تحويل الصنف بنجاح إلى ${targetType === 'cosmetics' ? 'مستحضر تجميل' : 'دواء'}`, itemType: targetType });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ── عملاء مستحضرات التجميل ──
+  app.get('/api/outstock/cosmetics/customers', authMiddleware, async (req, res) => {
+    try {
+      const { search, branchId } = req.query || {};
+      let query = `
+        SELECT DISTINCT c.id, c.customer_code, c.full_name, c.whatsapp_phone, c.address, c.zone,
+               b.name as branch_name,
+               COUNT(o.id) as total_cosmetics_orders,
+               MAX(o.created_at) as last_order_date
+        FROM public.outstock_customers c
+        JOIN public.outstock_orders o ON c.id = o.customer_id
+        JOIN public.outstock_order_items i ON o.id = i.order_id
+        LEFT JOIN public.outstock_branches b ON c.primary_branch_id = b.id
+        WHERE (i.item_type = 'cosmetics' OR o.order_category = 'cosmetics')
+      `;
+      const params = [];
+      if (branchId && branchId !== 'all') {
+        params.push(branchId);
+        query += ` AND o.branch_id = $${params.length}`;
+      }
+      if (search && String(search).trim()) {
+        params.push(`%${String(search).trim()}%`);
+        query += ` AND (i.medication_name ILIKE $${params.length} OR c.full_name ILIKE $${params.length} OR c.whatsapp_phone ILIKE $${params.length})`;
+      }
+      query += ` GROUP BY c.id, b.name ORDER BY last_order_date DESC LIMIT 200`;
+      const result = await db.query(query, params);
+      res.json({ success: true, customers: result.rows });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/outstock/cosmetics/send-promo-whatsapp', authMiddleware, async (req, res) => {
+    try {
+      const { customerIds = [], message = '' } = req.body || {};
+      if (!message || !String(message).trim()) {
+        return res.status(400).json({ success: false, error: 'نص الرسالة الترويجية مطلوب' });
+      }
+      if (!Array.isArray(customerIds) || customerIds.length === 0) {
+        return res.status(400).json({ success: false, error: 'يرجى اختيار عميل واحد على الأقل' });
+      }
+
+      const custs = await db.query('SELECT whatsapp_phone, full_name FROM public.outstock_customers WHERE id = ANY($1)', [customerIds]);
+      let sentCount = 0;
+      for (const c of custs.rows) {
+        if (c.whatsapp_phone) {
+          try {
+            if (typeof sendInternalWhatsAppAlert === 'function') {
+              const personalizedMsg = message.replace(/{customer_name}/g, c.full_name);
+              await sendInternalWhatsAppAlert(c.whatsapp_phone, personalizedMsg);
+              sentCount++;
+            }
+          } catch (_) {}
+        }
+      }
+      res.json({ success: true, message: `تم إرسال الحملة الترويجية لـ ${sentCount} عميل بنجاح`, sentCount });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
 
   // ───────────────────────────────────────────────────────────────────────────
   // مسح وتصفير طلبات النظام بالكامل مع الحفاظ التام على سجل العملاء (للمالك فقط)
@@ -4064,10 +4661,22 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const branchId = req.query.branchId || req.query.branch_id || user?.branchId || null;
 
       // فحص إذا كان المستخدم مسؤول مستحضرات تجميل
-      const isCosmeticsOfficer = user.permissions?.category_scope === 'cosmetics' || user.role === 'procurement_cosmetics';
+      const isCosmeticsOfficer = 
+        req.query.category_scope === 'cosmetics' ||
+        req.query.categoryScope === 'cosmetics' ||
+        user.permissions?.category_scope === 'cosmetics' ||
+        user.category_scope === 'cosmetics' ||
+        ['cosmetics_officer', 'outstock_cosmetics_officer', 'procurement_cosmetics'].includes(user.role);
+
       let pendingItemsFilter = '';
+      let pendingInquiriesFilter = '';
+
       if (isCosmeticsOfficer) {
         pendingItemsFilter = ` AND i.item_type = 'cosmetics'`;
+        pendingInquiriesFilter = ` AND COALESCE(r.item_type, 'medication') = 'cosmetics'`;
+      } else if (['procurement_manager', 'procurement_officer', 'procurement'].includes(user.role) || req.query.category_scope === 'medication' || req.query.categoryScope === 'medication') {
+        pendingItemsFilter = ` AND COALESCE(i.item_type, 'medication') = 'medication'`;
+        pendingInquiriesFilter = ` AND COALESCE(r.item_type, 'medication') = 'medication'`;
       }
 
       // 1. عدد طلبات الفروع المجمعة التي لم يتم الرد عليها من المشتريات
@@ -4085,8 +4694,9 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       // 2. عدد الاستعلامات وتصحيح الأصناف المعلقة بانتظار رد المشتريات
       const pendingInquiriesRes = await db.query(`
         SELECT COUNT(*) as count
-        FROM public.outstock_medication_requests
-        WHERE status = 'pending'
+        FROM public.outstock_medication_requests r
+        WHERE r.status = 'pending'
+          ${pendingInquiriesFilter}
       `);
       const pendingInquiriesCount = parseInt(pendingInquiriesRes.rows[0]?.count || 0, 10);
 
@@ -5474,7 +6084,9 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   // ───────────────────────────────────────────────────────────────────────────
   app.get('/api/outstock/medication-requests', authMiddleware, async (req, res) => {
     try {
-      const { branchId, status, requestType } = req.query;
+      const { branchId, status, requestType, categoryScope, category_scope } = req.query;
+      const targetScope = categoryScope || category_scope || req.outstockUser?.permissions?.category_scope || (['cosmetics_officer', 'outstock_cosmetics_officer', 'procurement_cosmetics'].includes(req.outstockUser?.role) ? 'cosmetics' : null);
+
       let query = `
         SELECT r.*, b.name as branch_name
         FROM public.outstock_medication_requests r
@@ -5502,6 +6114,12 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         query += ` AND r.request_type = $${params.length}`;
       }
 
+      if (targetScope === 'cosmetics') {
+        query += ` AND COALESCE(r.item_type, 'medication') = 'cosmetics'`;
+      } else if (targetScope === 'medication') {
+        query += ` AND COALESCE(r.item_type, 'medication') = 'medication'`;
+      }
+
       query += ' ORDER BY r.created_at DESC LIMIT 200';
       const result = await db.query(query, params);
       res.json({ success: true, requests: result.rows });
@@ -5526,7 +6144,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         employeeCode = null,
         employeeName = null,
         attachmentUrl = null,
-        attachmentName = null
+        attachmentName = null,
+        itemType: reqItemType = null
       } = req.body || {};
 
       let branchId = bodyBranchId || req.outstockUser.branchId || req.outstockUser.id;
@@ -5542,13 +6161,27 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const finalAttachmentUrl = attachmentUrl || req.body?.attachment_url || null;
       const finalAttachmentName = attachmentName || req.body?.attachment_name || null;
 
+      let finalItemType = reqItemType || req.body?.item_type;
+      if (!finalItemType && medicationId) {
+        try {
+          const medCheck = await db.query('SELECT item_type, category FROM public.outstock_medications WHERE id = $1 LIMIT 1', [medicationId]);
+          if (medCheck.rows.length > 0) {
+            finalItemType = medCheck.rows[0].item_type || (medCheck.rows[0].category?.includes('تجميل') ? 'cosmetics' : 'medication');
+          }
+        } catch (_) {}
+      }
+      if (!finalItemType) {
+        const cat = (req.body?.category || finalRequestedData?.category || medicationName || '');
+        finalItemType = cat.includes('تجميل') || cat.includes('شامبو') || cat.includes('كريم') || cat.includes('سيروم') ? 'cosmetics' : 'medication';
+      }
+
       const reqId = `mreq_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
 
       await db.query(`
         INSERT INTO public.outstock_medication_requests (
-          id, branch_id, request_type, medication_name, medication_id, requested_data, pharmacist_notes, submitted_by, status, employee_code, employee_name, attachment_url, attachment_name
-        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, 'pending', $9, $10, $11, $12)
-      `, [reqId, branchId, requestType, medicationName.trim(), medicationId, JSON.stringify(finalRequestedData), finalNotes, submitter, finalEmployeeCode, finalEmployeeName, finalAttachmentUrl, finalAttachmentName]);
+          id, branch_id, request_type, medication_name, medication_id, requested_data, pharmacist_notes, submitted_by, status, employee_code, employee_name, attachment_url, attachment_name, item_type
+        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, 'pending', $9, $10, $11, $12, $13)
+      `, [reqId, branchId, requestType, medicationName.trim(), medicationId, JSON.stringify(finalRequestedData), finalNotes, submitter, finalEmployeeCode, finalEmployeeName, finalAttachmentUrl, finalAttachmentName, finalItemType]);
 
       const newRecord = {
         id: reqId,
@@ -5564,6 +6197,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         employeeName: finalEmployeeName,
         attachment_url: finalAttachmentUrl,
         attachment_name: finalAttachmentName,
+        itemType: finalItemType,
+        item_type: finalItemType,
         status: 'pending',
         createdAt: new Date().toISOString()
       };

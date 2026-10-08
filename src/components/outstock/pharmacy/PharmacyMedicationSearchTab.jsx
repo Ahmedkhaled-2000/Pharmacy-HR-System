@@ -31,6 +31,7 @@ import {
 import MedicationMasterCardModal from '../common/MedicationMasterCardModal';
 import AddMedicationModal from '../common/AddMedicationModal';
 import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
+import CosmeticsProductModal from '../common/CosmeticsProductModal';
 
 /**
  * PharmacyMedicationSearchTab.jsx
@@ -56,6 +57,7 @@ export default function PharmacyMedicationSearchTab({
   const [masterCardMedId, setMasterCardMedId] = useState(null);
   const [masterCardData, setMasterCardData] = useState(null);
   const [isLoadingMasterCard, setIsLoadingMasterCard] = useState(false);
+  const [selectedCosmeticItem, setSelectedCosmeticItem] = useState(null);
 
   // تعديل السعر (سعر أعلى فقط)
   const [priceEditMed, setPriceEditMed] = useState(null);
@@ -556,27 +558,56 @@ export default function PharmacyMedicationSearchTab({
 
                   {/* أزرار الإجراءات للفرع */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenMasterCard(med.id)}
-                      style={{
-                        padding: '8px 10px',
-                        borderRadius: '8px',
-                        background: '#eff6ff',
-                        color: '#1d4ed8',
-                        border: '1px solid #bfdbfe',
-                        fontSize: '12.5px',
-                        fontWeight: '700',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <FileText size={15} />
-                      <span>كارتة الصنف والبدائل</span>
-                    </button>
+                    {(med.item_type === 'cosmetics' || med.category === 'مستحضرات تجميل') ? (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCosmeticItem({
+                          id: med.id,
+                          medication_id: med.id,
+                          medication_name: med.trade_name_ar || med.trade_name_en,
+                          medicationName: med.trade_name_ar || med.trade_name_en,
+                          item_type: 'cosmetics'
+                        })}
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          background: '#fdf2f8',
+                          color: '#db2777',
+                          border: '1px solid #fbcfe8',
+                          fontSize: '12.5px',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <span>كارتة التجميل 💄</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenMasterCard(med.id)}
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          background: '#eff6ff',
+                          color: '#1d4ed8',
+                          border: '1px solid #bfdbfe',
+                          fontSize: '12.5px',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <FileText size={15} />
+                        <span>كارتة الصنف والبدائل</span>
+                      </button>
+                    )}
 
                     {!canEditPrices ? (
                       <div
@@ -1209,6 +1240,16 @@ export default function PharmacyMedicationSearchTab({
         }}
         onSuccess={handleAuthSuccess}
       />
+
+      {/* ── 5. كارتة مستحضرات التجميل 💄 ── */}
+      {selectedCosmeticItem && (
+        <CosmeticsProductModal
+          isOpen={Boolean(selectedCosmeticItem)}
+          item={selectedCosmeticItem}
+          onClose={() => setSelectedCosmeticItem(null)}
+          showToast={showToast}
+        />
+      )}
     </div>
   );
 }

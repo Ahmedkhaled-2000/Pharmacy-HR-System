@@ -11,18 +11,24 @@ import {
   Calendar,
   User,
   Phone,
-  FileText
+  FileText,
+  Printer,
+  CreditCard
 } from 'lucide-react';
 import {
   outstockAdjustCustomerWallet,
-  outstockGetCustomerWalletTransactions
+  outstockGetCustomerWalletTransactions,
+  outstockRequestWalletOtp,
+  outstockVerifyWalletOtp
 } from '../../../utils/outstockApiClient';
+import { printCustomerWalletReceipt as printWalletReceipt } from '../../../utils/printCustomerWalletReceipt';
 
 export default function CustomerWalletModal({
   customer,
   isOpen,
   onClose,
   onBalanceUpdated,
+  branchName = 'الفرع الرئيسي',
   showToast
 }) {
   const [balance, setBalance] = useState(parseFloat(customer?.wallet_balance || customer?.walletBalance || 0));
@@ -32,8 +38,43 @@ export default function CustomerWalletModal({
 
   // حقول نموذج الإيداع / الخصم
   const [adjustmentType, setAdjustmentType] = useState('deposit'); // 'deposit' | 'withdraw'
+  const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' | 'instapay' | 'vodafone_cash' | 'card' | 'return_settlement'
+  const [employeeCode, setEmployeeCode] = useState('');
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
+  const [lastTxReceiptData, setLastTxReceiptData] = useState(null);
+
+  // طبقة الأمان المتقدمة لعمليات السحب (WhatsApp OTP / 2D QR Scanner)
+  const [verificationMethod, setVerificationMethod] = useState('employee_code'); // 'employee_code' | 'otp' | 'qr_scanner'
+  const [otpCode, setOtpCode] = useState('');
+  const [qrToken, setQrToken] = useState('');
+  const [isRequestingOtp, setIsRequestingOtp] = useState(false);
+  const [otpSentMessage, setOtpSentMessage] = useState('');
+
+  const handleRequestOtp = async (methodType = 'otp') => {
+    if (!customer?.id) return;
+    setIsRequestingOtp(true);
+    setOtpSentMessage('');
+    try {
+      const res = await outstockRequestWalletOtp(customer.id, {
+        method: methodType,
+        amount: parseFloat(amount) || 0
+      });
+      if (res?.success) {
+        const msg = methodType === 'otp'
+          ? '✅ تم إرسال كود التحقق (OTP) لواتساب العميل بنجاح'
+          : '✅ تم إرسال رمز QR المشفر لواتساب العميل (جاهز للمسح بالـ Hand Scanner)';
+        setOtpSentMessage(msg);
+        showToast?.(msg);
+      } else {
+        showToast?.(res?.error || 'تعذر إرسال رمز التحقق');
+      }
+    } catch {
+      showToast?.('حدث خطأ أثناء طلب رمز الأمان');
+    } finally {
+      setIsRequestingOtp(false);
+    }
+  };
 
   const fetchTransactions = useCallback(async () => {
     if (!customer?.id) return;
@@ -93,9 +134,25 @@ export default function CustomerWalletModal({
       return;
     }
 
+    if (!employeeCode.trim()) {
+      showToast?.('⚠️ يرجى إدخال كود الموظف المسؤول عن العملية');
+      return;
+    }
+
     if (adjustmentType === 'withdraw' && numAmt > balance) {
       showToast?.('⚠️ الرصيد المتاح في المحفظة أقل من المبلغ المراد سحبه/خصمه');
       return;
+    }
+
+    if (adjustmentType === 'withdraw') {
+      if (verificationMethod === 'otp' && !otpCode.trim()) {
+        showToast?.('⚠️ يرجى إدخال كود الأمان (OTP) المكون من 4 أرقام والمرسل لواتساب العميل');
+        return;
+      }
+      if (verificationMethod === 'qr_scanner' && !qrToken.trim()) {
+        showToast?.('⚠️ يرجى مسح رمز الـ QR من هاتف العميل بالـ Hand Scanner');
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -103,14 +160,45 @@ export default function CustomerWalletModal({
       const res = await outstockAdjustCustomerWallet(customer.id, {
         amount: numAmt,
         type: adjustmentType,
+        paymentMethod,
+        employeeCode: employeeCode.trim(),
+        verificationMethod: adjustmentType === 'withdraw' ? verificationMethod : 'employee_code',
+        otpCode: adjustmentType === 'withdraw' && verificationMethod === 'otp' ? otpCode.trim() : null,
+        qrToken: adjustmentType === 'withdraw' && verificationMethod === 'qr_scanner' ? qrToken.trim() : null,
+        branchName,
         notes: notes.trim() || (adjustmentType === 'deposit' ? 'شحن رصيد نقدي' : 'سحب / تسوية رصيد')
       });
 
       if (res?.success) {
         const newBal = parseFloat(res.walletBalance ?? (adjustmentType === 'deposit' ? balance + numAmt : balance - numAmt));
         setBalance(newBal);
+
+        const receiptInfo = {
+          receiptNumber: res.receiptNumber || ('RCP-' + Date.now().toString().slice(-6)),
+          customer: {
+            id: customer.id,
+            fullName: customer.full_name || customer.fullName || 'عميل نقدي',
+            phone: customer.whatsapp_phone || customer.whatsappPhone || ''
+          },
+          transactionType: adjustmentType,
+          amount: numAmt,
+          previousBalance: balance,
+          newBalance: newBal,
+          balanceAfter: newBal,
+          paymentMethod,
+          employeeCode: employeeCode.trim(),
+          employeeName: employeeCode.trim(),
+          branchName,
+          notes: notes.trim() || (adjustmentType === 'deposit' ? 'شحن رصيد' : 'سحب رصيد'),
+          date: new Date()
+        };
+        setLastTxReceiptData(receiptInfo);
+
         setAmount('');
         setNotes('');
+        setOtpCode('');
+        setQrToken('');
+        setOtpSentMessage('');
         showToast?.(`✅ تم ${adjustmentType === 'deposit' ? 'إيداع' : 'خصم'} ${numAmt.toFixed(2)} ج.م بنجاح`);
         fetchTransactions();
         onBalanceUpdated?.(customer.id, newBal);
@@ -323,9 +411,143 @@ export default function CustomerWalletModal({
               </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr auto', gap: '8px', alignItems: 'end' }}>
+            {/* طريقة الدفع */}
+            <div>
+              <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '6px' }}>
+                طريقة الدفع / وسيلة الحركة:
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: adjustmentType === 'deposit' ? 'repeat(5, 1fr)' : 'repeat(4, 1fr)', gap: '6px' }}>
+                {[
+                  { id: 'cash', label: '💵 كاش نقدي' },
+                  { id: 'instapay', label: '⚡ انستاباي' },
+                  { id: 'vodafone_cash', label: '📱 محفظة إلكترونية' },
+                  { id: 'card', label: '💳 فيزا / كارت' },
+                  ...(adjustmentType === 'deposit' ? [{ id: 'return_settlement', label: '↩️ تسوية مرتجع' }] : [])
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setPaymentMethod(m.id)}
+                    style={{
+                      padding: '6px 4px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: paymentMethod === m.id ? '800' : '600',
+                      cursor: 'pointer',
+                      border: paymentMethod === m.id ? '1.5px solid #0d9488' : '1px solid #cbd5e1',
+                      background: paymentMethod === m.id ? '#f0fdfa' : '#ffffff',
+                      color: paymentMethod === m.id ? '#0f766e' : '#64748b'
+                    }}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* طبقة الأمان المتقدمة لعمليات السحب (WhatsApp OTP / 2D QR Scanner) */}
+            {adjustmentType === 'withdraw' && (
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: '10px',
+                  padding: '10px 12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '800', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <span>🛡️ طبقة التحقق والأمان لعملية السحب:</span>
+                  </label>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>حماية سيادية لأرصدة العملاء</span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                  {[
+                    { id: 'employee_code', label: '🔐 كود الموظف المشفر' },
+                    { id: 'otp', label: '📱 كود OTP للواتساب' },
+                    { id: 'qr_scanner', label: '📷 مسح 2D QR بالماسح' }
+                  ].map((v) => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      onClick={() => setVerificationMethod(v.id)}
+                      style={{
+                        padding: '6px',
+                        borderRadius: '6px',
+                        fontSize: '11px',
+                        fontWeight: verificationMethod === v.id ? '800' : '600',
+                        border: verificationMethod === v.id ? '1.5px solid #dc2626' : '1px solid #cbd5e1',
+                        background: verificationMethod === v.id ? '#fef2f2' : '#ffffff',
+                        color: verificationMethod === v.id ? '#b91c1c' : '#64748b',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {v.label}
+                    </button>
+                  ))}
+                </div>
+
+                {verificationMethod === 'otp' && (
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+                    <button
+                      type="button"
+                      disabled={isRequestingOtp}
+                      onClick={() => handleRequestOtp('otp')}
+                      className="outstock-btn"
+                      style={{ fontSize: '11px', padding: '6px 12px', background: '#2563eb', color: '#ffffff', border: 'none', borderRadius: '6px', whiteSpace: 'nowrap' }}
+                    >
+                      {isRequestingOtp ? 'جاري الإرسال...' : 'إرسال كود OTP لواتساب العميل 📲'}
+                    </button>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      placeholder="كود الـ OTP (4 أرقام)"
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value)}
+                      className="outstock-form-input"
+                      style={{ height: '34px', fontSize: '13px', fontWeight: 'bold', textAlign: 'center', flex: 1, letterSpacing: '4px' }}
+                    />
+                  </div>
+                )}
+
+                {verificationMethod === 'qr_scanner' && (
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+                    <button
+                      type="button"
+                      disabled={isRequestingOtp}
+                      onClick={() => handleRequestOtp('qr_scanner')}
+                      className="outstock-btn"
+                      style={{ fontSize: '11px', padding: '6px 12px', background: '#7c3aed', color: '#ffffff', border: 'none', borderRadius: '6px', whiteSpace: 'nowrap' }}
+                    >
+                      {isRequestingOtp ? 'جاري الإرسال...' : 'إرسال QR لواتساب العميل 📲'}
+                    </button>
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="امسح الـ QR من هاتف العميل بالـ Hand Scanner..."
+                      value={qrToken}
+                      onChange={(e) => setQrToken(e.target.value)}
+                      className="outstock-form-input"
+                      style={{ height: '34px', fontSize: '12px', fontWeight: 'bold', textAlign: 'center', flex: 1 }}
+                    />
+                  </div>
+                )}
+
+                {otpSentMessage && (
+                  <span style={{ fontSize: '11.5px', color: '#16a34a', fontWeight: '700' }}>
+                    {otpSentMessage}
+                  </span>
+                )}
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '110px 110px 1fr auto', gap: '8px', alignItems: 'end' }}>
               <div>
-                <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
+                <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
                   المبلغ (ج.م) * :
                 </label>
                 <input
@@ -342,16 +564,32 @@ export default function CustomerWalletModal({
               </div>
 
               <div>
-                <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
+                <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
+                  كود الموظف * 🔒:
+                </label>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  placeholder="••••"
+                  value={employeeCode}
+                  onChange={(e) => setEmployeeCode(e.target.value)}
+                  className="outstock-form-input"
+                  style={{ fontWeight: 'bold', textAlign: 'center', height: '36px' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
                   البيان / سبب الحركة:
                 </label>
                 <input
                   type="text"
-                  placeholder="مثال: مسترد فارغ، شحن نقدي مسبق..."
+                  placeholder="مثال: شحن رصيد، مسترد..."
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   className="outstock-form-input"
-                  style={{ height: '36px', fontSize: '12.5px' }}
+                  style={{ height: '36px', fontSize: '12px' }}
                 />
               </div>
 
@@ -361,8 +599,8 @@ export default function CustomerWalletModal({
                 className="outstock-btn"
                 style={{
                   height: '36px',
-                  padding: '0 16px',
-                  fontSize: '12.5px',
+                  padding: '0 14px',
+                  fontSize: '12px',
                   fontWeight: '800',
                   background: adjustmentType === 'deposit' ? '#059669' : '#dc2626',
                   color: '#ffffff',
@@ -370,9 +608,51 @@ export default function CustomerWalletModal({
                   borderRadius: '8px'
                 }}
               >
-                {isSubmitting ? 'جاري...' : 'تنفيذ الحركة'}
+                {isSubmitting ? 'جاري...' : 'تنفيذ'}
               </button>
             </div>
+
+            {/* بانر نجاح العملية الأحدث مع زر طباعة الإيصال الفوري */}
+            {lastTxReceiptData && (
+              <div
+                style={{
+                  marginTop: '8px',
+                  padding: '10px 14px',
+                  background: '#f0fdf4',
+                  border: '1px solid #86efac',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', color: '#166534', fontWeight: '700' }}>
+                  <CheckCircle2 size={16} color="#16a34a" />
+                  <span>تم حفظ الحركة بنجاح! الرصيد الحالي: {lastTxReceiptData.balanceAfter.toFixed(2)} ج.م</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => printWalletReceipt(lastTxReceiptData)}
+                  style={{
+                    background: '#15803d',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '5px 12px',
+                    fontSize: '11.5px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <Printer size={13} />
+                  <span>طباعة إيصال حراري 🖨️</span>
+                </button>
+              </div>
+            )}
           </form>
 
           {/* سجل حركات المحفظة */}
@@ -410,18 +690,33 @@ export default function CustomerWalletModal({
                     <th style={{ padding: '8px 10px' }}>المبلغ</th>
                     <th style={{ padding: '8px 10px' }}>البيان</th>
                     <th style={{ padding: '8px 10px' }}>المحرر</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'center' }}>إيصال</th>
                   </tr>
                 </thead>
                 <tbody>
                   {transactions.length === 0 ? (
                     <tr>
-                      <td colSpan={5} style={{ textAlign: 'center', padding: '24px', color: '#94a3b8' }}>
+                      <td colSpan={6} style={{ textAlign: 'center', padding: '24px', color: '#94a3b8' }}>
                         لا توجد حركات مسجلة على هذه المحفظة حتى الآن
                       </td>
                     </tr>
                   ) : (
                     transactions.map((t, idx) => {
                       const isDep = t.transaction_type === 'deposit' || t.transaction_type === 'credit';
+                      const txReceipt = {
+                        txId: t.id || ('TX-' + idx),
+                        transactionType: isDep ? 'deposit' : 'withdraw',
+                        amount: parseFloat(t.amount || 0),
+                        balanceAfter: parseFloat(t.balance_after || t.balanceAfter || balance),
+                        paymentMethod: t.payment_method || t.paymentMethod || 'cash',
+                        employeeCode: t.created_by || 'الفرع',
+                        notes: t.notes || (isDep ? 'شحن رصيد' : 'سحب رصيد'),
+                        branchName,
+                        customerName: customer.full_name || customer.fullName || 'عميل نقدي',
+                        customerPhone: customer.whatsapp_phone || customer.whatsappPhone || '',
+                        createdAt: t.created_at
+                      };
+
                       return (
                         <tr key={t.id || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
                           <td style={{ padding: '8px 10px', color: '#64748b' }}>
@@ -453,6 +748,26 @@ export default function CustomerWalletModal({
                           </td>
                           <td style={{ padding: '8px 10px', color: '#64748b', fontSize: '11px' }}>
                             {t.created_by || 'الفرع'}
+                          </td>
+                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => printWalletReceipt(txReceipt)}
+                              title="طباعة إيصال حراري"
+                              style={{
+                                background: '#f1f5f9',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: '6px',
+                                padding: '4px 6px',
+                                cursor: 'pointer',
+                                color: '#0f766e',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                              }}
+                            >
+                              <Printer size={13} />
+                            </button>
                           </td>
                         </tr>
                       );

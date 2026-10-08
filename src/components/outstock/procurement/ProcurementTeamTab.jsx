@@ -193,7 +193,11 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
     localStorage.getItem('app_auth_role') === 'owner' ||
     localStorage.getItem('app_owner_authenticated') === 'true' ||
     sessionStorage.getItem('app_owner_authenticated') === 'true' ||
-    sessionStorage.getItem('app_outstock_owner_unlocked') === 'true'
+    sessionStorage.getItem('app_outstock_owner_unlocked') === 'true' ||
+    sessionStorage.getItem('app_owner_simulation_active') === 'true' ||
+    localStorage.getItem('app_owner_simulation_active') === 'true' ||
+    sessionStorage.getItem('app_owner_session_backup') ||
+    localStorage.getItem('app_owner_session_backup')
   );
 
   const handleOpenEditMember = (member) => {

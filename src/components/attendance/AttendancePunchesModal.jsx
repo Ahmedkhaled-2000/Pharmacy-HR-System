@@ -598,8 +598,14 @@ export default function AttendancePunchesModal({
 
       let updatedShifts;
       if (isAddingNewPunch) {
-        const newShift = {
-          id: `punch_manual_${Date.now()}`,
+        const existingIdx = (state.shifts || []).findIndex(s =>
+          (String(s.employeeId) === String(employee.id) || (employee.code && String(s.employeeCode) === String(employee.code))) &&
+          s.date === editDate &&
+          s.status !== 'cancelled' && !s.isCancelled
+        );
+
+        const newShiftPayload = {
+          id: existingIdx >= 0 ? state.shifts[existingIdx].id : `punch_manual_${Date.now()}`,
           employeeId: employee.id,
           employeeCode: employee.code || '',
           employeeName: employee.name || '',
@@ -625,9 +631,16 @@ export default function AttendancePunchesModal({
           adminApproved: true,
           statusLabel: overtimeHours > 0 ? 'تسجيل يدوي (مع إضافي معتمد)' : 'تسجيل يدوي من الإدارة',
           note: (editNotes.trim() ? editNotes.trim() + ' | ' : '') + 'تسجيل بصمة يدوية بواسطة الإدارة العليا' + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ''),
-          createdAt: new Date().toISOString()
+          createdAt: existingIdx >= 0 ? (state.shifts[existingIdx].createdAt || new Date().toISOString()) : new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         };
-        updatedShifts = [newShift, ...(state.shifts || [])];
+
+        if (existingIdx >= 0) {
+          // تحديث الوردية القائمة في نفس اليوم لمنع تكرار الورديات نهائياً
+          updatedShifts = (state.shifts || []).map((s, idx) => idx === existingIdx ? { ...s, ...newShiftPayload } : s);
+        } else {
+          updatedShifts = [newShiftPayload, ...(state.shifts || [])];
+        }
       } else {
         updatedShifts = (state.shifts || []).map((s) => {
           if (String(s.id) === String(editingPunch.id)) {

@@ -17,10 +17,19 @@ import {
   ShieldCheck,
   Check,
   Info,
-  Lock
+  Lock,
+  Search,
+  Users
 } from 'lucide-react';
 import { getResolvedWhatsAppServerUrl } from '../../../utils/systemUrlHelper';
-import { outstockGetOrders, outstockGetCustomers, outstockGetSettings, outstockSaveSettings } from '../../../utils/outstockApiClient';
+import {
+  outstockGetOrders,
+  outstockGetCustomers,
+  outstockGetSettings,
+  outstockSaveSettings,
+  outstockGetCosmeticsCustomers,
+  outstockSendCosmeticsPromoWhatsapp
+} from '../../../utils/outstockApiClient';
 import { buildInvoicePdfHtml } from '../../../utils/invoicePdfGenerator';
 
 /**
@@ -42,6 +51,17 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
       if (stored?.role === 'owner' || stored?.role === 'outstock_owner') return true;
       const appUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
       if (appUser?.role === 'owner') return true;
+    } catch (_) {}
+    return false;
+  }, [userRole, currentUser]);
+
+  // مسؤول التسويق ومستحضرات التجميل
+  const isCosmeticsOfficer = useMemo(() => {
+    if (userRole === 'cosmetics_officer' || userRole === 'outstock_cosmetics_officer' || userRole === 'procurement_cosmetics') return true;
+    if (currentUser?.role === 'cosmetics_officer' || currentUser?.role === 'outstock_cosmetics_officer' || currentUser?.originalRole === 'cosmetics_officer' || currentUser?.category_scope === 'cosmetics') return true;
+    try {
+      const stored = JSON.parse(localStorage.getItem('outstock_user') || '{}');
+      if (stored?.role === 'cosmetics_officer' || stored?.category_scope === 'cosmetics') return true;
     } catch (_) {}
     return false;
   }, [userRole, currentUser]);
@@ -72,6 +92,83 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
   const [recentOrders, setRecentOrders] = useState([]);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [attachPdf, setAttachPdf] = useState(true);
+
+  // ── استهداف عملاء مستحضرات التجميل والتسويق الجماعي ──
+  const [cosmSearchTerm, setCosmSearchTerm] = useState('');
+  const [cosmCustomers, setCosmCustomers] = useState([]);
+  const [selectedCosmCustomerIds, setSelectedCosmCustomerIds] = useState([]);
+  const [isLoadingCosmCustomers, setIsLoadingCosmCustomers] = useState(false);
+  const [isSendingCosmPromo, setIsSendingCosmPromo] = useState(false);
+  const [cosmPromoMessage, setCosmPromoMessage] = useState(
+    'أهلاً بك يا {customer_name} 🌸 يسعدنا إعلامك بوصول تشكيلة حصرية وعروض مميزة على مستحضرات التجميل والعناية بصيدليتنا! تفضل بزيارتنا أو اطلب مباشرة عبر الواتساب ✨'
+  );
+
+  const handleSearchCosmeticsCustomers = async (searchVal = cosmSearchTerm) => {
+    setIsLoadingCosmCustomers(true);
+    try {
+      const res = await outstockGetCosmeticsCustomers({
+        search: searchVal,
+        branchId: branchId || 'all'
+      });
+      if (res?.success && Array.isArray(res.customers)) {
+        setCosmCustomers(res.customers);
+        setSelectedCosmCustomerIds(res.customers.map(c => c.id));
+      } else {
+        setCosmCustomers([]);
+        setSelectedCosmCustomerIds([]);
+      }
+    } catch (e) {
+      console.warn('Error loading cosmetics customers:', e);
+      showToast?.(`⚠️ خطأ في جلب عملاء التجميل: ${e.message}`);
+    } finally {
+      setIsLoadingCosmCustomers(false);
+    }
+  };
+
+  const handleToggleSelectAllCosm = () => {
+    if (selectedCosmCustomerIds.length === cosmCustomers.length) {
+      setSelectedCosmCustomerIds([]);
+    } else {
+      setSelectedCosmCustomerIds(cosmCustomers.map(c => c.id));
+    }
+  };
+
+  const handleToggleSelectCosmCustomer = (id) => {
+    setSelectedCosmCustomerIds(prev =>
+      prev.includes(id) ? prev.filter(cId => cId !== id) : [...prev, id]
+    );
+  };
+
+  const handleSendCosmeticsPromoBulk = async () => {
+    if (!cosmPromoMessage || !cosmPromoMessage.trim()) {
+      showToast?.('⚠️ يرجى كتابة نص الرسالة الترويجية أولاً');
+      return;
+    }
+    if (selectedCosmCustomerIds.length === 0) {
+      showToast?.('⚠️ يرجى تحديد عميل واحد على الأقل لإرسال الحملة الترويجية');
+      return;
+    }
+    if (!window.confirm(`هل أنت متأكد من إرسال هذا العرض الترويجي لواتساب ${selectedCosmCustomerIds.length} عميل؟`)) {
+      return;
+    }
+
+    setIsSendingCosmPromo(true);
+    try {
+      const res = await outstockSendCosmeticsPromoWhatsapp({
+        customerIds: selectedCosmCustomerIds,
+        message: cosmPromoMessage.trim()
+      });
+      if (res?.success) {
+        showToast?.(`🚀 ${res.message || 'تم إرسال الحملة الترويجية بنجاح!'}`);
+      } else {
+        showToast?.(`⚠️ فشل إرسال الحملة: ${res?.error || 'حدث خطأ'}`);
+      }
+    } catch (e) {
+      showToast?.(`❌ خطأ: ${e.message}`);
+    } finally {
+      setIsSendingCosmPromo(false);
+    }
+  };
 
   // أرقام واتساب التوجيه الآلي (إدارة المشتريات ومسؤول مستحضرات التجميل)
   const [procurementPhone, setProcurementPhone] = useState('');
@@ -888,7 +985,7 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
             <span>بيانات العميل والطلب المستهدف</span>
           </div>
 
-          <div style={{ display: 'flex', gap: '6px' }}>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             <button
               type="button"
               onClick={() => setSelectedRecipientType('recent_orders')}
@@ -905,9 +1002,126 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
             >
               إدخال رقم مباشر
             </button>
+            {isCosmeticsOfficer && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedRecipientType('cosmetics_promo');
+                  if (cosmCustomers.length === 0) handleSearchCosmeticsCustomers('');
+                }}
+                className={`outstock-btn ${selectedRecipientType === 'cosmetics_promo' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
+                style={{
+                  flex: 1.2,
+                  padding: '6px 8px',
+                  fontSize: '12px',
+                  background: selectedRecipientType === 'cosmetics_promo' ? 'linear-gradient(135deg, #db2777 0%, #be185d 100%)' : '#fdf2f8',
+                  borderColor: '#f472b6',
+                  color: selectedRecipientType === 'cosmetics_promo' ? '#ffffff' : '#be185d',
+                  fontWeight: '900'
+                }}
+              >
+                <span>🎯 تسويق مستحضرات التجميل 💄</span>
+              </button>
+            )}
           </div>
 
-          {selectedRecipientType === 'recent_orders' ? (
+          {(isCosmeticsOfficer && selectedRecipientType === 'cosmetics_promo') ? (
+            /* قسم استهداف عملاء مستحضرات التجميل */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <input
+                  type="text"
+                  placeholder="ابحث باسم صنف التجميل (سيروم، واقي شمس، لاروش...)"
+                  value={cosmSearchTerm}
+                  onChange={(e) => setCosmSearchTerm(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSearchCosmeticsCustomers(cosmSearchTerm)}
+                  className="outstock-form-input"
+                  style={{ fontSize: '12.5px', height: '36px' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleSearchCosmeticsCustomers(cosmSearchTerm)}
+                  disabled={isLoadingCosmCustomers}
+                  className="outstock-btn outstock-btn-secondary"
+                  style={{ height: '36px', padding: '0 12px', fontSize: '12px', borderColor: '#f472b6', color: '#db2777' }}
+                >
+                  <Search size={14} />
+                  <span>بحث</span>
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px', color: '#64748b' }}>
+                <span>العملاء الذين طلبوا مستحضرات تجميل ({cosmCustomers.length}):</span>
+                {cosmCustomers.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleToggleSelectAllCosm}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#db2777',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      fontSize: '11.5px',
+                      textDecoration: 'underline'
+                    }}
+                  >
+                    {selectedCosmCustomerIds.length === cosmCustomers.length ? 'إلغاء تحديد الكل' : 'تحديد الكل'} ({selectedCosmCustomerIds.length})
+                  </button>
+                )}
+              </div>
+
+              {isLoadingCosmCustomers ? (
+                <div style={{ textAlign: 'center', padding: '16px', color: '#64748b', fontSize: '12px' }}>
+                  جاري جلب عملاء مستحضرات التجميل...
+                </div>
+              ) : cosmCustomers.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '16px', color: '#94a3b8', fontSize: '12px', background: '#f8fafc', borderRadius: '8px' }}>
+                  لا يوجد عملاء اشتروا هذا الصنف التجميلي حتى الآن.
+                </div>
+              ) : (
+                <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '4px' }}>
+                  {cosmCustomers.map((c) => {
+                    const isChecked = selectedCosmCustomerIds.includes(c.id);
+                    return (
+                      <div
+                        key={c.id}
+                        onClick={() => handleToggleSelectCosmCustomer(c.id)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '7px 10px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          background: isChecked ? '#fdf2f8' : '#ffffff',
+                          border: isChecked ? '1px solid #fbcfe8' : '1px solid transparent',
+                          marginBottom: '3px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {}} // handled by div
+                          style={{ cursor: 'pointer' }}
+                        />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: '800', color: '#1e293b' }}>{c.full_name || 'عميل'}</div>
+                          <div style={{ fontSize: '11px', color: '#64748b', direction: 'ltr', textAlign: 'right' }}>
+                            {c.whatsapp_phone} {c.branch_name ? `• ${c.branch_name}` : ''}
+                          </div>
+                        </div>
+                        <span style={{ fontSize: '10.5px', background: '#fae8ff', color: '#a21caf', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>
+                          {c.total_cosmetics_orders || 1} طلب
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : selectedRecipientType === 'recent_orders' ? (
             <div>
               <label style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
                 اختر العميل من أحدث الطلبات:
@@ -978,8 +1192,8 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
             </div>
           )}
 
-          {/* معاينة العميل المختار */}
-          {recipientPhone && (
+          {/* معاينة العميل المختار في الوضع الفردي */}
+          {selectedRecipientType !== 'cosmetics_promo' && recipientPhone && (
             <div style={{
               background: '#f8fafc',
               border: '1px solid #e2e8f0',
@@ -1010,102 +1224,171 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
           gap: '12px'
         }}>
           <div style={{ fontSize: '14px', fontWeight: '900', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Sparkles size={16} color="#0284c7" />
-            <span>صياغة رسالة الواتساب والقوالب الجاهزة</span>
+            <Sparkles size={16} color={selectedRecipientType === 'cosmetics_promo' ? '#db2777' : '#0284c7'} />
+            <span>
+              {selectedRecipientType === 'cosmetics_promo'
+                ? 'صياغة الحملة التسويقية لمستحضرات التجميل 💄'
+                : 'صياغة رسالة الواتساب والقوالب الجاهزة'}
+            </span>
           </div>
 
-          <div>
-            <label style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
-              اختر نوع الإشعار التلقائي:
-            </label>
-            <select
-              value={selectedTemplate}
-              onChange={(e) => setSelectedTemplate(e.target.value)}
-              className="outstock-form-select"
-              style={{ minHeight: '38px', fontSize: '12.5px', fontWeight: '700' }}
-            >
-              <option value="order_arrived">🎉 إشعار توفر الدواء وجاهزيته للاستلام بالفرع</option>
-              <option value="order_confirmation">📦 تأكيد استلام حجز الدواء وقيمة العربون</option>
-              <option value="substitute_suggestion">💡 اقتراح المثائل والبدائل المسجلة (Drug Eye)</option>
-              <option value="chronic_reminder">⏰ تذكير شهري بتجهيز أدوية الأمراض المزمنة</option>
-            </select>
-          </div>
+          {selectedRecipientType === 'cosmetics_promo' ? (
+            /* محرر الحملات الترويجية لمستحضرات التجميل */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ background: '#fdf2f8', padding: '8px 12px', borderRadius: '8px', border: '1px solid #fbcfe8', fontSize: '11.5px', color: '#9d174d' }}>
+                💡 <strong>تلميح ذكي:</strong> يمكنك استخدام المتغير <code>{'{customer_name}'}</code> وسيتم استبداله باسم العميل الفعلي تلقائياً لكل محادثة.
+              </div>
 
-          <div>
-            <label style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
-              نص الرسالة التي ستصل للعميل:
-            </label>
-            <textarea
-              rows={6}
-              value={customMessage}
-              onChange={(e) => setCustomMessage(e.target.value)}
-              className="outstock-form-input"
-              style={{
-                width: '100%',
-                padding: '10px',
-                fontSize: '12.5px',
-                lineHeight: 1.5,
-                borderRadius: '10px',
-                resize: 'vertical'
-              }}
-            />
-          </div>
+              <div>
+                <label style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                  نص الحملة الترويجية:
+                </label>
+                <textarea
+                  rows={6}
+                  value={cosmPromoMessage}
+                  onChange={(e) => setCosmPromoMessage(e.target.value)}
+                  className="outstock-form-input"
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    fontSize: '12.5px',
+                    lineHeight: 1.5,
+                    borderRadius: '10px',
+                    resize: 'vertical',
+                    borderColor: '#f472b6'
+                  }}
+                />
+              </div>
 
-          {selectedOrder && (
-            <label style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              cursor: 'pointer',
-              fontSize: '12px',
-              color: '#0f766e',
-              fontWeight: 'bold',
-              background: '#f0fdf4',
-              padding: '8px 12px',
-              borderRadius: '8px',
-              border: '1px solid #bbf7d0',
-              userSelect: 'none'
-            }}>
-              <input
-                type="checkbox"
-                checked={attachPdf}
-                onChange={(e) => setAttachPdf(e.target.checked)}
-              />
-              <FileText size={15} />
-              <span>إرفاق الفاتورة الرسمية كملف PDF مع الرسالة تلقائياً للطلب #{selectedOrder.order_number || selectedOrder.orderNumber}</span>
-            </label>
+              {/* زر الإرسال الجماعي للتجميل */}
+              <button
+                type="button"
+                onClick={handleSendCosmeticsPromoBulk}
+                disabled={isSendingCosmPromo || selectedCosmCustomerIds.length === 0 || waState.status !== 'CONNECTED'}
+                className="outstock-btn"
+                style={{
+                  background: 'linear-gradient(135deg, #db2777 0%, #be185d 100%)',
+                  color: '#ffffff',
+                  padding: '12px 18px',
+                  borderRadius: '10px',
+                  fontSize: '13.5px',
+                  fontWeight: '900',
+                  border: 'none',
+                  cursor: isSendingCosmPromo || selectedCosmCustomerIds.length === 0 ? 'not-allowed' : 'pointer',
+                  opacity: (selectedCosmCustomerIds.length === 0 || waState.status !== 'CONNECTED') ? 0.6 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 12px rgba(219, 39, 119, 0.25)',
+                  marginTop: 'auto'
+                }}
+              >
+                <Send size={16} />
+                <span>
+                  {isSendingCosmPromo
+                    ? 'جاري إرسال الحملة الترويجية...'
+                    : `إرسال عرض ترويجي لواتساب كافة عملاء هذا الصنف دفعة واحدة 🚀 (${selectedCosmCustomerIds.length} عميل)`}
+                </span>
+              </button>
+            </div>
+          ) : (
+            /* المحرر الفردي القياسي */
+            <>
+              <div>
+                <label style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                  اختر نوع الإشعار التلقائي:
+                </label>
+                <select
+                  value={selectedTemplate}
+                  onChange={(e) => setSelectedTemplate(e.target.value)}
+                  className="outstock-form-select"
+                  style={{ minHeight: '38px', fontSize: '12.5px', fontWeight: '700' }}
+                >
+                  <option value="order_arrived">🎉 إشعار توفر الدواء وجاهزيته للاستلام بالفرع</option>
+                  <option value="order_confirmation">📦 تأكيد استلام حجز الدواء وقيمة العربون</option>
+                  <option value="substitute_suggestion">💡 اقتراح المثائل والبدائل المسجلة (Drug Eye)</option>
+                  <option value="chronic_reminder">⏰ تذكير شهري بتجهيز أدوية الأمراض المزمنة</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                  نص الرسالة التي ستصل للعميل:
+                </label>
+                <textarea
+                  rows={6}
+                  value={customMessage}
+                  onChange={(e) => setCustomMessage(e.target.value)}
+                  className="outstock-form-input"
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    fontSize: '12.5px',
+                    lineHeight: 1.5,
+                    borderRadius: '10px',
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+
+              {selectedOrder && (
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  color: '#0f766e',
+                  fontWeight: 'bold',
+                  background: '#f0fdf4',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #bbf7d0',
+                  userSelect: 'none'
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={attachPdf}
+                    onChange={(e) => setAttachPdf(e.target.checked)}
+                  />
+                  <FileText size={15} />
+                  <span>إرفاق الفاتورة الرسمية كملف PDF مع الرسالة تلقائياً للطلب #{selectedOrder.order_number || selectedOrder.orderNumber}</span>
+                </label>
+              )}
+
+              {/* أزرار الإرسال الفردي */}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: 'auto' }}>
+                <button
+                  type="button"
+                  onClick={handleSendAutomated}
+                  disabled={isSending || waState.status !== 'CONNECTED'}
+                  className="outstock-btn outstock-btn-whatsapp"
+                  style={{
+                    flex: 1,
+                    padding: '10px 14px',
+                    fontSize: '13px',
+                    fontWeight: '800',
+                    opacity: waState.status !== 'CONNECTED' ? 0.6 : 1
+                  }}
+                >
+                  <Send size={16} />
+                  <span>{isSending ? 'جاري الإرسال عبر الخادم...' : 'إرسال تلقائي عبر خادم الواتساب ⚡'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenWhatsAppWeb}
+                  className="outstock-btn outstock-btn-secondary"
+                  style={{ padding: '10px 14px', fontSize: '12.5px' }}
+                  title="فتح المحادثة مباشرة في WhatsApp Web"
+                >
+                  <ExternalLink size={15} />
+                  <span>فتح WhatsApp Web</span>
+                </button>
+              </div>
+            </>
           )}
-
-          {/* أزرار الإرسال */}
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: 'auto' }}>
-            <button
-              type="button"
-              onClick={handleSendAutomated}
-              disabled={isSending || waState.status !== 'CONNECTED'}
-              className="outstock-btn outstock-btn-whatsapp"
-              style={{
-                flex: 1,
-                padding: '10px 14px',
-                fontSize: '13px',
-                fontWeight: '800',
-                opacity: waState.status !== 'CONNECTED' ? 0.6 : 1
-              }}
-            >
-              <Send size={16} />
-              <span>{isSending ? 'جاري الإرسال عبر الخادم...' : 'إرسال تلقائي عبر خادم الواتساب ⚡'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleOpenWhatsAppWeb}
-              className="outstock-btn outstock-btn-secondary"
-              style={{ padding: '10px 14px', fontSize: '12.5px' }}
-              title="فتح المحادثة مباشرة في WhatsApp Web"
-            >
-              <ExternalLink size={15} />
-              <span>فتح WhatsApp Web</span>
-            </button>
-          </div>
         </div>
       </div>
     </div>

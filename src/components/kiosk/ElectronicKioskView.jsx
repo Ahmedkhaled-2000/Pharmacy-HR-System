@@ -1190,7 +1190,7 @@ export default function ElectronicKioskView({
       updatedActiveShifts[currentEmp.id] = newActiveShift;
       updatedActiveShifts[String(currentEmp.id)] = newActiveShift;
 
-      // 2. إدراج سجل الحضور فورياً في قائمة الحضور وشيت الورديات
+      // 2. إدراج سجل الحضور فورياً في قائمة الحضور وشيت الورديات (مع الحماية من التكرار)
       const openShiftRecord = {
         id: shiftId,
         employeeId: currentEmp.id,
@@ -1217,7 +1217,16 @@ export default function ElectronicKioskView({
         note: `تسجيل حضور بالصورة في تمام ${displayTime} (${punchTime}) بانتظار اعتماد الإدارة`,
         createdAt: now.toISOString()
       };
-      updatedShifts = [openShiftRecord, ...updatedShifts];
+      const existingOpenShiftIdx = updatedShifts.findIndex(s =>
+        (String(s.employeeId) === String(currentEmp.id) || (currentEmp.code && String(s.employeeCode) === String(currentEmp.code))) &&
+        s.date === dateStr &&
+        (!s.timeOut || s.timeOut === '—' || s.timeOut === '' || s.isLiveActive)
+      );
+      if (existingOpenShiftIdx >= 0) {
+        updatedShifts[existingOpenShiftIdx] = { ...updatedShifts[existingOpenShiftIdx], ...openShiftRecord };
+      } else {
+        updatedShifts = [openShiftRecord, ...updatedShifts];
+      }
 
     } else if (actionType === 'shift_end') {
       const active = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];

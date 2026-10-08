@@ -355,6 +355,7 @@ export default function NewCustomerOrderModal({
     const d = editingOrder?.discount_value ?? editingOrder?.discountValue;
     return (d !== undefined && d !== null && d > 0) ? String(d) : '';
   });
+  const [customerDiscountStatus, setCustomerDiscountStatus] = useState(null);
   const [useSplitPayment, setUseSplitPayment] = useState(() => {
     const splits = editingOrder?.payment_splits || editingOrder?.paymentSplits;
     return Boolean(splits && typeof splits === 'object' && Object.values(splits).some(v => parseFloat(v) > 0));
@@ -586,6 +587,87 @@ export default function NewCustomerOrderModal({
       handleSearchCustomer(digitsOnly);
     }
   };
+
+  // دالة البحث المباشر برقم الهاتف
+  const handleSearchCustomer = async (cleanDigits) => {
+    if (!cleanDigits || cleanDigits.length !== 11) return;
+    try {
+      setIsSearchingCustomer(true);
+      const res = await outstockGetCustomers({ search: cleanDigits });
+      if (res?.success && Array.isArray(res.customers)) {
+        const found = res.customers.find(
+          (c) => String(c.whatsapp_phone || '').replace(/\D/g, '') === cleanDigits
+        );
+        if (found) {
+          handleSelectCustomer(found);
+        } else {
+          setIsNewCustomer(true);
+          setWhatsappPhone(cleanDigits);
+        }
+      }
+    } catch (e) {
+      console.warn('handleSearchCustomer error:', e);
+    } finally {
+      setIsSearchingCustomer(false);
+    }
+  };
+
+  // ── احتساب وتطبيق خصم العميل التلقائي المشروط (الحد الأدنى ونطاق الخصم) ──
+  useEffect(() => {
+    if (!isDiscountAllowed) {
+      setCustomerDiscountStatus(null);
+      return;
+    }
+
+    if (!selectedCustomer || !selectedCustomer.discount_type || selectedCustomer.discount_type === 'none') {
+      setCustomerDiscountStatus(null);
+      return;
+    }
+
+    const cDiscType = selectedCustomer.discount_type;
+    const cDiscVal = parseFloat(selectedCustomer.discount_value || 0);
+    const minOrder = parseFloat(selectedCustomer.min_order_amount || 0);
+    const scope = selectedCustomer.discount_scope || 'all';
+
+    if (cDiscVal <= 0) {
+      setCustomerDiscountStatus(null);
+      return;
+    }
+
+    // احتساب إجمالي الأصناف الخاضعة للخصم
+    let eligibleSubtotal = 0;
+    items.forEach((it) => {
+      const qty = parseInt(it.quantity || 1, 10);
+      const price = parseFloat(it.unitPrice || it.priceMin || 0);
+      if (scope === 'cosmetics') {
+        if (it.itemType === 'cosmetics') eligibleSubtotal += qty * price;
+      } else {
+        eligibleSubtotal += qty * price;
+      }
+    });
+
+    const isQualified = (eligibleSubtotal >= minOrder) || minOrder <= 0;
+    const scopeLabel = scope === 'cosmetics' ? 'مستحضرات التجميل فقط' : 'كامل الأصناف';
+    const discLabel = cDiscType === 'percentage' ? `${cDiscVal}%` : `${cDiscVal} ج.م`;
+
+    if (isQualified && eligibleSubtotal > 0) {
+      setDiscountType(cDiscType);
+      setDiscountValue(String(cDiscVal));
+      setCustomerDiscountStatus({
+        isQualified: true,
+        message: `🏷️ تم تفعيل خصم العميل تلقائياً (${discLabel} على ${scopeLabel}) - شرط الحد الأدنى محقق: ${minOrder > 0 ? minOrder + ' ج.م' : 'بدون حد أدنى'}`
+      });
+    } else {
+      if (minOrder > 0) {
+        setCustomerDiscountStatus({
+          isQualified: false,
+          message: `⚠️ خصم العميل المسجل (${discLabel} على ${scopeLabel}) غير مفعل: يتطلب حداً أدنى ${minOrder} ج.م (المتوفر حالياً: ${eligibleSubtotal.toFixed(2)} ج.م - ينقص ${(minOrder - eligibleSubtotal).toFixed(2)} ج.م)`
+        });
+      } else {
+        setCustomerDiscountStatus(null);
+      }
+    }
+  }, [selectedCustomer, items, isDiscountAllowed]);
 
   // بحث تلقائي برقم العميل الممرر عند الفتح
   useEffect(() => {
@@ -2365,6 +2447,28 @@ export default function NewCustomerOrderModal({
                 <span>{useSplitPayment ? '✓ دفع مقسم (كاش + فيزا)' : 'تفعيل الدفع المقسم (Multi-tender)'}</span>
               </button>
             </div>
+
+            {/* بادج خصم العميل التلقائي المشروط */}
+            {customerDiscountStatus && (
+              <div
+                style={{
+                  marginBottom: '12px',
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  background: customerDiscountStatus.isQualified ? '#f0fdf4' : '#fffbeb',
+                  border: `1.5px solid ${customerDiscountStatus.isQualified ? '#86efac' : '#fde68a'}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  fontSize: '12.5px',
+                  color: customerDiscountStatus.isQualified ? '#15803d' : '#b45309',
+                  fontWeight: '700'
+                }}
+              >
+                <Tag size={16} />
+                <span>{customerDiscountStatus.message}</span>
+              </div>
+            )}
 
             {/* صف الدفع والمقدم */}
             {!useSplitPayment ? (

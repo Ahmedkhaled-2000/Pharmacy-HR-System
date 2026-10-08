@@ -25,7 +25,8 @@ import {
   ArrowRightLeft,
   Edit,
   Trash2,
-  DollarSign
+  DollarSign,
+  RotateCcw
 } from 'lucide-react';
 import {
   outstockGetOrders,
@@ -33,13 +34,16 @@ import {
   outstockMarkWhatsappNotified,
   outstockDeleteOrder,
   outstockDeleteOrderItem,
-  outstockUpdateOrderDeposit
+  outstockUpdateOrderDeposit,
+  outstockGetOrderReturns
 } from '../../../utils/outstockApiClient';
 import NewCustomerOrderModal from './NewCustomerOrderModal';
 import DualCashierReceiptModal from './DualCashierReceiptModal';
 import OrderDeliverySettlementModal from './OrderDeliverySettlementModal';
 import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
 import OrderComplaintModal from './OrderComplaintModal';
+import OrderReturnModal from '../common/OrderReturnModal';
+import { printReturnReceipt } from '../../../utils/printReturnReceipt';
 
 /**
  * PharmacyOrdersTab.jsx
@@ -101,6 +105,14 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
   // 🔒 حالة التحقق من كود الموظف المسلّم لتسليم الطلب
   const [deliveryAuthOrder, setDeliveryAuthOrder] = useState(null);
   const [authenticatedDeliverer, setAuthenticatedDeliverer] = useState(null);
+
+  // ↩️ حالة مرتجعات طلبات العملاء بالفرع والتحقق من كود الموظف
+  const [branchReturns, setBranchReturns] = useState([]);
+  const [isReturnsLoading, setIsReturnsLoading] = useState(false);
+  const [returningOrder, setReturningOrder] = useState(null);
+  const [returnAuthOrder, setReturnAuthOrder] = useState(null);
+  const [authenticatedReturnEmployee, setAuthenticatedReturnEmployee] = useState(null);
+  const [returnsSubFilter, setReturnsSubFilter] = useState('all');
 
   // جلب الطلبات النشطة
   const fetchOrders = useCallback(async () => {
@@ -165,17 +177,36 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     }
   }, [branchId, dateFrom, dateTo]);
 
+  // جلب سجل مرتجعات الفرع
+  const fetchBranchReturns = useCallback(async () => {
+    setIsReturnsLoading(true);
+    try {
+      const res = await outstockGetOrderReturns({ branchId });
+      if (res?.success && Array.isArray(res.returns)) {
+        setBranchReturns(res.returns);
+      } else {
+        setBranchReturns([]);
+      }
+    } catch {
+      setBranchReturns([]);
+    } finally {
+      setIsReturnsLoading(false);
+    }
+  }, [branchId]);
+
   useEffect(() => {
     if (branchId) {
       if (activeInnerTab === 'active') {
         fetchOrders();
       } else if (activeInnerTab === 'transferred') {
         fetchTransferredOrders();
+      } else if (activeInnerTab === 'returns') {
+        fetchBranchReturns();
       } else {
         fetchDeliveredOrders();
       }
 
-      // جلب عدد الطلبات المحولة دائماً لتحديث البادج
+      // جلب عدد الطلبات المحولة والمرتجعات لتحديث العدادات
       if (activeInnerTab !== 'transferred') {
         outstockGetOrders({ branchId, transferredOnly: true, transferDirection: 'all' })
           .then((res) => {
@@ -185,8 +216,17 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
           })
           .catch(() => {});
       }
+      if (activeInnerTab !== 'returns') {
+        outstockGetOrderReturns({ branchId })
+          .then((res) => {
+            if (res?.success && Array.isArray(res.returns)) {
+              setBranchReturns(res.returns);
+            }
+          })
+          .catch(() => {});
+      }
     }
-  }, [branchId, activeInnerTab, fetchOrders, fetchTransferredOrders, fetchDeliveredOrders]);
+  }, [branchId, activeInnerTab, fetchOrders, fetchTransferredOrders, fetchDeliveredOrders, fetchBranchReturns]);
 
   // الاستماع المباشر لتحديثات المزامنة اللحظية والأوفلاين
   useEffect(() => {
@@ -592,31 +632,6 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
             <span>📋 الطلبات النشطة والمعلقة</span>
             <span style={{ background: '#0d9488', color: '#ffffff', fontSize: '11px', padding: '1px 7px', borderRadius: '10px' }}>
               {activeStats.total}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveInnerTab('transferred')}
-            style={{
-              padding: '8px 18px',
-              borderRadius: '10px',
-              fontSize: '13.5px',
-              fontWeight: '900',
-              cursor: 'pointer',
-              border: activeInnerTab === 'transferred' ? '2px solid #7c3aed' : '1px solid #cbd5e1',
-              background: activeInnerTab === 'transferred' ? '#f5f3ff' : '#ffffff',
-              color: activeInnerTab === 'transferred' ? '#6d28d9' : '#64748b',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: activeInnerTab === 'transferred' ? '0 2px 6px rgba(124, 58, 237, 0.2)' : 'none'
-            }}
-          >
-            <ArrowRightLeft size={16} color={activeInnerTab === 'transferred' ? '#6d28d9' : '#64748b'} />
-            <span>🔄 طلبات محولة من وإلى</span>
-            <span style={{ background: '#7c3aed', color: '#ffffff', fontSize: '11px', padding: '1px 7px', borderRadius: '10px' }}>
-              {transferredStats.total}
             </span>
           </button>
 
@@ -1352,6 +1367,30 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                             </>
                           )}
 
+                          {/* زر المرتجع متاح في حال رد المشتريات */}
+                          {hasReplied && (
+                            <button
+                              type="button"
+                              onClick={() => setReturnAuthOrder(order)}
+                              className="outstock-btn"
+                              style={{
+                                padding: '7px 11px',
+                                fontSize: '12px',
+                                fontWeight: '800',
+                                background: '#fdf2f8',
+                                color: '#be185d',
+                                border: '1px solid #fbcfe8',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                              title="تسجيل طلب مرتجع كلي أو جزئي لأصناف الطلب المعتمدة"
+                            >
+                              <RotateCcw size={14} />
+                              <span>مرتجع ↩️</span>
+                            </button>
+                          )}
+
                           {/* تعديل العربون متاح دائماً */}
                           <button
                             type="button"
@@ -1681,6 +1720,201 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
             </div>
           )}
         </div>
+      ) : activeInnerTab === 'returns' ? (
+        /* ── قسم مرتجعات طلبات العملاء بالفرع ↩️ ── */
+        <div className="outstock-card">
+          <div className="outstock-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            <h3 className="outstock-card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <RotateCcw size={18} color="#db2777" />
+              <span>سجل مرتجعات طلبات العملاء بالفرع ↩️</span>
+              <span style={{ fontSize: '13px', color: '#db2777', fontWeight: '800' }}>
+                ({branchReturns.length} طلب مرتجع)
+              </span>
+            </h3>
+
+            {/* فلاتر حالات المرتجعات */}
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {[
+                { id: 'all', label: 'الكل' },
+                { id: 'pending_procurement', label: 'قيد انتظار المشتريات ⏳' },
+                { id: 'approved', label: 'معتمدة ✅' },
+                { id: 'rejected', label: 'مرفوضة ❌' }
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setReturnsSubFilter(f.id)}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    border: returnsSubFilter === f.id ? '2px solid #db2777' : '1px solid #cbd5e1',
+                    background: returnsSubFilter === f.id ? '#fdf2f8' : '#ffffff',
+                    color: returnsSubFilter === f.id ? '#be185d' : '#64748b'
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {isReturnsLoading ? (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+              <RefreshCw size={26} className="animate-spin" style={{ margin: '0 auto 10px auto', color: '#db2777' }} />
+              <div>جاري استرجاع سجل المرتجعات...</div>
+            </div>
+          ) : branchReturns.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '48px 20px', color: '#64748b' }}>
+              <RotateCcw size={42} color="#94a3b8" style={{ margin: '0 auto 10px auto' }} />
+              <h4 style={{ margin: '0 0 6px', color: '#1e293b', fontSize: '16px', fontWeight: '800' }}>
+                لا توجد مرتجعات مسجلة لهذا الفرع
+              </h4>
+              <p style={{ margin: 0, fontSize: '13px' }}>
+                يمكنك الضغط على زر "مرتجع ↩️" في أي طلب عميل معتمد لطلب إرجاع كلي أو جزئي.
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {branchReturns
+                .filter((r) => {
+                  if (returnsSubFilter === 'all') return true;
+                  return r.status === returnsSubFilter;
+                })
+                .map((ret) => {
+                  const items = Array.isArray(ret.items) ? ret.items : [];
+                  const isPending = ret.status === 'pending_procurement';
+                  const isApproved = ret.status === 'approved';
+                  const isRejected = ret.status === 'rejected';
+
+                  return (
+                    <div
+                      key={ret.id}
+                      style={{
+                        background: '#ffffff',
+                        border: '1.5px solid',
+                        borderColor: isPending ? '#fde68a' : isApproved ? '#bbf7d0' : '#fecaca',
+                        borderRadius: '14px',
+                        padding: '16px 20px',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                          <span style={{ background: '#0f172a', color: '#ffffff', padding: '4px 10px', borderRadius: '8px', fontWeight: '900', fontSize: '13px' }}>
+                            طلب #{ret.order_number}
+                          </span>
+                          <strong style={{ fontSize: '15.5px', color: '#0f172a' }}>
+                            {ret.customer_name || 'العميل'}
+                          </strong>
+                          {ret.customer_phone && (
+                            <span style={{ fontSize: '13px', color: '#0284c7' }} dir="ltr">
+                              ({ret.customer_phone})
+                            </span>
+                          )}
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>
+                            {new Date(ret.created_at).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' })}
+                          </span>
+                        </div>
+
+                        <div>
+                          {isPending && (
+                            <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '800' }}>
+                              ⏳ قيد انتظار المشتريات (الأصناف بعهدة الفرع)
+                            </span>
+                          )}
+                          {isApproved && (
+                            <span style={{ background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '800' }}>
+                              ✅ معتمد من المشتريات (تمت التسوية)
+                            </span>
+                          )}
+                          {isRejected && (
+                            <span style={{ background: '#fef2f2', color: '#991b1b', border: '1px solid #fca5a5', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '800' }}>
+                              ❌ مرفوض: {ret.procurement_rejection_reason || 'غير محدد'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* جدول الأصناف المرتجعة */}
+                      <div style={{ overflowX: 'auto', border: '1px solid #f1f5f9', borderRadius: '8px', marginBottom: '10px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'right' }}>
+                          <thead>
+                            <tr style={{ background: '#f8fafc', color: '#475569' }}>
+                              <th style={{ padding: '6px 10px' }}>الصنف</th>
+                              <th style={{ padding: '6px 10px', textAlign: 'center' }}>الكمية</th>
+                              <th style={{ padding: '6px 10px', textAlign: 'center' }}>سعر الوحدة</th>
+                              <th style={{ padding: '6px 10px', textAlign: 'center' }}>الإجمالي</th>
+                              <th style={{ padding: '6px 10px' }}>سبب الإرجاع</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {items.map((it, idx) => (
+                              <tr key={idx} style={{ borderBottom: '1px solid #f8fafc' }}>
+                                <td style={{ padding: '6px 10px', fontWeight: 'bold' }}>{it.medicationName || it.name}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'center' }}>{it.quantity}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'center' }}>{parseFloat(it.unitPrice || 0).toFixed(2)} ج.م</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 'bold', color: '#0d9488' }}>
+                                  {parseFloat(it.totalPrice || (it.unitPrice * it.quantity) || 0).toFixed(2)} ج.م
+                                </td>
+                                <td style={{ padding: '6px 10px', color: '#64748b' }}>{it.returnReason || ret.general_return_reason || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* سطر الإجماليات وزر الطباعة الحرارية */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', paddingTop: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', fontSize: '12.5px' }}>
+                          <div>
+                            إجمالي المرتجع: <strong>{parseFloat(ret.total_refund_amount || 0).toFixed(2)} ج.م</strong>
+                          </div>
+                          {parseFloat(ret.down_payment_refund || 0) > 0 && (
+                            <div style={{ color: '#059669', fontWeight: 'bold' }}>
+                              العربون المحول للمحفظة: {parseFloat(ret.down_payment_refund).toFixed(2)} ج.م
+                              {ret.wallet_credited && ' (✓ مودع)'}
+                            </div>
+                          )}
+                          <div style={{ color: '#64748b', fontSize: '11.5px' }}>
+                            مسجل المرتجع: {ret.created_by_name} ({ret.created_by_code})
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            printReturnReceipt({
+                              returnId: ret.id,
+                              orderNumber: ret.order_number,
+                              branchName: branch?.name || ret.branch_name || 'الفرع',
+                              customerName: ret.customer_name || '',
+                              customerPhone: ret.customer_phone || '',
+                              items,
+                              totalRefundAmount: parseFloat(ret.total_refund_amount || 0),
+                              downPaymentRefund: parseFloat(ret.down_payment_refund || 0),
+                              generalReturnReason: ret.general_return_reason || '',
+                              refundDestination: ret.refund_destination || 'wallet',
+                              employeeCode: ret.created_by_code || '',
+                              employeeName: ret.created_by_name || '',
+                              date: ret.created_at
+                            });
+                          }}
+                          className="outstock-btn outstock-btn-secondary"
+                          style={{ padding: '5px 10px', fontSize: '11.5px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          <Printer size={13} />
+                          <span>طباعة إيصال مرتجع 🖨️</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
       ) : (
         /* قسم أرشيف الطلبات المسلّمة */
         <div className="outstock-card">
@@ -1869,6 +2103,23 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
         />
       )}
 
+      {/* 🔒 نافذة التحقق من كود الصيدلي المستلم للمرتجع */}
+      {returnAuthOrder && (
+        <EmployeeCodeAuthModal
+          isOpen={Boolean(returnAuthOrder)}
+          title="التحقق من هوية الموظف المسؤول عن تسجيل المرتجع 🔒"
+          subtitle="يرجى إدخال كود الموظف السري لتوثيق استلام المرتجع وتعديل الحسابات"
+          branchId={branchId}
+          onClose={() => setReturnAuthOrder(null)}
+          onSuccess={(emp) => {
+            const target = returnAuthOrder;
+            setReturnAuthOrder(null);
+            setAuthenticatedReturnEmployee(emp);
+            setReturningOrder(target);
+          }}
+        />
+      )}
+
       {/* نافذة تسجيل طلب جديد */}
       {isNewOrderModalOpen && (
         <NewCustomerOrderModal
@@ -2011,6 +2262,26 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
               )
             );
           }}
+        />
+      )}
+
+      {/* ── نافذة تسجيل طلب مرتجع للعميل (كلي أو جزئي) ── */}
+      {returningOrder && (
+        <OrderReturnModal
+          isOpen={Boolean(returningOrder)}
+          order={returningOrder}
+          authenticatedEmployee={authenticatedReturnEmployee}
+          onClose={() => {
+            setReturningOrder(null);
+            setAuthenticatedReturnEmployee(null);
+          }}
+          onReturnSubmitted={() => {
+            setReturningOrder(null);
+            setAuthenticatedReturnEmployee(null);
+            fetchOrders();
+            fetchBranchReturns();
+          }}
+          branchName={branch?.name || 'الصيدلية'}
           showToast={showToast}
         />
       )}

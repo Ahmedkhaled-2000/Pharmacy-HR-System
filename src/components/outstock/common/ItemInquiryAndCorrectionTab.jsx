@@ -48,7 +48,13 @@ export default function ItemInquiryAndCorrectionTab({
   branchId = null,
   currentBranch = null,
   currentUser = null,
-  showToast = (msg) => alert(msg)
+  showToast = (msg) => {
+    if (typeof window !== 'undefined') {
+      const detail = typeof msg === 'object' ? msg : { message: String(msg) };
+      window.dispatchEvent(new CustomEvent('outstock:notify', { detail }));
+    }
+  },
+  categoryScope = null
 }) {
   const isProcurement = userRole === 'procurement_manager' || userRole === 'procurement_officer' || userRole === 'owner';
 
@@ -107,6 +113,10 @@ export default function ItemInquiryAndCorrectionTab({
       if (statusFilter !== 'all') {
         params.status = statusFilter;
       }
+      if (categoryScope) {
+        params.categoryScope = categoryScope;
+        params.category_scope = categoryScope;
+      }
       const res = await outstockGetMedicationRequests(params);
       if (res?.success && Array.isArray(res.requests)) {
         setRequests(res.requests);
@@ -122,7 +132,7 @@ export default function ItemInquiryAndCorrectionTab({
 
   useEffect(() => {
     fetchRequests();
-  }, [activeSubTab, statusFilter, branchId]);
+  }, [activeSubTab, statusFilter, branchId, categoryScope]);
 
   // عند نجاح التحقق من كود الموظف
   const handleAuthSuccess = (emp) => {
@@ -258,6 +268,19 @@ export default function ItemInquiryAndCorrectionTab({
   // تصفية الطلبات المعروضة
   const filteredRequests = useMemo(() => {
     let list = requests;
+    if (categoryScope === 'cosmetics') {
+      list = list.filter((r) => {
+        const itemType = r.item_type || r.itemType;
+        const cat = String(r.requested_data?.category || '').toLowerCase();
+        const name = String(r.medication_name || '').toLowerCase();
+        return itemType === 'cosmetics' || cat.includes('تجميل') || cat.includes('cosmetic') || name.includes('شامبو') || name.includes('سيروم') || name.includes('كريم');
+      });
+    } else if (categoryScope === 'medication') {
+      list = list.filter((r) => {
+        const itemType = r.item_type || r.itemType;
+        return itemType !== 'cosmetics';
+      });
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       list = list.filter((r) => {
@@ -268,7 +291,7 @@ export default function ItemInquiryAndCorrectionTab({
       });
     }
     return list;
-  }, [requests, searchQuery]);
+  }, [requests, categoryScope, searchQuery]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', direction: 'rtl' }}>

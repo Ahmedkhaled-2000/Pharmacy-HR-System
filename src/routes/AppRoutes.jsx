@@ -1925,9 +1925,10 @@ export default function AppRoutes() {
               }
               currentUser={
                 (authRole === 'outstock_procurement_manager' || currentEmpUser?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager')
-                  ? { ...currentEmpUser, role: 'procurement_manager', allBranchesAccess: true }
-                  : currentEmpUser
+                  ? { ...currentEmpUser, role: 'procurement_manager', allBranchesAccess: true, isOwnerSimulating }
+                  : { ...currentEmpUser, isOwnerSimulating }
               }
+              isOwnerSimulating={isOwnerSimulating}
               onLogout={handleLogout}
               themeMode={themeMode}
               toggleTheme={toggleTheme}
@@ -2745,9 +2746,10 @@ export default function AppRoutes() {
                           }
                           currentUser={
                             (authRole === 'outstock_procurement_manager' || authRole === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager')
-                              ? { ...currentEmpUser, role: 'procurement_manager', allBranchesAccess: true }
-                              : currentEmpUser
+                              ? { ...currentEmpUser, role: 'procurement_manager', allBranchesAccess: true, isOwnerSimulating }
+                              : { ...currentEmpUser, isOwnerSimulating }
                           }
+                          isOwnerSimulating={isOwnerSimulating}
                           onLogout={handleLogout}
                           themeMode={themeMode}
                           toggleTheme={toggleTheme}
