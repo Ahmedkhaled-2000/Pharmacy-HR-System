@@ -763,7 +763,298 @@ export async function sendUniversalAttendanceWhatsAppAlert(punchPayload, state) 
 // الاسم المستعار للتوافق العكسي
 export const sendBiometricWhatsAppAlert = sendUniversalAttendanceWhatsAppAlert;
 
+export function getNextDateStr(dateStr) {
+  try {
+    const d = new Date(dateStr + 'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  } catch {
+    return dateStr;
+  }
+}
 
+export function getPreviousDateStr(dateStr) {
+  try {
+    const d = new Date(dateStr + 'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d.toISOString().slice(0, 10);
+  } catch {
+    return dateStr;
+  }
+}
+
+// 🗓️ دالة استخراج تفاصيل اليوم المقررة للموظف لمعرفة هل هو راحة أسبوعية أو إجازة أو وردية
+export function getEmployeeScheduledDayDetails(empObj, dateStr, stateData) {
+  if (!empObj || !dateStr) return { isOff: false, hours: 8, start: '09:00', end: '17:00' };
+  const empId = String(empObj.id || '');
+  const empCode = String(empObj.code || '');
+
+  let arDay = '';
+  try {
+    const dObj = new Date(dateStr + 'T12:00:00Z');
+    const AR_DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+    arDay = AR_DAYS[dObj.getUTCDay()];
+  } catch {}
+
+  // 1. الموظف بدون جدول شهري (مواعيد حرة)
+  if (empObj.noMonthlySchedule) {
+    const restDays = Array.isArray(empObj.weeklyRestDays) && empObj.weeklyRestDays.length > 0
+      ? empObj.weeklyRestDays
+      : ['الجمعة'];
+    const isRest = restDays.some(d => String(d).trim().replace(/[إأآ]/g, 'ا') === arDay.replace(/[إأآ]/g, 'ا'));
+    if (isRest) {
+      return { isOff: true, type: 'off', start: '', end: '', hours: 0, label: 'راحة أسبوعية' };
+    }
+    return {
+      isOff: false,
+      type: 'shift',
+      start: '',
+      end: '',
+      hours: parseFloat(empObj.workHoursPerDay || empObj.workHours) || 8,
+      label: 'دوام حر بالساعات'
+    };
+  }
+
+  // 2. فحص طلبات تعديل الروستر أو الإجازات المعتمدة
+  const approvedReq = (stateData?.requests || []).find(r => {
+    if (!r) return false;
+    const isMatchEmp = String(r.employeeId) === empId || (empCode && String(r.employeeCode) === empCode);
+    if (!isMatchEmp) return false;
+    const isApproved = r.status === 'approved' || r.adminApproved === true;
+    if (!isApproved) return false;
+
+    if (r.type === 'leave') {
+      const startD = r.startDate || r.date;
+      const endD = r.endDate || r.date || startD;
+      if (dateStr >= startD && dateStr <= endD) return true;
+    }
+    if (r.type === 'shift_adjustment' || r.type === 'roster_edit' || r.type === 'roster_update') {
+      if (r.date === dateStr || (Array.isArray(r.dates) && r.dates.includes(dateStr))) return true;
+      if (r.schedule && r.schedule[dateStr]) return true;
+      if (r.newSchedule && r.newSchedule[dateStr]) return true;
+    }
+    if (r.type === 'shift_swap' || r.type === 'swap') {
+      const d1 = r.requesterDate || r.date;
+      const d2 = r.targetDate || r.targetSwapDate || d1;
+      if (d1 === dateStr || d2 === dateStr) return true;
+    }
+    return false;
+  });
+
+  if (approvedReq) {
+    if (approvedReq.type === 'leave') {
+      return { isOff: true, type: 'off', start: '', end: '', hours: 0, label: 'إجازة معتمدة' };
+    }
+    const item = (approvedReq.schedule && approvedReq.schedule[dateStr]) ||
+                  (approvedReq.newSchedule && approvedReq.newSchedule[dateStr]);
+    if (item) {
+      const isOff = item.isOff || item.type === 'off';
+      return {
+        isOff,
+        type: isOff ? 'off' : 'shift',
+        start: isOff ? '' : (item.start?.slice(0, 5) || '08:00'),
+        end: isOff ? '' : (item.end?.slice(0, 5) || '16:00'),
+        hours: isOff ? 0 : parseFloat(item.hours || 8),
+        label: isOff ? 'راحة معتمدة بطلب تعديل' : 'وردية معدلة بطلب رسمي'
+      };
+    }
+    if (approvedReq.actionType === 'set_rest_day') {
+      return { isOff: true, type: 'off', start: '', end: '', hours: 0, label: 'راحة معتمدة بطلب رسمي' };
+    }
+  }
+
+  // 3. فحص جداول العمل المعتمدة في state.rosters
+  const approvedRosters = (stateData?.rosters || []).filter(r => {
+    if (!r) return false;
+    const isApproved = r.status === 'approved' || r.adminApproved === true || !r.status;
+    if (!isApproved) return false;
+    const isEmp = String(r.employeeId) === empId || (empCode && String(r.employeeCode) === empCode);
+    if (!isEmp) return false;
+    if (r.fromDate && r.toDate) return dateStr >= r.fromDate && dateStr <= r.toDate;
+    if (r.month && dateStr.startsWith(r.month)) return true;
+    return false;
+  });
+
+  for (const r of approvedRosters) {
+    if (r.schedule) {
+      if (r.schedule[dateStr]) {
+        const item = r.schedule[dateStr];
+        const isOff = item.isOff || item.type === 'off';
+        return {
+          isOff,
+          type: isOff ? 'off' : 'shift',
+          start: isOff ? '' : (item.start?.slice(0, 5) || '08:00'),
+          end: isOff ? '' : (item.end?.slice(0, 5) || '16:00'),
+          hours: isOff ? 0 : parseFloat(item.hours || 8),
+          label: isOff ? 'راحة أسبوعية' : 'وردية مجدولة'
+        };
+      }
+      if (arDay && r.schedule[arDay]) {
+        const item = r.schedule[arDay];
+        const isOff = item.isOff || item.type === 'off';
+        return {
+          isOff,
+          type: isOff ? 'off' : 'shift',
+          start: isOff ? '' : (item.start?.slice(0, 5) || '08:00'),
+          end: isOff ? '' : (item.end?.slice(0, 5) || '16:00'),
+          hours: isOff ? 0 : parseFloat(item.hours || 8),
+          label: isOff ? 'راحة أسبوعية' : 'وردية مجدولة'
+        };
+      }
+    }
+  }
+
+  // 4. جدول الموظف الافتراضي empObj.roster
+  if (empObj?.roster?.schedule) {
+    const sMap = empObj.roster.schedule;
+    if (sMap[dateStr]) {
+      const item = sMap[dateStr];
+      const isOff = item.isOff || item.type === 'off';
+      return {
+        isOff,
+        type: isOff ? 'off' : 'shift',
+        start: isOff ? '' : (item.start?.slice(0, 5) || '08:00'),
+        end: isOff ? '' : (item.end?.slice(0, 5) || '16:00'),
+        hours: isOff ? 0 : parseFloat(item.hours || 8),
+        label: isOff ? 'راحة أسبوعية' : 'وردية مجدولة'
+      };
+    }
+    if (arDay && sMap[arDay]) {
+      const item = sMap[arDay];
+      const isOff = item.isOff || item.type === 'off';
+      return {
+        isOff,
+        type: isOff ? 'off' : 'shift',
+        start: isOff ? '' : (item.start?.slice(0, 5) || '08:00'),
+        end: isOff ? '' : (item.end?.slice(0, 5) || '16:00'),
+        hours: isOff ? 0 : parseFloat(item.hours || 8),
+        label: isOff ? 'راحة أسبوعية' : 'وردية مجدولة'
+      };
+    }
+  }
+
+  return {
+    isOff: false,
+    type: 'shift',
+    start: '09:00',
+    end: '17:00',
+    hours: parseFloat(empObj.workHoursPerDay || empObj.workHours) || 8,
+    label: 'دوام افتراضي'
+  };
+}
+
+// 🌟 المحرك العبقري لتحديد التاريخ التشغيلي للوردية ومنع تكرار الورديات (Overnight & Zero-Duplicate Engine)
+export function resolveOvernightOperationalDate({
+  empObj,
+  datePart,
+  timePart,
+  stateData,
+  currentShifts = [],
+  currentActiveShifts = {}
+}) {
+  const [inHour] = timePart.split(':').map(Number);
+  const empId = String(empObj?.id || '');
+  const empCode = String(empObj?.code || '');
+  const matchEmpKeys = [empId, empCode].filter(Boolean);
+
+  // 1. الدخول قبل منتصف الليل (20:00 فصاعداً):
+  // ينسب لليوم الحالي حتماً (تاريخ يوم الدخول)
+  if (inHour >= 20) {
+    const nextDate = getNextDateStr(datePart);
+    const todaySched = getEmployeeScheduledDayDetails(empObj, datePart, stateData);
+    const tmrwSched = getEmployeeScheduledDayDetails(empObj, nextDate, stateData);
+
+    if ((!todaySched || todaySched.isOff) && tmrwSched && !tmrwSched.isOff && tmrwSched.start) {
+      const [tmrwH] = tmrwSched.start.split(':').map(Number);
+      if (tmrwH <= 2) {
+        return {
+          operationalDate: nextDate,
+          actualPunchDate: datePart,
+          isOvernight: true,
+          isEarlyOvernightIn: true,
+          isPostMidnightInForYesterday: false,
+          scheduledDetails: tmrwSched,
+          reason: `حضور مبكر لوردية الغد المجدولة (${tmrwSched.start})`
+        };
+      }
+    }
+
+    return {
+      operationalDate: datePart,
+      actualPunchDate: datePart,
+      isOvernight: false,
+      isEarlyOvernightIn: false,
+      isPostMidnightInForYesterday: false,
+      scheduledDetails: todaySched,
+      reason: 'حضور قبل منتصف الليل ينسب لليوم الحالي'
+    };
+  }
+
+  // 2. الدخول بعد منتصف الليل في الساعات الأولى (00:00 - 04:59 فجراً):
+  if (inHour < 5) {
+    const yesterday = getPreviousDateStr(datePart);
+    const yesterdaySched = getEmployeeScheduledDayDetails(empObj, yesterday, stateData);
+    const todaySched = getEmployeeScheduledDayDetails(empObj, datePart, stateData);
+
+    // 🛡️ الاستثناء الحاسم: هل كان الموظف في راحة أسبوعية (OFF) بالأمس؟
+    const isYesterdayOff = Boolean(yesterdaySched && yesterdaySched.isOff);
+
+    if (isYesterdayOff) {
+      // حظر قطعي: الأمس كان راحة أسبوعية معتمدة، لا يجوز نسب الوردية للأمس حتى لا تُمسخ راحته الأسبوعية!
+      return {
+        operationalDate: datePart,
+        actualPunchDate: datePart,
+        isOvernight: false,
+        isEarlyOvernightIn: false,
+        isPostMidnightInForYesterday: false,
+        scheduledDetails: todaySched,
+        reason: `دخول بعد منتصف الليل (${timePart}) ولكن ينسب لليوم الحالي لأن الأمس (${yesterday}) كان راحة أسبوعية معتمدة`
+      };
+    }
+
+    // فحص هل يوجد بالفعل وردية عمل حقيقية مكتملة بالأمس للموظف؟
+    const yesterdayExistingShift = (currentShifts || []).find(s =>
+      matchEmpKeys.some(k => String(s.employeeId) === String(k) || (s.employeeCode && String(s.employeeCode) === String(k))) &&
+      s.date === yesterday &&
+      parseFloat(s.hours || s.actualWorkedHours || 0) >= 3
+    );
+
+    if (yesterdayExistingShift) {
+      return {
+        operationalDate: datePart,
+        actualPunchDate: datePart,
+        isOvernight: false,
+        isEarlyOvernightIn: false,
+        isPostMidnightInForYesterday: false,
+        scheduledDetails: todaySched,
+        reason: `دخول بعد منتصف الليل ينسب لليوم الحالي لوجود وردية مكتملة بالأمس (${yesterdayExistingShift.timeIn} - ${yesterdayExistingShift.timeOut})`
+      };
+    }
+
+    // إذا لم يكن الأمس راحة أسبوعية، وليس لديه وردية مكتملة بالأمس:
+    // ننسب الوردية للأمس فوراً كحضور لوردية الليل!
+    return {
+      operationalDate: yesterday,
+      actualPunchDate: datePart,
+      isOvernight: true,
+      isEarlyOvernightIn: false,
+      isPostMidnightInForYesterday: true,
+      scheduledDetails: yesterdaySched,
+      reason: `نسب الوردية للأمس (${yesterday}) كحضور متأخر لوردية الليل بعد منتصف الليل`
+    };
+  }
+
+  // الدوام النهاري العادي (05:00 فصاعداً):
+  return {
+    operationalDate: datePart,
+    actualPunchDate: datePart,
+    isOvernight: false,
+    isEarlyOvernightIn: false,
+    isPostMidnightInForYesterday: false,
+    scheduledDetails: getEmployeeScheduledDayDetails(empObj, datePart, stateData),
+    reason: 'دوام نهاري عادي'
+  };
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 🚀 تسجيل مسارات ADMS ومسارات الواجهة البرمجية (Routes Registration)
@@ -850,16 +1141,6 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     }
 
     return null;
-  }
-
-  function getNextDateStr(dateStr) {
-    try {
-      const d = new Date(dateStr + 'T12:00:00Z');
-      d.setUTCDate(d.getUTCDate() + 1);
-      return d.toISOString().slice(0, 10);
-    } catch {
-      return dateStr;
-    }
   }
 
   // 🗓️ دالة استخراج بداية الوردية المقررة للموظف من جدوله المعتمد لدعم الحضور المبكر للورديات الليلية
@@ -1633,6 +1914,99 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
   // ────────────────────────────────────────────────────────────────────────────
   // 2. معالج استقبال حركات البصمة اللحظية (ADMS Punch Ingestion: POST /iclock/cdata)
   // ────────────────────────────────────────────────────────────────────────────
+  // ── دالة التحقق الذكي وإنشاء طلب الوقت الإضافي وربطه بمركز الموافقات تلقائياً ──
+  const ensureOvertimeRequestForShift = (shift, emp, branch, state, currentRequests, currentNotifications, deviceName = 'ماكينة البصمة') => {
+    if (!shift || !shift.overtimeHours || parseFloat(shift.overtimeHours) <= 0) return shift;
+    const isApproved = Boolean(shift.overtimeStatus === 'approved' || shift.adminApproved || shift.isAdminCreated);
+    if (isApproved) return shift;
+
+    const otHours = Math.round(parseFloat(shift.overtimeHours) * 100) / 100;
+    if (otHours <= 0) return shift;
+
+    const shiftId = shift.id || `shift_${shift.employeeId}_${shift.date}`;
+    const reqId = shift.overtimeRequestId || `req_ot_${shift.employeeId}_${shift.date}_${shiftId}`;
+
+    // تحديد مسار الموافقة حسب قواعد المنظومة وحالة مدير الفرع
+    const bId = shift.branchId || branch?.id || emp?.branchId;
+    const bObj = branch || (state?.branches || []).find(b => String(b.id) === String(bId) || String(b.code) === String(bId));
+    const noBranchMgr = !bObj?.managerId || bObj.managerId === 'none' || String(bObj.managerId).trim() === '' || !(state?.employees || []).some(e => String(e.id) === String(bObj.managerId));
+    const isEmpBranchMgr = bObj?.managerId && String(bObj.managerId) === String(shift.employeeId);
+    
+    const otRule = (state?.approvalRules || []).find(r => r.requestType === 'overtime' || r.type === 'overtime');
+    const isDualRule = otRule ? (otRule.reqBranch !== false && otRule.reqAdmin !== false) : true;
+    const isDirectAdmin = Boolean(noBranchMgr || isEmpBranchMgr || !isDualRule);
+    const targetApproval = isDirectAdmin ? 'admin_only' : 'both';
+
+    const regHours = Math.round((parseFloat(shift.regularHours) || (parseFloat(shift.hours) - otHours) || 8) * 100) / 100;
+    const totalHours = Math.round((parseFloat(shift.hours) || (regHours + otHours)) * 100) / 100;
+    const schedHours = parseFloat(shift.scheduledHours) || 8;
+
+    const overtimeReq = {
+      id: reqId,
+      shiftId: shiftId,
+      employeeId: shift.employeeId,
+      employeeName: shift.employeeName || emp?.name || '',
+      employeeCode: shift.employeeCode || emp?.code || '',
+      jobTitle: emp?.jobTitle || '',
+      branchId: bId || '',
+      branchName: shift.branchName || bObj?.name || 'الفرع الرئيسي',
+      type: 'overtime',
+      subType: 'extra_hours',
+      hours: otHours,
+      regularHours: regHours,
+      totalShiftHours: totalHours,
+      scheduledHours: schedHours,
+      actualIn: shift.timeIn || '',
+      actualOut: shift.timeOut || '',
+      date: shift.date,
+      reason: `تسجيل بصمة انصراف عبر ${deviceName} مع وجود ساعات إضافية (+${otHours} س) فوق ساعات العمل المقررة (${schedHours} س).`,
+      details: `وردية عمل بتاريخ ${shift.date} | الحضور: ${shift.timeIn || '—'} | الانصراف: ${shift.timeOut || '—'} | الساعات الفعلية: ${totalHours} س | الأساسي: ${regHours} س | الإضافي المطلوب اعتماده: +${otHours} س`,
+      targetApproval,
+      isDirectToAdmin: isDirectAdmin,
+      branchNotRequired: isDirectAdmin,
+      managerStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : 'pending'),
+      branchApprovalStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : undefined),
+      branchApproved: false,
+      adminApproved: false,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      source: 'biometric_device'
+    };
+
+    const existIdx = currentRequests.findIndex(r => r.id === reqId || (r.shiftId && r.shiftId === shiftId && r.type === 'overtime'));
+    if (existIdx >= 0) {
+      currentRequests[existIdx] = {
+        ...currentRequests[existIdx],
+        ...overtimeReq,
+        status: currentRequests[existIdx].status || 'pending',
+        branchApproved: currentRequests[existIdx].branchApproved || false,
+        adminApproved: currentRequests[existIdx].adminApproved || false
+      };
+    } else {
+      currentRequests.unshift(overtimeReq);
+
+      const notifId = `notif_ot_${shift.employeeId}_${shift.date}_${Date.now()}`;
+      currentNotifications.unshift({
+        id: notifId,
+        type: 'overtime_alert',
+        title: `⏱️ طلب اعتماد ساعات إضافية (بصمة): ${shift.employeeName || emp?.name} (+${otHours} س)`,
+        message: `سجل الموظف ${shift.employeeName || emp?.name} بفرع ${shift.branchName || bObj?.name || 'الفرع'} انصرافاً بزيادة ${otHours} س عن الوردية المقررة. يتطلب الاعتماد.`,
+        date: shift.date,
+        timestamp: new Date().toISOString(),
+        read: false,
+        targetRole: isDirectAdmin ? 'admin' : 'all',
+        branchId: bId || '',
+        requestId: reqId
+      });
+    }
+
+    return {
+      ...shift,
+      overtimeRequestId: reqId,
+      overtimeStatus: shift.overtimeStatus || 'pending'
+    };
+  };
+
   const handleAdmsPostCData = async (req, res) => {
     try {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -1738,6 +2112,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             const branches = Array.isArray(state?.branches) ? state.branches : [];
             const currentActiveShifts = { ...(state?.activeShifts || {}) };
             let currentShifts = [...(state?.shifts || [])];
+            let currentRequests = Array.isArray(state?.requests) ? [...state.requests] : [];
+            let currentNotifications = Array.isArray(state?.notifications) ? [...state.notifications] : [];
 
             let processedCount = 0;
             const endedEmpIds = new Set();
@@ -2112,24 +2488,28 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         let shiftRecord = null;
 
         if (actionType === 'check_in') {
-          // 🛡️ فحص ذكي للورديات الليلية وعابرة منتصف الليل:
-          // إذا حضر الموظف في المساء المتأخر (من 21:00 فصاعداً) وكان لديه وردية مجدولة تبدأ بعد منتصف الليل مباشرة (00:00 إلى 02:00)
-          // في اليوم التالي: ينسب تاريخ الوردية لليوم التالي ليكون حضوراً مبكراً لوردية الغد، مما يمنع ازدواجية اليوم السابق وفقدان يوم الغد
-          let operationalShiftDate = datePart;
-          let isEarlyOvernightIn = false;
-          const [pInHour] = timePart.split(':').map(Number);
-          if (pInHour >= 21) {
-            const nextDate = getNextDateStr(datePart);
-            const tmrwSched = getEmployeeScheduledShiftStart(matchedEmpObj, nextDate, state);
-            if (tmrwSched && tmrwSched.start) {
-              const [tmrwH] = tmrwSched.start.split(':').map(Number);
-              if (tmrwH <= 2) {
-                operationalShiftDate = nextDate;
-                isEarlyOvernightIn = true;
-                console.log(`[Biometric Resolver] 🌙 حضور مبكر لوردية منتصف الليل: الموظف ${matchedEmpName} حضر ${timePart} لوردية مجدولة تبدأ ${tmrwSched.start} في ${nextDate} - تم تسجيل الوردية بتاريخ ${nextDate}`);
-              }
-            }
-          }
+          // 🌟 تطبيق خوارزمية تحديد اليوم التشغيلي للورديات العابرة لمنتصف الليل ومنع التكرار
+          const overnightRes = resolveOvernightOperationalDate({
+            empObj: matchedEmpObj,
+            datePart,
+            timePart,
+            stateData: state,
+            currentShifts,
+            currentActiveShifts
+          });
+
+          const operationalShiftDate = overnightRes.operationalDate;
+          const isEarlyOvernightIn = overnightRes.isEarlyOvernightIn;
+          const isPostMidnightInForYesterday = overnightRes.isPostMidnightInForYesterday;
+          const isOvernight = Boolean(overnightRes.isOvernight || operationalShiftDate !== datePart);
+
+          console.log(`[Biometric Resolver] 🕒 تعيين اليوم التشغيلي للموظف ${matchedEmpName}: تاريخ البصمة=${datePart} ${timePart} ➔ تاريخ الوردية=${operationalShiftDate} [${overnightRes.reason}]`);
+
+          // 🛡️ درع فحص ومنع تكرار الورديات في نفس اليوم التشغيلي (Deduplication Shield)
+          const existingSameDayIdx = currentShifts.findIndex(s =>
+            possibleEmpKeys.some(k => String(s.employeeId) === String(k) || (s.employeeCode && String(s.employeeCode) === String(k))) &&
+            s.date === operationalShiftDate
+          );
 
           // 🛡️ توليد معرف جديد فريد دائماً لعدم مسح أو استبدال أي وردية سابقة
           const newShiftId = `shift_${matchedEmpId}_${punchEpoch}`;
@@ -2141,6 +2521,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             date: operationalShiftDate,
             actualPunchDate: datePart,
             isEarlyOvernightIn,
+            isPostMidnightInForYesterday,
+            isOvernight,
             timeIn: timePart,
             timeOut: '',
             branchId: effectiveShiftBranchId,
@@ -2155,6 +2537,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             isSuspiciousTravel,
             isLiveActive: true,
             status: 'active',
+            statusLabel: isOvernight ? 'حضور حي 🌙 (وردية عابرة لمنتصف الليل)' : 'حضور حي',
             punchSource: 'biometric_device',
             source: 'biometric_device',
             biometricDeviceSerial: sn,
@@ -2177,6 +2560,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             date: operationalShiftDate,
             actualPunchDate: datePart,
             isEarlyOvernightIn,
+            isPostMidnightInForYesterday,
+            isOvernight,
             timeIn: timePart,
             startEpoch: safePunchEpoch,
             isPaused: false,
@@ -2192,8 +2577,41 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             currentActiveShifts[k] = activePayload;
           });
 
-          // إضافة الوردية الجديدة بدون مسح الورديات السابقة
-          currentShifts = [shiftRecord, ...currentShifts.filter(s => s.id !== newShiftId)];
+          if (existingSameDayIdx >= 0) {
+            const existingSameDay = currentShifts[existingSameDayIdx];
+            // 1. إذا كانت الوردية القائمة شبحية أو صفرية: نستبدلها بالوردية الحقيقية الجديدة
+            if (parseFloat(existingSameDay.hours || 0) <= 0.1 && (!existingSameDay.timeOut || existingSameDay.timeIn === existingSameDay.timeOut || existingSameDay.timeOut === '—')) {
+              console.log(`[Biometric Deduplication] ♻️ استبدال وردية شبحية مكررة (${existingSameDay.id}) بوردية الحضور الفعلية الجديدة.`);
+              shiftRecord.id = existingSameDay.id;
+              currentShifts[existingSameDayIdx] = shiftRecord;
+            } else if (existingSameDay.timeOut && existingSameDay.timeOut !== '—' && existingSameDay.timeOut !== 'قيد العمل الآن') {
+              // 2. إذا كانت الوردية السابقة مغلقة بالفعل والبصمة قريبة جداً (أقل من 60 دقيقة من الخروج):
+              const diffFromPrevOutMins = calculatePunchMinutesDiff(operationalShiftDate, existingSameDay.timeOut, datePart, timePart);
+              if (diffFromPrevOutMins >= 0 && diffFromPrevOutMins <= 60) {
+                console.log(`[Biometric Deduplication] 🛡️ امتصاص بصمة انصراف متأخر وتحديث الوردية القائمة (${existingSameDay.timeOut} ➔ ${timePart}) بدلاً من تكرار ورديات اليوم.`);
+                existingSameDay.timeOut = timePart;
+                existingSameDay.timeOutDate = datePart;
+                const newDuration = calculatePunchMinutesDiff(existingSameDay.date, existingSameDay.timeIn, datePart, timePart);
+                const newCalcH = Math.max(0, Math.round(((newDuration / 60) - parseFloat(existingSameDay.breakHours || 0)) * 100) / 100);
+                existingSameDay.hours = newCalcH;
+                existingSameDay.actualWorkedHours = newCalcH;
+                existingSameDay.netHours = newCalcH;
+                existingSameDay.updatedAt = new Date().toISOString();
+                currentShifts[existingSameDayIdx] = existingSameDay;
+                shiftRecord = existingSameDay;
+              } else {
+                // فترة ثانية مشروعة (Split shift): نضيفها دون استبدال
+                shiftRecord.isSplitShift = true;
+                currentShifts = [shiftRecord, ...currentShifts.filter(s => s.id !== newShiftId)];
+              }
+            } else {
+              // الوردية القائمة مفتوحة أصلاً
+              shiftRecord.id = existingSameDay.id;
+              currentShifts[existingSameDayIdx] = shiftRecord;
+            }
+          } else {
+            currentShifts = [shiftRecord, ...currentShifts.filter(s => s.id !== newShiftId)];
+          }
         } else {
           // ── تسجيل انصراف ذكي وإغلاق الوردية العابرة لمنتصف الليل ──
           possibleEmpKeys.forEach(k => {
@@ -2281,11 +2699,37 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             updatedAt: new Date().toISOString()
           };
 
+          if (otHours > 0 && !isOtApproved) {
+            closedRecord = ensureOvertimeRequestForShift(
+              closedRecord,
+              matchedEmpObj,
+              effBranchObj || physBranchObj,
+              state,
+              currentRequests,
+              currentNotifications,
+              devObj?.device_name || 'ZKTeco MB20'
+            );
+          }
+
           if (existIdx >= 0) {
             currentShifts[existIdx] = closedRecord;
           } else {
             currentShifts = [closedRecord, ...currentShifts];
           }
+
+          // 🛡️ كنس وحذف أي وردية شبحية مكررة فُتحت بالخطأ صباح اليوم بعد إغلاق الوردية الليلية بنجاح
+          if (isOvernight) {
+            currentShifts = currentShifts.filter(s => {
+              const isMatch = possibleEmpKeys.some(k => String(s.employeeId) === String(k) || (s.employeeCode && String(s.employeeCode) === String(k)));
+              const isPhantomMorning = isMatch && s.date === datePart && s.id !== closedRecord.id &&
+                (!s.timeOut || s.timeOut === '—' || s.timeOut === 'قيد العمل الآن' || parseFloat(s.hours || 0) <= 0.1);
+              if (isPhantomMorning) {
+                console.log(`[Biometric Deduplication] 🧹 كنس وحذف وردية شبحية مكررة صباح اليوم (${s.id}) بعد إغلاق الوردية الليلية بنجاح.`);
+              }
+              return !isPhantomMorning;
+            });
+          }
+
           shiftRecord = closedRecord;
         }
 
@@ -2426,6 +2870,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             // 8. حفظ التحديثات في Redis و PostgreSQL بهدوء فائق وسرعة دون بث عاصفة الـ 4.2MB
             state.activeShifts = currentActiveShifts;
             state.shifts = currentShifts;
+            state.requests = currentRequests;
+            state.notifications = currentNotifications;
             state._punchSource = 'biometric_adms';
             state._endedShiftEmpIds = Array.from(endedEmpIds);
             await saveSettingsToStorage(STORAGE_KEY, state, 'batch-worker');
@@ -4664,6 +5110,10 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
           ? (pA.raw_payload.split(/[\t\s]+/)[2]?.slice(0, 5) || getEgyptTime(dtA))
           : getEgyptTime(dtA);
 
+        // 🛡️ درع صارم: pA يجب ألا تكون بصمة خروج! بصمة الخروج تنهي العمل ولا تبدأ وردية ليلية
+        const isExitA = pA.action_type === 'check_out' || pA.raw_punch_state === 1;
+        if (isExitA) continue;
+
         if (i + 1 < empPunches.length) {
           const pB = empPunches[i + 1];
           const dtB = new Date(pB.punch_time);
@@ -4674,22 +5124,42 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
             ? (pB.raw_payload.split(/[\t\s]+/)[2]?.slice(0, 5) || getEgyptTime(dtB))
             : getEgyptTime(dtB);
 
+          const todayStr = getEgyptDate();
+
+          // 🛡️ درع صارم: إذا كانت pB تخص اليوم الحالي وكانت بصمة حضور (check_in)، فهي حتماً بداية عمل اليوم ولا يمكن أن تكون انصرافاً للأمس!
+          if (dateB === todayStr && (pB.action_type === 'check_in' || pB.raw_punch_state === 0)) {
+            continue;
+          }
+
+          // 🛡️ درع صارم: pB لا يمكن أن تكون بصمة حضور (check_in) تنهي وردية بالأمس إلا إذا كانت بصمة فجرية مبكرة (قبل 06:00 ص)
+          const hourB = parseInt(timeB.split(':')[0], 10) || 0;
+          if (pB.action_type === 'check_in' && hourB >= 7) {
+            continue;
+          }
+
+          // فحص ما إذا كان هناك بصمة انصراف أخرى تخص dateA بعد pA (أي أن وردية dateA اكتملت وانتهت بالفعل في نفس اليوم)
+          const hasSameDayCheckout = empPunches.some((pMid, idxMid) => {
+            if (idxMid <= i) return false;
+            const dtMid = new Date(pMid.punch_time);
+            const dateMid = pMid.raw_payload && pMid.raw_payload.includes('-')
+              ? (pMid.raw_payload.split(/[\t\s]+/)[1] || getEgyptDate(dtMid))
+              : getEgyptDate(dtMid);
+            return dateMid === dateA && (pMid.action_type === 'check_out' || pMid.raw_punch_state === 1);
+          });
+          if (hasSameDayCheckout) {
+            continue;
+          }
+
           const diffMinutes = calculatePunchMinutesDiff(dateA, timeA, dateB, timeB);
           const diffHours = diffMinutes / 60;
-
           const hourA = parseInt(timeA.split(':')[0], 10) || 0;
-          const hourB = parseInt(timeB.split(':')[0], 10) || 0;
 
-          // 🛡️ معايير الوردية الليلية الحقيقية والمحرك العابر للزمن (الاعتماد التام على التوقيت المصري ودعم كامل حتى 24 ساعة):
-          // 1. ورديات منتصف اليوم والمساء/الإغلاق: تبدأ بين 10:00 صباحاً و 20:59 مساءً وتنتهي بعد منتصف الليل ومدتها حتى 24 ساعة
-          const isMiddayOrEveningOvernight = hourA >= 10 && hourA <= 20 && hourB <= 6 && diffHours >= 0.25 && diffHours <= 24;
-          // 2. ورديات الليل الكاملة: تبدأ ليلاً (21:00 - 04:00 فجراً) وتنتهي صباحاً أو ظهراً (لتغطية وردية 12 ليلاً إلى 12 ظهراً)
-          const isNightOvernight = (hourA >= 21 || hourA <= 4) && hourB <= 14 && diffHours >= 0.25 && diffHours <= 24;
-          // 3. أي بصمة في الساعات الأولى من اليوم التالي (hourB <= 6) بعد وردية بدأت بالأمس ولم تتجاوز 24 ساعة
-          const isEarlyMorningOvernight = hourB <= 6 && diffHours >= 0.25 && diffHours <= 24;
-          // 4. المحرك العابر للزمن: أي بصمة عبرت لليوم التالي ومدتها بين 15 دقيقة و 24 ساعة
-          const isUniversalCrossDate = diffHours >= 0.25 && diffHours <= 24;
-          const isOvernightPair = dateB > dateA && (isMiddayOrEveningOvernight || isNightOvernight || isEarlyMorningOvernight || isUniversalCrossDate);
+          // 🛡️ معايير الوردية الليلية الحقيقية (بين 15 دقيقة و 16 ساعة كحد أقصى):
+          // 1. ورديات المساء/الإغلاق: تبدأ عصراً أو مساءً (hourA >= 14) وتنتهي بعد منتصف الليل (hourB <= 6)
+          const isEveningOvernight = hourA >= 14 && hourB <= 6 && diffHours >= 0.25 && diffHours <= 16;
+          // 2. ورديات الليل الكاملة: تبدأ ليلاً (21:00 - 04:00) وتنتهي صباحاً أو ظهراً (hourB <= 14)
+          const isNightOvernight = (hourA >= 21 || hourA <= 4) && hourB <= 14 && diffHours >= 0.25 && diffHours <= 16;
+          const isOvernightPair = dateB > dateA && (isEveningOvernight || isNightOvernight);
 
           if (isOvernightPair) {
             // التحقق أولاً: إذا كانت البصمة B متبوعة ببصمة لاحقة في نفس اليوم dateB تفصلها مدة عمل حقيقية (أكثر من ساعتين)،
@@ -4768,18 +5238,20 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
                 updatedAt: new Date().toISOString()
               };
 
-              // إزالة أي وردية وهمية فُتحت بالخطأ عند وقت الخروج timeB في اليوم التالي dateB
-              currentShifts = currentShifts.filter(s => {
-                const isMatchEmp = possibleKeys.some(k => String(s.employeeId) === String(k));
-                const isPhantomNextDay = isMatchEmp && s.date === dateB && (s.timeIn === timeB || (s.timeIn >= timeB && (!s.timeOut || s.hours <= 0.1)));
-                return !isPhantomNextDay;
-              });
+              // 🛡️ حظر مسح ورديات اليوم الحالي: يُمنع منعاً باتاً حذف أو تفريغ أي وردية أو حالة نشطة لليوم الحالي dateB === todayStr
+              if (dateB !== todayStr) {
+                currentShifts = currentShifts.filter(s => {
+                  const isMatchEmp = possibleKeys.some(k => String(s.employeeId) === String(k));
+                  const isPhantomNextDay = isMatchEmp && s.date === dateB && (s.timeIn === timeB || (s.timeIn >= timeB && (!s.timeOut || s.hours <= 0.1)));
+                  return !isPhantomNextDay;
+                });
 
-              possibleKeys.forEach(k => {
-                if (currentActiveShifts[k]?.timeIn === timeB || currentActiveShifts[k]?.date === dateB) {
-                  delete currentActiveShifts[k];
-                }
-              });
+                possibleKeys.forEach(k => {
+                  if (currentActiveShifts[k]?.timeIn === timeB || currentActiveShifts[k]?.date === dateB) {
+                    delete currentActiveShifts[k];
+                  }
+                });
+              }
 
               if (existingIdx >= 0) {
                 currentShifts[existingIdx] = restoredShift;
@@ -4802,7 +5274,287 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
       }
     }
 
-    if (repairedCount > 0) {
+    // ── المرحلة الثانية: محرك الفرز والتطهير ومنع تكرار الورديات (Master Deduplication Engine) ──
+    let deduplicatedCount = 0;
+    let pass = 0;
+    while (pass < 2) {
+      pass++;
+      const groupedByEmpDate = new Map();
+      for (const shift of currentShifts) {
+        if (!shift || !shift.employeeId || !shift.date) continue;
+        const key = `${shift.employeeId}_${shift.date}`;
+        if (!groupedByEmpDate.has(key)) groupedByEmpDate.set(key, []);
+        groupedByEmpDate.get(key).push(shift);
+      }
+
+      let hasDupsInPass = false;
+      const nextCleanShifts = [];
+
+      for (const [key, list] of groupedByEmpDate.entries()) {
+        if (list.length === 1) {
+          nextCleanShifts.push(list[0]);
+          continue;
+        }
+
+        hasDupsInPass = true;
+        // 1. تصفية الورديات الشبحية الصفرية (ساعات = 0 أو دخول=خروج بدون خروج حقيقي)
+        const todayDateStr = getEgyptDate();
+        const validShifts = list.filter(s => {
+          if (s.date === todayDateStr && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive || s.status === 'active')) {
+            return true;
+          }
+          const h = parseFloat(s.hours || s.actualWorkedHours || 0);
+          const isPhantom = h <= 0.1 && (s.timeIn === s.timeOut || !s.timeOut || s.timeOut === '—');
+          return !isPhantom;
+        });
+
+        if (validShifts.length === 0) {
+          nextCleanShifts.push(list[0]);
+          deduplicatedCount += (list.length - 1);
+          continue;
+        }
+
+        if (validShifts.length === 1) {
+          nextCleanShifts.push(validShifts[0]);
+          deduplicatedCount += (list.length - 1);
+          continue;
+        }
+
+        // فحص إذا كانت إحدى الورديات بعد منتصف الليل (00:00 - 05:00) وتعود ليوم الأمس
+        const postMidnightIdx = validShifts.findIndex(s => {
+          const [inH] = String(s.timeIn || '99').split(':').map(Number);
+          return inH < 5;
+        });
+
+        if (postMidnightIdx >= 0 && validShifts.length === 2 && pass === 1) {
+          const pmShift = validShifts[postMidnightIdx];
+          const yesterday = getPreviousDateStr(pmShift.date);
+          const empId = pmShift.employeeId;
+          const empObj = employees.find(e => String(e.id) === String(empId) || (e.code && String(e.code) === String(empId)));
+          const yesterdaySched = getEmployeeScheduledDayDetails(empObj, yesterday, state);
+
+          // لا ننسب للأمس إذا كان الأمس راحة أسبوعية (OFF)
+          if (!yesterdaySched.isOff) {
+            const yesterdayShift = currentShifts.find(s => s.employeeId === empId && s.date === yesterday && parseFloat(s.hours || 0) > 2);
+            if (!yesterdayShift) {
+              pmShift.date = yesterday;
+              pmShift.isOvernight = true;
+              pmShift.isPostMidnightInForYesterday = true;
+              pmShift.notes = ((pmShift.notes || '') + ` [تم نسب الوردية للأمس ${yesterday} كوردية سهر ليلية بدأت بعد منتصف الليل]`).trim();
+              nextCleanShifts.push(pmShift);
+              const otherShift = validShifts[1 - postMidnightIdx];
+              nextCleanShifts.push(otherShift);
+              deduplicatedCount++;
+              continue;
+            }
+          }
+        }
+
+        // دمج الورديات المتعددة في نفس اليوم في وردية واحدة موحدة نظيفة
+        const sortedByIn = [...validShifts].sort((a,b) => (a.timeIn || '99:99').localeCompare(b.timeIn || '99:99'));
+        const sortedByOut = [...validShifts].sort((a,b) => (b.timeOut || '00:00').localeCompare(a.timeOut || '00:00'));
+
+        const earliestIn = sortedByIn[0].timeIn || '09:00';
+        const latestOut = sortedByOut[0].timeOut || '18:00';
+        const totalH = validShifts.reduce((acc, s) => acc + (parseFloat(s.hours || s.actualWorkedHours || 0) || 0), 0);
+        const schedH = parseFloat(sortedByIn[0].scheduledHours || 8);
+        const regH = Math.min(totalH, schedH);
+        const otH = Math.max(0, Math.round((totalH - regH) * 100) / 100);
+
+        const consolidated = {
+          ...sortedByIn[0],
+          timeIn: earliestIn,
+          timeOut: latestOut,
+          hours: Math.round(totalH * 100) / 100,
+          actualWorkedHours: Math.round(totalH * 100) / 100,
+          netHours: Math.round(totalH * 100) / 100,
+          regularHours: Math.round(regH * 100) / 100,
+          overtimeHours: otH,
+          overtimeStatus: (sortedByIn.some(s => s.overtimeStatus === 'approved') || otH === 0) ? (otH > 0 ? 'approved' : 'none') : 'pending',
+          notes: (validShifts.map(s => s.notes || s.note).filter(Boolean).join(' | ') || 'دمج وتنسيق تلقائي للورديات المكررة في نفس اليوم').trim(),
+          isConsolidated: true,
+          updatedAt: new Date().toISOString()
+        };
+
+        nextCleanShifts.push(consolidated);
+        deduplicatedCount += (list.length - 1);
+      }
+
+      currentShifts = nextCleanShifts;
+      if (!hasDupsInPass) break;
+    }
+
+    // ── المرحلة الثالثة: محرك ضبط وتدقيق ساعات العمل واسترداد بصمات الانصراف (Precision Hours & Recovery Engine) ──
+    let hoursAdjustedCount = 0;
+    currentShifts = currentShifts.map(s => {
+      if (!s || !s.date) return s;
+
+      const emp = employees.find(e => String(e.id) === String(s.employeeId) || (e.code && String(e.code) === String(s.employeeCode)));
+      const schedHours = parseFloat(s.scheduledHours || emp?.workHoursPerDay || emp?.workHours || 8);
+
+      // 🛡️ صمام الأمان الفولاذي: تخطي أي وردية لليوم الحالي إذا كان الموظف على رأس عمله الآن
+      const todayStr = getEgyptDate();
+      const isTodayShift = s.date === todayStr;
+      const isActiveNow = Boolean(
+        currentActiveShifts[s.employeeId] ||
+        currentActiveShifts[s.employeeCode] ||
+        s.isLiveActive ||
+        s.status === 'active' ||
+        s.timeOut === 'قيد العمل الآن'
+      );
+      if (isTodayShift && isActiveNow) {
+        // الموظف يباشر عمله اليوم - يُمنع منعاً باتاً وضع أي انصراف اصطناعي له!
+        return s;
+      }
+
+      // استرداد بصمات الانصراف من سجل الماكينات الخام للورديات السابقة غير المكتملة
+      if ((!s.timeOut || s.timeOut === '—' || s.timeOut === '' || parseFloat(s.hours || 0) <= 0.1) && s.timeIn && s.date < todayStr) {
+        const empId = s.employeeId;
+        const empPin = s.employeeCode || emp?.code;
+        const nextDate = getNextDateStr(s.date);
+
+        const candidatePunches = (punches || []).filter(rp => {
+          const matchEmp = (empId && String(rp.employee_id) === String(empId)) ||
+                           (empPin && String(rp.device_user_pin) === String(empPin));
+          if (!matchEmp) return false;
+          // حصر الاسترداد في بصمات الانصراف الفعلية حصراً (check_out أو state=1)
+          const isRealCheckout = rp.action_type === 'check_out' || rp.raw_punch_state === 1;
+          if (!isRealCheckout) return false;
+
+          let pDate = '';
+          let pTime = '';
+          if (rp.raw_payload && rp.raw_payload.includes('-') && rp.raw_payload.includes(':')) {
+            const parts = rp.raw_payload.split(/[\t\s]+/);
+            pDate = parts[1];
+            pTime = parts[2]?.slice(0, 5);
+          } else {
+            const dt = new Date(rp.punch_time);
+            pDate = getEgyptDate(dt);
+            pTime = getEgyptTime(dt);
+          }
+
+          if (pDate === s.date) {
+            const [pInH, pInM] = s.timeIn.split(':').map(Number);
+            const [pOutH, pOutM] = pTime.split(':').map(Number);
+            return (pOutH * 60 + pOutM) - (pInH * 60 + pInM) >= 30; // 30 دقيقة على الأقل
+          }
+          if (pDate === nextDate && pTime < '13:00') return true;
+          return false;
+        });
+
+        if (candidatePunches.length > 0) {
+          const chosen = candidatePunches[candidatePunches.length - 1];
+          let pDate = '';
+          let pTime = '';
+          if (chosen.raw_payload && chosen.raw_payload.includes('-') && chosen.raw_payload.includes(':')) {
+            const parts = chosen.raw_payload.split(/[\t\s]+/);
+            pDate = parts[1];
+            pTime = parts[2]?.slice(0, 5);
+          } else {
+            const dt = new Date(chosen.punch_time);
+            pDate = getEgyptDate(dt);
+            pTime = getEgyptTime(dt);
+          }
+
+          s.timeOut = pTime;
+          s.timeOutDate = pDate;
+          s.isOvernight = (pDate > s.date) || (s.timeIn > pTime);
+          s.notes = ((s.notes || '').replace(/\[أغلقت بواسطة مكنسة الأمان لتجاوز \d+ ساعة بدون انصراف\]/g, '') + ' [تم استرداد بصمة الانصراف الفعلية من جهاز البصمة]').trim();
+          hoursAdjustedCount++;
+        }
+      }
+
+      // إغلاق الورديات المفتوحة القديمة
+      if (!s.timeOut || s.timeOut === '—' || s.timeOut === '' || s.timeOut === 'قيد العمل الآن') {
+        const todayStr = getEgyptDate();
+        if (s.date < todayStr) {
+          const [inH, inM] = (s.timeIn || '09:00').split(':').map(Number);
+          const outH = (inH + Math.floor(schedHours)) % 24;
+          const outTimeStr = `${String(outH).padStart(2, '0')}:${String(inM).padStart(2, '0')}`;
+          s.timeOut = outTimeStr;
+          s.timeOutDate = (inH + schedHours >= 24) ? getNextDateStr(s.date) : s.date;
+          s.isOvernight = s.timeOutDate > s.date;
+          s.hours = schedHours;
+          s.actualWorkedHours = schedHours;
+          s.netHours = schedHours;
+          s.regularHours = schedHours;
+          s.overtimeHours = 0;
+          s.overtimeStatus = 'none';
+          s.status = 'completed';
+          s.notes = ((s.notes || '') + ' [تم استكمال الانصراف وفق ساعات العمل المقررة لعدم وجود بصمة خروج]').trim();
+          hoursAdjustedCount++;
+          return s;
+        }
+      }
+
+      // ضبط الورديات والساعات
+      if (s.timeIn && s.timeOut && s.timeOut !== '—' && s.timeOut !== '') {
+        const [inH, inM] = s.timeIn.split(':').map(Number);
+        const [outH, outM] = s.timeOut.split(':').map(Number);
+        const inMins = inH * 60 + inM;
+        const outMins = outH * 60 + outM;
+
+        const isInverted = inMins > outMins;
+
+        if (isInverted) {
+          s.isOvernight = true;
+          if (!s.timeOutDate) s.timeOutDate = getNextDateStr(s.date);
+
+          const actualMins = (24 * 60 - inMins) + outMins;
+          let calculatedHours = Math.round((actualMins / 60) * 100) / 100;
+
+          const currHours = parseFloat(s.hours);
+          const needsHoursCorrection = isNaN(currHours) || currHours <= 0.1 || Math.abs(currHours - calculatedHours) > 0.5;
+
+          if (needsHoursCorrection) {
+            if (calculatedHours > 16) {
+              calculatedHours = Math.min(schedHours, 10);
+              s.notes = ((s.notes || '') + ` [تم ضبط ساعات العمل على ${calculatedHours} ساعة لتجاوز الفارق 16 ساعة ناتج عن تأخر تسجيل الانصراف]`).trim();
+            }
+            s.hours = calculatedHours;
+            s.actualWorkedHours = calculatedHours;
+            s.netHours = calculatedHours;
+            const regH = Math.min(calculatedHours, schedHours);
+            s.regularHours = Math.round(regH * 100) / 100;
+            const otH = Math.max(0, Math.round((calculatedHours - regH) * 100) / 100);
+            s.overtimeHours = otH;
+            s.overtimeStatus = otH > 0 ? (s.overtimeStatus || 'approved') : 'none';
+            hoursAdjustedCount++;
+          }
+        } else {
+          s.isOvernight = false;
+          s.timeOutDate = s.date;
+
+          const actualMins = outMins - inMins;
+          let calculatedHours = Math.round((actualMins / 60) * 100) / 100;
+          const currHours = parseFloat(s.hours);
+
+          if (calculatedHours > 16) {
+            calculatedHours = Math.min(schedHours, 10);
+            s.notes = ((s.notes || '') + ` [تم ضبط ساعات العمل على ${calculatedHours} ساعة لتجاوز الفارق 16 ساعة ناتج عن تأخر تسجيل الانصراف]`).trim();
+            s.hours = calculatedHours;
+            s.actualWorkedHours = calculatedHours;
+            s.netHours = calculatedHours;
+            const regH = Math.min(calculatedHours, schedHours);
+            s.regularHours = Math.round(regH * 100) / 100;
+            s.overtimeHours = Math.max(0, Math.round((calculatedHours - regH) * 100) / 100);
+            hoursAdjustedCount++;
+          } else if (isNaN(currHours) || (currHours <= 0.1 && calculatedHours > 0.5) || currHours > 16) {
+            s.hours = calculatedHours;
+            s.actualWorkedHours = calculatedHours;
+            s.netHours = calculatedHours;
+            const regH = Math.min(calculatedHours, schedHours);
+            s.regularHours = Math.round(regH * 100) / 100;
+            s.overtimeHours = Math.max(0, Math.round((calculatedHours - regH) * 100) / 100);
+            hoursAdjustedCount++;
+          }
+        }
+      }
+
+      return s;
+    });
+
+    if (repairedCount > 0 || deduplicatedCount > 0 || hoursAdjustedCount > 0) {
       state.shifts = currentShifts;
       state.activeShifts = currentActiveShifts;
       state._punchSource = 'biometric_overnight_repair';
@@ -4813,6 +5565,7 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
           entityType: 'shifts',
           action: 'repaired',
           repairedCount,
+          deduplicatedCount,
           timestamp: new Date().toISOString()
         });
         io.emit('entity:changed', {
@@ -4821,12 +5574,12 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
           timestamp: new Date().toISOString()
         });
       }
-      console.log(`[Biometric Self-Healing] ✅ تم ترميم وإصلاح ${repairedCount} وردية ليلية بنجاح!`);
+      console.log(`[Biometric Self-Healing] ✅ تم ترميم وإصلاح ${repairedCount} وردية ليلية وتطهير ${deduplicatedCount} وردية مكررة بنجاح!`);
     } else {
-      console.log('[Biometric Self-Healing] ℹ️ تم فحص السجلات ولا توجد ورديات بحاجة لترميم.');
+      console.log('[Biometric Self-Healing] ℹ️ تم فحص السجلات ولا توجد ورديات بحاجة لترميم أو تطهير.');
     }
 
-    return { success: true, repairedCount, repairedDetails };
+    return { success: true, repairedCount, deduplicatedCount, repairedDetails };
   } catch (err) {
     console.error('[Biometric Self-Healing Error]:', err.message);
     return { success: false, error: err.message };
