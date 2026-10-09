@@ -218,7 +218,15 @@ export function calculateShiftMetrics(shift, state) {
   let effectiveBreak = 0;
   let actualWorkedHours = 0;
 
-  if (timeIn && timeOut && String(timeOut).trim() !== '' && String(timeOut).trim() !== '—') {
+  const hasRealTimeOut = Boolean(
+    timeOut &&
+    String(timeOut).trim() !== '' &&
+    String(timeOut).trim() !== '—' &&
+    !String(timeOut).includes('قيد العمل') &&
+    !String(timeOut).includes('غير مسجل')
+  );
+
+  if (timeIn && hasRealTimeOut) {
     const rawMins = calcRawDurationMinutes(timeIn, timeOut, {
       startDate: shift.date,
       endDate: shift.timeOutDate || shift.endDate || shift.date,
@@ -290,11 +298,12 @@ export function calculateShiftMetrics(shift, state) {
     } else {
       regularHours = Math.round(Math.min(actualWorkedHours, scheduledHours) * 100) / 100;
       if (shift.regularHours !== undefined && parseFloat(shift.regularHours) > 0) {
-        regularHours = Math.min(actualWorkedHours, parseFloat(shift.regularHours));
+        regularHours = Math.round(Math.min(actualWorkedHours, parseFloat(shift.regularHours)) * 100) / 100;
       }
-      overtimeHours = Math.max(0, Math.round((actualWorkedHours - regularHours) * 100) / 100);
+      const maxPossibleOt = Math.max(0, Math.round((actualWorkedHours - regularHours) * 100) / 100);
+      overtimeHours = maxPossibleOt;
       if (shift.overtimeHours !== undefined && parseFloat(shift.overtimeHours) > 0) {
-        overtimeHours = Math.max(overtimeHours, parseFloat(shift.overtimeHours));
+        overtimeHours = Math.min(maxPossibleOt, Math.round(parseFloat(shift.overtimeHours) * 100) / 100);
       }
     }
   }

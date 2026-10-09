@@ -5475,6 +5475,57 @@ export default function EmployeePortalView({
                                   })
                                 )}
                               </tbody>
+                              {bShifts.length > 0 && (
+                                <tfoot>
+                                  <tr style={{ fontWeight: 700, background: 'var(--surface-muted)' }}>
+                                    <td colSpan="5" style={{ textAlign: 'right', paddingRight: '12px', color: 'var(--text-muted)' }}>
+                                      إجمالي الفرع ({bShifts.length} وردية)
+                                    </td>
+                                    <td>
+                                      <span className="ep-break-badge">
+                                        {fmt(bShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0))} س
+                                      </span>
+                                    </td>
+                                    <td style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>
+                                      {(() => {
+                                        const bSum = summary.perBranch?.[bId] || {};
+                                        const bHours = bSum.hours || 0;
+                                        const bOt = bSum.approvedOtHours || 0;
+                                        const bPendingOt = bSum.pendingOtHours || 0;
+                                        return bOt > 0 ? (
+                                          <>
+                                            <div>{fmt(bHours + bOt)} ساعة</div>
+                                            <div style={{ fontSize: '10.5px', color: '#16a34a' }}>({fmt(bHours)} س أساسي + {fmt(bOt)} س إضافي معتمد)</div>
+                                            {bPendingOt > 0 && (
+                                              <div style={{ fontSize: '10px', color: '#b45309' }}>+{fmt(bPendingOt)} س معلق</div>
+                                            )}
+                                          </>
+                                        ) : bPendingOt > 0 ? (
+                                          <>
+                                            <div>{fmt(bHours)} ساعة</div>
+                                            <div style={{ fontSize: '10px', color: '#b45309' }}>+{fmt(bPendingOt)} س معلق</div>
+                                          </>
+                                        ) : `${fmt(bHours)} ساعة`;
+                                      })()}
+                                    </td>
+                                    <td style={{ color: 'var(--success)', fontWeight: 700 }}>
+                                      {canViewSalary ? (() => {
+                                        const bSum = summary.perBranch?.[bId] || {};
+                                        const bBase = bSum.baseEarnings || 0;
+                                        const bOtEarn = bSum.otEarnings || 0;
+                                        return bOtEarn > 0 ? (
+                                          <>
+                                            <div>{fmt(bBase + bOtEarn)} ج.م</div>
+                                            <div style={{ fontSize: '10.5px', color: '#16a34a' }}>({fmt(bBase)} أساسي + {fmt(bOtEarn)} إضافي)</div>
+                                          </>
+                                        ) : `${fmt(bBase)} ج.م`;
+                                      })() : '🔒 مقيد'}
+                                    </td>
+                                    <td></td>
+                                    {canEditShift && <td></td>}
+                                  </tr>
+                                </tfoot>
+                              )}
                             </table>
                           </div>
                         )}
@@ -5609,13 +5660,18 @@ export default function EmployeePortalView({
                       <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>
                         📊 الإجمالي ({empShifts.length} وردية)
                       </span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
                         <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--primary-dark)' }}>
-                          {fmt(summary.hours)} ساعة
+                          {fmt(summary.totalHours || (summary.hours + (summary.approvedOvertimeHours || 0)))} ساعة
+                          {summary.approvedOvertimeHours > 0 && (
+                            <span style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: 'bold', display: 'block' }}>
+                              ({fmt(summary.hours)} س أساسي + {fmt(summary.approvedOvertimeHours)} س إضافي)
+                            </span>
+                          )}
                         </span>
                         {canViewSalary && (
                           <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--success)' }}>
-                            {fmt(summary.baseEarnings)} ج.م
+                            {fmt(summary.baseEarnings + (summary.overtimeEarnings || 0))} ج.م
                           </span>
                         )}
                       </div>
@@ -5677,12 +5733,12 @@ export default function EmployeePortalView({
                                 )}
                                 {shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeHours > 0 && (
                                   <span style={{ display: 'block', marginTop: '2px', background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
-                                    ⭐ وقت إضافي معتمد (+{shiftMetrics.overtimeHours} س)
+                                    ⭐ وقت إضافي معتمد (+{fmt(shiftMetrics.overtimeHours)} س)
                                   </span>
                                 )}
                                 {shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0 && (
                                   <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
-                                    ⏳ إضافي (+{shiftMetrics.overtimeHours} س) بانتظار الاعتماد
+                                    ⏳ إضافي (+{fmt(shiftMetrics.overtimeHours)} س) بانتظار الاعتماد
                                   </span>
                                 )}
                                 {shiftMetrics.overtimeStatus === 'rejected' && (
@@ -5756,8 +5812,44 @@ export default function EmployeePortalView({
                             الإجمالي ({empShifts.length} وردية)
                           </td>
                           <td><span className="ep-break-badge">{fmt(empShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0))} س</span></td>
-                          <td style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>{fmt(summary.hours)} ساعة</td>
-                          <td style={{ color: 'var(--success)', fontWeight: 700 }}>{canViewSalary ? `${fmt(summary.baseEarnings)} ج.م` : '🔒 مقيد'}</td>
+                          <td style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>
+                            {summary.approvedOvertimeHours > 0 ? (
+                              <>
+                                <div>{fmt(summary.totalHours || (summary.hours + summary.approvedOvertimeHours))} ساعة</div>
+                                <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: 'bold' }}>
+                                  ({fmt(summary.hours)} س أساسي + {fmt(summary.approvedOvertimeHours)} س إضافي معتمد)
+                                </div>
+                                {summary.pendingOvertimeHours > 0 && (
+                                  <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 'bold' }}>
+                                    (+{fmt(summary.pendingOvertimeHours)} س إضافي قيد المراجعة)
+                                  </div>
+                                )}
+                              </>
+                            ) : summary.pendingOvertimeHours > 0 ? (
+                              <>
+                                <div>{fmt(summary.hours)} ساعة</div>
+                                <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 'bold' }}>
+                                  (+{fmt(summary.pendingOvertimeHours)} س إضافي قيد المراجعة)
+                                </div>
+                              </>
+                            ) : (
+                              `${fmt(summary.hours)} ساعة`
+                            )}
+                          </td>
+                          <td style={{ color: 'var(--success)', fontWeight: 700 }}>
+                            {canViewSalary ? (
+                              summary.approvedOvertimeHours > 0 ? (
+                                <>
+                                  <div>{fmt(summary.baseEarnings + (summary.overtimeEarnings || 0))} ج.م</div>
+                                  <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: 'bold' }}>
+                                    ({fmt(summary.baseEarnings)} أساسي + {fmt(summary.overtimeEarnings)} إضافي)
+                                  </div>
+                                </>
+                              ) : (
+                                `${fmt(summary.baseEarnings)} ج.م`
+                              )
+                            ) : '🔒 مقيد'}
+                          </td>
                           <td></td>
                           {canEditShift && <td></td>}
                         </tr>
@@ -6110,7 +6202,7 @@ export default function EmployeePortalView({
                             );
                           })}
                           <td style={{ textAlign: 'center', padding: '14px 16px', fontSize: '16px', color: '#047857', background: '#d1fae5', borderRight: '2px solid #a7f3d0' }}>
-                            {fmt(summary.baseEarnings + (summary.totalBonus || 0) - (summary.totalDeduction || 0))} ج.م
+                            {fmt(summary.baseEarnings + (summary.overtimeEarnings || 0) + (summary.totalBonus || 0) - (summary.totalDeduction || 0))} ج.م
                           </td>
                         </tr>
                       </tbody>

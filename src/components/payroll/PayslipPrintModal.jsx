@@ -2,7 +2,7 @@ import { getRealTodayStr } from '../../utils/timeEngine';
 import React, { useState, useEffect, useRef } from 'react';
 import { fmt, arabicWeekday, AR_MONTHS, getEmployeeApprovedLeaves } from '../../utils/formatters';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
-import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
+import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics } from '../../utils/latePenaltyEngine';
 import { triggerDirectPrint, generateOfficialPayslipHTML } from '../../utils/printHelper';
 import { getCycleDateRange } from '../../utils/periodEngine';
 import { computeEmployeeLoanDeductionsForPeriod } from '../../utils/loansEngine';
@@ -515,20 +515,18 @@ export default function PayslipPrintModal({
   (empShifts || []).forEach((s) => {
     const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
     const isRejectedPhoto = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
-    const effHours = isRejectedPhoto ? 0 : getEffectiveShiftHours(s, state);
     const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
     const daySched = getEmployeeDaySchedule(emp.id, s.date, state);
-    const isSwapped = daySched && daySched.isSwapped;
-
-    const otReq = (state?.requests || []).find((r) => 
-      r && r.type === 'overtime' && String(r.employeeId) === String(emp.id) && (r.date === s.date || r.shiftId === s.id)
-    );
-    const otStatus = s.overtimeStatus || (otReq ? otReq.status : null);
-    const otHours = parseFloat(s.overtimeHours || (otReq ? otReq.hours : 0)) || 0;
-    const rejOtHours = parseFloat(s.rejectedOvertimeHours || (otReq && otReq.status === 'rejected' ? otReq.hours : 0)) || 0;
+    const isSwapped = Boolean(daySched && daySched.isSwapped);
+    const shiftMetrics = getShiftHoursMetrics(s, state);
+    const effHours = isRejectedPhoto ? 0 : shiftMetrics.regularHours;
+    const otHours = shiftMetrics.overtimeHours;
+    const isOtApproved = shiftMetrics.isOvertimeApproved;
+    const otStatus = shiftMetrics.overtimeStatus;
+    const rejOtHours = parseFloat(s.rejectedOvertimeHours || 0) || 0;
 
     let otBadge = null;
-    if (otStatus === 'approved' && otHours > 0) {
+    if (isOtApproved && otHours > 0) {
       otBadge = (
         <span style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', padding: '1px 5px', borderRadius: '4px', fontWeight: 'bold', fontSize: '8.5px', display: 'inline-block', marginTop: '2px' }}>
           ✅ إضافي معتمد (+{otHours.toFixed(2)} س)
@@ -548,8 +546,7 @@ export default function PayslipPrintModal({
       );
     }
 
-    const isOtApproved = otStatus === 'approved' && otHours > 0;
-    const totalShiftHours = effHours + (isOtApproved ? otHours : 0);
+    const totalShiftHours = isRejectedPhoto ? 0 : shiftMetrics.payableHours;
     const shiftEarnings = totalShiftHours * shiftRate;
 
     unifiedTableRows.push({
@@ -1161,112 +1158,101 @@ export default function PayslipPrintModal({
                     const bSum = summary.perBranch?.[bId] || {};
                     const bRate = bSum.rate || bSum.hourlyRate || hourlyRate;
                     const bTotalHours = bShifts.reduce((acc, s) => {
-                      const isRej = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
+                      const isRej = Boolean(s.isRejectedPhoto || s.status === "rejected_photo" || (typeof s.statusLabel === "string" && s.statusLabel.includes("رفض الصورة")));
                       if (isRej) return acc;
-                      const regH = getEffectiveShiftHours(s, state) || 0;
-                      const otH = (s.overtimeStatus === 'approved' || (parseFloat(s.overtimeHours) > 0 && (s.adminApproved || s.isAdminCreated))) ? (parseFloat(s.overtimeHours) || 0) : 0;
-                      return acc + regH + otH;
+                      const metrics = getShiftHoursMetrics(s, state);
+                      return acc + metrics.payableHours;
                     }, 0);
                     const bTotalBreak = bShifts.reduce((acc, s) => acc + (parseFloat(s.breakHours) || 0), 0);
-                    const bTotalEarn = bShifts.reduce((acc, s) => {
-                      const isRej = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
-                      if (isRej) return acc;
-                      const regH = getEffectiveShiftHours(s, state) || 0;
-                      const otH = (s.overtimeStatus === 'approved' || (parseFloat(s.overtimeHours) > 0 && (s.adminApproved || s.isAdminCreated))) ? (parseFloat(s.overtimeHours) || 0) : 0;
-                      return acc + ((regH + otH) * bRate);
-                    }, 0);
+                    const bTotalEarn = bTotalHours * bRate;
 
                     return (
-                      <div key={bId} style={{ marginBottom: '10px', border: '1.5px solid #0f766e', borderRadius: '8px', overflow: 'hidden', background: '#ffffff' }}>
-                        <div style={{ background: '#f0fdf4', padding: '6px 12px', borderBottom: '1.5px solid #0f766e', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontWeight: 800, color: '#0f766e', fontSize: '11.5px', fontFamily: 'Cairo' }}>
-                            🏢 جدول بصمات وحضور: <strong>{bName}</strong> ({bShifts.length} وردية)
-                          </span>
-                          <span style={{ fontSize: '10.5px', color: '#166534', fontWeight: 'bold' }}>
-                            سعر الساعة المعتمد بالفرع: {fmt(bRate)} ج.م/س
-                          </span>
+                      <div key={bId} style={{ marginBottom: "12px" }}>
+                        <div style={{ background: "#f1f5f9", padding: "4px 8px", borderRadius: "4px", fontWeight: "bold", fontSize: "11px", marginBottom: "4px", color: "#334155", display: "flex", justifyContent: "space-between" }}>
+                          <span>📍 {bName}</span>
+                          <span>سعر الساعة: {fmt(bRate)} ج.م</span>
                         </div>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', textAlign: 'center' }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "9.5px", textAlign: "center", marginBottom: "4px" }}>
                           <thead>
-                            <tr style={{ background: '#f1f5f9', color: '#334155' }}>
-                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '5%' }}>#</th>
-                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '25%' }}>اليوم والتاريخ</th>
-                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '15%' }}>وقت الدخول</th>
-                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '15%' }}>وقت الخروج</th>
-                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '12%' }}>البريك</th>
-                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '13%' }}>ساعات العمل</th>
-                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '15%' }}>الأجر المستحق بالفرع</th>
+                            <tr style={{ background: "#f8fafc", color: "#475569" }}>
+                              <th style={{ padding: "3px", border: "1px solid #cbd5e1", width: "25px" }}>#</th>
+                              <th style={{ padding: "3px", border: "1px solid #cbd5e1" }}>اليوم والتاريخ</th>
+                              <th style={{ padding: "3px", border: "1px solid #cbd5e1" }}>الدخول</th>
+                              <th style={{ padding: "3px", border: "1px solid #cbd5e1" }}>الخروج</th>
+                              <th style={{ padding: "3px", border: "1px solid #cbd5e1" }}>البريك</th>
+                              <th style={{ padding: "3px", border: "1px solid #cbd5e1" }}>الصافي</th>
+                              <th style={{ padding: "3px", border: "1px solid #cbd5e1" }}>المستحق</th>
                             </tr>
                           </thead>
                           <tbody>
                             {bShifts.map((s, sIdx) => {
-                              const isRej = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
-                              const effHours = isRej ? 0 : getEffectiveShiftHours(s, state);
+                              const isRej = Boolean(s.isRejectedPhoto || s.status === "rejected_photo" || (typeof s.statusLabel === "string" && s.statusLabel.includes("رفض الصورة")));
                               const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
-                              const otReq = (state?.requests || []).find((r) => 
-                                r && r.type === 'overtime' && String(r.employeeId) === String(emp.id) && (r.date === s.date || r.shiftId === s.id)
-                              );
-                              const otStatus = s.overtimeStatus || (otReq ? otReq.status : null);
-                              const otHours = parseFloat(s.overtimeHours || (otReq ? otReq.hours : 0)) || 0;
-                              const rejOtHours = parseFloat(s.rejectedOvertimeHours || (otReq && otReq.status === 'rejected' ? otReq.hours : 0)) || 0;
+                              const shiftMetrics = getShiftHoursMetrics(s, state);
+                              const isOtApproved = shiftMetrics.isOvertimeApproved;
+                              const otHours = shiftMetrics.overtimeHours;
+                              const otStatus = shiftMetrics.overtimeStatus;
+                              const effHours = isRej ? 0 : shiftMetrics.regularHours;
+                              const totalShiftHours = isRej ? 0 : shiftMetrics.payableHours;
+                              const rejOtHours = parseFloat(s.rejectedOvertimeHours || 0) || 0;
 
                               return (
-                                <tr key={s.id || sIdx} style={{ background: isRej ? '#fef2f2' : (hasPerm ? '#fefce8' : (sIdx % 2 === 0 ? '#fff' : '#f8fafc')) }}>
-                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{sIdx + 1}</td>
-                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>
+                                <tr key={s.id || sIdx} style={{ background: isRej ? "#fef2f2" : (hasPerm ? "#fefce8" : (sIdx % 2 === 0 ? "#fff" : "#f8fafc")) }}>
+                                  <td style={{ padding: "3px", border: "1px solid #cbd5e1" }}>{sIdx + 1}</td>
+                                  <td style={{ padding: "3px", border: "1px solid #cbd5e1", fontWeight: "bold" }}>
                                     {arabicWeekday(s.date)} {s.date}
-                                    {hasPerm && <span style={{ display: 'block', color: '#b45309', fontSize: '9px' }}>⏰ إذن معتمد</span>}
+                                    {hasPerm && <span style={{ display: "block", color: "#b45309", fontSize: "9px" }}>⏰ إذن معتمد</span>}
                                     {isRej && (
-                                      <span style={{ display: 'block', color: '#dc2626', fontSize: '9px', fontWeight: 'bold' }}>
+                                      <span style={{ display: "block", color: "#dc2626", fontSize: "9px", fontWeight: "bold" }}>
                                         ❌ تم رفض بصمة هذا اليوم بسبب رفض الصورة
                                       </span>
                                     )}
-                                    {otStatus === 'approved' && otHours > 0 && (
-                                      <span style={{ display: 'block', marginTop: '2px', background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', padding: '1px 5px', borderRadius: '4px', fontWeight: 'bold', fontSize: '8.5px' }}>
+                                    {isOtApproved && otHours > 0 && (
+                                      <span style={{ display: "block", marginTop: "2px", background: "#f0fdf4", color: "#16a34a", border: "1px solid #86efac", padding: "1px 5px", borderRadius: "4px", fontWeight: "bold", fontSize: "8.5px" }}>
                                         ✅ إضافي معتمد (+{otHours.toFixed(2)} س)
                                       </span>
                                     )}
-                                    {otStatus === 'rejected' && (
-                                      <span style={{ display: 'block', marginTop: '2px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', padding: '1px 5px', borderRadius: '4px', fontWeight: 'bold', fontSize: '8.5px' }}>
-                                        ❌ إضافي مرفوض {rejOtHours > 0 ? `(${rejOtHours.toFixed(2)} س)` : ''}
+                                    {otStatus === "rejected" && (
+                                      <span style={{ display: "block", marginTop: "2px", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", padding: "1px 5px", borderRadius: "4px", fontWeight: "bold", fontSize: "8.5px" }}>
+                                        ❌ إضافي مرفوض {rejOtHours > 0 ? `(${rejOtHours.toFixed(2)} س)` : ""}
                                       </span>
                                     )}
-                                    {otStatus === 'pending' && otHours > 0 && (
-                                      <span style={{ display: 'block', marginTop: '2px', background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 5px', borderRadius: '4px', fontWeight: 'bold', fontSize: '8.5px' }}>
+                                    {otStatus === "pending" && otHours > 0 && (
+                                      <span style={{ display: "block", marginTop: "2px", background: "#fffbeb", color: "#b45309", border: "1px solid #fde68a", padding: "1px 5px", borderRadius: "4px", fontWeight: "bold", fontSize: "8.5px" }}>
                                         ⏳ إضافي قيد الاعتماد (+{otHours.toFixed(2)} س)
                                       </span>
                                     )}
                                   </td>
-                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: isRej ? '#94a3b8' : '#16a34a', textDecoration: isRej ? 'line-through' : 'none' }}>{s.timeIn || '—'}</td>
-                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: isRej ? '#94a3b8' : '#dc2626', textDecoration: isRej ? 'line-through' : 'none' }}>{s.timeOut || '—'}</td>
-                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{fmt(s.breakHours)} س</td>
-                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: isRej ? '#dc2626' : 'inherit' }}>
-                                    {isRej ? '0 س (غير محتسبة)' : (
+                                  <td style={{ padding: "3px", border: "1px solid #cbd5e1", color: isRej ? "#94a3b8" : "#16a34a", textDecoration: isRej ? "line-through" : "none" }}>{s.timeIn || "—"}</td>
+                                  <td style={{ padding: "3px", border: "1px solid #cbd5e1", color: isRej ? "#94a3b8" : "#dc2626", textDecoration: isRej ? "line-through" : "none" }}>{s.timeOut || "—"}</td>
+                                  <td style={{ padding: "3px", border: "1px solid #cbd5e1" }}>{fmt(s.breakHours)} س</td>
+                                  <td style={{ padding: "3px", border: "1px solid #cbd5e1", fontWeight: "bold", color: isRej ? "#dc2626" : "inherit" }}>
+                                    {isRej ? "0 س (غير محتسبة)" : (
                                       <>
-                                        {otStatus === 'approved' && otHours > 0 ? `${fmt(effHours + otHours)} س` : `${fmt(effHours)} س`}
-                                        {otStatus === 'approved' && otHours > 0 && (
-                                          <div style={{ fontSize: '9px', color: '#16a34a' }}>
+                                        {isOtApproved && otHours > 0 ? `${fmt(effHours + otHours)} س` : `${fmt(effHours)} س`}
+                                        {isOtApproved && otHours > 0 && (
+                                          <div style={{ fontSize: "9px", color: "#16a34a" }}>
                                             (أساسي: {fmt(effHours)} + إضافي: {fmt(otHours)})
                                           </div>
                                         )}
                                       </>
                                     )}
                                   </td>
-                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: isRej ? '#dc2626' : '#0f766e' }}>
-                                    {isRej ? '0.00 ج.م' : `${fmt((effHours + (otStatus === 'approved' ? otHours : 0)) * bRate)} ج.م`}
+                                  <td style={{ padding: "3px", border: "1px solid #cbd5e1", fontWeight: "bold", color: isRej ? "#dc2626" : "#0f766e" }}>
+                                    {isRej ? "0.00 ج.م" : `${fmt(totalShiftHours * bRate)} ج.م`}
                                   </td>
                                 </tr>
                               );
                             })}
                           </tbody>
                           <tfoot>
-                            <tr style={{ background: '#e2e8f0', fontWeight: 'bold', fontSize: '10.5px' }}>
-                              <td colSpan={4} style={{ padding: '4px 8px', border: '1px solid #cbd5e1', textAlign: 'right', color: '#0f766e' }}>
+                            <tr style={{ background: "#e2e8f0", fontWeight: "bold", fontSize: "10.5px" }}>
+                              <td colSpan={4} style={{ padding: "4px 8px", border: "1px solid #cbd5e1", textAlign: "right", color: "#0f766e" }}>
                                 إجمالي فرع ({bName}):
                               </td>
-                              <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{fmt(bTotalBreak)} س</td>
-                              <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>{fmt(bTotalHours)} س</td>
-                              <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>{fmt(bTotalEarn)} ج.م</td>
+                              <td style={{ padding: "4px", border: "1px solid #cbd5e1" }}>{fmt(bTotalBreak)} س</td>
+                              <td style={{ padding: "4px", border: "1px solid #cbd5e1", color: "#0f766e" }}>{fmt(bTotalHours)} س</td>
+                              <td style={{ padding: "4px", border: "1px solid #cbd5e1", color: "#0f766e" }}>{fmt(bTotalEarn)} ج.م</td>
                             </tr>
                           </tfoot>
                         </table>
@@ -1275,10 +1261,16 @@ export default function PayslipPrintModal({
                   });
                 })()}
 
+
                 {/* Multi-Branch Grand Summary Strip */}
                 <div style={{ background: '#0f766e', color: '#ffffff', padding: '6px 14px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 'bold', fontSize: '11px' }}>
                   <span>📊 إجمالي البصمات وساعات العمل بكافة الفروع ({empShifts.length} وردية):</span>
-                  <span>إجمالي الساعات: {fmt(totalHours)} س | إجمالي المستحق: {fmt(baseEarnings)} ج.م</span>
+                  <span>
+                    إجمالي الساعات: {fmt(summary.totalHours || (totalHours + (summary.approvedOvertimeHours || 0)))} س
+                    {summary.approvedOvertimeHours > 0 && ` (${fmt(totalHours)} أساسي + ${fmt(summary.approvedOvertimeHours)} إضافي)`}
+                    {' '}| إجمالي المستحق: {fmt(baseEarnings + (summary.overtimeEarnings || 0))} ج.م
+                    {summary.approvedOvertimeHours > 0 && ` (${fmt(baseEarnings)} أساسي + ${fmt(summary.overtimeEarnings)} إضافي)`}
+                  </span>
                 </div>
               </div>
             ) : (
@@ -1383,8 +1375,30 @@ export default function PayslipPrintModal({
                       <tr style={{ background: '#e2e8f0', fontWeight: 'bold', fontSize: '11px' }}>
                         <td colSpan={4} style={{ padding: '4px 8px', border: '1px solid #cbd5e1', textAlign: 'right' }}>الإجمالي:</td>
                         <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{fmt(totalBreakHours)} س</td>
-                        <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>{fmt(totalHours)} س</td>
-                        <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>{fmt(baseEarnings)} ج.م</td>
+                        <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>
+                          {summary.approvedOvertimeHours > 0 ? (
+                            <>
+                              <div>{fmt(summary.totalHours || (totalHours + summary.approvedOvertimeHours))} س</div>
+                              <div style={{ fontSize: '9px', color: '#16a34a', fontWeight: 'normal' }}>
+                                ({fmt(totalHours)} س أساسي + {fmt(summary.approvedOvertimeHours)} س إضافي)
+                              </div>
+                            </>
+                          ) : (
+                            `${fmt(totalHours)} س`
+                          )}
+                        </td>
+                        <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>
+                          {summary.approvedOvertimeHours > 0 ? (
+                            <>
+                              <div>{fmt(baseEarnings + (summary.overtimeEarnings || 0))} ج.م</div>
+                              <div style={{ fontSize: '9px', color: '#16a34a', fontWeight: 'normal' }}>
+                                ({fmt(baseEarnings)} أساسي + {fmt(summary.overtimeEarnings)} إضافي)
+                              </div>
+                            </>
+                          ) : (
+                            `${fmt(baseEarnings)} ج.م`
+                          )}
+                        </td>
                       </tr>
                     </tfoot>
                   )}

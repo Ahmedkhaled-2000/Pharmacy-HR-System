@@ -2,7 +2,7 @@ import { registerPlugin } from '@capacitor/core';
 import { getRealTodayStr } from '../utils/timeEngine';
 import { fmt, arabicWeekday, AR_MONTHS, getEmployeeApprovedLeaves } from './formatters';
 import { getEmployeeDaySchedule } from './rosterEngine';
-import { getEffectiveShiftHours, isApprovedPermissionForDate } from './latePenaltyEngine';
+import { getEffectiveShiftHours, isApprovedPermissionForDate, getShiftHoursMetrics } from './latePenaltyEngine';
 import { getCycleDateRange } from './periodEngine';
 import { computeEmployeeLoanDeductionsForPeriod } from './loansEngine';
 
@@ -863,7 +863,6 @@ export function generateOfficialPayslipHTML({
   (shifts || []).forEach((s) => {
     const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
     const isRejectedPhoto = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
-    const effHours = isRejectedPhoto ? 0 : (parseFloat(s.hours || s.regularHours) || 0);
     const hasPerm = s.hasPermission || false;
     const daySched = getEmployeeDaySchedule(emp.id, s.date, state);
     const isSwapped = daySched && daySched.isSwapped;
@@ -875,15 +874,15 @@ export function generateOfficialPayslipHTML({
       badge = `<span style="background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px; display: inline-block;">🔄 وردية متبدلة ${daySched.swappedWithName ? `(بديل عن ${daySched.swappedWithName})` : ''}</span>`;
     }
 
-    const otReq = (state?.requests || []).find((r) => 
-      r && r.type === 'overtime' && String(r.employeeId) === String(emp.id) && (r.date === s.date || r.shiftId === s.id)
-    );
-    const otStatus = s.overtimeStatus || (otReq ? otReq.status : null);
-    const otHours = parseFloat(s.overtimeHours || (otReq ? otReq.hours : 0)) || 0;
-    const rejOtHours = parseFloat(s.rejectedOvertimeHours || (otReq && otReq.status === 'rejected' ? otReq.hours : 0)) || 0;
+    const shiftMetrics = getShiftHoursMetrics(s, state);
+    const effHours = isRejectedPhoto ? 0 : shiftMetrics.regularHours;
+    const otHours = shiftMetrics.overtimeHours;
+    const isOtApproved = shiftMetrics.isOvertimeApproved;
+    const otStatus = shiftMetrics.overtimeStatus;
+    const rejOtHours = parseFloat(s.rejectedOvertimeHours || 0) || 0;
 
     let otBadgeHtml = '';
-    if (otStatus === 'approved' && otHours > 0) {
+    if (isOtApproved && otHours > 0) {
       otBadgeHtml = `<span style="background: #f0fdf4; color: #16a34a; border: 1px solid #86efac; padding: 1px 5px; border-radius: 4px; font-weight: bold; font-size: 8px; display: inline-block; margin-top: 2px;">✅ إضافي معتمد (+${otHours.toFixed(2)} س)</span>`;
     } else if (otStatus === 'rejected') {
       otBadgeHtml = `<span style="background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; padding: 1px 5px; border-radius: 4px; font-weight: bold; font-size: 8px; display: inline-block; margin-top: 2px;">❌ إضافي مرفوض ${rejOtHours > 0 ? `(${rejOtHours.toFixed(2)} س)` : ''}</span>`;
@@ -895,8 +894,7 @@ export function generateOfficialPayslipHTML({
       badge = badge ? `${badge}<br/>${otBadgeHtml}` : otBadgeHtml;
     }
 
-    const isOtApproved = otStatus === 'approved' && otHours > 0;
-    const totalShiftHours = effHours + (isOtApproved ? otHours : 0);
+    const totalShiftHours = isRejectedPhoto ? 0 : shiftMetrics.payableHours;
     const shiftEarnings = totalShiftHours * shiftRate;
 
     unifiedTableRows.push({
@@ -1305,18 +1303,17 @@ export function generateOfficialPayslipHTML({
                     <tbody>
                       ${bShifts.map((s, idx) => {
                         const isRej = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
-                        const effHours = isRej ? 0 : (parseFloat(s.hours || s.regularHours) || 0);
                         const hasPerm = s.hasPermission || false;
-
-                        const otReq = (state?.requests || []).find((r) => 
-                          r && r.type === 'overtime' && String(r.employeeId) === String(emp.id) && (r.date === s.date || r.shiftId === s.id)
-                        );
-                        const otStatus = s.overtimeStatus || (otReq ? otReq.status : null);
-                        const otHours = parseFloat(s.overtimeHours || (otReq ? otReq.hours : 0)) || 0;
-                        const rejOtHours = parseFloat(s.rejectedOvertimeHours || (otReq && otReq.status === 'rejected' ? otReq.hours : 0)) || 0;
+                        const shiftMetrics = getShiftHoursMetrics(s, state);
+                        const isOtApproved = shiftMetrics.isOvertimeApproved;
+                        const otHours = shiftMetrics.overtimeHours;
+                        const otStatus = shiftMetrics.overtimeStatus;
+                        const effHours = isRej ? 0 : shiftMetrics.regularHours;
+                        const totalShiftHours = isRej ? 0 : shiftMetrics.payableHours;
+                        const rejOtHours = parseFloat(s.rejectedOvertimeHours || 0) || 0;
 
                         let otBadgeHtml = '';
-                        if (otStatus === 'approved' && otHours > 0) {
+                        if (isOtApproved && otHours > 0) {
                           otBadgeHtml = `<span style="background: #f0fdf4; color: #16a34a; border: 1px solid #86efac; padding: 1px 4px; border-radius: 4px; font-weight: bold; font-size: 7.5px; display: inline-block; margin-top: 1px;">✅ إضافي معتمد (+${otHours.toFixed(2)} س)</span>`;
                         } else if (otStatus === 'rejected') {
                           otBadgeHtml = `<span style="background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; padding: 1px 4px; border-radius: 4px; font-weight: bold; font-size: 7.5px; display: inline-block; margin-top: 1px;">❌ إضافي مرفوض ${rejOtHours > 0 ? `(${rejOtHours.toFixed(2)} س)` : ''}</span>`;
@@ -1336,9 +1333,9 @@ export function generateOfficialPayslipHTML({
                             <td style="padding: 2px; color: ${isRej ? '#94a3b8; text-decoration: line-through;' : '#dc2626;'}">${s.timeOut || '—'}</td>
                             <td style="padding: 2px;">${fmt(s.breakHours)} س</td>
                             <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : 'inherit;'}">${isRej ? '0 س (غير محتسبة)' : (
-                              (otStatus === 'approved' && otHours > 0) ? `${fmt(effHours + otHours)} س<div style="font-size: 7.5px; color: #16a34a;">(أساسي: ${fmt(effHours)} + إضافي: ${fmt(otHours)})</div>` : `${fmt(effHours)} س`
+                              (isOtApproved && otHours > 0) ? `${fmt(effHours + otHours)} س<div style="font-size: 7.5px; color: #16a34a;">(أساسي: ${fmt(effHours)} + إضافي: ${fmt(otHours)})</div>` : `${fmt(effHours)} س`
                             )}</td>
-                            <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : '#0d9488;'}">${isRej ? '0.00 ج.م' : `${fmt((effHours + (otStatus === 'approved' ? otHours : 0)) * bRate)} ج.م`}</td>
+                            <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : '#0d9488;'}">${isRej ? '0.00 ج.م' : `${fmt(totalShiftHours * bRate)} ج.م`}</td>
                           </tr>
                         `;
                       }).join('')}
@@ -1360,7 +1357,9 @@ export function generateOfficialPayslipHTML({
           <!-- Multi-Branch Grand Total Summary Bar -->
           <div style="background: #0f766e; color: #ffffff; padding: 4px 10px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; font-weight: 800; font-size: 10px; margin-top: 4px;">
             <span>📊 إجمالي البصمات وساعات العمل بكافة الفروع (${(shifts || []).length} وردية):</span>
-            <span>إجمالي الساعات: ${fmt(totalHours)} س | إجمالي المستحق: ${fmt(baseEarnings)} ج.م</span>
+            <span>
+              إجمالي الساعات: ${fmt(summary.totalHours || (totalHours + (summary.approvedOvertimeHours || 0)))} س${summary.approvedOvertimeHours > 0 ? ` (${fmt(totalHours)} أساسي + ${fmt(summary.approvedOvertimeHours)} إضافي)` : ''} | إجمالي المستحق: ${fmt(baseEarnings + (summary.overtimeEarnings || 0))} ج.م${summary.approvedOvertimeHours > 0 ? ` (${fmt(baseEarnings)} أساسي + ${fmt(summary.overtimeEarnings)} إضافي)` : ''}
+            </span>
           </div>
         </div>
       ` : `
@@ -1447,8 +1446,18 @@ export function generateOfficialPayslipHTML({
                 <tr style="background: #e2e8f0; font-weight: 800; font-size: 10px;">
                   <td colspan="4" style="padding: 2.5px 6px; text-align: right;">الإجمالي:</td>
                   <td style="padding: 2.5px;">${fmt(totalBreakHours)} س</td>
-                  <td style="padding: 2.5px; color: #0f766e;">${fmt(totalHours)} س</td>
-                  <td style="padding: 2.5px; color: #0d9488;">${fmt(baseEarnings)} ج.م</td>
+                  <td style="padding: 2.5px; color: #0f766e;">
+                    ${summary.approvedOvertimeHours > 0 ? `
+                      ${fmt(summary.totalHours || (totalHours + summary.approvedOvertimeHours))} س
+                      <div style="font-size: 7.5px; color: #16a34a; font-weight: normal;">(${fmt(totalHours)} س أساسي + ${fmt(summary.approvedOvertimeHours)} س إضافي)</div>
+                    ` : `${fmt(totalHours)} س`}
+                  </td>
+                  <td style="padding: 2.5px; color: #0d9488;">
+                    ${summary.approvedOvertimeHours > 0 ? `
+                      ${fmt(baseEarnings + (summary.overtimeEarnings || 0))} ج.م
+                      <div style="font-size: 7.5px; color: #16a34a; font-weight: normal;">(${fmt(baseEarnings)} أساسي + ${fmt(summary.overtimeEarnings)} إضافي)</div>
+                    ` : `${fmt(baseEarnings)} ج.م`}
+                  </td>
                 </tr>
               </tfoot>
             ` : ''}

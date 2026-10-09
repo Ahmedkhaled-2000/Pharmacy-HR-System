@@ -1101,10 +1101,13 @@ export default function BiometricDevicesCard({ state, showToast }) {
       const res = await bioFetch('/api/biometrics/repair-overnight-shifts', { method: 'POST' });
       const data = await res.json();
       if (data.success || data.repairedCount !== undefined) {
-        if (data.repairedCount > 0) {
-          showToast?.(`✅ تم ترميم واستعادة ${data.repairedCount} وردية ليلية بنجاح!`);
+        if (data.repairedCount > 0 || data.deduplicatedCount > 0) {
+          const parts = [];
+          if (data.repairedCount > 0) parts.push(`ترميم ${data.repairedCount} وردية ليلية`);
+          if (data.deduplicatedCount > 0) parts.push(`تطهير ودمج ${data.deduplicatedCount} وردية مكررة`);
+          showToast?.(`✅ تم ${parts.join(' و ')} بنجاح!`);
         } else {
-          showToast?.(data.message || 'ℹ️ تم الفحص بنجاح: لا توجد ورديات بحاجة لترميم أو تم إصلاحها مسبقاً.');
+          showToast?.(data.message || 'ℹ️ تم الفحص بنجاح: لا توجد ورديات بحاجة لترميم أو تطهير.');
         }
       } else {
         showToast?.('⚠️ تعذر إتمام الترميم: ' + (data.error || 'خطأ غير معروف'));

@@ -434,7 +434,7 @@ export default function AttendancePunchesModal({
   };
 
   const totalRegularHours = monthPunches
-    .reduce((acc, p) => acc + getShiftHoursMetrics(p, state).regularHours, 0);
+    .reduce((acc, p) => acc + (getEffectiveShiftHours(p, state) || 0), 0);
 
   const totalApprovedOtHours = monthPunches
     .reduce((acc, p) => acc + (getShiftHoursMetrics(p, state).isOvertimeApproved ? getShiftHoursMetrics(p, state).overtimeHours : 0), 0);
@@ -1927,7 +1927,17 @@ export default function AttendancePunchesModal({
                       </span>
                     </td>
                     <td style={{ textAlign: 'center', color: '#0d9488' }}>
-                      {totalWorkHours} ساعة
+                      <div style={{ fontWeight: '800' }}>{totalWorkHours} ساعة</div>
+                      {totalApprovedOtHours > 0 && (
+                        <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: 'bold' }}>
+                          ({totalRegularHours.toFixed(2)} س أساسي + {totalApprovedOtHours.toFixed(2)} س إضافي معتمد)
+                        </div>
+                      )}
+                      {totalPendingOtHours > 0 && (
+                        <div style={{ fontSize: '10.5px', color: '#b45309', fontWeight: 'bold' }}>
+                          (+{totalPendingOtHours.toFixed(2)} س إضافي قيد المراجعة)
+                        </div>
+                      )}
                     </td>
                     <td style={{ textAlign: 'center', color: '#16a34a', fontWeight: '800' }}>
                       {totalEarned} ج.م
