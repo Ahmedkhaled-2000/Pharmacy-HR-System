@@ -11,7 +11,7 @@ import { getSocket } from '../../../utils/socketClient';
 export default function PharmacyComplaintsTab({ branchId, branch, currentPharmacist = '', showToast }) {
   const [complaints, setComplaints] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [filterStatus, setFilterStatus] = useState('all'); // 'all' | 'pending' | 'resolved'
+  const [filterStatus, setFilterStatus] = useState('pending'); // default: 'pending' (قيد الانتظار)
 
   const fetchComplaints = useCallback(async () => {
     setIsLoading(true);

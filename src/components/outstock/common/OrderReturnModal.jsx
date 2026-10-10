@@ -192,7 +192,8 @@ export default function OrderReturnModal({
 
       const res = await outstockCreateOrderReturn(order.id, payload);
       if (res?.success) {
-        showToast?.('✅ تم إرسال طلب المرتجع للمشتريات وإشعار الإدارة بنجاح');
+        const walletMsg = res.walletCredited ? ' وتم إضافة المبلغ لمحفظة العميل بنجاح 👛' : '';
+        showToast?.(`✅ تم تسجيل المرتجع بنجاح${walletMsg} وإشعار إدارة المشتريات 📲`);
         const completeData = {
           ...payload,
           returnId: res.returnId || ('RET-' + Date.now().toString().slice(-6)),
@@ -202,6 +203,12 @@ export default function OrderReturnModal({
           customerPhone: order.customer_phone || order.customer?.whatsapp_phone || ''
         };
         setSubmittedReturnData(completeData);
+        // طباعة إيصال المرتجع الحراري 80mm تلقائياً
+        try {
+          printReturnReceipt(completeData);
+        } catch (printErr) {
+          console.warn('Auto print return receipt error:', printErr);
+        }
         onReturnSubmitted?.(completeData);
       } else {
         showToast?.(res?.error || 'تعذر تسجيل طلب المرتجع');

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Building2, Phone, Calendar, Clock, History, X, Users, RefreshCw, Wallet } from 'lucide-react';
 import { outstockGetCustomers, outstockGetCustomerHistory, outstockGetBranches } from '../../../utils/outstockApiClient';
 import CustomerWalletModal from '../common/CustomerWalletModal';
+import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
 
 /**
  * OwnerCustomersDirectoryTab.jsx
@@ -24,6 +25,14 @@ export default function OwnerCustomersDirectoryTab({ showToast }) {
 
   // نافذة محفظة العميل الإلكترونية
   const [walletCustomer, setWalletCustomer] = useState(null);
+  const [walletTargetCustomer, setWalletTargetCustomer] = useState(null);
+  const [isWalletAuthOpen, setIsWalletAuthOpen] = useState(false);
+  const [authenticatedEmployee, setAuthenticatedEmployee] = useState(null);
+
+  const handleOpenWallet = (cust) => {
+    setWalletTargetCustomer(cust);
+    setIsWalletAuthOpen(true);
+  };
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -237,7 +246,7 @@ export default function OwnerCustomersDirectoryTab({ showToast }) {
                           }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setWalletCustomer(cust);
+                            handleOpenWallet(cust);
                           }}
                           title="إدارة وشحن محفظة العميل"
                         >
@@ -313,7 +322,7 @@ export default function OwnerCustomersDirectoryTab({ showToast }) {
                       gap: '4px',
                       marginRight: 'auto'
                     }}
-                    onClick={() => setWalletCustomer(selectedCustomer)}
+                    onClick={() => handleOpenWallet(selectedCustomer)}
                   >
                     <Wallet size={12} />
                     <span>إدارة وشحن المحفظة 👛</span>
@@ -418,12 +427,34 @@ export default function OwnerCustomersDirectoryTab({ showToast }) {
         </div>
       )}
 
+      {/* ── التحقق من كود الموظف قبل فتح المحفظة ── */}
+      {isWalletAuthOpen && (
+        <EmployeeCodeAuthModal
+          isOpen={isWalletAuthOpen}
+          title="التحقق من كود الموظف لفتح محفظة العميل"
+          subtitle="يرجى إدخال كود الموظف لتدقيق وتسجيل جميع العمليات المالية"
+          actionLabel="تأكيد الكود وفتح المحفظة"
+          onSuccess={(emp) => {
+            setAuthenticatedEmployee(emp);
+            setIsWalletAuthOpen(false);
+            if (walletTargetCustomer) {
+              setWalletCustomer(walletTargetCustomer);
+            }
+          }}
+          onClose={() => {
+            setIsWalletAuthOpen(false);
+            setWalletTargetCustomer(null);
+          }}
+        />
+      )}
+
       {/* ── نافذة إدارة وشحن محفظة العميل ── */}
       {walletCustomer && (
         <CustomerWalletModal
           customer={walletCustomer}
           isOpen={Boolean(walletCustomer)}
           onClose={() => setWalletCustomer(null)}
+          authenticatedEmployee={authenticatedEmployee}
           onBalanceUpdated={(custId, newBal) => {
             setCustomers(prev => prev.map(c => c.id === custId ? { ...c, wallet_balance: newBal } : c));
             if (selectedCustomer && selectedCustomer.id === custId) {

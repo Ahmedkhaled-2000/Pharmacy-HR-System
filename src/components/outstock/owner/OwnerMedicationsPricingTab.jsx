@@ -49,6 +49,7 @@ import {
 import { extractMedicationsWithAi } from '../../../utils/outstockMedicationAiExtractor';
 import MedicationMasterCardModal from '../common/MedicationMasterCardModal';
 import AddMedicationModal from '../common/AddMedicationModal';
+import CosmeticsProductModal from '../common/CosmeticsProductModal';
 
 export default function OwnerMedicationsPricingTab({
   showToast = (msg) => {
@@ -97,6 +98,10 @@ export default function OwnerMedicationsPricingTab({
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isChoiceModalOpen, setIsChoiceModalOpen] = useState(false);
   const [newItemType, setNewItemType] = useState('medication'); // 'medication' | 'cosmetics'
+  const [catalogItemTypeFilter, setCatalogItemTypeFilter] = useState('all'); // 'all' | 'medication' | 'cosmetics'
+  const [isCosmeticsModalOpen, setIsCosmeticsModalOpen] = useState(false);
+  const [selectedCosmeticsItem, setSelectedCosmeticsItem] = useState(null);
+  const [cosmeticsModalMode, setCosmeticsModalMode] = useState('add');
   const [activeIngredientModalMed, setActiveIngredientModalMed] = useState(null);
   const [newMedForm, setNewMedForm] = useState({
     trade_name_ar: '',
@@ -186,11 +191,12 @@ export default function OwnerMedicationsPricingTab({
   }, []);
 
   // دالة البحث في الأدوية
-  const handleSearch = async (term) => {
+  const handleSearch = async (term, typeFilter = null) => {
     const q = String(term !== undefined ? term : searchTerm).trim();
+    const effectiveType = typeFilter !== null ? typeFilter : catalogItemTypeFilter;
     setIsSearching(true);
     try {
-      const res = await outstockSearchMedications(q, 40);
+      const res = await outstockSearchMedications(q, 40, effectiveType);
       if (res?.success && Array.isArray(res.medications)) {
         setSearchResults(res.medications);
       } else {
@@ -766,7 +772,9 @@ export default function OwnerMedicationsPricingTab({
               onClick={() => {
                 if (categoryScope === 'cosmetics') {
                   setNewItemType('cosmetics');
-                  setIsAddModalOpen(true);
+                  setSelectedCosmeticsItem(null);
+                  setCosmeticsModalMode('add');
+                  setIsCosmeticsModalOpen(true);
                 } else {
                   setIsChoiceModalOpen(true);
                 }
@@ -817,6 +825,39 @@ export default function OwnerMedicationsPricingTab({
               <FileSpreadsheet size={16} color="#059669" />
               <span>تصدير إكسل</span>
             </button>
+          </div>
+
+          {/* أزرار الفلترة: الكل / أدوية / مستحضرات تجميل */}
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '-4px', marginBottom: '2px' }}>
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b' }}>تصنيف العرض:</span>
+            {[
+              { id: 'all', label: 'الكل (شامل) 📦' },
+              { id: 'medication', label: 'الأدوية فقط 💊' },
+              { id: 'cosmetics', label: 'مستحضرات التجميل فقط 💄' }
+            ].map((pill) => (
+              <button
+                key={pill.id}
+                type="button"
+                onClick={() => {
+                  setCatalogItemTypeFilter(pill.id);
+                  handleSearch(searchTerm, pill.id);
+                }}
+                style={{
+                  padding: '5px 14px',
+                  borderRadius: '20px',
+                  fontSize: '12px',
+                  fontWeight: catalogItemTypeFilter === pill.id ? '800' : '600',
+                  cursor: 'pointer',
+                  border: catalogItemTypeFilter === pill.id ? '1.5px solid #0d9488' : '1px solid #cbd5e1',
+                  background: catalogItemTypeFilter === pill.id ? (pill.id === 'cosmetics' ? '#fdf2f8' : '#f0fdfa') : '#ffffff',
+                  color: catalogItemTypeFilter === pill.id ? (pill.id === 'cosmetics' ? '#db2777' : '#0f766e') : '#64748b',
+                  boxShadow: catalogItemTypeFilter === pill.id ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                {pill.label}
+              </button>
+            ))}
           </div>
 
           {/* جدول عرض الأدوية */}
@@ -953,7 +994,15 @@ export default function OwnerMedicationsPricingTab({
                           <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
                             <button
                               type="button"
-                              onClick={() => handleOpenMasterCard(med.id)}
+                              onClick={() => {
+                                if (med.item_type === 'cosmetics') {
+                                  setSelectedCosmeticsItem(med);
+                                  setCosmeticsModalMode('edit');
+                                  setIsCosmeticsModalOpen(true);
+                                } else {
+                                  handleOpenMasterCard(med.id);
+                                }
+                              }}
                               className="outstock-btn outstock-btn-secondary"
                               style={{
                                 padding: '6px 10px',
@@ -961,14 +1010,14 @@ export default function OwnerMedicationsPricingTab({
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 gap: '4px',
-                                background: '#eff6ff',
-                                color: '#1d4ed8',
-                                border: '1px solid #bfdbfe'
+                                background: med.item_type === 'cosmetics' ? '#fdf2f8' : '#eff6ff',
+                                color: med.item_type === 'cosmetics' ? '#be185d' : '#1d4ed8',
+                                border: med.item_type === 'cosmetics' ? '1px solid #fbcfe8' : '1px solid #bfdbfe'
                               }}
                               title="عرض كارتة الصنف والبدائل وسجل الأسعار"
                             >
-                              <FileText size={13} />
-                              <span>كارتة الصنف</span>
+                              {med.item_type === 'cosmetics' ? <Sparkles size={13} /> : <FileText size={13} />}
+                              <span>{med.item_type === 'cosmetics' ? 'كارتة التجميل 💄' : 'كارتة الصنف'}</span>
                             </button>
 
                             <button
@@ -2059,7 +2108,9 @@ export default function OwnerMedicationsPricingTab({
                 onClick={() => {
                   setNewItemType('cosmetics');
                   setIsChoiceModalOpen(false);
-                  setIsAddModalOpen(true);
+                  setSelectedCosmeticsItem(null);
+                  setCosmeticsModalMode('add');
+                  setIsCosmeticsModalOpen(true);
                 }}
                 style={{
                   display: 'flex',
@@ -2302,6 +2353,26 @@ export default function OwnerMedicationsPricingTab({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── 9. نافذة كارتة مستحضرات التجميل (إضافة / تعديل / استعراض) ── */}
+      {isCosmeticsModalOpen && (
+        <CosmeticsProductModal
+          isOpen={isCosmeticsModalOpen}
+          mode={cosmeticsModalMode}
+          item={selectedCosmeticsItem}
+          onClose={() => {
+            setIsCosmeticsModalOpen(false);
+            setSelectedCosmeticsItem(null);
+          }}
+          onSaved={() => {
+            setIsCosmeticsModalOpen(false);
+            setSelectedCosmeticsItem(null);
+            handleSearch(searchTerm);
+            fetchStats();
+          }}
+          showToast={showToast}
+        />
       )}
     </div>
   );

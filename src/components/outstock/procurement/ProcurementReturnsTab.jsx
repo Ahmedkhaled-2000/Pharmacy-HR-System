@@ -35,6 +35,9 @@ export default function ProcurementReturnsTab({ showToast, categoryScope = null 
   const [selectedBranchId, setSelectedBranchId] = useState('all');
   const [branches, setBranches] = useState([]);
 
+  // نافذة اعتماد المرتجع التفاعلية
+  const [approvingReturn, setApprovingReturn] = useState(null);
+
   // نافذة رفض المرتجع
   const [rejectingReturn, setRejectingReturn] = useState(null);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -129,23 +132,24 @@ export default function ProcurementReturnsTab({ showToast, categoryScope = null 
     });
   }, [returns, searchQuery]);
 
-  // اعتماد المرتجع
-  const handleApprove = async (ret) => {
-    const downPayment = parseFloat(ret.down_payment_refund || 0);
-    const confirmMsg = downPayment > 0
-      ? `هل أنت متأكد من اعتماد طلب المرتجع #${ret.order_number}؟\nسيتم تسوية المخزون وإيداع العربون (${downPayment} ج.م) تلقائياً في محفظة العميل.`
-      : `هل أنت متأكد من اعتماد طلب المرتجع #${ret.order_number} وتسوية الأصناف من عهدة الفرع؟`;
+  // فتح نافذة اعتماد المرتجع
+  const handleApprove = (ret) => {
+    setApprovingReturn(ret);
+  };
 
-    if (!window.confirm(confirmMsg)) return;
-
+  // تأكيد اعتماد المرتجع
+  const handleConfirmApprove = async () => {
+    if (!approvingReturn) return;
     setIsSubmittingReply(true);
     try {
-      const res = await outstockReplyOrderReturn(ret.id, {
-        action: 'approve'
+      const res = await outstockReplyOrderReturn(approvingReturn.id, {
+        decision: 'approved',
+        action: 'approved'
       });
 
       if (res?.success) {
         showToast?.('✅ تم اعتماد طلب المرتجع بنجاح وتسوية الرصيد والمخزون');
+        setApprovingReturn(null);
         fetchReturns();
       } else {
         showToast?.(res?.error || 'فشل اعتماد المرتجع');
@@ -174,7 +178,8 @@ export default function ProcurementReturnsTab({ showToast, categoryScope = null 
     setIsSubmittingReply(true);
     try {
       const res = await outstockReplyOrderReturn(rejectingReturn.id, {
-        action: 'reject',
+        decision: 'rejected',
+        action: 'rejected',
         rejectionReason: rejectionReason.trim()
       });
 
@@ -192,29 +197,7 @@ export default function ProcurementReturnsTab({ showToast, categoryScope = null 
     }
   };
 
-  // طباعة إيصال المرتجع
-  const handlePrint = (ret) => {
-    try {
-      printReturnReceipt({
-        returnId: ret.id,
-        orderNumber: ret.order_number,
-        branchName: ret.branch_name || 'الفرع',
-        customerName: ret.customer_name || '',
-        customerPhone: ret.customer_phone || '',
-        items: Array.isArray(ret.items) ? ret.items : [],
-        totalRefundAmount: parseFloat(ret.total_refund_amount || 0),
-        downPaymentRefund: parseFloat(ret.down_payment_refund || 0),
-        generalReturnReason: ret.general_return_reason || '',
-        refundDestination: ret.refund_destination || 'wallet',
-        employeeCode: ret.created_by_code || '',
-        employeeName: ret.created_by_name || '',
-        date: ret.created_at
-      });
-    } catch (e) {
-      console.error(e);
-      showToast?.('فشل تشغيل أمر الطباعة الحرارية');
-    }
-  };
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '6px 2px' }}>
@@ -569,17 +552,21 @@ export default function ProcurementReturnsTab({ showToast, categoryScope = null 
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                      <User size={13} color="#64748b" />
-                      <span>العميل: <strong style={{ color: '#0f172a' }}>{ret.customer_name || 'غير محدد'}</strong></span>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      <span
+                        style={{
+                          background: '#f1f5f9',
+                          color: '#475569',
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          fontSize: '11.5px',
+                          fontWeight: '700',
+                          border: '1px solid #cbd5e1'
+                        }}
+                      >
+                        🔒 بيانات العميل: محجوبة لخصوصية وسرية العملاء
+                      </span>
                     </div>
-
-                    {ret.customer_phone && (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <Phone size={13} color="#64748b" />
-                        <span dir="ltr">{ret.customer_phone}</span>
-                      </div>
-                    )}
 
                     <div style={{ color: '#475569' }}>
                       نوع المرتجع: <strong>{ret.return_type === 'full' ? 'مرتجع كلي للطلب' : 'مرتجع جزئي للأصناف'}</strong>
@@ -667,17 +654,6 @@ export default function ProcurementReturnsTab({ showToast, categoryScope = null 
 
                   {/* أزرار الإجراءات */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button
-                      type="button"
-                      onClick={() => handlePrint(ret)}
-                      className="outstock-btn outstock-btn-secondary"
-                      style={{ padding: '6px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                      title="طباعة إيصال مرتجع حراري"
-                    >
-                      <Printer size={14} />
-                      <span>طباعة إيصال</span>
-                    </button>
-
                     {isPending && (
                       <>
                         <button
@@ -806,6 +782,84 @@ export default function ProcurementReturnsTab({ showToast, categoryScope = null 
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── 5. نافذة اعتماد المرتجع التفاعلية (بديل window.confirm) ── */}
+      {approvingReturn && (
+        <div className="outstock-modal-overlay">
+          <div className="outstock-modal-card" style={{ maxWidth: '520px', width: '92%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <CheckCircle2 size={20} color="#16a34a" />
+                <h3 style={{ margin: 0, fontSize: '16px', color: '#0f172a', fontWeight: '800' }}>
+                  تأكيد اعتماد طلب المرتجع #{approvingReturn.order_number}
+                </h3>
+              </div>
+              <button
+                type="button"
+                className="outstock-btn-close"
+                onClick={() => setApprovingReturn(null)}
+                disabled={isSubmittingReply}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '13px' }}>
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '12px', color: '#166534' }}>
+                <p style={{ margin: '0 0 6px', fontWeight: '700' }}>
+                  هل أنت متأكد من اعتماد طلب المرتجع وتسوية العهدة المخزنية والمالية للفرع؟
+                </p>
+                <div style={{ fontSize: '12px', color: '#15803d' }}>
+                  الفرع: <strong>{approvingReturn.branch_name}</strong> | مسجل الطلب: <strong>{approvingReturn.created_by_name}</strong>
+                </div>
+              </div>
+
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px' }}>
+                <div style={{ fontWeight: '700', marginBottom: '6px', color: '#334155' }}>ملخص المرتجع:</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span style={{ color: '#64748b' }}>إجمالي قيمة المرتجع:</span>
+                  <strong style={{ color: '#0f766e' }}>{parseFloat(approvingReturn.total_refund_amount || 0).toFixed(2)} ج.م</strong>
+                </div>
+                {parseFloat(approvingReturn.down_payment_refund || 0) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: '#64748b' }}>العربون المحول للمحفظة:</span>
+                    <strong style={{ color: '#16a34a' }}>{parseFloat(approvingReturn.down_payment_refund).toFixed(2)} ج.م</strong>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>سبب الإرجاع:</span>
+                  <span style={{ color: '#334155' }}>{approvingReturn.general_return_reason}</span>
+                </div>
+              </div>
+
+              <div style={{ fontSize: '11.5px', color: '#64748b', background: '#eff6ff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                ℹ️ سيتم تحديث حالة المرتجع إلى (معتمد) وإشعار الفرع فوراً، وتسوية حساب العميل في السجلات المركزية.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px', borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
+              <button
+                type="button"
+                onClick={() => setApprovingReturn(null)}
+                disabled={isSubmittingReply}
+                className="outstock-btn outstock-btn-secondary"
+                style={{ padding: '8px 16px', fontSize: '13px' }}
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmApprove}
+                disabled={isSubmittingReply}
+                className="outstock-btn outstock-btn-success"
+                style={{ padding: '8px 20px', fontSize: '13px', fontWeight: '800' }}
+              >
+                {isSubmittingReply ? 'جاري الاعتماد...' : 'تأكيد الاعتماد ✅'}
+              </button>
+            </div>
           </div>
         </div>
       )}

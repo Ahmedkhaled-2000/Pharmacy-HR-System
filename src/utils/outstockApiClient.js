@@ -299,6 +299,13 @@ export async function outstockProcurementItemAction(payload) {
   });
 }
 
+export async function outstockProcurementBatchItemActions(actions) {
+  return await outstockRequest('procurement/batch-item-actions', {
+    method: 'POST',
+    body: JSON.stringify({ actions })
+  });
+}
+
 export async function outstockGetProcurementTracking(params = {}) {
   const qs = new URLSearchParams();
   if (params.branchId) qs.append('branchId', params.branchId);
@@ -382,11 +389,15 @@ export async function outstockGetOwnerOverview() {
 }
 
 // ── 9. كتالوج أدوية هيئة الدواء المصرية ودراج آي (EDA & Drug Eye Catalog) ───
-export async function outstockSearchMedications(term, limit = 15) {
+export async function outstockSearchMedications(term, limit = 15, itemType = null) {
   const clean = String(term || '').trim();
   if (!clean || clean.length < 2) return { success: true, medications: [] };
 
-  const qs = new URLSearchParams({ q: clean, limit: String(limit) });
+  const params = { q: clean, limit: String(limit) };
+  if (itemType && itemType !== 'all') {
+    params.itemType = itemType;
+  }
+  const qs = new URLSearchParams(params);
   const res = await outstockRequest(`medications/search?${qs.toString()}`, { method: 'GET' });
   if (res?.success && Array.isArray(res.medications)) {
     return res;
@@ -1054,9 +1065,10 @@ export async function outstockGetCustomerWalletTransactions(customerId) {
   return outstockRequest(`customers/${encodeURIComponent(customerId)}/wallet/transactions`);
 }
 
-export async function outstockRequestWalletOtp(customerId) {
+export async function outstockRequestWalletOtp(customerId, payload = {}) {
   return outstockRequest(`customers/${encodeURIComponent(customerId)}/wallet/request-otp`, {
-    method: 'POST'
+    method: 'POST',
+    body: JSON.stringify(payload)
   });
 }
 
@@ -1115,6 +1127,10 @@ export async function outstockSendCosmeticsPromoWhatsapp(payload) {
     method: 'POST',
     body: JSON.stringify(payload)
   });
+}
+
+export async function outstockGetCosmeticsCustomerOrders(customerId) {
+  return outstockRequest(`cosmetics/customers/${encodeURIComponent(customerId)}/orders`);
 }
 
 // ── 22. تصفير ومسح طلبات النظام ─────────────────────────────────────────────

@@ -98,9 +98,21 @@ export default function OrderDeliverySettlementModal({
   const tenderedExcess = (paymentMethod === 'cash' && tenderedNum > currentCollectNum) ? (tenderedNum - currentCollectNum) : 0;
   const customerChangeDue = downPaymentExcess > 0 ? downPaymentExcess : tenderedExcess;
 
+  // التحقق من الأصناف المعلقة بانتظار رد المشتريات
+  const pendingProcurementItems = (order?.items || []).filter(
+    (it) => !it.procurement_replied_at && (it.item_status === 'pending' || it.status === 'pending')
+  );
+  const hasPendingProcurement = pendingProcurementItems.length > 0;
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isSubmitting) return;
+
+    if (hasPendingProcurement) {
+      const pendingNames = pendingProcurementItems.map((it) => it.medication_name || it.item_name || it.medicationName).join(' ، ');
+      showToast(`🚫 محظور تسليم الطلب للعميل لوجود أصناف معلقة بانتظار رد وموافقة المشتريات: (${pendingNames})`);
+      return;
+    }
 
     const finalRefundCode = (deliveredBy?.code || refundEmployeeCode || '').trim();
 
@@ -303,6 +315,35 @@ export default function OrderDeliverySettlementModal({
 
         {/* ── جسم النافذة القابل للتمرير ── */}
         <form onSubmit={handleSubmit} style={{ overflowY: 'auto', overscrollBehavior: 'contain', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          {/* تحذير الأصناف المعلقة بانتظار رد المشتريات */}
+          {hasPendingProcurement && (
+            <div
+              style={{
+                background: '#fef2f2',
+                border: '1.5px solid #ef4444',
+                borderRadius: '12px',
+                padding: '12px 16px',
+                color: '#991b1b',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '10px'
+              }}
+            >
+              <AlertCircle size={20} color="#dc2626" style={{ marginTop: '2px', flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: '800', fontSize: '13.5px' }}>
+                  🚫 محظور تسليم الطلب للعميل حالياً!
+                </div>
+                <div style={{ fontSize: '12px', marginTop: '4px', lineHeight: '1.5' }}>
+                  يحتوي الطلب على ({pendingProcurementItems.length}) صنف معلق بانتظار رد وموافقة مسؤول المشتريات:
+                  <strong style={{ display: 'block', marginTop: '2px', color: '#b91c1c' }}>
+                    {pendingProcurementItems.map((it) => it.medication_name || it.item_name || it.medicationName).join(' ، ')}
+                  </strong>
+                  يجب البت في هذه الأصناف من قبل إدارة المشتريات أولاً قبل تسليم الطلب والتحصيل المالي.
+                </div>
+              </div>
+            </div>
+          )}
           {deliveredBy && (
             <div
               style={{
@@ -915,28 +956,33 @@ export default function OrderDeliverySettlementModal({
           <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || hasPendingProcurement}
               style={{
                 flex: 1,
                 padding: '12px 18px',
-                background: '#059669',
+                background: hasPendingProcurement ? '#94a3b8' : '#059669',
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: '8px',
                 fontSize: '14.5px',
                 fontWeight: '800',
-                cursor: isSubmitting ? 'not-allowed' : 'pointer',
-                opacity: isSubmitting ? 0.7 : 1,
+                cursor: (isSubmitting || hasPendingProcurement) ? 'not-allowed' : 'pointer',
+                opacity: (isSubmitting || hasPendingProcurement) ? 0.7 : 1,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '8px',
-                boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)',
+                boxShadow: hasPendingProcurement ? 'none' : '0 2px 6px rgba(5, 150, 105, 0.25)',
                 transition: 'all 0.15s ease'
               }}
             >
               {isSubmitting ? (
                 <>جاري إتمام التسليم وتحديث المبيعات...</>
+              ) : hasPendingProcurement ? (
+                <>
+                  <AlertCircle size={18} />
+                  <span>محظور التسليم (أصناف معلقة بانتظار رد المشتريات)</span>
+                </>
               ) : (
                 <>
                   <CheckCircle size={18} />

@@ -4699,7 +4699,7 @@ io.on('connection', (socket) => {
 registerSaasRoutes(app, db, io, JWT_SECRET, getSettingsFromStorage, saveSettingsToStorage);
 
 // ── 9.6 تسجيل مسارات نظام النواقص وطلبات أدوية العملاء والمشتريات (OutStock) ────
-registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromStorage);
+registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromStorage, saveSettingsToStorage);
 
 // ── 9.7 تسجيل مسارات محرك أجهزة البصمة الحيوية (ZKTeco MB20 / ADMS Push Engine) ───
 registerBiometricRoutes(app, db, io, redis, getSettingsFromStorage, saveSettingsToStorage);

@@ -67,6 +67,7 @@ import ProcurementReturnsTab from './procurement/ProcurementReturnsTab';
 import ProcurementDeliveryTrackingTab from './procurement/ProcurementDeliveryTrackingTab';
 import ProcurementUnavailableTab from './procurement/ProcurementUnavailableTab';
 import ProcurementWhatsAppCenterTab from './procurement/ProcurementWhatsAppCenterTab';
+import CosmeticsCustomersTab from './procurement/CosmeticsCustomersTab';
 
 import OwnerBranchOrdersTab from './owner/OwnerBranchOrdersTab';
 import OwnerProcurementMonitoringTab from './owner/OwnerProcurementMonitoringTab';
@@ -190,6 +191,7 @@ export default function OutstockSystemView({
       can_access_discounts_comparison: isMgr ? true : (p.can_access_discounts_comparison !== undefined ? p.can_access_discounts_comparison : currentUser?.can_access_discounts_comparison),
       can_access_pharmafly: isMgr ? true : (p.can_access_pharmafly !== undefined ? p.can_access_pharmafly : currentUser?.can_access_pharmafly),
       can_manage_team: isMgr ? true : (p.can_manage_team !== undefined ? p.can_manage_team : currentUser?.can_manage_team),
+      can_access_order_returns: isMgr ? true : (p.can_access_order_returns !== undefined ? p.can_access_order_returns : currentUser?.can_access_order_returns),
       category_scope: p.category_scope || currentUser?.category_scope || (currentUser?.role === 'cosmetics_officer' ? 'cosmetics' : 'all')
     };
   }, [currentUser, isProcurementManager, userRole]);
@@ -513,7 +515,12 @@ export default function OutstockSystemView({
     }
     return PROCUREMENT_BRANCH_ORDERS_SUBSECTIONS.filter((sub) => {
       if (sub.id === 'branch_orders') return effectivePermissions.can_view_orders !== false;
-      if (sub.id === 'customer_returns') return effectivePermissions.can_view_orders !== false;
+      if (sub.id === 'customer_returns') {
+        if (isCosmeticsOfficer) {
+          return effectivePermissions.can_access_order_returns === true;
+        }
+        return effectivePermissions.can_view_orders !== false;
+      }
       if (sub.id === 'procurement_inquiries') return effectivePermissions.can_view_orders !== false || effectivePermissions.can_edit_items === true;
       if (sub.id === 'delivery_tracking') return effectivePermissions.can_view_orders !== false;
       if (sub.id === 'unavailable_items') return effectivePermissions.can_view_orders !== false;
@@ -522,6 +529,9 @@ export default function OutstockSystemView({
       if (isCosmeticsOfficer) {
         if (sub.id === 'branch_orders') {
           return { ...sub, title: 'طلبات المستحضرات المجمعة 💄', desc: 'استعراض ومتابعة وتوريد طلبيات مستحضرات التجميل المحولة من الفروع' };
+        }
+        if (sub.id === 'customer_returns') {
+          return { ...sub, title: 'مرتجعات مستحضرات التجميل 💄', desc: 'مراجعة واعتماد أو رفض طلبات مرتجعات مستحضرات التجميل وتسوية المحفظة' };
         }
         if (sub.id === 'delivery_tracking') {
           return { ...sub, title: 'متابعة تسليم المستحضرات 💄', desc: 'تتبع خط سير تسليم مستحضرات التجميل والشحن الميداني للفروع' };
@@ -540,7 +550,9 @@ export default function OutstockSystemView({
     const tabs = [];
     if (canAccessBranchOrders) {
       tabs.push('branch_orders');
-      tabs.push('customer_returns');
+      if (!isCosmeticsOfficer || effectivePermissions.can_access_order_returns === true) {
+        tabs.push('customer_returns');
+      }
     }
     if (effectivePermissions.can_view_orders !== false || effectivePermissions.can_edit_items === true || isProcurementManager) tabs.push('procurement_inquiries');
     if (canAccessBranchOrders) tabs.push('delivery_tracking');
@@ -550,8 +562,11 @@ export default function OutstockSystemView({
     if (canAccessProcurementWhatsApp) tabs.push('procurement_whatsapp');
     if (canAccessMedicationsCatalog) tabs.push('procurement_medications');
     tabs.push('procurement_complaints');
+    if (isCosmeticsOfficer) {
+      tabs.push('cosmetics_customers');
+    }
     return tabs;
-  }, [userRole, isProcurementRole, isProcurementManager, canAccessBranchOrders, effectivePermissions, canAccessSuppliersTab, canManageTeam, canAccessProcurementWhatsApp, canAccessMedicationsCatalog]);
+  }, [userRole, isProcurementRole, isProcurementManager, canAccessBranchOrders, effectivePermissions, canAccessSuppliersTab, canManageTeam, canAccessProcurementWhatsApp, canAccessMedicationsCatalog, isCosmeticsOfficer]);
 
   // التحقق من تعيين قسم فرعي مسموح به تلقائياً في الموردين
   useEffect(() => {
@@ -722,7 +737,8 @@ export default function OutstockSystemView({
     branchRepliedInquiriesCount: 0,
     branchReadyOrdersCount: 0,
     branchRestockedItemsCount: 0,
-    ownerPendingComplaintsCount: 0
+    ownerPendingComplaintsCount: 0,
+    pendingReturnsCount: 0
   });
 
   // نافذة شكاوى الفروع المصعدة للمالك
@@ -1285,9 +1301,9 @@ export default function OutstockSystemView({
               >
                 <Package size={16} />
                 <span>طلبات</span>
-                {(notificationsSummary.branchReadyOrdersCount + (notificationsSummary.branchRestockedItemsCount || 0) + (notificationsSummary.branchRepliedInquiriesCount || 0)) > 0 && (
-                  <span className="outstock-nav-badge success" title={`${notificationsSummary.branchReadyOrdersCount} جاهز، ${notificationsSummary.branchRestockedItemsCount || 0} صنف متوفر، ${notificationsSummary.branchRepliedInquiriesCount || 0} رد استعلام`}>
-                    {notificationsSummary.branchReadyOrdersCount + (notificationsSummary.branchRestockedItemsCount || 0) + (notificationsSummary.branchRepliedInquiriesCount || 0)}
+                {(notificationsSummary.branchReadyOrdersCount + (notificationsSummary.branchRestockedItemsCount || 0) + (notificationsSummary.branchRepliedInquiriesCount || 0) + (notificationsSummary.pendingReturnsCount || 0)) > 0 && (
+                  <span className="outstock-nav-badge success" title={`${notificationsSummary.branchReadyOrdersCount} جاهز، ${notificationsSummary.branchRestockedItemsCount || 0} صنف متوفر، ${notificationsSummary.pendingReturnsCount || 0} مرتجع معلق`}>
+                    {notificationsSummary.branchReadyOrdersCount + (notificationsSummary.branchRestockedItemsCount || 0) + (notificationsSummary.branchRepliedInquiriesCount || 0) + (notificationsSummary.pendingReturnsCount || 0)}
                   </span>
                 )}
                 <ChevronDown
@@ -1387,9 +1403,9 @@ export default function OutstockSystemView({
                 >
                   {isCosmeticsOfficer ? <Sparkles size={16} /> : <Building2 size={16} />}
                   <span>{isCosmeticsOfficer ? 'طلبات مستحضرات التجميل 💄' : 'طلبات الفروع المجمعة'}</span>
-                  {(notificationsSummary.pendingBranchOrdersCount + notificationsSummary.pendingInquiriesCount) > 0 && (
-                    <span className="outstock-nav-badge" title={`${notificationsSummary.pendingBranchOrdersCount} طلب فرع جديد و ${notificationsSummary.pendingInquiriesCount} استعلام معلق`}>
-                      {notificationsSummary.pendingBranchOrdersCount + notificationsSummary.pendingInquiriesCount}
+                  {(notificationsSummary.pendingBranchOrdersCount + notificationsSummary.pendingInquiriesCount + (notificationsSummary.pendingReturnsCount || 0)) > 0 && (
+                    <span className="outstock-nav-badge" title={`${notificationsSummary.pendingBranchOrdersCount} طلب فرع جديد و ${notificationsSummary.pendingInquiriesCount} استعلام معلق و ${notificationsSummary.pendingReturnsCount || 0} مرتجع معلق`}>
+                      {notificationsSummary.pendingBranchOrdersCount + notificationsSummary.pendingInquiriesCount + (notificationsSummary.pendingReturnsCount || 0)}
                     </span>
                   )}
                   <ChevronDown
@@ -1478,6 +1494,18 @@ export default function OutstockSystemView({
                 <AlertTriangle size={16} />
                 <span>شكاوى الفروع</span>
               </button>
+
+              {isCosmeticsOfficer && (
+                <button
+                  type="button"
+                  className={`outstock-subnav-btn ${activeTab === 'cosmetics_customers' ? 'is-active' : ''}`}
+                  onClick={() => setActiveTab('cosmetics_customers')}
+                  title="العملاء المسجلين لمستحضرات التجميل وسجل الطلبات والتواصل"
+                >
+                  <Users size={16} />
+                  <span>العملاء المسجلين 💄</span>
+                </button>
+              )}
             </>
           )}
 
@@ -1857,6 +1885,12 @@ export default function OutstockSystemView({
               />
             )}
 
+            {activeTab === 'cosmetics_customers' && isCosmeticsOfficer && (
+              <CosmeticsCustomersTab
+                showToast={triggerNotification}
+              />
+            )}
+
             {/* حالة عدم وجود أي صفحات مصرح بها للمستخدم */}
             {allowedProcurementTabs.length === 0 && (
               <div style={{
@@ -2077,13 +2111,17 @@ export default function OutstockSystemView({
                   ? notificationsSummary.branchRepliedInquiriesCount
                   : sub.id === 'restocked_items'
                   ? (notificationsSummary.branchRestockedItemsCount || 0)
+                  : sub.id === 'order_returns'
+                  ? (notificationsSummary.pendingReturnsCount || 0)
                   : 0;
 
-                const badgeType = sub.id === 'inquiries' ? 'info' : 'success';
+                const badgeType = sub.id === 'inquiries' ? 'info' : (sub.id === 'order_returns' ? 'warning' : 'success');
                 const badgeSuffix = sub.id === 'procurement_tracking'
                   ? 'جاهز'
                   : sub.id === 'inquiries'
                   ? 'رد جديد'
+                  : sub.id === 'order_returns'
+                  ? 'معلق'
                   : 'متوفر';
 
                 return (
@@ -2162,6 +2200,8 @@ export default function OutstockSystemView({
                   ? notificationsSummary.pendingBranchOrdersCount
                   : sub.id === 'procurement_inquiries'
                   ? notificationsSummary.pendingInquiriesCount
+                  : sub.id === 'customer_returns'
+                  ? (notificationsSummary.pendingReturnsCount || 0)
                   : 0;
 
                 return (
@@ -2182,8 +2222,8 @@ export default function OutstockSystemView({
                       <span className="outstock-dropdown-item-desc">{sub.desc}</span>
                     </div>
                     {badgeCount > 0 && (
-                      <span className={`outstock-dropdown-item-badge ${sub.id === 'procurement_inquiries' ? 'warning' : ''}`}>
-                        {badgeCount} جديد
+                      <span className={`outstock-dropdown-item-badge ${sub.id === 'procurement_inquiries' || sub.id === 'customer_returns' ? 'warning' : ''}`}>
+                        {badgeCount} {sub.id === 'customer_returns' ? 'معلق' : 'جديد'}
                       </span>
                     )}
                     {isCurrent && (

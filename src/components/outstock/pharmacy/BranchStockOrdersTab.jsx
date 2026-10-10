@@ -14,7 +14,9 @@ import {
   ShieldCheck,
   Send,
   HelpCircle,
-  Filter
+  Filter,
+  AlertTriangle,
+  MessageSquare
 } from 'lucide-react';
 import { outstockGetOrders } from '../../../utils/outstockApiClient';
 import NewBranchStockOrderModal from './NewBranchStockOrderModal';
@@ -439,6 +441,7 @@ export default function BranchStockOrdersTab({
             const hasPending = items.some((it) => !it.status || it.status === 'pending');
             const hasAvailable = items.some((it) => it.status === 'available');
             const hasUnavailable = items.some((it) => it.status === 'unavailable');
+            const hasModified = items.some((it) => it.procurement_modified_qty || it.procurementModifiedQty);
 
             return (
               <div
@@ -551,6 +554,26 @@ export default function BranchStockOrdersTab({
                         صنف غير متوفر
                       </span>
                     )}
+
+                    {hasModified && (
+                      <span
+                        style={{
+                          background: '#fffbeb',
+                          color: '#b45309',
+                          border: '1px solid #fde68a',
+                          fontSize: '11.5px',
+                          fontWeight: '800',
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                      >
+                        <AlertTriangle size={12} />
+                        ⚠️ يحتوي على أصناف تم تعديل كميتها من المشتريات
+                      </span>
+                    )}
                   </div>
 
                   {/* مواعيد الإرسال والرد */}
@@ -585,110 +608,177 @@ export default function BranchStockOrdersTab({
                     const itStatus = getItemStatus(it);
                     const isCosmetics = (it.itemType || it.item_type) === 'cosmetics';
                     const medName = it.medicationName || it.medication_name || 'صنف غير محدد';
+                    const isModified = Boolean(it.procurement_modified_qty || it.procurementModifiedQty);
+                    const originalQty = it.original_quantity ?? it.originalQuantity;
+                    const procNotes = it.procurement_notes || it.procurementNotes;
 
                     return (
                       <div
                         key={idx}
                         style={{
                           display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          background: '#f8fafc',
+                          flexDirection: 'column',
+                          gap: '6px',
+                          background: isModified ? '#fffdf7' : '#f8fafc',
                           borderRadius: '10px',
-                          padding: '8px 14px',
-                          border: '1px solid #edf2f7'
+                          padding: '10px 14px',
+                          border: isModified ? '1.5px solid #fcd34d' : '1px solid #edf2f7'
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            flexWrap: 'wrap',
+                            gap: '8px'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                            <span
+                              style={{
+                                background: isCosmetics ? '#fce7f3' : '#e0f2fe',
+                                color: isCosmetics ? '#be185d' : '#0369a1',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                fontSize: '11px',
+                                fontWeight: '800'
+                              }}
+                            >
+                              {isCosmetics ? '💄 مستحضر' : '💊 دواء'}
+                            </span>
+
+                            <strong style={{ fontSize: '13.5px', color: '#0f172a' }}>
+                              {medName}
+                            </strong>
+
+                            {isModified && originalQty != null && Number(originalQty) !== Number(it.quantity) ? (
+                              <span
+                                style={{
+                                  fontSize: '12px',
+                                  color: '#b45309',
+                                  background: '#fef3c7',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontWeight: 'bold',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                (المطلوب: <span style={{ textDecoration: 'line-through', opacity: 0.75 }}>{originalQty}</span> ⬅️ المعتمد: <strong>{it.quantity} علبة</strong>)
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '12px', color: '#64748b' }}>
+                                (الكمية: <strong>{it.quantity} علبة</strong>)
+                              </span>
+                            )}
+
+                            {isModified && (
+                              <span
+                                style={{
+                                  background: '#fef3c7',
+                                  color: '#b45309',
+                                  border: '1px solid #fde68a',
+                                  fontSize: '10.5px',
+                                  fontWeight: '800',
+                                  padding: '2px 6px',
+                                  borderRadius: '5px'
+                                }}
+                              >
+                                ⚠️ تم تعديل الكمية
+                              </span>
+                            )}
+
+                            {it.notes && (
+                              <span style={{ fontSize: '11.5px', color: '#64748b', fontStyle: 'italic' }}>
+                                - {it.notes}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* حالة الصنف بالمشتريات وملاحظاتها وتوقيت الرد */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            {(it.procurementRepliedAt || it.procurement_replied_at) && (
+                              <span style={{ fontSize: '11px', color: '#64748b' }}>
+                                رد: {formatDateTime(it.procurementRepliedAt || it.procurement_replied_at)}
+                              </span>
+                            )}
+
+                            {itStatus === 'available' ? (
+                              <span
+                                style={{
+                                  background: '#dcfce7',
+                                  color: '#15803d',
+                                  padding: '3px 10px',
+                                  borderRadius: '8px',
+                                  fontSize: '12px',
+                                  fontWeight: '800',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                <CheckCircle size={13} />
+                                <span>متوفر {(it.procurementSourceName || it.procurement_source_name) ? `(${it.procurementSourceName || it.procurement_source_name})` : ''}</span>
+                              </span>
+                            ) : itStatus === 'unavailable' ? (
+                              <span
+                                style={{
+                                  background: '#fee2e2',
+                                  color: '#991b1b',
+                                  padding: '3px 10px',
+                                  borderRadius: '8px',
+                                  fontSize: '12px',
+                                  fontWeight: '800',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                <XCircle size={13} />
+                                <span>غير متوفر {it.procurement_notes ? `(${it.procurement_notes})` : ''}</span>
+                              </span>
+                            ) : (
+                              <span
+                                style={{
+                                  background: '#fef3c7',
+                                  color: '#92400e',
+                                  padding: '3px 10px',
+                                  borderRadius: '8px',
+                                  fontSize: '12px',
+                                  fontWeight: '800',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                <Clock size={13} />
+                                <span>بانتظار رد المشتريات</span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* ملحوظة المشتريات إن وجدت */}
+                        {procNotes && (
+                          <div
                             style={{
-                              background: isCosmetics ? '#fce7f3' : '#e0f2fe',
-                              color: isCosmetics ? '#be185d' : '#0369a1',
-                              padding: '2px 8px',
-                              borderRadius: '6px',
-                              fontSize: '11px',
-                              fontWeight: '800'
+                              background: '#fffbeb',
+                              borderRight: '3px solid #f59e0b',
+                              padding: '5px 10px',
+                              borderRadius: '4px',
+                              fontSize: '11.5px',
+                              color: '#92400e',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px'
                             }}
                           >
-                            {isCosmetics ? '💄 مستحضر' : '💊 دواء'}
-                          </span>
-
-                          <strong style={{ fontSize: '13.5px', color: '#0f172a' }}>
-                            {medName}
-                          </strong>
-
-                          <span style={{ fontSize: '12px', color: '#64748b' }}>
-                            (الكمية: <strong>{it.quantity} علبة</strong>)
-                          </span>
-
-                          {it.notes && (
-                            <span style={{ fontSize: '11.5px', color: '#64748b', fontStyle: 'italic' }}>
-                              - {it.notes}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* حالة الصنف بالمشتريات وملاحظاتها وتوقيت الرد */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          {(it.procurementRepliedAt || it.procurement_replied_at) && (
-                            <span style={{ fontSize: '11px', color: '#64748b' }}>
-                              رد: {formatDateTime(it.procurementRepliedAt || it.procurement_replied_at)}
-                            </span>
-                          )}
-
-                          {itStatus === 'available' ? (
-                            <span
-                              style={{
-                                background: '#dcfce7',
-                                color: '#15803d',
-                                padding: '3px 10px',
-                                borderRadius: '8px',
-                                fontSize: '12px',
-                                fontWeight: '800',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px'
-                              }}
-                            >
-                              <CheckCircle size={13} />
-                              <span>متوفر {(it.procurementSourceName || it.procurement_source_name) ? `(${it.procurementSourceName || it.procurement_source_name})` : ''}</span>
-                            </span>
-                          ) : itStatus === 'unavailable' ? (
-                            <span
-                              style={{
-                                background: '#fee2e2',
-                                color: '#991b1b',
-                                padding: '3px 10px',
-                                borderRadius: '8px',
-                                fontSize: '12px',
-                                fontWeight: '800',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px'
-                              }}
-                            >
-                              <XCircle size={13} />
-                              <span>غير متوفر {it.procurement_notes ? `(${it.procurement_notes})` : ''}</span>
-                            </span>
-                          ) : (
-                            <span
-                              style={{
-                                background: '#fef3c7',
-                                color: '#92400e',
-                                padding: '3px 10px',
-                                borderRadius: '8px',
-                                fontSize: '12px',
-                                fontWeight: '800',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px'
-                              }}
-                            >
-                              <Clock size={13} />
-                              <span>بانتظار رد المشتريات</span>
-                            </span>
-                          )}
-                        </div>
+                            <MessageSquare size={13} style={{ flexShrink: 0 }} />
+                            <span><strong>ملحوظة إدارة المشتريات:</strong> {procNotes}</span>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

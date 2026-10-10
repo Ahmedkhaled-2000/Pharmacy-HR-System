@@ -29,7 +29,8 @@ export default function CustomerWalletModal({
   onClose,
   onBalanceUpdated,
   branchName = 'الفرع الرئيسي',
-  showToast
+  showToast,
+  authenticatedEmployee
 }) {
   const [balance, setBalance] = useState(parseFloat(customer?.wallet_balance || customer?.walletBalance || 0));
   const [transactions, setTransactions] = useState([]);
@@ -39,13 +40,13 @@ export default function CustomerWalletModal({
   // حقول نموذج الإيداع / الخصم
   const [adjustmentType, setAdjustmentType] = useState('deposit'); // 'deposit' | 'withdraw'
   const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' | 'instapay' | 'vodafone_cash' | 'card' | 'return_settlement'
-  const [employeeCode, setEmployeeCode] = useState('');
+  const [employeeCode, setEmployeeCode] = useState(authenticatedEmployee?.employee_code || authenticatedEmployee?.code || '');
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
   const [lastTxReceiptData, setLastTxReceiptData] = useState(null);
 
   // طبقة الأمان المتقدمة لعمليات السحب (WhatsApp OTP / 2D QR Scanner)
-  const [verificationMethod, setVerificationMethod] = useState('employee_code'); // 'employee_code' | 'otp' | 'qr_scanner'
+  const [verificationMethod, setVerificationMethod] = useState('otp'); // 'otp' | 'qr_scanner'
   const [otpCode, setOtpCode] = useState('');
   const [qrToken, setQrToken] = useState('');
   const [isRequestingOtp, setIsRequestingOtp] = useState(false);
@@ -97,8 +98,11 @@ export default function CustomerWalletModal({
       fetchTransactions();
       setAmount('');
       setNotes('');
+      if (authenticatedEmployee?.employee_code || authenticatedEmployee?.code) {
+        setEmployeeCode(authenticatedEmployee.employee_code || authenticatedEmployee.code);
+      }
     }
-  }, [isOpen, customer, fetchTransactions]);
+  }, [isOpen, customer, fetchTransactions, authenticatedEmployee]);
 
   // إغلاق النافذة بزر Escape
   useEffect(() => {
@@ -194,12 +198,19 @@ export default function CustomerWalletModal({
         };
         setLastTxReceiptData(receiptInfo);
 
+        // طباعة إيصال حراري فوري 80mm
+        try {
+          printWalletReceipt(receiptInfo);
+        } catch (printErr) {
+          console.warn('Auto print receipt error:', printErr);
+        }
+
         setAmount('');
         setNotes('');
         setOtpCode('');
         setQrToken('');
         setOtpSentMessage('');
-        showToast?.(`✅ تم ${adjustmentType === 'deposit' ? 'إيداع' : 'خصم'} ${numAmt.toFixed(2)} ج.م بنجاح`);
+        showToast?.(`✅ تم ${adjustmentType === 'deposit' ? 'إيداع' : 'خصم'} ${numAmt.toFixed(2)} ج.م بنجاح وإرسال إشعار للعميل 📲`);
         fetchTransactions();
         onBalanceUpdated?.(customer.id, newBal);
       } else {
@@ -465,9 +476,8 @@ export default function CustomerWalletModal({
                   <span style={{ fontSize: '11px', color: '#64748b' }}>حماية سيادية لأرصدة العملاء</span>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
                   {[
-                    { id: 'employee_code', label: '🔐 كود الموظف المشفر' },
                     { id: 'otp', label: '📱 كود OTP للواتساب' },
                     { id: 'qr_scanner', label: '📷 مسح 2D QR بالماسح' }
                   ].map((v) => (

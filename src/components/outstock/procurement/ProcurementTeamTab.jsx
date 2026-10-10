@@ -71,7 +71,8 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
     can_access_order_receiving: true,
     can_access_supplier_invoices: true,
     can_access_branch_withdrawals: true,
-    can_access_discounts_comparison: true
+    can_access_discounts_comparison: true,
+    can_access_order_returns: false
   });
 
   const [selectedBranchForEmp, setSelectedBranchForEmp] = useState('');
@@ -111,6 +112,7 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
               can_access_supplier_invoices: isManager ? true : (p.can_access_supplier_invoices === true),
               can_access_branch_withdrawals: isManager ? true : (p.can_access_branch_withdrawals === true),
               can_access_discounts_comparison: isManager ? true : (p.can_access_discounts_comparison === true),
+              can_access_order_returns: isManager ? true : (p.can_access_order_returns === true || m.can_access_order_returns === true),
               can_manage_team: isManager
             };
           });
@@ -225,7 +227,8 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
       can_access_order_receiving: member.can_access_order_receiving === true || p.can_access_order_receiving === true,
       can_access_supplier_invoices: member.can_access_supplier_invoices === true || p.can_access_supplier_invoices === true,
       can_access_branch_withdrawals: member.can_access_branch_withdrawals === true || p.can_access_branch_withdrawals === true,
-      can_access_discounts_comparison: member.can_access_discounts_comparison === true || p.can_access_discounts_comparison === true
+      can_access_discounts_comparison: member.can_access_discounts_comparison === true || p.can_access_discounts_comparison === true,
+      can_access_order_returns: member.can_access_order_returns === true || p.can_access_order_returns === true
     });
     setIsMemberModalOpen(true);
   };
@@ -264,6 +267,7 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
       can_access_supplier_invoices: Boolean(memberForm.can_access_supplier_invoices),
       can_access_branch_withdrawals: Boolean(memberForm.can_access_branch_withdrawals),
       can_access_discounts_comparison: Boolean(memberForm.can_access_discounts_comparison),
+      can_access_order_returns: Boolean(memberForm.can_access_order_returns),
       category_scope: isCosmetics ? 'cosmetics' : 'all'
     };
 
@@ -510,6 +514,31 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
       ══════════════════════════════════════════════════════════════════════════ */}
       {activeSection === 'team' && (
         <div>
+          {/* بطاقة توضيحية لربط الموارد البشرية وتوزيع الفروع */}
+          <div
+            style={{
+              padding: '12px 16px',
+              background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)',
+              border: '1.5px solid #a7f3d0',
+              borderRadius: '12px',
+              marginBottom: '18px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+            }}
+          >
+            <span style={{ fontSize: '24px' }}>🤝</span>
+            <div>
+              <div style={{ fontSize: '13.5px', fontWeight: 800, color: '#065f46' }}>
+                إدارة أعضاء فريق المشتريات وتوزيع الفروع المسندة
+              </div>
+              <div style={{ fontSize: '12px', color: '#047857', marginTop: '2px', lineHeight: 1.5 }}>
+                يتم دمج أي موظف تم تعيينه كعضو في "فريق المشتريات" من شاشة صلاحيات المالك تلقائياً هنا، حيث يمتلك مدير المشتريات الصلاحية السيادية لتحديد الفروع التابعة له وتوزيع صلاحيات التوريد والاعتماد بدقة.
+              </div>
+            </div>
+          </div>
+
           {/* شريط الإجراءات */}
           <div
             style={{
@@ -724,6 +753,11 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                                 )}
                               </div>
                             ) : null}
+                            {m.can_access_order_returns === true && (
+                              <span style={{ background: '#fdf2f8', color: '#be185d', border: '1px solid #fbcfe8', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
+                                مرتجعات العملاء ↩️
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td style={{ padding: '12px 14px', textAlign: 'center' }}>
@@ -1272,6 +1306,18 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                       style={{ accentColor: '#0f766e' }}
                     />
                     <span>صلاحية توريد وشحن الطلبات وتغيير الحالات</span>
+                  </label>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={memberForm.can_access_order_returns}
+                      onChange={(e) => setMemberForm({ ...memberForm, can_access_order_returns: e.target.checked })}
+                      style={{ accentColor: '#0f766e' }}
+                    />
+                    <span style={{ fontWeight: memberForm.role === 'cosmetics_officer' ? 'bold' : 'normal', color: memberForm.role === 'cosmetics_officer' ? '#be185d' : 'inherit' }}>
+                      صلاحية إدارة واستعراض مرتجعات العملاء {memberForm.role === 'cosmetics_officer' ? '(مقتصرة تلقائياً على أصناف التجميل فقط)' : ''} ↩️
+                    </span>
                   </label>
 
                   {memberForm.role === 'cosmetics_officer' && (

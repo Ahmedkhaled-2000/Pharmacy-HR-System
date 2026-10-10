@@ -2660,7 +2660,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           const isOtApproved = Boolean(origShift?.overtimeStatus === 'approved' || origShift?.adminApproved || origShift?.isAdminCreated);
           const otStatus = isOtApproved ? 'approved' : (otHours > 0 ? 'pending' : 'none');
 
-          const closedRecord = {
+          let closedRecord = {
             ...(origShift || {}),
             id: targetShiftId || origShift?.id || `shift_${matchedEmpId}_${punchEpoch}`,
             employeeId: matchedEmpId,
@@ -5155,8 +5155,8 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
           const hourA = parseInt(timeA.split(':')[0], 10) || 0;
 
           // 🛡️ معايير الوردية الليلية الحقيقية (بين 15 دقيقة و 16 ساعة كحد أقصى):
-          // 1. ورديات المساء/الإغلاق: تبدأ عصراً أو مساءً (hourA >= 14) وتنتهي بعد منتصف الليل (hourB <= 6)
-          const isEveningOvernight = hourA >= 14 && hourB <= 6 && diffHours >= 0.25 && diffHours <= 16;
+          // 1. ورديات المساء/الإغلاق/الدليفري: تبدأ ظهراً أو عصراً أو مساءً (hourA >= 11) وتنتهي بعد منتصف الليل (hourB <= 6)
+          const isEveningOvernight = hourA >= 11 && hourB <= 6 && diffHours >= 0.25 && diffHours <= 16;
           // 2. ورديات الليل الكاملة: تبدأ ليلاً (21:00 - 04:00) وتنتهي صباحاً أو ظهراً (hourB <= 14)
           const isNightOvernight = (hourA >= 21 || hourA <= 4) && hourB <= 14 && diffHours >= 0.25 && diffHours <= 16;
           const isOvernightPair = dateB > dateA && (isEveningOvernight || isNightOvernight);
@@ -5417,10 +5417,7 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
           const matchEmp = (empId && String(rp.employee_id) === String(empId)) ||
                            (empPin && String(rp.device_user_pin) === String(empPin));
           if (!matchEmp) return false;
-          // حصر الاسترداد في بصمات الانصراف الفعلية حصراً (check_out أو state=1)
-          const isRealCheckout = rp.action_type === 'check_out' || rp.raw_punch_state === 1;
-          if (!isRealCheckout) return false;
-
+          // حصر الاسترداد في بصمات الانصراف الفعلية (check_out أو state=1 أو بصمة تالية باليوم التالي قبل 13:00)
           let pDate = '';
           let pTime = '';
           if (rp.raw_payload && rp.raw_payload.includes('-') && rp.raw_payload.includes(':')) {
@@ -5432,6 +5429,12 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
             pDate = getEgyptDate(dt);
             pTime = getEgyptTime(dt);
           }
+
+          const isRealCheckout = rp.action_type === 'check_out' || 
+                                 rp.raw_punch_state === 1 || 
+                                 (pDate === nextDate && pTime < '13:00') ||
+                                 (pDate === s.date && pTime > s.timeIn);
+          if (!isRealCheckout) return false;
 
           if (pDate === s.date) {
             const [pInH, pInM] = s.timeIn.split(':').map(Number);
@@ -5459,7 +5462,10 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
           s.timeOut = pTime;
           s.timeOutDate = pDate;
           s.isOvernight = (pDate > s.date) || (s.timeIn > pTime);
-          s.notes = ((s.notes || '').replace(/\[أغلقت بواسطة مكنسة الأمان لتجاوز \d+ ساعة بدون انصراف\]/g, '') + ' [تم استرداد بصمة الانصراف الفعلية من جهاز البصمة]').trim();
+          s.notes = ((s.notes || '')
+            .replace(/\[أغلقت بواسطة مكنسة الأمان لتجاوز \d+ ساعة بدون انصراف\]/g, '')
+            .replace(/\[تم استكمال الانصراف وفق ساعات العمل المقررة لعدم وجود بصمة خروج\]/g, '')
+            + ' [تم استرداد بصمة الانصراف الفعلية من جهاز البصمة]').trim();
           hoursAdjustedCount++;
         }
       }

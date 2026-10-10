@@ -43,6 +43,7 @@ import OrderDeliverySettlementModal from './OrderDeliverySettlementModal';
 import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
 import OrderComplaintModal from './OrderComplaintModal';
 import OrderReturnModal from '../common/OrderReturnModal';
+import MedicationSubstitutesModal from '../common/MedicationSubstitutesModal';
 import { printReturnReceipt } from '../../../utils/printReturnReceipt';
 
 /**
@@ -69,8 +70,8 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     }
   }, [initialInnerTab]);
 
-  // فلاتر التبويبة النشطة: 'all' | 'waiting_procurement' | 'replied'
-  const [activeSubFilter, setActiveSubFilter] = useState('all');
+  // فلاتر التبويبة النشطة: 'waiting_procurement' (افتراضي) | 'all' | 'replied'
+  const [activeSubFilter, setActiveSubFilter] = useState('waiting_procurement');
 
   // فلاتر الطلبات المحولة: 'all' (الكل) | 'to' (محولة إلى هذا الفرع - واردة) | 'from' (محولة من هذا الفرع - صادرة)
   const [transferredFilter, setTransferredFilter] = useState('all');
@@ -113,6 +114,9 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
   const [returnAuthOrder, setReturnAuthOrder] = useState(null);
   const [authenticatedReturnEmployee, setAuthenticatedReturnEmployee] = useState(null);
   const [returnsSubFilter, setReturnsSubFilter] = useState('all');
+
+  // 🔄 حالة نافذة فحص البدائل والمثائل الدوائية الذكية (AI Drug Eye)
+  const [substitutesModalData, setSubstitutesModalData] = useState(null);
 
   // جلب الطلبات النشطة
   const fetchOrders = useCallback(async () => {
@@ -283,6 +287,17 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
       typeof orderOrId === 'object'
         ? orderOrId
         : orders.find((o) => o.id === orderOrId) || transferredOrders.find((o) => o.id === orderOrId);
+
+    // التحقق الصارم: حظر تسليم الطلب إذا كان به أي صنف معلق بانتظار رد المشتريات
+    const pendingItems = (targetOrder?.items || []).filter(
+      (it) => !it.procurement_replied_at && (it.item_status === 'pending' || it.status === 'pending')
+    );
+    if (pendingItems.length > 0) {
+      const itemNames = pendingItems.map((it) => it.medication_name || it.item_name || it.medicationName).join(' ، ');
+      showToast?.(`🚫 محظور تسليم الطلب للعميل! يوجد (${pendingItems.length}) أصناف معلقة بانتظار رد المشتريات: (${itemNames})`);
+      return;
+    }
+
     setDeliveryAuthOrder(targetOrder || { id: orderOrId });
   };
 
@@ -461,9 +476,14 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
   const filteredActiveOrders = useMemo(() => {
     let result = orders.filter((o) => !isTransferredOrder(o));
 
-    // فلتر الحالة الفرعي: أي رد (ولو جزئي) يذهب مباشرة لتبويبة تم الرد ولا يظهر في قيد انتظار المشتريات
+    // فلتر الحالة الفرعي: الطلبات بانتظار رد المشتريات (تتضمن الطلبات التي ما زال بها أي بند معلق قيد الانتظار)
     if (activeSubFilter === 'waiting_procurement') {
-      result = result.filter((o) => !isOrderReplied(o));
+      result = result.filter((o) => {
+        const hasPendingItems = (o.items || []).some(
+          (it) => !it.pruned_from_bill && (it.item_status === 'pending' || !it.item_status || it.item_status === 'pending_procurement')
+        );
+        return !isOrderReplied(o) || hasPendingItems;
+      });
     } else if (activeSubFilter === 'replied') {
       result = result.filter((o) => isOrderReplied(o));
     }
@@ -1078,9 +1098,38 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                           </span>
                         )}
 
-                        {slaTime && (
-                          <span style={{ color: '#059669', background: '#dcfce7', padding: '1px 6px', borderRadius: '6px', fontWeight: '800' }}>
-                            ⚡ {slaTime}
+                        {order.procurement_replied_at ? (
+                          slaTime && (
+                            <span style={{ color: '#059669', background: '#dcfce7', border: '1px solid #86efac', padding: '1px 8px', borderRadius: '6px', fontWeight: '800' }}>
+                              ⚡ استجابة: {slaTime}
+                            </span>
+                          )
+                        ) : (() => {
+                          const wHours = (Date.now() - new Date(order.sent_to_procurement_at || order.created_at).getTime()) / (1000 * 60 * 60);
+                          if (wHours >= 4) {
+                            return (
+                              <span style={{ color: '#b91c1c', background: '#fee2e2', border: '1px solid #f87171', padding: '1px 8px', borderRadius: '6px', fontWeight: '800' }}>
+                                🔴 متأخر عن المهلة (+{Math.floor(wHours)} ساعة)
+                              </span>
+                            );
+                          }
+                          if (wHours >= 2) {
+                            return (
+                              <span style={{ color: '#b45309', background: '#fef3c7', border: '1px solid #fde68a', padding: '1px 8px', borderRadius: '6px', fontWeight: '800' }}>
+                                🟡 اقتراب المهلة ({Math.floor(wHours)} ساعة)
+                              </span>
+                            );
+                          }
+                          return (
+                            <span style={{ color: '#047857', background: '#d1fae5', border: '1px solid #a7f3d0', padding: '1px 8px', borderRadius: '6px', fontWeight: '800' }}>
+                              🟢 انتظار قياسي ({Math.max(1, Math.floor(wHours * 60))} دقيقة)
+                            </span>
+                          );
+                        })()}
+
+                        {order.items?.some(it => it.procurement_modified_qty || it.procurementModifiedQty) && (
+                          <span style={{ color: '#b45309', background: '#fef3c7', border: '1px solid #fde68a', padding: '1px 8px', borderRadius: '6px', fontWeight: '800' }}>
+                            ⚠️ يحتوي على أصناف تم تعديل كميتها من المشتريات
                           </span>
                         )}
                       </div>
@@ -1106,74 +1155,133 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                           const isCosmetics = item.item_type === 'cosmetics';
                           const isAvail = item.status === 'available' || item.itemStatus === 'available_by_procurement';
 
+                          const isModified = Boolean(item.procurement_modified_qty || item.procurementModifiedQty);
+                          const unitLabel = item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة';
+
                           return (
                             <div
                               key={idx}
                               style={{
-                                background: isAvail ? '#f0fdf4' : '#ffffff',
+                                background: isModified ? '#fffbeb' : (isAvail ? '#f0fdf4' : '#ffffff'),
                                 border: '1px solid',
-                                borderColor: isAvail ? '#86efac' : isEst ? '#fde68a' : '#cbd5e1',
+                                borderColor: isModified ? '#fde68a' : (isAvail ? '#86efac' : isEst ? '#fde68a' : '#cbd5e1'),
                                 borderRadius: '8px',
-                                padding: '6px 12px',
+                                padding: '8px 12px',
                                 fontSize: '12.5px',
                                 display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px'
+                                flexDirection: 'column',
+                                gap: '5px'
                               }}
                             >
-                              <span
-                                style={{
-                                  fontSize: '10.5px',
-                                  fontWeight: '800',
-                                  padding: '1px 5px',
-                                  borderRadius: '5px',
-                                  background: isCosmetics ? '#fce7f3' : '#e0f2fe',
-                                  color: isCosmetics ? '#be185d' : '#0369a1'
-                                }}
-                              >
-                                {isCosmetics ? '💄 مستحضر' : '💊 دواء'}
-                              </span>
-
-                              <strong>{item.medicationName || item.medication_name}</strong>
-
-                              <span style={{ color: '#64748b' }}>
-                                ({item.quantity} {item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة'})
-                              </span>
-
-                              {isEst && (
-                                <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', borderRadius: '4px', padding: '1px 5px', fontSize: '10.5px', fontWeight: 'bold' }}>
-                                  ({pMin.toFixed(0)} - {pMax.toFixed(0)} ج.م)
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                <span
+                                  style={{
+                                    fontSize: '10.5px',
+                                    fontWeight: '800',
+                                    padding: '1px 5px',
+                                    borderRadius: '5px',
+                                    background: isCosmetics ? '#fce7f3' : '#e0f2fe',
+                                    color: isCosmetics ? '#be185d' : '#0369a1'
+                                  }}
+                                >
+                                  {isCosmetics ? '💄 مستحضر' : '💊 دواء'}
                                 </span>
-                              )}
 
-                              {isAvail ? (
-                                <span style={{ color: '#16a34a', fontWeight: '900', fontSize: '11px' }}>✓ متوفر</span>
-                              ) : item.status === 'unavailable' ? (
-                                <span style={{ color: '#dc2626', fontWeight: '900', fontSize: '11px' }}>✕ غير متوفر</span>
-                              ) : (
-                                <span style={{ color: '#d97706', fontSize: '11px' }}>⏳ قيد الشراء</span>
-                              )}
+                                <strong>{item.medicationName || item.medication_name}</strong>
 
-                              {!hasReplied && activeItems.length > 1 && (
+                                {isModified ? (
+                                  <span style={{ fontSize: '12px', color: '#1e293b', fontWeight: '800' }}>
+                                    (<s style={{ color: '#dc2626' }}>{item.original_quantity || item.originalQuantity}</s> ⬅️ <strong style={{ color: '#0d9488' }}>{item.quantity}</strong> {unitLabel})
+                                  </span>
+                                ) : (
+                                  <span style={{ color: '#64748b' }}>
+                                    ({item.quantity} {unitLabel})
+                                  </span>
+                                )}
+
+                                {isEst && (
+                                  <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', borderRadius: '4px', padding: '1px 5px', fontSize: '10.5px', fontWeight: 'bold' }}>
+                                    ({pMin.toFixed(0)} - {pMax.toFixed(0)} ج.م)
+                                  </span>
+                                )}
+
+                                {isModified && (
+                                  <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', borderRadius: '4px', padding: '1px 6px', fontSize: '10.5px', fontWeight: '900' }}>
+                                    ⚠️ تم تعديل الكمية من المشتريات
+                                  </span>
+                                )}
+
+                                {isAvail ? (
+                                  <span style={{ color: '#16a34a', fontWeight: '900', fontSize: '11px' }}>✓ متوفر</span>
+                                ) : item.status === 'unavailable' ? (
+                                  <span style={{ color: '#dc2626', fontWeight: '900', fontSize: '11px' }}>✕ غير متوفر</span>
+                                ) : (
+                                  <span style={{ color: '#d97706', fontSize: '11px' }}>⏳ قيد الشراء</span>
+                                )}
+
+                                {/* زر استعراض البدائل والمثائل الدوائية الذكية (AI Drug Eye) */}
                                 <button
                                   type="button"
-                                  onClick={() => handleDeleteOrderItem(order.id, item.id || idx, item.medicationName || item.medication_name)}
+                                  onClick={() => setSubstitutesModalData({
+                                    medicationName: item.medicationName || item.medication_name,
+                                    customerPhone: order.customer_phone || order.customerPhone,
+                                    customerName: order.customer_name || order.customerName,
+                                    branchName: branch?.name
+                                  })}
                                   style={{
-                                    background: '#fee2e2',
-                                    border: '1px solid #fecaca',
+                                    background: '#f0fdfa',
+                                    border: '1px solid #99f6e4',
                                     borderRadius: '5px',
-                                    color: '#dc2626',
+                                    color: '#0f766e',
                                     cursor: 'pointer',
-                                    padding: '2px 5px',
+                                    padding: '2px 6px',
                                     display: 'inline-flex',
                                     alignItems: 'center',
                                     gap: '2px',
-                                    fontSize: '11px'
+                                    fontSize: '11px',
+                                    fontWeight: '700'
                                   }}
-                                  title="حذف هذا الصنف من الطلب قبل رد المشتريات"
+                                  title="فحص البدائل والمثائل المعتمدة بنفس المادة الفعالة (AI Drug Eye)"
                                 >
-                                  <Trash2 size={11} />
+                                  <span>بدائل 🔄</span>
                                 </button>
+
+                                {!hasReplied && activeItems.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteOrderItem(order.id, item.id || idx, item.medicationName || item.medication_name)}
+                                    style={{
+                                      background: '#fee2e2',
+                                      border: '1px solid #fecaca',
+                                      borderRadius: '5px',
+                                      color: '#dc2626',
+                                      cursor: 'pointer',
+                                      padding: '2px 5px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '2px',
+                                      fontSize: '11px'
+                                    }}
+                                    title="حذف هذا الصنف من الطلب قبل رد المشتريات"
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* ملحوظة المشتريات المرفقة بالصنف المعدل إن وجدت */}
+                              {Boolean(item.procurement_notes || item.procurementNotes) && (
+                                <div style={{
+                                  marginTop: '2px',
+                                  padding: '4px 8px',
+                                  background: 'rgba(254, 243, 199, 0.45)',
+                                  borderRight: '3px solid #f59e0b',
+                                  borderRadius: '4px',
+                                  fontSize: '11px',
+                                  color: '#78350f'
+                                }}>
+                                  <strong>💬 ملحوظة المشتريات:</strong> {item.procurement_notes || item.procurementNotes}
+                                </div>
                               )}
                             </div>
                           );
@@ -1190,11 +1298,40 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                               padding: '6px 12px',
                               fontSize: '12px',
                               color: '#dc2626',
-                              textDecoration: 'line-through'
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              flexWrap: 'wrap',
+                              gap: '8px'
                             }}
                             title="تم شطبه لعدم التوفر بالسوق وتحويله لصفحة النواقص"
                           >
-                            {item.medicationName || item.medication_name} (غير متوفر بالسوق)
+                            <span style={{ textDecoration: 'line-through' }}>
+                              {item.medicationName || item.medication_name} (غير متوفر بالسوق)
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setSubstitutesModalData({
+                                medicationName: item.medicationName || item.medication_name,
+                                customerPhone: order.customer_phone || order.customerPhone,
+                                customerName: order.customer_name || order.customerName,
+                                branchName: branch?.name
+                              })}
+                              style={{
+                                background: '#ffffff',
+                                border: '1px solid #f87171',
+                                borderRadius: '5px',
+                                color: '#b91c1c',
+                                cursor: 'pointer',
+                                padding: '1px 6px',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                textDecoration: 'none'
+                              }}
+                              title="اقتراح ومطابقة بديل معتمد للعميل بنفس المادة الفعالة"
+                            >
+                              فحص البدائل المتاحة 🔄
+                            </button>
                           </div>
                         ))}
                       </div>
@@ -1607,16 +1744,27 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                               opacity: isPruned ? 0.6 : 1
                             }}
                           >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                               <span style={{ fontWeight: '800', color: isPruned ? '#94a3b8' : '#1e293b', textDecoration: isPruned ? 'line-through' : 'none' }}>
                                 {item.medicationName || item.medication_name}
                               </span>
-                              <span style={{ fontSize: '12px', color: '#64748b' }}>
-                                × {item.quantity} {item.unitType === 'pack' ? 'علبة' : 'شريط'}
-                              </span>
-                              {item.procurementNotes && (
+                              {Boolean(item.procurement_modified_qty || item.procurementModifiedQty) ? (
+                                <span style={{ fontSize: '12px', color: '#1e293b', fontWeight: '800' }}>
+                                  (<s style={{ color: '#dc2626' }}>{item.original_quantity || item.originalQuantity}</s> ⬅️ <strong style={{ color: '#0d9488' }}>{item.quantity}</strong> {item.unitType === 'pack' ? 'علبة' : 'شريط'})
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: '12px', color: '#64748b' }}>
+                                  × {item.quantity} {item.unitType === 'pack' ? 'علبة' : 'شريط'}
+                                </span>
+                              )}
+                              {Boolean(item.procurement_modified_qty || item.procurementModifiedQty) && (
+                                <span style={{ fontSize: '10.5px', color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontWeight: '800' }}>
+                                  ⚠️ تم تعديل الكمية
+                                </span>
+                              )}
+                              {(item.procurementNotes || item.procurement_notes) && (
                                 <span style={{ fontSize: '11px', color: '#0284c7', background: '#f0f9ff', padding: '1px 6px', borderRadius: '4px' }}>
-                                  ملاحظة المشتريات: {item.procurementNotes}
+                                  ملاحظة المشتريات: {item.procurementNotes || item.procurement_notes}
                                 </span>
                               )}
                             </div>
@@ -2283,6 +2431,19 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
           }}
           branchName={branch?.name || 'الصيدلية'}
           showToast={showToast}
+        />
+      )}
+
+      {/* ── نافذة رادار البدائل والمثائل الدوائية التلقائية (AI Drug Eye) ── */}
+      {substitutesModalData && (
+        <MedicationSubstitutesModal
+          isOpen={Boolean(substitutesModalData)}
+          onClose={() => setSubstitutesModalData(null)}
+          medicationName={substitutesModalData.medicationName}
+          medicationId={substitutesModalData.medicationId}
+          customerPhone={substitutesModalData.customerPhone}
+          customerName={substitutesModalData.customerName}
+          branchName={substitutesModalData.branchName || branch?.name}
         />
       )}
     </div>

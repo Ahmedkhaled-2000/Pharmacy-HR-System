@@ -14,7 +14,7 @@ import { getSocket } from '../../../utils/socketClient';
 export default function ProcurementComplaintsTab({ currentUser, showToast }) {
   const [complaints, setComplaints] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [filterStatus, setFilterStatus] = useState('all'); // 'all' | 'pending_procurement' | 'pending_owner' | 'resolved'
+  const [filterStatus, setFilterStatus] = useState('pending_procurement'); // default: 'pending_procurement' (بانتظار رد المشتريات)
   const [replyingId, setReplyingId] = useState(null);
   const [replyText, setReplyText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);

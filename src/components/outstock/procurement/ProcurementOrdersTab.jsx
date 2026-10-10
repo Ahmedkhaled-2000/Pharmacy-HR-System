@@ -16,9 +16,15 @@ import {
   Camera,
   X,
   Pill,
-  Filter
+  Filter,
+  Edit3
 } from 'lucide-react';
-import { outstockGetProcurementAggregated, outstockProcurementItemAction, listenToOutstockLocalMessages } from '../../../utils/outstockApiClient';
+import {
+  outstockGetProcurementAggregated,
+  outstockProcurementItemAction,
+  outstockProcurementBatchItemActions,
+  listenToOutstockLocalMessages
+} from '../../../utils/outstockApiClient';
 import { exportProcurementOrdersExcel } from '../../../utils/outstockExcelExporter';
 import OutstockConfirmModal from '../common/OutstockConfirmModal';
 import CosmeticsProductModal from '../common/CosmeticsProductModal';
@@ -47,6 +53,9 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
   const [previewOrderImageUrl, setPreviewOrderImageUrl] = useState(null);
   const [previewOrderImageTitle, setPreviewOrderImageTitle] = useState('');
   const [selectedCosmeticsItem, setSelectedCosmeticsItem] = useState(null);
+
+  // حالة نافذة تعديل كمية الصنف وملاحظات المشتريات (المتطلب 20)
+  const [adjustingItemModalData, setAdjustingItemModalData] = useState(null);
 
   // قرارات الشراء المعلقة قبل الإرسال (Staged Decisions)
   // Map of `${branchId}_${medicationName}_${unitType}` -> 'available' | 'unavailable'
@@ -211,6 +220,78 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
     });
   };
 
+  // فتح نافذة تعديل الكمية المعتمدة وتدوين الملاحظات (المتطلب 20)
+  const handleOpenAdjustModal = (item) => {
+    const perOrder = {};
+    (item.item_details || []).forEach(d => {
+      perOrder[d.itemId] = d.quantity;
+    });
+    setAdjustingItemModalData({
+      item,
+      approvedQty: item.total_requested_qty,
+      notes: '',
+      perOrderAdjustments: perOrder
+    });
+  };
+
+  // اعتماد تعديل الكمية بالمشتريات وتطبيق المزامنة وإشعار الواتساب
+  const handleConfirmAdjustQuantity = async () => {
+    if (!adjustingItemModalData) return;
+    const { item, approvedQty, notes, perOrderAdjustments } = adjustingItemModalData;
+
+    const hasMultiple = (item.item_details || []).length > 1;
+    let finalQty = approvedQty;
+    const itemAdjustmentsList = [];
+
+    if (hasMultiple) {
+      let sum = 0;
+      (item.item_details || []).forEach(d => {
+        const q = perOrderAdjustments[d.itemId] != null ? parseInt(perOrderAdjustments[d.itemId], 10) : d.quantity;
+        sum += q;
+        itemAdjustmentsList.push({
+          itemId: d.itemId,
+          modifiedQuantity: q,
+          notes: (notes || '').trim()
+        });
+      });
+      finalQty = sum;
+    } else {
+      const num = parseInt(approvedQty, 10);
+      if (isNaN(num) || num <= 0) {
+        showToast?.('يرجى إدخال كمية صحيحة أكبر من صفر');
+        return;
+      }
+      finalQty = num;
+    }
+
+    setIsProcessing(true);
+    try {
+      const res = await outstockProcurementItemAction({
+        branchId: item.branch_id,
+        medicationName: item.medication_name,
+        unitType: item.unit_type,
+        action: 'available',
+        modifiedQuantity: finalQty,
+        notes: (notes || '').trim() || 'تم تعديل الكمية وتوفيرها من المشتريات',
+        itemAdjustments: itemAdjustmentsList.length > 0 ? itemAdjustmentsList : null,
+        itemIds: (item.item_details || []).map(d => d.itemId)
+      });
+
+      if (res?.success) {
+        const waNote = res.whatsAppSent ? ' 📱 وتم إرسال إشعار الواتساب للفرع' : '';
+        showToast?.(`✅ ${res.message || 'تم اعتماد وتعديل الكمية بنجاح'}${waNote}`);
+        setAdjustingItemModalData(null);
+        fetchAggregatedOrders();
+      } else {
+        showToast?.(`⚠️ ${res?.error || 'تعذر تعديل الكمية'}`);
+      }
+    } catch (err) {
+      showToast?.('حدث خطأ أثناء تعديل الكمية');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // إرسال دفعة القرارات المحددة معاً للفروع بنافذة تأكيد منبثقة
   const handleBatchSubmit = () => {
     const keys = Object.keys(decisions).filter(k => decisions[k]);
@@ -222,7 +303,7 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
     setConfirmConfig({
       isOpen: true,
       title: 'إرسال وتطبيق قرارات المشتريات دفعة واحدة',
-      message: `هل تريد اعتماد وإرسال (${keys.length}) قرار دفعة واحدة للفروع المعنية وتحديث حسابات وفواتير المرضى والمزامنة اللحظية؟`,
+      message: `هل تريد اعتماد وإرسال (${keys.length}) قرار دفعة واحدة للفروع المعنية وتحديث حسابات وفواتير المرضى وإرسال تقارير الواتساب الموحدة للفروع؟`,
       iconType: 'send',
       confirmText: `اعتماد وإرسال (${keys.length}) قرار الآن`,
       cancelText: 'مراجعة القرارات',
@@ -230,30 +311,34 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
       badge: `${keys.length} صنف محدد`,
       details: [
         { label: 'إجمالي القرارات المحددة', value: `${keys.length} صنف` },
-        { label: 'المزامنة', value: 'تحديث فوري لرصيد الفروع وإشعارات الصيدليات' }
+        { label: 'المزامنة', value: 'تحديث فوري لرصيد الفروع مع إشعارات واتساب مجمعة' }
       ],
       onConfirmAction: async () => {
         setIsProcessing(true);
         try {
-          let successCount = 0;
+          const actions = [];
           for (const item of filteredItems) {
             const key = `${item.branch_id}_${item.medication_name}_${item.unit_type}`;
             const action = decisions[key];
             if (action) {
-              await outstockProcurementItemAction({
+              actions.push({
                 branchId: item.branch_id,
                 medicationName: item.medication_name,
                 unitType: item.unit_type,
                 action,
                 itemIds: (item.item_details || []).map(d => d.itemId)
               });
-              successCount++;
             }
           }
 
-          showToast?.(`✅ تم إرسال وتطبيق (${successCount}) تحديث بنجاح ومزامنتها مع الفروع فورياً`);
-          setDecisions({});
-          fetchAggregatedOrders();
+          const res = await outstockProcurementBatchItemActions(actions);
+          if (res?.success) {
+            showToast?.(`✅ ${res.message || `تم إرسال وتطبيق (${actions.length}) تحديث بنجاح ومزامنتها مع الفروع فورياً`}`);
+            setDecisions({});
+            fetchAggregatedOrders();
+          } else {
+            showToast?.(`⚠️ ${res?.error || 'حدث خطأ أثناء إرسال الدفعة'}`);
+          }
         } catch (err) {
           showToast?.('حدث خطأ أثناء إرسال الدفعة');
         } finally {
@@ -788,6 +873,24 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
                             <span>غير متوفر</span>
                           </button>
 
+                          {/* 3. تعديل الكمية وإضافة ملاحظات المشتريات */}
+                          <button
+                            type="button"
+                            className="outstock-btn outstock-btn-secondary"
+                            onClick={() => handleOpenAdjustModal(item)}
+                            style={{
+                              padding: '6px 12px',
+                              fontSize: '12px',
+                              borderColor: '#fde68a',
+                              color: '#b45309',
+                              background: '#fffbeb'
+                            }}
+                            title="تعديل الكمية المعتمدة وتدوين ملاحظات مدير المشتريات / مسؤول المستحضرات وإشعار الصيدلية"
+                          >
+                            <Edit3 size={14} />
+                            <span>تعديل الكمية</span>
+                          </button>
+
                           {/* زر الإرسال السريع الفردي في حال رغبة الصيدلي في إنهاء بند واحد فوراً */}
                           {decision && (
                             <button
@@ -884,6 +987,312 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
           onClose={() => setSelectedCosmeticsItem(null)}
           showToast={showToast}
         />
+      )}
+
+      {/* ── نافذة تعديل كمية الصنف واعتمادها بالمشتريات (المتطلب 20) ── */}
+      {adjustingItemModalData && (
+        <div
+          className="outstock-modal-backdrop"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(5px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 99999,
+            padding: '16px'
+          }}
+          onClick={() => !isProcessing && setAdjustingItemModalData(null)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '20px',
+              width: '100%',
+              maxWidth: '560px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              border: '1px solid #e2e8f0',
+              overflow: 'hidden'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* رأس النافذة */}
+            <div style={{
+              background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+              padding: '18px 24px',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  background: 'rgba(255, 255, 255, 0.2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Edit3 size={20} color="#ffffff" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>
+                    تعديل كمية الصنف واعتمادها
+                  </h3>
+                  <p style={{ margin: '2px 0 0 0', fontSize: '12px', opacity: 0.9 }}>
+                    اعتماد كمية مخصصة للصيدلية وتدوين ملاحظات المشتريات وإشعار الواتساب
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isProcessing && setAdjustingItemModalData(null)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  padding: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* محتوى النافذة */}
+            <div style={{ padding: '20px 24px', maxHeight: '75vh', overflowY: 'auto' }}>
+              {/* ملخص الصنف والفرع */}
+              <div style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '12px',
+                padding: '14px',
+                marginBottom: '18px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '700' }}>الصنف:</span>
+                  <strong style={{ fontSize: '15px', color: '#0f172a' }}>
+                    {adjustingItemModalData.item.medication_name}
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '700' }}>الفرع المستلم:</span>
+                  <span style={{ fontSize: '13px', fontWeight: '800', color: '#0d9488' }}>
+                    {adjustingItemModalData.item.branch_name || adjustingItemModalData.item.branch_id}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '700' }}>إجمالي الكمية المطلوبة بالفرع:</span>
+                  <span style={{
+                    background: '#ecfeff',
+                    color: '#0e7490',
+                    padding: '2px 10px',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    fontWeight: '900',
+                    border: '1px solid #cffafe'
+                  }}>
+                    {adjustingItemModalData.item.total_requested_qty} {adjustingItemModalData.item.unit_type === 'strip' ? 'شريط' : 'علبة'}
+                  </span>
+                </div>
+              </div>
+
+              {/* إذا كان هناك تفصيل للطلبات */}
+              {(adjustingItemModalData.item.item_details || []).length > 1 ? (
+                <div style={{ marginBottom: '18px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '800', color: '#1e293b', marginBottom: '8px' }}>
+                    توزيع الكمية المعتمدة لكل طلب عميل / فرع:
+                  </label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {adjustingItemModalData.item.item_details.map(d => {
+                      const currentVal = adjustingItemModalData.perOrderAdjustments[d.itemId] != null
+                        ? adjustingItemModalData.perOrderAdjustments[d.itemId]
+                        : d.quantity;
+                      return (
+                        <div
+                          key={d.itemId}
+                          style={{
+                            background: '#f8fafc',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '10px',
+                            padding: '10px 14px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '12px'
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a' }}>
+                              طلب #{d.orderNumber} ({d.customerName})
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#64748b' }}>
+                              المطلوب: {d.quantity} {adjustingItemModalData.item.unit_type === 'strip' ? 'شريط' : 'علبة'}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: '12px', color: '#475569' }}>المعتمد:</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max={d.quantity}
+                              value={currentVal}
+                              onChange={e => {
+                                const val = e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value, 10));
+                                setAdjustingItemModalData(prev => ({
+                                  ...prev,
+                                  perOrderAdjustments: {
+                                    ...prev.perOrderAdjustments,
+                                    [d.itemId]: val
+                                  }
+                                }));
+                              }}
+                              style={{
+                                width: '70px',
+                                padding: '6px 8px',
+                                border: '2px solid #cbd5e1',
+                                borderRadius: '8px',
+                                textAlign: 'center',
+                                fontWeight: '800',
+                                fontSize: '14px',
+                                color: '#0d9488'
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ marginBottom: '18px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '800', color: '#1e293b', marginBottom: '6px' }}>
+                    الكمية المعتمدة والمتوفرة ({adjustingItemModalData.item.unit_type === 'strip' ? 'شريط' : 'علبة'}):
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={adjustingItemModalData.approvedQty}
+                    onChange={e => {
+                      const val = e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value, 10));
+                      setAdjustingItemModalData(prev => ({ ...prev, approvedQty: val }));
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      border: '2px solid #cbd5e1',
+                      borderRadius: '10px',
+                      fontSize: '15px',
+                      fontWeight: '800',
+                      color: '#0f172a'
+                    }}
+                  />
+                  <small style={{ color: '#64748b', fontSize: '11px', marginTop: '4px', display: 'block' }}>
+                    الكمية المطلوبة أصلاً كانت ({adjustingItemModalData.item.total_requested_qty}). سيتم تعديل كمية الطلب واحتساب الفارق المالي تلقائياً.
+                  </small>
+                </div>
+              )}
+
+              {/* ملحوظات مدير المشتريات / مسؤول المستحضرات */}
+              <div style={{ marginBottom: '18px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '800', color: '#1e293b', marginBottom: '6px' }}>
+                  💬 ملحوظات المشتريات (تظهر للفرع وفي إشعار الواتساب):
+                </label>
+                <textarea
+                  rows="3"
+                  value={adjustingItemModalData.notes}
+                  onChange={e => setAdjustingItemModalData(prev => ({ ...prev, notes: e.target.value }))}
+                  placeholder="مثال: تم اعتماد وتوفير جزء من الكمية المطلوبة نظراً لعدم توفر الحصص الكاملة لدى الوكيل حالياً..."
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    border: '2px solid #cbd5e1',
+                    borderRadius: '10px',
+                    fontSize: '13px',
+                    fontFamily: 'inherit',
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+
+              {/* تنبيه الأمان والمزامنة */}
+              <div style={{
+                background: '#fef3c7',
+                border: '1px solid #fde68a',
+                borderRadius: '10px',
+                padding: '10px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '12px',
+                color: '#92400e'
+              }}>
+                <AlertCircle size={16} />
+                <span>
+                  عند الاعتماد، سيتم تحديث الكمية في فاتورة الفرع وإعادة احتساب المبالغ المالية فورياً وإرسال رسالة واتساب رسمية لرقم الفرع مع توضيح الملاحظات.
+                </span>
+              </div>
+            </div>
+
+            {/* أزرار الإجراء */}
+            <div style={{
+              background: '#f8fafc',
+              borderTop: '1px solid #e2e8f0',
+              padding: '14px 24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={() => setAdjustingItemModalData(null)}
+                disabled={isProcessing}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '10px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  cursor: 'pointer'
+                }}
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAdjustQuantity}
+                disabled={isProcessing}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: '#0d9488',
+                  color: '#ffffff',
+                  fontSize: '13px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <Send size={15} />}
+                <span>اعتماد التعديل والتوفير وإشعار الفرع 🚀</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

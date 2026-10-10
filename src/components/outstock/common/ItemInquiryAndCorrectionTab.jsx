@@ -22,7 +22,8 @@ import {
   Tag,
   Camera,
   UploadCloud,
-  AlertTriangle
+  AlertTriangle,
+  Eye
 } from 'lucide-react';
 import {
   outstockGetMedicationRequests,
@@ -34,6 +35,7 @@ import {
 } from '../../../utils/outstockApiClient';
 import MedicationAutocompleteInput from '../pharmacy/MedicationAutocompleteInput';
 import EmployeeCodeAuthModal from './EmployeeCodeAuthModal';
+import ProcurementReplyModal from './ProcurementReplyModal';
 
 /**
  * ItemInquiryAndCorrectionTab.jsx
@@ -62,7 +64,8 @@ export default function ItemInquiryAndCorrectionTab({
   const [requests, setRequests] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'pending' | 'resolved' | 'approved' | 'rejected'
+  const [statusFilter, setStatusFilter] = useState('pending'); // default: 'pending' (في انتظار رد المشتريات)
+  const [previewReplyRequest, setPreviewReplyRequest] = useState(null); // نافذة معاينة رد المشتريات المفصلة
 
   // التحقق من كود الموظف قبل فتح الاستعلام أو التصحيح
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -476,14 +479,23 @@ export default function ItemInquiryAndCorrectionTab({
                       ? { label: 'تصحيح بيانات صنف', bg: '#fef3c7', color: '#b45309' }
                       : { label: 'اعتماد صنف جديد', bg: '#dcfce7', color: '#15803d' };
 
+                  const replyObj = typeof reqItem.procurement_reply === 'object' && reqItem.procurement_reply !== null
+                    ? reqItem.procurement_reply
+                    : (typeof reqItem.procurement_reply === 'string'
+                      ? (() => { try { return JSON.parse(reqItem.procurement_reply); } catch { return {}; } })()
+                      : {});
+                  const replyText = reqItem.response_notes || replyObj.notes || replyObj.message || (reqItem.status === 'approved' ? 'تم اعتماد الصنف وإدراجه رسمياً بكتالوج الأدوية' : '');
+                  const replierName = reqItem.responded_by || reqItem.replied_by || replyObj.repliedBy || 'المشتريات';
+                  const isItemReplied = reqItem.status === 'resolved' || reqItem.status === 'replied' || reqItem.status === 'approved' || Boolean(replyText);
+
                   const statusBadge =
-                    reqItem.status === 'resolved'
-                      ? { label: 'تم الرد بنجاح', bg: '#dcfce7', color: '#15803d' }
-                      : reqItem.status === 'approved'
-                      ? { label: 'معتمد بالكتالوج', bg: '#dbeafe', color: '#1d4ed8' }
+                    reqItem.status === 'approved'
+                      ? { label: 'معتمد بالكتالوج ⭐', bg: '#dbeafe', color: '#1d4ed8' }
+                      : (reqItem.status === 'resolved' || reqItem.status === 'replied' || isItemReplied)
+                      ? { label: 'تم الرد بنجاح 🟢', bg: '#dcfce7', color: '#15803d' }
                       : reqItem.status === 'rejected'
-                      ? { label: 'مرفوض', bg: '#fee2e2', color: '#b91c1c' }
-                      : { label: 'قيد الانتظار', bg: '#f1f5f9', color: '#64748b' };
+                      ? { label: 'مرفوض ❌', bg: '#fee2e2', color: '#b91c1c' }
+                      : { label: 'قيد الانتظار ⏳', bg: '#f1f5f9', color: '#64748b' };
 
                   const propData = reqItem.proposed_data || {};
 
@@ -592,12 +604,28 @@ export default function ItemInquiryAndCorrectionTab({
                       </td>
 
                       {/* رد المشتريات */}
-                      <td style={{ padding: '12px 16px', maxWidth: '240px' }}>
-                        {reqItem.response_notes ? (
-                          <div style={{ fontSize: '12.5px', color: '#0369a1', background: '#f0f9ff', padding: '6px 10px', borderRadius: '8px', border: '1px solid #bae6fd' }}>
-                            {reqItem.response_notes}
-                            <div style={{ fontSize: '10.5px', color: '#0284c7', marginTop: '2px', fontWeight: 'bold' }}>
-                              — {reqItem.responded_by || 'المشتريات'}
+                      <td style={{ padding: '12px 16px', maxWidth: '250px' }}>
+                        {isItemReplied ? (
+                          <div
+                            onClick={() => setPreviewReplyRequest(reqItem)}
+                            style={{
+                              fontSize: '12.5px',
+                              color: '#0369a1',
+                              background: '#f0f9ff',
+                              padding: '7px 10px',
+                              borderRadius: '9px',
+                              border: '1px solid #bae6fd',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease'
+                            }}
+                            title="انقر للمعاينة الموسعة للرد والقرار"
+                          >
+                            <div style={{ maxHeight: '42px', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 600 }}>
+                              {replyText || 'تم حفظ القرار والرد من المشتريات.'}
+                            </div>
+                            <div style={{ fontSize: '10.5px', color: '#0284c7', marginTop: '3px', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span>— {replierName}</span>
+                              <span style={{ color: '#0284c7', textDecoration: 'underline' }}>معاينة التفاصيل 👁️</span>
                             </div>
                           </div>
                         ) : (
@@ -608,7 +636,7 @@ export default function ItemInquiryAndCorrectionTab({
                       {/* الإجراء */}
                       <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                         {isProcurement ? (
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', flexWrap: 'wrap' }}>
                             {reqItem.request_type === 'new_item' && reqItem.status !== 'approved' && (
                               <button
                                 type="button"
@@ -629,11 +657,35 @@ export default function ItemInquiryAndCorrectionTab({
                               </button>
                             )}
 
+                            {isItemReplied && (
+                              <button
+                                type="button"
+                                onClick={() => setPreviewReplyRequest(reqItem)}
+                                style={{
+                                  background: '#f0fdf4',
+                                  color: '#166534',
+                                  border: '1px solid #bbf7d0',
+                                  borderRadius: '6px',
+                                  padding: '5px 9px',
+                                  fontSize: '11.5px',
+                                  fontWeight: '800',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                                title="معاينة الرد المعتمد"
+                              >
+                                <Eye size={13} />
+                                <span>معاينة</span>
+                              </button>
+                            )}
+
                             <button
                               type="button"
                               onClick={() => {
                                 setReplyTargetRequest(reqItem);
-                                setReplyNotes(reqItem.response_notes || '');
+                                setReplyNotes(replyText || '');
                                 setReplyStatus(reqItem.status === 'pending' ? 'resolved' : reqItem.status);
                               }}
                               style={{
@@ -647,60 +699,80 @@ export default function ItemInquiryAndCorrectionTab({
                                 cursor: 'pointer'
                               }}
                             >
-                              رد / تحديث
+                              {isItemReplied ? 'تعديل الرد' : 'رد / تحديث'}
                             </button>
                           </div>
                         ) : (
-                          <div>
-                            {reqItem.status === 'pending' ? (
-                              reqItem.has_complaint || escalatedInquiryIds.has(reqItem.id) ? (
-                                <span
-                                  style={{
-                                    fontSize: '11px',
-                                    background: '#fef2f2',
-                                    color: '#dc2626',
-                                    border: '1px solid #fecaca',
-                                    padding: '4px 8px',
-                                    borderRadius: '6px',
-                                    fontWeight: '800',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '4px'
-                                  }}
-                                  title="تم تصعيد شكوى للمالك وإدارة المشتريات لعدم الرد"
-                                >
-                                  <AlertTriangle size={12} />
-                                  <span>تم التصعيد 🚨</span>
-                                </span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setComplaintTargetInquiry(reqItem);
-                                    setComplaintNotes('');
-                                  }}
-                                  style={{
-                                    background: '#fff1f2',
-                                    color: '#e11d48',
-                                    border: '1px solid #fecdd3',
-                                    borderRadius: '6px',
-                                    padding: '5px 9px',
-                                    fontSize: '11.5px',
-                                    fontWeight: '800',
-                                    cursor: 'pointer',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    transition: 'all 0.15s ease'
-                                  }}
-                                  title="تصعيد شكوى للمالك والمشتريات لعدم الرد على هذا الاستعلام"
-                                >
-                                  <AlertTriangle size={13} color="#e11d48" />
-                                  <span>تصعيد شكوى لعدم الرد 🚨</span>
-                                </button>
-                              )
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                            {isItemReplied ? (
+                              <button
+                                type="button"
+                                onClick={() => setPreviewReplyRequest(reqItem)}
+                                style={{
+                                  background: '#eff6ff',
+                                  color: '#0284c7',
+                                  border: '1.5px solid #38bdf8',
+                                  borderRadius: '8px',
+                                  padding: '6px 12px',
+                                  fontSize: '12px',
+                                  fontWeight: '800',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  boxShadow: '0 2px 4px rgba(2, 132, 199, 0.1)',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                title="معاينة قرار ورد إدارة المشتريات في نافذة مفصلة"
+                              >
+                                <Eye size={13} color="#0284c7" />
+                                <span>معاينة رد المشتريات 👁️</span>
+                              </button>
+                            ) : reqItem.has_complaint || escalatedInquiryIds.has(reqItem.id) ? (
+                              <span
+                                style={{
+                                  fontSize: '11px',
+                                  background: '#fef2f2',
+                                  color: '#dc2626',
+                                  border: '1px solid #fecaca',
+                                  padding: '4px 8px',
+                                  borderRadius: '6px',
+                                  fontWeight: '800',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                                title="تم تصعيد شكوى للمالك وإدارة المشتريات لعدم الرد"
+                              >
+                                <AlertTriangle size={12} />
+                                <span>تم التصعيد 🚨</span>
+                              </span>
                             ) : (
-                              <span style={{ fontSize: '12px', color: '#94a3b8' }}>-</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setComplaintTargetInquiry(reqItem);
+                                  setComplaintNotes('');
+                                }}
+                                style={{
+                                  background: '#fff1f2',
+                                  color: '#e11d48',
+                                  border: '1px solid #fecdd3',
+                                  borderRadius: '6px',
+                                  padding: '5px 9px',
+                                  fontSize: '11.5px',
+                                  fontWeight: '800',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                title="تصعيد شكوى للمالك والمشتريات لعدم الرد على هذا الاستعلام"
+                              >
+                                <AlertTriangle size={13} color="#e11d48" />
+                                <span>تصعيد شكوى لعدم الرد 🚨</span>
+                              </button>
                             )}
                           </div>
                         )}
@@ -1264,6 +1336,14 @@ export default function ItemInquiryAndCorrectionTab({
           </div>
         </div>
       )}
+
+      {/* ── نافذة معاينة رد المشتريات المفصلة ── */}
+      <ProcurementReplyModal
+        isOpen={Boolean(previewReplyRequest)}
+        onClose={() => setPreviewReplyRequest(null)}
+        requestItem={previewReplyRequest}
+        showToast={showToast}
+      />
     </div>
   );
 }

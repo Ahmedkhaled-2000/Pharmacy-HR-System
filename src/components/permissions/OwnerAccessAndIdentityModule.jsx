@@ -864,7 +864,7 @@ export default function OwnerAccessAndIdentityModule({
                                 )}
                                 {u.permissions?.outstockHandling?.enabled && (
                                   <span style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '2px 7px', borderRadius: '5px', fontSize: '10.5px', fontWeight: 800 }}>
-                                    💊 OutStock ({u.permissions?.outstockHandling?.role === 'procurement_manager' ? 'مدير مشتريات (كافة الفروع 🌐)' : u.permissions?.outstockHandling?.role === 'cosmetics_officer' ? 'مسؤول مستحضرات تجميل 💄' : u.permissions?.outstockHandling?.role === 'procurement_team' ? 'فريق مشتريات' : `صيدلية: ${(branches.find(b => String(b.id) === String(u.permissions?.outstockHandling?.assignedBranchId))?.name) || 'فرع'}`})
+                                    💊 OutStock ({u.permissions?.outstockHandling?.role === 'procurement_manager' ? 'مدير مشتريات (كافة الفروع 🌐)' : u.permissions?.outstockHandling?.role === 'cosmetics_officer' ? (u.permissions?.outstockHandling?.assignedBranchId === 'ALL' || !u.permissions?.outstockHandling?.assignedBranchId ? 'مسؤول تجميل (كافة الفروع 🌐)' : `مسؤول تجميل: ${(branches.find(b => String(b.id) === String(u.permissions?.outstockHandling?.assignedBranchId))?.name) || 'فرع'}`) : u.permissions?.outstockHandling?.role === 'procurement_team' ? 'فريق مشتريات عام 🤝' : `صيدلية: ${(branches.find(b => String(b.id) === String(u.permissions?.outstockHandling?.assignedBranchId))?.name) || 'فرع'}`})
                                   </span>
                                 )}
                                 {u.permissions?.accountsSystem?.enabled && (
@@ -1660,7 +1660,11 @@ export default function OwnerAccessAndIdentityModule({
                           ...prev,
                           permissions: {
                             ...prev.permissions,
-                            outstockHandling: { ...prev.permissions?.outstockHandling, role: 'procurement_team' }
+                            outstockHandling: {
+                              ...prev.permissions?.outstockHandling,
+                              role: 'procurement_team',
+                              assignedBranchId: null
+                            }
                           }
                         }))}
                       />
@@ -1677,7 +1681,11 @@ export default function OwnerAccessAndIdentityModule({
                           ...prev,
                           permissions: {
                             ...prev.permissions,
-                            outstockHandling: { ...prev.permissions?.outstockHandling, role: 'cosmetics_officer' }
+                            outstockHandling: {
+                              ...prev.permissions?.outstockHandling,
+                              role: 'cosmetics_officer',
+                              assignedBranchId: prev.permissions?.outstockHandling?.assignedBranchId || 'ALL'
+                            }
                           }
                         }))}
                       />
@@ -1685,7 +1693,7 @@ export default function OwnerAccessAndIdentityModule({
                     </label>
                   </div>
 
-                  {/* تحديد الفرع المسؤول عنه أو إتاحة كافة الفروع لمدير المشتريات */}
+                  {/* تحديد الفرع المسؤول عنه أو إتاحة كافة الفروع لمدير المشتريات / مسؤول التجميل / فريق المشتريات */}
                   {empAccessForm.permissions?.outstockHandling?.role === 'procurement_manager' ? (
                     <div style={{
                       padding: '12px 14px',
@@ -1704,6 +1712,50 @@ export default function OwnerAccessAndIdentityModule({
                           بصفته مديراً للمشتريات، يتم فتح كامل أقسام منظومة النواقص وسجل طلبات جميع الفروع والموردين والتقارير المالية دون تقييد بفرع محدد.
                         </div>
                       </div>
+                    </div>
+                  ) : empAccessForm.permissions?.outstockHandling?.role === 'procurement_team' ? (
+                    <div style={{
+                      padding: '12px 14px',
+                      background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)',
+                      border: '1.5px solid #86efac',
+                      borderRadius: '10px',
+                      color: '#065f46',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px'
+                    }}>
+                      <span style={{ fontSize: '24px' }}>🤝</span>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 900 }}>عضو فريق المشتريات والتوريدات العام</div>
+                        <div style={{ fontSize: '12px', color: '#047857', marginTop: '3px', lineHeight: 1.5 }}>
+                          تم تعيين الموظف كعضو في فريق المشتريات العام — سيقوم مدير المشتريات بتحديد الفروع التابعة له وتوزيع صلاحيات التوريد التفصيلية من داخل شاشة "إدارة فريق المشتريات".
+                        </div>
+                      </div>
+                    </div>
+                  ) : empAccessForm.permissions?.outstockHandling?.role === 'cosmetics_officer' ? (
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, marginBottom: '5px', color: '#be185d' }}>
+                        نطاق فروع مستحضرات التجميل المسندة للمسؤول:
+                      </label>
+                      <select
+                        value={empAccessForm.permissions?.outstockHandling?.assignedBranchId || 'ALL'}
+                        onChange={(e) => setEmpAccessForm(prev => ({
+                          ...prev,
+                          permissions: {
+                            ...prev.permissions,
+                            outstockHandling: {
+                              ...prev.permissions?.outstockHandling,
+                              assignedBranchId: e.target.value
+                            }
+                          }
+                        }))}
+                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1.5px solid #f472b6', fontSize: '13px', fontFamily: 'Cairo', background: '#fff' }}
+                      >
+                        <option value="ALL">🌐 جميع الفروع (إشراف مركزي كامل على مستحضرات التجميل)</option>
+                        {branches.map(b => (
+                          <option key={b.id} value={b.id}>🏢 صيدلية: {b.name}</option>
+                        ))}
+                      </select>
                     </div>
                   ) : (
                     <div>

@@ -1306,21 +1306,29 @@ export async function seedEdaMedications(db, medsList) {
 }
 
 // ── 5. البحث اللحظي السريع في كتالوج الأدوية (Fast Realtime Autocomplete) ──────
-export async function searchEdaMedications(db, queryTerm, limit = 15) {
+export async function searchEdaMedications(db, queryTerm, limit = 15, itemType = null) {
   const clean = String(queryTerm || '').trim();
   if (!clean) {
     const fetchLimit = Math.min(100, Math.max(1, limit || 40));
-    const res = await db.query(`
+    let sqlEmpty = `
       SELECT
         id, eda_reg_no, trade_name_en, trade_name_ar, generic_name,
         dosage_form, strength, pack_size, unit_name, public_price,
         unit_price, manufacturer, category, is_table_drug, is_refrigerated,
         gtin_barcode, market_status, updated_at, created_at,
-        invoice_display_name, active_ingredients_list
+        invoice_display_name, active_ingredients_list,
+        COALESCE(item_type, 'medication') as item_type, image_url, brand, target_skin_type, usage_instructions, estimated_cost_price
       FROM public.outstock_medications
-      ORDER BY trade_name_en ASC
-      LIMIT $1
-    `, [fetchLimit]);
+    `;
+    const paramsEmpty = [fetchLimit];
+    if (itemType === 'cosmetics') {
+      sqlEmpty += ` WHERE (item_type = 'cosmetics' OR item_type = 'cosmetic') `;
+    } else if (itemType === 'medication') {
+      sqlEmpty += ` WHERE (item_type IS NULL OR item_type = 'medication') `;
+    }
+    sqlEmpty += ` ORDER BY trade_name_en ASC LIMIT $1 `;
+
+    const res = await db.query(sqlEmpty, paramsEmpty);
 
     return res.rows.map(r => ({
       ...r,
@@ -1347,23 +1355,32 @@ export async function searchEdaMedications(db, queryTerm, limit = 15) {
     phoneticPattern = '%فانترن%';
   }
 
+  let itemTypeClause = '';
+  if (itemType === 'cosmetics') {
+    itemTypeClause = ` AND (item_type = 'cosmetics' OR item_type = 'cosmetic') `;
+  } else if (itemType === 'medication') {
+    itemTypeClause = ` AND (item_type IS NULL OR item_type = 'medication') `;
+  }
+
   const sql = `
     SELECT
       id, eda_reg_no, trade_name_en, trade_name_ar, generic_name,
       dosage_form, strength, pack_size, unit_name, public_price,
       unit_price, manufacturer, category, is_table_drug, is_refrigerated,
       gtin_barcode, market_status, updated_at, created_at,
-      invoice_display_name, active_ingredients_list
+      invoice_display_name, active_ingredients_list,
+      COALESCE(item_type, 'medication') as item_type, image_url, brand, target_skin_type, usage_instructions, estimated_cost_price
     FROM public.outstock_medications
     WHERE
-      search_normalized LIKE $1
+      (search_normalized LIKE $1
       OR search_normalized LIKE $8
       OR LOWER(trade_name_en) LIKE $2
       OR LOWER(trade_name_ar) LIKE $2
       OR LOWER(generic_name) LIKE $2
       OR LOWER(COALESCE(invoice_display_name, '')) LIKE $2
       OR gtin_barcode = $3
-      OR gtin_barcode LIKE $9
+      OR gtin_barcode LIKE $9)
+      ${itemTypeClause}
     ORDER BY
       CASE
         WHEN gtin_barcode = $3 THEN 0
@@ -1383,7 +1400,7 @@ export async function searchEdaMedications(db, queryTerm, limit = 15) {
     clean.toLowerCase(),
     `${clean.toLowerCase()}%`,
     `${normalized}%`,
-    Math.min(30, Math.max(1, limit)),
+    Math.min(50, Math.max(1, limit)),
     phoneticPattern,
     barcodePrefix
   ];
@@ -2119,21 +2136,30 @@ export async function addNewMedication(db, medData, userRole = 'branch', usernam
   );
 
   const itemType = (medData.item_type || medData.itemType || (category.includes('تجميل') ? 'cosmetics' : 'medication')).trim();
+  const imageUrl = medData.image_url || medData.imageUrl || null;
+  const brand = medData.brand || null;
+  const targetSkinType = medData.target_skin_type || medData.skinType || null;
+  const usageInstructions = medData.usage_instructions || medData.instructions || null;
+  const estimatedCostPrice = medData.estimated_cost_price !== undefined ? parseFloat(medData.estimated_cost_price || 0) : null;
 
   await db.query(`
     INSERT INTO public.outstock_medications (
       id, eda_reg_no, trade_name_en, trade_name_ar, generic_name, dosage_form,
       strength, pack_size, unit_name, public_price, unit_price, manufacturer,
       category, item_type, is_table_drug, is_refrigerated, gtin_barcode, market_status,
-      search_normalized, invoice_display_name, active_ingredients_list, updated_at, created_at
+      search_normalized, invoice_display_name, active_ingredients_list,
+      image_url, brand, target_skin_type, usage_instructions, estimated_cost_price,
+      updated_at, created_at
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'available', $18, $19, $20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'available',
+      $18, $19, $20, $21, $22, $23, $24, $25, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
     )
   `, [
     newId, edaRegNo, nameEn, nameAr, genericName, dosageForm,
     medData.strength || '', packSize, unitName, publicPrice, unitPrice,
     manufacturer, category, itemType, isTableDrug, isRefrigerated, barcode, normalized,
-    invoiceDisplayName, activeIngredientsList ? JSON.stringify(activeIngredientsList) : null
+    invoiceDisplayName, activeIngredientsList ? JSON.stringify(activeIngredientsList) : null,
+    imageUrl, brand, targetSkinType, usageInstructions, estimatedCostPrice
   ]);
 
   // توثيق إضافة الصنف في سجل الرقابة
@@ -2163,6 +2189,12 @@ export async function addNewMedication(db, medData, userRole = 'branch', usernam
       unit_price: unitPrice,
       manufacturer,
       category,
+      item_type: itemType,
+      image_url: imageUrl,
+      brand,
+      target_skin_type: targetSkinType,
+      usage_instructions: usageInstructions,
+      estimated_cost_price: estimatedCostPrice,
       is_table_drug: isTableDrug,
       is_refrigerated: isRefrigerated,
       gtin_barcode: barcode,
@@ -2191,7 +2223,7 @@ export async function updateMedicationDetails(db, medId, updateData, userRole = 
   const oldPublic = parseFloat(current.public_price || 0);
   const oldUnit = parseFloat(current.unit_price || 0);
 
-  const isManagerOrOwner = ['owner', 'procurement_manager', 'procurement'].includes(userRole) ||
+  const isManagerOrOwner = ['owner', 'procurement_manager', 'procurement', 'cosmetics_officer', 'admin'].includes(userRole) ||
     Boolean(updateData.can_edit_items || updateData.canEditItems);
 
   // 🛡️ الضابط الحاسم للصيدلي بالفرع (بدون صلاحيات مدير):
@@ -2266,8 +2298,15 @@ export async function updateMedicationDetails(db, medId, updateData, userRole = 
     ? updateData.active_ingredients_list
     : current.active_ingredients_list;
 
+  const itemType = String(updateData.item_type || updateData.itemType || current.item_type || 'medication').trim();
+  const imageUrl = updateData.image_url !== undefined ? updateData.image_url : (updateData.imageUrl !== undefined ? updateData.imageUrl : current.image_url);
+  const brand = updateData.brand !== undefined ? updateData.brand : current.brand;
+  const targetSkinType = updateData.target_skin_type !== undefined ? updateData.target_skin_type : current.target_skin_type;
+  const usageInstructions = updateData.usage_instructions !== undefined ? updateData.usage_instructions : current.usage_instructions;
+  const estimatedCostPrice = updateData.estimated_cost_price !== undefined ? parseFloat(updateData.estimated_cost_price || 0) : current.estimated_cost_price;
+
   const normalized = normalizeDrugSearchText(
-    `${newNameEn} ${newNameAr} ${newGeneric} ${invoiceDisplayName || ''} ${newManufacturer} ${newBarcode || ''} ${newDosage}`
+    `${newNameEn} ${newNameAr} ${newGeneric} ${invoiceDisplayName || ''} ${newManufacturer} ${newBarcode || ''} ${newDosage} ${brand || ''}`
   );
 
   await db.query(`
@@ -2277,13 +2316,16 @@ export async function updateMedicationDetails(db, medId, updateData, userRole = 
       pack_size = $5, unit_name = $6, public_price = $7, unit_price = $8,
       manufacturer = $9, category = $10, is_table_drug = $11, is_refrigerated = $12,
       gtin_barcode = $13, search_normalized = $14, invoice_display_name = $15,
-      active_ingredients_list = $16, updated_at = CURRENT_TIMESTAMP
-    WHERE id = $17
+      active_ingredients_list = $16, item_type = $17, image_url = $18, brand = $19,
+      target_skin_type = $20, usage_instructions = $21, estimated_cost_price = $22,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = $23
   `, [
     newNameEn, newNameAr, newGeneric, newDosage, newPackSize, newUnitName,
     newPublic, newUnitPrice, newManufacturer, newCategory, isTableDrug, isRefrigerated,
     newBarcode, normalized, invoiceDisplayName,
     activeIngredientsList ? JSON.stringify(activeIngredientsList) : null,
+    itemType, imageUrl, brand, targetSkinType, usageInstructions, estimatedCostPrice,
     medId
   ]);
 

@@ -10,7 +10,7 @@ import { outstockGetOrders } from '../../../utils/outstockApiClient';
 export default function PharmacyProcurementTrackingTab({ branchId }) {
   const [orders, setOrders] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'pending', 'available', 'unavailable'
+  const [filterStatus, setFilterStatus] = useState('pending'); // default: 'pending' (قيد رد المشتريات)
   const [searchQuery, setSearchQuery] = useState('');
 
   const fetchTracking = async () => {

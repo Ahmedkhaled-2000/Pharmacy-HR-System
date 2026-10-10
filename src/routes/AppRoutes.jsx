@@ -1543,15 +1543,18 @@ export default function AppRoutes() {
           if (perms.outstockHandling?.enabled || perms.outstock?.enabled) {
             const outPerm = perms.outstockHandling || perms.outstock || {};
             const isProcMgr = outPerm.role === 'procurement_manager' || outPerm.role === 'outstock_procurement_manager';
-            const bId = isProcMgr ? 'all' : (outPerm.assignedBranchId || outPerm.branchId);
+            const isCosmeticsAll = outPerm.role === 'cosmetics_officer' && (outPerm.assignedBranchId === 'ALL' || outPerm.assignedBranchId === 'all' || !outPerm.assignedBranchId);
+            const isProcTeam = outPerm.role === 'procurement_team';
+            const isAll = isProcMgr || isCosmeticsAll || isProcTeam;
+            const bId = isAll ? 'all' : (outPerm.assignedBranchId || outPerm.branchId);
             workspaces.push({
               id: 'outstock',
               type: 'outstock',
-              outstockRole: outPerm.role || 'outstock_pharmacy',
+              outstockRole: isProcTeam ? 'outstock_procurement_officer' : (outPerm.role || 'outstock_pharmacy'),
               branchId: bId,
-              allBranches: isProcMgr,
-              title: isProcMgr ? 'نظام النواقص والمشتريات (مدير مشتريات - كافة الفروع)' : 'نظام متابعة النواقص والمشتريات (OutStock)',
-              desc: isProcMgr ? 'إدارة مشتريات مركزية شاملة لكافة الفروع والموردين والطلبيات' : 'تسجيل ومتابعة طلبات ونواقص الأدوية'
+              allBranches: isAll,
+              title: isProcMgr ? 'نظام النواقص والمشتريات (مدير مشتريات - كافة الفروع)' : (isCosmeticsAll ? 'نظام النواقص (مسؤول مستحضرات تجميل - كافة الفروع)' : (isProcTeam ? 'نظام النواقص (فريق المشتريات العام)' : 'نظام متابعة النواقص والمشتريات (OutStock)')),
+              desc: isProcMgr ? 'إدارة مشتريات مركزية شاملة لكافة الفروع والموردين والطلبيات' : (isCosmeticsAll ? 'إشراف مركزي كامل على طلبات ومستحضرات التجميل لجميع الفروع' : (isProcTeam ? 'متابعة وتنفيذ توريدات النواقص لفريق المشتريات' : 'تسجيل ومتابعة طلبات ونواقص الأدوية'))
             });
           }
 
@@ -2736,17 +2739,23 @@ export default function AppRoutes() {
                           initialRole={
                             authRole === 'owner' ? 'outstock_owner' :
                             (authRole === 'outstock_procurement_manager' || authRole === 'procurement_manager' || currentEmpUser?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager') ? 'procurement_manager' :
+                            (authRole === 'outstock_cosmetics_officer' || currentEmpUser?.role === 'cosmetics_officer' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'cosmetics_officer') ? 'cosmetics_officer' :
+                            (authRole === 'outstock_procurement_officer' || currentEmpUser?.role === 'procurement_officer' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_team') ? 'procurement_officer' :
                             authRole === 'branch' ? 'outstock_pharmacy' :
                             (typeof authRole === 'string' && authRole.startsWith('outstock_')) ? authRole : 'outstock_owner'
                           }
                           currentBranch={
-                            (authRole === 'outstock_procurement_manager' || authRole === 'procurement_manager' || currentEmpUser?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager')
+                            (authRole === 'outstock_procurement_manager' || authRole === 'procurement_manager' || currentEmpUser?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_team' || (currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'cosmetics_officer' && (currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.assignedBranchId === 'ALL' || !currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.assignedBranchId)))
                               ? { id: 'all', name: 'كافة الفروع' }
                               : currentBranch
                           }
                           currentUser={
                             (authRole === 'outstock_procurement_manager' || authRole === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager')
                               ? { ...currentEmpUser, role: 'procurement_manager', allBranchesAccess: true, isOwnerSimulating }
+                              : (authRole === 'outstock_cosmetics_officer' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'cosmetics_officer')
+                              ? { ...currentEmpUser, role: 'cosmetics_officer', category_scope: 'cosmetics', allBranchesAccess: currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.assignedBranchId === 'ALL' || !currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.assignedBranchId, isOwnerSimulating }
+                              : (currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_team')
+                              ? { ...currentEmpUser, role: 'procurement_officer', allBranchesAccess: true, isOwnerSimulating }
                               : { ...currentEmpUser, isOwnerSimulating }
                           }
                           isOwnerSimulating={isOwnerSimulating}
