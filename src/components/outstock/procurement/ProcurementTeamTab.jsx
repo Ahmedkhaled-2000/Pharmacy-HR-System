@@ -103,15 +103,15 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
               role: isManager ? 'procurement_manager' : (isCosmetics ? 'cosmetics_officer' : (m.role || 'procurement_officer')),
               category_scope: isCosmetics ? 'cosmetics' : (p.category_scope || 'all'),
               allowed_branches: m.assigned_branches || m.allowed_branches || [],
-              can_edit_items: isManager ? true : (p.can_edit_items === true),
-              can_view_orders: isManager ? true : (p.can_view_orders !== false),
-              can_change_status: isManager ? true : (p.can_change_status === true),
-              can_access_suppliers: isManager ? true : (p.can_access_suppliers === true),
-              can_access_supplier_accounts: isManager ? true : (p.can_access_supplier_accounts === true),
-              can_access_order_receiving: isManager ? true : (p.can_access_order_receiving === true),
-              can_access_supplier_invoices: isManager ? true : (p.can_access_supplier_invoices === true),
-              can_access_branch_withdrawals: isManager ? true : (p.can_access_branch_withdrawals === true),
-              can_access_discounts_comparison: isManager ? true : (p.can_access_discounts_comparison === true),
+              can_edit_items: isManager ? true : (p.can_edit_items === true || m.can_edit_items === true),
+              can_view_orders: isManager ? true : (p.can_view_orders !== false && m.can_view_orders !== false),
+              can_change_status: isManager ? true : (p.can_change_status === true || m.can_change_status === true),
+              can_access_suppliers: isManager ? true : (p.can_access_suppliers === true || m.can_access_suppliers === true),
+              can_access_supplier_accounts: isManager ? true : (p.can_access_supplier_accounts === true || m.can_access_supplier_accounts === true),
+              can_access_order_receiving: isManager ? true : (p.can_access_order_receiving === true || m.can_access_order_receiving === true),
+              can_access_supplier_invoices: isManager ? true : (p.can_access_supplier_invoices === true || m.can_access_supplier_invoices === true),
+              can_access_branch_withdrawals: isManager ? true : (p.can_access_branch_withdrawals === true || m.can_access_branch_withdrawals === true),
+              can_access_discounts_comparison: isManager ? true : (p.can_access_discounts_comparison === true || m.can_access_discounts_comparison === true),
               can_access_order_returns: isManager ? true : (p.can_access_order_returns === true || m.can_access_order_returns === true),
               can_manage_team: isManager
             };
@@ -203,8 +203,8 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
   );
 
   const handleOpenEditMember = (member) => {
-    if (!isOwner && (member.is_hr_integrated || member.role === 'procurement_manager')) {
-      showToast?.('هذا الحساب مرتبط بمنظومة الموارد البشرية، ويتم تعديل بياناته وصلاحياته من شاشة إدارة صلاحيات الموظفين للمالك.');
+    if (!isOwner && member.role === 'procurement_manager') {
+      showToast?.('لا يمكن تعديل حساب مدير إدارة المشتريات إلا بواسطة المالك.');
       return;
     }
     setEditingMember(member);
@@ -762,9 +762,9 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                         </td>
                         <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                            {(!isOwner && (m.is_hr_integrated || m.role === 'procurement_manager')) ? (
+                            {(!isOwner && m.role === 'procurement_manager') ? (
                               <span style={{ fontSize: '11px', color: '#0369a1', background: '#f0f9ff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #bae6fd', fontWeight: 'bold' }}>
-                                حساب مدار من شاشة الموظفين
+                                حساب المدير الرئيسي
                               </span>
                             ) : (
                               <>
@@ -1074,6 +1074,23 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
             </div>
 
             <form onSubmit={handleSaveMember}>
+              {editingMember?.is_hr_integrated && (
+                <div style={{
+                  background: '#f0fdf4',
+                  border: '1.5px solid #a7f3d0',
+                  borderRadius: '10px',
+                  padding: '10px 14px',
+                  marginBottom: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}>
+                  <span style={{ fontSize: '20px' }}>🔗</span>
+                  <div style={{ fontSize: '12px', color: '#065f46', lineHeight: 1.4 }}>
+                    <strong>موظف معتمد في الموارد البشرية:</strong> بصفتك مدير المشتريات يمكنك الآن تحديد وتغيير الفروع المسندة إليه، ومنحه أو تعديل صلاحيات التوريد والاعتماد والتعديل على الأصناف.
+                  </div>
+                </div>
+              )}
               {/* قسم اختيار موظف من فرع معين للربط التلقائي السريع */}
               {!editingMember && (
                 <div

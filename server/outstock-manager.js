@@ -917,6 +917,26 @@ export async function checkUsernameCollisionWithHr(username, db, getSettingsFrom
 
 // ── 2. تسجيل مسارات الـ API وخادم المزامنة ────────────────────────────────────
 export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromStorage, saveSettingsToStorage) {
+  const STORAGE_KEY = 'pharmacy-tracker-data';
+
+  // دالة مساعدة لقراءة إعدادات الـ HR بشكل آمن مع الرجوع لقاعدة البيانات مباشرة عند اللزوم
+  const getSafeHrSettings = async () => {
+    try {
+      if (typeof getSettingsFromStorage === 'function') {
+        const s = await getSettingsFromStorage(STORAGE_KEY);
+        if (s && typeof s === 'object') return s;
+      }
+    } catch (e) {}
+    try {
+      const sRes = await db.query("SELECT value_data FROM public.app_settings WHERE key_name = 'pharmacy-tracker-data'");
+      if (sRes.rows.length > 0) {
+        const val = sRes.rows[0].value_data;
+        return typeof val === 'string' ? JSON.parse(val) : val;
+      }
+    } catch (e) {}
+    return null;
+  };
+
   // دالة بث موحدة وآمنة عبر Socket.io
   const broadcastOutstock = (event, data) => {
     try {
@@ -963,7 +983,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       // إذا لم يكن محدداً مباشرة في التوكن ولكن المعرف لموظف، نتحقق من إعدادات الموارد البشرية
       if (!isEmpProcMgr && payload.id) {
         try {
-          const appSettings = await getSettingsFromStorage(STORAGE_KEY);
+          const appSettings = await getSafeHrSettings();
           const empAccessMap = appSettings?.orgSettings?.employeeUnifiedAccess || {};
           const empAccess = empAccessMap[payload.id] || empAccessMap[payload.username] || empAccessMap[payload.userId];
           if (empAccess?.isEnabled !== false && empAccess?.permissions?.outstockHandling?.enabled && empAccess?.permissions?.outstockHandling?.role === 'procurement_manager') {
@@ -1087,7 +1107,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       // 👑 فحص المالك المعتمد الحصري (saif)
       if (cleanUser === 'saif') {
-        const appSettings = await getSettingsFromStorage(STORAGE_KEY);
+        const appSettings = await getSafeHrSettings();
         const org = appSettings?.orgSettings || {};
         const storedOwnerPass = org.ownerPassword || '181013';
         if (
@@ -1232,7 +1252,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       // 3. البحث في موظفي الـ HR الحاصلين على صلاحية النواقص وإدارة المشتريات
       try {
-        const appSettings = await getSettingsFromStorage(STORAGE_KEY);
+        const appSettings = await getSafeHrSettings();
         const org = appSettings?.orgSettings || {};
         const empAccessMap = org.employeeUnifiedAccess || {};
         const emps = appSettings?.employees || [];
@@ -6412,58 +6432,87 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       let team = [...usersRes.rows];
 
-      // دمج موظفي الموارد البشرية الحاصلين على صلاحية إدارة أو فريق المشتريات
+      // دمج موظفي الموارد البشرية الحاصلين على صلاحية إدارة أو فريق المشتريات ومستحضرات التجميل
       try {
-        const settings = await getSettingsFromStorage(STORAGE_KEY);
+        const settings = await getSafeHrSettings();
         const org = settings?.orgSettings || {};
         const empAccessMap = org.employeeUnifiedAccess || {};
         const emps = settings?.employees || [];
 
+        const validProcurementRoles = ['procurement_team', 'procurement_officer', 'procurement_manager', 'cosmetics_officer'];
+
         for (const [empId, acc] of Object.entries(empAccessMap)) {
           if (!acc || acc.isEnabled === false) continue;
           const outstockPerm = acc.permissions?.outstockHandling;
-          if (outstockPerm?.enabled) {
-            const empObj = emps.find(e => String(e.id) === String(empId) || String(e.code) === String(empId));
-            const empName = empObj?.name || empObj?.fullName || `موظف #${empId}`;
-            const empUser = acc.username || empObj?.code || empObj?.phone || empId;
+          if (!outstockPerm?.enabled) continue;
 
-            // عدم التكرار إن كان مسجلاً بالفعل في outstock_users
-            const alreadyInList = team.some(m =>
-              String(m.id) === String(empId) ||
-              String(m.username).toLowerCase() === String(empUser).toLowerCase() ||
-              m.full_name === empName
-            );
+          const rawRole = outstockPerm.role;
+          if (!validProcurementRoles.includes(rawRole)) continue;
 
-            if (!alreadyInList) {
-              const role = outstockPerm.role === 'procurement_manager' ? 'procurement_manager' : (
-                outstockPerm.role === 'cosmetics_officer' ? 'cosmetics_officer' : 'procurement_officer'
-              );
-              team.push({
-                id: `hr_emp_${empId}`,
-                employee_id: empId,
-                username: empUser,
-                full_name: empName,
-                role: role,
-                phone: empObj?.phone || acc.phone || '',
-                is_active: true,
-                is_hr_integrated: true,
-                assigned_branches: outstockPerm.assignedBranchIds || (outstockPerm.assignedBranchId && outstockPerm.assignedBranchId !== 'all' ? [outstockPerm.assignedBranchId] : []),
-                permissions: {
-                  can_edit_items: true,
-                  can_view_orders: true,
-                  can_change_status: true,
-                  can_access_suppliers: true,
-                  can_access_supplier_accounts: role === 'procurement_manager',
-                  can_access_order_receiving: true,
-                  can_access_supplier_invoices: role === 'procurement_manager',
-                  can_access_branch_withdrawals: role === 'procurement_manager',
-                  can_access_discounts_comparison: role === 'procurement_manager',
-                  can_manage_team: role === 'procurement_manager',
-                  category_scope: role === 'cosmetics_officer' ? 'cosmetics' : 'all'
-                },
-                created_at: acc.updatedAt || new Date().toISOString()
-              });
-            }
+          const empObj = emps.find(e => String(e.id) === String(empId) || String(e.code) === String(empId));
+          const empName = empObj?.name || empObj?.fullName || `موظف #${empId}`;
+          const empUser = acc.username || empObj?.code || empObj?.phone || empId;
+
+          // فحص هل الموظف موجود مسبقاً في قائمة المستخدمين
+          const existingIndex = team.findIndex(m =>
+            String(m.id) === String(empId) ||
+            String(m.id) === `hr_emp_${empId}` ||
+            String(m.employee_id) === String(empId) ||
+            (m.username && empUser && String(m.username).toLowerCase() === String(empUser).toLowerCase()) ||
+            (m.full_name && empName && m.full_name.trim().toLowerCase() === empName.trim().toLowerCase())
+          );
+
+          const role = rawRole === 'procurement_manager' ? 'procurement_manager' : (
+            rawRole === 'cosmetics_officer' ? 'cosmetics_officer' : 'procurement_officer'
+          );
+
+          const assignedBranches = outstockPerm.assignedBranchIds ||
+            (outstockPerm.assignedBranchId && outstockPerm.assignedBranchId !== 'all' && outstockPerm.assignedBranchId !== 'ALL'
+              ? [outstockPerm.assignedBranchId]
+              : []);
+
+          const allBranches = outstockPerm.assignedBranchId === 'ALL' ||
+                              outstockPerm.assignedBranchId === 'all' ||
+                              outstockPerm.allBranchesAccess === true;
+
+          const customPerms = outstockPerm.permissions || outstockPerm.customPermissions || {};
+
+          const hrMemberData = {
+            id: existingIndex >= 0 ? team[existingIndex].id : `hr_emp_${empId}`,
+            employee_id: empId,
+            username: existingIndex >= 0 ? team[existingIndex].username : empUser,
+            full_name: empName,
+            role: role,
+            phone: empObj?.phone || acc.phone || (existingIndex >= 0 ? team[existingIndex].phone : ''),
+            is_active: true,
+            is_hr_integrated: true,
+            assigned_branches: assignedBranches,
+            all_branches_access: allBranches,
+            permissions: {
+              can_edit_items: customPerms.can_edit_items !== undefined ? Boolean(customPerms.can_edit_items) : (outstockPerm.can_edit_items !== false),
+              can_view_orders: customPerms.can_view_orders !== false,
+              can_change_status: customPerms.can_change_status !== undefined ? Boolean(customPerms.can_change_status) : true,
+              can_access_suppliers: customPerms.can_access_suppliers !== undefined ? Boolean(customPerms.can_access_suppliers) : true,
+              can_access_supplier_accounts: role === 'procurement_manager' || Boolean(customPerms.can_access_supplier_accounts),
+              can_access_order_receiving: customPerms.can_access_order_receiving !== undefined ? Boolean(customPerms.can_access_order_receiving) : true,
+              can_access_supplier_invoices: role === 'procurement_manager' || Boolean(customPerms.can_access_supplier_invoices),
+              can_access_branch_withdrawals: role === 'procurement_manager' || Boolean(customPerms.can_access_branch_withdrawals),
+              can_access_discounts_comparison: role === 'procurement_manager' || Boolean(customPerms.can_access_discounts_comparison),
+              can_access_order_returns: Boolean(customPerms.can_access_order_returns),
+              can_manage_team: role === 'procurement_manager',
+              category_scope: role === 'cosmetics_officer' ? 'cosmetics' : 'all'
+            },
+            created_at: acc.updatedAt || new Date().toISOString()
+          };
+
+          if (existingIndex >= 0) {
+            team[existingIndex] = {
+              ...team[existingIndex],
+              ...hrMemberData,
+              is_hr_integrated: true
+            };
+          } else {
+            team.push(hrMemberData);
           }
         }
       } catch (hrMergeErr) {
@@ -6585,15 +6634,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           isActive
         } = req.body || {};
 
-        let settings = null;
-        if (typeof getSettingsFromStorage === 'function') {
-          settings = await getSettingsFromStorage('pharmacy-tracker-data');
-        }
-        if (!settings) {
-          const sRes = await db.query("SELECT value_data FROM public.app_settings WHERE key_name = 'pharmacy-tracker-data'");
-          settings = typeof sRes.rows[0]?.value_data === 'string' ? JSON.parse(sRes.rows[0].value_data) : sRes.rows[0]?.value_data;
-        }
-
+        let settings = await getSafeHrSettings();
         if (!settings) {
           return res.status(500).json({ success: false, error: 'تعذر الوصول لبيانات منظومة الـ HR' });
         }
@@ -6601,7 +6642,15 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         settings.orgSettings = settings.orgSettings || {};
         settings.orgSettings.employeeUnifiedAccess = settings.orgSettings.employeeUnifiedAccess || {};
 
-        const empAccess = settings.orgSettings.employeeUnifiedAccess[empId];
+        let empAccess = settings.orgSettings.employeeUnifiedAccess[empId];
+        if (!empAccess) {
+          const emps = settings.employees || [];
+          const matchedEmp = emps.find(e => String(e.id) === String(empId) || String(e.code) === String(empId));
+          if (matchedEmp) {
+            empAccess = settings.orgSettings.employeeUnifiedAccess[String(matchedEmp.id)] ||
+                        settings.orgSettings.employeeUnifiedAccess[String(matchedEmp.code)];
+          }
+        }
         if (!empAccess) {
           return res.status(404).json({ success: false, error: 'بيانات وصول الموظف غير موجودة في الـ HR' });
         }
@@ -6623,14 +6672,14 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
         if (branchesList !== null) {
           outPerm.assignedBranchIds = branchesList;
-          outPerm.assignedBranchId = (branchesList.length === 1) ? branchesList[0] : (isCosmetics && branchesList.length === 0 ? 'ALL' : null);
+          outPerm.assignedBranchId = (branchesList.length === 1) ? branchesList[0] : (isCosmetics && branchesList.length === 0 ? 'ALL' : (branchesList.length === 0 ? 'all' : 'multiple'));
+          outPerm.allBranchesAccess = branchesList.length === 0 || branchesList.includes('ALL') || branchesList.includes('all');
         }
 
         const permsSource = (permissions && typeof permissions === 'object') ? permissions : req.body || {};
-        outPerm.customPermissions = {
-          ...(outPerm.customPermissions || {}),
+        const cleanPerms = {
           can_edit_items: permsSource.can_edit_items !== undefined ? Boolean(permsSource.can_edit_items) : true,
-          can_view_orders: permsSource.can_view_orders !== undefined ? Boolean(permsSource.can_view_orders) : true,
+          can_view_orders: permsSource.can_view_orders !== false,
           can_change_status: permsSource.can_change_status !== undefined ? Boolean(permsSource.can_change_status) : true,
           can_access_suppliers: permsSource.can_access_suppliers !== undefined ? Boolean(permsSource.can_access_suppliers) : true,
           can_access_supplier_accounts: permsSource.can_access_supplier_accounts !== undefined ? Boolean(permsSource.can_access_supplier_accounts) : (outPerm.role === 'procurement_manager'),
@@ -6638,8 +6687,13 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           can_access_supplier_invoices: permsSource.can_access_supplier_invoices !== undefined ? Boolean(permsSource.can_access_supplier_invoices) : (outPerm.role === 'procurement_manager'),
           can_access_branch_withdrawals: permsSource.can_access_branch_withdrawals !== undefined ? Boolean(permsSource.can_access_branch_withdrawals) : (outPerm.role === 'procurement_manager'),
           can_access_discounts_comparison: permsSource.can_access_discounts_comparison !== undefined ? Boolean(permsSource.can_access_discounts_comparison) : (outPerm.role === 'procurement_manager'),
+          can_access_order_returns: Boolean(permsSource.can_access_order_returns),
           category_scope: isCosmetics ? 'cosmetics' : 'all'
         };
+
+        outPerm.permissions = cleanPerms;
+        outPerm.customPermissions = cleanPerms;
+        outPerm.can_edit_items = cleanPerms.can_edit_items;
 
         if (password && String(password).trim()) {
           empAccess.password = String(password).trim();
@@ -6649,14 +6703,47 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         }
 
         empAccess.updatedAt = new Date().toISOString();
+        settings.orgSettings.updatedAt = empAccess.updatedAt;
 
         if (typeof saveSettingsToStorage === 'function') {
-          await saveSettingsToStorage('pharmacy-tracker-data', settings);
+          await saveSettingsToStorage(STORAGE_KEY, settings);
         }
         await db.query(
-          "UPDATE public.app_settings SET value_data = $1, updated_at = CURRENT_TIMESTAMP WHERE key_name = 'pharmacy-tracker-data'",
+          "UPDATE public.app_settings SET value_data = $1::jsonb, updated_at = CURRENT_TIMESTAMP WHERE key_name = 'pharmacy-tracker-data'",
           [JSON.stringify(settings)]
         );
+
+        // إذا كان الموظف مسجلاً أيضاً في جدول outstock_users، نقوم بتحديث سجله هناك
+        try {
+          const empObj = (settings.employees || []).find(e => String(e.id) === String(empId) || String(e.code) === String(empId));
+          const empUser = empAccess.username || empObj?.code || empObj?.phone || empId;
+          const uRes = await db.query(
+            "SELECT id FROM public.outstock_users WHERE LOWER(username) = $1 OR full_name = $2",
+            [String(empUser).toLowerCase(), empObj?.name || '']
+          );
+          if (uRes.rows.length > 0) {
+            const outUserId = uRes.rows[0].id;
+            await db.query(`
+              UPDATE public.outstock_users
+              SET role = $1, permissions = $2::jsonb, phone = COALESCE($3, phone), updated_at = CURRENT_TIMESTAMP
+              WHERE id = $4
+            `, [outPerm.role, JSON.stringify(cleanPerms), phone || null, outUserId]);
+
+            if (branchesList !== null) {
+              await db.query('DELETE FROM public.outstock_user_branch_access WHERE user_id = $1', [outUserId]);
+              for (const bId of branchesList) {
+                if (!bId) continue;
+                await db.query(`
+                  INSERT INTO public.outstock_user_branch_access (id, user_id, branch_id)
+                  VALUES ($1, $2, $3)
+                  ON CONFLICT (user_id, branch_id) DO NOTHING
+                `, [`uba_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`, outUserId, String(bId)]);
+              }
+            }
+          }
+        } catch (syncErr) {
+          console.warn('[Outstock Users DB Sync Warn]:', syncErr.message);
+        }
 
         broadcastOutstock('outstock:procurement_team_updated', {
           id: targetId,
@@ -6740,6 +6827,47 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
             ON CONFLICT (user_id, branch_id) DO NOTHING
           `, [`uba_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`, targetId, String(bId)]);
         }
+      }
+
+      // مزامنة التحديثات مع employeeUnifiedAccess إن كان الموظف مسجلاً في منظومة الـ HR
+      try {
+        const hrSettings = await getSafeHrSettings();
+        if (hrSettings && hrSettings.orgSettings?.employeeUnifiedAccess) {
+          const empAccessMap = hrSettings.orgSettings.employeeUnifiedAccess;
+          const emps = hrSettings.employees || [];
+          for (const [eId, acc] of Object.entries(empAccessMap)) {
+            const empObj = emps.find(e => String(e.id) === String(eId) || String(e.code) === String(eId));
+            const empName = empObj?.name || empObj?.fullName || '';
+            const empUser = acc.username || empObj?.code || empObj?.phone || '';
+            if (
+              String(eId) === String(targetId) ||
+              (existingUser.username && empUser && String(existingUser.username).toLowerCase() === String(empUser).toLowerCase()) ||
+              (existingUser.full_name && empName && existingUser.full_name.trim().toLowerCase() === empName.trim().toLowerCase())
+            ) {
+              acc.permissions = acc.permissions || {};
+              acc.permissions.outstockHandling = acc.permissions.outstockHandling || { enabled: true };
+              const outPerm = acc.permissions.outstockHandling;
+              outPerm.role = isCosmetics ? 'cosmetics_officer' : (effectiveRole === 'procurement_manager' ? 'procurement_manager' : 'procurement_team');
+              outPerm.permissions = mergedPerms;
+              outPerm.customPermissions = mergedPerms;
+              outPerm.can_edit_items = mergedPerms.can_edit_items;
+              if (branchesList !== null) {
+                outPerm.assignedBranchIds = branchesList;
+                outPerm.assignedBranchId = branchesList.length === 1 ? branchesList[0] : (branchesList.length === 0 ? 'ALL' : 'multiple');
+                outPerm.allBranchesAccess = branchesList.length === 0 || branchesList.includes('ALL') || branchesList.includes('all');
+              }
+              acc.updatedAt = new Date().toISOString();
+              hrSettings.orgSettings.updatedAt = acc.updatedAt;
+              if (typeof saveSettingsToStorage === 'function') {
+                await saveSettingsToStorage(STORAGE_KEY, hrSettings, '127.0.0.1');
+              }
+              await db.query("UPDATE public.app_settings SET value_data = $1::jsonb, updated_at = CURRENT_TIMESTAMP WHERE key_name = 'pharmacy-tracker-data'", [JSON.stringify(hrSettings)]);
+              break;
+            }
+          }
+        }
+      } catch (hrSyncErr) {
+        console.warn('[Procurement Team HR Sync Warn]:', hrSyncErr.message);
       }
 
       res.json({ success: true, message: 'تم تحديث بيانات وصلاحيات الموظف بنجاح' });
