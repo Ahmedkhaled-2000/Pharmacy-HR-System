@@ -295,6 +295,31 @@ export default function DayDetailsModal({ details, onClose }) {
                 </div>
               )}
 
+              {/* Row 4b: تنبيه الاستراحة المنسية المغلقة تلقائياً */}
+              {(cleanNotes.includes('استراحة مفتوحة') || cleanNotes.includes('نسيان تسجيل عودة من البريك')) && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                  padding: '10px 12px',
+                  background: '#fffbeb',
+                  borderRadius: '8px',
+                  border: '1.5px solid #fde68a',
+                  fontSize: '13px',
+                  color: '#92400e'
+                }}>
+                  <span style={{ fontSize: '18px' }}>⚠️</span>
+                  <div>
+                    <div style={{ fontWeight: 800, color: '#b45309', marginBottom: '2px' }}>
+                      إغلاق تلقائي لاستراحة مفتوحة (نسيان عودة من البريك بكشك البصمة)
+                    </div>
+                    <div>
+                      تم إنهاء الوردية عبر جهاز البصمة مع احتساب ساعات الاستراحة ({breakH || '0'} س). يمكنك مراجعة وتعديل ساعات البريك فورياً من زر التعديل (✏️) في جدول البصمات.
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Row 5: الملاحظات النصية */}
               {cleanNotes && (
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '8px 10px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px' }}>

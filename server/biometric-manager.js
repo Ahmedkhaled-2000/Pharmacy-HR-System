@@ -763,6 +763,72 @@ export async function sendUniversalAttendanceWhatsAppAlert(punchPayload, state) 
 // الاسم المستعار للتوافق العكسي
 export const sendBiometricWhatsAppAlert = sendUniversalAttendanceWhatsAppAlert;
 
+/**
+ * ⏱️ تنبيه استباقي عبر واتساب للاستراحات المفتوحة التي تجاوزت 180 دقيقة (3 ساعات)
+ * يرسل تذكيراً مهذباً ومباشراً لهاتف الموظف لتسجيل العودة بكشك البصمة
+ */
+export async function sendBreakTimeoutWarningWhatsAppAlert({ employeeId, employeeName, branchId, branchName, breakDurationMins = 180, breakStartTime = '' }, state) {
+  try {
+    const org = state?.orgSettings || {};
+    const alertConfig = org.biometricWhatsAppAlerts || {};
+    if (alertConfig.enabled === false) return;
+
+    const waUrls = [
+      'http://hr-whatsapp-server:3100/send',
+      'http://127.0.0.1:3100/send'
+    ];
+
+    const employees = Array.isArray(state?.employees) ? state.employees : [];
+    const emp = employees.find(e => String(e.id) === String(employeeId) || (e.code && String(e.code) === String(employeeId)));
+    const targetEmpName = emp?.name || employeeName || 'الموظف';
+    const targetBranchName = branchName || (state?.branches || []).find(b => String(b.id) === String(branchId))?.name || 'الفرع';
+
+    const rawEmpPhone = emp?.phone || emp?.mobile || emp?.phoneNumber || emp?.whatsApp || emp?.whatsapp || '';
+    let empPhone = String(rawEmpPhone).replace(/\D/g, '');
+    if (empPhone.startsWith('01') && empPhone.length === 11) {
+      empPhone = '2' + empPhone;
+    } else if (empPhone.startsWith('1') && empPhone.length === 10) {
+      empPhone = '20' + empPhone;
+    }
+
+    const companyName = org.companyName || org.orgName || 'مجموعة الصيدليات';
+    const warningMessage = 
+`🔔 *تنبيه استراحة مفتوحة* ⏱️
+━━━━━━━━━━━━━━━━━━
+أهلاً بك د/ *${targetEmpName}*،
+نود تذكيرك بأن استراحتك بفرع *${targetBranchName}* قد بدأت ${breakStartTime ? `في تمام *${breakStartTime}* و` : ''}مضت عليها *${breakDurationMins} دقيقة (3 ساعات)* دون تسجيل بصمة عودة بكشك البصمة.
+
+يرجى التوجه إلى كشك البصمة وتسجيل *(عودة من الاستراحة)* لضمان دقة ساعات عملك وعدم تأثر احتساب الوردية 🟢.
+
+🏢 *${companyName}*`;
+
+    if (empPhone.length >= 9) {
+      for (const waUrl of waUrls) {
+        try {
+          const resp = await fetch(waUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId: 'hr_main',
+              phone: empPhone,
+              message: warningMessage
+            }),
+            signal: AbortSignal.timeout(4000)
+          });
+          if (resp.ok) {
+            console.log(`[Break Warning WA] 📲 تم إرسال تنبيه تجاوز 180 دقيقة استراحة بنجاح للموظف (${targetEmpName} - ${empPhone})`);
+            break;
+          }
+        } catch (e) {
+          console.warn(`[Break Warning WA Error (${waUrl})]:`, e.message);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Break Warning WA Error]:', err.message);
+  }
+}
+
 export function getNextDateStr(dateStr) {
   try {
     const d = new Date(dateStr + 'T12:00:00Z');
@@ -2007,6 +2073,115 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     };
   };
 
+  // ── دالة التحقق الذكي وإنشاء طلب نسيان بصمة بريك وربطه بالموافقة المزدوجة تلقائياً ──
+  const ensureForgottenBreakRequestForShift = ({
+    shift,
+    emp,
+    branch,
+    state,
+    currentRequests,
+    currentNotifications,
+    deviceName = 'ماكينة البصمة',
+    breakStartTime = '',
+    unclosedBreakMins = 0,
+    appliedBreakHours = 1.0,
+    rawBreakHours = 0,
+    totalElapsedHours = 8
+  }) => {
+    if (!shift) return shift;
+
+    const shiftId = shift.id || `shift_${shift.employeeId}_${shift.date}`;
+    const reqId = shift.forgottenBreakRequestId || `req_fb_${shift.employeeId}_${shift.date}_${Date.now()}`;
+
+    // تحديد مسار الموافقة حسب قواعد الموافقة المزدوجة بالمنظومة (rule_forgotten_break)
+    const bId = shift.branchId || branch?.id || emp?.branchId;
+    const bObj = branch || (state?.branches || []).find(b => String(b.id) === String(bId) || String(b.code) === String(bId));
+    const noBranchMgr = !bObj?.managerId || bObj.managerId === 'none' || String(bObj.managerId).trim() === '' || !(state?.employees || []).some(e => String(e.id) === String(bObj.managerId));
+    const isEmpBranchMgr = bObj?.managerId && String(bObj.managerId) === String(shift.employeeId);
+
+    const fbRule = (state?.approvalRules || []).find(r => r.requestType === 'forgotten_break' || r.type === 'forgotten_break' || r.id === 'rule_forgotten_break');
+    const isDualRule = fbRule ? (fbRule.reqBranch !== false && fbRule.requiresBranchManager !== false) : true;
+    const isDirectAdmin = Boolean(noBranchMgr || isEmpBranchMgr || !isDualRule);
+    const targetApproval = isDirectAdmin ? 'admin_only' : 'both';
+
+    const cleanTimeIn = shift.timeIn || '—';
+    const cleanTimeOut = shift.timeOut || '—';
+    const cleanBreakStart = breakStartTime || '—';
+
+    const forgottenBreakReq = {
+      id: reqId,
+      shiftId: shiftId,
+      employeeId: shift.employeeId,
+      employeeName: shift.employeeName || emp?.name || '',
+      employeeCode: shift.employeeCode || emp?.code || '',
+      jobTitle: emp?.jobTitle || '',
+      branchId: bId || '',
+      branchName: shift.branchName || bObj?.name || 'الفرع',
+      type: 'forgotten_break',
+      requestType: 'forgotten_break',
+      typeLabel: 'نسيان بصمة بريك',
+      subType: 'break_confirmation',
+      date: shift.date,
+      timeIn: cleanTimeIn,
+      timeOut: cleanTimeOut,
+      breakStartTime: cleanBreakStart,
+      breakEndTime: cleanTimeOut,
+      unclosedBreakMinutes: unclosedBreakMins,
+      currentBreakHours: appliedBreakHours,
+      rawBreakHours: rawBreakHours,
+      adjustedBreakHours: appliedBreakHours,
+      proposedBreakHours: appliedBreakHours,
+      shiftTotalElapsedHours: totalElapsedHours,
+      shiftNetHours: shift.hours,
+      reason: `نسيان بصمة بريك: بدأ الموظف استراحة بالكشك في تمام (${cleanBreakStart}) ونسي تسجيل العودة، ثم بصم انصرافاً على جهاز البصمة (${cleanTimeOut}). يرجى التأكيد أو التعديل على مدة البريك المحتسبة.`,
+      details: `وردية عمل بتاريخ ${shift.date} | وقت الدخول: ${cleanTimeIn} | بدء الاستراحة: ${cleanBreakStart} | وقت الانصراف: ${cleanTimeOut} | إجمالي مدة الاستراحة المفتوحة: ${unclosedBreakMins} دقيقة | ساعات البريك المحتسبة حالياً: ${appliedBreakHours} س | صافي ساعات العمل: ${shift.hours} س`,
+      targetApproval,
+      dualApproval: !isDirectAdmin,
+      isDirectToAdmin: isDirectAdmin,
+      branchNotRequired: isDirectAdmin,
+      managerStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : 'pending'),
+      branchApprovalStatus: noBranchMgr ? 'skipped' : (isDirectAdmin ? 'skipped' : undefined),
+      branchApproved: false,
+      adminApproved: false,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      source: 'biometric_device'
+    };
+
+    const existIdx = currentRequests.findIndex(r => r.id === reqId || (r.shiftId && r.shiftId === shiftId && r.type === 'forgotten_break'));
+    if (existIdx >= 0) {
+      currentRequests[existIdx] = {
+        ...currentRequests[existIdx],
+        ...forgottenBreakReq,
+        status: currentRequests[existIdx].status || 'pending',
+        branchApproved: currentRequests[existIdx].branchApproved || false,
+        adminApproved: currentRequests[existIdx].adminApproved || false
+      };
+    } else {
+      currentRequests.unshift(forgottenBreakReq);
+
+      const notifId = `notif_fb_${shift.employeeId}_${shift.date}_${Date.now()}`;
+      currentNotifications.unshift({
+        id: notifId,
+        type: 'forgotten_break_alert',
+        title: `☕ طلب نسيان بصمة بريك: ${shift.employeeName || emp?.name} (${shift.branchName || bObj?.name || 'الفرع'})`,
+        message: `أخذ الموظف استراحة بالكشك (${cleanBreakStart}) وبصم انصرافاً على جهاز البصمة (${cleanTimeOut}). يرجى تأكيد أو تعديل ساعات البريك المحتسبة (${appliedBreakHours} س).`,
+        date: shift.date,
+        timestamp: new Date().toISOString(),
+        read: false,
+        targetRole: isDirectAdmin ? 'admin' : 'all',
+        branchId: bId || '',
+        requestId: reqId
+      });
+    }
+
+    return {
+      ...shift,
+      forgottenBreakRequestId: reqId,
+      forgottenBreakStatus: 'pending'
+    };
+  };
+
   const handleAdmsPostCData = async (req, res) => {
     try {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -2472,8 +2647,9 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             processedCount++;
             continue;
           }
-          // 3. 🌟 النظام المعتمد الحر: أي بصمة بعد الدخول هي انصراف (Check-Out) حتماً ويقيناً!
-          // لا يتم إنهاء الوردية حتى بعد منتصف الليل إلا ببصمة الخروج الخاصة به
+          // 3. 🌟 قاعدة صارمة وموحدة: بصمة جهاز البصمة الأولى حضور والثانية انصراف دائماً
+          // (بدء وانتهاء الاستراحة محصور حصرياً في كشك البصمة الإلكتروني فقط)
+          // وإذا كان الموظف في استراحة مفتوحة (نسي بصمة العودة بالكشك)، تُنهى الوردية كانصراف وتُغلق الاستراحة وتُسجل الملحوظة
           else {
             actionType = 'check_out';
             if (isDifferentDate) {
@@ -2612,6 +2788,104 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           } else {
             currentShifts = [shiftRecord, ...currentShifts.filter(s => s.id !== newShiftId)];
           }
+        } else if (actionType === 'break_end') {
+          // ── استئناف الوردية وإنهاء فترة الاستراحة (Break-End / Resume Shift) ──
+          const punchTimeEpoch = safePunchEpoch || Date.now();
+          const targetShiftId = effectiveActive?.shiftId || effectiveActive?.id;
+          let existIdx = -1;
+          if (targetShiftId) {
+            existIdx = currentShifts.findIndex(s => s && s.id === targetShiftId);
+          }
+          if (existIdx < 0 && openShiftIdx >= 0) {
+            existIdx = openShiftIdx;
+          }
+          if (existIdx < 0) {
+            existIdx = currentShifts.findIndex(s => s &&
+              possibleEmpKeys.some(k => String(s.employeeId) === String(k) || (s.employeeCode && String(s.employeeCode) === String(k))) &&
+              (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive)
+            );
+          }
+
+          const origShift = existIdx >= 0 ? currentShifts[existIdx] : null;
+          const pauseStartMs = Number(effectiveActive?.pauseStartEpoch) || (origShift?.pauseStartEpoch ? Number(origShift.pauseStartEpoch) : punchTimeEpoch);
+          const pauseDuration = Math.max(0, punchTimeEpoch - pauseStartMs);
+          const prevPauseMs = Number(effectiveActive?.accumulatedPauseMs || origShift?.accumulatedPauseMs || 0);
+          const totalPauseMs = prevPauseMs + pauseDuration;
+          const trackedBreakHours = Math.round((totalPauseMs / 3600000) * 100) / 100;
+
+          // 1. تحديث activeShifts فورياً لإلغاء حالة التوقف واستئناف العمل
+          possibleEmpKeys.forEach(k => {
+            if (currentActiveShifts[k]) {
+              currentActiveShifts[k] = {
+                ...currentActiveShifts[k],
+                isPaused: false,
+                isOnBreak: false,
+                breakStartTime: null,
+                pauseStartEpoch: null,
+                accumulatedPauseMs: totalPauseMs,
+                updatedAt: punchTimeEpoch
+              };
+            }
+          });
+
+          // 2. تحديث سجل الوردية في currentShifts
+          if (existIdx >= 0) {
+            currentShifts[existIdx] = {
+              ...currentShifts[existIdx],
+              isPaused: false,
+              isOnBreak: false,
+              breakStartTime: null,
+              pauseStartEpoch: null,
+              accumulatedPauseMs: totalPauseMs,
+              breakHours: trackedBreakHours,
+              notes: ((currentShifts[existIdx].notes || '') + ` [انتهاء استراحة ${timePart} عبر جهاز ${devObj?.device_name || sn}]`).trim(),
+              updatedAt: new Date().toISOString()
+            };
+            shiftRecord = currentShifts[existIdx];
+          }
+
+          console.log(`[Biometric Resolver] ▶️ استئناف وردية وإنهاء استراحة للموظف ${matchedEmpName} في ${timePart} (مدة البريك: ${Math.round(pauseDuration / 60000)} دقيقة)`);
+        } else if (actionType === 'break_start') {
+          // ── بدء فترة الاستراحة وإيقاف الوردية مؤقتاً (Break-Start / Pause Shift) ──
+          const punchTimeEpoch = safePunchEpoch || Date.now();
+          const targetShiftId = effectiveActive?.shiftId || effectiveActive?.id;
+          let existIdx = -1;
+          if (targetShiftId) {
+            existIdx = currentShifts.findIndex(s => s && s.id === targetShiftId);
+          }
+          if (existIdx < 0 && openShiftIdx >= 0) {
+            existIdx = openShiftIdx;
+          }
+
+          // 1. تحديث activeShifts
+          possibleEmpKeys.forEach(k => {
+            if (currentActiveShifts[k]) {
+              currentActiveShifts[k] = {
+                ...currentActiveShifts[k],
+                isPaused: true,
+                isOnBreak: true,
+                breakStartTime: timePart,
+                pauseStartEpoch: punchTimeEpoch,
+                updatedAt: punchTimeEpoch
+              };
+            }
+          });
+
+          // 2. تحديث سجل الوردية في currentShifts
+          if (existIdx >= 0) {
+            currentShifts[existIdx] = {
+              ...currentShifts[existIdx],
+              isPaused: true,
+              isOnBreak: true,
+              breakStartTime: timePart,
+              pauseStartEpoch: punchTimeEpoch,
+              notes: ((currentShifts[existIdx].notes || '') + ` [بدء استراحة ${timePart} عبر جهاز ${devObj?.device_name || sn}]`).trim(),
+              updatedAt: new Date().toISOString()
+            };
+            shiftRecord = currentShifts[existIdx];
+          }
+
+          console.log(`[Biometric Resolver] ☕ بدء استراحة للموظف ${matchedEmpName} في ${timePart}`);
         } else {
           // ── تسجيل انصراف ذكي وإغلاق الوردية العابرة لمنتصف الليل ──
           possibleEmpKeys.forEach(k => {
@@ -2642,6 +2916,42 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           const inTime = origShift?.timeIn || effectiveActive?.timeIn || timePart;
           const outTime = timePart;
 
+          // ⚡ فحص ما إذا كان الموظف قد نسي بصمة العودة من البريك بكشك البصمة
+          const wasForgottenBreak = Boolean(
+            effectiveActive?.isOnBreak ||
+            effectiveActive?.isPaused ||
+            origShift?.isOnBreak ||
+            origShift?.isPaused
+          );
+
+          let unclosedBreakMs = 0;
+          let unclosedBreakMins = 0;
+          let appliedPauseMs = 0;
+          let totalPauseMs = Number(effectiveActive?.accumulatedPauseMs || origShift?.accumulatedPauseMs || 0);
+          let trackedBreakHours = parseFloat(origShift?.breakHours || 0);
+          let forgottenBreakNote = '';
+
+          if (wasForgottenBreak) {
+            const pauseStartMs = Number(effectiveActive?.pauseStartEpoch) || (origShift?.pauseStartEpoch ? Number(origShift.pauseStartEpoch) : null);
+            const punchTimeEpoch = safePunchEpoch || Date.now();
+            if (pauseStartMs) {
+              unclosedBreakMs = Math.max(0, punchTimeEpoch - pauseStartMs);
+              unclosedBreakMins = Math.round(unclosedBreakMs / 60000);
+            }
+            // سقف أمان لاحتساب الاستراحة المنسية (بحد أقصى 60 دقيقة) لحماية ساعات عمل الموظف من الخصم الجائر
+            appliedPauseMs = Math.min(unclosedBreakMs, 60 * 60 * 1000);
+            totalPauseMs += appliedPauseMs;
+            trackedBreakHours = Math.round((totalPauseMs / 3600000) * 100) / 100;
+
+            const breakStartTime = origShift?.breakStartTime || effectiveActive?.breakStartTime || '—';
+            const cappedNotice = unclosedBreakMins > 60
+              ? ` (تم احتساب 60 دقيقة كحد أقصى للبريك لحماية ساعات العمل من إجمالي ${unclosedBreakMins} دقيقة مفتوحة)`
+              : ` (مدة الاستراحة: ${unclosedBreakMins} دقيقة)`;
+
+            forgottenBreakNote = `[⚠️ تم إنهاء الوردية عبر جهاز البصمة (${devObj?.device_name || 'ZKTeco MB20'}) مع وجود استراحة مفتوحة (نسيان تسجيل عودة من البريك بكشك البصمة) - بدأت الاستراحة: ${breakStartTime} وأغلقت تلقائياً عند بصمة الانصراف ${outTime}${cappedNotice}]`;
+            console.log(`[Biometric Resolver] ⚠️ ${matchedEmpName}: نسيان بصمة عودة من البريك بالكشك - أغلقت الوردية والاستراحة تلقائياً عند بصمة الانصراف ${outTime}`);
+          }
+
           // ⚡ حساب دقيق لساعات العمل الصافية من الفارق الفعلي بين بصمة الدخول وبصمة الخروج
           let calcHours = 0;
           const durationMins = calculatePunchMinutesDiff(effectiveDate, inTime, datePart, outTime);
@@ -2649,7 +2959,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           if (durationMins <= 1) {
             calcHours = 0; // حماية البصمة المزدوجة المتطابقة
           } else {
-            const bHours = parseFloat(origShift?.breakHours || 0);
+            const bHours = wasForgottenBreak ? trackedBreakHours : parseFloat(origShift?.breakHours || 0);
             const rawElapsed = durationMins / 60;
             calcHours = Math.max(0, Math.round((rawElapsed - bHours) * 100) / 100);
           }
@@ -2659,6 +2969,11 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           const otHours = Math.max(0, Math.round((calcHours - regHours) * 100) / 100);
           const isOtApproved = Boolean(origShift?.overtimeStatus === 'approved' || origShift?.adminApproved || origShift?.isAdminCreated);
           const otStatus = isOtApproved ? 'approved' : (otHours > 0 ? 'pending' : 'none');
+
+          const finalNotes = (forgottenBreakNote
+            ? (origShift?.notes ? `${origShift.notes} | ${forgottenBreakNote}` : forgottenBreakNote)
+            : (origShift?.notes || '')
+          ).trim();
 
           let closedRecord = {
             ...(origShift || {}),
@@ -2688,6 +3003,14 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             overtimeHours: otHours,
             overtimeStatus: otStatus,
             scheduledHours: schedH,
+            breakHours: trackedBreakHours,
+            accumulatedPauseMs: totalPauseMs,
+            isPaused: false,
+            isOnBreak: false,
+            breakStartTime: null,
+            pauseStartEpoch: null,
+            notes: finalNotes,
+            note: finalNotes,
             isOvernight,
             isLiveActive: false,
             status: 'completed',
@@ -2709,6 +3032,24 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
               currentNotifications,
               devObj?.device_name || 'ZKTeco MB20'
             );
+          }
+
+          if (wasForgottenBreak) {
+            const rawElapsed = durationMins > 0 ? Math.round((durationMins / 60) * 100) / 100 : 0;
+            closedRecord = ensureForgottenBreakRequestForShift({
+              shift: closedRecord,
+              emp: matchedEmpObj,
+              branch: effBranchObj || physBranchObj,
+              state,
+              currentRequests,
+              currentNotifications,
+              deviceName: devObj?.device_name || 'ZKTeco MB20',
+              breakStartTime: origShift?.breakStartTime || effectiveActive?.breakStartTime || '',
+              unclosedBreakMins,
+              appliedBreakHours: trackedBreakHours,
+              rawBreakHours: Math.round((unclosedBreakMins / 60) * 100) / 100,
+              totalElapsedHours: rawElapsed
+            });
           }
 
           if (existIdx >= 0) {
@@ -2755,7 +3096,13 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           if (!empActionMap.has(matchedEmpId)) {
             empActionMap.set(matchedEmpId, { name: matchedEmpName || `موظف (${matchedEmpId})`, actions: [] });
           }
-          const actionLabelAr = actionType === 'check_in' ? `حضور ${timePart}` : `انصراف ${timePart}`;
+          const actionLabelAr = actionType === 'check_in'
+            ? `حضور ${timePart}`
+            : (actionType === 'check_out'
+              ? `انصراف ${timePart}`
+              : (actionType === 'break_end'
+                ? `استئناف عمل (عودة من الاستراحة) ${timePart}`
+                : `بدء استراحة ${timePart}`));
           empActionMap.get(matchedEmpId).actions.push(actionLabelAr);
         }
 

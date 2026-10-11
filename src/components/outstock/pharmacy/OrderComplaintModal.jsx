@@ -21,6 +21,7 @@ export default function OrderComplaintModal({
   showToast
 }) {
   const [complaintType, setComplaintType] = useState('delayed_response');
+  const [selectedItemId, setSelectedItemId] = useState('all');
   const [notes, setNotes] = useState('');
   const [pharmacistName, setPharmacistName] = useState(
     currentPharmacist || order?.responsible_pharmacist || ''
@@ -105,10 +106,17 @@ export default function OrderComplaintModal({
     setErrorMsg('');
 
     try {
+      let selectedItemObj = null;
+      if (selectedItemId !== 'all' && Array.isArray(order?.items)) {
+        selectedItemObj = order.items.find(it => String(it.id) === String(selectedItemId));
+      }
+
       const res = await outstockSendOrderComplaint(order.id, {
         complaintType,
         notes: notes.trim(),
-        pharmacistName: pharmacistName.trim()
+        pharmacistName: pharmacistName.trim(),
+        itemId: selectedItemId !== 'all' ? selectedItemId : null,
+        medicationName: selectedItemObj ? (selectedItemObj.medication_name || selectedItemObj.medicationName) : null
       });
 
       if (res?.success) {
@@ -234,28 +242,73 @@ export default function OrderComplaintModal({
                 </div>
               </div>
 
-              {/* قائمة أصناف الطلب */}
+              {/* اختيار وتحديد الصنف المعني بالشكوى */}
               {Array.isArray(order?.items) && order.items.length > 0 && (
-                <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #cbd5e1' }}>
-                  <div style={{ fontSize: '11.5px', fontWeight: '800', color: '#64748b', marginBottom: '6px' }}>
-                    الأصناف المطلوبة بالطلب:
+                <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px dashed #cbd5e1' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '12.5px', fontWeight: '900', color: '#991b1b' }}>
+                      💊 حدد الصنف الذي تخصه الشكوى (اختياري):
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>
+                      {selectedItemId === 'all' ? 'الشكوى على كامل الطلب' : 'تم تخصيص صنف محدد'}
+                    </span>
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {order.items.map((it, idx) => (
-                      <span
-                        key={idx}
-                        style={{
-                          background: '#ffffff',
-                          border: '1px solid #cbd5e1',
-                          borderRadius: '6px',
-                          padding: '3px 8px',
-                          fontSize: '11.5px',
-                          color: '#334155'
-                        }}
-                      >
-                        💊 {it.medication_name || it.medicationName} ({it.quantity || 1} علبة)
-                      </span>
-                    ))}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedItemId('all')}
+                      style={{
+                        background: selectedItemId === 'all' ? '#fee2e2' : '#ffffff',
+                        border: selectedItemId === 'all' ? '2px solid #dc2626' : '1px solid #cbd5e1',
+                        borderRadius: '8px',
+                        padding: '6px 12px',
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        color: selectedItemId === 'all' ? '#991b1b' : '#475569',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <Package size={14} />
+                      <span>كامل الطلب (جميع الأصناف)</span>
+                    </button>
+
+                    {order.items.map((it, idx) => {
+                      const itId = String(it.id || idx);
+                      const isSelected = selectedItemId === itId;
+                      const itName = it.medication_name || it.medicationName || 'صنف';
+                      const uLabel = it.unit_type === 'strip' ? 'شريط' : 'علبة';
+
+                      return (
+                        <button
+                          key={itId}
+                          type="button"
+                          onClick={() => setSelectedItemId(itId)}
+                          style={{
+                            background: isSelected ? '#fee2e2' : '#ffffff',
+                            border: isSelected ? '2px solid #dc2626' : '1px solid #cbd5e1',
+                            borderRadius: '8px',
+                            padding: '6px 12px',
+                            fontSize: '12px',
+                            fontWeight: '800',
+                            color: isSelected ? '#991b1b' : '#334155',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: isSelected ? '0 2px 6px rgba(220, 38, 38, 0.15)' : 'none'
+                          }}
+                        >
+                          <span>💊</span>
+                          <span>{itName}</span>
+                          <span style={{ fontSize: '10.5px', background: isSelected ? '#ffffff' : '#f1f5f9', padding: '1px 6px', borderRadius: '4px', color: '#64748b' }}>
+                            ({it.quantity || 1} {uLabel})
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}

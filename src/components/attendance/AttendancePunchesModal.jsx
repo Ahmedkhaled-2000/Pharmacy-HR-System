@@ -168,7 +168,8 @@ export default function AttendancePunchesModal({
     const pEpoch = getShiftStartEpoch(p);
     // صمام الأمان: الورديات المفتوحة لا تتجاوز 16 ساعة كحد أقصى تماشياً مع صمام أمان الـ 15 ساعة
     const isWithinSafetyValve = pEpoch > 0 && (Date.now() - pEpoch < 16 * 3600 * 1000);
-    const isLiveNow = !hasTimeOut && (p.isLiveActive || p.date === todayStrNow || isWithinSafetyValve) && !isSuppressedByLeave;
+    // الوردية تكون حية فقط إذا كانت غير مكتملة وضمن صمام الأمان (أقل من 16 ساعة)
+    const isLiveNow = !hasTimeOut && !isSuppressedByLeave && isWithinSafetyValve && (p.isLiveActive || p.date === todayStrNow);
     const isStaleUnclosed = !hasTimeOut && !isLiveNow;
 
     if (isLiveNow) {
@@ -208,16 +209,16 @@ export default function AttendancePunchesModal({
 
   // 🔄 ترتيب السجلات دائماً من الأحدث إلى الأقدم (Newest to Oldest)
   const monthPunches = [...rawMonthCombined].sort((a, b) => {
-    // 1. الوردية الحية النشطة تكون دائماً في القمة أولاً
-    if (a?.isLiveActive && !b?.isLiveActive) return -1;
-    if (!a?.isLiveActive && b?.isLiveActive) return 1;
-
-    // 2. الترتيب حسب التاريخ من الأحدث إلى الأقدم (تنازلي)
+    // 1. الترتيب الأساسي والقطعي: حسب التاريخ من الأحدث إلى الأقدم (تنازلي)
     const dateA = String(a?.date || '').trim();
     const dateB = String(b?.date || '').trim();
     if (dateA !== dateB) {
       return dateB.localeCompare(dateA);
     }
+
+    // 2. في نفس اليوم: الوردية الحية النشطة تكون دائماً في القمة أولاً
+    if (a?.isLiveActive && !b?.isLiveActive) return -1;
+    if (!a?.isLiveActive && b?.isLiveActive) return 1;
 
     // 3. في نفس اليوم: الترتيب حسب وقت الدخول من الأحدث إلى الأقدم (تنازلي)
     const timeA = String(a?.timeIn || '').trim();
@@ -2005,6 +2006,36 @@ export default function AttendancePunchesModal({
                       value={editBreakHours}
                       onChange={(e) => setEditBreakHours(e.target.value)}
                     />
+                    <div style={{ display: 'flex', gap: '4px', marginTop: '6px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => setEditBreakHours('0')}
+                        style={{ padding: '2px 6px', fontSize: '10.5px', background: editBreakHours === '0' ? '#0d9488' : '#f1f5f9', color: editBreakHours === '0' ? '#fff' : '#334155', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 700 }}
+                      >
+                        0 دقيقة
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditBreakHours('0.5')}
+                        style={{ padding: '2px 6px', fontSize: '10.5px', background: editBreakHours === '0.5' ? '#0d9488' : '#f1f5f9', color: editBreakHours === '0.5' ? '#fff' : '#334155', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 700 }}
+                      >
+                        30 د (0.5 س)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditBreakHours('0.75')}
+                        style={{ padding: '2px 6px', fontSize: '10.5px', background: editBreakHours === '0.75' ? '#0d9488' : '#f1f5f9', color: editBreakHours === '0.75' ? '#fff' : '#334155', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 700 }}
+                      >
+                        45 د (0.75 س)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditBreakHours('1')}
+                        style={{ padding: '2px 6px', fontSize: '10.5px', background: editBreakHours === '1' ? '#0d9488' : '#f1f5f9', color: editBreakHours === '1' ? '#fff' : '#334155', border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer', fontWeight: 700 }}
+                      >
+                        60 د (1.0 س)
+                      </button>
+                    </div>
                   </div>
 
                   {isMultiBranch && (

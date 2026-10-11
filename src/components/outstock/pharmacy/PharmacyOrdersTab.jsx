@@ -503,7 +503,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
       });
     }
 
-    return result;
+    return result.sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0));
   }, [orders, activeSubFilter, searchQuery, isOrderReplied, isTransferredOrder]);
 
   // فلترة الطلبات المسلمة (استبعاد المحولة)
@@ -524,7 +524,7 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
       });
     }
 
-    return result;
+    return result.sort((a, b) => new Date(b.delivered_at || b.deliveredAt || b.created_at || 0) - new Date(a.delivered_at || a.deliveredAt || a.created_at || 0));
   }, [deliveredOrders, searchQuery, isTransferredOrder]);
 
   // إحصائيات سريعة للطلبات النشطة (بدون المحولة)
@@ -1318,19 +1318,22 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                                 branchName: branch?.name
                               })}
                               style={{
-                                background: '#ffffff',
-                                border: '1px solid #f87171',
-                                borderRadius: '5px',
-                                color: '#b91c1c',
+                                background: '#ecfdf5',
+                                border: '1.5px solid #10b981',
+                                borderRadius: '6px',
+                                color: '#047857',
                                 cursor: 'pointer',
-                                padding: '1px 6px',
-                                fontSize: '11px',
-                                fontWeight: '700',
-                                textDecoration: 'none'
+                                padding: '3px 9px',
+                                fontSize: '11.5px',
+                                fontWeight: '800',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                boxShadow: '0 1px 3px rgba(16, 185, 129, 0.2)'
                               }}
-                              title="اقتراح ومطابقة بديل معتمد للعميل بنفس المادة الفعالة"
+                              title="إرسال البدائل والمثائل المعتمدة للعميل عبر الواتساب"
                             >
-                              فحص البدائل المتاحة 🔄
+                              <span>📱 إرسال البدائل للعميل عبر الواتساب</span>
                             </button>
                           </div>
                         ))}

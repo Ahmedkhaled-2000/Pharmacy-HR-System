@@ -145,6 +145,9 @@ export function getFormattedRequestBadge(type, leaveType, targetAction, fullReq 
   if (cleanType === 'bonus' || cleanType === 'reward' || cleanType === 'مكافأة') {
     return <span className="badge badge-success">🏆 إضافة مكافأة</span>;
   }
+  if (cleanType === 'forgotten_break' || cleanType === 'break_forgotten' || cleanType === 'break_confirmation' || cleanType === 'نسيان بصمة بريك' || (cleanType.includes('break') && !cleanType.includes('log'))) {
+    return <span className="badge" style={{ background: '#d97706', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>☕ نسيان بصمة بريك</span>;
+  }
   if (cleanType === 'overtime' || cleanType === 'overtime_request' || cleanType === 'إضافي') {
     return <span className="badge badge-success">⭐ ساعات إضافية</span>;
   }
@@ -267,6 +270,11 @@ export default function RequestsModule({
   const [loanCustomNotes, setLoanCustomNotes] = useState('');
   const [isEditingLoan, setIsEditingLoan] = useState(false);
 
+  // Forgotten Break Modification State (تأكيد أو تعديل ساعات الاستراحة المنسية)
+  const [customBreakHours, setCustomBreakHours] = useState('1.0');
+  const [customBreakNotes, setCustomBreakNotes] = useState('');
+  const [isEditingBreak, setIsEditingBreak] = useState(false);
+
   const [showHiddenAdminRequests, setShowHiddenAdminRequests] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -306,6 +314,14 @@ export default function RequestsModule({
       setLoanCustomMonthlyDed(String(monthly));
       setLoanCustomNotes(req.adminNotes || '');
       setIsEditingLoan(false);
+    }
+    if (req && (req.type === 'forgotten_break' || req.requestType === 'forgotten_break')) {
+      const initialBreak = req.adjustedBreakHours !== undefined
+        ? req.adjustedBreakHours
+        : (req.currentBreakHours !== undefined ? req.currentBreakHours : (req.breakHours !== undefined ? req.breakHours : 1.0));
+      setCustomBreakHours(String(initialBreak));
+      setCustomBreakNotes(req.adminNotes || req.notes || '');
+      setIsEditingBreak(false);
     }
   };
 
@@ -1148,7 +1164,7 @@ export default function RequestsModule({
       if (approvedTargetReq.photoUrl) delete approvedTargetReq.photoUrl;
 
       // Apply any loan modifications decided by Higher Management
-      if (customLoanData) {
+      if (customLoanData && (approvedTargetReq.type === 'loan' || approvedTargetReq.type === 'advance' || approvedTargetReq.type === 'meds' || approvedTargetReq.type === 'credit_medicine')) {
         const originalAmt = approvedTargetReq.originalAmount || approvedTargetReq.amount || approvedTargetReq.totalAmount;
         const newAmt = parseFloat(customLoanData.amount) || parseFloat(approvedTargetReq.amount) || 0;
         const isInst = customLoanData.loanType === 'installment';
@@ -1165,6 +1181,18 @@ export default function RequestsModule({
         approvedTargetReq.installmentAmount = monthly;
         approvedTargetReq.adminNotes = customLoanData.adminNotes || '';
         approvedTargetReq.adminModified = (parseFloat(originalAmt) !== newAmt) || Boolean(customLoanData.isModified);
+      }
+
+      // Apply any break modifications decided by Management
+      if (approvedTargetReq.type === 'forgotten_break' || approvedTargetReq.requestType === 'forgotten_break') {
+        const finalBreak = customLoanData?.breakHours !== undefined && customLoanData?.breakHours !== null
+          ? Math.max(0, parseFloat(customLoanData.breakHours) || 0)
+          : (approvedTargetReq.adjustedBreakHours !== undefined
+            ? Math.max(0, parseFloat(approvedTargetReq.adjustedBreakHours) || 0)
+            : Math.max(0, parseFloat(approvedTargetReq.currentBreakHours || 1.0) || 0));
+
+        approvedTargetReq.adjustedBreakHours = finalBreak;
+        approvedTargetReq.adminNotes = customLoanData?.adminNotes || approvedTargetReq.adminNotes || '';
       }
 
       let updatedRequests = [...(state.requests || [])];
@@ -1198,6 +1226,50 @@ export default function RequestsModule({
               ...s,
               overtimeStatus: 'approved',
               overtimeHours: overtimeHrs,
+              adminApproved: true,
+              note: newNote,
+              notes: newNote
+            };
+          }
+          return s;
+        });
+      }
+
+      // 0.05 Forgotten Break Request Approval (تأكيد واعتماد نسيان بصمة بريك)
+      if (approvedTargetReq.type === 'forgotten_break' || approvedTargetReq.requestType === 'forgotten_break') {
+        const finalBreakHours = approvedTargetReq.adjustedBreakHours !== undefined
+          ? Math.max(0, parseFloat(approvedTargetReq.adjustedBreakHours) || 0)
+          : (customLoanData?.breakHours !== undefined
+            ? Math.max(0, parseFloat(customLoanData.breakHours) || 0)
+            : Math.max(0, parseFloat(approvedTargetReq.currentBreakHours || 1.0) || 0));
+
+        updatedShifts = updatedShifts.map((s) => {
+          if (s.id === approvedTargetReq.shiftId || (String(s.employeeId) === String(approvedTargetReq.employeeId) && s.date === approvedTargetReq.date)) {
+            const timeIn = s.timeIn || approvedTargetReq.timeIn || '09:00';
+            const timeOut = s.timeOut || approvedTargetReq.timeOut || '17:00';
+            const [inH, inM] = timeIn.split(':').map(Number);
+            const [outH, outM] = timeOut.split(':').map(Number);
+            let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+            if (diff < 0) diff += 24 * 60;
+            const grossHours = Math.round((diff / 60) * 100) / 100;
+            const netHours = Math.max(0, Math.round((grossHours - finalBreakHours) * 100) / 100);
+
+            const cleanExistingNotes = (s.notes || s.note || '')
+              .replace(/\[⚠️ تم إنهاء الوردية عبر جهاز البصمة.*?\]/g, '')
+              .trim();
+            const newNote = cleanExistingNotes
+              ? `${cleanExistingNotes} | ✅ تم تأكيد واعتماد الاستراحة (${finalBreakHours} س) وصافي العمل (${netHours} س)`
+              : `✅ تم تأكيد واعتماد الاستراحة (${finalBreakHours} س) وصافي العمل (${netHours} س)`;
+
+            return {
+              ...s,
+              breakHours: finalBreakHours,
+              hours: netHours,
+              netHours: netHours,
+              actualWorkedHours: netHours,
+              regularHours: Math.min(netHours, s.scheduledHours || 8),
+              overtimeHours: Math.max(0, Math.round((netHours - (s.scheduledHours || 8)) * 100) / 100),
+              breakConfirmed: true,
               adminApproved: true,
               note: newNote,
               notes: newNote
@@ -5469,6 +5541,133 @@ export default function RequestsModule({
                   </div>
                 )}
 
+                {/* ── FORGOTTEN BREAK REQUEST DETAILS (نسيان بصمة بريك) ── */}
+                {(previewModalReq.type === 'forgotten_break' || previewModalReq.requestType === 'forgotten_break') && (
+                  <div style={{ background: '#fffbeb', padding: '18px', borderRadius: '14px', border: '1.5px solid #f59e0b', boxShadow: '0 2px 10px rgba(217, 119, 6, 0.08)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                      <h4 style={{ margin: 0, color: '#92400e', fontSize: '15.5px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800 }}>
+                        <span>☕</span>
+                        <span>طلب تأكيد وتعديل ساعات استراحة الوردية (نسيان بصمة عودة من البريك):</span>
+                      </h4>
+                      <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '3px 12px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 800 }}>
+                        {previewModalReq.status === 'approved' ? '🟢 معتمد ومؤكد' : '⏳ بانتظار اعتماد الإدارة'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '14px' }}>
+                      <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #fde68a' }}>
+                        <span style={{ fontSize: '11.5px', color: '#92400e', fontWeight: 600 }}>📅 تاريخ الوردية والفرع:</span>
+                        <div style={{ fontWeight: 800, color: '#78350f', fontSize: '13.5px', marginTop: '3px' }}>
+                          {previewModalReq.date} ({previewModalReq.branchName || 'الفرع'})
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #fde68a' }}>
+                        <span style={{ fontSize: '11.5px', color: '#92400e', fontWeight: 600 }}>⏱️ الحضور والانصراف:</span>
+                        <div style={{ fontWeight: 800, color: '#78350f', fontSize: '13.5px', marginTop: '3px' }}>
+                          دخول: <strong>{previewModalReq.timeIn || '—'}</strong> ⬅️ خروج: <strong>{previewModalReq.timeOut || '—'}</strong>
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #fde68a' }}>
+                        <span style={{ fontSize: '11.5px', color: '#92400e', fontWeight: 600 }}>☕ وقت بدء الاستراحة بالكشك:</span>
+                        <div style={{ fontWeight: 800, color: '#b45309', fontSize: '14px', marginTop: '3px' }}>
+                          {previewModalReq.breakStartTime || '—'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#fef2f2', padding: '10px 14px', borderRadius: '10px', border: '1px solid #fecaca' }}>
+                        <span style={{ fontSize: '11.5px', color: '#991b1b', fontWeight: 700 }}>⏳ مدة الاستراحة المفتوحة:</span>
+                        <div style={{ fontWeight: 900, color: '#dc2626', fontSize: '15px', marginTop: '3px' }}>
+                          {previewModalReq.unclosedBreakMinutes || Math.round((parseFloat(previewModalReq.currentBreakHours || 1) * 60))} دقيقة
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* قسم التعديل التفاعلي لمدة البريك */}
+                    <div style={{ background: '#fff', padding: '14px 16px', borderRadius: '12px', border: '1.5px solid #d97706', marginBottom: '10px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                        <label style={{ margin: 0, fontWeight: 800, color: '#78350f', fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>✏️</span>
+                          <span>ساعات الاستراحة المعتمدة للخصم من الوردية:</span>
+                        </label>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          {[0, 0.5, 1.0, 1.5, 2.0].map((presetVal) => (
+                            <button
+                              key={presetVal}
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{
+                                padding: '2px 8px',
+                                fontSize: '11.5px',
+                                fontWeight: 'bold',
+                                background: parseFloat(customBreakHours) === presetVal ? '#d97706' : '#fef3c7',
+                                color: parseFloat(customBreakHours) === presetVal ? '#fff' : '#92400e',
+                                border: '1px solid #f59e0b',
+                                borderRadius: '6px'
+                              }}
+                              onClick={() => setCustomBreakHours(String(presetVal))}
+                            >
+                              {presetVal === 0 ? 'إلغاء الخصم (0 س)' : `${presetVal} س`}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <input
+                              type="number"
+                              step="0.25"
+                              min="0"
+                              max="12"
+                              value={customBreakHours}
+                              onChange={(e) => setCustomBreakHours(e.target.value)}
+                              className="form-control"
+                              style={{ maxWidth: '120px', fontWeight: 900, fontSize: '16px', textAlign: 'center', color: '#92400e', borderColor: '#f59e0b' }}
+                            />
+                            <span style={{ fontSize: '13px', fontWeight: 700, color: '#78350f' }}>ساعة بريك</span>
+                          </div>
+                        </div>
+
+                        {/* حساب صافي العمل المتوقع لحظياً */}
+                        {(() => {
+                          const parsedCustom = Math.max(0, parseFloat(customBreakHours) || 0);
+                          let totalDiffHrs = parseFloat(previewModalReq.shiftTotalElapsedHours);
+                          if (!totalDiffHrs && previewModalReq.timeIn && previewModalReq.timeOut) {
+                            const [inH, inM] = previewModalReq.timeIn.split(':').map(Number);
+                            const [outH, outM] = previewModalReq.timeOut.split(':').map(Number);
+                            let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+                            if (diff < 0) diff += 24 * 60;
+                            totalDiffHrs = Math.round((diff / 60) * 100) / 100;
+                          }
+                          const netWorked = Math.max(0, Math.round(((totalDiffHrs || 8) - parsedCustom) * 100) / 100);
+                          return (
+                            <div style={{ background: '#f0fdf4', padding: '8px 12px', borderRadius: '8px', border: '1px solid #86efac', textAlign: 'center' }}>
+                              <span style={{ fontSize: '11px', color: '#166534', fontWeight: 600 }}>صافي ساعات العمل بعد اعتماد البريك:</span>
+                              <div style={{ fontSize: '15px', fontWeight: 900, color: '#15803d' }}>
+                                {netWorked} ساعة عمل صافية
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      <div style={{ marginTop: '10px' }}>
+                        <input
+                          type="text"
+                          placeholder="ملاحظات الاعتماد (اختياري)..."
+                          value={customBreakNotes}
+                          onChange={(e) => setCustomBreakNotes(e.target.value)}
+                          className="form-control"
+                          style={{ fontSize: '12.5px', width: '100%' }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* ── OVERTIME REQUEST DETAILS ── */}
                 {previewModalReq.type === 'overtime' && (
                   <div style={{ background: 'var(--surface-muted)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
@@ -6369,6 +6568,48 @@ export default function RequestsModule({
                       }}
                     >
                       📧 إرسال إشعار للموظف بالإيميل
+                    </button>
+                  </div>
+                ) : (previewModalReq.type === 'forgotten_break' || previewModalReq.requestType === 'forgotten_break') && (previewModalReq.status === 'pending' || previewModalReq.status === 'pending_admin') ? (
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-start"
+                      style={{ padding: '8px 20px', fontSize: '13px', background: '#d97706' }}
+                      onClick={() => {
+                        handleApprove(previewModalReq.id, {
+                          breakHours: parseFloat(customBreakHours) || 0,
+                          adminNotes: customBreakNotes || ''
+                        });
+                        setPreviewModalReq(null);
+                      }}
+                    >
+                      ☕ تأكيد واعتماد الاستراحة ({parseFloat(customBreakHours) || 0} س)
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ padding: '8px 16px', fontSize: '13px', border: '1px solid #cbd5e1' }}
+                      onClick={() => {
+                        handleApprove(previewModalReq.id, {
+                          breakHours: 0,
+                          adminNotes: 'تم إلغاء خصم الاستراحة واعتماد ساعات الوردية كاملة'
+                        });
+                        setPreviewModalReq(null);
+                      }}
+                    >
+                      🛡️ إلغاء الخصم (0 س استراحة)
+                    </button>
+                    <button
+                      type="button"
+                      className="del-btn"
+                      style={{ padding: '8px 18px', fontSize: '13px' }}
+                      onClick={() => {
+                        handleReject(previewModalReq.id);
+                        setPreviewModalReq(null);
+                      }}
+                    >
+                      ❌ رفض الطلب
                     </button>
                   </div>
                 ) : previewModalReq.type === 'overtime' && previewModalReq.status === 'pending' ? (

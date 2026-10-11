@@ -1003,7 +1003,7 @@ export default function BranchManagerView({
 
   // Request Type Statistics for Branch Manager request filter pills
   const branchReqTypeStats = useMemo(() => {
-    const counts = { all: (branchRequests || []).length, leave: 0, schedule_deviation: 0, manual_punch: 0, overtime: 0, permission: 0, swap: 0, shift_adjustment: 0, roster_edit: 0, comp_off: 0 };
+    const counts = { all: (branchRequests || []).length, leave: 0, schedule_deviation: 0, manual_punch: 0, overtime: 0, permission: 0, swap: 0, shift_adjustment: 0, roster_edit: 0, comp_off: 0, forgotten_break: 0 };
     (branchRequests || []).forEach((r) => {
       if (r.type === 'leave' || r.type === 'leave_request' || r.type === 'long_leave' || r.type === 'annual_leave' || r.type === 'sick_leave' || Boolean(r.leaveType)) counts.leave++;
       else if (r.type === 'schedule_deviation' || r.type === 'deviation' || (typeof r.details === 'string' && r.details.includes('عدم الالتزام بالجدول'))) counts.schedule_deviation++;
@@ -1014,6 +1014,7 @@ export default function BranchManagerView({
       else if (r.type === 'shift_adjustment') counts.shift_adjustment++;
       else if (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') counts.roster_edit++;
       else if (r.type === 'comp_off_grant' || r.type === 'leave_comp_off' || r.leaveType === 'comp_off') counts.comp_off++;
+      else if (r.type === 'forgotten_break' || r.requestType === 'forgotten_break') counts.forgotten_break++;
     });
     return counts;
   }, [branchRequests]);
@@ -1323,11 +1324,11 @@ export default function BranchManagerView({
     const managerShifts = (state.shifts || []).filter(
       (s) => s && s.employeeId === managerEmp?.id && matchesDateRange(s.date)
     ).sort((a, b) => {
-      if (a?.isLiveActive && !b?.isLiveActive) return -1;
-      if (!a?.isLiveActive && b?.isLiveActive) return 1;
       const dateA = String(a?.date || '');
       const dateB = String(b?.date || '');
       if (dateA !== dateB) return dateB.localeCompare(dateA);
+      if (a?.isLiveActive && !b?.isLiveActive) return -1;
+      if (!a?.isLiveActive && b?.isLiveActive) return 1;
       return String(b?.timeIn || '').localeCompare(String(a?.timeIn || ''));
     });
     const totalHours = Math.round(managerShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0) * 100) / 100;
@@ -3080,11 +3081,22 @@ export default function BranchManagerView({
 
                   if (activeInThisBranch) {
                     if (activeShift.isOnBreak || activeShift.isPaused) {
-                      const breakTime = getActiveBreakStr ? getActiveBreakStr(activeShift) : '';
-                      statusLabel = isNightShift ? `⏸️ في استراحة (وردية ليلية 🌙) ${breakTime ? `(${breakTime})` : ''}` : `⏸️ في استراحة ${breakTime ? `(${breakTime})` : ''}`;
-                      statusBg = 'rgba(245, 158, 11, 0.1)';
-                      statusColor = '#d97706';
-                      statusDotClass = 'syncing';
+                      const pauseStartEpoch = Number(activeShift.pauseStartEpoch) || 0;
+                      const breakMins = pauseStartEpoch ? Math.floor((Date.now() - pauseStartEpoch) / 60000) : 0;
+                      const isOverdueBreak = breakMins >= 60;
+                      const breakTime = getActiveBreakStr ? getActiveBreakStr(activeShift) : (breakMins > 0 ? `${breakMins} دقيقة` : '');
+
+                      if (isOverdueBreak) {
+                        statusLabel = `⚠️ استراحة مفتوحة تجاوزت 60 دقيقة (${breakMins} د) - نسيان عودة محتمل!`;
+                        statusBg = 'rgba(239, 68, 68, 0.15)';
+                        statusColor = '#dc2626';
+                        statusDotClass = 'offline';
+                      } else {
+                        statusLabel = isNightShift ? `☕ في استراحة (وردية ليلية 🌙) ${breakTime ? `(${breakTime})` : ''}` : `☕ في استراحة ${breakTime ? `(${breakTime})` : ''}`;
+                        statusBg = 'rgba(245, 158, 11, 0.12)';
+                        statusColor = '#d97706';
+                        statusDotClass = 'syncing';
+                      }
                     } else {
                       const workTime = getActiveElapsedStr ? getActiveElapsedStr(activeShift) : '';
                       statusLabel = isNightShift ? `🟢 على رأس العمل (وردية ليلية 🌙 بدأت ${activeShift.timeIn}) ${workTime ? `(${workTime})` : ''}` : `🟢 على رأس العمل ${workTime ? `(${workTime})` : ''}`;
@@ -8212,11 +8224,11 @@ export default function BranchManagerView({
               if (!isThisBranchShift) return false;
               return matchesDateRange ? matchesDateRange(s.date) : true;
             }).sort((a, b) => {
-              if (a?.isLiveActive && !b?.isLiveActive) return -1;
-              if (!a?.isLiveActive && b?.isLiveActive) return 1;
               const dateA = String(a?.date || '');
               const dateB = String(b?.date || '');
               if (dateA !== dateB) return dateB.localeCompare(dateA);
+              if (a?.isLiveActive && !b?.isLiveActive) return -1;
+              if (!a?.isLiveActive && b?.isLiveActive) return 1;
               return String(b?.timeIn || '').localeCompare(String(a?.timeIn || ''));
             });
 

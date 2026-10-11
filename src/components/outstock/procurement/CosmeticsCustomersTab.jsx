@@ -13,19 +13,24 @@ import {
   RefreshCw,
   ShoppingBag,
   ExternalLink,
-  Tag
+  Tag,
+  Send,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import {
   outstockGetCustomers,
   outstockGetCosmeticsCustomerOrders,
   outstockGetBranches
 } from '../../../utils/outstockApiClient';
+import CosmeticsWhatsAppBroadcastModal from './CosmeticsWhatsAppBroadcastModal';
 
 /**
  * CosmeticsCustomersTab.jsx
  * تبويبة العملاء المسجلين لمسؤول مستحضرات التجميل:
  * - تقتصر على عملاء مستحضرات التجميل المسجلين
- * - إمكانية البحث باسم العميل، رقم الهاتف، أو اسم مستحضر التجميل
+ * - إمكانية البحث باسم العميل، رقم الهاتف، أو اسم مستحضر التجميل المطلوب
+ * - اختيار فردي وجماعي للعملاء لإطلاق حملات واتساب تسويقية فاخرة
  * - سجل طلبات قراءة فقط (Read-only) مخصص لأصناف التجميل
  */
 export default function CosmeticsCustomersTab({ showToast }) {
@@ -33,7 +38,12 @@ export default function CosmeticsCustomersTab({ showToast }) {
   const [branches, setBranches] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [productSearch, setProductSearch] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('all');
+
+  // تحديد العملاء للحملات الجماعية
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState(new Set());
+  const [isBroadcastModalOpen, setIsBroadcastModalOpen] = useState(false);
 
   // نافذة سجل طلبات العميل
   const [historyCustomer, setHistoryCustomer] = useState(null);
@@ -45,7 +55,11 @@ export default function CosmeticsCustomersTab({ showToast }) {
     setIsLoading(true);
     try {
       const [custRes, branchRes] = await Promise.all([
-        outstockGetCustomers({ category_scope: 'cosmetics', search: searchQuery }),
+        outstockGetCustomers({ 
+          category_scope: 'cosmetics', 
+          search: searchQuery,
+          productSearch: productSearch
+        }),
         outstockGetBranches().catch(() => null)
       ]);
 
@@ -64,7 +78,7 @@ export default function CosmeticsCustomersTab({ showToast }) {
     } finally {
       setIsLoading(false);
     }
-  }, [searchQuery, showToast]);
+  }, [searchQuery, productSearch, showToast]);
 
   useEffect(() => {
     fetchCustomers();
@@ -101,11 +115,42 @@ export default function CosmeticsCustomersTab({ showToast }) {
         const name = String(c.full_name || c.name || '').toLowerCase();
         const phone = String(c.whatsapp_phone || c.phone || '').toLowerCase();
         const code = String(c.customer_code || '').toLowerCase();
-        return name.includes(q) || phone.includes(q) || code.includes(q);
+        const productsMatch = Array.isArray(c.requested_products) && c.requested_products.some(p => String(p).toLowerCase().includes(q));
+        return name.includes(q) || phone.includes(q) || code.includes(q) || productsMatch;
+      });
+    }
+    if (productSearch.trim()) {
+      const pq = productSearch.toLowerCase().trim();
+      result = result.filter(c => {
+        return Array.isArray(c.requested_products) && c.requested_products.some(p => String(p).toLowerCase().includes(pq));
       });
     }
     return result;
-  }, [customers, selectedBranch, searchQuery]);
+  }, [customers, selectedBranch, searchQuery, productSearch]);
+
+  // إدارة التحديد
+  const toggleSelectCustomer = (id) => {
+    setSelectedCustomerIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const isAllSelected = filteredCustomers.length > 0 && selectedCustomerIds.size === filteredCustomers.length;
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedCustomerIds(new Set());
+    } else {
+      setSelectedCustomerIds(new Set(filteredCustomers.map(c => c.id)));
+    }
+  };
+
+  const selectedCustomersList = useMemo(() => {
+    return filteredCustomers.filter(c => selectedCustomerIds.has(c.id));
+  }, [filteredCustomers, selectedCustomerIds]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '6px 2px' }}>
@@ -188,7 +233,7 @@ export default function CosmeticsCustomersTab({ showToast }) {
         </div>
       </div>
 
-      {/* ── شريط البحث والفلترة ── */}
+      {/* ── شريط البحث والفلترة المزدوج (اسم العميل + اسم المنتج التجميلي) ── */}
       <div
         style={{
           background: '#ffffff',
@@ -201,10 +246,10 @@ export default function CosmeticsCustomersTab({ showToast }) {
           flexWrap: 'wrap'
         }}
       >
-        <div style={{ position: 'relative', flex: 1, minWidth: '260px' }}>
+        <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
           <input
             type="text"
-            placeholder="ابحث باسم العميل، رقم الواتساب، أو اسم مستحضر التجميل المطلوب..."
+            placeholder="ابحث بالاسم، رقم الواتساب، أو كود العميل..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="outstock-form-input"
@@ -218,7 +263,25 @@ export default function CosmeticsCustomersTab({ showToast }) {
           <Search size={18} color="#be185d" style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)' }} />
         </div>
 
-        <div style={{ minWidth: '180px' }}>
+        <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
+          <input
+            type="text"
+            placeholder="ابحث بمستحضر التجميل المطلوب (سيروم، كريم، واقي...)..."
+            value={productSearch}
+            onChange={(e) => setProductSearch(e.target.value)}
+            className="outstock-form-input"
+            style={{
+              paddingRight: '38px',
+              height: '42px',
+              fontSize: '13px',
+              borderColor: '#ec4899',
+              background: '#fdf2f8'
+            }}
+          />
+          <ShoppingBag size={18} color="#be185d" style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+        </div>
+
+        <div style={{ minWidth: '160px' }}>
           <select
             value={selectedBranch}
             onChange={(e) => setSelectedBranch(e.target.value)}
@@ -232,6 +295,84 @@ export default function CosmeticsCustomersTab({ showToast }) {
           </select>
         </div>
       </div>
+
+      {/* ── الشريط العائم لإطلاق حملة الواتساب الجماعية عند تحديد عملاء ── */}
+      {selectedCustomerIds.size > 0 && (
+        <div
+          style={{
+            background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)',
+            borderRadius: '14px',
+            padding: '12px 20px',
+            color: '#ffffff',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            boxShadow: '0 8px 20px rgba(49, 46, 129, 0.35)',
+            animation: 'outstockFadeIn 0.2s ease-out',
+            flexWrap: 'wrap',
+            gap: '12px'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span
+              style={{
+                background: '#be185d',
+                color: '#ffffff',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontWeight: '900',
+                fontSize: '13px'
+              }}
+            >
+              {selectedCustomerIds.size}
+            </span>
+            <span style={{ fontSize: '13.5px', fontWeight: '800' }}>
+              عملاء تم تحديدهم لإطلاق حملة مستحضرات التجميل
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button
+              type="button"
+              onClick={() => setSelectedCustomerIds(new Set())}
+              style={{
+                background: 'rgba(255, 255, 255, 0.15)',
+                border: '1px solid rgba(255, 255, 255, 0.3)',
+                color: '#ffffff',
+                padding: '7px 14px',
+                borderRadius: '8px',
+                fontSize: '12.5px',
+                fontWeight: '700',
+                cursor: 'pointer'
+              }}
+            >
+              إلغاء التحديد
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsBroadcastModalOpen(true)}
+              style={{
+                background: 'linear-gradient(135deg, #db2777 0%, #be185d 100%)',
+                border: 'none',
+                color: '#ffffff',
+                padding: '8px 18px',
+                borderRadius: '8px',
+                fontSize: '13px',
+                fontWeight: '900',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 12px rgba(219, 39, 119, 0.4)'
+              }}
+            >
+              <Send size={15} />
+              <span>📱 إرسال حملة واتساب جماعية فاخرة ({selectedCustomerIds.size}) 💄✨</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── قائمة العملاء ── */}
       <div
@@ -260,88 +401,155 @@ export default function CosmeticsCustomersTab({ showToast }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '13px' }}>
               <thead>
                 <tr style={{ background: '#fdf2f8', borderBottom: '1px solid #fbcfe8', color: '#831843' }}>
+                  <th style={{ padding: '12px 14px', width: '40px', textAlign: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={toggleSelectAll}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      title={isAllSelected ? 'إلغاء تحديد الكل' : 'تحديد كل العملاء المعروضين'}
+                    >
+                      {isAllSelected ? (
+                        <CheckSquare size={19} color="#be185d" />
+                      ) : (
+                        <Square size={19} color="#94a3b8" />
+                      )}
+                    </button>
+                  </th>
                   <th style={{ padding: '12px 16px' }}>العميل</th>
                   <th style={{ padding: '12px 16px' }}>رقم الواتساب</th>
                   <th style={{ padding: '12px 16px' }}>الفرع المسجل</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'center' }}>عدد طلبات التجميل</th>
+                  <th style={{ padding: '12px 16px' }}>المنتجات المطلوبة مسبقاً 💄</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center' }}>عدد الطلبات</th>
                   <th style={{ padding: '12px 16px' }}>تاريخ التسجيل</th>
                   <th style={{ padding: '12px 16px', textAlign: 'center' }}>الإجراءات</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredCustomers.map((cust, idx) => (
-                  <tr
-                    key={cust.id || idx}
-                    style={{
-                      borderBottom: '1px solid #f1f5f9',
-                      transition: 'background 0.15s ease'
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = '#fdf2f8'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = '#ffffff'}
-                  >
-                    <td style={{ padding: '12px 16px' }}>
-                      <div style={{ fontWeight: '800', color: '#0f172a' }}>{cust.full_name || cust.name || 'عميل نقدي'}</div>
-                      {cust.customer_code && (
-                        <div style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>
-                          {cust.customer_code}
+                {filteredCustomers.map((cust, idx) => {
+                  const isSelected = selectedCustomerIds.has(cust.id);
+                  const reqProducts = Array.isArray(cust.requested_products) ? cust.requested_products : [];
+
+                  return (
+                    <tr
+                      key={cust.id || idx}
+                      style={{
+                        borderBottom: '1px solid #f1f5f9',
+                        background: isSelected ? '#fff1f2' : '#ffffff',
+                        transition: 'background 0.15s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isSelected) e.currentTarget.style.background = '#fdf2f8';
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isSelected) e.currentTarget.style.background = '#ffffff';
+                      }}
+                    >
+                      <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => toggleSelectCustomer(cust.id)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        >
+                          {isSelected ? (
+                            <CheckSquare size={18} color="#be185d" />
+                          ) : (
+                            <Square size={18} color="#cbd5e1" />
+                          )}
+                        </button>
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{ fontWeight: '800', color: '#0f172a' }}>{cust.full_name || cust.name || 'عميل نقدي'}</div>
+                        {cust.customer_code && (
+                          <div style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>
+                            {cust.customer_code}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }} dir="ltr">
+                          <Phone size={13} color="#be185d" />
+                          <span style={{ fontWeight: '600' }}>{cust.whatsapp_phone || cust.phone || '—'}</span>
                         </div>
-                      )}
-                    </td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }} dir="ltr">
-                        <Phone size={13} color="#be185d" />
-                        <span style={{ fontWeight: '600' }}>{cust.whatsapp_phone || cust.phone || '—'}</span>
-                      </div>
-                    </td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <span style={{ background: '#f1f5f9', color: '#334155', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '700' }}>
-                        {cust.branch_name || cust.primary_branch_id || 'الفرع الرئيسي'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                      <span
-                        style={{
-                          background: '#fdf2f8',
-                          color: '#be185d',
-                          border: '1px solid #fbcfe8',
-                          padding: '3px 10px',
-                          borderRadius: '12px',
-                          fontWeight: '800',
-                          fontSize: '12px'
-                        }}
-                      >
-                        {cust.cosmetics_orders_count || cust.orders_count || 1} طلب
-                      </span>
-                    </td>
-                    <td style={{ padding: '12px 16px', color: '#64748b', fontSize: '12px' }}>
-                      {cust.created_at ? new Date(cust.created_at).toLocaleDateString('ar-EG') : '—'}
-                    </td>
-                    <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenHistory(cust)}
-                        className="outstock-btn"
-                        style={{
-                          background: '#fdf2f8',
-                          border: '1px solid #f472b6',
-                          color: '#be185d',
-                          padding: '6px 12px',
-                          borderRadius: '8px',
-                          fontSize: '12px',
-                          fontWeight: '800',
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '5px'
-                        }}
-                        title="استعراض سجل طلبات مستحضرات التجميل (قراءة فقط)"
-                      >
-                        <History size={13} />
-                        <span>سجل الطلبات 📋</span>
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <span style={{ background: '#f1f5f9', color: '#334155', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '700' }}>
+                          {cust.branch_name || cust.primary_branch_id || 'الفرع الرئيسي'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 16px', maxWidth: '240px' }}>
+                        {reqProducts.length > 0 ? (
+                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                            {reqProducts.slice(0, 3).map((prod, pIdx) => (
+                              <span
+                                key={pIdx}
+                                style={{
+                                  background: '#fdf2f8',
+                                  color: '#9d174d',
+                                  border: '1px solid #fbcfe8',
+                                  padding: '2px 7px',
+                                  borderRadius: '6px',
+                                  fontSize: '11px',
+                                  fontWeight: '700'
+                                }}
+                              >
+                                {prod}
+                              </span>
+                            ))}
+                            {reqProducts.length > 3 && (
+                              <span style={{ fontSize: '10.5px', color: '#64748b', alignSelf: 'center' }}>
+                                +{reqProducts.length - 3}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: '11.5px', color: '#94a3b8' }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <span
+                          style={{
+                            background: '#fdf2f8',
+                            color: '#be185d',
+                            border: '1px solid #fbcfe8',
+                            padding: '3px 10px',
+                            borderRadius: '12px',
+                            fontWeight: '800',
+                            fontSize: '12px'
+                          }}
+                        >
+                          {cust.cosmetics_orders_count || cust.orders_count || 1} طلب
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 16px', color: '#64748b', fontSize: '12px' }}>
+                        {cust.created_at ? new Date(cust.created_at).toLocaleDateString('ar-EG') : '—'}
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenHistory(cust)}
+                          className="outstock-btn"
+                          style={{
+                            background: '#fdf2f8',
+                            border: '1px solid #f472b6',
+                            color: '#be185d',
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            fontWeight: '800',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px'
+                          }}
+                          title="استعراض سجل طلبات مستحضرات التجميل (قراءة فقط)"
+                        >
+                          <History size={13} />
+                          <span>سجل الطلبات 📋</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -526,6 +734,14 @@ export default function CosmeticsCustomersTab({ showToast }) {
           </div>
         </div>
       )}
+
+      {/* ── نافذة إطلاق حملة الواتساب الترويجية الفاخرة ── */}
+      <CosmeticsWhatsAppBroadcastModal
+        isOpen={isBroadcastModalOpen}
+        onClose={() => setIsBroadcastModalOpen(false)}
+        selectedCustomers={selectedCustomersList}
+        showToast={showToast}
+      />
     </div>
   );
 }

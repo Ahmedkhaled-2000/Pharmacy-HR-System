@@ -442,6 +442,17 @@ export function DataProvider({ children, showToast = () => {} }) {
         requiresBranchManager: false,
         requiresSuperAdmin: true,
         autoExecuteOnBoth: true
+      },
+      {
+        id: 'rule_forgotten_break',
+        requestType: 'forgotten_break',
+        name: 'طلبات تأكيد وتعديل ساعات نسيان بصمة البريك',
+        typeLabel: 'نسيان بصمة بريك',
+        reqBranch: true,
+        reqAdmin: true,
+        requiresBranchManager: true,
+        requiresSuperAdmin: true,
+        autoExecuteOnBoth: true
       }
     ],
     shifts: [],

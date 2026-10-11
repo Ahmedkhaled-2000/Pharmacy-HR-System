@@ -1222,16 +1222,44 @@ export default function EmployeePortalView({
     ? computeEmpSummary(emp.id, filterFn, filterMode === 'month' ? selectedMonth : null, selectedBranchId || null)
     : { hours: 0, dailyRate: 0, rate: 0, hourlyRate: 0, monthlySalary: 0, salary: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0, perBranch: {} };
 
+  const todayStrNow = typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
+
   const empShifts = emp
     ? (state.shifts || [])
-        .filter((s) => s.employeeId === emp.id && filterFn(s.date) && (!selectedBranchId || s.branchId === selectedBranchId || !s.branchId))
+        .filter((s) => {
+          if (!s) return false;
+          if (s.status === 'cancelled' || s.isCancelled) return false;
+          const sEmpId = String(s.employeeId || '');
+          const sEmpCode = String(s.employeeCode || '');
+          const eId = String(emp.id || '');
+          const eCode = String(emp.code || '');
+          const isMatch = (
+            sEmpId === eId ||
+            (eCode && sEmpId === eCode) ||
+            (eCode && sEmpCode === eCode) ||
+            (eId && sEmpCode === eId)
+          );
+          return isMatch && filterFn(s.date) && (!selectedBranchId || s.branchId === selectedBranchId || !s.branchId);
+        })
         .sort((a, b) => {
-          if (a?.isLiveActive && !b?.isLiveActive) return -1;
-          if (!a?.isLiveActive && b?.isLiveActive) return 1;
-          const dateA = String(a?.date || '');
-          const dateB = String(b?.date || '');
+          // 1. 🔄 الترتيب الصارم حسب التاريخ من الأحدث إلى الأقدم (Newest to Oldest)
+          const dateA = String(a?.date || '').trim();
+          const dateB = String(b?.date || '').trim();
           if (dateA !== dateB) return dateB.localeCompare(dateA);
-          return String(b?.timeIn || '').localeCompare(String(a?.timeIn || ''));
+
+          // 2. في نفس اليوم: الوردية الحية النشطة الفعلية لليوم الحالي تكون أولاً
+          const isLiveA = Boolean(a?.isLiveActive && a?.date >= todayStrNow && (!a?.timeOut || a?.timeOut === '' || a?.timeOut === '—' || a?.timeOut === 'قيد العمل الآن'));
+          const isLiveB = Boolean(b?.isLiveActive && b?.date >= todayStrNow && (!b?.timeOut || b?.timeOut === '' || b?.timeOut === '—' || b?.timeOut === 'قيد العمل الآن'));
+          if (isLiveA && !isLiveB) return -1;
+          if (!isLiveA && isLiveB) return 1;
+
+          // 3. في نفس اليوم: الترتيب حسب وقت الدخول من الأحدث إلى الأقدم (تنازلي)
+          const timeA = String(a?.timeIn || '').trim();
+          const timeB = String(b?.timeIn || '').trim();
+          if (timeA !== timeB) return timeB.localeCompare(timeA);
+
+          // 4. في حالة التطابق: الترتيب حسب المعرف تنازلياً
+          return String(b?.createdAt || b?.id || '').localeCompare(String(a?.createdAt || a?.id || ''));
         })
     : [];
 

@@ -77,6 +77,14 @@ export default function ApprovalCenterModule({
       requiresBranchManager: false,
       requiresSuperAdmin: true,
       autoExecuteOnBoth: false
+    },
+    {
+      id: 'rule_forgotten_break',
+      name: 'طلبات تأكيد وتعديل ساعات نسيان بصمة البريك',
+      requestType: 'forgotten_break',
+      requiresBranchManager: true,
+      requiresSuperAdmin: true,
+      autoExecuteOnBoth: true
     }
   ]);
 

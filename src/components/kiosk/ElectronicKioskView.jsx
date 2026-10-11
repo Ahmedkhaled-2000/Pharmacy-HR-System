@@ -21,7 +21,7 @@ import {
   getCalibratedNow
 } from '../../utils/kioskOutbox';
 import { subscribeToPunchRecorded } from '../../utils/socketClient';
-import { playFingerprintChime } from '../../hooks/useAudio';
+import { playFingerprintChime, speakKioskPrompt } from '../../hooks/useAudio';
 import { calcRawDurationMinutes } from '../../utils/workHoursEngine';
 import '../../kiosk-modern.css';
 
@@ -195,13 +195,15 @@ export default function ElectronicKioskView({
         return;
       }
 
-      try {
-        playFingerprintChime('success');
-      } catch {}
-
       const actionLabel = payload.actionType === 'check_out' ? 'انصراف' : 'حضور';
       const verifyLabel = payload.verifyType === 'FACE' ? 'بصمة الوجه' : 'بصمة الإصبع';
       const empName = payload.employeeName || 'الموظف';
+      const firstName = empName.split(' ')[0] || empName;
+
+      try {
+        playFingerprintChime('success');
+        speakKioskPrompt(`أهلاً بك دكتور ${firstName}، تم توثيق ${actionLabel}ك عبر جهاز البصمة بنجاح`);
+      } catch {}
 
       setKioskAlertModal({
         isOpen: true,
@@ -369,7 +371,19 @@ export default function ElectronicKioskView({
     );
     if (recordedMatch) {
       if (isShiftTrulyOpen(recordedMatch)) {
-        verifiedActiveShift = { ...rawActiveShift, ...recordedMatch };
+        // حماية حالة الاستراحة والبريك من المسح العرضي عند الدمج
+        const isPausedState = Boolean(rawActiveShift.isPaused || recordedMatch.isPaused);
+        const isOnBreakState = Boolean(rawActiveShift.isOnBreak || recordedMatch.isOnBreak);
+        const pauseStart = rawActiveShift.pauseStartEpoch || recordedMatch.pauseStartEpoch || null;
+        const breakStart = rawActiveShift.breakStartTime || recordedMatch.breakStartTime || null;
+        verifiedActiveShift = {
+          ...rawActiveShift,
+          ...recordedMatch,
+          isPaused: isPausedState,
+          isOnBreak: isOnBreakState,
+          pauseStartEpoch: pauseStart,
+          breakStartTime: breakStart
+        };
       }
     } else if (isShiftTrulyOpen(rawActiveShift)) {
       verifiedActiveShift = rawActiveShift;
@@ -584,8 +598,17 @@ export default function ElectronicKioskView({
             return;
           }
 
-          // فحص حالة الوردية لتحديد الإجراء المناسب تلقائياً
-          const activeS = (state?.activeShifts?.[emp.id] || state?.activeShifts?.[String(emp.id)]);
+          // فحص حالة الوردية والاستراحة لتحديد الإجراء المناسب تلقائياً وبدقة
+          const activeS = (
+            state?.activeShifts?.[emp.id] ||
+            state?.activeShifts?.[String(emp.id)] ||
+            (emp.code && state?.activeShifts?.[String(emp.code)]) ||
+            Object.values(state?.activeShifts || {}).find(s => s && (
+              String(s.employeeId) === String(emp.id) ||
+              (emp.code && String(s.employeeCode) === String(emp.code)) ||
+              (emp.code && String(s.employeeId) === String(emp.code))
+            ))
+          );
           
           let targetAction = 'shift_start';
           if (activeS) {
@@ -601,7 +624,18 @@ export default function ElectronicKioskView({
               lastAutoPunchTimesRef.current.set(empId, nowMs);
               return;
             }
-            if (activeS.isPaused) {
+
+            const isEmpOnBreak = Boolean(
+              activeS.isPaused ||
+              activeS.isOnBreak ||
+              (state?.shifts || []).some(s =>
+                (String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code))) &&
+                (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive) &&
+                (s.isPaused || s.isOnBreak)
+              )
+            );
+
+            if (isEmpOnBreak) {
               targetAction = 'break_end';
             } else {
               targetAction = 'shift_end';
@@ -1058,7 +1092,21 @@ export default function ElectronicKioskView({
     const requestId = 'REQ-BIO-' + now.getTime();
     const shiftId = 'shift_bio_' + now.getTime() + '_' + Math.random().toString(36).substr(2, 4);
 
-    // ⚡ 1. إظهار نافذة التأكيد الفورية في النظام (0ms Delay)
+    // ⚡ 1. إظهار نافذة التأكيد الفورية والتوجيه الصوتي الذكي (0ms Delay)
+    try {
+      playFingerprintChime('success');
+      const empFirstName = (currentEmp?.name || '').split(' ')[0] || currentEmp?.name || '';
+      if (actionType === 'break_end') {
+        speakKioskPrompt(`أهلاً بك دكتور ${empFirstName}، تم تسجيل عودتك من الاستراحة واستئناف الوردية بنجاح`);
+      } else if (actionType === 'break_start') {
+        speakKioskPrompt(`تم تسجيل بدء الاستراحة، استراحة ممتعة دكتور ${empFirstName}`);
+      } else if (actionType === 'shift_start') {
+        speakKioskPrompt(`أهلاً بك دكتور ${empFirstName}، تم تسجيل حضورك وبدء الوردية بنجاح`);
+      } else if (actionType === 'shift_end') {
+        speakKioskPrompt(`مع السلامة دكتور ${empFirstName}، تم تسجيل انصرافك وإنهاء الوردية بنجاح`);
+      }
+    } catch {}
+
     setKioskAlertModal({
       isOpen: true,
       type: 'success',
@@ -1363,7 +1411,16 @@ export default function ElectronicKioskView({
       }
 
     } else if (actionType === 'break_start') {
-      const active = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];
+      const empKeys = [
+        currentEmp.id ? String(currentEmp.id) : null,
+        currentEmp.code ? String(currentEmp.code) : null
+      ].filter(Boolean);
+      const active = empKeys.map(k => updatedActiveShifts[k]).find(Boolean) ||
+        Object.values(updatedActiveShifts).find(s => s && (
+          String(s.employeeId) === String(currentEmp.id) ||
+          (currentEmp.code && String(s.employeeCode) === String(currentEmp.code))
+        ));
+
       if (active) {
         const pausedShift = {
           ...active,
@@ -1373,8 +1430,9 @@ export default function ElectronicKioskView({
           pauseStartEpoch: now.getTime(),
           updatedAt: now.getTime()
         };
-        updatedActiveShifts[currentEmp.id] = pausedShift;
-        updatedActiveShifts[String(currentEmp.id)] = pausedShift;
+        empKeys.forEach(k => {
+          updatedActiveShifts[k] = pausedShift;
+        });
       }
 
       // تحديث سجل الوردية المفتوح في مصفوفة shifts فورياً لضمان عدم ضياع البريك
@@ -1394,7 +1452,16 @@ export default function ElectronicKioskView({
         };
       }
     } else if (actionType === 'break_end') {
-      const active = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];
+      const empKeys = [
+        currentEmp.id ? String(currentEmp.id) : null,
+        currentEmp.code ? String(currentEmp.code) : null
+      ].filter(Boolean);
+      const active = empKeys.map(k => updatedActiveShifts[k]).find(Boolean) ||
+        Object.values(updatedActiveShifts).find(s => s && (
+          String(s.employeeId) === String(currentEmp.id) ||
+          (currentEmp.code && String(s.employeeCode) === String(currentEmp.code))
+        ));
+
       let addedPauseMs = 0;
       if (active) {
         addedPauseMs = now.getTime() - (active.pauseStartEpoch || now.getTime());
@@ -1407,8 +1474,9 @@ export default function ElectronicKioskView({
           accumulatedPauseMs: (active.accumulatedPauseMs || 0) + addedPauseMs,
           updatedAt: now.getTime()
         };
-        updatedActiveShifts[currentEmp.id] = resumedShift;
-        updatedActiveShifts[String(currentEmp.id)] = resumedShift;
+        empKeys.forEach(k => {
+          updatedActiveShifts[k] = resumedShift;
+        });
       }
 
       // تحديث سجل الوردية المفتوح واحتساب ساعات البريك في مصفوفة shifts فورياً

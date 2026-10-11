@@ -3,6 +3,8 @@
  * طباعة إيصال استلام مرتجع حراري (80mm / 58mm) لطلبات الصيدلية
  */
 
+import { getEffectiveOrgLogo, getEffectiveOrgName } from './outstockLogoHelper.js';
+
 export function printReturnReceipt({
   returnId,
   orderNumber,
@@ -18,6 +20,8 @@ export function printReturnReceipt({
   employeeName = '',
   date = new Date()
 }) {
+  const orgLogo = getEffectiveOrgLogo();
+  const orgName = getEffectiveOrgName('مجموعة صيدليات د. سيف الدين');
   const formattedDate = new Date(date).toLocaleString('ar-EG', {
     year: 'numeric',
     month: '2-digit',
@@ -124,7 +128,8 @@ export function printReturnReceipt({
 </head>
 <body>
   <div class="header">
-    <h1>مجموعة صيدليات د. سيف الدين</h1>
+    ${orgLogo ? `<div style="text-align: center; margin-bottom: 6px;"><img src="${orgLogo}" alt="Logo" style="max-height: 48px; max-width: 140px; object-fit: contain; margin: 0 auto; display: block;" /></div>` : ''}
+    <h1>${orgName}</h1>
     <div style="font-size: 11px; font-weight: 600;">${branchName}</div>
     <div class="badge">إشعار استلام مرتجع مبيعات</div>
   </div>
@@ -151,7 +156,7 @@ export function printReturnReceipt({
   </div>
   <div class="info-row">
     <span>الموظف المستلم:</span>
-    <strong>${employeeName || 'مسؤول الفرع'} (${employeeCode || '—'})</strong>
+    <strong>${employeeName || 'مسؤول الفرع'}</strong>
   </div>
   <div class="info-row">
     <span>وجهة الاسترداد:</span>

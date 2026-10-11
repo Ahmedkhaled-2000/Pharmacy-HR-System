@@ -18,7 +18,7 @@ export function useRequestsManager() {
   const { state, setState, saveState } = useData();
   const { showToast, executeWithOwnerGuard } = useUI();
 
-  const handleApproveRequest = useCallback(async (requestId, role = 'admin') => {
+  const handleApproveRequest = useCallback(async (requestId, role = 'admin', customData = null) => {
     if (!state) return;
     const currentRequests = state?.requests || [];
     const target = currentRequests.find((r) => r && r.id === requestId);
@@ -37,6 +37,12 @@ export function useRequestsManager() {
 
       const isFullyApproved = role === 'admin' || (isBranchApproved && isAdminApproved);
 
+      const finalBreakHours = customData?.breakHours !== undefined && customData?.breakHours !== null
+        ? Math.max(0, parseFloat(customData.breakHours) || 0)
+        : (target.adjustedBreakHours !== undefined
+          ? Math.max(0, parseFloat(target.adjustedBreakHours) || 0)
+          : Math.max(0, parseFloat(target.currentBreakHours || target.breakHours || 0)));
+
       const updatedRequests = currentRequests.map((r) => {
         if (r.id === requestId) {
           return {
@@ -44,7 +50,9 @@ export function useRequestsManager() {
             branchApproved: isBranchApproved,
             adminApproved: isAdminApproved,
             status: isFullyApproved ? 'approved' : 'pending_admin',
-            approvedAt: isFullyApproved ? new Date().toISOString() : r.approvedAt
+            approvedAt: isFullyApproved ? new Date().toISOString() : r.approvedAt,
+            adjustedBreakHours: customData?.breakHours !== undefined ? finalBreakHours : r.adjustedBreakHours,
+            adminNotes: customData?.adminNotes !== undefined ? customData.adminNotes : r.adminNotes
           };
         }
         return r;
@@ -81,6 +89,44 @@ export function useRequestsManager() {
                 ...s,
                 overtimeStatus: 'approved',
                 overtimeHours: overtimeHrs,
+                adminApproved: true,
+                note: newNote,
+                notes: newNote
+              };
+            }
+            return s;
+          });
+        }
+
+        // 0.05 Forgotten Break Request Approval (تأكيد واعتماد نسيان بصمة بريك)
+        if (target.type === 'forgotten_break') {
+          updatedShifts = updatedShifts.map((s) => {
+            if (s.id === target.shiftId || (String(s.employeeId) === String(target.employeeId) && s.date === target.date)) {
+              const timeIn = s.timeIn || target.timeIn || '09:00';
+              const timeOut = s.timeOut || target.timeOut || '17:00';
+              const [inH, inM] = timeIn.split(':').map(Number);
+              const [outH, outM] = timeOut.split(':').map(Number);
+              let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+              if (diff < 0) diff += 24 * 60;
+              const grossHours = Math.round((diff / 60) * 100) / 100;
+              const netHours = Math.max(0, Math.round((grossHours - finalBreakHours) * 100) / 100);
+
+              const cleanExistingNotes = (s.notes || s.note || '')
+                .replace(/\[⚠️ تم إنهاء الوردية عبر جهاز البصمة.*?\]/g, '')
+                .trim();
+              const newNote = cleanExistingNotes
+                ? `${cleanExistingNotes} | ✅ تم تأكيد واعتماد الاستراحة (${finalBreakHours} س) وصافي العمل (${netHours} س)`
+                : `✅ تم تأكيد واعتماد الاستراحة (${finalBreakHours} س) وصافي العمل (${netHours} س)`;
+
+              return {
+                ...s,
+                breakHours: finalBreakHours,
+                hours: netHours,
+                netHours: netHours,
+                actualWorkedHours: netHours,
+                regularHours: Math.min(netHours, s.scheduledHours || 8),
+                overtimeHours: Math.max(0, Math.round((netHours - (s.scheduledHours || 8)) * 100) / 100),
+                breakConfirmed: true,
                 adminApproved: true,
                 note: newNote,
                 notes: newNote

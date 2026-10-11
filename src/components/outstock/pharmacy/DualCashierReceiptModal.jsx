@@ -26,6 +26,7 @@ import {
   sendInvoicePdfViaWhatsApp
 } from '../../../utils/invoicePdfGenerator';
 import { outstockGetSettings } from '../../../utils/outstockApiClient';
+import { getEffectiveOrgLogo } from '../../../utils/outstockLogoHelper';
 
 /**
  * DualCashierReceiptModal.jsx
@@ -78,7 +79,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
   const branchPhone = branch?.phone || '';
   const branchAddress = branch?.address || '';
   const barcodeValue = String(order?.barcode_data || order?.barcodeData || order?.order_number || order?.orderNumber || '00000000');
-  const pharmacyLogo = pharmacySettings?.pharmacyLogo || pharmacySettings?.logoUrl || branch?.logoUrl || '';
+  const pharmacyLogo = getEffectiveOrgLogo(pharmacySettings?.pharmacyLogo || pharmacySettings?.logoUrl || branch?.logoUrl || '');
 
   // ── 1. محرك الطباعة مع أمر القص التلقائي لكل نسخة على حدة (Sequential Multi-Job Auto-Cut) ──
   const executeIsolatedPrintJob = useCallback((innerHtmlContent, jobTitle = 'Receipt') => {

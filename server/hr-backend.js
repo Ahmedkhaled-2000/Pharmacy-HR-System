@@ -22,7 +22,7 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { initSaasTables, registerSaasRoutes, DEFAULT_DEV_USER, DEFAULT_DEV_PASS } from './saas-manager.js';
 import { initOutstockTables, registerOutstockRoutes } from './outstock-manager.js';
-import { initBiometricTables, registerBiometricRoutes, sendUniversalAttendanceWhatsAppAlert } from './biometric-manager.js';
+import { initBiometricTables, registerBiometricRoutes, sendUniversalAttendanceWhatsAppAlert, sendBreakTimeoutWarningWhatsAppAlert } from './biometric-manager.js';
 import {
   getEgyptDate,
   getEgyptTime,
@@ -683,6 +683,12 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
                 incomingActiveShifts[String(empId)] = existingShift;
                 shiftsProtected++;
                 console.log(`[ActiveShift Guard] 🛡️ Protected active shift for emp ${empId} (${existingShift.branchId}) - timeIn: ${existingShift.timeIn}, date: ${existingShift.date}`);
+              } else if (existingShift && (existingShift.isPaused || existingShift.isOnBreak) && !incomingShift.isPaused) {
+                // حماية حالة الاستراحة والبريك من المسح عند وصول حالة قديمة من أحد العملاء
+                incomingShift.isPaused = true;
+                incomingShift.isOnBreak = true;
+                incomingShift.pauseStartEpoch = existingShift.pauseStartEpoch;
+                incomingShift.breakStartTime = existingShift.breakStartTime;
               }
             }
           }
@@ -1477,7 +1483,12 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
           }
         });
 
-        let targetIdx = currentShifts.findIndex(s => s && (s.id === shiftId || (possibleKeys.has(String(s.employeeId)) && s.date === punchDate && (!s.timeOut || s.timeOut === '' || s.isLiveActive))));
+        let targetIdx = currentShifts.findIndex(s => s && (
+          (shiftId && (String(s.id) === String(shiftId) || String(s.shiftId) === String(shiftId))) ||
+          (p.shiftRecord?.id && String(s.id) === String(p.shiftRecord.id)) ||
+          (possibleKeys.has(String(s.employeeId)) && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive)) ||
+          (possibleKeys.has(String(s.employeeId)) && s.date === punchDate)
+        ));
         if (targetIdx >= 0) {
           currentShifts[targetIdx] = {
             ...currentShifts[targetIdx],
@@ -1502,13 +1513,20 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
               isOnBreak: false,
               breakStartTime: null,
               pauseStartEpoch: null,
+              breakTimeoutAlerted: false,
+              breakTimeoutAlertedAt: null,
               accumulatedPauseMs: (act.accumulatedPauseMs || 0) + pauseDuration,
               updatedAt: punchEpoch
             };
           }
         });
 
-        let targetIdx = currentShifts.findIndex(s => s && (s.id === shiftId || (possibleKeys.has(String(s.employeeId)) && s.date === punchDate && (!s.timeOut || s.timeOut === '' || s.isLiveActive))));
+        let targetIdx = currentShifts.findIndex(s => s && (
+          (shiftId && (String(s.id) === String(shiftId) || String(s.shiftId) === String(shiftId))) ||
+          (p.shiftRecord?.id && String(s.id) === String(p.shiftRecord.id)) ||
+          (possibleKeys.has(String(s.employeeId)) && (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive)) ||
+          (possibleKeys.has(String(s.employeeId)) && s.date === punchDate)
+        ));
         if (targetIdx >= 0) {
           const prev = currentShifts[targetIdx];
           const pauseDuration = prev.pauseStartEpoch ? Math.max(0, punchEpoch - prev.pauseStartEpoch) : addedPauseMs;
@@ -4444,6 +4462,80 @@ async function checkAndRunScheduledDriveBackup() {
 
 // تشغيل فاحص الجدولة التلقائي كل 60 ثانية على مدار الساعة 24/7
 setInterval(checkAndRunScheduledDriveBackup, 60 * 1000);
+
+// ── 8.3b. فاحص الاستراحات المفتوحة الاستباقي (Unreturned Breaks 180-Minute Monitor) ──
+let isCheckingBreaks = false;
+async function checkAndAlertUnreturnedBreaks() {
+  if (isCheckingBreaks) return;
+  isCheckingBreaks = true;
+  try {
+    const rawStored = await getSettingsFromStorage(STORAGE_KEY);
+    if (!rawStored || !rawStored.activeShifts || typeof rawStored.activeShifts !== 'object') return;
+    const activeShiftsMap = rawStored.activeShifts;
+    const now = Date.now();
+    let stateModified = false;
+
+    for (const [key, shift] of Object.entries(activeShiftsMap)) {
+      if (!shift || typeof shift !== 'object') continue;
+      const isShiftOnBreak = Boolean(shift.isOnBreak || shift.isPaused);
+      if (!isShiftOnBreak) continue;
+
+      const pauseStartMs = Number(shift.pauseStartEpoch) || 0;
+      if (!pauseStartMs) continue;
+
+      const elapsedMinutes = Math.floor((now - pauseStartMs) / 60000);
+
+      // فحص تجاوز 180 دقيقة كاملة (3 ساعات) مع عدم إرسال التنبيه مسبقاً لهذه الاستراحة
+      if (elapsedMinutes >= 180 && !shift.breakTimeoutAlerted) {
+        shift.breakTimeoutAlerted = true;
+        shift.breakTimeoutAlertedAt = new Date().toISOString();
+        stateModified = true;
+
+        const empId = shift.employeeId || key;
+        const empName = shift.employeeName || '';
+        const bId = shift.branchId || '';
+        const bName = shift.branchName || '';
+        const bStart = shift.breakStartTime || '';
+
+        console.log(`[Break Monitor] ⚠️ استراحة مفتوحة تجاوزت 180 دقيقة (3 ساعات) للموظف ${empName} (${empId}) - إرسال إنذار واتساب استباقي...`);
+
+        sendBreakTimeoutWarningWhatsAppAlert({
+          employeeId: empId,
+          employeeName: empName,
+          branchId: bId,
+          branchName: bName,
+          breakDurationMins: elapsedMinutes,
+          breakStartTime: bStart
+        }, rawStored).catch(e => console.warn('[Break Monitor WA Warning]:', e.message));
+
+        // بث إشعار لحظي عبر السوكت لكشك الفرع ولوحة الإدارة
+        try {
+          if (io) {
+            io.emit('kiosk:break_warning', {
+              employeeId: empId,
+              employeeName: empName,
+              branchId: bId,
+              elapsedMinutes,
+              breakStartTime: bStart,
+              timestamp: new Date().toISOString()
+            });
+          }
+        } catch {}
+      }
+    }
+
+    if (stateModified) {
+      await saveSettingsToStorage(STORAGE_KEY, rawStored, 'break-monitor-worker');
+    }
+  } catch (err) {
+    console.warn('[Break Monitor Check Error]:', err.message);
+  } finally {
+    isCheckingBreaks = false;
+  }
+}
+
+// تشغيل فاحص الاستراحات المفتوحة كل 60 ثانية 24/7
+setInterval(checkAndAlertUnreturnedBreaks, 60 * 1000);
 
 // ── 8.4. مهمة التنظيف والصيانة التلقائية لقاعدة البيانات (Automated 24/7 Maintenance Worker) ──
 async function runDatabaseMaintenance() {

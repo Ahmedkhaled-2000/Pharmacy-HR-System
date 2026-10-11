@@ -3,6 +3,8 @@
  * طباعة إيصال استلام حراري (80mm / 58mm) لعمليات شحن وسحب محفظة العميل
  */
 
+import { getEffectiveOrgLogo, getEffectiveOrgName } from './outstockLogoHelper.js';
+
 export function printCustomerWalletReceipt({
   receiptNumber,
   customer,
@@ -17,6 +19,8 @@ export function printCustomerWalletReceipt({
   notes = '',
   date = new Date()
 }) {
+  const orgLogo = getEffectiveOrgLogo();
+  const orgName = getEffectiveOrgName('مجموعة صيدليات د. سيف الدين');
   const isDeposit = transactionType === 'deposit' || transactionType === 'refund_to_wallet';
   const typeLabel = isDeposit ? 'سند إيداع نقدي بالمحفظة' : 'سند صرف / خصم من المحفظة';
   const amountFormatted = Number(amount).toFixed(2);
@@ -153,7 +157,8 @@ export function printCustomerWalletReceipt({
 </head>
 <body>
   <div class="header">
-    <h1>مجموعة صيدليات د. سيف الدين</h1>
+    ${orgLogo ? `<div style="text-align: center; margin-bottom: 6px;"><img src="${orgLogo}" alt="Logo" style="max-height: 48px; max-width: 140px; object-fit: contain; margin: 0 auto; display: block;" /></div>` : ''}
+    <h1>${orgName}</h1>
     <div class="subtitle">منظومة النواقص والمشتريات الذكية</div>
     <div style="font-size: 12px; font-weight: bold; margin-top: 3px;">${branchName}</div>
     <div class="badge">${typeLabel}</div>
@@ -181,7 +186,7 @@ export function printCustomerWalletReceipt({
   </div>
   <div class="info-row">
     <span>الموظف المسؤول:</span>
-    <strong>${employeeName || 'مسؤول الفرع'} (${employeeCode || '—'})</strong>
+    <strong>${employeeName || 'مسؤول الفرع'}</strong>
   </div>
   <div class="info-row">
     <span>طريقة الدفع:</span>

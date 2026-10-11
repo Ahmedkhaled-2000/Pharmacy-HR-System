@@ -979,7 +979,13 @@ export default function OutstockSystemView({
         return;
       }
 
-      // التنقل بالأسهم بين تبويبات الشريط العلوي والقوائم المنسدلة
+      // التحقق مما إذا كانت هناك أي نافذة منبثقة مفتوحة
+      const isAnyModalOpen = Boolean(document.querySelector('.outstock-modal-backdrop, .modal-backdrop, [role="dialog"], .outstock-modal-panel'));
+      if (isAnyModalOpen) {
+        return;
+      }
+
+      // التنقل بالقوائم المنسدلة فقط بدون تغيير التبويبات بالأسهم
       const activeEl = document.activeElement;
       const isInputFocused = activeEl && (
         activeEl.tagName === 'INPUT' ||
@@ -989,7 +995,7 @@ export default function OutstockSystemView({
       );
 
       if (!isInputFocused) {
-        // التنقل بالقوائم المنسدلة بالأسهم لأعلى ولأسفل
+        // التنقل بالقوائم المنسدلة بالأسهم لأعلى ولأسفل عند فتح قائمة
         const isDropdownOpen = isPharmacyOrdersMenuOpen || isBranchOrdersMenuOpen || isSuppliersMenuOpen || isSettingsMenuOpen;
         if (isDropdownOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
           e.preventDefault();
@@ -1018,24 +1024,6 @@ export default function OutstockSystemView({
               firstDropItem?.focus();
             }, 60);
             return;
-          }
-        }
-
-        // التنقل بالأسهم يميناً ويساراً بين التبويبات العلوية
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-          const navBtns = Array.from(document.querySelectorAll('.outstock-sub-navbar-container .outstock-subnav-btn:not([disabled])'));
-          if (navBtns.length > 0) {
-            e.preventDefault();
-            const currentIdx = navBtns.findIndex(b => b === activeEl || b.classList.contains('is-active'));
-            let nextIdx = 0;
-            // بنية RTL: السهم الأيسر يذهب للتبويب التالي والسهم الأيمن للتبويب السابق
-            if (e.key === 'ArrowLeft') {
-              nextIdx = currentIdx < navBtns.length - 1 ? currentIdx + 1 : 0;
-            } else {
-              nextIdx = currentIdx > 0 ? currentIdx - 1 : navBtns.length - 1;
-            }
-            navBtns[nextIdx]?.focus();
-            navBtns[nextIdx]?.click();
           }
         }
       }

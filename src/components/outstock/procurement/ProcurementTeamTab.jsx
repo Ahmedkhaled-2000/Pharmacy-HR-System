@@ -93,27 +93,35 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
       ]);
       if (teamRes?.success) {
         const normalized = (teamRes.team || [])
-          .filter(m => m.username !== 'admin-stock')
+          .filter(m => {
+            const u = String(m.username || '').toLowerCase();
+            const r = String(m.role || '').toLowerCase();
+            if (u === 'admin-stock' || u === 'procurement_manager' || u === 'procurement-manager' || u === 'manager') return false;
+            if (r === 'procurement_manager' || r === 'outstock_procurement_manager' || r === 'manager') return false;
+            if (m.permissions?.can_manage_team) return false;
+            return true;
+          })
           .map(m => {
             const p = m.permissions || {};
-            const isManager = m.role === 'procurement_manager' || p.can_manage_team === true;
-            const isCosmetics = !isManager && (m.role === 'cosmetics_officer' || p.category_scope === 'cosmetics');
+            const isCosmetics = m.role === 'cosmetics_officer' || p.category_scope === 'cosmetics';
+            const realFullName = m.full_name || m.fullName || m.name || m.username;
             return {
               ...m,
-              role: isManager ? 'procurement_manager' : (isCosmetics ? 'cosmetics_officer' : (m.role || 'procurement_officer')),
+              fullName: realFullName,
+              role: isCosmetics ? 'cosmetics_officer' : (m.role || 'procurement_officer'),
               category_scope: isCosmetics ? 'cosmetics' : (p.category_scope || 'all'),
               allowed_branches: m.assigned_branches || m.allowed_branches || [],
-              can_edit_items: isManager ? true : (p.can_edit_items === true || m.can_edit_items === true),
-              can_view_orders: isManager ? true : (p.can_view_orders !== false && m.can_view_orders !== false),
-              can_change_status: isManager ? true : (p.can_change_status === true || m.can_change_status === true),
-              can_access_suppliers: isManager ? true : (p.can_access_suppliers === true || m.can_access_suppliers === true),
-              can_access_supplier_accounts: isManager ? true : (p.can_access_supplier_accounts === true || m.can_access_supplier_accounts === true),
-              can_access_order_receiving: isManager ? true : (p.can_access_order_receiving === true || m.can_access_order_receiving === true),
-              can_access_supplier_invoices: isManager ? true : (p.can_access_supplier_invoices === true || m.can_access_supplier_invoices === true),
-              can_access_branch_withdrawals: isManager ? true : (p.can_access_branch_withdrawals === true || m.can_access_branch_withdrawals === true),
-              can_access_discounts_comparison: isManager ? true : (p.can_access_discounts_comparison === true || m.can_access_discounts_comparison === true),
-              can_access_order_returns: isManager ? true : (p.can_access_order_returns === true || m.can_access_order_returns === true),
-              can_manage_team: isManager
+              can_edit_items: p.can_edit_items === true || m.can_edit_items === true,
+              can_view_orders: p.can_view_orders !== false && m.can_view_orders !== false,
+              can_change_status: p.can_change_status === true || m.can_change_status === true,
+              can_access_suppliers: p.can_access_suppliers === true || m.can_access_suppliers === true,
+              can_access_supplier_accounts: p.can_access_supplier_accounts === true || m.can_access_supplier_accounts === true,
+              can_access_order_receiving: p.can_access_order_receiving === true || m.can_access_order_receiving === true,
+              can_access_supplier_invoices: p.can_access_supplier_invoices === true || m.can_access_supplier_invoices === true,
+              can_access_branch_withdrawals: p.can_access_branch_withdrawals === true || m.can_access_branch_withdrawals === true,
+              can_access_discounts_comparison: p.can_access_discounts_comparison === true || m.can_access_discounts_comparison === true,
+              can_access_order_returns: p.can_access_order_returns === true || m.can_access_order_returns === true,
+              can_manage_team: false
             };
           });
         setTeamMembers(normalized);
@@ -617,28 +625,35 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                         }}
                       >
                         <td style={{ padding: '12px 14px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                            <span style={{ fontWeight: 'bold', color: '#0f172a' }}>{m.fullName || m.name || m.username}</span>
-                            {m.role === 'procurement_manager' ? (
-                              <span style={{ fontSize: '11px', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '2px 8px', borderRadius: '6px', fontWeight: '800' }}>
-                                👑 مدير إدارة المشتريات
-                              </span>
-                            ) : (m.role === 'cosmetics_officer' || m.category_scope === 'cosmetics') ? (
-                              <span style={{ fontSize: '10.5px', background: '#fce7f3', color: '#be185d', padding: '1px 7px', borderRadius: '6px', fontWeight: '800' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#e0f2fe', color: '#0369a1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '13px' }}>
+                              <User size={16} />
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: '900', fontSize: '13.5px', color: '#0f172a' }}>
+                                {m.fullName || m.name || m.username}
+                              </div>
+                              {m.username && m.username !== m.fullName && (
+                                <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
+                                  اسم المستخدم: @{m.username}
+                                </div>
+                              )}
+                            </div>
+                            {(m.role === 'cosmetics_officer' || m.category_scope === 'cosmetics') ? (
+                              <span style={{ fontSize: '10.5px', background: '#fce7f3', color: '#be185d', padding: '2px 8px', borderRadius: '6px', fontWeight: '800' }}>
                                 💄 مستحضرات تجميل
                               </span>
                             ) : (
-                              <span style={{ fontSize: '10.5px', background: '#e0f2fe', color: '#0369a1', padding: '1px 7px', borderRadius: '6px', fontWeight: '800' }}>
+                              <span style={{ fontSize: '10.5px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '6px', fontWeight: '800' }}>
                                 📦 مشتريات عام
                               </span>
                             )}
                             {m.is_hr_integrated && (
-                              <span style={{ fontSize: '10px', background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', padding: '1px 6px', borderRadius: '6px', fontWeight: 'bold' }}>
-                                🔗 موظف معتمد بالنظام
+                              <span style={{ fontSize: '10px', background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', padding: '2px 7px', borderRadius: '6px', fontWeight: 'bold' }}>
+                                🔗 موظف معتمد بالمنظومة
                               </span>
                             )}
                           </div>
-                          <div style={{ fontSize: '11px', color: '#0f766e', fontWeight: 'bold' }}>@{m.username}</div>
                         </td>
                         <td style={{ padding: '12px 14px', color: '#64748b' }}>{m.phone || '-'}</td>
                         <td style={{ padding: '12px 14px' }}>

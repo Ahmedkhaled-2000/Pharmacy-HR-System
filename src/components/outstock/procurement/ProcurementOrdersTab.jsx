@@ -28,6 +28,7 @@ import {
 import { exportProcurementOrdersExcel } from '../../../utils/outstockExcelExporter';
 import OutstockConfirmModal from '../common/OutstockConfirmModal';
 import CosmeticsProductModal from '../common/CosmeticsProductModal';
+import ItemUnavailabilityModal from './ItemUnavailabilityModal';
 import { getSocket } from '../../../utils/socketClient';
 
 /**
@@ -42,7 +43,7 @@ import { getSocket } from '../../../utils/socketClient';
  * - نافذة تأكيد منبثقة احترافية بدلاً من window.confirm
  * - مزامنة لحظية فورية عبر WebSockets عند تسجيل أي طلب بالفرع
  */
-export default function ProcurementOrdersTab({ showToast, categoryScope = null }) {
+export default function ProcurementOrdersTab({ showToast, categoryScope = null, currentUser = null }) {
   const [aggregatedData, setAggregatedData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
@@ -53,6 +54,9 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
   const [previewOrderImageUrl, setPreviewOrderImageUrl] = useState(null);
   const [previewOrderImageTitle, setPreviewOrderImageTitle] = useState('');
   const [selectedCosmeticsItem, setSelectedCosmeticsItem] = useState(null);
+
+  // حالة نافذة شطب الصنف وسبب عدم التوفر والبدائل الذكية
+  const [unavailabilityModalItem, setUnavailabilityModalItem] = useState(null);
 
   // حالة نافذة تعديل كمية الصنف وملاحظات المشتريات (المتطلب 20)
   const [adjustingItemModalData, setAdjustingItemModalData] = useState(null);
@@ -154,7 +158,7 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
     };
   }, [fetchAggregatedOrders]);
 
-  // استخراج قائمة الفروع الفريدة
+  // استخراج قائمة الفروع الفريدة مع عزل الفروع لمسؤولي المشتريات المحددين
   const branchesList = useMemo(() => {
     const map = new Map();
     aggregatedData.forEach(item => {
@@ -162,31 +166,73 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
         map.set(item.branch_id, item.branch_name || item.branch_id);
       }
     });
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [aggregatedData]);
+    let list = Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+    if (Array.isArray(currentUser?.allowedBranches) && currentUser.allowedBranches.length > 0) {
+      list = list.filter(b => currentUser.allowedBranches.includes(b.id));
+    }
+    return list;
+  }, [aggregatedData, currentUser]);
 
   // تعيين قرار لصنف معين
-  const handleSetDecision = (key, action) => {
+  const handleSetDecision = (key, action, item) => {
+    if (action === 'unavailable') {
+      setUnavailabilityModalItem(item);
+      return;
+    }
     setDecisions(prev => ({
       ...prev,
       [key]: prev[key] === action ? undefined : action
     }));
   };
 
+  // تأكيد شطب الصنف غير المتوفر مع حفظ السبب واقتراح البدائل الذكية
+  const handleConfirmUnavailability = async ({ reason, substitutes }) => {
+    if (!unavailabilityModalItem) return;
+    setIsProcessing(true);
+    try {
+      const res = await outstockProcurementItemAction({
+        branchId: unavailabilityModalItem.branch_id,
+        medicationName: unavailabilityModalItem.medication_name,
+        unitType: unavailabilityModalItem.unit_type,
+        action: 'unavailable',
+        notes: reason,
+        substitutes: substitutes,
+        itemIds: (unavailabilityModalItem.item_details || []).map(d => d.itemId)
+      });
+
+      if (res?.success) {
+        showToast?.(`✅ تم شطب الصنف وتسجيل سبب عدم التوفر وإرسال البدائل لواتساب الفرع بنجاح`);
+        setUnavailabilityModalItem(null);
+        fetchAggregatedOrders();
+      } else {
+        showToast?.(`⚠️ ${res?.error || 'تعذر شطب الصنف'}`);
+      }
+    } catch (err) {
+      showToast?.('حدث خطأ أثناء حفظ القرار');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // إرسال قرار فردي فوري بنافذة تأكيد منبثقة
   const handleQuickAction = (item, action) => {
+    if (action === 'unavailable') {
+      setUnavailabilityModalItem(item);
+      return;
+    }
+
     const isAvailable = action === 'available';
-    const actionLabel = isAvailable ? 'توفير الصنف وشحنه لرصيد الفرع' : 'تحديد الصنف كغير متوفر وشطبه من الفواتير';
+    const actionLabel = 'توفير الصنف وشحنه لرصيد الفرع';
     const unitLabel = item.unit_type === 'strip' ? 'شريط' : 'علبة';
 
     setConfirmConfig({
       isOpen: true,
-      title: isAvailable ? 'تأكيد توفير الصنف بالفرع' : 'تأكيد عدم توفر الصنف بالسوق',
+      title: 'تأكيد توفير الصنف بالفرع',
       message: `هل أنت متأكد من ${actionLabel}؟ سيتم تحديث رصيد الفرع وفواتير العملاء ومزامنتها لحظياً.`,
-      iconType: isAvailable ? 'success' : 'danger',
-      confirmText: isAvailable ? 'نعم، تم التوفير والشحن' : 'نعم، غير متوفر (شطب)',
+      iconType: 'success',
+      confirmText: 'نعم، تم التوفير والشحن',
       cancelText: 'تراجع',
-      confirmBtnStyle: isAvailable ? 'success' : 'danger',
+      confirmBtnStyle: 'success',
       badge: `${item.total_requested_qty} ${unitLabel}`,
       details: [
         { label: 'الصنف', value: item.medication_name },
@@ -374,9 +420,9 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
     }
   };
 
-  // تطبيق الفلاتر
+  // تطبيق الفلاتر وترتيب الطلبات من الأحدث إلى الأقدم
   const filteredItems = useMemo(() => {
-    return aggregatedData.filter(item => {
+    const items = aggregatedData.filter(item => {
       if (selectedBranchId !== 'all' && item.branch_id !== selectedBranchId) {
         return false;
       }
@@ -387,6 +433,17 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
         return med.includes(q) || bName.includes(q);
       }
       return true;
+    });
+
+    return items.sort((a, b) => {
+      const getLatest = (it) => {
+        if (Array.isArray(it.item_details) && it.item_details.length > 0) {
+          const times = it.item_details.map(d => new Date(d.createdAt || d.sentToProcurementAt || 0).getTime());
+          return Math.max(...times);
+        }
+        return 0;
+      };
+      return getLatest(b) - getLatest(a);
     });
   }, [aggregatedData, selectedBranchId, searchQuery]);
 
@@ -859,7 +916,7 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
                           <button
                             type="button"
                             className={`outstock-btn ${decision === 'unavailable' ? 'outstock-btn-danger' : 'outstock-btn-secondary'}`}
-                            onClick={() => handleSetDecision(key, 'unavailable')}
+                            onClick={() => handleSetDecision(key, 'unavailable', item)}
                             style={{
                               padding: '6px 12px',
                               fontSize: '12px',
@@ -1294,6 +1351,15 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null }
           </div>
         </div>
       )}
+
+      {/* ── نافذة شطب الصنف وتحديد سبب عدم التوفر والبدائل الذكية (DrugEye) ── */}
+      <ItemUnavailabilityModal
+        isOpen={Boolean(unavailabilityModalItem)}
+        item={unavailabilityModalItem}
+        onClose={() => setUnavailabilityModalItem(null)}
+        onConfirm={handleConfirmUnavailability}
+        isProcessing={isProcessing}
+      />
     </div>
   );
 }

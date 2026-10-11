@@ -182,6 +182,11 @@ export default function PharmacyComplaintsTab({ branchId, branch, currentPharmac
                       <span style={{ background: c.complaint_type === 'delayed_response' ? '#fee2e2' : '#fef3c7', color: c.complaint_type === 'delayed_response' ? '#991b1b' : '#92400e', fontSize: '11.5px', padding: '2px 8px', borderRadius: '6px', fontWeight: 800 }}>
                         {c.complaint_type === 'delayed_response' ? '⏳ تأخر رد المشتريات' : '⚠️ الصنف لم يتوفر رغم الموافقة'}
                       </span>
+                      {c.medication_name && (
+                        <span style={{ background: '#ede9fe', color: '#6d28d9', fontSize: '11.5px', padding: '2px 8px', borderRadius: '6px', fontWeight: 800, border: '1px solid #ddd6fe' }}>
+                          💊 الصنف: {c.medication_name}
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
                       تاريخ رفع الشكوى: {new Date(c.created_at).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' })} • الصيدلي: {c.pharmacist_name || 'صيدلي الفرع'}

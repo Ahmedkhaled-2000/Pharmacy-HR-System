@@ -132,6 +132,8 @@ export async function outstockSaveUser(userData) {
 export async function outstockGetCustomers(params = {}) {
   const qs = new URLSearchParams();
   if (params.search) qs.append('search', params.search);
+  if (params.productSearch) qs.append('productSearch', params.productSearch);
+  if (params.category_scope) qs.append('category_scope', params.category_scope);
   if (params.branchId) qs.append('branchId', params.branchId);
 
   const res = await outstockRequest(`customers?${qs.toString()}`, { method: 'GET' });

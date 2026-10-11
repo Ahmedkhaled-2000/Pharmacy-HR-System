@@ -53,9 +53,35 @@ export function playNotificationChime() {
   }
 }
 
+/**
+ * 🎙️ المساعد الصوتي التفاعلي لكشك البصمة الذكي
+ * ينطق التوجيهات والتأكيدات باللغة العربية بوضوح تام لضمان ثقة الموظف في نتيجة البصمة
+ */
+export function speakKioskPrompt(text, lang = 'ar-SA') {
+  try {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel(); // إلغاء أي نطق سابق
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = lang;
+    utterance.rate = 1.05;
+    utterance.pitch = 1.0;
+
+    const voices = window.speechSynthesis.getVoices() || [];
+    const arabicVoice = voices.find(v => v.lang && (v.lang.startsWith('ar') || v.lang.includes('AR')));
+    if (arabicVoice) {
+      utterance.voice = arabicVoice;
+    }
+
+    window.speechSynthesis.speak(utterance);
+  } catch {
+    // Non-blocking fallback
+  }
+}
+
 // Ensure global attachment to window
 if (typeof window !== 'undefined') {
   window.playNotificationChime = playNotificationChime;
   window.playFingerprintChime = playFingerprintChime;
+  window.speakKioskPrompt = speakKioskPrompt;
 }
 

@@ -723,6 +723,8 @@ export async function initOutstockTables(db) {
         ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS procurement_responder_name VARCHAR(128);
         ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS owner_reply TEXT;
         ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS owner_replied_at TIMESTAMPTZ;
+        ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS item_id VARCHAR(64);
+        ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS medication_name VARCHAR(255);
 
         -- 1. ترقية جدول العملاء لدعم الخصم التلقائي المشروط
         ALTER TABLE public.outstock_customers ADD COLUMN IF NOT EXISTS discount_type VARCHAR(20) DEFAULT 'none';
@@ -1066,6 +1068,26 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         } catch (bErr) {
           console.warn('[Outstock authMiddleware Branch Enrich Err]:', bErr.message);
           payload.branchId = payload.id;
+        }
+      }
+
+      // إثراء الفروع المصرح بها لأعضاء المشتريات إن وجدت
+      const normRole = String(payload.role || '').replace('outstock_', '');
+      const isExecutive = normRole === 'owner' || normRole === 'procurement_manager' || payload.username === 'saif' || payload.username === 'admin-stock';
+      if (!isExecutive) {
+        if (!Array.isArray(payload.allowedBranches) || payload.allowedBranches.length === 0) {
+          try {
+            const baRes = await db.query('SELECT branch_id FROM public.outstock_user_branch_access WHERE user_id = $1', [payload.id]);
+            if (baRes.rows.length > 0) {
+              payload.allowedBranches = baRes.rows.map(r => r.branch_id);
+            } else if (payload.branch_id || payload.branchId) {
+              payload.allowedBranches = [payload.branch_id || payload.branchId];
+            } else if (payload.permissions?.assignedBranchIds && Array.isArray(payload.permissions.assignedBranchIds) && payload.permissions.assignedBranchIds.length > 0) {
+              payload.allowedBranches = payload.permissions.assignedBranchIds;
+            } else if (payload.permissions?.allowed_branches && Array.isArray(payload.permissions.allowed_branches) && payload.permissions.allowed_branches.length > 0) {
+              payload.allowedBranches = payload.permissions.allowed_branches;
+            }
+          } catch (_) {}
         }
       }
 
@@ -1424,16 +1446,28 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     }
   });
 
-  // استرجاع المثائل والبدائل الدوائية المتاحة بنفس المادة الفعالة
+  // استرجاع المثائل والبدائل الدوائية المتاحة بنفس المادة الفعالة (بالمادة الفعالة أو الاسم التجاري)
   app.get('/api/outstock/medications/substitutes', async (req, res) => {
     try {
-      const generic = String(req.query.generic || '').trim();
+      let queryName = String(req.query.generic || req.query.name || req.query.medicationName || '').trim();
       const excludeId = req.query.excludeId || null;
-      if (!generic) {
+      if (!queryName) {
         return res.json({ success: true, substitutes: [] });
       }
 
-      const substitutes = await getDrugEyeSubstitutes(db, generic, excludeId);
+      let substitutes = await getDrugEyeSubstitutes(db, queryName, excludeId);
+      if (substitutes.length === 0) {
+        // محاولة جلب المادة الفعالة من الاسم التجاري للدواء
+        const medLook = await db.query(`
+          SELECT generic_name FROM public.outstock_medications
+          WHERE trade_name_ar ILIKE $1 OR trade_name_en ILIKE $1
+          LIMIT 1
+        `, [`%${queryName}%`]);
+        if (medLook.rows.length > 0 && medLook.rows[0].generic_name) {
+          substitutes = await getDrugEyeSubstitutes(db, medLook.rows[0].generic_name, excludeId);
+        }
+      }
+
       res.json({ success: true, substitutes });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
@@ -1967,10 +2001,20 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   // ───────────────────────────────────────────────────────────────────────────
   app.get('/api/outstock/customers', authMiddleware, async (req, res) => {
     try {
-      const { search, branchId } = req.query;
+      const { search, branchId, productSearch, itemType } = req.query;
       let query = `
         SELECT c.*, b.name as branch_name,
-               (SELECT COUNT(*) FROM public.outstock_orders o WHERE o.customer_id = c.id) as real_orders_count
+               (SELECT COUNT(*) FROM public.outstock_orders o WHERE o.customer_id = c.id) as real_orders_count,
+               (
+                 SELECT COALESCE(json_agg(DISTINCT json_build_object(
+                   'name', oi.medication_name,
+                   'itemType', COALESCE(oi.item_type, 'medication'),
+                   'status', oi.item_status
+                 )), '[]')
+                 FROM public.outstock_orders o2
+                 JOIN public.outstock_order_items oi ON o2.id = oi.order_id
+                 WHERE o2.customer_id = c.id
+               ) as requested_products
         FROM public.outstock_customers c
         LEFT JOIN public.outstock_branches b ON c.primary_branch_id = b.id
         WHERE 1=1
@@ -1979,15 +2023,42 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       if (search && String(search).trim()) {
         params.push(`%${String(search).trim()}%`);
-        query += ` AND (c.full_name ILIKE $${params.length} OR c.whatsapp_phone ILIKE $${params.length} OR c.customer_code ILIKE $${params.length})`;
+        const sParam = params.length;
+        query += ` AND (
+          c.full_name ILIKE $${sParam} OR c.whatsapp_phone ILIKE $${sParam} OR c.customer_code ILIKE $${sParam}
+          OR EXISTS (
+            SELECT 1 FROM public.outstock_orders o_s
+            JOIN public.outstock_order_items oi_s ON o_s.id = oi_s.order_id
+            WHERE o_s.customer_id = c.id AND oi_s.medication_name ILIKE $${sParam}
+          )
+        )`;
       }
 
-      if (branchId) {
+      if (productSearch && String(productSearch).trim()) {
+        params.push(`%${String(productSearch).trim()}%`);
+        const psParam = params.length;
+        query += ` AND EXISTS (
+          SELECT 1 FROM public.outstock_orders o_ps
+          JOIN public.outstock_order_items oi_ps ON o_ps.id = oi_ps.order_id
+          WHERE o_ps.customer_id = c.id AND oi_ps.medication_name ILIKE $${psParam}
+        )`;
+      }
+
+      if (branchId && branchId !== 'all') {
         params.push(branchId);
         query += ` AND c.primary_branch_id = $${params.length}`;
       }
 
-      query += ' ORDER BY c.created_at DESC LIMIT 200';
+      if (itemType) {
+        params.push(itemType);
+        query += ` AND EXISTS (
+          SELECT 1 FROM public.outstock_orders o_it
+          JOIN public.outstock_order_items oi_it ON o_it.id = oi_it.order_id
+          WHERE o_it.customer_id = c.id AND oi_it.item_type = $${params.length}
+        )`;
+      }
+
+      query += ' ORDER BY c.created_at DESC LIMIT 300';
       const result = await db.query(query, params);
       res.json({ success: true, customers: result.rows });
     } catch (err) {
@@ -2230,13 +2301,27 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         // استبعاد الطلبات المحولة بين الفروع من طلبات الفرع العادية
         query += ` AND (o.delivery_type <> 'other_branch_pickup' OR o.delivery_type IS NULL)`;
         // إذا كان المستخدم فرع صيدلية فيرى طلبات فرعه فقط
-        if (req.outstockUser.role === 'outstock_branch' || req.outstockUser.role === 'branch') {
+        const userRoleNorm = String(req.outstockUser.role || '').replace('outstock_', '');
+        const isBranchUser = userRoleNorm === 'branch';
+        const isRestrictedOfficer = (userRoleNorm === 'procurement_officer' || userRoleNorm === 'procurement' || userRoleNorm === 'cosmetics_officer') &&
+                                    Array.isArray(req.outstockUser.allowedBranches) && req.outstockUser.allowedBranches.length > 0;
+
+        if (isBranchUser) {
           params.push(req.outstockUser.branchId || req.outstockUser.id);
           query += ` AND o.branch_id = $${params.length}`;
-        } else if ((req.outstockUser.role === 'procurement_officer' || req.outstockUser.role === 'procurement') && Array.isArray(req.outstockUser.allowedBranches) && req.outstockUser.allowedBranches.length > 0) {
+        } else if (isRestrictedOfficer) {
           // موظف مشتريات محدد بفروع معينة
-          params.push(req.outstockUser.allowedBranches);
-          query += ` AND o.branch_id = ANY($${params.length}::text[])`;
+          if (branchId && branchId !== 'all') {
+            if (req.outstockUser.allowedBranches.includes(branchId)) {
+              params.push(branchId);
+              query += ` AND o.branch_id = $${params.length}`;
+            } else {
+              query += ` AND 1=0`;
+            }
+          } else {
+            params.push(req.outstockUser.allowedBranches);
+            query += ` AND o.branch_id = ANY($${params.length}::text[])`;
+          }
         } else if (branchId && branchId !== 'all') {
           params.push(branchId);
           query += ` AND o.branch_id = $${params.length}`;
@@ -4863,7 +4948,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   app.post('/api/outstock/orders/:id/complaint', authMiddleware, async (req, res) => {
     try {
       const orderId = req.params.id;
-      const { complaintType, notes, pharmacistName } = req.body || {};
+      const { complaintType, notes, pharmacistName, itemId, medicationName, itemName } = req.body || {};
 
       if (!complaintType) {
         return res.status(400).json({ success: false, error: 'نوع الشكوى مطلوب' });
@@ -4888,17 +4973,25 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       // جلب أصناف الطلب لإرفاقها في الشكوى
       const itemsRes = await db.query(`
-        SELECT medication_name, unit_type, quantity, item_status, procurement_notes
+        SELECT id, medication_name, unit_type, quantity, item_status, procurement_notes
         FROM public.outstock_order_items
         WHERE order_id = $1
       `, [orderId]);
+
+      // تحديد الصنف الخاص بالشكوى إن وُجد
+      let specificMedicationName = medicationName || itemName || null;
+      let specificItemId = itemId || null;
+      if (specificItemId && !specificMedicationName) {
+        const matchedItem = itemsRes.rows.find(it => String(it.id) === String(specificItemId));
+        if (matchedItem) specificMedicationName = matchedItem.medication_name;
+      }
 
       // إدراج الشكوى
       await db.query(`
         INSERT INTO public.outstock_order_complaints (
           id, order_id, order_number, branch_id, branch_name, complaint_type, pharmacist_name,
-          notes, order_created_at, procurement_replied_at, status, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          notes, order_created_at, procurement_replied_at, status, item_id, medication_name, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `, [
         complaintId,
         orderId,
@@ -4909,7 +5002,9 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         reporter,
         notes || null,
         order.created_at,
-        order.procurement_replied_at || null
+        order.procurement_replied_at || null,
+        specificItemId,
+        specificMedicationName
       ]);
 
       // تحديث حالة الطلب بأن عليه شكوى
@@ -4932,6 +5027,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         notes,
         orderCreatedAt: order.created_at,
         procurementRepliedAt: order.procurement_replied_at,
+        itemId: specificItemId,
+        medicationName: specificMedicationName,
         items: itemsRes.rows,
         createdAt: new Date().toISOString()
       };
@@ -5450,10 +5547,20 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const params = [];
 
       // إذا كان مسؤول مشتريات مساعد وله فروع محددة (استثناء المالك ومدير المشتريات العام)
-      const isExecutiveProcurement = user.role === 'owner' || user.role === 'procurement_manager' || user.username === 'admin-stock';
-      if (!isExecutiveProcurement && (user.role === 'procurement' || user.role === 'procurement_officer') && Array.isArray(user.allowedBranches) && user.allowedBranches.length > 0) {
-        params.push(user.allowedBranches);
-        branchFilter = ` AND (CASE WHEN o.delivery_type = 'other_branch_pickup' AND o.delivery_target_branch_id IS NOT NULL THEN o.delivery_target_branch_id ELSE o.branch_id END) = ANY($1)`;
+      const userRoleNorm = String(user.role || '').replace('outstock_', '');
+      const isExecutiveProcurement = userRoleNorm === 'owner' || userRoleNorm === 'procurement_manager' || user.username === 'admin-stock';
+      if (!isExecutiveProcurement && (userRoleNorm === 'procurement' || userRoleNorm === 'procurement_officer' || userRoleNorm === 'cosmetics_officer') && Array.isArray(user.allowedBranches) && user.allowedBranches.length > 0) {
+        if (req.query.branchId && req.query.branchId !== 'all') {
+          if (user.allowedBranches.includes(req.query.branchId)) {
+            params.push(req.query.branchId);
+            branchFilter = ` AND (CASE WHEN o.delivery_type = 'other_branch_pickup' AND o.delivery_target_branch_id IS NOT NULL THEN o.delivery_target_branch_id ELSE o.branch_id END) = $${params.length}`;
+          } else {
+            branchFilter = ` AND 1=0`;
+          }
+        } else {
+          params.push(user.allowedBranches);
+          branchFilter = ` AND (CASE WHEN o.delivery_type = 'other_branch_pickup' AND o.delivery_target_branch_id IS NOT NULL THEN o.delivery_target_branch_id ELSE o.branch_id END) = ANY($${params.length})`;
+        }
       } else if (req.query.branchId && req.query.branchId !== 'all') {
         params.push(req.query.branchId);
         branchFilter = ` AND (CASE WHEN o.delivery_type = 'other_branch_pickup' AND o.delivery_target_branch_id IS NOT NULL THEN o.delivery_target_branch_id ELSE o.branch_id END) = $${params.length}`;
@@ -5531,7 +5638,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
                    THEN COALESCE(tb.name, o.delivery_target_branch, b.name) 
                    ELSE b.name 
                  END
-        ORDER BY total_requested_qty DESC
+        ORDER BY MAX(o.created_at) DESC, total_requested_qty DESC
       `;
 
       const result = await db.query(query, params);
@@ -5549,14 +5656,14 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         return res.status(403).json({ success: false, error: 'غير مصرح - ليس لديك صلاحية اتخاذ قرار بشأن الأصناف' });
       }
 
-      const { branchId, medicationName, unitType, action, notes, itemIds, modifiedQuantity, itemAdjustments } = req.body || {};
+      const { branchId, medicationName, unitType, action, notes, itemIds, modifiedQuantity, itemAdjustments, substitutes } = req.body || {};
       // action: 'available' أو 'unavailable'
 
       if (!branchId || !medicationName || !action) {
         return res.status(400).json({ success: false, error: 'الفرع واسم الصنف والإجراء مطلوبان' });
       }
 
-      const replierName = req.outstockUser.full_name || req.outstockUser.username || 'مسؤول المشتريات';
+      const replierName = await resolveEmployeeCleanName(db, req.outstockUser, 'إدارة المشتريات والتوريدات');
 
       const actionResult = await executeSingleItemProcurementAction(db, {
         branchId,
@@ -5567,7 +5674,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         itemIds,
         modifiedQuantity,
         itemAdjustments,
-        replierName
+        replierName,
+        substitutes: Array.isArray(substitutes) ? substitutes : []
       });
 
       if (!actionResult.success) {
@@ -5644,7 +5752,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         return res.status(400).json({ success: false, error: 'قائمة القرارات مطلوبة' });
       }
 
-      const replierName = req.outstockUser.full_name || req.outstockUser.username || 'مسؤول المشتريات';
+      const replierName = await resolveEmployeeCleanName(db, req.outstockUser, 'إدارة المشتريات والتوريدات');
       const allAffectedBranchIds = new Set();
       // تجميع البنود لكل فرع لإرسال رسالة واتساب واحدة موحدة لكل صيدلية
       const branchSummaryMap = new Map();
@@ -5663,7 +5771,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           itemIds: act.itemIds || null,
           modifiedQuantity: act.modifiedQuantity || null,
           itemAdjustments: act.itemAdjustments || null,
-          replierName
+          replierName,
+          substitutes: Array.isArray(act.substitutes) ? act.substitutes : []
         });
 
         if (actionResult.success) {
@@ -6015,10 +6124,52 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       broadcastOutstock('outstock:item_restocked', restockPayload);
       broadcastOutstock('outstock:unavailable_items_updated', restockPayload);
 
+      // 📱 إرسال رسالة واتساب تلقائية إلى الصيدلية التي طلبت هذا الصنف مسبقاً (المتطلب 8)
+      try {
+        const cleanReplier = await resolveEmployeeCleanName(db, req.outstockUser, 'إدارة المشتريات والتوريدات');
+        const targetBranches = new Set();
+        if (branchId && branchId !== 'all') targetBranches.add(branchId);
+
+        // جلب كافة الفروع الأخرى المسجلة لنفس الصنف في النواقص
+        const brRes = await db.query(`
+          SELECT DISTINCT branch_id FROM public.outstock_deficiencies
+          WHERE LOWER(medication_name) = LOWER($1) AND unit_type = $2 AND branch_id <> 'all'
+        `, [medicationName, unitType || 'pack']);
+        brRes.rows.forEach(r => {
+          if (r.branch_id) targetBranches.add(r.branch_id);
+        });
+
+        for (const bId of targetBranches) {
+          const branchInfo = await getBranchContactInfo(db, bId);
+          if (branchInfo.phone) {
+            const dateStr = new Date().toLocaleDateString('ar-EG');
+            const timeStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+            const unitName = unitType === 'strip' ? 'شريط' : 'علبة';
+
+            const restockMsg = `🔔 *إشعار إعادة توفير صنف ناقص من إدارة المشتريات*\n` +
+              `🏢 *صيدلية:* ${branchInfo.name}\n` +
+              `💊 *الصنف:* ${medicationName}\n` +
+              `📦 *الوحدة:* (${unitName})\n` +
+              `👤 *المسؤول:* ${cleanReplier}\n` +
+              `📅 ${dateStr} - ⏰ ${timeStr}\n` +
+              `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `تحية طيبة زملاءنا الأعزاء،\n` +
+              `نفيدكم بأنه قد تم إعادة توفير الصنف المذكور أعلاه في المستودعات والأسواق بعد أن كان مسجلاً كـ "غير متوفر" في طلبات فرعكم سابقاً.\n` +
+              (waitingCustomers.length > 0 ? `👥 يوجد (${waitingCustomers.length}) عميل مسجل بانتظار هذا الصنف بفرعكم.\n` : '') +
+              `يرجى فتح شاشة الأصناف المعاد توفيرها بالمنظومة لمراجعة القائمة والتواصل مع العملاء لحجز وصرف طلباتهم.\n` +
+              `مع تحيات إدارة المشتريات والتوريدات 🌸`;
+
+            await sendGenericOutstockWhatsApp({ phone: branchInfo.phone, message: restockMsg });
+          }
+        }
+      } catch (waErr) {
+        console.warn('[Notify Restocked WA Error]:', waErr.message);
+      }
+
       res.json({
         success: true,
         waitingCustomers,
-        message: 'تم إشعار الفرع بنجاح واسترجاع بيانات العملاء للتواصل معهم'
+        message: 'تم إشعار الفرع بنجاح واسترجاع بيانات العملاء للتواصل معهم وإرسال رسالة الواتساب للفرع'
       });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
@@ -6425,21 +6576,23 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
                COALESCE(json_agg(ba.branch_id) FILTER (WHERE ba.branch_id IS NOT NULL), '[]') as assigned_branches
         FROM public.outstock_users u
         LEFT JOIN public.outstock_user_branch_access ba ON u.id = ba.user_id
-        WHERE u.role IN ('procurement_manager', 'procurement_officer', 'cosmetics_officer', 'procurement') AND u.username <> 'admin-stock'
+        WHERE u.role IN ('procurement_officer', 'cosmetics_officer', 'procurement') 
+          AND u.role <> 'procurement_manager' 
+          AND u.username <> 'admin-stock'
         GROUP BY u.id, u.username, u.full_name, u.role, u.phone, u.is_active, u.permissions, u.created_at
         ORDER BY u.created_at ASC
       `);
 
       let team = [...usersRes.rows];
 
-      // دمج موظفي الموارد البشرية الحاصلين على صلاحية إدارة أو فريق المشتريات ومستحضرات التجميل
+      // دمج موظفي الموارد البشرية الحاصلين على صلاحية فريق المشتريات ومستحضرات التجميل (مع استبعاد مدير المشتريات)
       try {
         const settings = await getSafeHrSettings();
         const org = settings?.orgSettings || {};
         const empAccessMap = org.employeeUnifiedAccess || {};
         const emps = settings?.employees || [];
 
-        const validProcurementRoles = ['procurement_team', 'procurement_officer', 'procurement_manager', 'cosmetics_officer'];
+        const validProcurementRoles = ['procurement_team', 'procurement_officer', 'cosmetics_officer'];
 
         for (const [empId, acc] of Object.entries(empAccessMap)) {
           if (!acc || acc.isEnabled === false) continue;
@@ -6447,7 +6600,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           if (!outstockPerm?.enabled) continue;
 
           const rawRole = outstockPerm.role;
-          if (!validProcurementRoles.includes(rawRole)) continue;
+          if (!validProcurementRoles.includes(rawRole) || rawRole === 'procurement_manager') continue;
 
           const empObj = emps.find(e => String(e.id) === String(empId) || String(e.code) === String(empId));
           const empName = empObj?.name || empObj?.fullName || `موظف #${empId}`;
@@ -6462,9 +6615,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
             (m.full_name && empName && m.full_name.trim().toLowerCase() === empName.trim().toLowerCase())
           );
 
-          const role = rawRole === 'procurement_manager' ? 'procurement_manager' : (
-            rawRole === 'cosmetics_officer' ? 'cosmetics_officer' : 'procurement_officer'
-          );
+          const role = rawRole === 'cosmetics_officer' ? 'cosmetics_officer' : 'procurement_officer';
 
           const assignedBranches = outstockPerm.assignedBranchIds ||
             (outstockPerm.assignedBranchId && outstockPerm.assignedBranchId !== 'all' && outstockPerm.assignedBranchId !== 'ALL'
@@ -6493,13 +6644,13 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
               can_view_orders: customPerms.can_view_orders !== false,
               can_change_status: customPerms.can_change_status !== undefined ? Boolean(customPerms.can_change_status) : true,
               can_access_suppliers: customPerms.can_access_suppliers !== undefined ? Boolean(customPerms.can_access_suppliers) : true,
-              can_access_supplier_accounts: role === 'procurement_manager' || Boolean(customPerms.can_access_supplier_accounts),
+              can_access_supplier_accounts: false,
               can_access_order_receiving: customPerms.can_access_order_receiving !== undefined ? Boolean(customPerms.can_access_order_receiving) : true,
-              can_access_supplier_invoices: role === 'procurement_manager' || Boolean(customPerms.can_access_supplier_invoices),
-              can_access_branch_withdrawals: role === 'procurement_manager' || Boolean(customPerms.can_access_branch_withdrawals),
-              can_access_discounts_comparison: role === 'procurement_manager' || Boolean(customPerms.can_access_discounts_comparison),
+              can_access_supplier_invoices: false,
+              can_access_branch_withdrawals: false,
+              can_access_discounts_comparison: false,
               can_access_order_returns: Boolean(customPerms.can_access_order_returns),
-              can_manage_team: role === 'procurement_manager',
+              can_manage_team: false,
               category_scope: role === 'cosmetics_officer' ? 'cosmetics' : 'all'
             },
             created_at: acc.updatedAt || new Date().toISOString()
@@ -6517,6 +6668,18 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         }
       } catch (hrMergeErr) {
         console.warn('[Procurement Team HR Merge Warn]:', hrMergeErr.message);
+      }
+
+      // استبعاد أي حساب مدير مشتريات أو حساب إداري من صفحة فريق المشتريات
+      team = team.filter(m => m.role !== 'procurement_manager' && m.username !== 'admin-stock');
+
+      // حل وتأكيد الاسم العربي الكامل الصريح لجميع الأعضاء لإظهار الاسم بدلاً من الكود
+      for (let i = 0; i < team.length; i++) {
+        const m = team[i];
+        if (!m.full_name || /^\d+$/.test(String(m.full_name).trim()) || String(m.full_name).includes('كود')) {
+          const clean = await resolveEmployeeCleanName(db, m.username || m.id, m.full_name || 'مسؤول مشتريات');
+          if (clean) m.full_name = clean;
+        }
       }
 
       res.json({ success: true, team });
@@ -10119,6 +10282,102 @@ async function getBranchContactInfo(db, branchId) {
   return { name: branchName, phone: branchPhone };
 }
 
+async function resolveEmployeeCleanName(db, userOrId, fallback = 'إدارة المشتريات والتوريدات') {
+  if (!userOrId) return fallback;
+  let candidateName = '';
+  let candidateCode = '';
+
+  if (typeof userOrId === 'object') {
+    candidateName = userOrId.full_name || userOrId.fullName || userOrId.name || '';
+    candidateCode = userOrId.username || userOrId.code || userOrId.id || '';
+  } else if (typeof userOrId === 'string') {
+    const s = userOrId.trim();
+    if (/^\d+$/.test(s)) {
+      candidateCode = s;
+    } else {
+      candidateName = s;
+    }
+  }
+
+  // إذا وجد اسم مرشح ولا يقتصر على أرقام الكود فقط
+  if (candidateName && !/^\d+$/.test(candidateName.trim())) {
+    const cleaned = candidateName
+      .replace(/\s*\(?\s*كود\s*:\s*\d+\s*\)?/gi, '')
+      .replace(/\s*\(?\s*\d+\s*\)?$/g, '')
+      .trim();
+    if (cleaned && !/^\d+$/.test(cleaned)) return cleaned;
+  }
+
+  // البحث في موظفي الـ HR عبر جدول app_settings
+  try {
+    const sRes = await db.query("SELECT value_data FROM public.app_settings WHERE key_name = 'pharmacy-tracker-data'");
+    const sData = typeof sRes.rows[0]?.value_data === 'string' ? JSON.parse(sRes.rows[0].value_data) : sRes.rows[0]?.value_data;
+    const emps = Array.isArray(sData?.employees) ? sData.employees : [];
+    const matched = emps.find(e =>
+      String(e.id) === String(candidateCode) ||
+      String(e.code) === String(candidateCode) ||
+      String(e.username) === String(candidateCode) ||
+      (candidateName && (String(e.name) === String(candidateName) || String(e.fullName) === String(candidateName)))
+    );
+    if (matched && (matched.name || matched.fullName)) {
+      const realName = (matched.name || matched.fullName).trim();
+      return realName
+        .replace(/\s*\(?\s*كود\s*:\s*\d+\s*\)?/gi, '')
+        .replace(/\s*\(?\s*\d+\s*\)?$/g, '')
+        .trim();
+    }
+  } catch (_) {}
+
+  // البحث في جدول outstock_users
+  try {
+    const uRes = await db.query(
+      "SELECT full_name FROM public.outstock_users WHERE (id = $1 OR username = $2) AND full_name IS NOT NULL AND full_name <> ''",
+      [candidateCode, candidateCode]
+    );
+    if (uRes.rows.length > 0 && uRes.rows[0].full_name && !/^\d+$/.test(uRes.rows[0].full_name.trim())) {
+      return uRes.rows[0].full_name
+        .replace(/\s*\(?\s*كود\s*:\s*\d+\s*\)?/gi, '')
+        .replace(/\s*\(?\s*\d+\s*\)?$/g, '')
+        .trim();
+    }
+  } catch (_) {}
+
+  return (candidateName && !/^\d+$/.test(candidateName.trim())) ? candidateName : fallback;
+}
+
+async function sendGenericOutstockWhatsApp({ phone, message, sessions = ['procurement', 'hr_main', 'default'] }) {
+  if (!phone || !message) return false;
+  let cleanPhone = String(phone).replace(/\D/g, '');
+  if (cleanPhone.startsWith('01') && cleanPhone.length === 11) cleanPhone = '2' + cleanPhone;
+  if (cleanPhone.length < 10) return false;
+
+  const waUrls = [
+    process.env.WHATSAPP_SERVER_URL,
+    'http://hr-whatsapp-server:3100/send',
+    'http://hr-whatsapp:3100/send',
+    'http://127.0.0.1:3100/send'
+  ].filter(Boolean);
+
+  for (const sId of sessions) {
+    for (const u of waUrls) {
+      try {
+        const bodyPayload = { sessionId: sId, phone: cleanPhone, message };
+        const wRes = await fetch(u, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyPayload),
+          signal: AbortSignal.timeout(6000)
+        });
+        if (wRes.ok) {
+          const resData = await wRes.json().catch(() => ({}));
+          if (resData?.success) return true;
+        }
+      } catch (_) {}
+    }
+  }
+  return false;
+}
+
 async function sendProcurementDecisionWhatsAppToBranch({ db, branchId, replierName, suppliedItems = [], unavailableItems = [], modifiedItems = [], hasPendingItems = false }) {
   try {
     if (suppliedItems.length === 0 && unavailableItems.length === 0 && modifiedItems.length === 0) {
@@ -10142,9 +10401,12 @@ async function sendProcurementDecisionWhatsAppToBranch({ db, branchId, replierNa
     const dateStr = new Date().toLocaleDateString('ar-EG');
     const timeStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
 
+    // استخراج الاسم النظيف للمسؤول بدون أي أكواد
+    const cleanReplier = await resolveEmployeeCleanName(db, replierName, 'إدارة المشتريات والتوريدات');
+
     let msg = `📋 *إشعار قرارات إدارة المشتريات والتوريدات*\n` +
       `🏢 *صيدلية:* ${branchInfo.name}\n` +
-      `👤 *المسؤول:* ${replierName || 'إدارة المشتريات'}\n` +
+      `👤 *المسؤول:* ${cleanReplier}\n` +
       `📅 ${dateStr} - ⏰ ${timeStr}\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `تحية طيبة زملاءنا الأفاضل،\n` +
@@ -10181,6 +10443,16 @@ async function sendProcurementDecisionWhatsAppToBranch({ db, branchId, replierNa
         const orderTxt = it.orderNumber ? ` [طلب #${it.orderNumber}]` : '';
         const notesTxt = it.notes ? ` (${it.notes})` : '';
         msg += `  ${idx + 1}. *${it.medicationName}* - الكمية: (${it.quantity} ${unit})${orderTxt}${notesTxt}\n`;
+
+        // إرفاق البدائل الذكية المقترحة لواتساب الفرع فقط (لتوجيه الصيادلة)
+        if (Array.isArray(it.substitutes) && it.substitutes.length > 0) {
+          msg += `     • 🔄 *البدائل والمثائل المقترحة بالأسواق (للصيدلية فقط):*\n`;
+          it.substitutes.forEach((sub) => {
+            const sName = typeof sub === 'object' ? (sub.name || sub.trade_name_ar || sub.trade_name_en || sub.invoice_display_name) : sub;
+            const sPrice = typeof sub === 'object' && sub.price ? ` - السعر: ${sub.price} ج.م` : '';
+            msg += `        - ${sName}${sPrice}\n`;
+          });
+        }
       });
       msg += `\n`;
     }
@@ -10250,7 +10522,8 @@ async function executeSingleItemProcurementAction(db, {
   itemIds = null,
   modifiedQuantity = null,
   itemAdjustments = null,
-  replierName = 'مسؤول المشتريات'
+  replierName = 'مسؤول المشتريات',
+  substitutes = []
 }) {
   let itemsToUpdate = [];
   if (Array.isArray(itemIds) && itemIds.length > 0) {
@@ -10373,7 +10646,13 @@ async function executeSingleItemProcurementAction(db, {
         supplied.push(itemReportObj);
       }
     } else if (action === 'unavailable') {
-      const finalNotes = notes || 'غير متوفر بالسوق المحلي حالياً';
+      let finalNotes = notes || 'غير متوفر بالسوق المحلي حالياً';
+      if (Array.isArray(substitutes) && substitutes.length > 0) {
+        const subNames = substitutes.map(s => typeof s === 'object' ? (s.name || s.trade_name_ar || s.trade_name_en || s.invoice_display_name) : s).filter(Boolean);
+        if (subNames.length > 0) {
+          finalNotes += ` [البدائل المقترحة: ${subNames.join('، ')}]`;
+        }
+      }
 
       await db.query(`
         UPDATE public.outstock_order_items
@@ -10416,7 +10695,8 @@ async function executeSingleItemProcurementAction(db, {
         medicationName: item.medication_name,
         unitType: item.unit_type,
         quantity: item.quantity,
-        notes: finalNotes
+        notes: finalNotes,
+        substitutes: Array.isArray(substitutes) ? substitutes : []
       });
     }
   }

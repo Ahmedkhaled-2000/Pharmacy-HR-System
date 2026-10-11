@@ -829,6 +829,15 @@ export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShi
           accumulatedPauseMs: s.accumulatedPauseMs || 0,
           updatedAt: Date.now()
         };
+      } else {
+        // إذا كان الموظف موجوداً بالفعل في الذاكرة ولكن سجل الوردية يحمل حالة استراحة حية: نحمي حالة الاستراحة من الضياع
+        const targetKey = merged[empId] ? empId : (empCode && merged[empCode] ? empCode : null);
+        if (targetKey && (s.isPaused || s.isOnBreak) && !merged[targetKey].isPaused) {
+          merged[targetKey].isPaused = true;
+          merged[targetKey].isOnBreak = true;
+          merged[targetKey].pauseStartEpoch = s.pauseStartEpoch || merged[targetKey].pauseStartEpoch || Date.now();
+          merged[targetKey].breakStartTime = s.breakStartTime || merged[targetKey].breakStartTime;
+        }
       }
     }
   }

@@ -217,6 +217,9 @@ export function normalizeRequestType(type) {
   if (['profile_update', 'profile_edit', 'profile_update_request'].includes(clean)) {
     return 'profile_update';
   }
+  if (['forgotten_break', 'break_forgotten', 'break_confirmation', 'نسيان بصمة بريك'].includes(clean)) {
+    return 'forgotten_break';
+  }
   return clean;
 }
 
@@ -240,7 +243,7 @@ export function isDualApprovalRequest(reqOrType, state = null) {
     // Specific rule match
     const matched = rules.find((r) => {
       const rType = normalizeRequestType(r.requestType || r.id?.replace('rule_', ''));
-      return rType === normType || (normType === 'roster_edit' && (r.id === 'rule_roster_edit' || r.requestType === 'roster_update'));
+      return rType === normType || (normType === 'roster_edit' && (r.id === 'rule_roster_edit' || r.requestType === 'roster_update')) || (normType === 'forgotten_break' && r.id === 'rule_forgotten_break');
     });
 
     if (matched) {
@@ -295,6 +298,7 @@ export function isDualApprovalRequest(reqOrType, state = null) {
   // - Bonuses
   // - Overtime hours
   // - Biometric Verification (Photo Punch)
+  // - Forgotten Break Confirmation
   const defaultDualTypes = [
     'roster_edit',
     'leave',
@@ -303,7 +307,8 @@ export function isDualApprovalRequest(reqOrType, state = null) {
     'bonus',
     'overtime',
     'schedule_deviation',
-    'biometric_verification'
+    'biometric_verification',
+    'forgotten_break'
   ];
 
   return defaultDualTypes.includes(normType);
