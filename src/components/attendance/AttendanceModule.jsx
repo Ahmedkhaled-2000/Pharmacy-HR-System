@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
-import { recalculateEmployeeCycleLateness, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
+import { recalculateEmployeeCycleLateness, getEffectiveShiftHours, reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import {
   getEmpDisplayName,
@@ -154,14 +154,14 @@ export default function AttendanceModule({
       const updatedShifts = [newPunch, ...(state.shifts || [])];
       let updatedState = { ...state, shifts: updatedShifts };
       
-      // Auto-recalculate employee lateness occurrences in current cycle
-      const recRes = recalculateEmployeeCycleLateness({
+      // Auto-recalculate employee lateness via unified reconciliation engine
+      const { updatedState: reconState } = reconcileEmployeeScheduleOrPunchChange({
         employeeId: manualEmpId,
         state: updatedState,
-        payrollCycleId: manualDate.slice(0, 7)
+        options: { reason: 'تسجيل بصمة يدوية بالإدارة' }
       });
 
-      const markedIncidents = (recRes.incidents || []).map((inc) => {
+      const markedIncidents = (reconState.lateIncidents || []).map((inc) => {
         if (inc.shiftId === newPunch.id || inc.date === manualDate) {
           return {
             ...inc,
@@ -174,7 +174,7 @@ export default function AttendanceModule({
         return inc;
       });
 
-      const markedRequests = (recRes.updatedRequests || []).map((r) => {
+      const markedRequests = (reconState.requests || []).map((r) => {
         if (r.date === manualDate || r.shiftId === newPunch.id) {
           return {
             ...r,
@@ -188,7 +188,7 @@ export default function AttendanceModule({
       });
 
       updatedState = {
-        ...updatedState,
+        ...reconState,
         lateIncidents: markedIncidents,
         requests: markedRequests
       };

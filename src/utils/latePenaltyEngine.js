@@ -1010,3 +1010,193 @@ export function auditAndCleanFlexibleStaffPenalties(state) {
     notifications: cleanedNotifications
   };
 }
+
+/**
+ * ══════════════════════════════════════════════════════════════════════════════
+ * ⚡ محرك التسوية التفاعلي الذكي اللحظي بين الجداول الشهرية وبصمات الحضور الفعلي
+ * (Bi-Directional Attendance & Roster Reactive Reconciliation Engine)
+ * ══════════════════════════════════════════════════════════════════════════════
+ * يُستدعى تلقائياً عند:
+ *  1. تعديل مواعيد عمل يوم أو شهر كامل في الجدول الشهري للموظف (من الإدارة أو الفرع).
+ *  2. اعتماد أو تعديل طلبات الروستر أو تعديل الورديات أو التبديل.
+ *  3. تعديل بصمة حضور أو انصراف يدوي أو حذفها أو تسجيل بصمة جديدة.
+ *
+ * المنطق الهندسي:
+ *  - يقارن التغيير الحادث في الجدول بمواعيد الحضور الفعلي المسجلة.
+ *  - إذا أصبح الحضور مطابقاً للموعد الجديد (أو كان الفارق ضمن فترة السماح أو أصبح اليوم راحة)، يُلغى جزاء التأخير فوراً وتُصفر دقائق الخصم والمبلغ المالي.
+ *  - تسوية أو إلغاء أي طلبات جزاءات مرتبطة في requests.
+ *  - إعادة احتساب تسلسل تكرار المخالفات (Occurrence Multiplier) لكامل الدورة لضمان عدم مضاعفة الجزاءات لاحقاً بالخطأ.
+ *  - دعم كامل لدورات المرتبات الممتدة بين شهرين (مثل 21 سبتمبر إلى 20 أكتوبر).
+ */
+export function reconcileEmployeeScheduleOrPunchChange({
+  employeeId,
+  changedDates = null,
+  state,
+  options = {}
+}) {
+  if (!employeeId || !state) {
+    return {
+      updatedState: state,
+      summary: { hasChanges: false, waivedDeductionMinutes: 0, waivedAmount: 0, eliminatedIncidentsCount: 0 }
+    };
+  }
+
+  const empIdStr = String(employeeId);
+  const emp = (state.employees || []).find((e) => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
+  if (!emp) {
+    return {
+      updatedState: state,
+      summary: { hasChanges: false, waivedDeductionMinutes: 0, waivedAmount: 0, eliminatedIncidentsCount: 0 }
+    };
+  }
+
+  // 1. حساب دقائق الخصم والمبالغ السابقة لهذا الموظف قبل التسوية
+  let prevDedMins = 0;
+  let prevMoney = 0;
+  const prevEmpIncidents = (state.lateIncidents || []).filter(
+    (inc) => inc && (String(inc.employeeId) === empIdStr || (emp.code && String(inc.employeeCode) === String(emp.code)))
+  );
+  prevEmpIncidents.forEach((inc) => {
+    if (inc.status !== 'cancelled' && (parseFloat(inc.deductionMinutes) || 0) > 0) {
+      prevDedMins += parseFloat(inc.deductionMinutes);
+      prevMoney += parseFloat(inc.penaltyAmount) || 0;
+    }
+  });
+
+  // 2. إعادة احتساب وقائع التأخير للدورة كاملة وفق الجداول والبصمات المحدثة
+  const recRes = recalculateEmployeeCycleLateness({
+    employeeId: emp.id,
+    cycleFilterFn: null,
+    state,
+    payrollCycleId: null
+  });
+
+  const newIncidentsForEmp = recRes.incidents || [];
+  const newIncidentIds = new Set(newIncidentsForEmp.map((i) => i.id));
+  const newIncidentsMap = new Map(newIncidentsForEmp.map((i) => [i.id, i]));
+
+  // 3. تحديد الوقائع التي ألغيت أو تم تصفير خصمها لتسوية طلبات الجزاء المقابلة لها
+  const eliminatedOrWaivedIncidents = [];
+  prevEmpIncidents.forEach((oldInc) => {
+    const newInc = newIncidentsMap.get(oldInc.id);
+    const oldDed = parseFloat(oldInc.deductionMinutes) || 0;
+    const newDed = newInc ? (parseFloat(newInc.deductionMinutes) || 0) : 0;
+    if (!newInc || (oldDed > 0 && newDed === 0) || (newInc && (newInc.actionType === 'grace' || newInc.status === 'cancelled'))) {
+      eliminatedOrWaivedIncidents.push(oldInc);
+    }
+  });
+
+  // 4. استبدال وقائع هذا الموظف فقط في مصفوفة lateIncidents
+  const otherEmployeesIncidents = (state.lateIncidents || []).filter(
+    (inc) => inc && String(inc.employeeId) !== empIdStr && (!emp.code || String(inc.employeeCode) !== String(emp.code))
+  );
+  const updatedLateIncidents = [...otherEmployeesIncidents, ...newIncidentsForEmp];
+
+  // 5. تسوية وإلغاء طلبات الجزاء المرتبطة في requests
+  const waivedIncidentIds = new Set(eliminatedOrWaivedIncidents.map((i) => i.id));
+  const waivedDates = new Set(eliminatedOrWaivedIncidents.map((i) => i.date));
+
+  const updatedRequests = (recRes.updatedRequests || state.requests || []).map((req) => {
+    if (!req) return req;
+    const isEmpMatch = String(req.employeeId) === empIdStr || (emp.code && String(req.employeeCode) === String(emp.code));
+    if (!isEmpMatch) return req;
+
+    const isPenaltyReq = req.type === 'penalty' || req.type === 'lateness' || req.subType === 'lateness' || String(req.id || '').startsWith('req_late_inc_');
+    if (!isPenaltyReq) return req;
+
+    const reqIncId = req.penaltyId || (String(req.id || '').startsWith('req_') ? req.id.replace('req_', '') : null);
+    const isTargetIncident = (reqIncId && waivedIncidentIds.has(reqIncId)) || (req.date && waivedDates.has(req.date));
+
+    if (isTargetIncident && req.status !== 'cancelled') {
+      return {
+        ...req,
+        status: 'cancelled',
+        isCancelled: true,
+        cancelledAt: new Date().toISOString(),
+        cancellationReason: options.reason
+          ? `تم إلغاء الجزاء تلقائياً لتطابق الحضور الفعلي مع (${options.reason})`
+          : 'تم إلغاء الجزاء تلقائياً لتطابق الحضور الفعلي مع تعديل الجدول/البصمة',
+        adminNote: (req.adminNote ? req.adminNote + ' | ' : '') + 'ملغى آلياً بواسطة محرك التسوية الذكي'
+      };
+    }
+    return req;
+  });
+
+  // 6. حساب دقائق الخصم والمبالغ بعد التسوية
+  let newDedMins = 0;
+  let newMoney = 0;
+  newIncidentsForEmp.forEach((inc) => {
+    if (inc.status !== 'cancelled' && (parseFloat(inc.deductionMinutes) || 0) > 0) {
+      newDedMins += parseFloat(inc.deductionMinutes);
+      newMoney += parseFloat(inc.penaltyAmount) || 0;
+    }
+  });
+
+  const waivedMins = Math.max(0, prevDedMins - newDedMins);
+  const waivedMoney = Math.max(0, Math.round((prevMoney - newMoney) * 100) / 100);
+
+  const updatedState = {
+    ...state,
+    lateIncidents: updatedLateIncidents,
+    requests: updatedRequests
+  };
+
+  return {
+    updatedState,
+    summary: {
+      employeeId: emp.id,
+      employeeName: emp.name,
+      previousIncidentsCount: prevEmpIncidents.length,
+      newIncidentsCount: newIncidentsForEmp.length,
+      eliminatedIncidentsCount: eliminatedOrWaivedIncidents.length,
+      waivedDeductionMinutes: waivedMins,
+      waivedAmount: waivedMoney,
+      hasChanges: Boolean(eliminatedOrWaivedIncidents.length > 0 || waivedMins > 0 || Math.abs(prevDedMins - newDedMins) > 0)
+    }
+  };
+}
+
+/**
+ * تسوية ذكية لعدة موظفين دفعة واحدة (Bulk Reconciliation)
+ */
+export function reconcileMultipleEmployeesScheduleChange({
+  employeeIds = null,
+  state,
+  options = {}
+}) {
+  if (!state) return { updatedState: state, summary: { totalWaivedMinutes: 0, totalWaivedAmount: 0, affectedCount: 0 } };
+
+  let currentState = state;
+  let totalWaivedMinutes = 0;
+  let totalWaivedAmount = 0;
+  let affectedEmployees = [];
+
+  const targetEmps = Array.isArray(employeeIds) && employeeIds.length > 0
+    ? (state.employees || []).filter(e => employeeIds.map(String).includes(String(e.id)) || (e.code && employeeIds.map(String).includes(String(e.code))))
+    : (state.employees || []);
+
+  for (const emp of targetEmps) {
+    if (!emp || !emp.id) continue;
+    const { updatedState, summary } = reconcileEmployeeScheduleOrPunchChange({
+      employeeId: emp.id,
+      state: currentState,
+      options
+    });
+    currentState = updatedState;
+    if (summary.hasChanges) {
+      totalWaivedMinutes += summary.waivedDeductionMinutes;
+      totalWaivedAmount += summary.waivedAmount;
+      affectedEmployees.push(summary);
+    }
+  }
+
+  return {
+    updatedState: currentState,
+    summary: {
+      totalWaivedMinutes,
+      totalWaivedAmount: Math.round(totalWaivedAmount * 100) / 100,
+      affectedCount: affectedEmployees.length,
+      affectedEmployees
+    }
+  };
+}

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics, recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
+import { isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics, recalculateEmployeeCycleLateness, reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
 import { calcRawDurationMinutes } from '../../utils/workHoursEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import {
@@ -773,13 +773,13 @@ export default function AttendancePunchesModal({
 
       let updatedState = { ...state, shifts: updatedShifts, activeShifts: updatedActiveShifts };
 
-      // Auto recalculate late incidents
-      const recRes = recalculateEmployeeCycleLateness({
+      // Auto recalculate late incidents and reconcile via unified engine
+      const { updatedState: reconState } = reconcileEmployeeScheduleOrPunchChange({
         employeeId: employee.id,
         state: updatedState,
-        payrollCycleId: snapDate.slice(0, 7)
+        options: { reason: 'تعديل بصمة يدوي بالإدارة' }
       });
-      let finalRequests = (recRes.updatedRequests || state.requests || []).map(r => {
+      let finalRequests = (reconState.requests || state.requests || []).map(r => {
         const isMatch = (
           (String(r.employeeId) === String(employee.id) || (employee.code && String(r.employeeCode) === String(employee.code))) &&
           (r.date === snapDate || r.targetDate === snapDate || r.details?.shiftDate === snapDate) &&
@@ -800,8 +800,7 @@ export default function AttendancePunchesModal({
       });
 
       updatedState = {
-        ...updatedState,
-        lateIncidents: recRes.incidents,
+        ...reconState,
         requests: finalRequests
       };
 
@@ -939,17 +938,13 @@ export default function AttendancePunchesModal({
         _deletedIds: updatedDeletedIds
       };
 
-      // 6. إعادة احتساب وقائع التأخير للدورة المحاسبية
-      const recRes = recalculateEmployeeCycleLateness({
+      // 6. إعادة احتساب وقائع التأخير والتسوية للدورة المحاسبية
+      const { updatedState: reconState } = reconcileEmployeeScheduleOrPunchChange({
         employeeId: employee.id,
         state: updatedState,
-        payrollCycleId: (punch.date || '').slice(0, 7)
+        options: { reason: 'حذف بصمة' }
       });
-      updatedState = {
-        ...updatedState,
-        lateIncidents: recRes.incidents,
-        requests: recRes.updatedRequests
-      };
+      updatedState = reconState;
 
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
@@ -1072,16 +1067,12 @@ export default function AttendancePunchesModal({
       };
 
       // إعادة احتساب الجزاءات والتأخيرات تلقائياً
-      const recRes = recalculateEmployeeCycleLateness({
+      const { updatedState: reconState } = reconcileEmployeeScheduleOrPunchChange({
         employeeId: employee.id,
         state: updatedState,
-        payrollCycleId: punchDate.slice(0, 7)
+        options: { reason: 'تسجيل/اعتماد بصمة يدوية' }
       });
-      updatedState = {
-        ...updatedState,
-        lateIncidents: recRes.incidents,
-        requests: recRes.updatedRequests
-      };
+      updatedState = reconState;
 
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);

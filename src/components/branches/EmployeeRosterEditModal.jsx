@@ -5,6 +5,7 @@ import { DAYS_OF_WEEK, formatTime12H, formatShiftRange12H } from './BranchMonthl
 import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { getEmployeeDaySchedule, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
+import { reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
 
 const DEFAULT_SCHEDULE = {
   'السبت': { type: 'shift', start: '08:00', end: '16:00', hours: 8 },
@@ -660,6 +661,35 @@ export default function EmployeeRosterEditModal({
     return { totalWeeklyHours: Math.round(totalWeeklyHours * 10) / 10, workDaysCount, offDaysCount };
   }, [scheduleInputs]);
 
+  // ── 🌟 المعاينة الذكية اللحظية لأثر تعديل الجدول على الجزاءات والتأخيرات ──
+  const reconciliationPreview = useMemo(() => {
+    if (!targetEmp || !isOpen) return null;
+    try {
+      const candidateRoster = {
+        id: 'preview_roster_reconcile',
+        employeeId: targetEmp.id,
+        employeeCode: targetEmp.code || '',
+        month: selectedMonth,
+        fromDate: fromDate || cycleRange?.startDate,
+        toDate: toDate || cycleRange?.endDate,
+        schedule: { ...scheduleInputs, ...monthlyDaysSchedule },
+        status: 'approved',
+        adminApproved: true
+      };
+      const tempState = {
+        ...state,
+        rosters: [candidateRoster, ...(state?.rosters || []).filter(r => String(r.employeeId) !== String(targetEmp.id))]
+      };
+      const { summary } = reconcileEmployeeScheduleOrPunchChange({
+        employeeId: targetEmp.id,
+        state: tempState
+      });
+      return summary;
+    } catch {
+      return null;
+    }
+  }, [targetEmp, isOpen, scheduleInputs, monthlyDaysSchedule, state, selectedMonth, fromDate, toDate, cycleRange]);
+
   // حفظ وإرسال الجدول
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -799,10 +829,21 @@ export default function EmployeeRosterEditModal({
           notifications: [newNotification, ...(state?.notifications || [])]
         };
 
-        setState?.(updatedState);
-        if (saveState) await saveState(updatedState);
+        // 🌟 التسوية الذكية التلقائية اللحظية بين المواعيد الجديدة وبصمات الحضور السابقة
+        const { updatedState: reconciledState, summary: reconSummary } = reconcileEmployeeScheduleOrPunchChange({
+          employeeId: targetEmp.id,
+          state: updatedState,
+          options: { reason: 'تعديل واعتماد الجدول الشهري' }
+        });
 
-        showToast?.(`✅ تم تعيين واعتماد الجدول الشهري للموظف (${targetEmp.name}) بنجاح!`);
+        setState?.(reconciledState);
+        if (saveState) await saveState(reconciledState);
+
+        if (reconSummary?.waivedDeductionMinutes > 0) {
+          showToast?.(`✅ تم اعتماد الجدول وإسقاط ${reconSummary.waivedDeductionMinutes} دقيقة خصم (${reconSummary.waivedAmount} ج.م) تلقائياً لتطابق الحضور!`);
+        } else {
+          showToast?.(`✅ تم تعيين واعتماد الجدول الشهري للموظف (${targetEmp.name}) بنجاح!`);
+        }
       } else {
         // ─────────────────────────────────────────────────────────────
         // الحالة الثانية: مدير الفرع (Branch Manager) ➔ إنشاء طلب اعتماد للإدارة
@@ -1086,6 +1127,48 @@ export default function EmployeeRosterEditModal({
                 </div>
               </div>
             </div>
+
+            {/* ── 🌟 المعاينة الذكية للأثر المالي والتأخيرات (Smart Impact Preview Banner) ── */}
+            {reconciliationPreview && reconciliationPreview.waivedDeductionMinutes > 0 && (
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                  border: '1.5px solid #10b981',
+                  borderRadius: '12px',
+                  padding: '12px 16px',
+                  marginBottom: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  color: '#065f46',
+                  boxShadow: '0 2px 8px rgba(16, 185, 129, 0.12)',
+                  animation: 'fadeIn 0.3s ease-in-out'
+                }}
+              >
+                <span style={{ fontSize: '24px' }}>✨</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: '13.5px', color: '#047857' }}>
+                    المعاينة الذكية للتأخيرات والخصومات (Smart Live Reconciliation):
+                  </div>
+                  <div style={{ fontSize: '12.5px', marginTop: '2px', lineHeight: '1.5' }}>
+                    تعديل مواعيد الجدول الحالي سيسقط تلقائياً <strong>{reconciliationPreview.waivedDeductionMinutes} دقيقة خصم</strong> {reconciliationPreview.waivedAmount > 0 && <span>(حوالي <strong>{reconciliationPreview.waivedAmount} ج.م</strong>)</span>} عن الموظف لتطابق أوقات حضوره الفعلي مع المواعيد الجديدة!
+                  </div>
+                </div>
+                <span
+                  style={{
+                    background: '#059669',
+                    color: '#ffffff',
+                    padding: '4px 10px',
+                    borderRadius: '8px',
+                    fontSize: '11px',
+                    fontWeight: 800,
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  إسقاط خصم آلي
+                </span>
+              </div>
+            )}
 
             {/* ── أزرار تبديل العرض: التقويم الشهري التفاعلي الكامل vs النمط الأسبوعي ── */}
             <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', borderBottom: '1.5px solid var(--border)', paddingBottom: '10px', flexWrap: 'wrap' }}>

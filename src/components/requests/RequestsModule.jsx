@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, normalizeState, fmt } from '../../utils/formatters';
 import { normalizeSchedule, getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { notifyEmployeeEarlyExitWarning, notifyOnPenaltyApplied } from '../../utils/gmailService';
-import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
+import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
 import { shouldRouteDirectToAdmin, isBranchWithoutManager, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from '../../utils/jobsHelper';
 import { syncNow, fetchRemoteState, hardDeleteEntityFast, purgeAllRequestsCloudAndLocal } from '../../utils/offlineSync';
 import { putRequestsBatch } from '../../utils/localDatabase';
@@ -2524,20 +2524,23 @@ export default function RequestsModule({
         });
       } else if (approvedTargetReq && approvedTargetReq.employeeId && approvedTargetReq.type !== 'loan' && approvedTargetReq.type !== 'advance') {
         try {
-          const { incidents, updatedRequests: recalcedRequests } = recalculateEmployeeCycleLateness({
+          const { updatedState: reconState } = reconcileEmployeeScheduleOrPunchChange({
             employeeId: approvedTargetReq.employeeId,
-            cycleFilterFn: null,
-            state: { ...state, requests: updatedRequests, shifts: updatedShifts, lateIncidents: updatedLateIncidents },
-            payrollCycleId: (approvedTargetReq.date || new Date().toISOString()).slice(0, 7)
+            state: {
+              ...state,
+              rosters: updatedRosters,
+              requests: updatedRequests,
+              shifts: updatedShifts,
+              lateIncidents: updatedLateIncidents
+            },
+            options: { reason: `اعتماد طلب ${approvedTargetReq.title || approvedTargetReq.type}` }
           });
-          if (recalcedRequests) {
-            updatedRequests = recalcedRequests;
+          if (reconState?.lateIncidents) {
+            updatedLateIncidents = reconState.lateIncidents;
           }
-          const incidentIds = new Set(incidents.map((i) => i.id));
-          updatedLateIncidents = [
-            ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(approvedTargetReq.employeeId)),
-            ...incidents
-          ];
+          if (reconState?.requests) {
+            updatedRequests = reconState.requests;
+          }
         } catch (e) {
           console.error('Error auto-syncing late incidents upon request approval:', e);
         }
