@@ -484,6 +484,12 @@ export function generateOfficialPayslipHTML({
   state = {},
   printFitMode = 'single_page'
 }) {
+  const effectiveCycle = (!startCutoff || !endCutoff) && month
+    ? getCycleDateRange(month, orgSettings || state?.orgSettings)
+    : null;
+  const effectiveStartCutoff = startCutoff || effectiveCycle?.startDate || '';
+  const effectiveEndCutoff = endCutoff || effectiveCycle?.endDate || '';
+
   const orgName = orgSettings.orgName || 'مجموعة الصيدليات الطبية';
   const gmName = orgSettings.generalManagerName || 'د. أحمد خالد - المدير العام للصيدليات';
   const printDate = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -666,7 +672,7 @@ export function generateOfficialPayslipHTML({
       ) &&
       (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
       (!selectedBranchId || String(inc.branchId) === String(selectedBranchId)) &&
-      (inc.date >= startCutoff && inc.date <= endCutoff)
+      (effectiveStartCutoff && effectiveEndCutoff ? (inc.date >= effectiveStartCutoff && inc.date <= effectiveEndCutoff) : inc.date?.startsWith(month))
   );
 
   const latePenaltyItems = empLateIncidents.map((inc) => {
@@ -713,8 +719,8 @@ export function generateOfficialPayslipHTML({
   const cycleFilterFn = (d) => {
     if (!d) return false;
     const dStr = String(d).slice(0, 10);
-    if (startCutoff && endCutoff) {
-      return dStr >= startCutoff && dStr <= endCutoff;
+    if (effectiveStartCutoff && effectiveEndCutoff) {
+      return dStr >= effectiveStartCutoff && dStr <= effectiveEndCutoff;
     }
     return dStr.startsWith(month);
   };
@@ -723,9 +729,9 @@ export function generateOfficialPayslipHTML({
 
   // Generate date list for cycle
   const cycleDates = [];
-  if (startCutoff && endCutoff) {
-    let cur = new Date(startCutoff);
-    const endD = new Date(endCutoff);
+  if (effectiveStartCutoff && effectiveEndCutoff) {
+    let cur = new Date(effectiveStartCutoff);
+    const endD = new Date(effectiveEndCutoff);
     if (!isNaN(cur) && !isNaN(endD) && cur <= endD) {
       while (cur <= endD) {
         const cy = cur.getFullYear();

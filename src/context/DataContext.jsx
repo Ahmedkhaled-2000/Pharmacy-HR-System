@@ -262,20 +262,20 @@ export function DataProvider({ children, showToast = () => {} }) {
       payrollPayoutStartDay: (() => {
         try {
           const v = localStorage.getItem('payroll_payout_start_day');
-          return v !== null ? parseInt(v, 10) : 26;
-        } catch { return 26; }
+          return v !== null ? parseInt(v, 10) : 21;
+        } catch { return 21; }
       })(),
       payrollPayoutEndDay: (() => {
         try {
           const v = localStorage.getItem('payroll_payout_end_day');
-          return v !== null ? parseInt(v, 10) : 25;
-        } catch { return 25; }
+          return v !== null ? parseInt(v, 10) : 20;
+        } catch { return 20; }
       })(),
       payrollPayoutDay: (() => {
         try {
           const v = localStorage.getItem('payroll_payout_end_day');
-          return v !== null ? parseInt(v, 10) : 25;
-        } catch { return 25; }
+          return v !== null ? parseInt(v, 10) : 20;
+        } catch { return 20; }
       })(),
       gmailConfig: (() => {
         const defaultCfg = {
@@ -1417,22 +1417,23 @@ export function DataProvider({ children, showToast = () => {} }) {
     if (!emp) return { hours: 0, dailyRate: 0, rate: 0, hourlyRate: 0, monthlySalary: 0, contractualMonthlySalary: 0, salary: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0, perBranch: {} };
 
     let effectiveFilterFn = filterFn;
-    if (!effectiveFilterFn) {
-      if (monthStr && typeof monthStr === 'string' && monthStr.length >= 7) {
-        const targetMonth = monthStr.slice(0, 7);
-        const range = getPayrollCutoffRange(targetMonth);
-        if (range && range.startDate && range.endDate) {
+    if (monthStr && typeof monthStr === 'string' && monthStr.length >= 7) {
+      const targetMonth = monthStr.slice(0, 7);
+      const range = getPayrollCutoffRange(targetMonth);
+      if (range && range.startDate && range.endDate) {
+        // إذا لم يتم تمرير دالة فلترة، أو تم تمرير دالة startsWith قديمة لا تغطي بداية الدورة الشهرية (مثلاً 21 في الشهر السابق):
+        if (!effectiveFilterFn || (typeof effectiveFilterFn === 'function' && !effectiveFilterFn(range.startDate))) {
           effectiveFilterFn = (d) => {
             if (!d) return false;
             const dStr = String(d).slice(0, 10);
             return dStr >= range.startDate && dStr <= range.endDate;
           };
-        } else {
-          effectiveFilterFn = (d) => d && String(d).startsWith(targetMonth);
         }
-      } else {
-        effectiveFilterFn = () => true;
+      } else if (!effectiveFilterFn) {
+        effectiveFilterFn = (d) => d && String(d).startsWith(targetMonth);
       }
+    } else if (!effectiveFilterFn) {
+      effectiveFilterFn = () => true;
     }
 
     const allBranchesList = state.branches || [];
@@ -1711,6 +1712,7 @@ export function DataProvider({ children, showToast = () => {} }) {
         if (i.branchId) return isBranchMatch(i.branchId, targetBranchObj);
         return isPrimaryForAdjustments;
       }
+      return true;
     });
 
     const lateDeduction = isFlexibleScheduleEmp ? 0 : empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.penaltyAmount) || 0), 0);

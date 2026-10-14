@@ -35,7 +35,7 @@ export default function PayrollModule({
       const v = localStorage.getItem('payroll_payout_start_day');
       if (v !== null) return parseInt(v, 10);
     } catch {}
-    return state.orgSettings?.payrollPayoutStartDay !== undefined ? state.orgSettings.payrollPayoutStartDay : 26;
+    return state.orgSettings?.payrollPayoutStartDay !== undefined ? state.orgSettings.payrollPayoutStartDay : 21;
   });
 
   const [payoutEndDay, setPayoutEndDay] = useState(() => {
@@ -43,7 +43,7 @@ export default function PayrollModule({
       const v = localStorage.getItem('payroll_payout_end_day');
       if (v !== null) return parseInt(v, 10);
     } catch {}
-    return state.orgSettings?.payrollPayoutEndDay !== undefined ? state.orgSettings.payrollPayoutEndDay : 25;
+    return state.orgSettings?.payrollPayoutEndDay !== undefined ? state.orgSettings.payrollPayoutEndDay : 20;
   });
 
   const [customFrom, setCustomFrom] = useState(() => {

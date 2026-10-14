@@ -446,13 +446,13 @@ export function normalizeState(parsed) {
 
   const effectiveStartDay = (parsed.orgSettings?.payrollPayoutStartDay !== undefined)
     ? parseInt(parsed.orgSettings.payrollPayoutStartDay, 10)
-    : (savedStartDay !== null && savedStartDay !== undefined ? savedStartDay : 26);
+    : (savedStartDay !== null && savedStartDay !== undefined ? savedStartDay : 21);
 
   let rawEndDay = (parsed.orgSettings?.payrollPayoutEndDay !== undefined)
     ? parseInt(parsed.orgSettings.payrollPayoutEndDay, 10)
     : (parsed.orgSettings?.payrollPayoutDay !== undefined
         ? parseInt(parsed.orgSettings.payrollPayoutDay, 10)
-        : (savedEndDay !== null && savedEndDay !== undefined ? savedEndDay : 25));
+        : (savedEndDay !== null && savedEndDay !== undefined ? savedEndDay : 20));
 
   if (effectiveStartDay > 1 && (rawEndDay === effectiveStartDay || isNaN(rawEndDay))) {
     rawEndDay = effectiveStartDay - 1;

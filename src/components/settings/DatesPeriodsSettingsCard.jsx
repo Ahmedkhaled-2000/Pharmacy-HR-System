@@ -22,8 +22,8 @@ export default function DatesPeriodsSettingsCard({
   const currentSettings = extractPayrollSettings(orgSettings);
 
   const [periodType, setPeriodType] = useState(currentSettings.periodType || 'cycle');
-  const [startDay, setStartDay] = useState(currentSettings.startDay || 26);
-  const [endDay, setEndDay] = useState(currentSettings.endDay || 25);
+  const [startDay, setStartDay] = useState(currentSettings.startDay || 21);
+  const [endDay, setEndDay] = useState(currentSettings.endDay || 20);
   const [startTime, setStartTime] = useState(currentSettings.startTime || '00:00');
   const [endTime, setEndTime] = useState(currentSettings.endTime || '23:59');
   const [customFrom, setCustomFrom] = useState(currentSettings.customFrom || '');

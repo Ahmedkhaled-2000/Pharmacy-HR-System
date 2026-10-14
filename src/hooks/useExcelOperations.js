@@ -5,6 +5,7 @@ import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../utils/exce
 import { getJobsList, getDepartmentsList } from '../utils/jobsHelper';
 import { exportComprehensiveCompanyPayrollExcel } from '../utils/grandPayrollExcelExporter';
 import { getEffectiveShiftHours, isApprovedPermissionForDate, computeLatenessFinancialAmount } from '../utils/latePenaltyEngine';
+import { getCycleDateRange } from '../utils/periodEngine';
 import { useData } from '../context/DataContext';
 import { useUI } from '../context/UIContext';
 
@@ -708,8 +709,13 @@ export function useExcelOperations() {
         periodLabel = `من ${customStart} إلى ${customEnd}`;
         fileNameStr = `شيت-مرتب-${emp.name}-من-${customStart}-إلى-${customEnd}.xlsx`;
       } else {
-        filterFn = (d) => d.startsWith(monthPicker);
-        periodLabel = arabicMonthLabel(monthPicker);
+        const cycleRange = getCycleDateRange(monthPicker, state.orgSettings);
+        filterFn = (d) => {
+          if (!d) return false;
+          const cleanDate = String(d).slice(0, 10);
+          return cleanDate >= cycleRange.startDate && cleanDate <= cycleRange.endDate;
+        };
+        periodLabel = cycleRange.label;
         fileNameStr = `شيت-مرتب-${emp.name}-${monthPicker}.xlsx`;
       }
 
@@ -965,7 +971,12 @@ export function useExcelOperations() {
         }
         filterFn = (d) => d >= effectiveStart && d <= effectiveEnd;
       } else {
-        filterFn = (d) => d.startsWith(monthPicker);
+        const cycleRange = getCycleDateRange(monthPicker, state.orgSettings);
+        filterFn = (d) => {
+          if (!d) return false;
+          const cleanDate = String(d).slice(0, 10);
+          return cleanDate >= cycleRange.startDate && cleanDate <= cycleRange.endDate;
+        };
       }
 
       await exportComprehensiveCompanyPayrollExcel({

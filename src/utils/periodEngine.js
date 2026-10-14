@@ -39,9 +39,9 @@ export function extractPayrollSettings(orgSettings = {}) {
     : (() => {
         try {
           const v = localStorage.getItem('payroll_payout_start_day');
-          return v !== null ? parseInt(v, 10) : 26;
+          return v !== null ? parseInt(v, 10) : 21;
         } catch {
-          return 26;
+          return 21;
         }
       })();
 
@@ -52,14 +52,14 @@ export function extractPayrollSettings(orgSettings = {}) {
         : (() => {
             try {
               const v = localStorage.getItem('payroll_payout_end_day');
-              return v !== null ? parseInt(v, 10) : 25;
+              return v !== null ? parseInt(v, 10) : 20;
             } catch {
-              return 25;
+              return 20;
             }
           })());
 
-  const startDay = isNaN(sDay) ? 26 : sDay;
-  let endDay = isNaN(rawEnd) ? 25 : rawEnd;
+  const startDay = isNaN(sDay) ? 21 : sDay;
+  let endDay = isNaN(rawEnd) ? 20 : rawEnd;
 
   // إذا كانت بداية الدورة أكبر من 1 وكانت النهاية مساوية للبداية (مثلاً 21 و 21)، نجعل النهاية تلقائياً 20 (اليوم السابق) لتطابق الدورة الشهرية
   if (startDay > 1 && endDay === startDay) {
