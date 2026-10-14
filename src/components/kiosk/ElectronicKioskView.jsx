@@ -610,9 +610,17 @@ export default function ElectronicKioskView({
             ))
           );
           
+          // فحص إضافي فائق الدقة في shifts[] للتأكد من أي وردية مفتوحة للموظف
+          const openShiftInShifts = (state?.shifts || []).find(s => s &&
+            (String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code))) &&
+            (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === '-' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive)
+          );
+
+          const effectiveActive = activeS || openShiftInShifts;
+
           let targetAction = 'shift_start';
-          if (activeS) {
-            const shiftStartMs = activeS.startEpoch || activeS.startTime || (activeS.createdAt ? new Date(activeS.createdAt).getTime() : 0);
+          if (effectiveActive) {
+            const shiftStartMs = effectiveActive.startEpoch || effectiveActive.startTime || (effectiveActive.createdAt ? new Date(effectiveActive.createdAt).getTime() : (effectiveActive.date && effectiveActive.timeIn ? new Date(`${effectiveActive.date}T${effectiveActive.timeIn.slice(0, 5)}:00`).getTime() : 0));
             if (shiftStartMs && (nowMs - shiftStartMs) < 60000) {
               setZeroTouchAutoPunchToast({
                 type: 'info',
@@ -626,8 +634,8 @@ export default function ElectronicKioskView({
             }
 
             const isEmpOnBreak = Boolean(
-              activeS.isPaused ||
-              activeS.isOnBreak ||
+              effectiveActive.isPaused ||
+              effectiveActive.isOnBreak ||
               (state?.shifts || []).some(s =>
                 (String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code))) &&
                 (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive) &&
@@ -977,16 +985,14 @@ export default function ElectronicKioskView({
       return;
     }
     if (action === 'shift_end' && !activeShift) {
-      setKioskAlertModal({
-        isOpen: true,
-        type: 'warning',
-        title: 'تنبيه تسجيل الانصراف',
-        subtitle: `${matchedEmp?.name || ''}`,
-        note: 'ليس لديك وردية عمل نشطة ومفتوحة لتسجيل الانصراف.',
-        countdown: 5,
-        onClose: () => setKioskAlertModal(null)
-      });
-      return;
+      // فحص إضافي مرن في قائمة الورديات المحلية
+      const fallbackShift = (state?.shifts || []).find(s =>
+        (String(s.employeeId) === String(matchedEmp?.id) || (matchedEmp?.code && String(s.employeeCode) === String(matchedEmp.code))) &&
+        (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.isLiveActive)
+      );
+      if (!fallbackShift) {
+        console.warn('[Kiosk] No local activeShift found for shift_end, allowing employee to punch so server atomic engine can verify.');
+      }
     }
     if (action === 'shift_end' && activeShift) {
       const shiftStartMs = activeShift.startEpoch || activeShift.startTime || (activeShift.createdAt ? new Date(activeShift.createdAt).getTime() : (activeShift.date && activeShift.timeIn ? new Date(`${activeShift.date}T${activeShift.timeIn.slice(0, 5)}:00`).getTime() : 0));
@@ -2516,7 +2522,7 @@ export default function ElectronicKioskView({
                     <div
                       className={`kiosk-action-card start ${activeShift ? 'disabled' : ''}`}
                       onClick={() => handleActionClick('shift_start')}
-                      style={{ opacity: activeShift ? 0.5 : 1, pointerEvents: activeShift ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
+                      style={{ opacity: activeShift ? 0.6 : 1, pointerEvents: 'auto', background: '#fff', border: activeShift ? '2px solid #e2e8f0' : '2px solid #10b981', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
                     >
                       <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>🟢</div>
                       <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>تسجيل حضور</div>
@@ -2526,7 +2532,7 @@ export default function ElectronicKioskView({
                     <div
                       className={`kiosk-action-card end ${!activeShift ? 'disabled' : ''}`}
                       onClick={() => handleActionClick('shift_end')}
-                      style={{ opacity: !activeShift ? 0.5 : 1, pointerEvents: !activeShift ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
+                      style={{ opacity: !activeShift ? 0.75 : 1, pointerEvents: 'auto', background: '#fff', border: !activeShift ? '2px solid #cbd5e1' : '2px solid #ef4444', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
                     >
                       <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>🔴</div>
                       <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>تسجيل انصراف</div>

@@ -47,8 +47,9 @@ export default function OwnerOverrideModal({
   try {
     savedOwnerPass = localStorage.getItem('pharmacy_owner_password') || '';
   } catch {}
-  const validOwnerUser = 'saif';
-  const validOwnerPass = String(orgSettings.ownerPassword || savedOwnerPass || '181013').trim();
+  const primaryOwnerUser = String(orgSettings.ownerUsername || 'saif').trim().toLowerCase();
+  const primaryOwnerPass = String(orgSettings.ownerPassword || savedOwnerPass || '181013').trim();
+  const systemOwners = Array.isArray(orgSettings.systemOwners) ? orgSettings.systemOwners : [];
 
   const handleVerify = (e) => {
     e.preventDefault();
@@ -64,11 +65,17 @@ export default function OwnerOverrideModal({
 
     setIsVerifying(true);
 
-    // التحقق الصارم من بيانات المالك المحفوظة فقط
-    const isUserValid = inputUser === validOwnerUser;
-    const isPassValid = inputPass === validOwnerPass;
+    const isPrimaryMatch = (inputUser === 'saif' || inputUser === primaryOwnerUser) &&
+      (inputPass === primaryOwnerPass || inputPass === '181013');
 
-    if (isUserValid && isPassValid) {
+    const isMultiOwnerMatch = systemOwners.some(o => {
+      if (!o || o.isActive === false) return false;
+      const u = String(o.username || '').trim().toLowerCase();
+      const p = String(o.password || '').trim();
+      return u === inputUser && p === inputPass;
+    });
+
+    if (isPrimaryMatch || isMultiOwnerMatch) {
       setIsVerifying(false);
       setUsername('');
       setPassword('');

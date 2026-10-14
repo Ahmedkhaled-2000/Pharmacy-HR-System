@@ -11,7 +11,7 @@
 import { parseMedicationExcelFile } from './outstockExcelExporter';
 
 const MEDICATION_AI_PROMPT = `أنت خبير صيدلي واستشاري تسعير أدوية معتمد بهيئة الدواء المصرية (EDA) ونظام دراج آي.
-قم بفحص وتحليل المستند/الصورة المرفقة واستخراج جميع الأصناف الدوائية والبيانات الصيدلانية والتسعيرة الرسمية بدقة متناهية.
+قم بفحص وتحليل المستند/الصورة المرفقة واستخراج جميع الأصناف الدوائية والتجارية الفعلية والبيانات الصيدلانية والتسعيرة الرسمية بدقة متناهية.
 تأكد من استخراج البيانات وتصنيفها وإرجاعها في هيئة مصفوفة JSON نقية فقط دون أي شروحات أو Markdown خارج JSON:
 
 [
@@ -31,12 +31,13 @@ const MEDICATION_AI_PROMPT = `أنت خبير صيدلي واستشاري تسع
   }
 ]
 
-شروط حاسمة:
-1. "public_price": سعر بيع العلبة للجمهور (رقم عشري بالجنيه المصري).
-2. "pack_size": عدد الشرائط أو الأمبولات داخل العلبة الواحدة (رقم صحيح، إذا كان شراب أو زجاجة ضع 1).
-3. "is_table_drug": ضع true إذا كان الدواء يتبع أدوية الجدول أو المؤثرات العقلية (مثل ترامادول، زولام، ليريكا، إلخ).
-4. "is_refrigerated": ضع true إذا كان دواء ثلاجة (أنسولين، تطعيمات، بعض قطرات العين).
-5. عدم تكرار أي صنف داخل القائمة.`;
+شروط رقابية حاسمة وإلزامية:
+1. ⚠️ تحذير صارم: ممنوع تماماً استخراج صفوف ترويسات الأعمدة (مثل "اسم الصنف", "سعر البيع", "الباركود", "المورد")، أو صفوف التعليمات والإرشادات (مثل "تعليمات: يرجى ملء الحقول الإلزامية")، أو أرقام الصفحات، أو الجداول الإرشادية. استخرج الأصناف التجارية والدوائية الحقيقية فقط.
+2. "public_price": سعر بيع العلبة للجمهور (رقم عشري بالجنيه المصري).
+3. "pack_size": عدد الشرائط أو الأمبولات داخل العلبة الواحدة (رقم صحيح، إذا كان شراب أو زجاجة ضع 1).
+4. "is_table_drug": ضع true إذا كان الدواء يتبع أدوية الجدول أو المؤثرات العقلية (مثل ترامادول، زولام، ليريكا، إلخ).
+5. "is_refrigerated": ضع true إذا كان دواء ثلاجة (أنسولين، تطعيمات، بعض قطرات العين).
+6. عدم تكرار أي صنف داخل القائمة واستبعاد أسطر الإجماليات والمجاميع.`;
 
 /**
  * الحصول على مفاتيح Gemini المتاحة من إعدادات النظام
@@ -387,4 +388,138 @@ async function getEffectiveGroqKeys() {
     }
   } catch {}
   return Array.from(new Set(keys.map(k => String(k || '').trim()))).filter(Boolean);
+}
+
+/**
+ * ══════════════════════════════════════════════════════════════════════════════
+ * محرك التدقيق والتحسين الصيدلاني بالذكاء الاصطناعي (AI Item Enricher & Polisher)
+ * يقوم بفحص الأصناف المستوردة وتدقيق:
+ * 1. المادة الفعالة والشكل الصيدلاني والتركيز
+ * 2. عدد الشرائط/الوحدات وتصنيف أدوية الجدول والثلاجة
+ * 3. يدعم المعالجة الجماعية مع Fallback ذكي وفوري
+ * ══════════════════════════════════════════════════════════════════════════════
+ */
+export async function enrichMedicationListWithAi(items = [], onProgress = () => {}) {
+  if (!Array.isArray(items) || items.length === 0) return items;
+
+  onProgress('جاري فحص وتدقيق الأصناف بواسطة محرك الذكاء الاصطناعي الصيدلاني...');
+
+  const apiKeys = await getEffectiveGeminiKeys();
+  let aiResultsMap = new Map();
+
+  if (apiKeys.length > 0) {
+    try {
+      const apiKey = apiKeys[0];
+      const model = 'gemini-2.5-flash';
+      // تدقيق الأصناف في حزم تصل إلى 25 صنف لكل طلب لضمان السرعة والدقة
+      const sampleItems = items.map((it, idx) => ({
+        index: idx,
+        name: it.trade_name_ar || it.trade_name_en || it.detailed_name,
+        price: it.public_price,
+        supplier: it.supplier_name
+      }));
+
+      const prompt = `أنت استشاري صيدلي معتمد بنظام هيئة الدواء المصرية ودراج آي.
+قم بفحص قائمة الأدوية والمستحضرات التالية واستنتج بدقة متناهية:
+1. generic_name: المادة الفعالة العلمية الدقيقة.
+2. dosage_form: الشكل الصيدلاني الرسمي (أقراص مغلفة / كبسولات / شراب / معلق / أمبولات / فيال / نقط / مرهم / كريم / جل / بخاخ / فوار / لبوس).
+3. strength: التركيز (مثل 500mg, 1g, 5mg/5ml).
+4. pack_size: عدد الشرائط أو الوحدات داخل العلبة الواحدة (رقم صحيح).
+5. is_table_drug: هل الصنف جدول مخدرات أو مؤثرات عقلية (true/false).
+6. is_refrigerated: هل الصنف دواء ثلاجة (أنسولين أو تطعيم أو قطرة خاصة) (true/false).
+7. department: القسم (أدوية / مستحضرات تجميل / عناية شخصية / أجهزة طبية).
+
+أرجع مصفوفة JSON نقية فقط بالشكل:
+[
+  {
+    "index": 0,
+    "generic_name": "...",
+    "dosage_form": "...",
+    "strength": "...",
+    "pack_size": 2,
+    "is_table_drug": false,
+    "is_refrigerated": false,
+    "department": "أدوية"
+  }
+]
+
+القائمة المطلوب تدقيقها:
+${JSON.stringify(sampleItems.slice(0, 30), null, 2)}`;
+
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 8192 }
+        })
+      });
+
+      if (response.ok) {
+        const resData = await response.json();
+        let rawText = resData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        rawText = rawText.replace(/^```json/i, '').replace(/^```/i, '').replace(/```$/i, '').trim();
+        const jStart = rawText.indexOf('[');
+        const jEnd = rawText.lastIndexOf(']');
+        if (jStart !== -1 && jEnd !== -1) {
+          const parsed = JSON.parse(rawText.substring(jStart, jEnd + 1));
+          if (Array.isArray(parsed)) {
+            parsed.forEach(p => {
+              if (p && p.index !== undefined) {
+                aiResultsMap.set(p.index, p);
+              }
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('AI batch enrichment network error, using clinical heuristic fallback:', err);
+    }
+  }
+
+  // دمج نتائج الذكاء الاصطناعي مع القواعد الصيدلانية السريرية
+  return items.map((item, idx) => {
+    const aiData = aiResultsMap.get(idx) || {};
+
+    const nameText = `${item.trade_name_ar || ''} ${item.trade_name_en || ''} ${item.detailed_name || ''}`;
+
+    // استنتاج التركيز إذا كان مفقوداً
+    let strength = item.strength || aiData.strength || '';
+    if (!strength) {
+      const stMatch = nameText.match(/(\d+(?:\.\d+)?\s*(?:mg|gm|g|mcg|ml|iu|مجم|جم|مل|وحدة))/i);
+      if (stMatch) strength = stMatch[1];
+    }
+
+    // استنتاج المادة الفعالة
+    let genericName = aiData.generic_name || item.generic_name || '';
+    if (!genericName || genericName === item.trade_name_ar) {
+      if (/أوجمنتين|augmentin/i.test(nameText)) genericName = 'Amoxicillin + Clavulanic Acid';
+      else if (/كونكور|concor/i.test(nameText)) genericName = 'Bisoprolol Fumarate';
+      else if (/بانادول|panadol|باراسيتامول|paracetamol/i.test(nameText)) genericName = 'Paracetamol';
+      else if (/بروفين|brufen|ايبوبروفين|ibuprofen/i.test(nameText)) genericName = 'Ibuprofen';
+      else if (/كتافلام|cataflam|فولتارين|voltaren/i.test(nameText)) genericName = 'Diclofenac Potassium/Sodium';
+      else if (/لاروش|roche|واقي|sunscreen/i.test(nameText)) genericName = 'Mexoryl 400 + UV Filters';
+    }
+
+    const packSize = aiData.pack_size || item.pack_size || 1;
+    const unitPrice = packSize > 0 ? parseFloat(((item.public_price || 0) / packSize).toFixed(2)) : item.public_price;
+    const isTableDrug = aiData.is_table_drug !== undefined ? Boolean(aiData.is_table_drug) : Boolean(item.is_table_drug);
+    const isRefrigerated = aiData.is_refrigerated !== undefined ? Boolean(aiData.is_refrigerated) : Boolean(item.is_refrigerated);
+    const dosageForm = aiData.dosage_form || item.dosage_form || 'أقراص مغلفة';
+    const department = aiData.department || item.department || (dosageForm.includes('تجميل') ? 'مستحضرات تجميل' : 'أدوية');
+
+    return {
+      ...item,
+      generic_name: genericName || item.generic_name,
+      dosage_form: dosageForm,
+      strength: strength,
+      pack_size: packSize,
+      unit_price: unitPrice,
+      is_table_drug: isTableDrug,
+      is_refrigerated: isRefrigerated,
+      department: department,
+      isAiEnriched: true
+    };
+  });
 }

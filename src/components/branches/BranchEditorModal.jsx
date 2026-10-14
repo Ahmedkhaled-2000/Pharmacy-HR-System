@@ -25,6 +25,7 @@ export default function BranchEditorModal({
   const [branchLogo, setBranchLogo] = useState('');
   const [managerId, setManagerId] = useState('');
   const [phones, setPhones] = useState([{ id: '1', number: '', type: 'landline' }]);
+  const [whatsappPhone, setWhatsappPhone] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [openingTime, setOpeningTime] = useState('');
@@ -95,6 +96,13 @@ export default function BranchEditorModal({
         setPhones([{ id: '1', number: '', type: 'landline' }]);
       }
 
+      let foundWaPhone = editingBranch.whatsappPhone || editingBranch.whatsapp_phone || '';
+      if (!foundWaPhone && Array.isArray(editingBranch.phones)) {
+        const wp = editingBranch.phones.find(p => p.type === 'whatsapp' || p.type === 'mobile' || (p.number && String(p.number).replace(/\D/g, '').startsWith('01')));
+        if (wp) foundWaPhone = wp.number;
+      }
+      setWhatsappPhone(foundWaPhone || '');
+
       setManagerId(editingBranch.managerId || '');
       setUsername(editingBranch.username || '');
       setPassword(editingBranch.password || '');
@@ -126,6 +134,7 @@ export default function BranchEditorModal({
       setBranchLongitude(null);
       setBranchLogo('');
       setPhones([{ id: Date.now().toString(), number: '', type: 'landline' }]);
+      setWhatsappPhone('');
       setManagerId('');
       setIpRestrictionEnabled(true);
       setAllowedIps([]);
@@ -394,6 +403,13 @@ export default function BranchEditorModal({
     const validPhones = phones.filter((p) => p.number && p.number.trim());
     const primaryPhone = validPhones[0]?.number || '';
 
+    // Deduce or clean WhatsApp phone
+    let finalWhatsappPhone = (whatsappPhone || '').trim();
+    if (!finalWhatsappPhone) {
+      const mobileP = validPhones.find(p => p.type === 'whatsapp' || p.type === 'mobile' || (p.number && String(p.number).replace(/\D/g, '').startsWith('01')));
+      if (mobileP) finalWhatsappPhone = mobileP.number.trim();
+    }
+
     const isPasswordChanged = editingBranch && String(editingBranch.password || '').trim() !== String(password || '').trim();
     const nextBranchSessionVer = isPasswordChanged
       ? (Number(editingBranch?.sessionVersion || 0)) + 1
@@ -420,6 +436,8 @@ export default function BranchEditorModal({
       photoUrl: branchLogo,
       image: branchLogo,
       phone: primaryPhone,
+      whatsappPhone: finalWhatsappPhone,
+      whatsapp_phone: finalWhatsappPhone,
       phones: validPhones,
       openingTime: (openingTime || '').trim(),
       closingTime: (closingTime || '').trim(),
@@ -1253,6 +1271,46 @@ export default function BranchEditorModal({
                     <span>➕</span>
                     <span>إضافة رقم آخر</span>
                   </button>
+                </div>
+
+                {/* الحقل المخصص لرقم الواتساب الرسمي المعتمد للفرع */}
+                <div
+                  style={{
+                    background: '#f0fdf4',
+                    border: '1.5px solid #86efac',
+                    borderRadius: '12px',
+                    padding: '14px 16px',
+                    marginBottom: '16px'
+                  }}
+                >
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', fontWeight: 800, color: '#166534', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '18px' }}>💬</span>
+                    <span>رقم واتساب الفرع المعتمد (لاستقبال قرارات المشتريات وتوجيه إشعارات النواقص)</span>
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      placeholder="رقم محمول الواتساب (مثال: 01156036080)"
+                      value={whatsappPhone}
+                      onChange={(e) => setWhatsappPhone(e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #bbf7d0',
+                        fontSize: '14px',
+                        direction: 'ltr',
+                        textAlign: 'right',
+                        fontFamily: 'monospace',
+                        fontWeight: 800,
+                        background: '#ffffff',
+                        color: '#14532d'
+                      }}
+                    />
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#15803d', marginTop: '6px', fontWeight: 700 }}>
+                    💡 هذا الرقم هو الذي تعتمد عليه إدارة المشتريات لإرسال تقارير توفير النواقص وبدائل الأدوية للفرع مباشرة عبر الواتساب.
+                  </div>
                 </div>
 
                 {/* قائمة الحقول */}

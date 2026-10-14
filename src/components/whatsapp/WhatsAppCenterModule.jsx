@@ -9,7 +9,11 @@ import {
   sendEmployeeRequestDecisionWhatsApp,
   generateSampleDecisionMessage
 } from '../../utils/whatsappTemplates';
-import { Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck, LogOut, Globe, Network, Copy, Check, ExternalLink, Smartphone, Wifi, ShieldCheck, QrCode, Download, Bell } from 'lucide-react';
+import {
+  Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck,
+  LogOut, Globe, Network, Copy, Check, ExternalLink, Smartphone, Wifi, ShieldCheck, QrCode,
+  Download, Bell, Activity, Clock, Phone, Plus, Trash2, Crown, Sliders, CheckSquare, MessageSquare
+} from 'lucide-react';
 import QRCode from 'qrcode';
 import { useUI } from '../../context/UIContext';
 
@@ -242,6 +246,173 @@ export default function WhatsAppCenterModule({
     }
     return filteredEmployees[0] || employees[0] || null;
   }, [targetEmpId, filteredEmployees, employees]);
+
+  // ── التبويب النشط الرئيسي في مركز مراسلات الواتساب الذكي ──
+  const [activeMainTab, setActiveMainTab] = useState('payslips'); // 'payslips' | 'biometricAlerts' | 'ownerVIP' | 'watchdogAndReconciliation' | 'decisions' | 'serverSetup'
+
+  // ── إعدادات وأرقام إشعارات البصمة والمالك والمراقبة والتسوية الموحدة ──
+  const [waAlertsConfig, setWaAlertsConfig] = useState({
+    enabled: true,
+    notifyBiometricDevices: true,
+    notifyKioskPunches: true,
+    notifyCheckIn: true,
+    notifyCheckOut: true,
+    notifyBreakStart: true,
+    notifyBreakEnd: true,
+    notifyEmployee: true,
+    recipientPhones: [],
+    ownerWhatsAppNumber: '',
+    notifyOwnerOnOutstockComplaints: true,
+    watchdogEnabled: true,
+    watchdogTimeoutMinutes: 10,
+    watchdogRecipientPhones: [],
+    reconciliationEnabled: true,
+    reconciliationMinBatchSize: 3,
+    reconciliationRecipientPhones: [],
+    templates: {}
+  });
+
+  const [newAttendancePhone, setNewAttendancePhone] = useState('');
+  const [newWatchdogPhone, setNewWatchdogPhone] = useState('');
+  const [newReconciliationPhone, setNewReconciliationPhone] = useState('');
+  const [isSavingAlertsConfig, setIsSavingAlertsConfig] = useState(false);
+  const [isTestingAlert, setIsTestingAlert] = useState(false);
+  const [testPunchAction, setTestPunchAction] = useState('check_in');
+  const [testPunchTarget, setTestPunchTarget] = useState('admin');
+
+  // جلب إعدادات التنبيهات من الخادم
+  const fetchWaAlertsConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/biometrics/whatsapp-config', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('app_auth_token') || ''}`,
+          'X-App-Role': localStorage.getItem('app_auth_role') || 'owner'
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.config) {
+          setWaAlertsConfig(prev => ({
+            ...prev,
+            ...data.config,
+            ownerWhatsAppNumber: data.config.ownerWhatsAppNumber || (state?.orgSettings?.ownerPhone) || ''
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch WA alerts config:', e);
+    }
+  }, [state?.orgSettings?.ownerPhone]);
+
+  useEffect(() => {
+    fetchWaAlertsConfig();
+  }, [fetchWaAlertsConfig]);
+
+  // منسق الأرقام الذكي (يقبل 010... ويحولها دولياً 2010...)
+  const normalizeAlertPhone = (raw) => {
+    if (!raw) return '';
+    let c = String(raw).replace(/\D/g, '');
+    if (c.startsWith('01') && c.length === 11) c = '2' + c;
+    else if (c.startsWith('1') && c.length === 10) c = '20' + c;
+    return c;
+  };
+
+  // حفظ التعديلات في السيرفر وتحديث الحالة
+  const handleSaveAlertsConfig = async (customConfig = null, silent = false) => {
+    setIsSavingAlertsConfig(true);
+    const toSave = customConfig || waAlertsConfig;
+    try {
+      const res = await fetch('/api/biometrics/whatsapp-config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('app_auth_token') || ''}`,
+          'X-App-Role': localStorage.getItem('app_auth_role') || 'owner'
+        },
+        body: JSON.stringify({ config: toSave })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setWaAlertsConfig(prev => ({ ...prev, ...(data.config || toSave) }));
+        if (toSave.ownerWhatsAppNumber && setState) {
+          setState(prev => ({
+            ...prev,
+            orgSettings: {
+              ...(prev.orgSettings || {}),
+              ownerPhone: toSave.ownerWhatsAppNumber
+            }
+          }));
+        }
+        if (!silent) {
+          showToast?.('💾 تم حفظ كافة إعدادات وأرقام تنبيهات الواتساب وتزامنها مع المنظومة بنجاح!');
+        }
+      } else {
+        if (!silent) showToast?.(`⚠️ ${data.error || 'تعذر حفظ الإعدادات'}`);
+      }
+    } catch (err) {
+      if (!silent) showToast?.('❌ تعذر الحفظ، يرجى التحقق من اتصال الخادم');
+    } finally {
+      setIsSavingAlertsConfig(false);
+    }
+  };
+
+  // إضافة رقم هاتف جديد مع التنسيق التلقائي والحفظ الفوري
+  const handleAddPhoneChip = async (field, rawValue, clearInputCallback) => {
+    const clean = normalizeAlertPhone(rawValue);
+    if (!clean || clean.length < 9) {
+      showToast?.('⚠️ يرجى إدخال رقم هاتف صحيح (مثال: 01080739315 أو 201080739315)');
+      return;
+    }
+    const currentList = waAlertsConfig[field] || [];
+    if (currentList.includes(clean)) {
+      showToast?.('⚠️ هذا الرقم مضاف مسبقاً');
+      return;
+    }
+    const nextList = [...currentList, clean];
+    const nextConfig = { ...waAlertsConfig, [field]: nextList };
+    setWaAlertsConfig(nextConfig);
+    if (clearInputCallback) clearInputCallback('');
+    await handleSaveAlertsConfig(nextConfig, false);
+  };
+
+  // إزالة رقم هاتف مع الحفظ الفوري
+  const handleRemovePhoneChip = async (field, phoneToRemove) => {
+    const currentList = waAlertsConfig[field] || [];
+    const nextList = currentList.filter(p => p !== phoneToRemove);
+    const nextConfig = { ...waAlertsConfig, [field]: nextList };
+    setWaAlertsConfig(nextConfig);
+    await handleSaveAlertsConfig(nextConfig, false);
+  };
+
+  // اختبار إرسال إشعار تجريبي فوري
+  const handleTestAlert = async (testPhone, actionType, target = 'admin') => {
+    setIsTestingAlert(true);
+    try {
+      const res = await fetch('/api/biometrics/whatsapp-test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('app_auth_token') || ''}`,
+          'X-App-Role': localStorage.getItem('app_auth_role') || 'owner'
+        },
+        body: JSON.stringify({
+          testPhone: testPhone ? normalizeAlertPhone(testPhone) : undefined,
+          actionType,
+          target
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast?.('📲 ' + (data.message || 'تم إرسال الإشعار التجريبي بنجاح عبر الواتساب!'));
+      } else {
+        showToast?.('⚠️ ' + (data.error || 'تعذر إرسال الإشعار التجريبي'));
+      }
+    } catch (err) {
+      showToast?.('❌ خطأ في الإرسال التجريبي: ' + err.message);
+    } finally {
+      setIsTestingAlert(false);
+    }
+  };
 
   // ── إعدادات إشعارات قرارات الطلبات التلقائية (قبول / رفض) ──
   const isAutoNotifyOnDecision = state?.orgSettings?.whatsappAutoNotifyOnDecision !== false;
@@ -1824,7 +1995,1105 @@ export default function WhatsAppCenterModule({
         </div>
       )}
 
-      {/* ── بطاقة إعدادات الإشعارات التلقائية للطلبات الإدارية (قبول / رفض) ── */}
+      {/* ── شريط التبويبات الرئيسي الموحد لمركز مراسلات الواتساب الذكي ── */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        flexWrap: 'wrap',
+        marginBottom: '22px',
+        background: 'var(--surface)',
+        padding: '10px 14px',
+        borderRadius: '16px',
+        border: '1.5px solid var(--border)',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.03)'
+      }}>
+        {[
+          {
+            id: 'payslips',
+            label: 'كشوفات المرتبات والمراسلات العامة',
+            icon: MessageSquare,
+            badge: null
+          },
+          {
+            id: 'biometricAlerts',
+            label: 'إشعارات حركات البصمة والدوام',
+            icon: Activity,
+            badge: (waAlertsConfig.recipientPhones || []).length > 0 ? `${(waAlertsConfig.recipientPhones || []).length} رقم` : 'غير مسجل'
+          },
+          {
+            id: 'ownerVIP',
+            label: 'هاتف المالك وشكاوى النواقص',
+            icon: Crown,
+            badge: waAlertsConfig.ownerWhatsAppNumber ? 'VIP مسجل' : 'غير مسجل',
+            highlight: true
+          },
+          {
+            id: 'watchdogAndReconciliation',
+            label: 'مراقبة الأجهزة والتسوية',
+            icon: Wifi,
+            badge: ((waAlertsConfig.watchdogRecipientPhones || []).length + (waAlertsConfig.reconciliationRecipientPhones || []).length) > 0
+              ? `${(waAlertsConfig.watchdogRecipientPhones || []).length + (waAlertsConfig.reconciliationRecipientPhones || []).length} رقم`
+              : null
+          },
+          {
+            id: 'decisions',
+            label: 'إشعارات القرارات الإدارية',
+            icon: Bell,
+            badge: isAutoNotifyOnDecision ? 'مفعل تلقائياً' : 'معطل'
+          }
+        ].map((tab) => {
+          const isActive = activeMainTab === tab.id;
+          const TabIcon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveMainTab(tab.id)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '10px 16px',
+                borderRadius: '12px',
+                fontSize: '13.5px',
+                fontWeight: isActive ? 800 : 700,
+                cursor: 'pointer',
+                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                border: isActive
+                  ? (tab.highlight ? '1.5px solid #d97706' : '1.5px solid #10b981')
+                  : '1px solid transparent',
+                background: isActive
+                  ? (tab.highlight
+                      ? 'linear-gradient(135deg, #f59e0b, #d97706)'
+                      : 'linear-gradient(135deg, #059669, #10b981)')
+                  : 'var(--surface-variant, rgba(0,0,0,0.02))',
+                color: isActive ? '#ffffff' : 'var(--text)',
+                boxShadow: isActive
+                  ? (tab.highlight
+                      ? '0 4px 14px rgba(217, 119, 6, 0.35)'
+                      : '0 4px 14px rgba(16, 185, 129, 0.35)')
+                  : 'none'
+              }}
+            >
+              <TabIcon style={{ width: '16px', height: '16px' }} />
+              <span>{tab.label}</span>
+              {tab.badge && (
+                <span style={{
+                  fontSize: '11px',
+                  padding: '2px 7px',
+                  borderRadius: '20px',
+                  fontWeight: 800,
+                  background: isActive ? 'rgba(255,255,255,0.25)' : 'var(--border)',
+                  color: isActive ? '#ffffff' : 'var(--text-secondary, #64748b)'
+                }}>
+                  {tab.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── تبويب 2: إشعارات حركات البصمة والدوام اليومية ── */}
+      {activeMainTab === 'biometricAlerts' && (
+        <div style={{
+          background: 'var(--surface)',
+          border: '1.5px solid var(--border)',
+          borderRadius: '16px',
+          padding: '22px 24px',
+          marginBottom: '22px',
+          boxShadow: '0 6px 20px rgba(0,0,0,0.04)'
+        }}>
+          {/* Header & Main Toggle */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '16px',
+            borderBottom: '1px solid var(--border)',
+            paddingBottom: '16px',
+            marginBottom: '18px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+              <div style={{
+                width: '46px',
+                height: '46px',
+                borderRadius: '12px',
+                background: waAlertsConfig.enabled !== false
+                  ? 'linear-gradient(135deg, #10b981, #059669)'
+                  : 'linear-gradient(135deg, #94a3b8, #64748b)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '22px',
+                boxShadow: waAlertsConfig.enabled !== false
+                  ? '0 4px 14px rgba(16, 185, 129, 0.35)'
+                  : 'none'
+              }}>
+                <Activity style={{ width: '22px', height: '22px' }} />
+              </div>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: 'var(--text)' }}>
+                  إشعارات حركات البصمة والدوام اللحظية عبر الواتساب
+                </h4>
+                <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--text-secondary, #64748b)' }}>
+                  إرسال رسائل فورية وتنبيهات تلقائية للإدارة العليا وللموظف عند كل حركة تبصيم حضور وانصراف واستراحة
+                </p>
+              </div>
+            </div>
+
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+              <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>
+                {waAlertsConfig.enabled !== false ? '🟢 التنبيهات مفعلة' : '🔴 التنبيهات متوقفة'}
+              </span>
+              <input
+                type="checkbox"
+                checked={waAlertsConfig.enabled !== false}
+                onChange={(e) => {
+                  const next = { ...waAlertsConfig, enabled: e.target.checked };
+                  setWaAlertsConfig(next);
+                  handleSaveAlertsConfig(next, false);
+                }}
+                style={{ width: '22px', height: '22px', accentColor: '#10b981', cursor: 'pointer' }}
+              />
+            </label>
+          </div>
+
+          {/* 1. قنوات التبصيم المعتمدة */}
+          <div style={{ marginBottom: '18px' }}>
+            <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text)', display: 'block', marginBottom: '8px' }}>
+              📡 قنوات التبصيم المعتمدة لإرسال الإشعارات:
+            </span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px' }}>
+              <div style={{
+                background: waAlertsConfig.notifyBiometricDevices !== false ? 'rgba(16, 185, 129, 0.08)' : 'var(--surface-variant, #f8fafc)',
+                border: `1.5px solid ${waAlertsConfig.notifyBiometricDevices !== false ? '#10b981' : 'var(--border)'}`,
+                borderRadius: '12px',
+                padding: '12px 14px'
+              }}>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={waAlertsConfig.notifyBiometricDevices !== false}
+                    onChange={(e) => {
+                      const next = { ...waAlertsConfig, notifyBiometricDevices: e.target.checked };
+                      setWaAlertsConfig(next);
+                      handleSaveAlertsConfig(next, true);
+                    }}
+                    style={{ marginTop: '3px', width: '18px', height: '18px', accentColor: '#10b981' }}
+                  />
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text)' }}>
+                      أجهزة البصمة الحيوية (ZKTeco MB20) 🧬
+                    </div>
+                    <p style={{ margin: '3px 0 0', fontSize: '11.5px', color: 'var(--text-secondary, #64748b)' }}>
+                      إرسال إشعار فوري عند سحب البصمة من أجهزة الحضور والانصراف بالصيدليات.
+                    </p>
+                  </div>
+                </label>
+              </div>
+
+              <div style={{
+                background: waAlertsConfig.notifyKioskPunches !== false ? 'rgba(59, 130, 246, 0.08)' : 'var(--surface-variant, #f8fafc)',
+                border: `1.5px solid ${waAlertsConfig.notifyKioskPunches !== false ? '#3b82f6' : 'var(--border)'}`,
+                borderRadius: '12px',
+                padding: '12px 14px'
+              }}>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={waAlertsConfig.notifyKioskPunches !== false}
+                    onChange={(e) => {
+                      const next = { ...waAlertsConfig, notifyKioskPunches: e.target.checked };
+                      setWaAlertsConfig(next);
+                      handleSaveAlertsConfig(next, true);
+                    }}
+                    style={{ marginTop: '3px', width: '18px', height: '18px', accentColor: '#3b82f6' }}
+                  />
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text)' }}>
+                      كشك البصمة السريعة وشاشات التابلت 📱
+                    </div>
+                    <p style={{ margin: '3px 0 0', fontSize: '11.5px', color: 'var(--text-secondary, #64748b)' }}>
+                      إرسال إشعار فوري للبصمات المسجلة عبر شاشات وكشك الفروع.
+                    </p>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. أنواع الحركات المطلوبة */}
+          <div style={{ marginBottom: '18px', background: 'var(--surface-variant, #f8fafc)', border: '1px solid var(--border)', borderRadius: '14px', padding: '14px' }}>
+            <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text)', display: 'block', marginBottom: '10px' }}>
+              📌 الحركات المطلوب إرسال إشعارات لها:
+            </span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 700 }}>
+                <input
+                  type="checkbox"
+                  checked={waAlertsConfig.notifyCheckIn !== false}
+                  onChange={(e) => {
+                    const next = { ...waAlertsConfig, notifyCheckIn: e.target.checked };
+                    setWaAlertsConfig(next);
+                    handleSaveAlertsConfig(next, true);
+                  }}
+                  style={{ width: '16px', height: '16px', accentColor: '#10b981' }}
+                />
+                <span>🟢 بصمة الحضور (Check-In)</span>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 700 }}>
+                <input
+                  type="checkbox"
+                  checked={waAlertsConfig.notifyCheckOut !== false}
+                  onChange={(e) => {
+                    const next = { ...waAlertsConfig, notifyCheckOut: e.target.checked };
+                    setWaAlertsConfig(next);
+                    handleSaveAlertsConfig(next, true);
+                  }}
+                  style={{ width: '16px', height: '16px', accentColor: '#ef4444' }}
+                />
+                <span>🔴 بصمة الانصراف (Check-Out)</span>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 700 }}>
+                <input
+                  type="checkbox"
+                  checked={waAlertsConfig.notifyBreakStart !== false}
+                  onChange={(e) => {
+                    const next = { ...waAlertsConfig, notifyBreakStart: e.target.checked };
+                    setWaAlertsConfig(next);
+                    handleSaveAlertsConfig(next, true);
+                  }}
+                  style={{ width: '16px', height: '16px', accentColor: '#f59e0b' }}
+                />
+                <span>☕ بدء الاستراحة (Break Start)</span>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 700 }}>
+                <input
+                  type="checkbox"
+                  checked={waAlertsConfig.notifyBreakEnd !== false}
+                  onChange={(e) => {
+                    const next = { ...waAlertsConfig, notifyBreakEnd: e.target.checked };
+                    setWaAlertsConfig(next);
+                    handleSaveAlertsConfig(next, true);
+                  }}
+                  style={{ width: '16px', height: '16px', accentColor: '#059669' }}
+                />
+                <span>⚡ إنهاء الاستراحة والعودة</span>
+              </label>
+            </div>
+
+            <div style={{ marginTop: '12px', borderTop: '1px dashed var(--border)', paddingTop: '10px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 800, color: '#059669' }}>
+                <input
+                  type="checkbox"
+                  checked={waAlertsConfig.notifyEmployee !== false}
+                  onChange={(e) => {
+                    const next = { ...waAlertsConfig, notifyEmployee: e.target.checked };
+                    setWaAlertsConfig(next);
+                    handleSaveAlertsConfig(next, true);
+                  }}
+                  style={{ width: '18px', height: '18px', accentColor: '#059669' }}
+                />
+                <span>📲 إرسال إشعار فوري إلى هاتف الموظف نفسه (على رقم الواتساب المسجل بملفه)</span>
+              </label>
+            </div>
+          </div>
+
+          {/* 3. أرقام هواتف الإدارة العليا المستلمة لكافة حركات التبصيم اليومية */}
+          <div style={{ marginBottom: '18px', background: 'var(--surface-variant, #f8fafc)', border: '1.5px solid var(--border)', borderRadius: '14px', padding: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '6px' }}>
+              <label style={{ fontSize: '13.5px', fontWeight: 800, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Phone style={{ width: '16px', height: '16px', color: '#0284c7' }} />
+                <span>📱 أرقام هواتف الإدارة العليا المستلمة لكافة حركات التبصيم اليومية:</span>
+              </label>
+              <span style={{ fontSize: '11.5px', color: '#059669', fontWeight: 700 }}>
+                ⚡ يتم الحفظ التلقائي الفوري فور الإضافة أو الحذف
+              </span>
+            </div>
+            <p style={{ margin: '0 0 10px', fontSize: '12px', color: 'var(--text-secondary, #64748b)' }}>
+              تصل إليها كافة إشعارات الحضور والانصراف اللحظية من كافة فروع الصيدليات. (يقبل الرقم المصري المباشر مثل 01080739315 أو الدولي 201080739315).
+            </p>
+
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+              <input
+                type="text"
+                value={newAttendancePhone}
+                onChange={(e) => setNewAttendancePhone(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddPhoneChip('recipientPhones', newAttendancePhone, setNewAttendancePhone);
+                  }
+                }}
+                placeholder="أدخل رقم الهاتف (مثال: 01080739315 أو 201080739315)"
+                style={{
+                  flex: 1,
+                  padding: '9px 12px',
+                  borderRadius: '10px',
+                  border: '1.5px solid var(--border)',
+                  fontSize: '13px',
+                  fontFamily: 'monospace',
+                  background: 'var(--surface)',
+                  color: 'var(--text)'
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => handleAddPhoneChip('recipientPhones', newAttendancePhone, setNewAttendancePhone)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '9px 16px',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  cursor: 'pointer'
+                }}
+              >
+                <Plus style={{ width: '15px', height: '15px' }} />
+                <span>إضافة وتثبيت فوري</span>
+              </button>
+            </div>
+
+            {/* Chips List */}
+            <div style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '8px',
+              minHeight: '44px',
+              padding: '10px',
+              background: 'var(--surface)',
+              borderRadius: '10px',
+              border: '1px solid var(--border)'
+            }}>
+              {(waAlertsConfig.recipientPhones || []).length === 0 ? (
+                <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <AlertCircle style={{ width: '14px', height: '14px' }} />
+                  لم تُضف أرقام مخصصة بعد (سيتم استخدام هاتف الإدارة المسجل بإعدادات المنشأة تلقائياً).
+                </span>
+              ) : (
+                waAlertsConfig.recipientPhones.map((ph) => (
+                  <span
+                    key={ph}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '4px 12px',
+                      borderRadius: '20px',
+                      background: 'rgba(16, 185, 129, 0.12)',
+                      border: '1px solid #10b981',
+                      color: '#065f46',
+                      fontSize: '12.5px',
+                      fontFamily: 'monospace',
+                      fontWeight: 800
+                    }}
+                  >
+                    <span>📱 {ph}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemovePhoneChip('recipientPhones', ph)}
+                      title="حذف الرقم"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: '#dc2626',
+                        fontWeight: 900,
+                        fontSize: '14px',
+                        padding: '0 2px',
+                        display: 'flex',
+                        alignItems: 'center'
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* 4. أداة الاختبار الميداني اللحظي */}
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.05) 0%, rgba(3, 105, 161, 0.02) 100%)',
+            border: '1.5px solid rgba(2, 132, 199, 0.25)',
+            borderRadius: '14px',
+            padding: '16px',
+            marginBottom: '18px'
+          }}>
+            <span style={{ fontSize: '13px', fontWeight: 800, color: '#0369a1', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <Sparkles style={{ width: '16px', height: '16px' }} />
+              <span>فحص واختبار إشعار بصمة تجريبي فوري:</span>
+            </span>
+            <p style={{ margin: '0 0 12px', fontSize: '12px', color: 'var(--text-secondary, #64748b)' }}>
+              إرسال رسالة تجريبية تحاكي تسجيل بصمة فعلية للتأكد من وصول الإشعارات لهواتف الإدارة دون تأخير.
+            </p>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <select
+                value={testPunchAction}
+                onChange={(e) => setTestPunchAction(e.target.value)}
+                style={{ padding: '8px 12px', borderRadius: '10px', border: '1px solid var(--border)', fontSize: '13px', fontWeight: 700 }}
+              >
+                <option value="check_in">🟢 تجربة إشعار حضور (Check-In)</option>
+                <option value="check_out">🔴 تجربة إشعار انصراف (Check-Out)</option>
+                <option value="break_start">☕ تجربة بدء استراحة (Break Start)</option>
+                <option value="break_end">⚡ تجربة عودة من استراحة (Break End)</option>
+              </select>
+
+              <button
+                type="button"
+                disabled={isTestingAlert}
+                onClick={() => handleTestAlert(null, testPunchAction, 'admin')}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '9px 16px',
+                  borderRadius: '10px',
+                  background: '#0284c7',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  cursor: isTestingAlert ? 'wait' : 'pointer',
+                  boxShadow: '0 4px 12px rgba(2, 132, 199, 0.3)'
+                }}
+              >
+                <Send style={{ width: '14px', height: '14px' }} className={isTestingAlert ? 'animate-spin' : ''} />
+                <span>{isTestingAlert ? 'جاري الإرسال التجريبي...' : 'إرسال إشعار تجريبي فوري للإدارة'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Master Save Button */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              disabled={isSavingAlertsConfig}
+              onClick={() => handleSaveAlertsConfig(waAlertsConfig, false)}
+              className="btn btn-primary"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '10px 22px',
+                borderRadius: '12px',
+                fontSize: '13.5px',
+                fontWeight: 800
+              }}
+            >
+              <span>{isSavingAlertsConfig ? 'جاري الحفظ والتزامن...' : '💾 حفظ وتأكيد كافة إعدادات البصمة'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── تبويب 3: هاتف المالك (سيف) وتنبيهات شكاوى النواقص الفورية ── */}
+      {activeMainTab === 'ownerVIP' && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(217, 119, 6, 0.02) 100%)',
+          border: '2px solid rgba(245, 158, 11, 0.45)',
+          borderRadius: '16px',
+          padding: '24px',
+          marginBottom: '22px',
+          boxShadow: '0 8px 24px rgba(245, 158, 11, 0.09)'
+        }}>
+          {/* Header */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '16px',
+            borderBottom: '1.5px solid rgba(245, 158, 11, 0.25)',
+            paddingBottom: '16px',
+            marginBottom: '20px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+              <div style={{
+                width: '50px',
+                height: '50px',
+                borderRadius: '14px',
+                background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '24px',
+                boxShadow: '0 6px 18px rgba(217, 119, 6, 0.35)'
+              }}>
+                <Crown style={{ width: '26px', height: '26px' }} />
+              </div>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: '#92400e' }}>
+                  بوابة هاتف المالك (سيف) وتنبيهات شكاوى النواقص الفورية 👑
+                </h4>
+                <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: '#b45309' }}>
+                  قناة واتساب مباشرة وسرية للمالك لمتابعة كافة الشكاوى والطوارئ والأصناف الحرجة بالفروع لحظياً
+                </p>
+              </div>
+            </div>
+
+            <div>
+              {waAlertsConfig.ownerWhatsAppNumber ? (
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: '#dcfce7',
+                  color: '#166534',
+                  padding: '6px 12px',
+                  borderRadius: '20px',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  border: '1px solid #86efac'
+                }}>
+                  <CheckCircle2 style={{ width: '15px', height: '15px' }} />
+                  <span>VIP مسجل ومعتمد للمالك</span>
+                </span>
+              ) : (
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: '#fee2e2',
+                  color: '#991b1b',
+                  padding: '6px 12px',
+                  borderRadius: '20px',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  border: '1px solid #fca5a5'
+                }}>
+                  <AlertCircle style={{ width: '15px', height: '15px' }} />
+                  <span>لم يتم تسجيل رقم المالك بعد</span>
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Section 1: Phone input */}
+          <div style={{
+            background: '#ffffff',
+            border: '1.5px solid #fef08a',
+            borderRadius: '14px',
+            padding: '18px',
+            marginBottom: '18px',
+            boxShadow: '0 4px 14px rgba(0,0,0,0.02)'
+          }}>
+            <label style={{ display: 'block', fontSize: '14px', fontWeight: 800, color: '#854d0e', marginBottom: '6px' }}>
+              📱 رقم هاتف المالك (سيف) الشخصي المعتمد للإشعارات:
+            </label>
+            <p style={{ margin: '0 0 10px', fontSize: '12.5px', color: '#713f12', lineHeight: '1.5' }}>
+              أدخل الرقم بالصيغة المصرية المباشرة (مثل: <strong>01012345678</strong>) أو الدولية (مثل: <strong>201012345678</strong>). يتم حفظ الرقم وتحديثه تلقائياً في منظومة الصلاحيات وقاعدة البيانات.
+            </p>
+
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                type="text"
+                value={waAlertsConfig.ownerWhatsAppNumber || ''}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/[^0-9]/g, '');
+                  setWaAlertsConfig(prev => ({ ...prev, ownerWhatsAppNumber: val }));
+                }}
+                placeholder="رقم واتساب المالك (مثال: 01012345678)"
+                style={{
+                  flex: 1,
+                  maxWidth: '360px',
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  border: '2px solid #fde047',
+                  fontSize: '14px',
+                  fontFamily: 'monospace',
+                  fontWeight: 800,
+                  background: '#fefce8',
+                  color: '#0f172a'
+                }}
+              />
+
+              <button
+                type="button"
+                disabled={isSavingAlertsConfig}
+                onClick={async () => {
+                  const clean = normalizeAlertPhone(waAlertsConfig.ownerWhatsAppNumber);
+                  if (!clean || clean.length < 9) {
+                    showToast?.('⚠️ يرجى إدخال رقم هاتف صحيح للمالك');
+                    return;
+                  }
+                  const next = { ...waAlertsConfig, ownerWhatsAppNumber: clean };
+                  setWaAlertsConfig(next);
+                  await handleSaveAlertsConfig(next, false);
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '10px 18px',
+                  borderRadius: '10px',
+                  background: 'linear-gradient(135deg, #d97706, #b45309)',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(217, 119, 6, 0.3)'
+                }}
+              >
+                <span>💾 حفظ وتثبيت رقم المالك فوراً</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Section 2: Outstock complaints toggle */}
+          <div style={{
+            background: '#ffffff',
+            border: '1.5px solid #fde68a',
+            borderRadius: '14px',
+            padding: '18px',
+            marginBottom: '18px',
+            boxShadow: '0 4px 14px rgba(0,0,0,0.02)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', margin: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={waAlertsConfig.notifyOwnerOnOutstockComplaints !== false}
+                  onChange={(e) => {
+                    const next = { ...waAlertsConfig, notifyOwnerOnOutstockComplaints: e.target.checked };
+                    setWaAlertsConfig(next);
+                    handleSaveAlertsConfig(next, false);
+                  }}
+                  style={{ width: '20px', height: '20px', accentColor: '#d97706', cursor: 'pointer' }}
+                />
+                <span style={{ fontSize: '14px', fontWeight: 800, color: '#92400e' }}>
+                  تفعيل إرسال إشعار فوري للمالك عند رفع الصيدلية شكوى في نظام النواقص 🚨
+                </span>
+              </label>
+              <span style={{ fontSize: '12px', background: '#fef3c7', color: '#92400e', padding: '3px 10px', borderRadius: '10px', fontWeight: 800 }}>
+                {waAlertsConfig.notifyOwnerOnOutstockComplaints !== false ? '🟢 التنبيه التلقائي مفعل' : '🔴 متوقف'}
+              </span>
+            </div>
+
+            <p style={{ margin: 0, fontSize: '12.5px', color: '#78350f', lineHeight: '1.6' }}>
+              فور قيام الصيدلي في أي فرع برفع شكوى نواقص (تأخر الرد على صنف، صنف عاجل غير متوفر، أو مشكلة تسعير)، يتم إرسال تنبيه واتساب مباشر إلى هاتف المالك يحتوي على: كود الطلب، اسم الصيدلي، اسم الفرع، اسم الصنف، ونص الشكوى للتدخل الفوري.
+            </p>
+          </div>
+
+          {/* Section 3: Live Test Alert to Owner */}
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(217, 119, 6, 0.06) 0%, rgba(180, 83, 9, 0.02) 100%)',
+            border: '1.5px solid rgba(217, 119, 6, 0.3)',
+            borderRadius: '14px',
+            padding: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '12px'
+          }}>
+            <div>
+              <span style={{ fontSize: '13.5px', fontWeight: 800, color: '#92400e', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Sparkles style={{ width: '16px', height: '16px' }} />
+                <span>فحص واختبار إشعار شكوى تجريبي لهاتف المالك:</span>
+              </span>
+              <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#78350f' }}>
+                يقوم النظام بإرسال رسالة تجريبية تحاكي شكوى نواقص فعلية للتأكد من ربط هاتف المالك بنجاح.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              disabled={isTestingAlert || !waAlertsConfig.ownerWhatsAppNumber}
+              onClick={() => handleTestAlert(waAlertsConfig.ownerWhatsAppNumber, 'outstock_complaint', 'owner')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '10px 20px',
+                borderRadius: '10px',
+                background: waAlertsConfig.ownerWhatsAppNumber ? 'linear-gradient(135deg, #d97706, #b45309)' : '#cbd5e1',
+                color: '#ffffff',
+                border: 'none',
+                fontSize: '13px',
+                fontWeight: 800,
+                cursor: (isTestingAlert || !waAlertsConfig.ownerWhatsAppNumber) ? 'not-allowed' : 'pointer',
+                boxShadow: waAlertsConfig.ownerWhatsAppNumber ? '0 4px 14px rgba(217, 119, 6, 0.35)' : 'none'
+              }}
+            >
+              <Crown style={{ width: '15px', height: '15px' }} />
+              <span>{isTestingAlert ? 'جاري الإرسال التجريبي...' : '👑 إرسال إشعار شكوى تجريبي للمالك الآن'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── تبويب 4: نظام المراقبة الذكي للأجهزة والتسوية التلقائية ── */}
+      {activeMainTab === 'watchdogAndReconciliation' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '22px' }}>
+          {/* 1. نظام المراقبة الذكي للأجهزة (Device Watchdog) */}
+          <div style={{
+            background: 'var(--surface)',
+            border: `1.5px solid ${waAlertsConfig.watchdogEnabled !== false ? '#38bdf8' : 'var(--border)'}`,
+            borderRadius: '16px',
+            padding: '22px 24px',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.04)'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '14px',
+              borderBottom: '1px solid var(--border)',
+              paddingBottom: '16px',
+              marginBottom: '16px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '12px',
+                  background: 'linear-gradient(135deg, #0284c7, #0369a1)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '22px'
+                }}>
+                  <Wifi style={{ width: '22px', height: '22px' }} />
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#0369a1' }}>
+                    نظام المراقبة الذكي للأجهزة (Device Watchdog & WhatsApp Alerts) 🛰️
+                  </h4>
+                  <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--text-secondary, #64748b)' }}>
+                    فحص دوري لنبض ماكينات البصمة بالصيدليات وإرسال تنبيهات فورية عند انقطاع الاتصال وعند استعادته
+                  </p>
+                </div>
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                <span style={{ fontSize: '13px', fontWeight: 700 }}>
+                  {waAlertsConfig.watchdogEnabled !== false ? '🟢 المراقبة مفعلة' : '🔴 المراقبة متوقفة'}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={waAlertsConfig.watchdogEnabled !== false}
+                  onChange={(e) => {
+                    const next = { ...waAlertsConfig, watchdogEnabled: e.target.checked };
+                    setWaAlertsConfig(next);
+                    handleSaveAlertsConfig(next, false);
+                  }}
+                  style={{ width: '20px', height: '20px', accentColor: '#0284c7', cursor: 'pointer' }}
+                />
+              </label>
+            </div>
+
+            {waAlertsConfig.watchdogEnabled !== false && (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>
+                    ⏱️ مهلة اعتبار الجهاز غير متصل (بالدقائق):
+                  </span>
+                  <input
+                    type="number"
+                    min="3"
+                    max="60"
+                    value={waAlertsConfig.watchdogTimeoutMinutes || 10}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10) || 10;
+                      setWaAlertsConfig(prev => ({ ...prev, watchdogTimeoutMinutes: val }));
+                    }}
+                    onBlur={() => handleSaveAlertsConfig(null, true)}
+                    style={{ width: '75px', padding: '6px 8px', borderRadius: '8px', border: '1.5px solid var(--border)', fontSize: '13px', fontWeight: 800, textAlign: 'center' }}
+                  />
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary, #64748b)' }}>
+                    (إذا لم يرسل الجهاز نبضاً خلال هذه المدة يتم إرسال تنبيه انقطاع فوري للإدارة)
+                  </span>
+                </div>
+
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#0369a1', marginBottom: '6px' }}>
+                  📱 أرقام هواتف مخصصة لاستلام تنبيهات انقطاع وعودة الأجهزة:
+                </label>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                  <input
+                    type="text"
+                    value={newWatchdogPhone}
+                    onChange={(e) => setNewWatchdogPhone(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddPhoneChip('watchdogRecipientPhones', newWatchdogPhone, setNewWatchdogPhone);
+                      }
+                    }}
+                    placeholder="مثال: 01080739315 أو 201080739315"
+                    style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1.5px solid var(--border)', fontSize: '13px', fontFamily: 'monospace' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddPhoneChip('watchdogRecipientPhones', newWatchdogPhone, setNewWatchdogPhone)}
+                    style={{ padding: '8px 16px', borderRadius: '8px', background: '#0284c7', color: '#ffffff', border: 'none', fontWeight: 800, cursor: 'pointer', fontSize: '13px' }}
+                  >
+                    ➕ إضافة وتثبيت
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', minHeight: '36px', padding: '8px', background: 'var(--surface-variant, #f8fafc)', borderRadius: '10px', border: '1px solid var(--border)', marginBottom: '14px' }}>
+                  {(waAlertsConfig.watchdogRecipientPhones || []).length === 0 ? (
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                      لم تُحدد أرقام خاصة بالمراقبة (سيتم الإرسال تلقائياً لأرقام الإدارة العليا المسجلة).
+                    </span>
+                  ) : (
+                    waAlertsConfig.watchdogRecipientPhones.map(ph => (
+                      <span
+                        key={ph}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '3px 10px',
+                          borderRadius: '16px',
+                          background: '#e0f2fe',
+                          border: '1px solid #7dd3fc',
+                          color: '#0369a1',
+                          fontSize: '12px',
+                          fontFamily: 'monospace',
+                          fontWeight: 800
+                        }}
+                      >
+                        <span>🛰️ {ph}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePhoneChip('watchdogRecipientPhones', ph)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontWeight: 800, padding: 0 }}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    disabled={isTestingAlert}
+                    onClick={() => handleTestAlert(null, 'device_offline', 'admin')}
+                    style={{
+                      padding: '7px 14px',
+                      borderRadius: '8px',
+                      background: '#fef2f2',
+                      border: '1px solid #fecaca',
+                      color: '#dc2626',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      cursor: isTestingAlert ? 'wait' : 'pointer'
+                    }}
+                  >
+                    ⚠️ تجربة إشعار انقطاع الاتصال (Offline Test)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isTestingAlert}
+                    onClick={() => handleTestAlert(null, 'device_online', 'admin')}
+                    style={{
+                      padding: '7px 14px',
+                      borderRadius: '8px',
+                      background: '#f0fdf4',
+                      border: '1px solid #bbf7d0',
+                      color: '#16a34a',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      cursor: isTestingAlert ? 'wait' : 'pointer'
+                    }}
+                  >
+                    🟢 تجربة إشعار عودة الاتصال (Online Test)
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 2. تقرير التسوية التلقائي بعد الاسترداد (Reconciliation) */}
+          <div style={{
+            background: 'var(--surface)',
+            border: `1.5px solid ${waAlertsConfig.reconciliationEnabled !== false ? '#c084fc' : 'var(--border)'}`,
+            borderRadius: '16px',
+            padding: '22px 24px',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.04)'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '14px',
+              borderBottom: '1px solid var(--border)',
+              paddingBottom: '16px',
+              marginBottom: '16px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '12px',
+                  background: 'linear-gradient(135deg, #7e22ce, #6b21a8)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '22px'
+                }}>
+                  <CheckSquare style={{ width: '22px', height: '22px' }} />
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#7e22ce' }}>
+                    تقرير التسوية التلقائي بعد الاسترداد (Post-Recovery Reconciliation) 📊
+                  </h4>
+                  <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--text-secondary, #64748b)' }}>
+                    إرسال تقرير تسوية شامل عبر واتساب فور استلام الحركات المتراكمة بعد عودة الإنترنت للفرع
+                  </p>
+                </div>
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                <span style={{ fontSize: '13px', fontWeight: 700 }}>
+                  {waAlertsConfig.reconciliationEnabled !== false ? '🟢 التسوية مفعلة' : '🔴 التسوية متوقفة'}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={waAlertsConfig.reconciliationEnabled !== false}
+                  onChange={(e) => {
+                    const next = { ...waAlertsConfig, reconciliationEnabled: e.target.checked };
+                    setWaAlertsConfig(next);
+                    handleSaveAlertsConfig(next, false);
+                  }}
+                  style={{ width: '20px', height: '20px', accentColor: '#7e22ce', cursor: 'pointer' }}
+                />
+              </label>
+            </div>
+
+            {waAlertsConfig.reconciliationEnabled !== false && (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>
+                    📥 الحد الأدنى للبصمات المتراكمة لإرسال التقرير:
+                  </span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={waAlertsConfig.reconciliationMinBatchSize || 3}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10) || 3;
+                      setWaAlertsConfig(prev => ({ ...prev, reconciliationMinBatchSize: val }));
+                    }}
+                    onBlur={() => handleSaveAlertsConfig(null, true)}
+                    style={{ width: '70px', padding: '6px 8px', borderRadius: '8px', border: '1.5px solid var(--border)', fontSize: '13px', fontWeight: 800, textAlign: 'center' }}
+                  />
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary, #64748b)' }}>
+                    (حركات بصمة متراكمة تم رفعها دفعة واحدة بعد عودة الاتصال)
+                  </span>
+                </div>
+
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#7e22ce', marginBottom: '6px' }}>
+                  📱 أرقام هواتف مخصصة لاستلام تقرير التسوية التلقائي:
+                </label>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                  <input
+                    type="text"
+                    value={newReconciliationPhone}
+                    onChange={(e) => setNewReconciliationPhone(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddPhoneChip('reconciliationRecipientPhones', newReconciliationPhone, setNewReconciliationPhone);
+                      }
+                    }}
+                    placeholder="مثال: 01080739315 أو 201080739315"
+                    style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1.5px solid var(--border)', fontSize: '13px', fontFamily: 'monospace' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddPhoneChip('reconciliationRecipientPhones', newReconciliationPhone, setNewReconciliationPhone)}
+                    style={{ padding: '8px 16px', borderRadius: '8px', background: '#7e22ce', color: '#ffffff', border: 'none', fontWeight: 800, cursor: 'pointer', fontSize: '13px' }}
+                  >
+                    ➕ إضافة وتثبيت
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', minHeight: '36px', padding: '8px', background: 'var(--surface-variant, #f8fafc)', borderRadius: '10px', border: '1px solid var(--border)', marginBottom: '14px' }}>
+                  {(waAlertsConfig.reconciliationRecipientPhones || []).length === 0 ? (
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                      لم تُحدد أرقام خاصة بتقرير التسوية (سيتم الإرسال تلقائياً لأرقام الإدارة العليا المسجلة).
+                    </span>
+                  ) : (
+                    waAlertsConfig.reconciliationRecipientPhones.map(ph => (
+                      <span
+                        key={ph}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '3px 10px',
+                          borderRadius: '16px',
+                          background: '#f3e8ff',
+                          border: '1px solid #d8b4fe',
+                          color: '#7e22ce',
+                          fontSize: '12px',
+                          fontFamily: 'monospace',
+                          fontWeight: 800
+                        }}
+                      >
+                        <span>📊 {ph}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePhoneChip('reconciliationRecipientPhones', ph)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontWeight: 800, padding: 0 }}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+
+                <div>
+                  <button
+                    type="button"
+                    disabled={isTestingAlert}
+                    onClick={() => handleTestAlert(null, 'reconciliation_report', 'admin')}
+                    style={{
+                      padding: '7px 14px',
+                      borderRadius: '8px',
+                      background: '#faf5ff',
+                      border: '1px solid #d8b4fe',
+                      color: '#7e22ce',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      cursor: isTestingAlert ? 'wait' : 'pointer'
+                    }}
+                  >
+                    📊 تجربة إرسال تقرير تسوية استرداد تجريبي (Test Report)
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── تبويب 5: إشعارات القرارات الإدارية (قبول / رفض) ── */}
+      {activeMainTab === 'decisions' && (
       <div style={{
         background: isAutoNotifyOnDecision
           ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.06) 0%, rgba(5, 150, 105, 0.02) 100%)'
@@ -2111,7 +3380,11 @@ export default function WhatsAppCenterModule({
           </div>
         </div>
       </div>
+      )}
 
+      {/* ── تبويب 1: كشوفات المرتبات والمراسلات العامة ── */}
+      {activeMainTab === 'payslips' && (
+      <>
       {/* ── قسم اختيار القوالب الجاهزة والتخصيص ─────────────────────────────── */}
       <div style={{
         background: 'var(--surface)',
@@ -2421,6 +3694,8 @@ export default function WhatsAppCenterModule({
           </tbody>
         </table>
       </div>
+      </>
+      )}
     </div>
   );
 }

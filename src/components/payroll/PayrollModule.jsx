@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import PayslipPrintModal from './PayslipPrintModal';
 import { fmt, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
-import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
+import { computeLatenessFinancialAmount, isApprovedPermissionForDate, isVariableScheduleEmployee } from '../../utils/latePenaltyEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import { getCycleDateRange } from '../../utils/periodEngine';
 import { autoSettlePeriodLoans, revertPeriodLoanSettlements } from '../../utils/loansEngine';
@@ -531,7 +531,7 @@ export default function PayrollModule({
                       }}>
                         <span>🏬 {branchNameDisplay}</span>
                       </div>
-                      {emp.noMonthlySchedule && (
+                      {isVariableScheduleEmployee(emp) && (
                         <div style={{ marginTop: '3px' }}>
                           <span style={{ background: '#ede9fe', color: '#6d28d9', padding: '1px 7px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', border: '1px solid #c4b5fd' }}>
                             ⏱️ مواعيد متغيرة
@@ -544,6 +544,11 @@ export default function PayrollModule({
                       {empSum.approvedOvertimeHours > 0 && (
                         <div style={{ fontSize: '11.5px', color: '#15803d', fontWeight: 'bold' }}>
                           ⭐ +{empSum.approvedOvertimeHours} س إضافي (+{fmt(empSum.overtimeEarnings)} ج.م)
+                        </div>
+                      )}
+                      {empSum.pendingOvertimeHours > 0 && (
+                        <div style={{ fontSize: '11px', color: '#b45309', fontWeight: 'bold' }}>
+                          ⏳ +{empSum.pendingOvertimeHours} س إضافي معلق
                         </div>
                       )}
                       <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>({fmt(empSum.baseEarnings)} ج.م أساسي)</div>
@@ -723,6 +728,7 @@ export default function PayrollModule({
               </div>
               {/* Late Penalties Detailed Incidents Table */}
               {(() => {
+                if (isVariableScheduleEmployee(selectedEmpModal)) return null;
                 const empLateIncidents = (state.lateIncidents || []).filter(
                   (inc) =>
                     String(inc.employeeId) === String(selectedEmpModal.id) &&

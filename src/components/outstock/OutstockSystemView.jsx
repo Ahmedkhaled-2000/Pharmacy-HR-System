@@ -75,6 +75,10 @@ import OwnerCustomersDirectoryTab from './owner/OwnerCustomersDirectoryTab';
 import OwnerSettingsTab from './owner/OwnerSettingsTab';
 import OwnerMedicationsPricingTab from './owner/OwnerMedicationsPricingTab';
 import OwnerFinancialReportsTab from './owner/OwnerFinancialReportsTab';
+import OwnerEmployeeSalesReportTab from './owner/OwnerEmployeeSalesReportTab';
+import OwnerProcurementTeamKpiTab from './owner/OwnerProcurementTeamKpiTab';
+import OwnerProcurementRespondedOrdersTab from './owner/OwnerProcurementRespondedOrdersTab';
+import OwnerProcurementResponseSpeedTab from './owner/OwnerProcurementResponseSpeedTab';
 import PharmacyMedicationSearchTab from './pharmacy/PharmacyMedicationSearchTab';
 
 // أقسام النواقص والمشتريات المطورة
@@ -364,8 +368,81 @@ export default function OutstockSystemView({
     }
   ];
 
-  // قائمة الأقسام الفرعية لصفحة الإعدادات والصلاحيات للمالك
+  // ── قوائم الأقسام المنسدلة لبوابة المالك والإشراف العام ──
+  // 1. قائمة طلبات الفروع المنسدلة للمالك
+  const OWNER_BRANCH_ORDERS_SUBSECTIONS = [
+    {
+      id: 'owner_branches',
+      title: 'طلبات الفروع وأرصدتها',
+      desc: 'استعراض ومتابعة وتوريد طلبيات العملاء والنواقص لكافة الفروع',
+      icon: Building2
+    },
+    {
+      id: 'owner_complaints',
+      title: 'شكاوى الفروع المصعدة',
+      desc: 'متابعة الشكاوى المرفوعة للمالك بخصوص تأخر الرد أو عدم توفر الصنف',
+      icon: AlertTriangle
+    },
+    {
+      id: 'owner_inquiries',
+      title: 'استعلامات وتصحيح الأصناف',
+      desc: 'استعلامات الفروع واعتماد وتصحيح بيانات وأسعار الأدوية',
+      icon: HelpCircle
+    }
+  ];
+
+  // 2. قائمة متابعة المشتريات المنسدلة للمالك
+  const OWNER_PROCUREMENT_SUBSECTIONS = [
+    {
+      id: 'owner_procurement',
+      title: 'متابعة إدارة المشتريات',
+      desc: 'لوحة القيادة المركزية ومتابعة أعمال وإحصائيات إدارة المشتريات',
+      icon: TrendingUp
+    },
+    {
+      id: 'owner_procurement_team_kpi',
+      title: 'أداء مسؤولي المشتريات (KPIs)',
+      desc: 'مؤشرات إنجاز وسرعة ونسب تلبية كل مسؤول مشتريات وتقييم الكفاءة',
+      icon: UserCheck
+    },
+    {
+      id: 'owner_procurement_responded',
+      title: 'أرشيف الطلبات التي تم الرد عليها',
+      desc: 'سجل تدقيق كامل لكافة الأصناف المعالجة من المشتريات وقرارات التوريد',
+      icon: PackageCheck
+    },
+    {
+      id: 'owner_procurement_speed',
+      title: 'سرعة الرد على طلبات الفروع (SLA)',
+      desc: 'مصفوفة زمن الاستجابة الفوري والقياسي والمتأخر مع تعديل المعايير',
+      icon: Clock
+    }
+  ];
+
+  // 3. قائمة التقارير المركزية المنسدلة للمالك
+  const OWNER_REPORTS_SUBSECTIONS = [
+    {
+      id: 'owner_financial_reports',
+      title: 'التقارير المالية والأرباح المركزية',
+      desc: 'متابعة المبيعات والعربونات وأرباح النواقص المركزية لكافة الفروع',
+      icon: BarChart3
+    },
+    {
+      id: 'owner_employee_sales',
+      title: 'تقرير مبيعات الموظفين والنواقص',
+      desc: 'حصر مبيعات وحجوزات الموظفين بالأكواد ومعدل التحويل وحساب الحوافز',
+      icon: Users
+    }
+  ];
+
+  // 4. قائمة الأقسام الفرعية لصفحة الإعدادات والصلاحيات للمالك
   const OWNER_SETTINGS_SUBSECTIONS = [
+    {
+      id: 'owner_team',
+      title: 'فريق المشتريات والصلاحيات',
+      desc: 'إدارة حسابات ومسؤولي المشتريات وتحديد نطاق وصلاحيات الفروع',
+      icon: UserCheck
+    },
     {
       id: 'pharmacy_identity',
       title: 'هوية وشعار الصيدلية بالفاتورة',
@@ -458,6 +535,25 @@ export default function OutstockSystemView({
   const suppliersMenuRef = useRef(null);
   const [suppliersMenuCoords, setSuppliersMenuCoords] = useState(null);
   const [suppliersActiveSubTab, setSuppliersActiveSubTab] = useState('accounts');
+
+  // ── القوائم المنسدلة الذكية الخاصة ببوابة المالك ──
+  // أ) قائمة طلبات الفروع المنسدلة للمالك
+  const [isOwnerBranchOrdersMenuOpen, setIsOwnerBranchOrdersMenuOpen] = useState(false);
+  const ownerBranchOrdersButtonRef = useRef(null);
+  const ownerBranchOrdersMenuRef = useRef(null);
+  const [ownerBranchOrdersMenuCoords, setOwnerBranchOrdersMenuCoords] = useState(null);
+
+  // ب) قائمة متابعة المشتريات المنسدلة للمالك
+  const [isOwnerProcurementMenuOpen, setIsOwnerProcurementMenuOpen] = useState(false);
+  const ownerProcurementButtonRef = useRef(null);
+  const ownerProcurementMenuRef = useRef(null);
+  const [ownerProcurementMenuCoords, setOwnerProcurementMenuCoords] = useState(null);
+
+  // ج) قائمة التقارير المركزية المنسدلة للمالك
+  const [isOwnerReportsMenuOpen, setIsOwnerReportsMenuOpen] = useState(false);
+  const ownerReportsButtonRef = useRef(null);
+  const ownerReportsMenuRef = useRef(null);
+  const [ownerReportsMenuCoords, setOwnerReportsMenuCoords] = useState(null);
 
   // فحص الصلاحيات الدقيقة للأقسام الخمسة لإدارة الموردين
   const canAccessSuppliersTab = useMemo(() => {
@@ -653,15 +749,44 @@ export default function OutstockSystemView({
     }
   }, [isSuppliersMenuOpen, calculateMenuCoords]);
 
+  useEffect(() => {
+    if (isOwnerBranchOrdersMenuOpen) {
+      setOwnerBranchOrdersMenuCoords(calculateMenuCoords(ownerBranchOrdersButtonRef));
+    }
+  }, [isOwnerBranchOrdersMenuOpen, calculateMenuCoords]);
+
+  useEffect(() => {
+    if (isOwnerProcurementMenuOpen) {
+      setOwnerProcurementMenuCoords(calculateMenuCoords(ownerProcurementButtonRef));
+    }
+  }, [isOwnerProcurementMenuOpen, calculateMenuCoords]);
+
+  useEffect(() => {
+    if (isOwnerReportsMenuOpen) {
+      setOwnerReportsMenuCoords(calculateMenuCoords(ownerReportsButtonRef));
+    }
+  }, [isOwnerReportsMenuOpen, calculateMenuCoords]);
+
   // إدارة أحداث الإغلاق عند النقر الخارجي وتغيير مقاس الشاشة
   useEffect(() => {
-    if (!isSettingsMenuOpen && !isBranchOrdersMenuOpen && !isSuppliersMenuOpen && !isPharmacyOrdersMenuOpen) return;
+    if (
+      !isSettingsMenuOpen &&
+      !isBranchOrdersMenuOpen &&
+      !isSuppliersMenuOpen &&
+      !isPharmacyOrdersMenuOpen &&
+      !isOwnerBranchOrdersMenuOpen &&
+      !isOwnerProcurementMenuOpen &&
+      !isOwnerReportsMenuOpen
+    ) return;
 
     const handleUpdate = () => {
       if (isSettingsMenuOpen) setMenuCoords(calculateMenuCoords(settingsButtonRef));
       if (isPharmacyOrdersMenuOpen) setPharmacyOrdersMenuCoords(calculateMenuCoords(pharmacyOrdersButtonRef));
       if (isBranchOrdersMenuOpen) setBranchOrdersMenuCoords(calculateMenuCoords(branchOrdersButtonRef));
       if (isSuppliersMenuOpen) setSuppliersMenuCoords(calculateMenuCoords(suppliersButtonRef));
+      if (isOwnerBranchOrdersMenuOpen) setOwnerBranchOrdersMenuCoords(calculateMenuCoords(ownerBranchOrdersButtonRef));
+      if (isOwnerProcurementMenuOpen) setOwnerProcurementMenuCoords(calculateMenuCoords(ownerProcurementButtonRef));
+      if (isOwnerReportsMenuOpen) setOwnerReportsMenuCoords(calculateMenuCoords(ownerReportsButtonRef));
     };
 
     const handleClickOutside = (e) => {
@@ -685,6 +810,21 @@ export default function OutstockSystemView({
           setIsSuppliersMenuOpen(false);
         }
       }
+      if (isOwnerBranchOrdersMenuOpen) {
+        if (!ownerBranchOrdersButtonRef.current?.contains(e.target) && !ownerBranchOrdersMenuRef.current?.contains(e.target)) {
+          setIsOwnerBranchOrdersMenuOpen(false);
+        }
+      }
+      if (isOwnerProcurementMenuOpen) {
+        if (!ownerProcurementButtonRef.current?.contains(e.target) && !ownerProcurementMenuRef.current?.contains(e.target)) {
+          setIsOwnerProcurementMenuOpen(false);
+        }
+      }
+      if (isOwnerReportsMenuOpen) {
+        if (!ownerReportsButtonRef.current?.contains(e.target) && !ownerReportsMenuRef.current?.contains(e.target)) {
+          setIsOwnerReportsMenuOpen(false);
+        }
+      }
     };
 
     const handleKeyDown = (e) => {
@@ -693,6 +833,9 @@ export default function OutstockSystemView({
         setIsPharmacyOrdersMenuOpen(false);
         setIsBranchOrdersMenuOpen(false);
         setIsSuppliersMenuOpen(false);
+        setIsOwnerBranchOrdersMenuOpen(false);
+        setIsOwnerProcurementMenuOpen(false);
+        setIsOwnerReportsMenuOpen(false);
       }
     };
 
@@ -709,7 +852,16 @@ export default function OutstockSystemView({
       document.removeEventListener('touchstart', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isSettingsMenuOpen, isPharmacyOrdersMenuOpen, isBranchOrdersMenuOpen, isSuppliersMenuOpen, calculateMenuCoords]);
+  }, [
+    isSettingsMenuOpen,
+    isPharmacyOrdersMenuOpen,
+    isBranchOrdersMenuOpen,
+    isSuppliersMenuOpen,
+    isOwnerBranchOrdersMenuOpen,
+    isOwnerProcurementMenuOpen,
+    isOwnerReportsMenuOpen,
+    calculateMenuCoords
+  ]);
 
   // تحديث التبويب التلقائي عند تبديل الدور أو إذا كان التبويب الحالي غير متوافق
   useEffect(() => {
@@ -723,7 +875,23 @@ export default function OutstockSystemView({
         setActiveTab(allowedProcurementTabs[0]);
       }
     } else if (userRole === 'owner') {
-      const ownerTabs = ['owner_financial_reports', 'owner_branches', 'owner_procurement', 'owner_suppliers', 'owner_complaints', 'owner_inquiries', 'owner_team', 'owner_medications', 'owner_customers', 'owner_whatsapp', 'owner_settings'];
+      const ownerTabs = [
+        'owner_branches',
+        'owner_complaints',
+        'owner_inquiries',
+        'owner_procurement',
+        'owner_procurement_team_kpi',
+        'owner_procurement_responded',
+        'owner_procurement_speed',
+        'owner_financial_reports',
+        'owner_employee_sales',
+        'owner_suppliers',
+        'owner_team',
+        'owner_medications',
+        'owner_customers',
+        'owner_whatsapp',
+        'owner_settings'
+      ];
       if (!ownerTabs.includes(activeTab)) {
         setActiveTab('owner_branches');
       }
@@ -738,6 +906,8 @@ export default function OutstockSystemView({
     branchReadyOrdersCount: 0,
     branchRestockedItemsCount: 0,
     ownerPendingComplaintsCount: 0,
+    procurementPendingComplaintsCount: 0,
+    branchPendingComplaintsCount: 0,
     pendingReturnsCount: 0
   });
 
@@ -782,6 +952,9 @@ export default function OutstockSystemView({
     window.addEventListener('outstock:branch_order_replied', handleBranchOrderReplied);
     window.addEventListener('outstock:medication_request_created', handleRefresh);
     window.addEventListener('outstock:medication_request_replied', handleRefresh);
+    window.addEventListener('outstock:owner_complaint_escalation', handleRefresh);
+    window.addEventListener('outstock:complaint_created', handleRefresh);
+    window.addEventListener('outstock:complaint_updated', handleRefresh);
 
     return () => {
       clearInterval(interval);
@@ -793,6 +966,9 @@ export default function OutstockSystemView({
       window.removeEventListener('outstock:branch_order_replied', handleBranchOrderReplied);
       window.removeEventListener('outstock:medication_request_created', handleRefresh);
       window.removeEventListener('outstock:medication_request_replied', handleRefresh);
+      window.removeEventListener('outstock:owner_complaint_escalation', handleRefresh);
+      window.removeEventListener('outstock:complaint_created', handleRefresh);
+      window.removeEventListener('outstock:complaint_updated', handleRefresh);
     };
   }, [fetchNotificationsSummary, effectiveBranchId, userRole, triggerNotification]);
 
@@ -1365,6 +1541,14 @@ export default function OutstockSystemView({
               >
                 <AlertTriangle size={16} />
                 <span>شكاوى وتصعيد النواقص</span>
+                {(notificationsSummary.branchPendingComplaintsCount || 0) > 0 && (
+                  <span
+                    className="outstock-nav-badge warning"
+                    title={`${notificationsSummary.branchPendingComplaintsCount} شكوى قيد المتابعة والانتظار`}
+                  >
+                    {notificationsSummary.branchPendingComplaintsCount}
+                  </span>
+                )}
               </button>
             </>
           )}
@@ -1481,6 +1665,14 @@ export default function OutstockSystemView({
               >
                 <AlertTriangle size={16} />
                 <span>شكاوى الفروع</span>
+                {(notificationsSummary.procurementPendingComplaintsCount || 0) > 0 && (
+                  <span
+                    className="outstock-nav-badge danger"
+                    title={`${notificationsSummary.procurementPendingComplaintsCount} شكوى فرع عاجلة بانتظار رد وتوضيح المشتريات`}
+                  >
+                    {notificationsSummary.procurementPendingComplaintsCount}
+                  </span>
+                )}
               </button>
 
               {isCosmeticsOfficer && (
@@ -1497,42 +1689,108 @@ export default function OutstockSystemView({
             </>
           )}
 
-          {/* 3. قوائم بوابة المالك (7 قوائم) */}
+          {/* 3. قوائم بوابة المالك المركزية المطورة */}
           {userRole === 'owner' && (
             <>
+              {/* قائمة 1: طلبات الفروع المنسدلة الذكية */}
               <button
+                ref={ownerBranchOrdersButtonRef}
                 type="button"
-                className={`outstock-subnav-btn ${activeTab === 'owner_financial_reports' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('owner_financial_reports')}
-                title="متابعة التقارير المالية ومبيعات الفروع والعربونات ونواقص السوق"
-              >
-                <BarChart3 size={16} />
-                <span>التقارير المالية والأرباح</span>
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-subnav-btn ${activeTab === 'owner_branches' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('owner_branches')}
+                className={`outstock-subnav-btn ${['owner_branches', 'owner_complaints', 'owner_inquiries'].includes(activeTab) ? 'is-active' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOwnerBranchOrdersMenuCoords(calculateMenuCoords(ownerBranchOrdersButtonRef));
+                  setIsOwnerBranchOrdersMenuOpen(prev => !prev);
+                  if (isOwnerProcurementMenuOpen) setIsOwnerProcurementMenuOpen(false);
+                  if (isOwnerReportsMenuOpen) setIsOwnerReportsMenuOpen(false);
+                  if (isSuppliersMenuOpen) setIsSuppliersMenuOpen(false);
+                  if (isSettingsMenuOpen) setIsSettingsMenuOpen(false);
+                }}
+                title="طلبات الفروع وأرصدتها، شكاوى الفروع المصعدة، واستعلامات وتصحيح الأصناف"
+                aria-haspopup="true"
+                aria-expanded={isOwnerBranchOrdersMenuOpen}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
               >
                 <Building2 size={16} />
-                <span>طلبات الفروع وأرصدتها</span>
-                {notificationsSummary.pendingBranchOrdersCount > 0 && (
-                  <span className="outstock-nav-badge" title={`${notificationsSummary.pendingBranchOrdersCount} طلب بانتظار التوريد`}>
-                    {notificationsSummary.pendingBranchOrdersCount}
+                <span>طلبات الفروع</span>
+                {(notificationsSummary.pendingBranchOrdersCount + notificationsSummary.ownerPendingComplaintsCount + notificationsSummary.pendingInquiriesCount) > 0 && (
+                  <span className="outstock-nav-badge warning" title={`${notificationsSummary.pendingBranchOrdersCount} طلب فرع، ${notificationsSummary.ownerPendingComplaintsCount} شكوى، ${notificationsSummary.pendingInquiriesCount} استعلام`}>
+                    {notificationsSummary.pendingBranchOrdersCount + notificationsSummary.ownerPendingComplaintsCount + notificationsSummary.pendingInquiriesCount}
                   </span>
                 )}
+                <ChevronDown
+                  size={14}
+                  style={{
+                    transform: isOwnerBranchOrdersMenuOpen ? 'rotate(180deg)' : 'none',
+                    transition: 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                    opacity: 0.85
+                  }}
+                />
               </button>
 
+              {/* قائمة 2: متابعة المشتريات المنسدلة الذكية */}
               <button
+                ref={ownerProcurementButtonRef}
                 type="button"
-                className={`outstock-subnav-btn ${activeTab === 'owner_procurement' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('owner_procurement')}
+                className={`outstock-subnav-btn ${['owner_procurement', 'owner_procurement_team_kpi', 'owner_procurement_responded', 'owner_procurement_speed'].includes(activeTab) ? 'is-active' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOwnerProcurementMenuCoords(calculateMenuCoords(ownerProcurementButtonRef));
+                  setIsOwnerProcurementMenuOpen(prev => !prev);
+                  if (isOwnerBranchOrdersMenuOpen) setIsOwnerBranchOrdersMenuOpen(false);
+                  if (isOwnerReportsMenuOpen) setIsOwnerReportsMenuOpen(false);
+                  if (isSuppliersMenuOpen) setIsSuppliersMenuOpen(false);
+                  if (isSettingsMenuOpen) setIsSettingsMenuOpen(false);
+                }}
+                title="متابعة إدارة المشتريات، أداء مسؤولي المشتريات، أرشيف الردود، وسرعة الرد SLA"
+                aria-haspopup="true"
+                aria-expanded={isOwnerProcurementMenuOpen}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
               >
                 <TrendingUp size={16} />
-                <span>متابعة إدارة المشتريات</span>
+                <span>متابعة المشتريات</span>
+                <ChevronDown
+                  size={14}
+                  style={{
+                    transform: isOwnerProcurementMenuOpen ? 'rotate(180deg)' : 'none',
+                    transition: 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                    opacity: 0.85
+                  }}
+                />
               </button>
 
+              {/* قائمة 3: التقارير المركزية المنسدلة الذكية */}
+              <button
+                ref={ownerReportsButtonRef}
+                type="button"
+                className={`outstock-subnav-btn ${['owner_financial_reports', 'owner_employee_sales'].includes(activeTab) ? 'is-active' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOwnerReportsMenuCoords(calculateMenuCoords(ownerReportsButtonRef));
+                  setIsOwnerReportsMenuOpen(prev => !prev);
+                  if (isOwnerBranchOrdersMenuOpen) setIsOwnerBranchOrdersMenuOpen(false);
+                  if (isOwnerProcurementMenuOpen) setIsOwnerProcurementMenuOpen(false);
+                  if (isSuppliersMenuOpen) setIsSuppliersMenuOpen(false);
+                  if (isSettingsMenuOpen) setIsSettingsMenuOpen(false);
+                }}
+                title="التقارير المالية والأرباح، وتقرير مبيعات وحوافز الموظفين"
+                aria-haspopup="true"
+                aria-expanded={isOwnerReportsMenuOpen}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <BarChart3 size={16} />
+                <span>التقارير</span>
+                <ChevronDown
+                  size={14}
+                  style={{
+                    transform: isOwnerReportsMenuOpen ? 'rotate(180deg)' : 'none',
+                    transition: 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                    opacity: 0.85
+                  }}
+                />
+              </button>
+
+              {/* قائمة 4: الموردين وفواتير الشراء المنسدلة الذكية */}
               <button
                 ref={userRole === 'owner' ? suppliersButtonRef : undefined}
                 type="button"
@@ -1541,6 +1799,9 @@ export default function OutstockSystemView({
                   e.stopPropagation();
                   setSuppliersMenuCoords(calculateMenuCoords(suppliersButtonRef));
                   setIsSuppliersMenuOpen(prev => !prev);
+                  if (isOwnerBranchOrdersMenuOpen) setIsOwnerBranchOrdersMenuOpen(false);
+                  if (isOwnerProcurementMenuOpen) setIsOwnerProcurementMenuOpen(false);
+                  if (isOwnerReportsMenuOpen) setIsOwnerReportsMenuOpen(false);
                   if (isSettingsMenuOpen) setIsSettingsMenuOpen(false);
                 }}
                 title="حسابات الموردين وفواتير الشراء والمسحوبات ومقارنة الخصومات و i'SUPPLY"
@@ -1560,51 +1821,7 @@ export default function OutstockSystemView({
                 />
               </button>
 
-              <button
-                type="button"
-                className={`outstock-subnav-btn ${activeTab === 'owner_complaints' ? 'is-active' : ''}`}
-                style={{
-                  background: notificationsSummary.ownerPendingComplaintsCount > 0 ? '#fef2f2' : undefined,
-                  color: notificationsSummary.ownerPendingComplaintsCount > 0 ? '#b91c1c' : undefined,
-                  border: notificationsSummary.ownerPendingComplaintsCount > 0 ? '1.5px solid #fca5a5' : undefined
-                }}
-                onClick={() => setActiveTab('owner_complaints')}
-                title="استعراض ومتابعة شكاوى الفروع المصعدة للمالك بخصوص تأخر الرد أو عدم توفر الصنف"
-              >
-                <AlertTriangle size={16} color={notificationsSummary.ownerPendingComplaintsCount > 0 ? '#dc2626' : undefined} />
-                <span>شكاوى الفروع المصعدة</span>
-                {notificationsSummary.ownerPendingComplaintsCount > 0 && (
-                  <span className="outstock-nav-badge warning" style={{ background: '#dc2626' }} title={`${notificationsSummary.ownerPendingComplaintsCount} شكوى معلقة`}>
-                    {notificationsSummary.ownerPendingComplaintsCount}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-subnav-btn ${activeTab === 'owner_inquiries' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('owner_inquiries')}
-                title="استعلامات الفروع وتصحيح الأصناف"
-              >
-                <HelpCircle size={16} />
-                <span>استعلامات وتصحيح الأصناف</span>
-                {notificationsSummary.pendingInquiriesCount > 0 && (
-                  <span className="outstock-nav-badge warning" title={`${notificationsSummary.pendingInquiriesCount} استعلام معلق`}>
-                    {notificationsSummary.pendingInquiriesCount}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                className={`outstock-subnav-btn ${activeTab === 'owner_team' ? 'is-active' : ''}`}
-                onClick={() => setActiveTab('owner_team')}
-                title="فريق المشتريات والصلاحيات"
-              >
-                <UserCheck size={16} />
-                <span>فريق المشتريات والصلاحيات</span>
-              </button>
-
+              {/* كتالوج وتسعير الأدوية */}
               <button
                 type="button"
                 className={`outstock-subnav-btn ${activeTab === 'owner_medications' ? 'is-active' : ''}`}
@@ -1615,40 +1832,47 @@ export default function OutstockSystemView({
                 <span>كتالوج وتسعير الأدوية</span>
               </button>
 
+              {/* دليل العملاء المركزي */}
               <button
                 type="button"
                 className={`outstock-subnav-btn ${activeTab === 'owner_customers' ? 'is-active' : ''}`}
                 onClick={() => setActiveTab('owner_customers')}
+                title="دليل العملاء المركزي الشامل ومحفظة العملاء وسجل الطلبات"
               >
                 <Users size={16} />
                 <span>دليل العملاء المركزي</span>
               </button>
 
+              {/* مركز الواتساب */}
               <button
                 type="button"
                 className={`outstock-subnav-btn ${activeTab === 'owner_whatsapp' ? 'is-active' : ''}`}
                 onClick={() => setActiveTab('owner_whatsapp')}
-                title="مركز الواتساب والرسائل التلقائية لعملاء الفروع"
+                title="مركز الواتساب والبث الموحد للفروع"
               >
                 <MessageSquare size={16} />
                 <span>مركز الواتساب</span>
               </button>
 
-              {/* تبويبة وقائمة الإعدادات والصلاحيات المنسدلة الذكية */}
+              {/* الإعدادات والصلاحيات */}
               <button
                 ref={settingsButtonRef}
                 type="button"
-                className={`outstock-subnav-btn ${activeTab === 'owner_settings' ? 'is-active' : ''}`}
+                className={`outstock-subnav-btn ${activeTab === 'owner_settings' || activeTab === 'owner_team' ? 'is-active' : ''}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (activeTab !== 'owner_settings') {
+                  if (activeTab !== 'owner_settings' && activeTab !== 'owner_team') {
                     setActiveTab('owner_settings');
                     setIsSettingsMenuOpen(true);
                   } else {
                     setIsSettingsMenuOpen(prev => !prev);
                   }
+                  if (isOwnerBranchOrdersMenuOpen) setIsOwnerBranchOrdersMenuOpen(false);
+                  if (isOwnerProcurementMenuOpen) setIsOwnerProcurementMenuOpen(false);
+                  if (isOwnerReportsMenuOpen) setIsOwnerReportsMenuOpen(false);
+                  if (isSuppliersMenuOpen) setIsSuppliersMenuOpen(false);
                 }}
-                title="إعدادات وصلاحيات وهوية النظام والفروع"
+                title="إعدادات وصلاحيات وهوية النظام والفروع وفريق المشتريات"
                 aria-haspopup="true"
                 aria-expanded={isSettingsMenuOpen}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
@@ -1922,6 +2146,10 @@ export default function OutstockSystemView({
               <OwnerFinancialReportsTab showToast={triggerNotification} />
             )}
 
+            {activeTab === 'owner_employee_sales' && (
+              <OwnerEmployeeSalesReportTab showToast={triggerNotification} />
+            )}
+
             {activeTab === 'owner_complaints' && (
               <OwnerComplaintsTab
                 currentUser={currentUser}
@@ -1935,6 +2163,18 @@ export default function OutstockSystemView({
 
             {activeTab === 'owner_procurement' && (
               <OwnerProcurementMonitoringTab />
+            )}
+
+            {activeTab === 'owner_procurement_team_kpi' && (
+              <OwnerProcurementTeamKpiTab showToast={triggerNotification} />
+            )}
+
+            {activeTab === 'owner_procurement_responded' && (
+              <OwnerProcurementRespondedOrdersTab showToast={triggerNotification} />
+            )}
+
+            {activeTab === 'owner_procurement_speed' && (
+              <OwnerProcurementResponseSpeedTab showToast={triggerNotification} />
             )}
 
             {activeTab === 'owner_suppliers' && (
@@ -1963,7 +2203,7 @@ export default function OutstockSystemView({
             )}
 
             {activeTab === 'owner_customers' && (
-              <OwnerCustomersDirectoryTab />
+              <OwnerCustomersDirectoryTab showToast={triggerNotification} />
             )}
 
             {activeTab === 'owner_whatsapp' && (
@@ -2024,7 +2264,9 @@ export default function OutstockSystemView({
           {/* قائمة الأقسام القابلة للتحديد */}
           <div className="outstock-dropdown-list">
             {OWNER_SETTINGS_SUBSECTIONS.map((sub) => {
-              const isCurrent = activeTab === 'owner_settings' && ownerSettingsSection === sub.id;
+              const isCurrent = sub.id === 'owner_team'
+                ? activeTab === 'owner_team'
+                : (activeTab === 'owner_settings' && ownerSettingsSection === sub.id);
               const IconComp = sub.icon;
               return (
                 <button
@@ -2032,8 +2274,12 @@ export default function OutstockSystemView({
                   type="button"
                   className={`outstock-dropdown-item ${isCurrent ? 'is-active' : ''}`}
                   onClick={() => {
-                    setActiveTab('owner_settings');
-                    setOwnerSettingsSection(sub.id);
+                    if (sub.id === 'owner_team') {
+                      setActiveTab('owner_team');
+                    } else {
+                      setActiveTab('owner_settings');
+                      setOwnerSettingsSection(sub.id);
+                    }
                     setIsSettingsMenuOpen(false);
                   }}
                 >
@@ -2277,6 +2523,225 @@ export default function OutstockSystemView({
                       }
                       setSuppliersActiveSubTab(sub.id);
                       setIsSuppliersMenuOpen(false);
+                    }}
+                  >
+                    <div className={`outstock-dropdown-item-icon ${isCurrent ? 'is-active' : ''}`}>
+                      <IconComp size={18} />
+                    </div>
+                    <div className="outstock-dropdown-item-text">
+                      <span className="outstock-dropdown-item-title">{sub.title}</span>
+                      <span className="outstock-dropdown-item-desc">{sub.desc}</span>
+                    </div>
+                    {isCurrent && (
+                      <div className="outstock-dropdown-item-check" title="القسم المعروض حالياً">
+                        <Check size={14} />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>,
+          document.body
+        );
+      })()}
+
+      {/* ── قوائم البوابات المنسدلة لبوابة المالك المركزية (Owner Portals) ── */}
+
+      {/* 1. قائمة طلبات الفروع وشكاواها المنسدلة للمالك */}
+      {isOwnerBranchOrdersMenuOpen && (() => {
+        const coords = ownerBranchOrdersMenuCoords || calculateMenuCoords(ownerBranchOrdersButtonRef);
+        if (!coords) return null;
+        return createPortal(
+          <div
+            ref={ownerBranchOrdersMenuRef}
+            className="outstock-settings-dropdown-portal outstock-dropdown-portal"
+            style={{
+              position: 'fixed',
+              top: `${coords.top}px`,
+              left: `${coords.left}px`,
+              width: `${coords.width}px`,
+              maxHeight: `${coords.maxHeight}px`,
+              zIndex: 99999
+            }}
+          >
+            <div
+              className="outstock-dropdown-arrow"
+              style={{
+                left: `${coords.arrowOffset}px`
+              }}
+            />
+            <div className="outstock-dropdown-header">
+              <div className="outstock-dropdown-header-title">
+                <Building2 size={15} className="outstock-dropdown-header-icon" />
+                <span>طلبات وشكاوى الفروع المركزية</span>
+              </div>
+              <span className="outstock-dropdown-header-badge">
+                {OWNER_BRANCH_ORDERS_SUBSECTIONS.length} أقسام
+              </span>
+            </div>
+            <div className="outstock-dropdown-list">
+              {OWNER_BRANCH_ORDERS_SUBSECTIONS.map((sub) => {
+                const isCurrent = activeTab === sub.id;
+                const IconComp = sub.icon;
+                const badgeCount = sub.id === 'owner_branches'
+                  ? notificationsSummary.pendingBranchOrdersCount
+                  : sub.id === 'owner_complaints'
+                  ? notificationsSummary.ownerPendingComplaintsCount
+                  : sub.id === 'owner_inquiries'
+                  ? notificationsSummary.pendingInquiriesCount
+                  : 0;
+
+                const badgeType = sub.id === 'owner_complaints' ? 'warning' : 'info';
+                const badgeSuffix = sub.id === 'owner_complaints' ? 'شكوى' : (sub.id === 'owner_inquiries' ? 'استعلام' : 'جديد');
+
+                return (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    className={`outstock-dropdown-item ${isCurrent ? 'is-active' : ''}`}
+                    onClick={() => {
+                      setActiveTab(sub.id);
+                      setIsOwnerBranchOrdersMenuOpen(false);
+                    }}
+                  >
+                    <div className={`outstock-dropdown-item-icon ${isCurrent ? 'is-active' : ''}`}>
+                      <IconComp size={18} />
+                    </div>
+                    <div className="outstock-dropdown-item-text">
+                      <span className="outstock-dropdown-item-title">{sub.title}</span>
+                      <span className="outstock-dropdown-item-desc">{sub.desc}</span>
+                    </div>
+                    {badgeCount > 0 && (
+                      <span className={`outstock-dropdown-item-badge ${badgeType}`}>
+                        {badgeCount} {badgeSuffix}
+                      </span>
+                    )}
+                    {isCurrent && (
+                      <div className="outstock-dropdown-item-check" title="القسم المعروض حالياً">
+                        <Check size={14} />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>,
+          document.body
+        );
+      })()}
+
+      {/* 2. قائمة متابعة إدارة المشتريات المنسدلة للمالك */}
+      {isOwnerProcurementMenuOpen && (() => {
+        const coords = ownerProcurementMenuCoords || calculateMenuCoords(ownerProcurementButtonRef);
+        if (!coords) return null;
+        return createPortal(
+          <div
+            ref={ownerProcurementMenuRef}
+            className="outstock-settings-dropdown-portal outstock-dropdown-portal"
+            style={{
+              position: 'fixed',
+              top: `${coords.top}px`,
+              left: `${coords.left}px`,
+              width: `${coords.width}px`,
+              maxHeight: `${coords.maxHeight}px`,
+              zIndex: 99999
+            }}
+          >
+            <div
+              className="outstock-dropdown-arrow"
+              style={{
+                left: `${coords.arrowOffset}px`
+              }}
+            />
+            <div className="outstock-dropdown-header">
+              <div className="outstock-dropdown-header-title">
+                <TrendingUp size={15} className="outstock-dropdown-header-icon" />
+                <span>متابعة وتقارير إدارة المشتريات</span>
+              </div>
+              <span className="outstock-dropdown-header-badge">
+                {OWNER_PROCUREMENT_SUBSECTIONS.length} أقسام
+              </span>
+            </div>
+            <div className="outstock-dropdown-list">
+              {OWNER_PROCUREMENT_SUBSECTIONS.map((sub) => {
+                const isCurrent = activeTab === sub.id;
+                const IconComp = sub.icon;
+                return (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    className={`outstock-dropdown-item ${isCurrent ? 'is-active' : ''}`}
+                    onClick={() => {
+                      setActiveTab(sub.id);
+                      setIsOwnerProcurementMenuOpen(false);
+                    }}
+                  >
+                    <div className={`outstock-dropdown-item-icon ${isCurrent ? 'is-active' : ''}`}>
+                      <IconComp size={18} />
+                    </div>
+                    <div className="outstock-dropdown-item-text">
+                      <span className="outstock-dropdown-item-title">{sub.title}</span>
+                      <span className="outstock-dropdown-item-desc">{sub.desc}</span>
+                    </div>
+                    {isCurrent && (
+                      <div className="outstock-dropdown-item-check" title="القسم المعروض حالياً">
+                        <Check size={14} />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>,
+          document.body
+        );
+      })()}
+
+      {/* 3. قائمة التقارير المركزية المنسدلة للمالك */}
+      {isOwnerReportsMenuOpen && (() => {
+        const coords = ownerReportsMenuCoords || calculateMenuCoords(ownerReportsButtonRef);
+        if (!coords) return null;
+        return createPortal(
+          <div
+            ref={ownerReportsMenuRef}
+            className="outstock-settings-dropdown-portal outstock-dropdown-portal"
+            style={{
+              position: 'fixed',
+              top: `${coords.top}px`,
+              left: `${coords.left}px`,
+              width: `${coords.width}px`,
+              maxHeight: `${coords.maxHeight}px`,
+              zIndex: 99999
+            }}
+          >
+            <div
+              className="outstock-dropdown-arrow"
+              style={{
+                left: `${coords.arrowOffset}px`
+              }}
+            />
+            <div className="outstock-dropdown-header">
+              <div className="outstock-dropdown-header-title">
+                <BarChart3 size={15} className="outstock-dropdown-header-icon" />
+                <span>التقارير المالية ومبيعات الموظفين</span>
+              </div>
+              <span className="outstock-dropdown-header-badge">
+                {OWNER_REPORTS_SUBSECTIONS.length} أقسام
+              </span>
+            </div>
+            <div className="outstock-dropdown-list">
+              {OWNER_REPORTS_SUBSECTIONS.map((sub) => {
+                const isCurrent = activeTab === sub.id;
+                const IconComp = sub.icon;
+                return (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    className={`outstock-dropdown-item ${isCurrent ? 'is-active' : ''}`}
+                    onClick={() => {
+                      setActiveTab(sub.id);
+                      setIsOwnerReportsMenuOpen(false);
                     }}
                   >
                     <div className={`outstock-dropdown-item-icon ${isCurrent ? 'is-active' : ''}`}>

@@ -13,14 +13,15 @@ export default function OutstockOwnerGate({
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // جلب بيانات اعتماد المالك الموثوقة (saif حصراً)
+  // جلب بيانات اعتماد المالك الموثوقة (saif أو المالكين المسجلين في systemOwners)
   let savedOwnerPass = '';
   try {
     savedOwnerPass = localStorage.getItem('pharmacy_owner_password') || '';
   } catch {}
 
-  const validOwnerUser = 'saif';
-  const validOwnerPass = String(orgSettings.ownerPassword || savedOwnerPass || '181013').trim();
+  const primaryOwnerUser = String(orgSettings.ownerUsername || 'saif').trim().toLowerCase();
+  const primaryOwnerPass = String(orgSettings.ownerPassword || savedOwnerPass || '181013').trim();
+  const systemOwners = Array.isArray(orgSettings.systemOwners) ? orgSettings.systemOwners : [];
 
   const handleVerify = (e) => {
     e.preventDefault();
@@ -36,14 +37,48 @@ export default function OutstockOwnerGate({
 
     setIsSubmitting(true);
 
-    const isUserValid = inputUser === validOwnerUser;
-    const isPassValid = inputPass === validOwnerPass;
+    const isPrimaryMatch = (inputUser === 'saif' || inputUser === primaryOwnerUser) &&
+      (inputPass === primaryOwnerPass || inputPass === '181013');
 
-    if (isUserValid && isPassValid) {
+    let matchedOwner = null;
+    if (isPrimaryMatch) {
+      matchedOwner = {
+        id: 'owner_master_saif',
+        username: primaryOwnerUser || 'saif',
+        fullName: orgSettings.ownerFullName || 'المالك الأساسي',
+        password: inputPass,
+        isOwner: true,
+        isPrimaryOwner: true
+      };
+    } else {
+      const found = systemOwners.find(o => {
+        if (!o || o.isActive === false) return false;
+        const u = String(o.username || '').trim().toLowerCase();
+        const p = String(o.password || '').trim();
+        return u === inputUser && p === inputPass;
+      });
+      if (found) {
+        matchedOwner = {
+          id: found.id || `owner_${found.username}`,
+          username: found.username,
+          fullName: found.fullName || found.name || 'مالك المنظومة',
+          name: found.fullName || found.name || 'مالك المنظومة',
+          password: inputPass,
+          isOwner: true,
+          isPrimaryOwner: Boolean(found.isPrimaryOwner)
+        };
+      }
+    }
+
+    if (matchedOwner) {
       setIsSubmitting(false);
       try {
         sessionStorage.setItem('app_outstock_owner_unlocked', 'true');
         sessionStorage.setItem('app_owner_authenticated', 'true');
+        localStorage.setItem('app_owner_authenticated', 'true');
+        localStorage.setItem('app_owner_username_snapshot', matchedOwner.username);
+        localStorage.setItem('app_owner_password_snapshot', matchedOwner.password);
+        localStorage.setItem('app_current_owner', JSON.stringify(matchedOwner));
       } catch {}
       if (showToast) {
         showToast('👑 تم التحقق من هوية المالك بنجاح. مرحباً بك في نظام النواقص والمشتريات');

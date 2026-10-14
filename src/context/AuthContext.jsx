@@ -238,18 +238,48 @@ export function AuthProvider({ children }) {
 
     if (isOwnerSession) {
       const myOwnerPass = localStorage.getItem('app_owner_password_snapshot');
+      const myOwnerUser = String(localStorage.getItem('app_owner_username_snapshot') || '').trim().toLowerCase();
       const myOwnerVer = Number(localStorage.getItem('app_owner_session_version') || 0);
-      const srvOwnerPass = latestState?.orgSettings?.ownerPassword;
-      const srvOwnerVer = Number(latestState?.orgSettings?.ownerSessionVersion || 0);
+
+      const systemOwners = Array.isArray(latestState?.orgSettings?.systemOwners) ? latestState.orgSettings.systemOwners : [];
+      const matchedOwner = systemOwners.find(o => o && String(o.username || '').trim().toLowerCase() === myOwnerUser);
+
+      // إذا كان المالك مسجلاً في systemOwners ولكن تم تعطيل حسابه من قبل الإدارة
+      if (matchedOwner && matchedOwner.isActive === false) {
+        console.warn('🔒 [AuthContext] تم تعطيل حساب المالك من قبل الإدارة العليا');
+        handleLogout();
+        return;
+      }
+
+      const srvOwnerPass = matchedOwner
+        ? matchedOwner.password
+        : (latestState?.orgSettings?.ownerPassword || '181013');
+
+      const srvOwnerVer = Number(
+        (matchedOwner?.sessionVersion !== undefined
+          ? matchedOwner.sessionVersion
+          : latestState?.orgSettings?.ownerSessionVersion) || 0
+      );
 
       // إذا كانت نسخة الجلسة غير مسجلة محلياً، نسجلها تلقائياً بدلاً من الطرد الخاطئ
       if (myOwnerVer === 0 && srvOwnerVer > 0) {
         try { localStorage.setItem('app_owner_session_version', String(srvOwnerVer)); } catch {}
-      } else if ((myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
-          (myOwnerVer > 0 && srvOwnerVer > 0 && srvOwnerVer > myOwnerVer)) {
-        console.warn('🔒 [AuthContext] انتهاء جلسة المالك بسبب تقدم رقم الجلسة بالسيرفر');
-        handleLogout();
-        return;
+      } else if (
+        (myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
+        (myOwnerVer > 0 && srvOwnerVer > 0 && srvOwnerVer > myOwnerVer)
+      ) {
+        // فحص أمان إضافي قبل الطرد: هل كلمة المرور المسجلة محلياً لا تزال تطابق إما كلمة المرور الأساسية أو كلمة مرور المالك النشط؟
+        const isStillValidPassword =
+          myOwnerPass === (latestState?.orgSettings?.ownerPassword || '181013') ||
+          systemOwners.some(o => o && o.isActive !== false && String(o.username || '').trim().toLowerCase() === myOwnerUser && o.password === myOwnerPass);
+
+        const isVersionStale = myOwnerVer > 0 && srvOwnerVer > 0 && srvOwnerVer > myOwnerVer;
+
+        if (!isStillValidPassword || isVersionStale) {
+          console.warn('🔒 [AuthContext] انتهاء جلسة المالك بسبب تغيير كلمة المرور أو تقدم رقم الجلسة بالسيرفر');
+          handleLogout();
+          return;
+        }
       }
     }
 
@@ -355,6 +385,28 @@ export function AuthProvider({ children }) {
         localStorage.setItem('app_auth_role', 'owner');
         localStorage.setItem('app_owner_authenticated', 'true');
         sessionStorage.setItem('app_owner_authenticated', 'true');
+        if (user) {
+          const ownerUser = user.username || 'saif';
+          localStorage.setItem('app_owner_username_snapshot', ownerUser);
+          sessionStorage.setItem('app_owner_username_snapshot', ownerUser);
+          if (user.password) {
+            localStorage.setItem('app_owner_password_snapshot', String(user.password));
+          }
+          if (user.sessionVersion !== undefined) {
+            localStorage.setItem('app_owner_session_version', String(user.sessionVersion));
+          }
+          if (user.fullName || user.name) {
+            localStorage.setItem('app_owner_display_name', user.fullName || user.name);
+          }
+          localStorage.setItem('app_current_owner', JSON.stringify({
+            id: user.id || `owner_${ownerUser}`,
+            username: ownerUser,
+            name: user.fullName || user.name || 'مالك المنظومة',
+            fullName: user.fullName || user.name || 'مالك المنظومة',
+            isOwner: true,
+            ...(user.password ? { password: user.password } : {})
+          }));
+        }
       } catch {}
     } else if (role === 'admin') {
       setIsAdminLoggedIn(true);

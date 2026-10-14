@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { AR_MONTHS, arabicWeekday, fmt, arabicMonthLabel, getActivePayrollCycleMonth, getEmpDisplayName, getEmployeeManualPunchesCount, isShiftManualPunch, getEmployeeApprovedLeaves } from '../../utils/formatters';
+import { AR_MONTHS, arabicWeekday, fmt, arabicMonthLabel, getActivePayrollCycleMonth, getEmpDisplayName, getEmployeeManualPunchesCount, isShiftManualPunch, getEmployeeApprovedLeaves, getShiftStartEpoch } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
 import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '../../utils/periodEngine';
 import { getRealDate, getRealTodayStr, getRealNowTimeStr } from '../../utils/timeEngine';
@@ -733,9 +733,23 @@ export default function EmployeePortalView({
         tableHeaderRow(ws, r, ['التاريخ', 'اليوم', 'وقت الدخول', 'وقت الخروج', 'البريك (ساعة)', 'ساعات العمل', 'سعر الساعة', 'المبلغ المستحق', 'الملاحظات']);
         r++;
 
-        const empShifts = state.shifts
-          .filter((s) => s.employeeId === emp.id && filterFn(s.date))
-          .sort((a, b) => (a.date === b.date ? a.timeIn.localeCompare(b.timeIn) : a.date.localeCompare(b.date)));
+        const empShifts = (state.shifts || [])
+          .filter((s) => {
+            if (!s) return false;
+            if (s.status === 'cancelled' || s.isCancelled) return false;
+            const sEmpId = String(s.employeeId || '');
+            const sEmpCode = String(s.employeeCode || '');
+            const eId = String(emp.id || '');
+            const eCode = String(emp.code || '');
+            const isMatch = (
+              sEmpId === eId ||
+              (eCode && sEmpId === eCode) ||
+              (eCode && sEmpCode === eCode) ||
+              (eId && sEmpCode === eId)
+            );
+            return isMatch && filterFn(s.date);
+          })
+          .sort((a, b) => (a.date === b.date ? String(a.timeIn || '').localeCompare(String(b.timeIn || '')) : String(a.date || '').localeCompare(String(b.date || ''))));
 
         if (empShifts.length === 0) {
           ws.mergeCells(r, 1, r, COLS);
@@ -746,11 +760,13 @@ export default function EmployeePortalView({
           r++;
         } else {
           empShifts.forEach((s) => {
-            const effHours = getEffectiveShiftHours(s, state);
+            const shiftMetrics = getShiftHoursMetrics(s, state);
+            const effHours = shiftMetrics.payableHours || getEffectiveShiftHours(s, state);
+            const effectiveRate = summary.perBranch?.[s.branchId]?.rate || summary.rate || 0;
             dataRow(ws, r, [
-              s.date, arabicWeekday(s.date), s.timeIn, s.timeOut || '—',
+              s.date, arabicWeekday(s.date), s.timeIn || '—', s.timeOut || '—',
               s.breakHours ? fmt(s.breakHours) : '—', fmt(effHours),
-              fmt(summary.rate), fmt(effHours * summary.rate), s.note || '—'
+              fmt(effectiveRate), fmt(effHours * effectiveRate), s.note || '—'
             ], 1, [4, 5, 6, 7]);
             r++;
           });
@@ -1224,44 +1240,88 @@ export default function EmployeePortalView({
 
   const todayStrNow = typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
 
-  const empShifts = emp
-    ? (state.shifts || [])
-        .filter((s) => {
-          if (!s) return false;
-          if (s.status === 'cancelled' || s.isCancelled) return false;
-          const sEmpId = String(s.employeeId || '');
-          const sEmpCode = String(s.employeeCode || '');
-          const eId = String(emp.id || '');
-          const eCode = String(emp.code || '');
-          const isMatch = (
-            sEmpId === eId ||
-            (eCode && sEmpId === eCode) ||
-            (eCode && sEmpCode === eCode) ||
-            (eId && sEmpCode === eId)
-          );
-          return isMatch && filterFn(s.date) && (!selectedBranchId || s.branchId === selectedBranchId || !s.branchId);
-        })
-        .sort((a, b) => {
-          // 1. 🔄 الترتيب الصارم حسب التاريخ من الأحدث إلى الأقدم (Newest to Oldest)
-          const dateA = String(a?.date || '').trim();
-          const dateB = String(b?.date || '').trim();
-          if (dateA !== dateB) return dateB.localeCompare(dateA);
+  const empShifts = useMemo(() => {
+    if (!emp) return [];
 
-          // 2. في نفس اليوم: الوردية الحية النشطة الفعلية لليوم الحالي تكون أولاً
-          const isLiveA = Boolean(a?.isLiveActive && a?.date >= todayStrNow && (!a?.timeOut || a?.timeOut === '' || a?.timeOut === '—' || a?.timeOut === 'قيد العمل الآن'));
-          const isLiveB = Boolean(b?.isLiveActive && b?.date >= todayStrNow && (!b?.timeOut || b?.timeOut === '' || b?.timeOut === '—' || b?.timeOut === 'قيد العمل الآن'));
-          if (isLiveA && !isLiveB) return -1;
-          if (!isLiveA && isLiveB) return 1;
+    // 1. الورديات المسجلة من state.shifts
+    const rawShifts = (state.shifts || []).filter((s) => {
+      if (!s) return false;
+      if (s.status === 'cancelled' || s.isCancelled) return false;
+      const sEmpId = String(s.employeeId || '');
+      const sEmpCode = String(s.employeeCode || '');
+      const eId = String(emp.id || '');
+      const eCode = String(emp.code || '');
+      const isMatch = (
+        sEmpId === eId ||
+        (eCode && sEmpId === eCode) ||
+        (eCode && sEmpCode === eCode) ||
+        (eId && sEmpCode === eId)
+      );
+      return isMatch && filterFn(s.date);
+    });
 
-          // 3. في نفس اليوم: الترتيب حسب وقت الدخول من الأحدث إلى الأقدم (تنازلي)
-          const timeA = String(a?.timeIn || '').trim();
-          const timeB = String(b?.timeIn || '').trim();
-          if (timeA !== timeB) return timeB.localeCompare(timeA);
+    // 2. فحص البصمة الحية النشطة من state.activeShifts
+    const rawActiveShift = state?.activeShifts?.[emp.id] ||
+      (emp.code && state?.activeShifts?.[emp.code]) ||
+      Object.values(state?.activeShifts || {}).find(
+        (as) => as && (
+          String(as.employeeId) === String(emp.id) ||
+          (emp.code && String(as.employeeCode) === String(emp.code)) ||
+          (emp.code && String(as.employeeId) === String(emp.code))
+        )
+      );
 
-          // 4. في حالة التطابق: الترتيب حسب المعرف تنازلياً
-          return String(b?.createdAt || b?.id || '').localeCompare(String(a?.createdAt || a?.id || ''));
-        })
-    : [];
+    let combined = [...rawShifts];
+    if (rawActiveShift && rawActiveShift.date && filterFn(rawActiveShift.date)) {
+      const alreadyHas = combined.some(s => s.isLiveActive || (s.date === rawActiveShift.date && s.timeIn === rawActiveShift.timeIn));
+      if (!alreadyHas) {
+        const actEpoch = getShiftStartEpoch(rawActiveShift);
+        const liveElapsed = actEpoch > 0
+          ? Math.max(0, Math.round(((Date.now() - actEpoch) / 3600000) * 10) / 10)
+          : 0;
+        const livePunch = {
+          id: rawActiveShift.id || rawActiveShift.shiftId || `active_${emp.id}_${rawActiveShift.date}`,
+          employeeId: emp.id,
+          employeeCode: emp.code || '',
+          employeeName: emp.name || '',
+          branchId: rawActiveShift.branchId || emp.branchId || '',
+          date: rawActiveShift.date,
+          timeIn: rawActiveShift.timeIn,
+          timeOut: 'قيد العمل الآن',
+          isLiveActive: true,
+          hours: liveElapsed,
+          netHours: liveElapsed,
+          workHours: liveElapsed,
+          breakHours: rawActiveShift.breakHours || 0,
+          note: '🟢 وردية نشطة مستمرة حالياً (حضور حي)',
+          statusLabel: 'حضور حي',
+          source: rawActiveShift.source || 'kiosk'
+        };
+        combined.unshift(livePunch);
+      }
+    }
+
+    return combined.sort((a, b) => {
+      // 1. 🔄 الترتيب الصارم حسب التاريخ من الأحدث إلى الأقدم (Newest to Oldest)
+      const dateA = String(a?.date || '').trim();
+      const dateB = String(b?.date || '').trim();
+      if (dateA !== dateB) return dateB.localeCompare(dateA);
+
+      // 2. في نفس اليوم: الوردية الحية النشطة الفعلية لليوم الحالي تكون أولاً
+      const isLiveA = Boolean(a?.isLiveActive && a?.date >= todayStrNow && (!a?.timeOut || a?.timeOut === '' || a?.timeOut === '—' || a?.timeOut === 'قيد العمل الآن'));
+      const isLiveB = Boolean(b?.isLiveActive && b?.date >= todayStrNow && (!b?.timeOut || b?.timeOut === '' || b?.timeOut === '—' || b?.timeOut === 'قيد العمل الآن'));
+      if (isLiveA && !isLiveB) return -1;
+      if (!isLiveA && isLiveB) return 1;
+
+      // 3. في نفس اليوم: الترتيب حسب وقت الدخول من الأحدث إلى الأقدم (تنازلي)
+      const timeA = String(a?.timeIn || '').trim();
+      const timeB = String(b?.timeIn || '').trim();
+      if (timeA !== timeB) return timeB.localeCompare(timeA);
+
+      // 4. في حالة التطابق: الترتيب حسب المعرف تنازلياً
+      return String(b?.createdAt || b?.id || '').localeCompare(String(a?.createdAt || a?.id || ''));
+    });
+  }, [emp, state.shifts, state.activeShifts, filterFn, selectedBranchId, isMultiBranchEmp, todayStrNow]);
 
   const empAdjs = useMemo(() => {
     if (!emp) return [];
@@ -1466,8 +1526,8 @@ export default function EmployeePortalView({
     const anyApprovedReq = (state?.requests || []).some(
       (r) =>
         (String(r.employeeId) === empIdStr || (emp.code && String(r.employeeCode) === String(emp.code))) &&
-        (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
-        (r.status === 'approved' || r.adminApproved) &&
+        (['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit', 'assign_roster'].includes(r.type) || r.requestType === 'roster_update') &&
+        (r.status === 'approved' || r.adminApproved || r.branchApproved) &&
         (r.month === activeMonthStr || r.month === selectedMonth)
     );
     return anyApprovedReq;
@@ -1479,8 +1539,9 @@ export default function EmployeePortalView({
     return (state?.requests || []).some(
       (r) =>
         (String(r.employeeId) === empIdStr || (emp.code && String(r.employeeCode) === String(emp.code))) &&
-        (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
+        (['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit', 'assign_roster'].includes(r.type) || r.requestType === 'roster_update') &&
         (r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_branch') &&
+        !r.branchApproved && !r.adminApproved &&
         (r.month === activeMonthStr || r.month === selectedMonth)
     );
   }, [emp, state?.requests, activeMonthStr, selectedMonth]);
@@ -4623,7 +4684,7 @@ export default function EmployeePortalView({
                           نظام العمل بمواعيد متغيرة (احتساب الأجر بالساعات الفعلية)
                         </h3>
                         <p style={{ margin: '3px 0 0', fontSize: '0.85rem', color: '#6d28d9' }}>
-                          أنت معفى من قيود المواعيد الثابتة ولائحة التأخيرات والساعات الإضافية، وراتبك يعتمد كلياً على ساعات البصمة المسجلة.
+                          أنت معفى من قيود المواعيد الثابتة ولائحة التأخيرات، ويتم احتساب ساعات عملك والإضافي المعتمد وفق البصمات المسجلة.
                         </p>
                       </div>
                     </div>
@@ -5573,7 +5634,11 @@ export default function EmployeePortalView({
                       const perm = isApprovedPermissionForDate(emp.id, s.date, state);
                       const hasPerm = s.hasApprovedPermission || !!perm;
                       const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+                      const shiftMetrics = getShiftHoursMetrics(s, state);
                       const effHours = getEffectiveShiftHours(s, state);
+                      const isOtApproved = shiftMetrics.isOvertimeApproved || s.overtimeStatus === 'approved';
+                      const otHours = (shiftMetrics.overtimeHours > 0 ? shiftMetrics.overtimeHours : parseFloat(s.overtimeHours)) || 0;
+                      const payableHours = shiftMetrics.payableHours || (isOtApproved ? (effHours + otHours) : effHours);
                       const branchRate = (summary.perBranch?.[s.branchId]?.rate || summary.rate) || 0;
 
                       return (
@@ -5605,18 +5670,18 @@ export default function EmployeePortalView({
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                               <span style={{ background: 'var(--primary-light, #ccfbf1)', color: 'var(--primary-dark, #0f766e)', fontWeight: 800, fontSize: '12px', padding: '3px 8px', borderRadius: '8px' }}>
-                                ⏱️ {fmt(effHours)} س
+                                ⏱️ {fmt(payableHours)} س
                               </span>
                               {canViewSalary && (
                                 <span style={{ background: '#f0fdf4', color: '#15803d', fontWeight: 800, fontSize: '12px', padding: '3px 8px', borderRadius: '8px' }}>
-                                  💵 {fmt(effHours * branchRate)} ج.م
+                                  💵 {fmt(payableHours * branchRate)} ج.م
                                 </span>
                               )}
                             </div>
                           </div>
 
                           {/* Badges Row (if any) */}
-                          {(hasPerm || isShiftManualPunch(s) || s.overtimeStatus) && (
+                          {(hasPerm || isShiftManualPunch(s) || isOtApproved || s.overtimeStatus) && (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                               {hasPerm && (
                                 <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '2px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 800 }}>
@@ -5628,14 +5693,19 @@ export default function EmployeePortalView({
                                   🖐️ بصمة يدوية معتمدة
                                 </span>
                               )}
-                              {s.overtimeStatus === 'approved' && (
+                              {isOtApproved && otHours > 0 && (
                                 <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '2px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 800 }}>
-                                  ⭐ إضافي معتمد (+{s.overtimeHours} س)
+                                  ⭐ وقت إضافي معتمد (+{fmt(otHours)} س)
                                 </span>
                               )}
-                              {s.overtimeStatus === 'pending' && (
+                              {!isOtApproved && shiftMetrics.overtimeStatus === 'pending' && otHours > 0 && (
                                 <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '2px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 800 }}>
-                                  ⏳ إضافي (+{s.overtimeHours} س) قيد المراجعة
+                                  ⏳ إضافي (+{fmt(otHours)} س) بانتظار الاعتماد
+                                </span>
+                              )}
+                              {!isOtApproved && shiftMetrics.overtimeStatus === 'rejected' && (
+                                <span style={{ background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', padding: '2px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 800 }}>
+                                  ❌ إضافي مستبعد
                                 </span>
                               )}
                             </div>
@@ -6341,6 +6411,29 @@ export default function EmployeePortalView({
                     </div>
                   </div>
 
+                  {/* ── Approved Overtime Detailed Section ── */}
+                  {(summary.approvedOvertimeHours > 0 || summary.overtimeEarnings > 0) && (
+                    <div className="ep-breakdown-section" style={{ borderColor: '#86efac', background: '#f0fdf4' }}>
+                      <div className="ep-breakdown-title" style={{ color: '#166534' }}>
+                        <span className="ep-breakdown-icon">⭐</span>أجر ساعات العمل الإضافي المعتمدة
+                      </div>
+                      <div className="ep-breakdown-rows">
+                        <div className="ep-breakdown-row">
+                          <span className="ep-breakdown-label">ساعات العمل الإضافي المعتمدة</span>
+                          <span className="ep-breakdown-value">{fmt(summary.approvedOvertimeHours)} ساعة</span>
+                        </div>
+                        <div className="ep-breakdown-row">
+                          <span className="ep-breakdown-label">سعر الساعة المعتمد</span>
+                          <span className="ep-breakdown-value">{fmt(summary.rate || currentHourlyRate)} ج.م / ساعة</span>
+                        </div>
+                        <div className="ep-breakdown-row ep-breakdown-result">
+                          <span className="ep-breakdown-label">⭐ مستحقات الإضافي المعتمد ({fmt(summary.rate || currentHourlyRate)} ج.م × {fmt(summary.approvedOvertimeHours)} س)</span>
+                          <span className="ep-breakdown-value highlight" style={{ color: '#15803d' }}>+{fmt(summary.overtimeEarnings || 0)} ج.م</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* ── Allowances Detailed Section ── */}
                   {summary.totalAllowances > 0 && (
                     <div className="ep-breakdown-section" style={{ borderColor: '#86efac', background: '#f0fdf4' }}>
@@ -6415,6 +6508,12 @@ export default function EmployeePortalView({
                     <div className="ep-breakdown-title"><span className="ep-breakdown-icon">🏆</span>الملخص المالي النهائي</div>
                     <div className="ep-breakdown-rows">
                       <div className="ep-breakdown-row"><span className="ep-breakdown-label">المستحقات الأساسية</span><span className="ep-breakdown-value">{fmt(summary.baseEarnings)} ج.م</span></div>
+                      {(summary.approvedOvertimeHours > 0 || summary.overtimeEarnings > 0) && (
+                        <div className="ep-breakdown-row" style={{ color: '#15803d', fontWeight: 'bold' }}>
+                          <span className="ep-breakdown-label">+ أجر ساعات العمل الإضافي المعتمدة ({fmt(summary.approvedOvertimeHours)} س)</span>
+                          <span className="ep-breakdown-value">+{fmt(summary.overtimeEarnings || 0)} ج.م</span>
+                        </div>
+                      )}
                       {summary.totalAllowances > 0 && (
                         <div className="ep-breakdown-row" style={{ color: '#166534', fontWeight: 'bold' }}>
                           <span className="ep-breakdown-label">+ إجمالي البدلات الثابتة</span>

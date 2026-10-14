@@ -10,6 +10,7 @@ import {
 } from '../../utils/bylawsDefaults';
 import { useUI } from '../../context/UIContext';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
+import { canUserModifyOrExemptPenalties } from '../../utils/permissionUtils';
 
 export default function BylawsModule({
   state,
@@ -20,6 +21,7 @@ export default function BylawsModule({
   activeSubTab = 'disciplinary_penalties',
   setActiveSubTab,
   currentEmpId = null,
+  currentEmpUser = null,
   currentBranch = null,
   currentBranchId = null,
   branchEmployees = null,
@@ -47,6 +49,25 @@ export default function BylawsModule({
   }, [activeSubTab]);
   const isManagerOrAdmin = userRole === 'admin' || userRole === 'owner' || userRole === 'branch';
   const isAdmin = userRole === 'admin' || userRole === 'owner';
+
+  const employees = (state.employees || []).filter((e) => e && e.id);
+  const resolvedCurrentUser = useMemo(() => {
+    if (currentEmpUser) return currentEmpUser;
+    if (currentEmpId) {
+      const found = employees.find((e) => e && (String(e.id) === String(currentEmpId) || (e.code && String(e.code) === String(currentEmpId))));
+      if (found) return found;
+    }
+    try {
+      const uStr = localStorage.getItem('app_current_emp_user') || localStorage.getItem('outstock_user');
+      if (uStr) return JSON.parse(uStr);
+    } catch {}
+    return null;
+  }, [currentEmpUser, currentEmpId, employees]);
+
+  // فحص صلاحية تعديل أو استثناء الجزاءات والخصومات
+  const canModifyOrExempt = useMemo(() => {
+    return canUserModifyOrExemptPenalties(resolvedCurrentUser, state?.orgSettings, userRole);
+  }, [resolvedCurrentUser, state?.orgSettings, userRole]);
 
   // State for official bylaws structured sections & raw text
   const [bylawsSections, setBylawsSections] = useState(() => getBylawsSectionsFromState(state));
@@ -81,6 +102,10 @@ export default function BylawsModule({
 
   // Clear all penalties & disciplinary records to start fresh with absolute tombstone synchronization
   const handleClearAllPenaltiesLog = async () => {
+    if (!canModifyOrExempt || !isAdmin) {
+      showToast?.('🚫 مسح سجل الجزاءات مقتصر حصرياً على الإدارة العليا المصرح لها.');
+      return;
+    }
     const isConfirmed = await showConfirm({
       title: '⚠️ مسح سجل الجزاءات والمخالفات والبدء من جديد',
       message: 'هل أنت متأكد من رغبتك في مسح كافة سجلات الجزاءات والمخالفات، وسجل القرارات والاعتمادات، وتصفير التقرير الشهري بالكامل للبدء من جديد؟ سيتم حذف جميع المخالفات والخصومات التأديبية والجزاءات نهائياً.',
@@ -185,6 +210,10 @@ export default function BylawsModule({
   // Delete a single penalty record permanently
   const handleDeleteSinglePenaltyRecord = async (record) => {
     if (!record || !record.id) return;
+    if (!canModifyOrExempt || !isAdmin) {
+      showToast?.('🚫 حذف سجلات الجزاءات مقتصر حصرياً على الإدارة العليا المصرح لها.');
+      return;
+    }
     const isConfirmed = await showConfirm({
       title: '🗑️ حذف سجل الجزاء نهائياً',
       message: `هل أنت متأكد من حذف هذا الجزاء نهائياً للموظف (${record.employeeName || 'الموظف'}) بمبلغ (${record.amount || 0} ج.م)؟ سيتم حذفه من السجلات ومسير الرواتب نهائياً.`,
@@ -545,6 +574,10 @@ export default function BylawsModule({
   };
 
   const handleAdminApproveObjection = async (reqId) => {
+    if (!canModifyOrExempt || !isAdmin) {
+      showToast?.('🚫 ليس لديك صلاحية البت في تظلمات أو استثناء الجزاءات.');
+      return;
+    }
     const performApproveObj = async () => {
       let empId = null;
       let ruleTitle = '';
@@ -652,6 +685,10 @@ export default function BylawsModule({
   };
 
   const handleAdminRejectObjection = async (reqId, reply = '') => {
+    if (!canModifyOrExempt || !isAdmin) {
+      showToast?.('🚫 ليس لديك صلاحية البت في تظلمات أو استثناء الجزاءات.');
+      return;
+    }
     const cleanId = String(reqId).replace(/^(req_|obj_req_|obj_inc_|obj_adj_)/, '');
     const updatedRequests = (state.requests || []).map((r) => {
       const rIdStr = String(r.id);
@@ -702,7 +739,6 @@ export default function BylawsModule({
   const [recordsCustomFrom, setRecordsCustomFrom] = useState(customFrom || '');
   const [recordsCustomTo, setRecordsCustomTo] = useState(customTo || '');
 
-  const employees = (state.employees || []).filter((e) => e && e.id);
   const branches = (state.branches || []).filter((b) => b && b.id);
 
   const allPenalties = useMemo(() => {

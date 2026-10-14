@@ -263,8 +263,8 @@ export default function NewBranchStockOrderModal({
         {/* رأس النافذة */}
         <div
           style={{
-            padding: '18px 24px',
-            background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+            padding: '20px 24px',
+            background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
             color: '#ffffff',
             display: 'flex',
             alignItems: 'center',
@@ -272,39 +272,55 @@ export default function NewBranchStockOrderModal({
             borderBottom: '2px solid #334155'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             <div
               style={{
-                width: '44px',
-                height: '44px',
+                width: '46px',
+                height: '46px',
                 borderRadius: '12px',
-                background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 4px 12px rgba(59, 130, 246, 0.35)'
+                boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)'
               }}
             >
-              <Building2 size={24} color="#ffffff" />
+              <Building2 size={26} color="#ffffff" />
             </div>
             <div>
-              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '900', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span>طلب بضاعة / نواقص خاصة بالفرع</span>
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: '18px',
+                  fontWeight: '900',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  color: '#ffffff'
+                }}
+              >
+                <span style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}>
+                  طلب بضاعة / نواقص خاصة بالفرع
+                </span>
                 <span
                   style={{
-                    fontSize: '11px',
+                    fontSize: '11.5px',
                     fontWeight: '800',
-                    background: 'rgba(59, 130, 246, 0.25)',
-                    color: '#93c5fd',
-                    padding: '2px 8px',
-                    borderRadius: '6px',
-                    border: '1px solid rgba(147, 197, 253, 0.3)'
+                    background: 'rgba(56, 189, 248, 0.2)',
+                    color: '#38bdf8',
+                    padding: '3px 10px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(56, 189, 248, 0.35)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px'
                   }}
                 >
-                  مخزون الفرع الداخلي 🏢
+                  <span>مخزون الفرع الداخلي</span>
+                  <span>🏢</span>
                 </span>
               </h2>
-              <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: '#94a3b8' }}>
+              <p style={{ margin: '4px 0 0 0', fontSize: '12.5px', color: '#cbd5e1', fontWeight: '500' }}>
                 طلب أدوية ومستحضرات لسد عجز الفرع - يتم الإرسال للمشتريات مباشرة دون أسعار أو فواتير عملاء
               </p>
             </div>
@@ -314,20 +330,21 @@ export default function NewBranchStockOrderModal({
             type="button"
             onClick={onClose}
             style={{
-              background: 'rgba(255, 255, 255, 0.1)',
-              border: 'none',
+              background: 'rgba(255, 255, 255, 0.12)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
               borderRadius: '10px',
-              width: '36px',
-              height: '36px',
+              width: '38px',
+              height: '38px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: '#ffffff',
               cursor: 'pointer',
-              transition: 'background 0.2s'
+              transition: 'all 0.2s'
             }}
+            title="إغلاق"
           >
-            <X size={20} />
+            <X size={20} color="#ffffff" />
           </button>
         </div>
 

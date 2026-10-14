@@ -46,6 +46,7 @@ import {
 } from '../../../utils/outstockApiClient';
 import MedicationAutocompleteInput from './MedicationAutocompleteInput';
 import AddMedicationModal from '../common/AddMedicationModal';
+import { useDeliveryZones } from '../../../utils/deliveryZonesService';
 
 // قائمة أسماء الوحدات الدوائية المعتمدة للاختيار السريع
 export const STANDARD_MED_UNITS = [
@@ -123,19 +124,8 @@ export default function NewCustomerOrderModal({
     editingOrder?.customer_permanent_notes || editingOrder?.customerPermanentNotes || ''
   );
 
-  // ── 2. قائمة المناطق / الأحياء المعتمدة من إعدادات المالك ──
-  const [deliveryZones] = useState(() => {
-    try {
-      const saved = localStorage.getItem('outstock_delivery_zones');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((z) => (typeof z === 'string' ? z : z.name)).filter(Boolean);
-        }
-      }
-    } catch (e) {}
-    return ['وسط البلد', 'حي الجامعة', 'المنطقة الأولى', 'المنطقة الثانية', 'حي النزهة', 'أخرى / خارج النطاق'];
-  });
+  // ── 2. قائمة المناطق / الأحياء المعتمدة من إعدادات المالك (الخدمة المركزية) ──
+  const deliveryZones = useDeliveryZones();
   // المنطقة خالية افتراضياً لإجبار الصيدلي على الاختيار، أو تسترجع من الطلب المعدل أو العميل
   const [selectedZone, setSelectedZone] = useState(() => {
     return (
@@ -1154,25 +1144,26 @@ export default function NewCustomerOrderModal({
         deliveryTargetBranchId: deliveryType === 'other_branch_pickup' ? deliveryTargetBranchId : null
       };
 
-      const res = editingOrder
+      const isEditMode = Boolean(editingOrder && editingOrder.id);
+      const res = isEditMode
         ? await outstockUpdateOrder(editingOrder.id, payload)
         : await outstockCreateOrder(payload);
 
-      if (res?.success && (res.order || editingOrder)) {
+      if (res?.success && (res.order || (isEditMode && editingOrder))) {
         const orderData = res.order || { ...editingOrder, ...payload };
         try {
           broadcastOutstockLocalMessage({
-            type: editingOrder ? 'outstock:order_updated' : 'outstock:order_created',
+            type: isEditMode ? 'outstock:order_updated' : 'outstock:order_created',
             orderId: orderData.id,
             branchId: payload.branchId,
             timestamp: new Date().toISOString()
           });
           window.dispatchEvent(
-            new CustomEvent(editingOrder ? 'outstock:order_updated' : 'outstock:order_created', { detail: orderData })
+            new CustomEvent(isEditMode ? 'outstock:order_updated' : 'outstock:order_created', { detail: orderData })
           );
         } catch (_) {}
 
-        if (editingOrder) {
+        if (isEditMode) {
           onOrderUpdated?.(orderData);
           showToast?.('✅ تم تحديث بيانات الطلب وإرسال إشعار فوري لإدارة المشتريات بالصنف المعدل عبر واتساب');
         } else {

@@ -91,8 +91,9 @@ export async function getValidAuthToken() {
     let password = '123';
 
     if (role === 'owner') {
-      password = localStorage.getItem('app_owner_password_snapshot') || 'owner123';
-      username = 'owner';
+      const ownerObj = (() => { try { return JSON.parse(localStorage.getItem('app_current_owner') || localStorage.getItem('app_owner_user') || '{}'); } catch { return {}; } })();
+      username = localStorage.getItem('app_owner_username_snapshot') || ownerObj.username || 'saif';
+      password = localStorage.getItem('app_owner_password_snapshot') || ownerObj.password || '181013';
     } else if (role === 'admin') {
       password = localStorage.getItem('app_admin_password_snapshot') || '123';
       username = 'admin';
@@ -180,7 +181,8 @@ async function request(endpoint, options = {}) {
 
     if (typeof localStorage !== 'undefined') {
       if (appRole === 'owner') {
-        appPass = localStorage.getItem('app_owner_password_snapshot') || 'owner123';
+        const ownerObj = (() => { try { return JSON.parse(localStorage.getItem('app_current_owner') || localStorage.getItem('app_owner_user') || '{}'); } catch { return {}; } })();
+        appPass = localStorage.getItem('app_owner_password_snapshot') || ownerObj.password || '181013';
       } else if (appRole === 'admin') {
         appPass = localStorage.getItem('app_admin_password_snapshot') || '123';
       } else if (appRole === 'branch') {

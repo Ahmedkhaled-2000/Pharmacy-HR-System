@@ -217,8 +217,9 @@ export default function LoansMedsModule({
     }
 
     const empObj = employees.find((e) => e.id === targetEmpId);
-    const months = (entryType === 'loan' && loanRepayPlan === 'installment') ? Math.max(2, parseInt(loanMonthsCount, 10) || 2) : 1;
-    const monthlyDeduction = (entryType === 'loan' && loanRepayPlan === 'installment') ? Math.round((parsed / months) * 100) / 100 : parsed;
+    const isInst = loanRepayPlan === 'installment';
+    const months = isInst ? Math.max(2, parseInt(loanMonthsCount, 10) || 2) : 1;
+    const monthlyDeduction = isInst ? Math.round((parsed / months) * 100) / 100 : parsed;
     const entryId = `loan_${Date.now()}`;
 
     const performAddEntry = async () => {
@@ -229,12 +230,14 @@ export default function LoansMedsModule({
         employeeCode: empObj?.code || '',
         branchId: empObj?.branchId || '',
         type: entryType,
-        loanType: entryType === 'loan' ? (loanRepayPlan === 'installment' ? 'installment' : 'monthly') : 'monthly',
-        typeLabel: entryType === 'loan' ? (loanRepayPlan === 'installment' ? 'سلفة مقسطة معتمدة' : 'سلفة مالية معتمدة') : 'أدوية ومشتريات آجل معتمدة',
+        loanType: isInst ? 'installment' : 'monthly',
+        typeLabel: entryType === 'loan' ? (isInst ? `سلفة مقسطة معتمدة (${months} شهور)` : 'سلفة مالية معتمدة') : (isInst ? `أدوية ومشتريات آجل مقسطة (${months} شهور)` : 'أدوية ومشتريات آجل معتمدة'),
         amount: parsed,
         paidAmount: 0,
         monthsCount: months,
+        installmentsCount: months,
         monthlyDeduction: monthlyDeduction,
+        installmentAmount: monthlyDeduction,
         status: 'approved',
         adminApproved: true,
         branchApproved: true,
@@ -654,19 +657,15 @@ export default function LoansMedsModule({
 
           <div className="field">
             <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>📅 أقصى عدد شهور لتقسيط الدواء</label>
-            <select
+            <input
+              type="number"
+              min="2"
+              max="36"
               value={ruleCreditMedicineMaxInstallments}
               onChange={(e) => setRuleCreditMedicineMaxInstallments(e.target.value)}
+              placeholder="6"
               disabled={!ruleAllowCreditMedicineInstallments}
-            >
-              <option value="2">شهرين (2 قسط)</option>
-              <option value="3">3 شهور (3 أقساط)</option>
-              <option value="4">4 شهور (4 أقساط)</option>
-              <option value="5">5 شهور (5 أقساط)</option>
-              <option value="6">6 شهور (6 أقساط)</option>
-              <option value="10">10 شهور</option>
-              <option value="12">سنة كاملة (12 شهر)</option>
-            </select>
+            />
             <small style={{ color: 'var(--muted)', fontSize: '11px' }}>الحد الأقصى للأقساط الشهرية للأدوية</small>
           </div>
         </div>
@@ -707,15 +706,20 @@ export default function LoansMedsModule({
           {loanRepayPlan === 'installment' && (
             <div className="field">
               <label>عدد شهور التقسيط</label>
-              <select value={loanMonthsCount} onChange={(e) => setLoanMonthsCount(e.target.value)}>
-                <option value="2">شهرين (2 شهور)</option>
-                <option value="3">3 شهور</option>
-                <option value="4">4 شهور</option>
-                <option value="5">5 شهور</option>
-                <option value="6">6 شهور</option>
-                <option value="10">10 شهور</option>
-                <option value="12">سنة كاملة (12 شهر)</option>
-              </select>
+              <input
+                type="number"
+                min="2"
+                max="36"
+                placeholder="أدخل عدد الشهور (مثال: 3)..."
+                value={loanMonthsCount}
+                onChange={(e) => setLoanMonthsCount(e.target.value)}
+                required
+              />
+              {parseFloat(amount) > 0 && parseInt(loanMonthsCount, 10) > 1 && (
+                <small style={{ color: 'var(--primary)', fontWeight: 'bold', display: 'block', marginTop: '4px' }}>
+                  💡 القسط: {fmt(Math.round((parseFloat(amount) / parseInt(loanMonthsCount, 10)) * 100) / 100)} ج.م / شهر
+                </small>
+              )}
             </div>
           )}
 

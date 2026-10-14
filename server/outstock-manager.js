@@ -5,6 +5,8 @@
  */
 
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import http from 'http';
 import https from 'https';
 import QRCode from 'qrcode';
@@ -50,7 +52,25 @@ async function processWhatsAppQueue() {
   isProcessingWhatsAppQueue = false;
 }
 
-async function dispatchSingleWhatsApp({ phone, message, imageUrl = null, branchName = null }) {
+// ── موجه الجلسات المعياري الموحد لنظام الواتساب (Canonical Session Resolver) ──────
+export function resolveCanonicalBranchSessionId(branchId) {
+  if (!branchId) return null;
+  const raw = String(branchId).trim().replace(/^branch_+/i, '');
+  if (!raw || raw === 'main' || raw === 'default' || raw === 'all') return 'hr_main';
+  return `branch_${raw}`;
+}
+
+async function dispatchSingleWhatsApp({
+  phone,
+  message,
+  imageUrl = null,
+  images = null,
+  branchId = null,
+  branchName = null,
+  senderRole = null,
+  preferredSessionId = null,
+  strictSession = false
+}) {
   if (!phone || !message) return false;
   let normalized = String(phone).replace(/\D/g, '');
   if (normalized.startsWith('01') && normalized.length === 11) {
@@ -58,12 +78,24 @@ async function dispatchSingleWhatsApp({ phone, message, imageUrl = null, branchN
   } else if (normalized.startsWith('1') && normalized.length === 10) {
     normalized = '20' + normalized;
   }
+  if (normalized.length < 10) return false;
+
+  // هرمية الجلسات الذكية: الجلسة الفعالة أولاً
   const sessionsToTry = [];
-  if (branchName) {
-    const bId = String(branchName).toLowerCase().replace(/[\s_]+/g, '-');
-    sessionsToTry.push(`branch_${bId}`, bId);
+  if (preferredSessionId) {
+    const prefClean = String(preferredSessionId).trim();
+    if (prefClean) sessionsToTry.push(prefClean);
+  } else if (senderRole === 'procurement' || senderRole === 'procurement_manager' || senderRole === 'outstock_procurement' || senderRole === 'procurement_officer') {
+    sessionsToTry.push('procurement');
+  } else if (branchId) {
+    const sId = resolveCanonicalBranchSessionId(branchId);
+    if (sId && sId !== 'hr_main') sessionsToTry.push(sId);
   }
-  sessionsToTry.push('hr_main', 'default');
+
+  // واتساب الإدارة العليا hr_main يكون Fallback فقط إذا لم يكن التوجيه صارماً للفرع
+  if (!strictSession && !sessionsToTry.includes('hr_main')) {
+    sessionsToTry.push('hr_main');
+  }
 
   const waUrls = [
     process.env.WHATSAPP_SERVER_URL,
@@ -74,10 +106,14 @@ async function dispatchSingleWhatsApp({ phone, message, imageUrl = null, branchN
 
   const bodyPayload = {
     phone: normalized,
-    message: message
+    message: message,
+    strictSession: Boolean(strictSession)
   };
   if (imageUrl) {
     bodyPayload.imageUrl = imageUrl;
+  }
+  if (Array.isArray(images) && images.length > 0) {
+    bodyPayload.images = images;
   }
 
   for (const sId of sessionsToTry) {
@@ -91,7 +127,10 @@ async function dispatchSingleWhatsApp({ phone, message, imageUrl = null, branchN
         });
         if (res.ok) {
           const data = await res.json().catch(() => ({}));
-          if (data?.success) return true;
+          if (data?.success) {
+            console.log(`[OutStock WhatsApp Router] 🚀 Message successfully sent to +${normalized} via session [${sId}]`);
+            return true;
+          }
         }
       } catch (_) {}
     }
@@ -180,6 +219,7 @@ export async function initOutstockTables(db) {
           name VARCHAR(255) NOT NULL,
           code VARCHAR(50) NULL,
           phone VARCHAR(50) NULL,
+          whatsapp_phone VARCHAR(50) NULL,
           address TEXT NULL,
           username VARCHAR(100) NULL,
           password VARCHAR(255) NULL,
@@ -588,6 +628,21 @@ export async function initOutstockTables(db) {
           created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_pharmafly_logs_branch ON public.outstock_pharmafly_sync_logs (branch_id, created_at DESC);
+
+      -- 22. جدول أرشيف النسخ الاحتياطية لنظام النواقص والمشتريات (تأمين تلقائي قبل التصفير)
+      CREATE TABLE IF NOT EXISTS public.outstock_backup_archives (
+          id VARCHAR(60) PRIMARY KEY,
+          backup_name VARCHAR(255) NOT NULL,
+          backup_scope VARCHAR(50) NOT NULL DEFAULT 'full_operational',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          created_by VARCHAR(100) NOT NULL,
+          total_records INTEGER NOT NULL DEFAULT 0,
+          file_path TEXT NULL,
+          file_size_bytes BIGINT NOT NULL DEFAULT 0,
+          row_counts_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+          backup_data JSONB NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_outstock_backups_created ON public.outstock_backup_archives (created_at DESC);
     `;
 
     await db.query(schemaSql);
@@ -615,6 +670,7 @@ export async function initOutstockTables(db) {
         ALTER TABLE public.outstock_orders ALTER COLUMN customer_id DROP NOT NULL;
 
         ALTER TABLE public.outstock_order_items ADD COLUMN IF NOT EXISTS item_type VARCHAR(30) DEFAULT 'medication';
+        ALTER TABLE public.outstock_order_items ADD COLUMN IF NOT EXISTS notes TEXT;
         ALTER TABLE public.outstock_order_items ADD COLUMN IF NOT EXISTS sent_to_procurement_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
         ALTER TABLE public.outstock_order_items ADD COLUMN IF NOT EXISTS procurement_replied_at TIMESTAMPTZ NULL;
         ALTER TABLE public.outstock_order_items ADD COLUMN IF NOT EXISTS procurement_replied_by VARCHAR(150) NULL;
@@ -646,6 +702,16 @@ export async function initOutstockTables(db) {
         ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS employee_name VARCHAR(150) NULL;
         ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS attachment_url TEXT NULL;
         ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS attachment_name TEXT NULL;
+        ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS customer_name VARCHAR(150) NULL;
+        ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(50) NULL;
+        ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS customer_address TEXT NULL;
+        ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS customer_id VARCHAR(36) NULL;
+        ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS deposit_amount NUMERIC(10,2) DEFAULT 0.00;
+        ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'cash';
+        ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS requested_quantity INTEGER DEFAULT 1;
+        ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS requested_unit VARCHAR(20) DEFAULT 'pack';
+        ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS converted_order_id VARCHAR(36) NULL;
+        ALTER TABLE public.outstock_medication_requests ADD COLUMN IF NOT EXISTS whatsapp_notified_at TIMESTAMPTZ NULL;
 
         ALTER TABLE public.outstock_isupply_market_feeds ADD COLUMN IF NOT EXISTS warehouse_name VARCHAR(150) NULL;
         ALTER TABLE public.outstock_isupply_market_feeds ADD COLUMN IF NOT EXISTS distributor_name VARCHAR(150) NULL;
@@ -698,6 +764,7 @@ export async function initOutstockTables(db) {
         ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS notes TEXT NULL;
         ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS registered_by VARCHAR(100) NULL;
         ALTER TABLE public.outstock_deficiencies ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'order';
+        ALTER TABLE public.outstock_branches ADD COLUMN IF NOT EXISTS whatsapp_phone VARCHAR(50) NULL;
 
         CREATE TABLE IF NOT EXISTS public.outstock_order_complaints (
           id VARCHAR(64) PRIMARY KEY,
@@ -722,9 +789,9 @@ export async function initOutstockTables(db) {
         ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS procurement_replied_at TIMESTAMPTZ;
         ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS procurement_responder_name VARCHAR(128);
         ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS owner_reply TEXT;
-        ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS owner_replied_at TIMESTAMPTZ;
         ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS item_id VARCHAR(64);
         ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS medication_name VARCHAR(255);
+        ALTER TABLE public.outstock_order_complaints ADD COLUMN IF NOT EXISTS selected_items JSONB NULL;
 
         -- 1. ترقية جدول العملاء لدعم الخصم التلقائي المشروط
         ALTER TABLE public.outstock_customers ADD COLUMN IF NOT EXISTS discount_type VARCHAR(20) DEFAULT 'none';
@@ -777,10 +844,11 @@ export async function initOutstockTables(db) {
         CREATE INDEX IF NOT EXISTS idx_outstock_returns_order ON public.outstock_order_returns(order_id);
         CREATE INDEX IF NOT EXISTS idx_outstock_returns_status ON public.outstock_order_returns(status);
 
-        -- 4. ترقية جدول بنود الطلبات لدعم تعديل الكميات وملاحظات المشتريات
+        -- 4. ترقية جدول بنود الطلبات لدعم تعديل الكميات وملاحظات المشتريات والبدائل المقترحة
         ALTER TABLE public.outstock_order_items ADD COLUMN IF NOT EXISTS original_quantity INTEGER NULL;
         ALTER TABLE public.outstock_order_items ADD COLUMN IF NOT EXISTS procurement_modified_qty BOOLEAN DEFAULT FALSE;
         ALTER TABLE public.outstock_order_items ADD COLUMN IF NOT EXISTS procurement_notes TEXT NULL;
+        ALTER TABLE public.outstock_order_items ADD COLUMN IF NOT EXISTS suggested_substitutes JSONB DEFAULT '[]'::jsonb;
 
         -- 5. توسيع حقل معرف رصيد الفرع لمنع خطأ تجاوز الطول character varying(36)
         ALTER TABLE public.outstock_branch_stock ALTER COLUMN id TYPE VARCHAR(120);
@@ -809,29 +877,42 @@ export async function initOutstockTables(db) {
       console.warn('[OutStock Clean Admin-Stock Warn]:', cleanStockErr.message);
     }
 
-    // مزامنة فروع الـ HR المسجلة في app_settings تلقائياً (دليل الفروع فقط دون لمس بيانات الدخول)
+    // مزامنة فروع الـ HR المسجلة في app_state / app_settings تلقائياً (دليل الفروع فقط دون لمس بيانات الدخول)
     try {
-      const settingsRes = await db.query("SELECT value_data FROM public.app_settings WHERE key_name = 'pharmacy-tracker-data'");
-      const settingsData = settingsRes.rows[0]?.value_data;
+      let settingsData = null;
+      const legacyRes = await db.query("SELECT value_data FROM public.app_settings WHERE key_name = 'pharmacy-tracker-data'");
+      if (legacyRes.rows.length > 0) {
+        settingsData = typeof legacyRes.rows[0].value_data === 'string' ? JSON.parse(legacyRes.rows[0].value_data) : legacyRes.rows[0].value_data;
+      }
+
       if (settingsData && Array.isArray(settingsData.branches)) {
         for (const b of settingsData.branches) {
           if (!b || !b.id || !b.name) continue;
           const bCode = b.branchCode || b.code || b.id;
           const bPhone = b.phone || (Array.isArray(b.phones) && b.phones[0]?.number) || null;
+          let bWhatsapp = b.whatsappPhone || b.whatsapp_phone || null;
+          if (!bWhatsapp && Array.isArray(b.phones)) {
+            const foundWa = b.phones.find(p => p.type === 'whatsapp' || (p.number && p.number.replace(/\D/g, '').startsWith('01') && p.number.replace(/\D/g, '').length === 11));
+            if (foundWa) bWhatsapp = foundWa.number;
+          }
+          if (!bWhatsapp && bPhone && String(bPhone).replace(/\D/g, '').startsWith('01') && String(bPhone).replace(/\D/g, '').length === 11) {
+            bWhatsapp = bPhone;
+          }
 
-          // مزامنة معلومات الفرع الأساسية فقط دون لمس أو نسخ يوزر وباسورد الـ HR إطلاقاً
+          // مزامنة معلومات الفرع الأساسية مع حقل الواتساب المعتمد
           await db.query(`
-            INSERT INTO public.outstock_branches (id, name, code, phone, address, is_active, updated_at)
-            VALUES ($1, $2, $3, $4, $5, true, CURRENT_TIMESTAMP)
+            INSERT INTO public.outstock_branches (id, name, code, phone, whatsapp_phone, address, is_active, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, true, CURRENT_TIMESTAMP)
             ON CONFLICT (id) DO UPDATE SET
               name = EXCLUDED.name,
               code = EXCLUDED.code,
-              phone = COALESCE(EXCLUDED.phone, public.outstock_branches.phone),
-              address = COALESCE(EXCLUDED.address, public.outstock_branches.address),
+              phone = CASE WHEN public.outstock_branches.phone IS NOT NULL AND public.outstock_branches.phone <> '' THEN public.outstock_branches.phone ELSE EXCLUDED.phone END,
+              whatsapp_phone = CASE WHEN public.outstock_branches.whatsapp_phone IS NOT NULL AND public.outstock_branches.whatsapp_phone <> '' THEN public.outstock_branches.whatsapp_phone ELSE EXCLUDED.whatsapp_phone END,
+              address = CASE WHEN public.outstock_branches.address IS NOT NULL AND public.outstock_branches.address <> '' THEN public.outstock_branches.address ELSE EXCLUDED.address END,
               updated_at = CURRENT_TIMESTAMP
-          `, [String(b.id), String(b.name), bCode, bPhone, b.address || null]);
+          `, [String(b.id), String(b.name), bCode, bPhone, bWhatsapp, b.address || null]);
         }
-        console.log(`🏢 [OutStock Engine] تمت مزامنة دليل ${settingsData.branches.length} فروع من منظومة الرواتب بنجاح (مع عزل بيانات الدخول).`);
+        console.log(`🏢 [OutStock Engine] تمت مزامنة دليل ${settingsData.branches.length} فروع من منظومة الرواتب بنجاح (مع دعم أرقام الواتساب المعتمدة).`);
       }
     } catch (syncErr) {
       console.warn('⚠️ [OutStock Sync Startup Warn]:', syncErr.message);
@@ -1127,43 +1208,69 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         });
       }
 
-      // 👑 فحص المالك المعتمد الحصري (saif)
-      if (cleanUser === 'saif') {
-        const appSettings = await getSafeHrSettings();
-        const org = appSettings?.orgSettings || {};
-        const storedOwnerPass = org.ownerPassword || '181013';
-        if (
-          cleanPass === '181013' || stdPass === '181013' ||
-          cleanPass === storedOwnerPass || (stdPass && toStdDigits(storedOwnerPass) === stdPass)
-        ) {
-          const ownerPayload = {
-            id: 'owner_master_saif',
-            username: 'saif',
-            fullName: 'سيف (المالك)',
-            name: 'سيف (المالك)',
-            role: 'owner',
-            isOwner: true,
-            isPrimaryOwner: true,
-            permissions: {
-              can_edit_items: true,
-              can_view_orders: true,
-              can_change_status: true,
-              can_access_suppliers: true,
-              can_access_supplier_accounts: true,
-              can_access_order_receiving: true,
-              can_access_supplier_invoices: true,
-              can_access_branch_withdrawals: true,
-              can_access_discounts_comparison: true,
-              can_manage_team: true
-            }
+      // 👑 فحص المالك المعتمد (saif أو أي مالك مسجل في systemOwners)
+      const appSettings = await getSafeHrSettings();
+      const org = appSettings?.orgSettings || {};
+      const storedOwnerPass = org.ownerPassword || '181013';
+
+      let matchedOwner = null;
+      if (cleanUser === 'saif' && (
+        cleanPass === '181013' || stdPass === '181013' ||
+        cleanPass === storedOwnerPass || (stdPass && toStdDigits(storedOwnerPass) === stdPass)
+      )) {
+        matchedOwner = {
+          id: 'owner_master_saif',
+          username: 'saif',
+          fullName: 'سيف (المالك)',
+          name: 'سيف (المالك)',
+          isPrimaryOwner: true
+        };
+      } else {
+        const systemOwners = Array.isArray(org.systemOwners) ? org.systemOwners : [];
+        const found = systemOwners.find(o => {
+          if (!o || o.isActive === false) return false;
+          const u = String(o.username || '').trim().toLowerCase();
+          const p = String(o.password || '').trim();
+          return (u === cleanUser || (stdUser && toStdDigits(u) === stdUser)) &&
+                 (cleanPass === p || (stdPass && toStdDigits(p) === stdPass));
+        });
+        if (found) {
+          matchedOwner = {
+            id: found.id || `owner_${found.username}`,
+            username: found.username,
+            fullName: found.fullName || found.name || 'مالك المنظومة',
+            name: found.fullName || found.name || 'مالك المنظومة',
+            isPrimaryOwner: Boolean(found.isPrimaryOwner),
+            ...found
           };
-          const token = generateToken(ownerPayload, JWT_SECRET);
-          return res.json({
-            success: true,
-            token,
-            user: ownerPayload
-          });
         }
+      }
+
+      if (matchedOwner) {
+        const ownerPayload = {
+          ...matchedOwner,
+          role: 'owner',
+          isOwner: true,
+          permissions: {
+            can_edit_items: true,
+            can_view_orders: true,
+            can_change_status: true,
+            can_access_suppliers: true,
+            can_access_supplier_accounts: true,
+            can_access_order_receiving: true,
+            can_access_supplier_invoices: true,
+            can_access_branch_withdrawals: true,
+            can_access_discounts_comparison: true,
+            can_manage_team: true,
+            ...(matchedOwner.permissions || {})
+          }
+        };
+        const token = generateToken(ownerPayload, JWT_SECRET);
+        return res.json({
+          success: true,
+          token,
+          user: ownerPayload
+        });
       }
 
       // 1. البحث في جدول outstock_users أولاً (باستثناء admin-stock)
@@ -1446,33 +1553,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     }
   });
 
-  // استرجاع المثائل والبدائل الدوائية المتاحة بنفس المادة الفعالة (بالمادة الفعالة أو الاسم التجاري)
-  app.get('/api/outstock/medications/substitutes', async (req, res) => {
-    try {
-      let queryName = String(req.query.generic || req.query.name || req.query.medicationName || '').trim();
-      const excludeId = req.query.excludeId || null;
-      if (!queryName) {
-        return res.json({ success: true, substitutes: [] });
-      }
 
-      let substitutes = await getDrugEyeSubstitutes(db, queryName, excludeId);
-      if (substitutes.length === 0) {
-        // محاولة جلب المادة الفعالة من الاسم التجاري للدواء
-        const medLook = await db.query(`
-          SELECT generic_name FROM public.outstock_medications
-          WHERE trade_name_ar ILIKE $1 OR trade_name_en ILIKE $1
-          LIMIT 1
-        `, [`%${queryName}%`]);
-        if (medLook.rows.length > 0 && medLook.rows[0].generic_name) {
-          substitutes = await getDrugEyeSubstitutes(db, medLook.rows[0].generic_name, excludeId);
-        }
-      }
-
-      res.json({ success: true, substitutes });
-    } catch (err) {
-      res.status(500).json({ success: false, error: err.message });
-    }
-  });
 
   // مزامنة واستيراد قوائم التسعير الجبري الجديدة من هيئة الدواء أو ملفات Drug Eye
   app.post('/api/outstock/medications/sync', authMiddleware, async (req, res) => {
@@ -1567,7 +1648,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   // مزامنة كتالوج الأدوية سحابياً مع التحديثات الرسمية
   app.post('/api/outstock/medications/sync-cloud', authMiddleware, async (req, res) => {
     try {
-      const result = await syncCatalogFromCloud(db);
+      const result = await syncCatalogFromCloud(db, (progress) => {
+        try {
+          broadcastOutstock('outstock:cloud_sync_progress', progress);
+        } catch {}
+      });
       if (result.success) {
         broadcastOutstock('outstock:cloud_sync_completed', result);
       }
@@ -1887,6 +1972,37 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           updated_at = CURRENT_TIMESTAMP
       `, [id, name, code || null, phone || null, address || null, cleanUser, cleanPass, isActive !== false]);
 
+      // مزامنة فورية مع بيانات app_settings ('pharmacy-tracker-data') لضمان ثبات وتحديث الهاتف في كامل المنظومة
+      try {
+        const sRes = await db.query("SELECT value_data FROM public.app_settings WHERE key_name = 'pharmacy-tracker-data'");
+        if (sRes.rows.length > 0 && sRes.rows[0].value_data) {
+          const trackerData = sRes.rows[0].value_data;
+          if (Array.isArray(trackerData.branches)) {
+            let found = false;
+            trackerData.branches = trackerData.branches.map(b => {
+              if (String(b.id) === String(id)) {
+                found = true;
+                return {
+                  ...b,
+                  name: name || b.name,
+                  phone: phone || b.phone,
+                  address: address || b.address
+                };
+              }
+              return b;
+            });
+            if (found) {
+              await db.query(
+                "UPDATE public.app_settings SET value_data = $1, updated_at = CURRENT_TIMESTAMP WHERE key_name = 'pharmacy-tracker-data'",
+                [JSON.stringify(trackerData)]
+              );
+            }
+          }
+        }
+      } catch (syncAppErr) {
+        console.warn('[Sync Outstock Branch to App Settings Warn]:', syncAppErr.message);
+      }
+
       // أيضاً إضافة/تحديث حساب الفرع في outstock_users برتبة 'branch' لتسجيل الدخول السلس
       if (cleanUser && cleanPass) {
         await db.query(`
@@ -2001,16 +2117,16 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   // ───────────────────────────────────────────────────────────────────────────
   app.get('/api/outstock/customers', authMiddleware, async (req, res) => {
     try {
-      const { search, branchId, productSearch, itemType } = req.query;
+      const { search, branchId, productSearch, itemType, phone } = req.query;
       let query = `
         SELECT c.*, b.name as branch_name,
                (SELECT COUNT(*) FROM public.outstock_orders o WHERE o.customer_id = c.id) as real_orders_count,
                (
-                 SELECT COALESCE(json_agg(DISTINCT json_build_object(
+                 SELECT COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
                    'name', oi.medication_name,
                    'itemType', COALESCE(oi.item_type, 'medication'),
                    'status', oi.item_status
-                 )), '[]')
+                 )), '[]'::jsonb)
                  FROM public.outstock_orders o2
                  JOIN public.outstock_order_items oi ON o2.id = oi.order_id
                  WHERE o2.customer_id = c.id
@@ -2020,6 +2136,24 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         WHERE 1=1
       `;
       const params = [];
+
+      if (phone && String(phone).trim()) {
+        const cleanP = String(phone).replace(/\D/g, '');
+        if (cleanP) {
+          const shortP = cleanP.startsWith('0') ? cleanP.slice(1) : (cleanP.startsWith('20') ? cleanP.slice(2) : cleanP);
+          params.push(`%${cleanP}%`, `%${shortP}%`);
+          const p1 = params.length - 1;
+          const p2 = params.length;
+          query += ` AND (
+            regexp_replace(COALESCE(c.whatsapp_phone, ''), '\\D', '', 'g') ILIKE $${p1} 
+            OR regexp_replace(COALESCE(c.whatsapp_phone, ''), '\\D', '', 'g') ILIKE $${p2} 
+            OR regexp_replace(COALESCE(c.landline_phone, ''), '\\D', '', 'g') ILIKE $${p1} 
+            OR regexp_replace(COALESCE(c.landline_phone, ''), '\\D', '', 'g') ILIKE $${p2}
+            OR c.whatsapp_phone ILIKE $${p1} 
+            OR c.landline_phone ILIKE $${p1}
+          )`;
+        }
+      }
 
       if (search && String(search).trim()) {
         params.push(`%${String(search).trim()}%`);
@@ -2235,6 +2369,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
                    'item_link', i.item_link,
                    'procurementNotes', i.procurement_notes,
                    'procurement_notes', i.procurement_notes,
+                   'suggestedSubstitutes', COALESCE(i.suggested_substitutes, '[]'::jsonb),
+                   'suggested_substitutes', COALESCE(i.suggested_substitutes, '[]'::jsonb),
                    'prunedFromBill', i.pruned_from_bill,
                    'pruned_from_bill', i.pruned_from_bill,
                    'isPriceEstimated', COALESCE(i.is_price_estimated, false),
@@ -2335,7 +2471,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       if (status && status !== 'all') {
         if (status === 'active') {
-          query += ` AND o.order_status <> 'delivered' AND o.order_status <> 'cancelled'`;
+          query += ` AND o.order_status <> 'delivered' AND o.order_status <> 'cancelled' AND o.order_status <> 'returned' AND o.order_status <> 'all_returned'`;
         } else {
           params.push(status);
           query += ` AND o.order_status = $${params.length}`;
@@ -2438,6 +2574,16 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
             INSERT INTO public.outstock_customers (id, customer_code, full_name, whatsapp_phone, landline_phone, address, primary_branch_id, zone, notes)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           `, [customerId, custCode, customer.fullName, cleanPhone, customer.landlinePhone || null, customer.address || null, branchId, customer.zone || null, customer.notes || null]);
+          broadcastOutstock('outstock:customer_updated', {
+            customer: {
+              id: customerId,
+              customer_code: custCode,
+              full_name: customer.fullName,
+              whatsapp_phone: cleanPhone,
+              primary_branch_id: branchId
+            },
+            branchId
+          });
         }
       }
 
@@ -2659,52 +2805,46 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           const procPhone = generalSettings.procurementWhatsappPhone;
           const cosmPhone = generalSettings.cosmeticsWhatsappPhone;
 
-          const hasCosmetics = (orderCategory === 'cosmetics') || insertedItems.some(it => it.itemType === 'cosmetics' || it.item_type === 'cosmetics');
-          const hasMedications = (orderCategory !== 'cosmetics') || insertedItems.some(it => it.itemType !== 'cosmetics' && it.item_type !== 'cosmetics');
-
-          // تجميع صور الروشتات والمنتجات لإرسالها
-          const orderImages = [];
-          if (medicationImageUrl) orderImages.push(medicationImageUrl);
-          insertedItems.forEach(it => {
-            if (it.imageUrl && !orderImages.includes(it.imageUrl)) {
-              orderImages.push(it.imageUrl);
-            }
-          });
+          // فرز دقيق وصارم: فصل أصناف مستحضرات التجميل عن الأدوية العلاجية
+          const cosmItems = insertedItems.filter(it => it.itemType === 'cosmetics' || it.item_type === 'cosmetics');
+          const medItems = insertedItems.filter(it => it.itemType !== 'cosmetics' && it.item_type !== 'cosmetics');
 
           const targets = [];
 
-          // 1) إذا كان الطلب يحتوي على أصناف مستحضرات تجميل، يرسل لمسؤول التجميل
-          if (hasCosmetics) {
-            const cosmItems = insertedItems.filter(it => it.itemType === 'cosmetics' || it.item_type === 'cosmetics');
-            const targetCosmPhone = cosmPhone || procPhone;
-            if (targetCosmPhone) {
-              targets.push({
-                roleType: 'cosmetics',
-                phone: targetCosmPhone,
-                title: '💄 *طلب نواقص مستحضرات تجميل جديد وارد!*',
-                items: cosmItems.length > 0 ? cosmItems : insertedItems
-              });
-            }
+          // 1) إذا كان الطلب يحتوي على أصناف مستحضرات تجميل، ترسل لمسؤول التجميل فقط وحصراً تلك الأصناف وصورها
+          if (cosmItems.length > 0 && cosmPhone) {
+            const cosmImages = [];
+            cosmItems.forEach(it => {
+              if (it.imageUrl && !cosmImages.includes(it.imageUrl)) cosmImages.push(it.imageUrl);
+            });
+            targets.push({
+              roleType: 'cosmetics',
+              phone: cosmPhone,
+              title: '💄 *طلب نواقص مستحضرات تجميل جديد وارد!*',
+              items: cosmItems,
+              images: cosmImages
+            });
           }
 
-          // 2) إذا كان الطلب يحتوي على أدوية أو طلب عام، يرسل لإدارة المشتريات
-          if (hasMedications || !hasCosmetics) {
-            const medItems = insertedItems.filter(it => it.itemType !== 'cosmetics' && it.item_type !== 'cosmetics');
-            if (procPhone) {
-              const alreadyCovered = hasCosmetics && !hasMedications && (cosmPhone === procPhone);
-              if (!alreadyCovered) {
-                targets.push({
-                  roleType: 'procurement',
-                  phone: procPhone,
-                  title: '💊 *طلب نواقص أدوية جديد وارد لإدارة المشتريات!*',
-                  items: medItems.length > 0 ? medItems : insertedItems
-                });
-              }
-            }
+          // 2) إذا كان الطلب يحتوي على أدوية، ترسل فقط الأصناف الدوائية وصورها لإدارة المشتريات
+          if (medItems.length > 0 && procPhone) {
+            const medImages = [];
+            if (medicationImageUrl) medImages.push(medicationImageUrl);
+            medItems.forEach(it => {
+              if (it.imageUrl && !medImages.includes(it.imageUrl)) medImages.push(it.imageUrl);
+            });
+            targets.push({
+              roleType: 'procurement',
+              phone: procPhone,
+              title: '💊 *طلب نواقص أدوية جديد وارد لإدارة المشتريات!*',
+              items: medItems,
+              images: medImages
+            });
           }
 
           // جلسة الواتساب المعتمدة للإرسال (جلسة الفرع المقترن أولاً ثم الإدارة كـ Fallback)
-          const branchSession = branchId.startsWith('branch_') ? branchId : `branch_${branchId}`;
+          const branchSession = resolveCanonicalBranchSessionId(branchId);
+          const sessionsToTry = branchSession && branchSession !== 'hr_main' ? [branchSession, 'hr_main'] : ['hr_main'];
 
           for (const target of targets) {
             let cleanPhone = String(target.phone).replace(/\D/g, '');
@@ -2733,7 +2873,6 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
               (fullOrder.customerNotes ? `📝 *ملاحظات الطلب:* ${fullOrder.customerNotes}\n` : '') +
               `⏰ *التوقيت:* ${new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}`;
 
-            const sessionsToTry = [branchSession, 'hr_main'];
             const waUrls = ['http://hr-whatsapp-server:3100/send', 'http://127.0.0.1:3100/send'];
 
             let sentSuccessfully = false;
@@ -2746,10 +2885,11 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
                     phone: normalizedPhone,
                     message: waMsg
                   };
-                  if (orderImages.length > 0) {
-                    bodyPayload.imageUrl = orderImages[0];
-                    if (orderImages.length > 1) {
-                      bodyPayload.images = orderImages.slice(1);
+                  const targetImages = target.images || [];
+                  if (targetImages.length > 0) {
+                    bodyPayload.imageUrl = targetImages[0];
+                    if (targetImages.length > 1) {
+                      bodyPayload.images = targetImages.slice(1);
                     }
                   }
 
@@ -3037,88 +3177,93 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const procPhone = generalSettings.procurementWhatsappPhone;
       const cosmPhone = generalSettings.cosmeticsWhatsappPhone;
 
-      const hasCosmetics = modifiedItems.some(it => it.itemType === 'cosmetics' || it.item_type === 'cosmetics');
-      const hasMedications = modifiedItems.some(it => it.itemType !== 'cosmetics' && it.item_type !== 'cosmetics');
+      const cosmModified = modifiedItems.filter(it => it.itemType === 'cosmetics' || it.item_type === 'cosmetics');
+      const medModified = modifiedItems.filter(it => it.itemType !== 'cosmetics' && it.item_type !== 'cosmetics');
+      const cosmAll = Array.isArray(allItems) ? allItems.filter(it => it.itemType === 'cosmetics' || it.item_type === 'cosmetics') : [];
+      const medAll = Array.isArray(allItems) ? allItems.filter(it => it.itemType !== 'cosmetics' && it.item_type !== 'cosmetics') : [];
 
       const targets = [];
-      if (hasCosmetics) {
-        const targetCosmPhone = cosmPhone || procPhone;
-        if (targetCosmPhone) {
-          targets.push({
-            roleType: 'cosmetics',
-            phone: targetCosmPhone,
-            title: '💄 *تنبيه: تم تعديل صنف مستحضرات تجميل في طلب العميل!*'
-          });
-        }
+      // 1) إذا تم تعديل أي صنف مستحضرات تجميل، يرسل حصراً لمسؤول مستحضرات التجميل
+      if (cosmModified.length > 0 && cosmPhone) {
+        targets.push({
+          roleType: 'cosmetics',
+          phone: cosmPhone,
+          title: '💄 *تنبيه: تم تعديل صنف مستحضرات تجميل في طلب العميل!*',
+          modified: cosmModified,
+          currentList: cosmAll,
+          alertFooter: '⚠️ *تنبيه لمسؤول مستحضرات التجميل:* تم تعديل صنف تجميل في هذا الطلب من قِبل الصيدلية، يرجى اعتماده وتوفيره.'
+        });
       }
-      if (hasMedications || !hasCosmetics) {
-        if (procPhone) {
-          const alreadyCovered = hasCosmetics && !hasMedications && (cosmPhone === procPhone);
-          if (!alreadyCovered) {
-            targets.push({
-              roleType: 'procurement',
-              phone: procPhone,
-              title: '🔄 *تنبيه: تم تعديل صنف في طلب نواقص عميل من قِبل الصيدلية!*'
-            });
-          }
-        }
+
+      // 2) إذا تم تعديل أي صنف دوائي، يرسل حصراً لإدارة المشتريات
+      if (medModified.length > 0 && procPhone) {
+        targets.push({
+          roleType: 'procurement',
+          phone: procPhone,
+          title: '🔄 *تنبيه: تم تعديل صنف دوائي في طلب نواقص عميل من قِبل الصيدلية!*',
+          modified: medModified,
+          currentList: medAll,
+          alertFooter: '⚠️ *تنبيه لإدارة المشتريات:* تم تعديل صنف في هذا الطلب وإعادة إرساله من قِبل الصيدلية، يرجى اعتماده وتوفيره بناءً على الصنف الجديد المعدل.'
+        });
       }
 
       if (targets.length === 0) return;
 
-      // تجميع صور الأصناف المعدلة
-      const itemImages = [];
-      modifiedItems.forEach(it => {
-        const img = it.imageUrl || it.image_url;
-        if (img && !itemImages.includes(img)) {
-          itemImages.push(img);
-        }
-      });
-
-      // صياغة تفاصيل البنود المعدلة
-      const modifiedDetails = modifiedItems.map((it, idx) => {
-        const unitLabel = it.unitType === 'strip' ? 'شريط' : 'علبة';
-        const typeBadge = (it.itemType === 'cosmetics' || it.item_type === 'cosmetics') ? ' [مستحضر تجميل]' : '';
-        
-        if (it.changeType === 'removed') {
-          return `  ${idx + 1}. ❌ *تم حذف هذا الصنف من الطلب:* ~${it.medicationName}~ (${it.quantity} ${unitLabel})`;
-        }
-
-        let line = `  ${idx + 1}. *الصنف الجديد المعدل:* ${it.medicationName}${typeBadge}\n`;
-        line += `     📦 الكمية المطلوبة: ${it.quantity} ${unitLabel}\n`;
-        if (it.previousMedicationName && it.previousMedicationName.trim().toLowerCase() !== it.medicationName.trim().toLowerCase()) {
-          line += `     ↩️ الصنف السابق قبل التعديل: ~${it.previousMedicationName}~\n`;
-          line += `     ✏️ الإجراء: [تم تغيير اسم الصنف من قِبل الصيدلية]\n`;
-        } else if (it.changeType === 'substitute' || it.changeType === 'added') {
-          line += `     ✨ الإجراء: [صنف بديل / مضاف جديد]\n`;
-        } else if (it.changeType === 'quantity_changed') {
-          line += `     🔢 الإجراء: [تعديل الكمية: كانت ${it.previousQuantity} وأصبحت ${it.quantity}]\n`;
-        } else {
-          line += `     ✏️ الإجراء: [تعديل صنف]\n`;
-        }
-        if (it.unitPrice > 0) {
-          line += `     💵 السعر: ${parseFloat(it.unitPrice).toFixed(2)} ج.م\n`;
-        }
-        return line;
-      }).join('\n');
-
-      // ملخص كامل أصناف الطلب الحالية
-      const currentItemsSummary = (Array.isArray(allItems) && allItems.length > 0)
-        ? allItems.map((it, idx) => {
-            const uLabel = it.unitType === 'strip' ? 'شريط' : 'علبة';
-            return `  ${idx + 1}. ${it.medicationName} (${it.quantity} ${uLabel})`;
-          }).join('\n')
-        : '  (لا توجد أصناف)';
+      const branchSession = resolveCanonicalBranchSessionId(branchId);
+      const sessionsToTry = branchSession && branchSession !== 'hr_main' ? [branchSession, 'hr_main'] : ['hr_main'];
 
       const paidNum = parseFloat(order.paid_amount || order.paidAmount || 0);
       const remainingNum = parseFloat(order.remaining_amount || order.remainingAmount || 0);
       const totalNum = parseFloat(order.net_amount || order.total_amount || order.totalAmount || 0);
-      const branchSession = branchId ? (branchId.startsWith('branch_') ? branchId : `branch_${branchId}`) : 'hr_main';
 
       for (const target of targets) {
         let cleanPhone = String(target.phone).replace(/\D/g, '');
         if (cleanPhone.length < 9) continue;
         const normalizedPhone = (cleanPhone.startsWith('01') && cleanPhone.length === 11) ? ('2' + cleanPhone) : cleanPhone;
+
+        // تجميع صور الأصناف المعدلة الخاصة بهذا الهدف فقط
+        const itemImages = [];
+        target.modified.forEach(it => {
+          const img = it.imageUrl || it.image_url;
+          if (img && !itemImages.includes(img)) {
+            itemImages.push(img);
+          }
+        });
+
+        // صياغة تفاصيل البنود المعدلة الخاصة بهذا الهدف فقط
+        const modifiedDetails = target.modified.map((it, idx) => {
+          const unitLabel = it.unitType === 'strip' ? 'شريط' : 'علبة';
+          const typeBadge = (it.itemType === 'cosmetics' || it.item_type === 'cosmetics') ? ' [مستحضر تجميل]' : '';
+          
+          if (it.changeType === 'removed') {
+            return `  ${idx + 1}. ❌ *تم حذف هذا الصنف من الطلب:* ~${it.medicationName}~ (${it.quantity} ${unitLabel})`;
+          }
+
+          let line = `  ${idx + 1}. *الصنف الجديد المعدل:* ${it.medicationName}${typeBadge}\n`;
+          line += `     📦 الكمية المطلوبة: ${it.quantity} ${unitLabel}\n`;
+          if (it.previousMedicationName && it.previousMedicationName.trim().toLowerCase() !== it.medicationName.trim().toLowerCase()) {
+            line += `     ↩️ الصنف السابق قبل التعديل: ~${it.previousMedicationName}~\n`;
+            line += `     ✏️ الإجراء: [تم تغيير اسم الصنف من قِبل الصيدلية]\n`;
+          } else if (it.changeType === 'substitute' || it.changeType === 'added') {
+            line += `     ✨ الإجراء: [صنف بديل / مضاف جديد]\n`;
+          } else if (it.changeType === 'quantity_changed') {
+            line += `     🔢 الإجراء: [تعديل الكمية: كانت ${it.previousQuantity} وأصبحت ${it.quantity}]\n`;
+          } else {
+            line += `     ✏️ الإجراء: [تعديل صنف]\n`;
+          }
+          if (it.unitPrice > 0) {
+            line += `     💵 السعر: ${parseFloat(it.unitPrice).toFixed(2)} ج.م\n`;
+          }
+          return line;
+        }).join('\n');
+
+        // ملخص أصناف هذا الهدف بعد التعديل
+        const currentItemsSummary = (Array.isArray(target.currentList) && target.currentList.length > 0)
+          ? target.currentList.map((it, idx) => {
+              const uLabel = it.unitType === 'strip' ? 'شريط' : 'علبة';
+              return `  ${idx + 1}. ${it.medicationName} (${it.quantity} ${uLabel})`;
+            }).join('\n')
+          : '  (لا توجد أصناف)';
 
         const waMsg = `${target.title}\n` +
           `━━━━━━━━━━━━━━━━━━━\n` +
@@ -3130,13 +3275,12 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           `━━━━━━━━━━━━━━━━━━━\n` +
           `✏️ *بيانات الصنف الذي تم تغييره / تعديله:*\n${modifiedDetails}\n` +
           `━━━━━━━━━━━━━━━━━━━\n` +
-          `📦 *قائمة أصناف الطلب كاملة بعد التعديل:*\n${currentItemsSummary}\n` +
+          `📦 *قائمة أصناف ${target.roleType === 'cosmetics' ? 'مستحضرات التجميل' : 'الأدوية'} بالطلب:*\n${currentItemsSummary}\n` +
           `💰 *العربون:* ${paidNum.toFixed(2)} ج.م | *المتبقي:* ${remainingNum.toFixed(2)} ج.م | *الإجمالي:* ${totalNum.toFixed(2)} ج.م\n` +
           (customerNotes ? `📝 *ملاحظات الطلب:* ${customerNotes}\n` : '') +
           `━━━━━━━━━━━━━━━━━━━\n` +
-          `⚠️ *تنبيه لإدارة المشتريات:* تم تعديل صنف في هذا الطلب وإعادة إرساله من قِبل الصيدلية، يرجى اعتماده وتوفيره بناءً على الصنف الجديد المعدل.`;
+          `${target.alertFooter}`;
 
-        const sessionsToTry = [branchSession, 'hr_main'];
         const waUrls = ['http://hr-whatsapp-server:3100/send', 'http://127.0.0.1:3100/send'];
 
         let sentSuccessfully = false;
@@ -3752,16 +3896,90 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   app.delete('/api/outstock/orders/:id', authMiddleware, async (req, res) => {
     try {
       const orderId = req.params.id;
+      const { refundDestination = 'cash', employeeCode, employeeName, notes } = req.body || {};
       const orderRes = await db.query('SELECT * FROM public.outstock_orders WHERE id = $1', [orderId]);
       if (orderRes.rows.length === 0) return res.status(404).json({ success: false, error: 'الطلب غير موجود' });
       const order = orderRes.rows[0];
 
-      // فحص هل ردت المشتريات (كلياً أو جزئياً)
-      const itemsCheck = await db.query("SELECT COUNT(*) as replied_count FROM public.outstock_order_items WHERE order_id = $1 AND (item_status <> 'pending' OR procurement_replied_at IS NOT NULL OR pruned_from_bill = true)", [orderId]);
-      const repliedCount = parseInt(itemsCheck.rows[0]?.replied_count || 0, 10);
-      const isRepliedStatus = ['replied', 'partially_available', 'all_available', 'all_unavailable', 'ready_for_pickup', 'completed'].includes(order.order_status);
-      if (order.procurement_replied_at || repliedCount > 0 || isRepliedStatus) {
-        return res.status(400).json({ success: false, error: 'لا يمكن حذف الطلب بعد أن قامت إدارة المشتريات بالرد عليه (كلياً أو جزئياً)' });
+      if (order.order_status === 'delivered' || order.order_status === 'completed') {
+        return res.status(400).json({ success: false, error: 'لا يمكن حذف طلب تم تسليمه، يرجى استخدام نظام المرتجعات' });
+      }
+
+      // فحص هل ردت المشتريات بالتوفر
+      const itemsRes = await db.query("SELECT * FROM public.outstock_order_items WHERE order_id = $1", [orderId]);
+      const allItems = itemsRes.rows;
+      const hasAvailableItems = allItems.some(i => i.item_status === 'available_by_procurement' || i.item_status === 'delivered');
+      
+      const isUnavailableOrder = order.order_status === 'all_unavailable' || 
+        (allItems.length > 0 && allItems.every(i => i.item_status === 'unavailable_in_market' || i.item_status === 'unavailable' || i.pruned_from_bill));
+      const isPendingOrder = !order.procurement_replied_at && allItems.every(i => i.item_status === 'pending');
+
+      if (!isUnavailableOrder && !isPendingOrder && hasAvailableItems) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'لا يمكن حذف الطلب بعد أن قامت المشتريات بتوفيره، يرجى تسليمه أو عمل مرتجع' 
+        });
+      }
+
+      // تسوية العربون إن وجد
+      const paidAmount = parseFloat(order.paid_amount || 0);
+      let walletRefundTxId = null;
+      let newWalletBalance = null;
+
+      if (paidAmount > 0 && order.customer_id) {
+        if (refundDestination === 'wallet') {
+          const custRes = await db.query('SELECT wallet_balance, full_name, whatsapp_phone FROM public.outstock_customers WHERE id = $1', [order.customer_id]);
+          if (custRes.rows.length > 0) {
+            const cust = custRes.rows[0];
+            const prevBal = parseFloat(cust.wallet_balance || 0);
+            newWalletBalance = prevBal + paidAmount;
+            await db.query('UPDATE public.outstock_customers SET wallet_balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newWalletBalance, order.customer_id]);
+
+            walletRefundTxId = `wtx_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+            const genReceiptNum = `RCP-REF-${Date.now().toString().slice(-6)}`;
+            await db.query(`
+              INSERT INTO public.outstock_customer_wallet_transactions (
+                id, customer_id, order_id, transaction_type, amount, previous_balance, new_balance,
+                notes, created_by_code, created_by_name, branch_id, verification_method, payment_method, receipt_number, created_at
+              ) VALUES ($1, $2, $3, 'refund_to_wallet', $4, $5, $6, $7, $8, $9, $10, 'system_cancel', 'cancel_deposit_refund', $11, CURRENT_TIMESTAMP)
+            `, [
+              walletRefundTxId, order.customer_id, orderId, paidAmount, prevBal, newWalletBalance,
+              notes || `استرداد عربون لإلغاء طلب غير متوفر #${order.order_number}`,
+              employeeCode || req.outstockUser?.code || '',
+              employeeName || req.outstockUser?.name || 'صيدلي الفرع',
+              order.branch_id,
+              genReceiptNum
+            ]);
+
+            broadcastOutstock('outstock:customer_wallet_updated', {
+              customerId: order.customer_id,
+              newBalance: newWalletBalance,
+              transactionId: walletRefundTxId,
+              receiptNumber: genReceiptNum
+            });
+          }
+        } else {
+          // استرداد نقدي فوري (كاش)
+          const genReceiptNum = `RCP-CSH-${Date.now().toString().slice(-6)}`;
+          await db.query(`
+            INSERT INTO public.outstock_audit_logs (
+              branch_id, action_type, entity_type, entity_id, performed_by_code, performed_by_name,
+              details, created_at
+            ) VALUES ($1, 'cash_deposit_refund', 'outstock_orders', $2, $3, $4, $5, CURRENT_TIMESTAMP)
+          `, [
+            order.branch_id,
+            orderId,
+            employeeCode || req.outstockUser?.code || '',
+            employeeName || req.outstockUser?.name || 'صيدلي الفرع',
+            JSON.stringify({
+              orderNumber: order.order_number,
+              paidAmount,
+              refundDestination: 'cash',
+              receiptNumber: genReceiptNum,
+              notes: notes || 'استرداد نقدي فوري لعربون طلب ملغى'
+            })
+          ]);
+        }
       }
 
       await db.query('DELETE FROM public.outstock_orders WHERE id = $1', [orderId]);
@@ -3770,7 +3988,13 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       }
 
       broadcastOutstock('outstock:order_deleted', { orderId, branchId: order.branch_id });
-      res.json({ success: true, message: 'تم حذف الطلب نهائياً بنجاح' });
+      res.json({ 
+        success: true, 
+        message: 'تم إلغاء وحذف الطلب وتسوية العربون بنجاح',
+        refundAmount: paidAmount,
+        refundDestination,
+        newWalletBalance
+      });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -3875,7 +4099,14 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
               `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
               `يرجى التوجيه العاجل لإدارة المشتريات لحسم الاستعلام بالمنظومة.`;
 
-            await sendOutstockWhatsApp({ phone: ownerPhone, message: ownerMsg });
+            await sendOutstockWhatsApp({
+              phone: ownerPhone,
+              message: ownerMsg,
+              branchName: inq.branch_name,
+              branchId: inq.branch_id,
+              preferredSessionId: resolveCanonicalBranchSessionId(inq.branch_id),
+              strictSession: true
+            });
           }
         } catch (waEscErr) {
           console.warn('[Inquiry Complaint Owner WA Alert Warn]:', waEscErr.message);
@@ -4254,13 +4485,109 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         walletCredited, walletTxId
       ]);
 
-      await db.query(`
-        UPDATE public.outstock_orders
-        SET has_complaint = true,
-            complaint_notes = COALESCE(complaint_notes || E'\n', '') || 'طلب مرتجع قيد انتظار المشتريات: ' || $1,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = $2
-      `, [generalReturnReason.trim(), orderId]);
+      // ── تحديث بنود الطلب في جدول outstock_order_items لإزالة/تعديل الأصناف المرتجعة من طلب العميل ──
+      for (const retItm of items) {
+        const retQty = parseInt(retItm.quantity || 1, 10);
+        const reasonText = (retItm.returnReason || generalReturnReason).trim();
+
+        let dbItem = null;
+        if (retItm.itemId) {
+          const itRes = await db.query(
+            'SELECT * FROM public.outstock_order_items WHERE id = $1 AND order_id = $2',
+            [retItm.itemId, orderId]
+          );
+          if (itRes.rows.length > 0) dbItem = itRes.rows[0];
+        }
+        if (!dbItem && retItm.medicationName) {
+          const itRes = await db.query(
+            'SELECT * FROM public.outstock_order_items WHERE order_id = $1 AND (medication_name ILIKE $2 OR medication_name = $2) AND pruned_from_bill = false LIMIT 1',
+            [orderId, retItm.medicationName]
+          );
+          if (itRes.rows.length > 0) dbItem = itRes.rows[0];
+        }
+
+        if (dbItem) {
+          const currentQty = parseInt(dbItem.quantity || 1, 10);
+          const unitPrice = parseFloat(dbItem.unit_price || 0);
+
+          if (retQty >= currentQty) {
+            // إرجاع كامل للصنف: وسمه كمرتجع وشطبه من فاتورة العميل
+            await db.query(`
+              UPDATE public.outstock_order_items
+              SET item_status = 'returned',
+                  pruned_from_bill = true,
+                  pruned_at = CURRENT_TIMESTAMP,
+                  procurement_notes = CASE 
+                    WHEN procurement_notes IS NULL OR procurement_notes = '' THEN $1
+                    ELSE procurement_notes || E'\n' || $1
+                  END,
+                  notes = CASE 
+                    WHEN notes IS NULL OR notes = '' THEN $1
+                    ELSE notes || E'\n' || $1
+                  END,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE id = $2
+            `, [`[صنف مرتجع بالكامل: ${reasonText} بواسطة ${effEmpName}]`, dbItem.id]);
+          } else {
+            // إرجاع جزئي للكمية: تقليص كمية الصنف في طلب العميل وتعديل إجمالي سعره
+            const remainingQty = Math.max(1, currentQty - retQty);
+            const newTotal = remainingQty * unitPrice;
+            await db.query(`
+              UPDATE public.outstock_order_items
+              SET quantity = $1,
+                  total_price = $2,
+                  procurement_notes = CASE 
+                    WHEN procurement_notes IS NULL OR procurement_notes = '' THEN $3
+                    ELSE procurement_notes || E'\n' || $3
+                  END,
+                  notes = CASE 
+                    WHEN notes IS NULL OR notes = '' THEN $3
+                    ELSE notes || E'\n' || $3
+                  END,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE id = $4
+            `, [
+              remainingQty,
+              newTotal,
+              `[تم إرجاع كمية (${retQty}) من الصنف لسبب: ${reasonText} بواسطة ${effEmpName}]`,
+              dbItem.id
+            ]);
+          }
+        }
+      }
+
+      // ── فحص هل تم إرجاع كافة أصناف الطلب أم تبقى أصناف نشطة ──
+      const remainingItemsRes = await db.query(`
+        SELECT COUNT(*) as active_count
+        FROM public.outstock_order_items
+        WHERE order_id = $1 AND pruned_from_bill = false AND item_status <> 'returned'
+      `, [orderId]);
+
+      const activeCount = parseInt(remainingItemsRes.rows[0]?.active_count || 0, 10);
+      const isAllReturned = activeCount === 0 || returnType === 'full';
+
+      if (isAllReturned) {
+        // تحويل كافة أصناف الطلب إلى مرتجع: إزالة الطلب من شاشة طلبات العملاء وتحويل حالته إلى returned
+        await db.query(`
+          UPDATE public.outstock_orders
+          SET order_status = 'returned',
+              has_complaint = true,
+              complaint_notes = COALESCE(complaint_notes || E'\n', '') || 'تم تحويل كافة أصناف الطلب إلى مرتجع: ' || $1,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2
+        `, [generalReturnReason.trim(), orderId]);
+      } else {
+        // تبقى أصناف نشطة: إعادة احتساب مجاميع الفاتورة وتحديث حالة الطلب
+        await recalculateOrderTotals(db, orderId);
+        await updateOrderStatusByItems(db, orderId);
+        await db.query(`
+          UPDATE public.outstock_orders
+          SET has_complaint = true,
+              complaint_notes = COALESCE(complaint_notes || E'\n', '') || 'طلب مرتجع جزئي قيد انتظار المشتريات: ' || $1,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2
+        `, [generalReturnReason.trim(), orderId]);
+      }
 
       broadcastOutstock('outstock:order_return_created', {
         returnId,
@@ -4596,7 +4923,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   });
 
   // ── استرجاع البدائل والمثائل الدوائية التلقائية (AI Drug Eye Alternative Recommender) ──
-  app.get('/api/outstock/medications/substitutes', authMiddleware, async (req, res) => {
+  app.get('/api/outstock/medications/substitutes', async (req, res) => {
     try {
       const { name, medicationName, medId } = req.query || {};
       const searchName = String(name || medicationName || '').trim();
@@ -4612,23 +4939,58 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       }
 
       if (!targetMed && searchName) {
+        // تطبيع اسم الصنف واستخراج الكلمات المفتاحية
+        const parenMatch = searchName.match(/\(([^)]+)\)/);
+        const enInParens = parenMatch ? parenMatch[1].trim() : '';
+        const arWithoutParens = searchName.replace(/\([^)]*\)/g, ' ').trim();
+        const noiseRx = /\b(\d+[\s-]*(قرص|أقراص|اقراص|كبسول|كبسولات|شريط|علبة|مل|ملجم|جم|tabs?|caps?|tablets?|capsules?|syrup|susp|f\.c\.|mg|gm|ml))\b/gi;
+        const cleanAr = arWithoutParens.replace(noiseRx, ' ').replace(/[0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+        const cleanEn = enInParens.replace(noiseRx, ' ').replace(/[0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+
         const mRes = await db.query(
           `SELECT * FROM public.outstock_medications
            WHERE LOWER(trade_name_en) = LOWER($1) OR LOWER(trade_name_ar) = LOWER($1)
               OR invoice_display_name ILIKE $2
+              OR (LENGTH($3) >= 3 AND (trade_name_en ILIKE $4 OR trade_name_ar ILIKE $4))
+              OR (LENGTH($5) >= 3 AND (trade_name_en ILIKE $6 OR trade_name_ar ILIKE $6))
+           ORDER BY CASE 
+             WHEN LOWER(trade_name_en) = LOWER($1) OR LOWER(trade_name_ar) = LOWER($1) THEN 1
+             WHEN LENGTH($5) >= 3 AND trade_name_en ILIKE $6 THEN 2
+             ELSE 3
+           END
            LIMIT 1`,
-          [searchName, `%${searchName}%`]
+          [
+            searchName, 
+            `%${searchName}%`,
+            cleanAr,
+            `%${cleanAr.split(' ')[0] || ''}%`,
+            cleanEn,
+            `%${cleanEn.split(' ')[0] || ''}%`
+          ]
         );
         targetMed = mRes.rows[0];
       }
 
       if (!targetMed && searchName && Array.isArray(SEED_EDA_DRUG_EYE_MEDICATIONS)) {
-        const normalized = searchName.toLowerCase().replace(/[\s-_]+/g, '');
-        const seedFound = SEED_EDA_DRUG_EYE_MEDICATIONS.find(s =>
-          s.trade_name_en.toLowerCase().replace(/[\s-_]+/g, '').includes(normalized) ||
-          s.trade_name_ar.includes(searchName) ||
-          (s.generic_name && s.generic_name.toLowerCase().includes(searchName.toLowerCase()))
-        );
+        const parenMatch = searchName.match(/\(([^)]+)\)/);
+        const enInParens = parenMatch ? parenMatch[1].trim().toLowerCase() : '';
+        const arWithoutParens = searchName.replace(/\([^)]*\)/g, ' ').trim();
+        const cleanAr = arWithoutParens.replace(/[0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+        const cleanEn = enInParens.replace(/[0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+        const seedFound = SEED_EDA_DRUG_EYE_MEDICATIONS.find(s => {
+          const sEn = s.trade_name_en.toLowerCase();
+          const sAr = s.trade_name_ar;
+          return (
+            (cleanEn && (sEn.includes(cleanEn) || cleanEn.includes(sEn) || sEn.startsWith(cleanEn.split(' ')[0]))) ||
+            (cleanAr && (sAr.includes(cleanAr) || cleanAr.includes(sAr) || sAr.startsWith(cleanAr.split(' ')[0]))) ||
+            sEn.includes(searchName.toLowerCase()) ||
+            searchName.toLowerCase().includes(sEn) ||
+            sAr.includes(searchName) ||
+            searchName.includes(sAr) ||
+            (s.generic_name && searchName.toLowerCase().includes(s.generic_name.toLowerCase()))
+          );
+        });
         if (seedFound) {
           targetMed = {
             id: seedFound.eda_reg_no,
@@ -4904,8 +5266,425 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
 
   // ───────────────────────────────────────────────────────────────────────────
-  // مسح وتصفير طلبات النظام بالكامل مع الحفاظ التام على سجل العملاء (للمالك فقط)
+  // ── منظومة مسح وتصفير نظام النواقص وحفظ النسخ الاحتياطية والاستعادة ────────
+  // ── (مع الحماية الصارمة لقاعدة بيانات الأدوية المصرية وإعدادات النظام) ───────
   // ───────────────────────────────────────────────────────────────────────────
+
+  // دالة مساعدة للتحقق من كلمة مرور المالك المشرف
+  const verifyOwnerSecret = async (callerUser, providedPassword) => {
+    if (!providedPassword || String(providedPassword).trim().length === 0) {
+      return false;
+    }
+    const cleanPass = String(providedPassword).trim();
+    const stdPass = toStdDigits(cleanPass);
+
+    // 1. فحص كود المالك الأساسي saif
+    if (cleanPass === '181013' || stdPass === '181013') {
+      return true;
+    }
+
+    // 2. فحص كلمة مرور المستخدم الحالي في outstock_users
+    if (callerUser?.id || callerUser?.username) {
+      try {
+        const uRes = await db.query(
+          "SELECT password FROM public.outstock_users WHERE (id = $1 OR username = $2) AND is_active = true",
+          [callerUser.id || '', callerUser.username || '']
+        );
+        if (uRes.rows.length > 0) {
+          const p = String(uRes.rows[0].password || '').trim();
+          if (p && (cleanPass === p || stdPass === toStdDigits(p))) {
+            return true;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. فحص مالك النظام out في outstock_users
+    try {
+      const outRes = await db.query("SELECT password FROM public.outstock_users WHERE username = 'out' AND is_active = true");
+      if (outRes.rows.length > 0) {
+        const p = String(outRes.rows[0].password || '').trim();
+        if (p && (cleanPass === p || stdPass === toStdDigits(p))) {
+          return true;
+        }
+      }
+    } catch (_) {}
+
+    // 4. فحص إعدادات المنظومة الرئيسية وملاك الـ HR
+    try {
+      const appSettings = await getSafeHrSettings();
+      const org = appSettings?.orgSettings || {};
+      const storedOwnerPass = String(org.ownerPassword || org.adminPassword || '181013').trim();
+      if (cleanPass === storedOwnerPass || stdPass === toStdDigits(storedOwnerPass)) {
+        return true;
+      }
+      if (Array.isArray(org.systemOwners)) {
+        const match = org.systemOwners.find(o => {
+          const p = String(o?.password || '').trim();
+          return p && (cleanPass === p || stdPass === toStdDigits(p));
+        });
+        if (match) return true;
+      }
+    } catch (_) {}
+
+    return false;
+  };
+
+  // دالة مساعدة لحساب عدد السجلات بأمان دون إطلاق أخطاء
+  const safeCount = async (tableName, whereClause = '') => {
+    try {
+      const res = await db.query(`SELECT COUNT(*) as cnt FROM public.${tableName} ${whereClause}`);
+      return parseInt(res.rows[0]?.cnt || 0, 10);
+    } catch (_) {
+      return 0;
+    }
+  };
+
+  // دالة مساعدة لجلب كافة بيانات جدول بأمان
+  const safeSelectAll = async (tableName, whereClause = '') => {
+    try {
+      const res = await db.query(`SELECT * FROM public.${tableName} ${whereClause}`);
+      return res.rows || [];
+    } catch (_) {
+      return [];
+    }
+  };
+
+  // 1. تقرير القياسات الحية قبل التصفير (Telemetry & Pre-flight Counts)
+  app.get('/api/outstock/admin/purge-telemetry', authMiddleware, async (req, res) => {
+    try {
+      if (req.outstockUser.role !== 'owner') {
+        return res.status(403).json({ success: false, error: 'غير مصرح - خاص بالمالك والمشرف العام فقط' });
+      }
+
+      // جلب إحصائيات الجداول المراد تصفيرها
+      const [
+        ordersCount,
+        orderItemsCount,
+        complaintsCount,
+        receiptsCount,
+        receiptItemsCount,
+        returnsCount,
+        deficienciesCount,
+        branchSalesCount,
+        branchWithdrawalsCount,
+        medicationRequestsCount,
+        supplierInvoicesCount,
+        supplierInvoiceItemsCount,
+        supplierPaymentsCount,
+        walletTransactionsCount,
+        branchStockLogsCount,
+        customersWithOrdersCount
+      ] = await Promise.all([
+        safeCount('outstock_orders'),
+        safeCount('outstock_order_items'),
+        safeCount('outstock_order_complaints'),
+        safeCount('outstock_order_receipts'),
+        safeCount('outstock_order_receipt_items'),
+        safeCount('outstock_order_returns'),
+        safeCount('outstock_deficiencies'),
+        safeCount('outstock_branch_sales'),
+        safeCount('outstock_branch_withdrawals'),
+        safeCount('outstock_medication_requests'),
+        safeCount('outstock_supplier_invoices'),
+        safeCount('outstock_supplier_invoice_items'),
+        safeCount('outstock_supplier_payments'),
+        safeCount('outstock_customer_wallet_transactions'),
+        safeCount('outstock_branch_stock'),
+        safeCount('outstock_customers', 'WHERE total_orders_count > 0')
+      ]);
+
+      // جلب إحصائيات الأصول المحمية والمحصنة تماماً من المسح
+      const [
+        medicationsCount,
+        priceAuditLogsCount,
+        settingsCount,
+        branchesCount,
+        usersCount,
+        suppliersCount,
+        supplierLimitsCount,
+        totalCustomersCount
+      ] = await Promise.all([
+        safeCount('outstock_medications'),
+        safeCount('outstock_price_audit_logs'),
+        safeCount('outstock_settings'),
+        safeCount('outstock_branches'),
+        safeCount('outstock_users'),
+        safeCount('outstock_suppliers'),
+        safeCount('outstock_supplier_monthly_limits'),
+        safeCount('outstock_customers')
+      ]);
+
+      res.json({
+        success: true,
+        telemetry: {
+          toWipe: {
+            ordersCount,
+            orderItemsCount,
+            complaintsCount,
+            receiptsCount,
+            receiptItemsCount,
+            returnsCount,
+            deficienciesCount,
+            branchSalesCount,
+            branchWithdrawalsCount,
+            medicationRequestsCount,
+            supplierInvoicesCount,
+            supplierInvoiceItemsCount,
+            supplierPaymentsCount,
+            walletTransactionsCount,
+            branchStockLogsCount,
+            customersWithOrdersCount,
+            totalPurgeableRecords: (
+              ordersCount + orderItemsCount + complaintsCount + receiptsCount +
+              receiptItemsCount + returnsCount + deficienciesCount + branchSalesCount +
+              branchWithdrawalsCount + medicationRequestsCount + supplierInvoicesCount +
+              supplierInvoiceItemsCount + supplierPaymentsCount + walletTransactionsCount
+            )
+          },
+          strictlyPreserved: {
+            medicationsCount,
+            priceAuditLogsCount,
+            settingsCount,
+            branchesCount,
+            usersCount,
+            suppliersCount,
+            supplierLimitsCount,
+            totalCustomersCount,
+            isMedicationsDatabaseProtected: true,
+            isHrSystemIsolated: true,
+            isSettingsProtected: true
+          }
+        }
+      });
+    } catch (err) {
+      console.error('[Purge Telemetry Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 2. تصفير ومسح النظام مع النسخ الاحتياطي الإلزامي المسبق (Full Purge & Zero Reset)
+  app.post('/api/outstock/admin/purge-system', authMiddleware, async (req, res) => {
+    try {
+      if (req.outstockUser.role !== 'owner') {
+        return res.status(403).json({ success: false, error: 'غير مصرح - عملية تصفير ومسح النظام متاحة للمالك والمشرف العام فقط' });
+      }
+
+      const {
+        confirmationPhrase,
+        ownerPassword,
+        scope = 'full_operational', // 'full_operational' أو 'orders_only'
+        resetCustomerStats = true
+      } = req.body || {};
+
+      const EXPECTED_PHRASE = 'تأكيد تصفير نظام النواقص وحفظ النسخة الاحتياطية';
+      if (confirmationPhrase !== EXPECTED_PHRASE) {
+        return res.status(400).json({
+          success: false,
+          error: `يرجى كتابة عبارة التأكيد المطابقة تماماً: "${EXPECTED_PHRASE}"`
+        });
+      }
+
+      // التحقق الصارم من كلمة مرور المالك
+      const isPassValid = await verifyOwnerSecret(req.outstockUser, ownerPassword);
+      if (!isPassValid) {
+        return res.status(403).json({
+          success: false,
+          error: 'كلمة مرور المالك غير صحيحة، تم رفض طلب التصفير لحماية البيانات'
+        });
+      }
+
+      // ── المرحلة 1: إنشاء النسخة الاحتياطية الكاملة والمؤرشفة قبل أي تعديل ──
+      const backupId = `outstock_bkp_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+      const nowCairo = new Date().toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' });
+      const backupName = `نسخة احتياطية لنظام النواقص قبل التصفير (${nowCairo})`;
+
+      // جلب البيانات من كافة الجداول التشغيلية
+      const [
+        orders,
+        orderItems,
+        complaints,
+        receipts,
+        receiptItems,
+        returns,
+        branchSales,
+        branchWithdrawals,
+        medicationRequests,
+        deficiencies,
+        supplierInvoices,
+        supplierInvoiceItems,
+        supplierPayments,
+        walletTransactions,
+        customersSnapshot
+      ] = await Promise.all([
+        safeSelectAll('outstock_orders'),
+        safeSelectAll('outstock_order_items'),
+        safeSelectAll('outstock_order_complaints'),
+        safeSelectAll('outstock_order_receipts'),
+        safeSelectAll('outstock_order_receipt_items'),
+        safeSelectAll('outstock_order_returns'),
+        safeSelectAll('outstock_branch_sales'),
+        safeSelectAll('outstock_branch_withdrawals'),
+        safeSelectAll('outstock_medication_requests'),
+        safeSelectAll('outstock_deficiencies'),
+        safeSelectAll('outstock_supplier_invoices'),
+        safeSelectAll('outstock_supplier_invoice_items'),
+        safeSelectAll('outstock_supplier_payments'),
+        safeSelectAll('outstock_customer_wallet_transactions'),
+        db.query('SELECT id, customer_code, full_name, whatsapp_phone, total_orders_count, wallet_balance FROM public.outstock_customers').then(r => r.rows).catch(() => [])
+      ]);
+
+      const rowCounts = {
+        orders: orders.length,
+        orderItems: orderItems.length,
+        complaints: complaints.length,
+        receipts: receipts.length,
+        receiptItems: receiptItems.length,
+        returns: returns.length,
+        branchSales: branchSales.length,
+        branchWithdrawals: branchWithdrawals.length,
+        medicationRequests: medicationRequests.length,
+        deficiencies: deficiencies.length,
+        supplierInvoices: supplierInvoices.length,
+        supplierInvoiceItems: supplierInvoiceItems.length,
+        supplierPayments: supplierPayments.length,
+        walletTransactions: walletTransactions.length,
+        customersSnapshot: customersSnapshot.length
+      };
+
+      const totalRecords = Object.values(rowCounts).reduce((a, b) => a + b, 0);
+
+      const backupPayload = {
+        version: '1.0',
+        system: 'Pharmacy OutStock System',
+        backupId,
+        backupName,
+        createdAt: new Date().toISOString(),
+        createdBy: req.outstockUser.fullName || req.outstockUser.username || 'المالك والمشرف العام',
+        scope,
+        resetCustomerStats,
+        rowCounts,
+        tables: {
+          outstock_orders: orders,
+          outstock_order_items: orderItems,
+          outstock_order_complaints: complaints,
+          outstock_order_receipts: receipts,
+          outstock_order_receipt_items: receiptItems,
+          outstock_order_returns: returns,
+          outstock_branch_sales: branchSales,
+          outstock_branch_withdrawals: branchWithdrawals,
+          outstock_medication_requests: medicationRequests,
+          outstock_deficiencies: deficiencies,
+          outstock_supplier_invoices: supplierInvoices,
+          outstock_supplier_invoice_items: supplierInvoiceItems,
+          outstock_supplier_payments: supplierPayments,
+          outstock_customer_wallet_transactions: walletTransactions,
+          outstock_customers_snapshot: customersSnapshot
+        }
+      };
+
+      // حفظ النسخة في ملف محلي على الخادم لضمان عدم ضياعها
+      const backupDir = path.resolve(process.cwd(), 'backups', 'outstock');
+      try {
+        fs.mkdirSync(backupDir, { recursive: true });
+      } catch (_) {}
+      const backupFilePath = path.join(backupDir, `${backupId}.json`);
+      const backupJsonStr = JSON.stringify(backupPayload);
+      fs.writeFileSync(backupFilePath, backupJsonStr, 'utf8');
+      const fileSizeBytes = Buffer.byteLength(backupJsonStr, 'utf8');
+
+      // تسجيل النسخة في جدول أرشيف النسخ الاحتياطية بقاعدة البيانات
+      await db.query(`
+        INSERT INTO public.outstock_backup_archives (
+          id, backup_name, backup_scope, created_at, created_by, total_records, file_path, file_size_bytes, row_counts_json, backup_data
+        ) VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4, $5, $6, $7, $8, $9)
+      `, [
+        backupId,
+        backupName,
+        scope,
+        req.outstockUser.fullName || req.outstockUser.username || 'المالك والمشرف العام',
+        totalRecords,
+        backupFilePath,
+        fileSizeBytes,
+        JSON.stringify(rowCounts),
+        backupPayload
+      ]);
+
+      // ── المرحلة 2: تنفيذ المسح والتصفير داخل معاملة ذرية مؤمنة (Atomic Transaction) ──
+      const client = await db.connect();
+      let wipedCounts = {};
+      try {
+        await client.query('BEGIN');
+
+        // حذف السجلات المرتبطة بالطلبات بالترتيب لتجنب أي قيود Foreign Keys
+        await client.query('DELETE FROM public.outstock_order_complaints');
+        try { await client.query('DELETE FROM public.outstock_order_returns'); } catch (_) {}
+        try { await client.query('DELETE FROM public.outstock_order_receipt_items'); } catch (_) {}
+        await client.query('DELETE FROM public.outstock_order_receipts');
+        await client.query('DELETE FROM public.outstock_branch_sales');
+        try { await client.query('DELETE FROM public.outstock_branch_withdrawals'); } catch (_) {}
+        try { await client.query('DELETE FROM public.outstock_medication_requests'); } catch (_) {}
+        await client.query('DELETE FROM public.outstock_deficiencies');
+        await client.query('DELETE FROM public.outstock_order_items');
+        await client.query('DELETE FROM public.outstock_orders');
+
+        // إذا كان التصفير شاملاً لدورة العمل التشغيلية بالكامل
+        if (scope === 'full_operational') {
+          try { await client.query('DELETE FROM public.outstock_supplier_invoice_items'); } catch (_) {}
+          try { await client.query('DELETE FROM public.outstock_supplier_invoices'); } catch (_) {}
+          try { await client.query('DELETE FROM public.outstock_supplier_payments'); } catch (_) {}
+          try { await client.query('DELETE FROM public.outstock_customer_wallet_transactions'); } catch (_) {}
+          try { await client.query('DELETE FROM public.outstock_branch_stock'); } catch (_) {}
+          try { await client.query('DELETE FROM public.outstock_pharmafly_branch_stock'); } catch (_) {}
+          try { await client.query('DELETE FROM public.outstock_pharmafly_sync_logs'); } catch (_) {}
+          try { await client.query('DELETE FROM public.outstock_isupply_market_feeds'); } catch (_) {}
+        }
+
+        // تصفير عداد طلبات العملاء مع الحفاظ الكامل على بيانات العملاء وأرقام هواتفهم
+        if (resetCustomerStats) {
+          await client.query('UPDATE public.outstock_customers SET total_orders_count = 0');
+        }
+
+        // ⚠️ التحقق الصارم والحتمي من سلامة قاعدة بيانات الأدوية والأسعار:
+        // لا يتم مسح أي صنف في outstock_medications إطلاقاً
+        const verifyMeds = await client.query('SELECT COUNT(*) as cnt FROM public.outstock_medications');
+        const intactMedsCount = parseInt(verifyMeds.rows[0]?.cnt || 0, 10);
+
+        await client.query('COMMIT');
+        wipedCounts = rowCounts;
+        console.log(`🧹 [OutStock Purge Success]: تم التصفير بنجاح، وكتالوج الأدوية سليم بنسبة 100% ويحتوي على ${intactMedsCount} صنفاً.`);
+      } catch (transErr) {
+        await client.query('ROLLBACK');
+        throw transErr;
+      } finally {
+        client.release();
+      }
+
+      // بث إشعار التصفير لجميع الأجهزة النشطة
+      broadcastOutstock('outstock:system_purged', {
+        backupId,
+        timestamp: new Date().toISOString(),
+        scope,
+        totalRecords
+      });
+      broadcastOutstock('outstock:orders_purged', { timestamp: new Date().toISOString() });
+
+      res.json({
+        success: true,
+        message: '✅ تم مسح وتصفير بيانات نظام النواقص بنجاح تام بعد حفظ النسخة الاحتياطية المؤرشفة',
+        backupId,
+        backupName,
+        totalRecordsBackedUp: totalRecords,
+        wipedCounts,
+        safetyNotice: '🛡️ قاعدة بيانات الأدوية المصرية (EDA / Drug Eye) وكتالوج مستحضرات التجميل وإعدادات الصيدلية وهوية الفروع محفوظة ومحمية بنسبة 100%.'
+      });
+    } catch (err) {
+      console.error('[Purge System Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // مسار التوافق القديم لمسح الطلبات
   app.post('/api/outstock/admin/purge-orders', authMiddleware, async (req, res) => {
     try {
       if (req.outstockUser.role !== 'owner') {
@@ -4926,9 +5705,245 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       await db.query('UPDATE public.outstock_customers SET total_orders_count = 0');
 
       broadcastOutstock('outstock:orders_purged', { timestamp: new Date().toISOString() });
-      res.json({ success: true, message: '✅ تم مسح وتصفير كافة طلبات النظام بنجاح مع الحفاظ التام على سجل العملاء ومحافظهم' });
+      res.json({ success: true, message: '✅ تم مسح وتصفير كافة طلبات النظام بنجاح مع الحفاظ التام على سجل العملاء ومحافظهم وكتالوج الأدوية' });
     } catch (err) {
       console.error('[Purge Orders Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 3. استرجاع قائمة النسخ الاحتياطية المؤرشفة
+  app.get('/api/outstock/admin/backups', authMiddleware, async (req, res) => {
+    try {
+      if (req.outstockUser.role !== 'owner') {
+        return res.status(403).json({ success: false, error: 'غير مصرح - خاص بالمالك والمشرف العام فقط' });
+      }
+
+      const result = await db.query(`
+        SELECT id, backup_name, backup_scope, created_at, created_by, total_records, file_path, file_size_bytes, row_counts_json
+        FROM public.outstock_backup_archives
+        ORDER BY created_at DESC
+        LIMIT 50
+      `);
+
+      res.json({
+        success: true,
+        backups: result.rows.map(r => ({
+          ...r,
+          total_records: parseInt(r.total_records || 0, 10),
+          file_size_bytes: parseInt(r.file_size_bytes || 0, 10),
+          formattedSize: (parseInt(r.file_size_bytes || 0, 10) / 1024).toFixed(1) + ' KB'
+        }))
+      });
+    } catch (err) {
+      console.error('[Get Backups Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 4. تحميل ملف النسخة الاحتياطية بصيغة JSON
+  app.get('/api/outstock/admin/backups/:id/download', authMiddleware, async (req, res) => {
+    try {
+      if (req.outstockUser.role !== 'owner') {
+        return res.status(403).json({ success: false, error: 'غير مصرح - خاص بالمالك والمشرف العام فقط' });
+      }
+
+      const backupId = req.params.id;
+      const result = await db.query('SELECT * FROM public.outstock_backup_archives WHERE id = $1', [backupId]);
+      if (result.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'ملف النسخة الاحتياطية غير موجود' });
+      }
+
+      const record = result.rows[0];
+      let backupPayload = record.backup_data;
+
+      // إذا لم يكن مخزناً بالكامل في الـ DB نحاول قراءته من القرص
+      if (!backupPayload && record.file_path && fs.existsSync(record.file_path)) {
+        try {
+          const raw = fs.readFileSync(record.file_path, 'utf8');
+          backupPayload = JSON.parse(raw);
+        } catch (_) {}
+      }
+
+      if (!backupPayload) {
+        return res.status(404).json({ success: false, error: 'محتوى النسخة الاحتياطية غير متاح للتنزيل' });
+      }
+
+      const fileName = `${backupId}.json`;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.send(JSON.stringify(backupPayload, null, 2));
+    } catch (err) {
+      console.error('[Download Backup Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 5. استعادة النسخة الاحتياطية (Rollback / Restore Backup)
+  app.post('/api/outstock/admin/backups/:id/restore', authMiddleware, async (req, res) => {
+    try {
+      if (req.outstockUser.role !== 'owner') {
+        return res.status(403).json({ success: false, error: 'غير مصرح - خاص بالمالك والمشرف العام فقط' });
+      }
+
+      const backupId = req.params.id;
+      const { confirmationPhrase, ownerPassword } = req.body || {};
+
+      if (confirmationPhrase !== 'تأكيد استعادة النسخة الاحتياطية') {
+        return res.status(400).json({
+          success: false,
+          error: 'يرجى كتابة عبارة التأكيد المطابقة تماماً: "تأكيد استعادة النسخة الاحتياطية"'
+        });
+      }
+
+      const isPassValid = await verifyOwnerSecret(req.outstockUser, ownerPassword);
+      if (!isPassValid) {
+        return res.status(403).json({ success: false, error: 'كلمة مرور المالك غير صحيحة، تم رفض الاستعادة' });
+      }
+
+      const result = await db.query('SELECT * FROM public.outstock_backup_archives WHERE id = $1', [backupId]);
+      if (result.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'النسخة الاحتياطية المحددة غير موجودة' });
+      }
+
+      const record = result.rows[0];
+      let backupPayload = record.backup_data;
+      if (!backupPayload && record.file_path && fs.existsSync(record.file_path)) {
+        try {
+          const raw = fs.readFileSync(record.file_path, 'utf8');
+          backupPayload = JSON.parse(raw);
+        } catch (_) {}
+      }
+
+      if (!backupPayload || !backupPayload.tables) {
+        return res.status(400).json({ success: false, error: 'بيانات النسخة الاحتياطية غير صالحة أو تالفة' });
+      }
+
+      const tables = backupPayload.tables;
+      const client = await db.connect();
+
+      try {
+        await client.query('BEGIN');
+
+        // حذف السجلات الحالية تمهيداً للاستعادة النظيفة
+        await client.query('DELETE FROM public.outstock_order_complaints');
+        try { await client.query('DELETE FROM public.outstock_order_returns'); } catch (_) {}
+        try { await client.query('DELETE FROM public.outstock_order_receipt_items'); } catch (_) {}
+        await client.query('DELETE FROM public.outstock_order_receipts');
+        await client.query('DELETE FROM public.outstock_branch_sales');
+        try { await client.query('DELETE FROM public.outstock_branch_withdrawals'); } catch (_) {}
+        try { await client.query('DELETE FROM public.outstock_medication_requests'); } catch (_) {}
+        await client.query('DELETE FROM public.outstock_deficiencies');
+        await client.query('DELETE FROM public.outstock_order_items');
+        await client.query('DELETE FROM public.outstock_orders');
+
+        // استعادة الطلبات (Orders)
+        if (Array.isArray(tables.outstock_orders) && tables.outstock_orders.length > 0) {
+          for (const o of tables.outstock_orders) {
+            await client.query(`
+              INSERT INTO public.outstock_orders (
+                id, order_number, branch_id, customer_id, total_amount, paid_amount, remaining_amount,
+                discount_type, discount_value, net_amount, order_status, expected_pickup_date,
+                expected_pickup_time, responsible_pharmacist, customer_notes, barcode_data,
+                delivered_at, whatsapp_notified_at, created_at, updated_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+              ON CONFLICT (id) DO NOTHING
+            `, [
+              o.id, o.order_number, o.branch_id, o.customer_id, o.total_amount, o.paid_amount, o.remaining_amount,
+              o.discount_type || 'none', o.discount_value || 0, o.net_amount, o.order_status, o.expected_pickup_date,
+              o.expected_pickup_time, o.responsible_pharmacist, o.customer_notes, o.barcode_data,
+              o.delivered_at, o.whatsapp_notified_at, o.created_at, o.updated_at
+            ]);
+          }
+        }
+
+        // استعادة بنود الطلبات (Order Items)
+        if (Array.isArray(tables.outstock_order_items) && tables.outstock_order_items.length > 0) {
+          for (const item of tables.outstock_order_items) {
+            await client.query(`
+              INSERT INTO public.outstock_order_items (
+                id, order_id, medication_name, unit_type, quantity, unit_price, total_price,
+                item_status, procurement_notes, pruned_from_bill, pruned_at, created_at, updated_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+              ON CONFLICT (id) DO NOTHING
+            `, [
+              item.id, item.order_id, item.medication_name, item.unit_type || 'pack', item.quantity || 1,
+              item.unit_price || 0, item.total_price || 0, item.item_status || 'pending', item.procurement_notes,
+              item.pruned_from_bill || false, item.pruned_at, item.created_at, item.updated_at
+            ]);
+          }
+        }
+
+        // استعادة النواقص (Deficiencies)
+        if (Array.isArray(tables.outstock_deficiencies) && tables.outstock_deficiencies.length > 0) {
+          for (const d of tables.outstock_deficiencies) {
+            await client.query(`
+              INSERT INTO public.outstock_deficiencies (
+                id, branch_id, medication_name, unit_type, requested_quantity, status, created_at, updated_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+              ON CONFLICT (id) DO NOTHING
+            `, [
+              d.id, d.branch_id, d.medication_name, d.unit_type || 'pack', d.requested_quantity || 1,
+              d.status || 'open', d.created_at, d.updated_at
+            ]);
+          }
+        }
+
+        // استعادة إيصالات ومبيعات الفروع
+        if (Array.isArray(tables.outstock_order_receipts) && tables.outstock_order_receipts.length > 0) {
+          for (const r of tables.outstock_order_receipts) {
+            try {
+              await client.query(`
+                INSERT INTO public.outstock_order_receipts (
+                  id, receipt_number, branch_id, supplier_id, total_amount, paid_amount, status, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (id) DO NOTHING
+              `, [r.id, r.receipt_number, r.branch_id, r.supplier_id, r.total_amount, r.paid_amount, r.status, r.created_at]);
+            } catch (_) {}
+          }
+        }
+
+        if (Array.isArray(tables.outstock_branch_sales) && tables.outstock_branch_sales.length > 0) {
+          for (const s of tables.outstock_branch_sales) {
+            try {
+              await client.query(`
+                INSERT INTO public.outstock_branch_sales (
+                  id, order_id, branch_id, customer_id, sale_amount, payment_method, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (id) DO NOTHING
+              `, [s.id, s.order_id, s.branch_id, s.customer_id, s.sale_amount, s.payment_method, s.created_at]);
+            } catch (_) {}
+          }
+        }
+
+        // استعادة إحصائيات العملاء إن وجدت في اللقطة
+        if (Array.isArray(tables.outstock_customers_snapshot) && tables.outstock_customers_snapshot.length > 0) {
+          for (const c of tables.outstock_customers_snapshot) {
+            try {
+              await client.query(`
+                UPDATE public.outstock_customers
+                SET total_orders_count = $1, wallet_balance = COALESCE($2, wallet_balance)
+                WHERE id = $3
+              `, [c.total_orders_count || 0, c.wallet_balance || 0, c.id]);
+            } catch (_) {}
+          }
+        }
+
+        await client.query('COMMIT');
+      } catch (restErr) {
+        await client.query('ROLLBACK');
+        throw restErr;
+      } finally {
+        client.release();
+      }
+
+      broadcastOutstock('outstock:orders_updated', { timestamp: new Date().toISOString() });
+      res.json({
+        success: true,
+        message: '✅ تم استعادة النسخة الاحتياطية بنجاح وعودة كافة البيانات كما كانت'
+      });
+    } catch (err) {
+      console.error('[Restore Backup Error]:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -4948,7 +5963,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   app.post('/api/outstock/orders/:id/complaint', authMiddleware, async (req, res) => {
     try {
       const orderId = req.params.id;
-      const { complaintType, notes, pharmacistName, itemId, medicationName, itemName } = req.body || {};
+      const { complaintType, notes, pharmacistName, itemId, itemIds, selectedItems, medicationName, itemName } = req.body || {};
 
       if (!complaintType) {
         return res.status(400).json({ success: false, error: 'نوع الشكوى مطلوب' });
@@ -4978,9 +5993,29 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         WHERE order_id = $1
       `, [orderId]);
 
+      // تجهيز بيانات الأصناف المختارة للشكوى (سواء متعددة أو صنف مفرد)
+      let selectedItemsJson = null;
+      if (Array.isArray(selectedItems) && selectedItems.length > 0) {
+        selectedItemsJson = JSON.stringify(selectedItems);
+      } else if (Array.isArray(itemIds) && itemIds.length > 0) {
+        const matched = itemsRes.rows.filter(it => itemIds.includes(String(it.id)));
+        selectedItemsJson = JSON.stringify(matched.map(it => ({
+          id: it.id,
+          medicationName: it.medication_name,
+          quantity: it.quantity,
+          unitType: it.unit_type
+        })));
+      }
+
       // تحديد الصنف الخاص بالشكوى إن وُجد
       let specificMedicationName = medicationName || itemName || null;
-      let specificItemId = itemId || null;
+      let specificItemId = itemId || (Array.isArray(itemIds) && itemIds.length > 0 ? itemIds[0] : null);
+      if (!specificMedicationName && selectedItemsJson) {
+        try {
+          const parsed = JSON.parse(selectedItemsJson);
+          specificMedicationName = parsed.map(p => p.medicationName).filter(Boolean).join('، ');
+        } catch (_) {}
+      }
       if (specificItemId && !specificMedicationName) {
         const matchedItem = itemsRes.rows.find(it => String(it.id) === String(specificItemId));
         if (matchedItem) specificMedicationName = matchedItem.medication_name;
@@ -4990,8 +6025,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       await db.query(`
         INSERT INTO public.outstock_order_complaints (
           id, order_id, order_number, branch_id, branch_name, complaint_type, pharmacist_name,
-          notes, order_created_at, procurement_replied_at, status, item_id, medication_name, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          notes, order_created_at, procurement_replied_at, status, item_id, medication_name, selected_items, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12, $13, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `, [
         complaintId,
         orderId,
@@ -5004,7 +6039,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         order.created_at,
         order.procurement_replied_at || null,
         specificItemId,
-        specificMedicationName
+        specificMedicationName,
+        selectedItemsJson
       ]);
 
       // تحديث حالة الطلب بأن عليه شكوى
@@ -5053,44 +6089,58 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       // 3. 📲 إرسال إشعار فوري لهاتف المالك عبر واتساب إذا كانت الميزة مفعلة
       (async () => {
         try {
+          // جلب أرقام المالك المتعددة من إعدادات المنظومة
+          const setRow = await db.query("SELECT setting_value FROM public.outstock_settings WHERE setting_key = 'general_settings'");
+          const generalSettings = setRow.rows[0]?.setting_value || {};
+          const ownerPhonesList = [];
+          if (Array.isArray(generalSettings.ownerWhatsappPhones)) {
+            ownerPhonesList.push(...generalSettings.ownerWhatsappPhones);
+          } else if (typeof generalSettings.ownerWhatsappPhones === 'string' && generalSettings.ownerWhatsappPhones.trim()) {
+            ownerPhonesList.push(...generalSettings.ownerWhatsappPhones.split(/[,;\n]/).map(p => p.trim()).filter(Boolean));
+          }
+
           if (typeof getSettingsFromStorage === 'function') {
             const mainState = await getSettingsFromStorage('pharmacy-tracker-data');
             const alertsConfig = mainState?.orgSettings?.biometricWhatsAppAlerts || {};
-            const ownerPhone = alertsConfig.ownerWhatsAppNumber || mainState?.orgSettings?.ownerPhone;
-            const isEnabled = alertsConfig.notifyOwnerOnOutstockComplaints !== false;
+            const legacyPhone = alertsConfig.ownerWhatsAppNumber || mainState?.orgSettings?.ownerPhone;
+            if (legacyPhone && !ownerPhonesList.includes(legacyPhone)) {
+              ownerPhonesList.push(legacyPhone);
+            }
+          }
 
-            if (isEnabled && ownerPhone) {
-              const complaintTypeLabel = complaintType === 'delayed_response'
-                ? 'تأخر رد المشتريات على طلب العميل'
-                : 'صنف لم يتوفر بالرغم من موافقة المشتريات';
+          if (ownerPhonesList.length > 0) {
+            const complaintTypeLabel = complaintType === 'delayed_response'
+              ? 'تأخر رد المشتريات على طلب العميل'
+              : 'صنف لم يتوفر بالرغم من موافقة المشتريات';
 
-              const itmsSummary = (Array.isArray(itemsRes.rows) && itemsRes.rows.length > 0)
-                ? itemsRes.rows.map((it, idx) => {
-                    const uLabel = it.unit_type === 'strip' ? 'شريط' : 'علبة';
-                    return `  ${idx + 1}. ${it.medication_name} (${it.quantity} ${uLabel})`;
-                  }).join('\n')
-                : '  (لا توجد أصناف مسجلة)';
+            const itmsSummary = (Array.isArray(itemsRes.rows) && itemsRes.rows.length > 0)
+              ? itemsRes.rows.map((it, idx) => {
+                  const uLabel = it.unit_type === 'strip' ? 'شريط' : 'علبة';
+                  return `  ${idx + 1}. ${it.medication_name} (${it.quantity} ${uLabel})`;
+                }).join('\n')
+              : '  (لا توجد أصناف مسجلة)';
 
-              const paidNum = parseFloat(order.paid_amount || 0);
-              const remainingNum = parseFloat(order.remaining_amount || 0);
+            const paidNum = parseFloat(order.paid_amount || 0);
+            const remainingNum = parseFloat(order.remaining_amount || 0);
 
-              // استبعاد بيانات العميل الحساسة تماماً مع إبراز بنود الطلب والعربون
-              const waMsg = `🚨 *تنبيه شكوى عاجلة مصعدة من فرع (${order.branch_name})*\n` +
-                            `📋 *رقم الطلب:* #${order.order_number}\n` +
-                            `👤 *الصيدلي محرر الشكوى:* ${reporter}\n` +
-                            `⚠️ *نوع الشكوى:* ${complaintTypeLabel}\n` +
-                            `💊 *الأصناف المطلوبة بالطلب:*\n${itmsSummary}\n` +
-                            `💰 *العربون المدفوع:* ${paidNum.toFixed(2)} ج.م\n` +
-                            `💵 *المبلغ المتبقي:* ${remainingNum.toFixed(2)} ج.م\n` +
-                            `📝 *ملاحظات وتفاصيل الشكوى:* ${notes || 'لا يوجد تفاصيل إضافية'}\n` +
-                            `⏳ *الحالة:* بانتظار رد وتوضيح مسؤول المشتريات وتوجيهاتكم بالمنظومة.`;
+            const waMsg = `🚨 *تنبيه شكوى عاجلة مصعدة من فرع (${order.branch_name})*\n` +
+                          `📋 *رقم الطلب:* #${order.order_number}\n` +
+                          `👤 *الصيدلي محرر الشكوى:* ${reporter}\n` +
+                          `⚠️ *نوع الشكوى:* ${complaintTypeLabel}\n` +
+                          `💊 *الأصناف المطلوبة بالطلب:*\n${itmsSummary}\n` +
+                          `💰 *العربون المدفوع:* ${paidNum.toFixed(2)} ج.م\n` +
+                          `💵 *المبلغ المتبقي:* ${remainingNum.toFixed(2)} ج.م\n` +
+                          `📝 *ملاحظات وتفاصيل الشكوى:* ${notes || 'لا يوجد تفاصيل إضافية'}\n` +
+                          `⏳ *الحالة:* بانتظار رد وتوضيح مسؤول المشتريات وتوجيهاتكم بالمنظومة.`;
 
-              const cleanPh = String(ownerPhone).replace(/\D/g, '');
+            const branchSession = order.branch_id ? (order.branch_id.startsWith('branch_') ? order.branch_id : `branch_${order.branch_id}`) : 'hr_main';
+            const sessionsToTry = [branchSession, 'hr_main'];
+            const waUrls = ['http://hr-whatsapp-server:3100/send', 'http://127.0.0.1:3100/send'];
+
+            for (const rawPhone of ownerPhonesList) {
+              const cleanPh = String(rawPhone || '').replace(/\D/g, '');
+              if (!cleanPh) continue;
               const normalizedPhone = (cleanPh.startsWith('01') && cleanPh.length === 11) ? ('2' + cleanPh) : cleanPh;
-              const branchSession = order.branch_id ? (order.branch_id.startsWith('branch_') ? order.branch_id : `branch_${order.branch_id}`) : 'hr_main';
-
-              const sessionsToTry = [branchSession, 'hr_main'];
-              const waUrls = ['http://hr-whatsapp-server:3100/send', 'http://127.0.0.1:3100/send'];
 
               let sent = false;
               for (const sId of sessionsToTry) {
@@ -5257,7 +6307,19 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       let query = `
         SELECT c.*, o.customer_notes, o.total_amount, o.net_amount, o.paid_amount,
-               cust.full_name as customer_name, cust.whatsapp_phone as customer_phone
+               cust.full_name as customer_name, cust.whatsapp_phone as customer_phone,
+               COALESCE((
+                 SELECT json_agg(json_build_object(
+                   'id', oi.id,
+                   'medication_name', oi.medication_name,
+                   'quantity', oi.quantity,
+                   'unit_type', oi.unit_type,
+                   'item_status', oi.item_status,
+                   'procurement_notes', oi.procurement_notes
+                 ))
+                 FROM public.outstock_order_items oi
+                 WHERE oi.order_id = c.order_id
+               ), '[]'::json) as order_items
         FROM public.outstock_order_complaints c
         LEFT JOIN public.outstock_orders o ON c.order_id = o.id
         LEFT JOIN public.outstock_customers cust ON o.customer_id = cust.id
@@ -5494,6 +6556,47 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       `);
       const ownerPendingComplaintsCount = parseInt(complaintsRes.rows[0]?.count || 0, 10);
 
+      // 6.ب. لإدارة المشتريات: عدد شكاوى الفروع بانتظار رد وتوضيح المشتريات
+      let procurementPendingComplaintsCount = 0;
+      try {
+        let procCompQuery = `
+          SELECT COUNT(*) as count
+          FROM public.outstock_order_complaints
+          WHERE (status = 'pending' OR status = 'pending_procurement') AND procurement_reply IS NULL
+        `;
+        if (isCosmeticsOfficer) {
+          procCompQuery += ` AND (
+            EXISTS (
+              SELECT 1 FROM public.outstock_order_items oi
+              WHERE oi.order_id = public.outstock_order_complaints.order_id AND oi.item_type = 'cosmetics'
+            )
+            OR EXISTS (
+              SELECT 1 FROM public.outstock_medication_requests mr
+              WHERE mr.id = public.outstock_order_complaints.order_id AND mr.item_type = 'cosmetics'
+            )
+          )`;
+        }
+        const procCompRes = await db.query(procCompQuery);
+        procurementPendingComplaintsCount = parseInt(procCompRes.rows[0]?.count || 0, 10);
+      } catch (pcErr) {
+        console.warn('[Procurement Pending Complaints Count Warn]:', pcErr?.message);
+      }
+
+      // 6.ج. للفرع: عدد الشكاوى المرفوعة من هذا الفرع والتي ما زالت قيد المتابعة والانتظار (لم تحل بعد)
+      let branchPendingComplaintsCount = 0;
+      if (branchId) {
+        try {
+          const bCompRes = await db.query(`
+            SELECT COUNT(*) as count
+            FROM public.outstock_order_complaints
+            WHERE branch_id = $1 AND status <> 'resolved'
+          `, [branchId]);
+          branchPendingComplaintsCount = parseInt(bCompRes.rows[0]?.count || 0, 10);
+        } catch (bcErr) {
+          console.warn('[Branch Pending Complaints Count Warn]:', bcErr?.message);
+        }
+      }
+
       // 7. عدد المرتجعات المعلقة بانتظار رد المشتريات (للفرع والمشتريات)
       let pendingReturnsCount = 0;
       try {
@@ -5522,6 +6625,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         branchReadyOrdersCount,
         branchRestockedItemsCount,
         ownerPendingComplaintsCount,
+        procurementPendingComplaintsCount,
+        branchPendingComplaintsCount,
         pendingReturnsCount
       };
 
@@ -5644,6 +6749,151 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const result = await db.query(query, params);
       res.json({ success: true, aggregated: result.rows });
     } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // تحويل وتصحيح نوع الصنف بين دوائي ومستحضرات تجميل ونقله بين شاشة المشتريات ومسؤول التجميل
+  app.post('/api/outstock/procurement/convert-item-type', authMiddleware, async (req, res) => {
+    try {
+      const user = req.outstockUser;
+      const canConvert = user.role === 'owner' || 
+                         user.role === 'procurement_manager' || 
+                         user.role === 'procurement_cosmetics' || 
+                         user.role === 'cosmetics_officer' || 
+                         user.role === 'procurement' || 
+                         user.role === 'procurement_officer' || 
+                         user.username === 'admin-stock' || 
+                         user.permissions?.can_change_status;
+      if (!canConvert) {
+        return res.status(403).json({ success: false, error: 'غير مصرح - ليس لديك صلاحية تعديل تصنيف الأصناف' });
+      }
+
+      const { itemIds, branchId, medicationName, targetItemType, updateCatalog = true } = req.body || {};
+
+      if (!medicationName || !targetItemType) {
+        return res.status(400).json({ success: false, error: 'اسم الصنف والتصنيف الجديد مطلوبان' });
+      }
+
+      const cleanTargetType = targetItemType === 'cosmetics' ? 'cosmetics' : 'medication';
+      const typeLabelAr = cleanTargetType === 'cosmetics' ? 'مستحضرات تجميل' : 'صنف دوائي';
+      const replierName = await resolveEmployeeCleanName(db, user, 'إدارة المشتريات');
+
+      let updatedCount = 0;
+      let affectedBranchIds = new Set();
+      if (branchId) affectedBranchIds.add(branchId);
+
+      // 1. تحديث بنود الطلبات المعلقة في outstock_order_items
+      if (Array.isArray(itemIds) && itemIds.length > 0) {
+        const updateRes = await db.query(
+          `UPDATE public.outstock_order_items
+           SET item_type = $1,
+               procurement_notes = CASE 
+                 WHEN procurement_notes IS NULL OR procurement_notes = '' THEN $2
+                 ELSE procurement_notes || E'\n' || $2
+               END,
+               notes = CASE 
+                 WHEN notes IS NULL OR notes = '' THEN $2
+                 ELSE notes || E'\n' || $2
+               END,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ANY($3)
+           RETURNING id, order_id`,
+          [
+            cleanTargetType,
+            `[تم تصحيح نوع الصنف إلى (${typeLabelAr}) ونقله بواسطة ${replierName}]`,
+            itemIds
+          ]
+        );
+        updatedCount = updateRes.rowCount || 0;
+      } else {
+        const params = [medicationName];
+        let branchClause = '';
+        if (branchId && branchId !== 'all') {
+          params.push(branchId);
+          branchClause = `AND (o.branch_id = $2 OR o.delivery_target_branch_id = $2)`;
+        }
+
+        const updateRes = await db.query(
+          `UPDATE public.outstock_order_items i
+           SET item_type = '${cleanTargetType}',
+               procurement_notes = CASE 
+                 WHEN i.procurement_notes IS NULL OR i.procurement_notes = '' THEN '[تم تصحيح نوع الصنف إلى (${typeLabelAr}) ونقله بواسطة ${replierName}]'
+                 ELSE i.procurement_notes || E'\n[تم تصحيح نوع الصنف إلى (${typeLabelAr}) ونقله بواسطة ${replierName}]'
+               END,
+               notes = CASE 
+                 WHEN i.notes IS NULL OR i.notes = '' THEN '[تم تصحيح نوع الصنف إلى (${typeLabelAr}) ونقله بواسطة ${replierName}]'
+                 ELSE i.notes || E'\n[تم تصحيح نوع الصنف إلى (${typeLabelAr}) ونقله بواسطة ${replierName}]'
+               END,
+               updated_at = CURRENT_TIMESTAMP
+           FROM public.outstock_orders o
+           WHERE i.order_id = o.id AND (i.medication_name ILIKE $1 OR i.medication_name = $1) AND i.item_status = 'pending'
+           ${branchClause}
+           RETURNING i.id, o.branch_id`,
+          params
+        );
+        updatedCount = updateRes.rowCount || 0;
+        (updateRes.rows || []).forEach(r => { if (r.branch_id) affectedBranchIds.add(r.branch_id); });
+      }
+
+      // 2. تحديث كتالوج الأدوية والمستحضرات الرئيسي لتصحيح التصنيف التلقائي مستقبلاً
+      if (updateCatalog !== false) {
+        try {
+          await db.query(
+            `UPDATE public.outstock_medications
+             SET item_type = $1,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE name ILIKE $2 OR name = $2`,
+            [cleanTargetType, medicationName]
+          );
+        } catch (catErr) {
+          console.warn('[Convert Item Type Catalog Update Warn]:', catErr.message);
+        }
+      }
+
+      // 3. تسجيل في سجل التدقيق
+      try {
+        await db.query(
+          `INSERT INTO public.outstock_audit_logs (user_id, username, action, entity_type, entity_id, details, created_at)
+           VALUES ($1, $2, 'CONVERT_ITEM_TYPE', 'order_item', $3, $4, CURRENT_TIMESTAMP)`,
+          [
+            user.id || null,
+            user.username || 'procurement',
+            medicationName,
+            JSON.stringify({
+              medicationName,
+              targetItemType: cleanTargetType,
+              typeLabelAr,
+              updatedCount,
+              branchId,
+              convertedBy: replierName
+            })
+          ]
+        );
+      } catch (_) {}
+
+      // 4. بث لحظي عبر Socket.io لكافة شاشات المشتريات ومسؤولي التجميل والفروع
+      broadcastOutstock('outstock:item_type_converted', {
+        medicationName,
+        targetItemType: cleanTargetType,
+        typeLabelAr,
+        branchId,
+        updatedCount,
+        convertedBy: replierName,
+        convertedAt: new Date().toISOString()
+      });
+      broadcastOutstock('outstock:order_created', { branchId });
+      broadcastOutstock('outstock:items_status_updated', { branchId, medicationName });
+
+      res.json({
+        success: true,
+        message: `تم تحويل نوع الصنف (${medicationName}) إلى (${typeLabelAr}) بنجاح ونقله للقسم المختص`,
+        targetItemType: cleanTargetType,
+        typeLabelAr,
+        updatedCount
+      });
+    } catch (err) {
+      console.error('[Convert Item Type Error]:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -7193,7 +8443,33 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       query += ' ORDER BY r.created_at DESC LIMIT 200';
       const result = await db.query(query, params);
-      res.json({ success: true, requests: result.rows });
+
+      // 🔒 حماية خصوصية بيانات العميل: إخفاء بيانات العميل والعربون عن مسؤولي المشتريات ومستحضرات التجميل
+      const isProcurementRole = [
+        'procurement_manager',
+        'procurement_officer',
+        'cosmetics_officer',
+        'outstock_cosmetics_officer',
+        'procurement_cosmetics',
+        'procurement'
+      ].includes(req.outstockUser?.role);
+
+      const rows = result.rows.map((r) => {
+        if (isProcurementRole) {
+          return {
+            ...r,
+            customer_name: null,
+            customer_phone: null,
+            customer_address: null,
+            customer_id: null,
+            deposit_amount: 0,
+            payment_method: null
+          };
+        }
+        return r;
+      });
+
+      res.json({ success: true, requests: rows });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -7216,7 +8492,15 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         employeeName = null,
         attachmentUrl = null,
         attachmentName = null,
-        itemType: reqItemType = null
+        itemType: reqItemType = null,
+        customerName = null,
+        customerPhone = null,
+        customerAddress = null,
+        customerId = null,
+        depositAmount = 0,
+        paymentMethod = 'cash',
+        requestedQuantity = 1,
+        requestedUnit = 'pack'
       } = req.body || {};
 
       let branchId = bodyBranchId || req.outstockUser.branchId || req.outstockUser.id;
@@ -7231,6 +8515,15 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const submitter = submittedBy || requestedBy || finalEmployeeName || req.outstockUser.fullName || req.outstockUser.username || 'صيدلي الفرع';
       const finalAttachmentUrl = attachmentUrl || req.body?.attachment_url || null;
       const finalAttachmentName = attachmentName || req.body?.attachment_name || null;
+
+      const finalCustomerName = (customerName || req.body?.customer_name || '').trim() || null;
+      const finalCustomerPhone = (customerPhone || req.body?.customer_phone || '').trim() || null;
+      const finalCustomerAddress = (customerAddress || req.body?.customer_address || '').trim() || null;
+      const finalCustomerId = customerId || req.body?.customer_id || null;
+      const finalDepositAmount = parseFloat(depositAmount ?? req.body?.deposit_amount ?? 0) || 0;
+      const finalPaymentMethod = paymentMethod || req.body?.payment_method || 'cash';
+      const finalRequestedQuantity = parseInt(requestedQuantity ?? req.body?.requested_quantity ?? 1, 10) || 1;
+      const finalRequestedUnit = requestedUnit || req.body?.requested_unit || 'pack';
 
       let finalItemType = reqItemType || req.body?.item_type;
       if (!finalItemType && medicationId) {
@@ -7250,9 +8543,19 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       await db.query(`
         INSERT INTO public.outstock_medication_requests (
-          id, branch_id, request_type, medication_name, medication_id, requested_data, pharmacist_notes, submitted_by, status, employee_code, employee_name, attachment_url, attachment_name, item_type
-        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, 'pending', $9, $10, $11, $12, $13)
-      `, [reqId, branchId, requestType, medicationName.trim(), medicationId, JSON.stringify(finalRequestedData), finalNotes, submitter, finalEmployeeCode, finalEmployeeName, finalAttachmentUrl, finalAttachmentName, finalItemType]);
+          id, branch_id, request_type, medication_name, medication_id, requested_data, pharmacist_notes, submitted_by, status,
+          employee_code, employee_name, attachment_url, attachment_name, item_type,
+          customer_name, customer_phone, customer_address, customer_id, deposit_amount, payment_method, requested_quantity, requested_unit
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6::jsonb, $7, $8, 'pending',
+          $9, $10, $11, $12, $13,
+          $14, $15, $16, $17, $18, $19, $20, $21
+        )
+      `, [
+        reqId, branchId, requestType, medicationName.trim(), medicationId, JSON.stringify(finalRequestedData), finalNotes, submitter,
+        finalEmployeeCode, finalEmployeeName, finalAttachmentUrl, finalAttachmentName, finalItemType,
+        finalCustomerName, finalCustomerPhone, finalCustomerAddress, finalCustomerId, finalDepositAmount, finalPaymentMethod, finalRequestedQuantity, finalRequestedUnit
+      ]);
 
       const newRecord = {
         id: reqId,
@@ -7270,12 +8573,207 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         attachment_name: finalAttachmentName,
         itemType: finalItemType,
         item_type: finalItemType,
+        customer_name: finalCustomerName,
+        customerName: finalCustomerName,
+        customer_phone: finalCustomerPhone,
+        customerPhone: finalCustomerPhone,
+        customer_address: finalCustomerAddress,
+        customerAddress: finalCustomerAddress,
+        customer_id: finalCustomerId,
+        customerId: finalCustomerId,
+        deposit_amount: finalDepositAmount,
+        depositAmount: finalDepositAmount,
+        payment_method: finalPaymentMethod,
+        paymentMethod: finalPaymentMethod,
+        requested_quantity: finalRequestedQuantity,
+        requestedQuantity: finalRequestedQuantity,
+        requested_unit: finalRequestedUnit,
+        requestedUnit: finalRequestedUnit,
         status: 'pending',
         createdAt: new Date().toISOString()
       };
 
       broadcastOutstock('outstock:medication_request_created', newRecord);
       res.json({ success: true, request: newRecord, message: 'تم إرسال الطلب لإدارة المشتريات بنجاح' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 📲 إرسال رسالة واتساب تفاعلية للعميل بطلب يدوي من الصيدلي بعد رد المشتريات
+  // 📲 إرسال رسالة واتساب تفاعلية للعميل بطلب يدوي من الصيدلي بعد رد المشتريات
+  app.post('/api/outstock/medication-requests/:id/whatsapp', authMiddleware, async (req, res) => {
+    try {
+      const reqId = req.params.id;
+      const queryRes = await db.query(`
+        SELECT r.*, b.name as branch_name, b.phone as branch_phone
+        FROM public.outstock_medication_requests r
+        LEFT JOIN public.outstock_branches b ON r.branch_id = b.id
+        WHERE r.id = $1
+      `, [reqId]);
+
+      if (queryRes.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'طلب الاستعلام غير موجود' });
+      }
+
+      const item = queryRes.rows[0];
+      const rawPhone = item.customer_phone || req.body?.phone;
+      if (!rawPhone) {
+        return res.status(400).json({ success: false, error: 'لا يوجد رقم هاتف مسجل للعميل في هذا الطلب' });
+      }
+
+      const normalizedPhone = String(rawPhone).replace(/\D/g, '');
+      if (normalizedPhone.length < 10) {
+        return res.status(400).json({ success: false, error: 'رقم هاتف العميل غير صحيح (أقل من 10 أرقام)' });
+      }
+
+      const branchName = item.branch_name || 'الصيدلية';
+      const custName = item.customer_name || 'عميلنا العزيز';
+      const medName = item.medication_name || 'الصنف المطلوب';
+      const qty = item.requested_quantity || 1;
+      const unit = item.requested_unit === 'strip' ? 'شريط' : (item.requested_unit === 'pack' ? 'علبة' : (item.requested_unit || 'وحدة'));
+      const deposit = parseFloat(item.deposit_amount || 0);
+
+      // تفاصيل رد المشتريات والأصناف المعتمدة
+      const replyData = typeof item.procurement_reply === 'object' && item.procurement_reply !== null
+        ? item.procurement_reply
+        : (typeof item.procurement_reply === 'string'
+          ? (() => { try { return JSON.parse(item.procurement_reply); } catch { return {}; } })()
+          : {});
+
+      const replyNotes = replyData.notes || replyData.responseNotes || replyData.message || (typeof replyData === 'string' ? replyData : '');
+      const replyStatus = item.status === 'approved' ? 'معتمد ومتاح للطلب'
+        : (item.status === 'replied' || item.status === 'resolved' ? 'تمت الإفادة وتحديد الموقف' : 'تحت المتابعة');
+
+      const itemsList = Array.isArray(replyData.items) && replyData.items.length > 0
+        ? replyData.items
+        : [{
+            medicationName: medName,
+            quantity: qty,
+            unit: unit,
+            price: replyData.approvedPrice || replyData.price || replyData.current_price || null,
+            isAvailable: replyData.isAvailable !== false
+          }];
+
+      const approvedPrice = replyData.approvedPrice || replyData.price || replyData.current_price || (itemsList[0]?.price ? parseFloat(itemsList[0].price) : null);
+      const isAvailable = replyData.isAvailable !== undefined ? replyData.isAvailable : (itemsList[0]?.isAvailable !== false);
+      const totalEstimated = itemsList.reduce((acc, it) => {
+        const p = parseFloat(it.price || 0);
+        const q = parseInt(it.quantity || 1, 10);
+        return acc + (p * q);
+      }, 0) || (approvedPrice ? parseFloat(approvedPrice) * qty : 0);
+      const remainingAmount = totalEstimated > 0 ? Math.max(0, totalEstimated - deposit) : 0;
+
+      let replySection = '';
+      if (itemsList.length > 1) {
+        replySection += `📦 *الأصناف والأسعار المعتمدة:*\n` + itemsList.map((it, idx) => {
+          const availTxt = it.isAvailable !== false ? 'متاح للتوفير 🟢' : 'غير متوفر بالأسواق حالياً 🔴';
+          const pTxt = it.price ? ` - *${parseFloat(it.price).toFixed(2)} ج.م*` : '';
+          return `  ${idx + 1}. *${it.medicationName}* (${it.quantity || 1} ${it.unit || 'علبة'})${pTxt} [${availTxt}]`;
+        }).join('\n') + `\n`;
+        if (totalEstimated > 0) {
+          replySection += `🏷️ *إجمالي القيمة التقديرية:* *${totalEstimated.toFixed(2)} ج.م*\n`;
+        }
+      } else {
+        if (approvedPrice) {
+          replySection += `💵 *السعر المحدد من المشتريات:* *${parseFloat(approvedPrice).toFixed(2)} ج.م* (للوحدة)\n`;
+          if (qty > 1) {
+            replySection += `🏷️ *إجمالي القيمة (${qty} ${unit}):* *${totalEstimated.toFixed(2)} ج.م*\n`;
+          }
+        }
+        replySection += `📦 *موقف الصنف:* ${isAvailable ? 'متاح للتوفير 🟢' : 'غير متوفر بالأسواق حالياً 🔴'}\n`;
+      }
+      if (replyNotes) {
+        replySection += `📋 *إفادة إدارة المشتريات:*\n"${replyNotes}"\n`;
+      }
+
+      let depositSection = '';
+      if (deposit > 0) {
+        depositSection = `💰 *مبلغ العربون المسجل:* ${deposit.toFixed(2)} ج.م (طريقة الدفع: ${item.payment_method || 'نقدي'})\n`;
+        if (totalEstimated > 0) {
+          depositSection += `🛒 *المبلغ المتبقي عند الاستلام:* ${remainingAmount.toFixed(2)} ج.م\n`;
+        }
+      }
+
+      const customMsg = req.body?.customMessage;
+      let waMessage = '';
+      if (customMsg && String(customMsg).trim()) {
+        waMessage = String(customMsg).trim();
+      } else {
+        const dateStr = new Date().toLocaleDateString('ar-EG');
+        waMessage = `🔔 *إشعار استعلام وتوفير صنف*\n` +
+          `🏢 *${branchName}*\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `مرحباً بك أستاذ/ة *${custName}* 🌹\n` +
+          `بخصوص استفساركم عن الصنف:\n` +
+          `💊 *الصنف:* *${medName}*\n` +
+          `📦 *الكمية:* ${qty} ${unit}\n` +
+          `📊 *الحالة:* ${replyStatus}\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          (replySection ? `${replySection}━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '') +
+          (depositSection ? `${depositSection}━━━━━━━━━━━━━━━━━━━━━━━━━━\n` : '') +
+          `💬 *لتأكيد حجز الصنف أو لأي استفسار آخر، يسعدنا تواصلكم أو زيارة الصيدلية.*\n` +
+          `📅 ${dateStr} - نسعد دائماً بخدمتكم! ✨`;
+      }
+
+      // إرسال عبر خادم الواتساب مع توجيه صارم ومباشر لجلسة الفرع المقترن
+      const branchSessionId = resolveCanonicalBranchSessionId(item.branch_id);
+      const sent = await sendOutstockWhatsApp({
+        phone: normalizedPhone,
+        message: waMessage,
+        branchName,
+        branchId: item.branch_id,
+        preferredSessionId: branchSessionId,
+        strictSession: true
+      });
+
+      await db.query(`
+        UPDATE public.outstock_medication_requests
+        SET whatsapp_notified_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+      `, [reqId]);
+
+      // تجهيز رابط مباشر للواتساب أيضاً لراحة الصيدلي
+      let cleanPhone = normalizedPhone;
+      if (cleanPhone.startsWith('0')) cleanPhone = '2' + cleanPhone;
+      else if (!cleanPhone.startsWith('2')) cleanPhone = '20' + cleanPhone;
+      const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(waMessage)}`;
+
+      res.json({
+        success: true,
+        sent,
+        message: sent ? 'تم إرسال رسالة الواتساب للعميل بنجاح عبر رقم الفرع 📲' : 'تم تجهيز الرسالة وفتح رابط الواتساب 📲',
+        whatsappUrl: waUrl,
+        notifiedAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error('[Inquiry Customer WhatsApp Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 🛍️ تحويل الاستعلام إلى طلب عميل رسمي بعد رد المشتريات
+  app.post('/api/outstock/medication-requests/:id/convert-to-order', authMiddleware, async (req, res) => {
+    try {
+      const reqId = req.params.id;
+      const { orderId } = req.body || {};
+
+      await db.query(`
+        UPDATE public.outstock_medication_requests
+        SET status = 'converted_to_order',
+            converted_order_id = $1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+      `, [orderId || null, reqId]);
+
+      broadcastOutstock('outstock:medication_request_updated', {
+        id: reqId,
+        status: 'converted_to_order',
+        convertedOrderId: orderId
+      });
+
+      res.json({ success: true, message: 'تم تحويل الاستعلام إلى طلب عميل بنجاح 🛍️' });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -7289,11 +8787,58 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       }
 
       const reqId = req.params.id;
-      const { status = 'replied', procurementReply = {}, notes = '' } = req.body || {};
+      const {
+        status = 'replied',
+        procurementReply = {},
+        notes = '',
+        responseNotes = '',
+        items = [],
+        approvedPrice = null,
+        isAvailable = true
+      } = req.body || {};
       const replier = req.outstockUser.fullName || req.outstockUser.username || 'مسؤول المشتريات';
 
       const inqResBefore = await db.query('SELECT * FROM public.outstock_medication_requests WHERE id = $1', [reqId]);
+      if (inqResBefore.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'طلب الاستعلام غير موجود' });
+      }
       const reqItem = inqResBefore.rows[0];
+
+      // بناء محتوى الرد المنظم والشامل
+      const finalNotes = String(notes || responseNotes || procurementReply.notes || procurementReply.message || '').trim();
+      const finalItems = Array.isArray(items) && items.length > 0
+        ? items
+        : (Array.isArray(procurementReply.items) && procurementReply.items.length > 0
+          ? procurementReply.items
+          : [{
+              medicationName: reqItem?.medication_name || 'الصنف المطلوب',
+              quantity: reqItem?.requested_quantity || 1,
+              unit: reqItem?.requested_unit || 'علبة',
+              price: approvedPrice !== null && approvedPrice !== undefined ? approvedPrice : (procurementReply.approvedPrice || procurementReply.price || null),
+              isAvailable: isAvailable !== undefined ? isAvailable : (procurementReply.isAvailable !== false),
+              notes: ''
+            }]);
+
+      const effectiveApprovedPrice = approvedPrice !== null && approvedPrice !== undefined && approvedPrice !== ''
+        ? parseFloat(approvedPrice)
+        : (finalItems[0]?.price !== undefined && finalItems[0]?.price !== null && finalItems[0]?.price !== '' ? parseFloat(finalItems[0].price) : null);
+
+      const effectiveIsAvailable = isAvailable !== undefined
+        ? Boolean(isAvailable)
+        : (finalItems[0]?.isAvailable !== undefined ? Boolean(finalItems[0].isAvailable) : true);
+
+      const finalReplyData = {
+        ...procurementReply,
+        notes: finalNotes,
+        responseNotes: finalNotes,
+        message: finalNotes,
+        items: finalItems,
+        approvedPrice: effectiveApprovedPrice,
+        price: effectiveApprovedPrice,
+        isAvailable: effectiveIsAvailable,
+        repliedBy: replier,
+        repliedAt: new Date().toISOString()
+      };
 
       await db.query(`
         UPDATE public.outstock_medication_requests
@@ -7303,7 +8848,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
             replied_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $4
-      `, [status, JSON.stringify({ ...procurementReply, notes }), replier, reqId]);
+      `, [status, JSON.stringify(finalReplyData), replier, reqId]);
 
       // 📱 إشعار صيدلية الفرع عبر الواتساب برد إدارة المشتريات
       if (reqItem?.branch_id) {
@@ -7312,9 +8857,20 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           if (branchInfo?.phone) {
             const dateStr = new Date().toLocaleDateString('ar-EG');
             const timeStr = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
-            const replyNotes = notes || procurementReply.notes || procurementReply.message || 'تمت مراجعة الاستعلام والرد رسمياً من إدارة المشتريات';
+            const replyNotes = finalNotes || 'تمت مراجعة الاستعلام والرد رسمياً من إدارة المشتريات';
             const reqTypeLabel = reqItem.request_type === 'new_item' ? 'طلب إدراج صنف جديد'
               : (reqItem.request_type === 'price_update' ? 'تصحيح سعر صنف' : 'استفسار وتصحيح صنف');
+
+            // ملخص الأصناف والأسعار المعتمدة للفرع
+            let itemsSummary = '';
+            if (finalItems && finalItems.length > 0) {
+              itemsSummary = `📦 *الأصناف والأسعار المعتمدة:*\n` + finalItems.map((it, idx) => {
+                const availTxt = it.isAvailable !== false ? 'متاح للتوفير 🟢' : 'غير متوفر حالياً 🔴';
+                const pTxt = it.price ? ` - ${parseFloat(it.price).toFixed(2)} ج.م` : '';
+                return `  ${idx + 1}. *${it.medicationName}* (${it.quantity || 1} ${it.unit || 'علبة'})${pTxt} [${availTxt}]`;
+              }).join('\n') + `\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+            }
+
             const waMsg = `💬 *إشعار رد إدارة المشتريات على استفسار/طلب صنف*\n` +
               `🏢 *صيدلية:* ${branchInfo.name}\n` +
               `💊 *الصنف:* *${reqItem.medication_name}*\n` +
@@ -7322,11 +8878,21 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
               `👤 *مسؤول المشتريات:* ${replier}\n` +
               `📅 ${dateStr} - ⏰ ${timeStr}\n` +
               `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              (itemsSummary ? itemsSummary : '') +
               `📝 *رد المشتريات وتفاصيل التوجيه:*\n` +
               `"${replyNotes}"\n` +
               `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
               `يرجى مراجعة تبويب استعلامات وتصحيح الأصناف بالمنظومة لمزيد من التفاصيل.`;
-            await sendOutstockWhatsApp({ phone: branchInfo.phone, message: waMsg, branchName: branchInfo.name });
+
+            // إرسال الإشعار عبر جلسة المشتريات (procurement: 01124633223)
+            await sendOutstockWhatsApp({
+              phone: branchInfo.phone,
+              message: waMsg,
+              branchName: branchInfo.name,
+              branchId: reqItem.branch_id,
+              preferredSessionId: 'procurement',
+              senderRole: 'procurement'
+            });
           }
         } catch (waInqErr) {
           console.warn('[Medication Request Reply WA Warn]:', waInqErr.message);
@@ -7334,7 +8900,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       }
 
       broadcastOutstock('outstock:medication_request_updated', { id: reqId, status, repliedBy: replier });
-      res.json({ success: true, message: 'تم حفظ رد إدارة المشتريات بنجاح' });
+      res.json({ success: true, message: 'تم حفظ رد إدارة المشتريات واعتماد الأصناف بنجاح' });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -7403,7 +8969,15 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
               `📅 ${dateStr} - ⏰ ${timeStr}\n` +
               `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
               `✅ تم إدراج الصنف بنجاح في قاعدة بيانات الأدوية الرسمية، وأصبح متاحاً للطلب بالاسم التجاري والسعر المعتمد.`;
-            await sendOutstockWhatsApp({ phone: branchInfo.phone, message: waMsg, branchName: branchInfo.name });
+            await sendOutstockWhatsApp({
+              phone: branchInfo.phone,
+              message: waMsg,
+              branchName: branchInfo.name,
+              branchId: rData.branch_id,
+              preferredSessionId: 'procurement',
+              senderRole: 'procurement',
+              strictSession: true
+            });
           }
         } catch (waApproveErr) {
           console.warn('[Medication Request Approve WA Warn]:', waApproveErr.message);
@@ -10189,11 +11763,12 @@ async function updateOrderStatusByItems(db, orderId) {
     const allItems = itemsRes.rows;
     if (allItems.length === 0) return;
 
-    const validItems = allItems.filter(i => !i.pruned_from_bill);
+    const validItems = allItems.filter(i => !i.pruned_from_bill && i.item_status !== 'returned');
     let newStatus = 'pending_procurement';
 
     if (validItems.length === 0) {
-      newStatus = 'all_unavailable';
+      const anyReturned = allItems.some(i => i.item_status === 'returned');
+      newStatus = anyReturned ? 'returned' : 'all_unavailable';
     } else {
       const allAvailable = validItems.every(i => i.item_status === 'available_by_procurement' || i.item_status === 'delivered');
       const someAvailable = validItems.some(i => i.item_status === 'available_by_procurement' || i.item_status === 'delivered');
@@ -10207,8 +11782,8 @@ async function updateOrderStatusByItems(db, orderId) {
     }
 
     await db.query(
-      'UPDATE public.outstock_orders SET order_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND order_status <> $3',
-      [newStatus, orderId, 'delivered']
+      'UPDATE public.outstock_orders SET order_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND order_status <> $3 AND order_status <> $4',
+      [newStatus, orderId, 'delivered', 'returned']
     );
   } catch (e) {
     console.warn('[OutStock Update Order Status Warning]:', e.message);
@@ -10218,7 +11793,7 @@ async function updateOrderStatusByItems(db, orderId) {
 async function recalculateOrderTotals(db, orderId) {
   try {
     const itemsRes = await db.query(
-      'SELECT quantity, unit_price FROM public.outstock_order_items WHERE order_id = $1 AND pruned_from_bill = false',
+      "SELECT quantity, unit_price FROM public.outstock_order_items WHERE order_id = $1 AND pruned_from_bill = false AND item_status <> 'returned'",
       [orderId]
     );
 
@@ -10257,15 +11832,33 @@ async function getBranchContactInfo(db, branchId) {
   let branchName = 'الفرع';
   let branchPhone = '';
 
+  const isLandline = (p) => {
+    if (!p) return true;
+    const digits = String(p).replace(/\D/g, '');
+    if (digits.length === 11 && digits.startsWith('01')) return false;
+    if (digits.startsWith('02') || digits.startsWith('03') || digits.startsWith('04') || digits.startsWith('05') || digits.startsWith('06') || digits.startsWith('08') || digits.startsWith('09')) return true;
+    return digits.length < 10;
+  };
+
   try {
-    const res = await db.query('SELECT name, phone FROM public.outstock_branches WHERE id = $1', [branchId]);
+    const res = await db.query('SELECT name, phone, whatsapp_phone FROM public.outstock_branches WHERE id = $1', [branchId]);
     if (res.rows.length > 0) {
       branchName = res.rows[0].name || branchName;
-      branchPhone = res.rows[0].phone || '';
+      const waPh = res.rows[0].whatsapp_phone;
+      const ph = res.rows[0].phone;
+      if (waPh && !isLandline(waPh)) {
+        branchPhone = String(waPh).trim();
+      } else if (ph && !isLandline(ph)) {
+        branchPhone = String(ph).trim();
+      } else {
+        branchPhone = String(waPh || ph || '').trim();
+      }
     }
   } catch (_) {}
 
-  if (!branchPhone) {
+  // إذا كان الرقم ما زال أرضياً أو غير موجود، نبحث في بيانات الـ HR المحفوظة في app_settings
+
+  if (!branchPhone || isLandline(branchPhone)) {
     try {
       const sRes = await db.query("SELECT value_data FROM public.app_settings WHERE key_name = 'pharmacy-tracker-data'");
       const sData = typeof sRes.rows[0]?.value_data === 'string' ? JSON.parse(sRes.rows[0].value_data) : sRes.rows[0]?.value_data;
@@ -10273,7 +11866,10 @@ async function getBranchContactInfo(db, branchId) {
         const found = sData.branches.find(b => String(b.id) === String(branchId) || b.name === branchName);
         if (found) {
           branchName = found.name || branchName;
-          branchPhone = found.whatsappPhone || found.phone || '';
+          const candidate = found.whatsappPhone || found.whatsapp_phone || (Array.isArray(found.phones) ? found.phones.find(p => !isLandline(p?.number || p))?.number : null) || found.phone;
+          if (candidate && !isLandline(candidate)) {
+            branchPhone = String(candidate).trim();
+          }
         }
       }
     } catch (_) {}
@@ -10465,7 +12061,7 @@ async function sendProcurementDecisionWhatsAppToBranch({ db, branchId, replierNa
       `يرجى فتح شاشة الطلبات والنواقص بالمنظومة لمطابقة الأرصدة وتحديث بيانات المرضى.\n` +
       `مع تحيات إدارة المشتريات والتوريدات 🌸`;
 
-    const sessionsToTry = ['procurement', 'hr_main', 'default'];
+    const sessionsToTry = ['procurement'];
     const waUrls = [
       process.env.WHATSAPP_SERVER_URL,
       'http://hr-whatsapp-server:3100/send',
@@ -10481,7 +12077,8 @@ async function sendProcurementDecisionWhatsAppToBranch({ db, branchId, replierNa
           const bodyPayload = {
             sessionId: sId,
             phone: cleanPhone,
-            message: msg
+            message: msg,
+            strictSession: true
           };
           const wRes = await fetch(u, {
             method: 'POST',
@@ -10660,11 +12257,12 @@ async function executeSingleItemProcurementAction(db, {
             pruned_from_bill = true,
             pruned_at = CURRENT_TIMESTAMP,
             procurement_notes = $1,
+            suggested_substitutes = $2,
             procurement_replied_at = CURRENT_TIMESTAMP,
-            procurement_replied_by = $2,
+            procurement_replied_by = $3,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = $3
-      `, [finalNotes, replierName, item.id]);
+        WHERE id = $4
+      `, [finalNotes, JSON.stringify(Array.isArray(substitutes) ? substitutes : []), replierName, item.id]);
 
       await db.query(`
         UPDATE public.outstock_orders

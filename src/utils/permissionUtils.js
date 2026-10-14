@@ -258,3 +258,43 @@ export function isUserEligibleForSwitcher(user, orgSettings = {}, currentRole = 
 
   return enabledCount > 1 || uAccess.isEnabled === true;
 }
+
+/**
+ * فحص صلاحية تعديل أو استثناء الجزاءات والخصومات اللائحية
+ * - المالك السيادي (Owner) دائماً يمتلك الصلاحية المطلقة.
+ * - مدير الفرع (Branch Manager) محظور نهائياً وبنسبة 100% من تعديل أو استثناء أي جزاء.
+ * - مستخدمو الإدارة العليا (Top Management) يُشترط تفعيل الصلاحية الصريحة لهم: canModifyOrExemptPenalties
+ */
+export function canUserModifyOrExemptPenalties(user = null, orgSettings = {}, currentRole = '') {
+  const normRole = String(currentRole || '').trim().toLowerCase();
+  
+  // 1. المالك السيادي يمتلك الصلاحية دائماً
+  if (normRole === 'owner' || user?.isOwner || user?.isPrimaryOwner) {
+    return true;
+  }
+
+  // 2. مدير الفرع محظور قطعياً من أي تعديل أو استثناء للجزاءات
+  if (normRole === 'branch' || user?.role === 'branch' || user?.role === 'branch_manager') {
+    return false;
+  }
+
+  // 3. استخراج الصلاحيات الموحدة للموظف
+  const uAccess = resolveEmployeeUnifiedAccess(user, orgSettings);
+  if (uAccess && uAccess.permissions) {
+    const topMgmt = uAccess.permissions.topManagement;
+    if (topMgmt && topMgmt.enabled) {
+      return Boolean(topMgmt.canModifyOrExemptPenalties);
+    }
+    // إذا لم تكن صلاحية الإدارة العليا مفعلة له
+    return false;
+  }
+
+  // 4. في حالة جلسة أدمن عامة مجردة بدون مستخدم موظف مقيد:
+  // إذا لم يكن هناك موظف محدد أو قيود، وكان الدور admin
+  if (normRole === 'admin' && !user) {
+    return true;
+  }
+
+  return false;
+}
+

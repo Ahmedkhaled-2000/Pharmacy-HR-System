@@ -27,17 +27,77 @@ const THIN_BORDER = { style: 'thin', color: { argb: STYLES.borderGray } };
 const CELL_BORDER = { top: THIN_BORDER, left: THIN_BORDER, bottom: THIN_BORDER, right: THIN_BORDER };
 const DOUBLE_BOTTOM_BORDER = { top: THIN_BORDER, left: THIN_BORDER, bottom: { style: 'double', color: { argb: 'FF0F766E' } }, right: THIN_BORDER };
 
+export const ARABIC_DAYS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+
+/**
+ * دالة هندسية محصنة لتحليل التاريخ والتوقيت واليوم بدون أي تشويه من فروق التوقيت أو المتصفح
+ * (Timezone-Immune Punch DateTime Parser)
+ */
+export function parsePunchDateTime(p) {
+  if (!p) return { dateStr: '', timeStr: '', dayName: '-', epoch: 0 };
+
+  let dateStr = '';
+  let timeStr = '';
+
+  // 1. إذا كان السجل يحتوي على الحقول الصريحة المهيأة مباشرة من السيرفر
+  if (p.punch_date && p.punch_time_str) {
+    dateStr = String(p.punch_date).trim();
+    timeStr = String(p.punch_time_str).trim().slice(0, 8);
+  } else if (p.punch_time_formatted) {
+    const parts = String(p.punch_time_formatted).trim().split(/\s+/);
+    dateStr = parts[0] || '';
+    timeStr = (parts[1] || '').slice(0, 8);
+  } else {
+    // 2. تحليل حقل punch_time أو date/time كنص مجرد دون تحويلات UTC التلقائية
+    const raw = String(p.punch_time || `${p.date || ''} ${p.time || ''}`).trim();
+    const match = raw.match(/(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2})?)/);
+    if (match) {
+      dateStr = match[1];
+      timeStr = match[2].length === 5 ? `${match[2]}:00` : match[2];
+    } else if (p.date) {
+      dateStr = String(p.date).trim();
+      timeStr = p.time ? String(p.time).trim().slice(0, 8) : '00:00:00';
+    }
+  }
+
+  // 3. استخراج اليوم العربي بشكل محايد للمنطقة الزمنية (استخدام ظهر اليوم لتفادي إزاحات منتصف الليل)
+  let dayName = '-';
+  let epoch = 0;
+
+  if (dateStr) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    if (y && m && d) {
+      const noonDate = new Date(y, m - 1, d, 12, 0, 0);
+      dayName = ARABIC_DAYS[noonDate.getDay()] || '-';
+
+      const [hh = 0, mm = 0, ss = 0] = timeStr ? timeStr.split(':').map(Number) : [0, 0, 0];
+      epoch = new Date(y, m - 1, d, hh, mm, ss).getTime();
+    }
+  }
+
+  return { dateStr, timeStr, dayName, epoch };
+}
+
 /**
  * دالة ذكية لتنقية وفلترة البصمات المكررة (Punch Deduplication Algorithm)
  */
 export function deduplicatePunches(punches, windowMinutes = 5) {
   if (!Array.isArray(punches) || punches.length === 0) return [];
 
-  const sorted = [...punches].sort((a, b) => {
-    const timeA = new Date(a.punch_time || `${a.date}T${a.time}`).getTime();
-    const timeB = new Date(b.punch_time || `${b.date}T${b.time}`).getTime();
-    return timeA - timeB;
+  const parsed = punches.map(p => {
+    const dt = parsePunchDateTime(p);
+    const action = p.action_type || p.actionType || (p.raw_punch_state === 1 ? 'check_out' : 'check_in');
+    return {
+      ...p,
+      _cleanedDate: dt.dateStr,
+      _cleanedTime: dt.timeStr,
+      _dayName: dt.dayName,
+      _epoch: dt.epoch,
+      _normalizedAction: action
+    };
   });
+
+  const sorted = [...parsed].sort((a, b) => a._epoch - b._epoch);
 
   const windowMs = windowMinutes * 60 * 1000;
   const filtered = [];
@@ -45,23 +105,16 @@ export function deduplicatePunches(punches, windowMinutes = 5) {
 
   for (const p of sorted) {
     const empId = p.employee_id || p.employeeId || p.device_user_pin || p.pin;
-    const pTimeStr = p.punch_time || `${p.date || ''} ${p.time || ''}`;
-    const pEpoch = new Date(pTimeStr).getTime() || Date.now();
-    const action = p.action_type || p.actionType || (p.raw_punch_state === 1 ? 'check_out' : 'check_in');
+    const action = p._normalizedAction;
 
     const last = lastPunchByEmp.get(empId);
 
-    if (last && (pEpoch - last.epoch) < windowMs && last.action === action) {
+    if (last && (p._epoch - last.epoch) < windowMs && last.action === action) {
       continue;
     }
 
-    lastPunchByEmp.set(empId, { epoch: pEpoch, action });
-    filtered.push({
-      ...p,
-      _cleanedTime: pTimeStr,
-      _epoch: pEpoch,
-      _normalizedAction: action
-    });
+    lastPunchByEmp.set(empId, { epoch: p._epoch, action });
+    filtered.push(p);
   }
 
   return filtered.reverse();
@@ -90,7 +143,8 @@ export async function exportBiometricPunchesExcel({
   devices = [],
   showToast = null,
   enableDeduplication = true,
-  dedupMinutes = 5
+  dedupMinutes = 5,
+  enablePerEmployeeSheets = true
 }) {
   try {
     const ExcelJS = await loadExcelJS(showToast);
@@ -185,10 +239,13 @@ export async function exportBiometricPunchesExcel({
     k2.alignment = { horizontal: 'center', vertical: 'middle' };
     k2.border = CELL_BORDER;
 
+    const anomaliesCount = finalPunches.filter(p => p.is_anomaly).length;
     wsMaster.mergeCells(`E${kpiRow}:G${kpiRow}`);
     const k3 = wsMaster.getCell(`E${kpiRow}`);
-    k3.value = `البصمات المكررة المستبعدة: ${deduplicatedCount} حركة`;
-    k3.font = { name: 'Arial', bold: true, size: 11, color: { argb: 'FF92400E' } };
+    k3.value = anomaliesCount > 0 
+      ? `المستبعد: ${deduplicatedCount} | ⚠️ شذوذ: ${anomaliesCount}`
+      : `البصمات المكررة المستبعدة: ${deduplicatedCount} حركة`;
+    k3.font = { name: 'Arial', bold: true, size: 11, color: { argb: anomaliesCount > 0 ? 'FFB45309' : 'FF92400E' } };
     k3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFBEB' } };
     k3.alignment = { horizontal: 'center', vertical: 'middle' };
     k3.border = CELL_BORDER;
@@ -215,7 +272,7 @@ export async function exportBiometricPunchesExcel({
       { text: 'الفرع التابع له', width: 20 },
       { text: 'نوع الحركة', width: 16 },
       { text: 'وسيلة البصمة', width: 18 },
-      { text: 'سيريال الماكينة / ملاحظات', width: 24 }
+      { text: 'سيريال الماكينة / ملاحظات', width: 26 }
     ];
 
     const masterHeadRow = wsMaster.getRow(mRow);
@@ -239,19 +296,10 @@ export async function exportBiometricPunchesExcel({
       const isAlt = idx % 2 === 1;
       const rowBg = isAlt ? STYLES.altRowBg : 'FFFFFFFF';
 
-      const pTimeRaw = p.punch_time || `${p.date || ''} ${p.time || ''}`;
-      let dateStr = p.date || '';
-      let timeStr = p.time || '';
-      let dayName = '-';
-
-      try {
-        const d = new Date(pTimeRaw);
-        if (!isNaN(d.getTime())) {
-          dateStr = d.toISOString().slice(0, 10);
-          timeStr = d.toTimeString().slice(0, 8);
-          dayName = arabicDays[d.getDay()];
-        }
-      } catch {}
+      const dt = parsePunchDateTime(p);
+      const dateStr = dt.dateStr || p._cleanedDate || p.date || '';
+      const timeStr = dt.timeStr || p._cleanedTime || p.time || '';
+      const dayName = dt.dayName || p._dayName || '-';
 
       const pin = p.device_user_pin || p.pin || p.employee_code || p.employeeCode || '-';
       const empName = p.employee_name || p.employeeName || 'موظف غير معرف';
@@ -262,7 +310,7 @@ export async function exportBiometricPunchesExcel({
 
       let verifyLabel = '👆 بصمة الإصبع';
       const vt = String(p.verify_type || p.verifyType || '').toUpperCase();
-      if (vt === 'FACE' || p.raw_verify_type === 15) {
+      if (vt === 'FACE' || vt === 'FACE_KIOSK' || p.raw_verify_type === 15) {
         verifyLabel = '👤 بصمة الوجه';
       } else if (vt === 'PASSWORD' || vt === 'PASS') {
         verifyLabel = '🔑 كلمة مرور';
@@ -270,7 +318,10 @@ export async function exportBiometricPunchesExcel({
         verifyLabel = '💳 كارت ذكي';
       }
 
-      const notes = p.device_serial || p.deviceSerial || 'MB20 - ADMS';
+      let notes = p.anomaly_reason || p.process_notes || p.device_serial || p.deviceSerial || 'MB20 - ADMS';
+      if (p.is_anomaly && !notes.includes('⚠️')) {
+        notes = `⚠️ ${notes}`;
+      }
 
       const rowValues = [
         idx + 1,
@@ -305,6 +356,9 @@ export async function exportBiometricPunchesExcel({
             size: 10,
             color: { argb: isCheckIn ? STYLES.checkInGreenText : STYLES.checkOutRedText }
           };
+        } else if (cIdx === 9 && p.is_anomaly) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } };
+          cell.font = { name: 'Arial', bold: true, size: 9, color: { argb: 'FFC2410C' } };
         } else {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBg } };
         }
@@ -316,7 +370,7 @@ export async function exportBiometricPunchesExcel({
     // ════════════════════════════════════════════════════════════════════════════
     // أوراق العمل 2..N: صفحة خاصة لكل موظف على حدة بحساب ساعات العمل والإضافي
     // ════════════════════════════════════════════════════════════════════════════
-
+    if (enablePerEmployeeSheets) {
     // تجميع البصمات لكل موظف
     const punchesByEmp = new Map();
     for (const p of finalPunches) {
@@ -405,24 +459,12 @@ export async function exportBiometricPunchesExcel({
       // محرك التزاوج الزمني الذكي للورديات (Intelligent Punch Pairing Engine)
       // يدعم الورديات الليلية العابرة لمنتصف الليل والورديات المنقسمة Split Shifts
       const parsedPunches = (empPunches || []).map(p => {
-        const pTimeRaw = p.punch_time || `${p.date || ''} ${p.time || ''}`.trim();
-        let dateStr = p.date || '';
-        let timeStr = p.time || '';
-        let dayName = '-';
-        let epoch = 0;
-
-        try {
-          const d = new Date(pTimeRaw);
-          if (!isNaN(d.getTime())) {
-            dateStr = d.toISOString().slice(0, 10);
-            timeStr = d.toTimeString().slice(0, 5);
-            dayName = arabicDays[d.getDay()] || '-';
-            epoch = d.getTime();
-          }
-        } catch {}
-
-        if (!dateStr && p.date) dateStr = p.date;
-        if (!timeStr && p.time) timeStr = String(p.time).slice(0, 5);
+        const dt = parsePunchDateTime(p);
+        const dateStr = dt.dateStr || p._cleanedDate || p.date || '';
+        const timeFull = dt.timeStr || p._cleanedTime || p.time || '';
+        const timeStr = timeFull.slice(0, 5);
+        const dayName = dt.dayName || p._dayName || '-';
+        const epoch = dt.epoch || p._epoch || 0;
 
         const action = p._normalizedAction || p.action_type || p.actionType;
         const isCheckIn = action === 'check_in' || action === 'shift_start' || p.raw_punch_state === 0;
@@ -432,7 +474,7 @@ export async function exportBiometricPunchesExcel({
           dateStr,
           timeStr,
           dayName,
-          epoch: epoch || (dateStr && timeStr ? new Date(`${dateStr}T${timeStr}:00`).getTime() : 0),
+          epoch,
           isCheckIn,
           device: p.device_serial || p.deviceSerial || 'MB20'
         };
@@ -683,6 +725,7 @@ export async function exportBiometricPunchesExcel({
         eRow++;
       }
     }
+  }
 
     // 3. كتابة ملف الإكسيل وتنزيله في المتصفح
     const buffer = await wb.xlsx.writeBuffer();

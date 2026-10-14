@@ -254,15 +254,25 @@ export default function SettingsModule({
     } catch {}
     const validOwnerUser = String(state?.orgSettings?.ownerUsername || orgSettings.ownerUsername || savedUser || 'saif').trim().toLowerCase();
     const validOwnerPass = String(state?.orgSettings?.ownerPassword || orgSettings.ownerPassword || savedPass || '181013').trim();
+    const systemOwners = Array.isArray(state?.orgSettings?.systemOwners || orgSettings?.systemOwners)
+      ? (state?.orgSettings?.systemOwners || orgSettings?.systemOwners)
+      : [];
 
     const inputUser = ownerUnlockUser.trim().toLowerCase();
     const inputPass = ownerUnlockPass.trim();
 
-    // التحقق الصارم من يوزر وباسورد المالك المحفوظين أو saif و 181013
-    const isUserValid = inputUser === validOwnerUser || inputUser === 'saif';
-    const isPassValid = inputPass === validOwnerPass || inputPass === '181013';
+    // التحقق الصارم من يوزر وباسورد المالك المحفوظين أو saif و 181013 أو قائمة systemOwners
+    const isPrimaryValid = (inputUser === validOwnerUser || inputUser === 'saif') &&
+      (inputPass === validOwnerPass || inputPass === '181013');
 
-    if (isUserValid && isPassValid) {
+    const matchedMultiOwner = systemOwners.find(o => {
+      if (!o || o.isActive === false) return false;
+      const u = String(o.username || '').trim().toLowerCase();
+      const p = String(o.password || '').trim();
+      return u === inputUser && p === inputPass;
+    });
+
+    if (isPrimaryValid || matchedMultiOwner) {
       // فتح شاشة تحكم المالك مع البقاء التام على جلسة المستخدم الحالية (كالآدمن) دون تحويل الدور
       setIsOwnerUnlocked(true);
       try {
@@ -270,6 +280,7 @@ export default function SettingsModule({
         sessionStorage.setItem('app_owner_authenticated', 'true');
         localStorage.setItem('pharmacy_owner_username', inputUser);
         localStorage.setItem('pharmacy_owner_password', inputPass);
+        localStorage.setItem('app_owner_username_snapshot', inputUser);
         localStorage.setItem('app_owner_password_snapshot', inputPass);
         localStorage.setItem('app_owner_authenticated', 'true');
       } catch {}
@@ -956,7 +967,7 @@ export default function SettingsModule({
   };
 
   // Approval Rules Configuration & Add Modal States
-  const [rules, setRules] = useState(() => (state.approvalRules && state.approvalRules.length > 0 ? state.approvalRules : [
+  const [rules, setRules] = useState(() => (state?.approvalRules && state.approvalRules.length > 0 ? state.approvalRules : [
     { id: 'rule_leave_over_3_days', requestType: 'long_leave', typeLabel: 'طلبات الإجازة أكثر من ثلاث أيام في الشهر (سنوية أو بدون أجر)', reqBranch: false, reqAdmin: true },
     { id: 'rule_leave', requestType: 'leave', typeLabel: 'طلبات الإجازات (سنوية / مرضي / عارضة <= 3 أيام)', reqBranch: true, reqAdmin: true },
     { id: 'rule_overtime', requestType: 'overtime', typeLabel: 'طلبات الساعات الإضافية (Overtime)', reqBranch: true, reqAdmin: true },
@@ -969,6 +980,13 @@ export default function SettingsModule({
     { id: 'rule_biometric_registration', requestType: 'biometric_registration', typeLabel: 'طلبات اعتماد تسجيل بصمة جديدة ذاتياً', reqBranch: false, reqAdmin: true },
     { id: 'rule_biometric_reset', requestType: 'biometric_reset', typeLabel: 'طلبات إعادة تسجيل ومسح البصمة الإلكترونية', reqBranch: false, reqAdmin: true }
   ]));
+
+  // مزامنة حية مستمرة مع قواعد الموافقات بالمنظومة لضمان عدم فقدان أو مسح أي قاعدة
+  useEffect(() => {
+    if (Array.isArray(state?.approvalRules) && state.approvalRules.length > 0) {
+      setRules(state.approvalRules);
+    }
+  }, [state?.approvalRules]);
   const [showAddRuleModal, setShowAddRuleModal] = useState(false);
   const [newRuleType, setNewRuleType] = useState('long_leave');
   const [newRuleLabel, setNewRuleLabel] = useState('طلبات الإجازة أكثر من ثلاث أيام في الشهر (سنوية أو بدون أجر)');
@@ -1091,9 +1109,21 @@ export default function SettingsModule({
 
   const handleToggleRule = async (ruleId, field) => {
     const performToggle = async () => {
+      const nowIso = new Date().toISOString();
       const updatedRules = rules.map((r) => {
         if (r.id === ruleId) {
-          return { ...r, [field]: !r[field] };
+          const newVal = !r[field];
+          const updatedR = { ...r, [field]: newVal, updatedAt: nowIso };
+          if (field === 'reqBranch') {
+            updatedR.requiresBranchManager = newVal;
+          }
+          if (field === 'reqAdmin') {
+            updatedR.requiresSuperAdmin = newVal;
+          }
+          const finalBranch = updatedR.reqBranch !== false && updatedR.requiresBranchManager !== false;
+          const finalAdmin = updatedR.reqAdmin !== false && updatedR.requiresSuperAdmin !== false;
+          updatedR.autoExecuteOnBoth = Boolean(finalBranch && finalAdmin);
+          return updatedR;
         }
         return r;
       });
@@ -1101,10 +1131,10 @@ export default function SettingsModule({
       const updatedState = {
         ...state,
         approvalRules: updatedRules,
-        _approvalRulesUpdatedAt: new Date().toISOString()
+        _approvalRulesUpdatedAt: nowIso
       };
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
+      if (saveState) await saveState(updatedState, { entityType: 'approvalRules', data: updatedRules });
       showToast?.('✅ تم التحديث والتأثير على قواعد التسلسل والموافقات');
     };
 
@@ -1860,12 +1890,18 @@ export default function SettingsModule({
     }
 
     const performAdd = async () => {
+      const nowIso = new Date().toISOString();
       const newRule = {
-        id: String(Date.now()),
+        id: `rule_${newRuleType}_${Date.now()}`,
         requestType: newRuleType,
         typeLabel: newRuleLabel,
-        reqBranch: newRuleReqBranch,
-        reqAdmin: newRuleReqAdmin
+        name: newRuleLabel,
+        reqBranch: Boolean(newRuleReqBranch),
+        reqAdmin: Boolean(newRuleReqAdmin),
+        requiresBranchManager: Boolean(newRuleReqBranch),
+        requiresSuperAdmin: Boolean(newRuleReqAdmin),
+        autoExecuteOnBoth: Boolean(newRuleReqBranch && newRuleReqAdmin),
+        updatedAt: nowIso
       };
       const updated = [...rules, newRule];
       setRules(updated);
@@ -1873,10 +1909,10 @@ export default function SettingsModule({
       const updatedState = {
         ...state,
         approvalRules: updated,
-        _approvalRulesUpdatedAt: new Date().toISOString()
+        _approvalRulesUpdatedAt: nowIso
       };
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
+      if (saveState) await saveState(updatedState, { entityType: 'approvalRules', data: updated });
       showToast?.('✅ تم إضافة قاعدة موافقة جديدة وتطبيقها بنجاح');
     };
 
@@ -1894,15 +1930,16 @@ export default function SettingsModule({
 
   const handleDeleteRule = async (ruleId) => {
     const performDelete = async () => {
+      const nowIso = new Date().toISOString();
       const updated = rules.filter(r => r.id !== ruleId);
       setRules(updated);
       const updatedState = {
         ...state,
         approvalRules: updated,
-        _approvalRulesUpdatedAt: new Date().toISOString()
+        _approvalRulesUpdatedAt: nowIso
       };
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
+      if (saveState) await saveState(updatedState, { entityType: 'approvalRules', data: updated });
       showToast?.('🗑️ تم حذف قاعدة الموافقة بنجاح');
     };
 
@@ -1920,13 +1957,14 @@ export default function SettingsModule({
 
   const handleSaveAllRules = async () => {
     const performSave = async () => {
+      const nowIso = new Date().toISOString();
       const updatedState = {
         ...state,
         approvalRules: rules,
-        _approvalRulesUpdatedAt: new Date().toISOString()
+        _approvalRulesUpdatedAt: nowIso
       };
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
+      if (saveState) await saveState(updatedState, { entityType: 'approvalRules', data: rules });
       showToast?.('💾 تم حفظ وتحسين وتطبيق كافة قواعد الموافقة المزدوجة بنجاح');
     };
 

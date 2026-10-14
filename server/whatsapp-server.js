@@ -126,8 +126,10 @@ if (!fs.existsSync(AUTH_BASE_DIR)) {
 // تطهير وتوحيد اسم الجلسة لمنع اختراق المسارات
 export function sanitizeSessionId(rawId) {
   if (!rawId || typeof rawId !== 'string') return 'hr_main';
-  const clean = rawId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  let clean = rawId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
   if (!clean || clean === 'default' || clean === 'main') return 'hr_main';
+  // إزالة وتوحيد أي تكرار لبادئة branch_ مثل branch_branch_...
+  clean = clean.replace(/^(branch_)+/i, 'branch_');
   return clean.slice(0, 64);
 }
 
@@ -709,13 +711,30 @@ app.post(['/send', '/api/send', '/send-message', '/api/send-message', '/send-med
   const sId = extractSessionId(req);
   const session = getOrCreateSession(sId, false);
 
-  const { phone, message, pdfBase64, pdfHtml, fileName, imageUrl, imageBase64, images } = req.body;
+  const { phone, message, pdfBase64, pdfHtml, fileName, imageUrl, imageBase64, images, strictSession } = req.body;
 
   if (!phone || (!message && !pdfBase64 && !pdfHtml && !imageUrl && !imageBase64 && (!Array.isArray(images) || images.length === 0))) {
     return res.status(400).json({ success: false, error: 'رقم الهاتف ونص الرسالة أو ملف الميديا مطلوبان.' });
   }
 
-  if (session.status !== 'CONNECTED' || !session.sock) {
+  let activeSession = session;
+  let activeSessionId = sId;
+  let usedFallback = false;
+
+  // في حال كانت جلسة الفرع أو المشتريات غير متصلة، نتحقق فوراً من توفر جلسة الإدارة العامة (hr_main) كاحتياطي فقط إذا لم يُطلب strictSession
+  if (!strictSession && (activeSession.status !== 'CONNECTED' || !activeSession.sock)) {
+    if (sId !== 'hr_main') {
+      const hrSession = sessionRegistry.get('hr_main');
+      if (hrSession && hrSession.status === 'CONNECTED' && hrSession.sock) {
+        console.log(`[WhatsApp] 🔄 Session (${sId}) is not connected. Automatically falling back to backup session (hr_main)...`);
+        activeSession = hrSession;
+        activeSessionId = 'hr_main';
+        usedFallback = true;
+      }
+    }
+  }
+
+  if (activeSession.status !== 'CONNECTED' || !activeSession.sock) {
     const sessionLabel = sId.startsWith('branch_')
       ? `فرع الصيدلية (#${sId.replace('branch_', '')})`
       : (sId === 'procurement' ? 'إدارة المشتريات' : 'إدارة الـ HR');
@@ -724,7 +743,7 @@ app.post(['/send', '/api/send', '/send-message', '/api/send-message', '/send-med
       success: false,
       error: `واتساب ${sessionLabel} غير متصل بالهاتف حالياً. يرجى مسح رمز الـ QR الخاص بهذا القسم للاقتران أولاً.`,
       sessionId: sId,
-      status: session.status
+      status: activeSession.status
     });
   }
 
@@ -739,10 +758,10 @@ app.post(['/send', '/api/send', '/send-message', '/api/send-message', '/send-med
       pdfBuffer = Buffer.from(pdfBase64, 'base64');
     } else if (pdfHtml) {
       try {
-        console.log(`[WhatsApp:${sId}] 📄 Rendering PDF from HTML for +${jid}...`);
+        console.log(`[WhatsApp:${activeSessionId}] 📄 Rendering PDF from HTML for +${jid}...`);
         pdfBuffer = await renderHtmlToPdfBuffer(pdfHtml);
       } catch (renderErr) {
-        console.error(`[WhatsApp:${sId}] PDF rendering error:`, renderErr.message);
+        console.error(`[WhatsApp:${activeSessionId}] PDF rendering error:`, renderErr.message);
       }
     }
 
@@ -767,14 +786,14 @@ app.post(['/send', '/api/send', '/send-message', '/api/send-message', '/send-med
 
     // محاكاة كتابة بشرية لمنع خوارزميات الحظر
     try {
-      await session.sock.sendPresenceUpdate('composing', jid);
+      await activeSession.sock.sendPresenceUpdate('composing', jid);
       await new Promise((resolve) => setTimeout(resolve, 1200));
-      await session.sock.sendPresenceUpdate('paused', jid);
+      await activeSession.sock.sendPresenceUpdate('paused', jid);
     } catch {}
 
     let sent;
     if (pdfBuffer) {
-      sent = await session.sock.sendMessage(jid, {
+      sent = await activeSession.sock.sendMessage(jid, {
         document: pdfBuffer,
         mimetype: 'application/pdf',
         fileName: fileName || 'مستند_رسمي.pdf',
@@ -782,7 +801,7 @@ app.post(['/send', '/api/send', '/send-message', '/api/send-message', '/send-med
       });
     } else if (imageBuffers.length > 0) {
       // إرسال الصورة الأولى مع نص الرسالة
-      sent = await session.sock.sendMessage(jid, {
+      sent = await activeSession.sock.sendMessage(jid, {
         image: imageBuffers[0],
         caption: message || ''
       });
@@ -791,17 +810,17 @@ app.post(['/send', '/api/send', '/send-message', '/api/send-message', '/send-med
       for (let i = 1; i < imageBuffers.length; i++) {
         try {
           await new Promise((resolve) => setTimeout(resolve, 800));
-          await session.sock.sendMessage(jid, {
+          await activeSession.sock.sendMessage(jid, {
             image: imageBuffers[i]
           });
         } catch (extraErr) {
-          console.warn(`[WhatsApp:${sId}] Extra image send warning:`, extraErr.message);
+          console.warn(`[WhatsApp:${activeSessionId}] Extra image send warning:`, extraErr.message);
         }
       }
     } else {
-      sent = await session.sock.sendMessage(jid, { text: message });
+      sent = await activeSession.sock.sendMessage(jid, { text: message });
     }
-    session.sentCount++;
+    activeSession.sentCount++;
 
     const logSnippet = message || (pdfBuffer ? '📎 [ملف PDF مرفق]' : (imageBuffers.length > 0 ? '🖼️ [صورة مرفقة]' : ''));
     const logEntry = {
@@ -812,14 +831,18 @@ app.post(['/send', '/api/send', '/send-message', '/api/send-message', '/send-med
       status: 'DELIVERED',
       hasPdf: Boolean(pdfBuffer),
       hasImage: imageBuffers.length > 0,
-      sessionId: sId
+      sessionId: activeSessionId,
+      originalSessionId: sId,
+      usedFallback
     };
-    session.logs.push(logEntry);
+    activeSession.logs.push(logEntry);
 
-    console.log(`[WhatsApp:${sId}] ✅ Sent to +${jid.split('@')[0]} ${pdfBuffer ? '📎 [مع PDF]' : (imageBuffers.length > 0 ? '🖼️ [مع صور]' : '')}`);
+    console.log(`[WhatsApp:${activeSessionId}] ✅ Sent to +${jid.split('@')[0]} ${pdfBuffer ? '📎 [مع PDF]' : (imageBuffers.length > 0 ? '🖼️ [مع صور]' : '')} ${usedFallback ? '(Fallback from ' + sId + ')' : ''}`);
     res.json({
       success: true,
-      sessionId: sId,
+      sessionId: activeSessionId,
+      originalSessionId: sId,
+      usedFallback,
       messageId: sent?.key?.id,
       phone: jid.split('@')[0],
       status: 'DELIVERED',
@@ -827,7 +850,7 @@ app.post(['/send', '/api/send', '/send-message', '/api/send-message', '/send-med
       hasImage: imageBuffers.length > 0
     });
   } catch (err) {
-    console.error(`[WhatsApp:${sId}] Error sending to +${jid}:`, err);
+    console.error(`[WhatsApp:${activeSessionId}] Error sending to +${jid}:`, err);
     res.status(500).json({ success: false, error: err.message || 'فشل إرسال الرسالة عبر الواتساب.' });
   }
 });
@@ -843,7 +866,21 @@ app.post(['/send-bulk', '/api/send-bulk'], async (req, res) => {
     return res.status(400).json({ success: false, error: 'قائمة الرسائل فارغة.' });
   }
 
-  if (session.status !== 'CONNECTED' || !session.sock) {
+  let activeBulkSession = session;
+  let activeBulkSessionId = sId;
+
+  if (activeBulkSession.status !== 'CONNECTED' || !activeBulkSession.sock) {
+    if (sId !== 'hr_main') {
+      const hrSession = sessions.get('hr_main');
+      if (hrSession && hrSession.status === 'CONNECTED' && hrSession.sock) {
+        console.log(`[WhatsApp] 🔄 Session (${sId}) is disconnected for bulk send. Falling back to hr_main backup session...`);
+        activeBulkSession = hrSession;
+        activeBulkSessionId = 'hr_main';
+      }
+    }
+  }
+
+  if (activeBulkSession.status !== 'CONNECTED' || !activeBulkSession.sock) {
     return res.status(503).json({
       success: false,
       error: `خادم الواتساب (${sId}) غير متصل بالهاتف حالياً. يرجى مسح رمز الـ QR للاقتران أولاً.`
@@ -852,8 +889,9 @@ app.post(['/send-bulk', '/api/send-bulk'], async (req, res) => {
 
   res.json({
     success: true,
-    sessionId: sId,
-    message: `بدأت عملية إرسال ${messages.length} رسالة بأمان عبر جلسة (${sId}).`,
+    sessionId: activeBulkSessionId,
+    originalSessionId: sId,
+    message: `بدأت عملية إرسال ${messages.length} رسالة بأمان عبر جلسة (${activeBulkSessionId}).`,
     totalCount: messages.length
   });
 
@@ -867,35 +905,35 @@ app.post(['/send-bulk', '/api/send-bulk'], async (req, res) => {
         const delayMs = 2500 + Math.floor(Math.random() * 2000);
         await new Promise((resolve) => setTimeout(resolve, delayMs));
 
-        await session.sock.sendPresenceUpdate('composing', jid);
+        await activeBulkSession.sock.sendPresenceUpdate('composing', jid);
         await new Promise((resolve) => setTimeout(resolve, 800));
-        await session.sock.sendPresenceUpdate('paused', jid);
+        await activeBulkSession.sock.sendPresenceUpdate('paused', jid);
 
         let pdfBuffer = null;
         if (item.pdfBase64) {
           pdfBuffer = Buffer.from(item.pdfBase64, 'base64');
         } else if (item.pdfHtml) {
           try {
-            console.log(`[WhatsApp:${sId} Bulk] 📄 Rendering PDF for (${item.empName || jid})...`);
+            console.log(`[WhatsApp:${activeBulkSessionId} Bulk] 📄 Rendering PDF for (${item.empName || jid})...`);
             pdfBuffer = await renderHtmlToPdfBuffer(item.pdfHtml);
           } catch (renderErr) {
-            console.error(`[WhatsApp:${sId} Bulk PDF Render Error for ${item.empName}]:`, renderErr.message);
+            console.error(`[WhatsApp:${activeBulkSessionId} Bulk PDF Render Error for ${item.empName}]:`, renderErr.message);
           }
         }
 
         if (pdfBuffer) {
-          await session.sock.sendMessage(jid, {
+          await activeBulkSession.sock.sendMessage(jid, {
             document: pdfBuffer,
             mimetype: 'application/pdf',
             fileName: item.fileName || `مستند_${item.empName || 'رسمي'}.pdf`,
             caption: item.message || ''
           });
         } else {
-          await session.sock.sendMessage(jid, { text: item.message });
+          await activeBulkSession.sock.sendMessage(jid, { text: item.message });
         }
-        session.sentCount++;
+        activeBulkSession.sentCount++;
 
-        session.logs.push({
+        activeBulkSession.logs.push({
           id: 'WAM_' + Date.now(),
           phone: jid.split('@')[0],
           empName: item.empName || '',
@@ -903,12 +941,12 @@ app.post(['/send-bulk', '/api/send-bulk'], async (req, res) => {
           timestamp: new Date().toLocaleTimeString('ar-EG'),
           status: 'DELIVERED',
           hasPdf: Boolean(pdfBuffer),
-          sessionId: sId
+          sessionId: activeBulkSessionId
         });
 
-        console.log(`[WhatsApp:${sId} Bulk] (${i + 1}/${messages.length}) Sent to ${item.empName || jid}`);
+        console.log(`[WhatsApp:${activeBulkSessionId} Bulk] (${i + 1}/${messages.length}) Sent to ${item.empName || jid}`);
       } catch (err) {
-        console.error(`[WhatsApp:${sId} Bulk] Error sending to ${item.empName || jid}:`, err.message);
+        console.error(`[WhatsApp:${activeBulkSessionId} Bulk] Error sending to ${item.empName || jid}:`, err.message);
       }
     }
   })();

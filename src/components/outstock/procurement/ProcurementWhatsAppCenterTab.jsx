@@ -141,7 +141,7 @@ export default function ProcurementWhatsAppCenterTab({ currentOfficer = 'مسؤ�
         if (res.branches.length > 0) {
           const first = res.branches[0];
           setSelectedBranchId(first.id);
-          setBranchPhoneOverride(first.phone || '');
+          setBranchPhoneOverride(first.whatsapp_phone || first.phone || '');
           setSelectedBranchIds(res.branches.map(b => b.id));
         }
       }
@@ -164,7 +164,7 @@ export default function ProcurementWhatsAppCenterTab({ currentOfficer = 'مسؤ�
   // تحديث هاتف الفرع عند تغيير الاختيار
   useEffect(() => {
     if (currentSelectedBranch) {
-      setBranchPhoneOverride(currentSelectedBranch.phone || '');
+      setBranchPhoneOverride(currentSelectedBranch.whatsapp_phone || currentSelectedBranch.phone || '');
     }
   }, [currentSelectedBranch]);
 
@@ -273,11 +273,6 @@ export default function ProcurementWhatsAppCenterTab({ currentOfficer = 'مسؤ�
       return;
     }
 
-    if (waState.status !== 'CONNECTED') {
-      showToast?.('⚠️ خادم الواتساب غير متصل حالياً. يرجى مسح رمز الـ QR أو استخدام زر "الفتح عبر WhatsApp Web".');
-      return;
-    }
-
     // تحديد قائمة الفروع المستهدفة
     let targetBranches = [];
     if (dispatchMode === 'single') {
@@ -285,7 +280,7 @@ export default function ProcurementWhatsAppCenterTab({ currentOfficer = 'مسؤ�
         showToast?.('⚠️ يرجى اختيار الفرع المستهدف');
         return;
       }
-      const phoneToUse = (branchPhoneOverride || currentSelectedBranch.phone || '').trim();
+      const phoneToUse = (branchPhoneOverride || currentSelectedBranch.whatsapp_phone || currentSelectedBranch.phone || '').trim();
       if (!phoneToUse) {
         showToast?.(`⚠️ لا يوجد رقم هاتف مسجل لفرع ${currentSelectedBranch.name}. يرجى إدخال الرقم.`);
         return;
@@ -294,7 +289,7 @@ export default function ProcurementWhatsAppCenterTab({ currentOfficer = 'مسؤ�
     } else {
       targetBranches = branches
         .filter(b => selectedBranchIds.includes(b.id))
-        .map(b => ({ ...b, targetPhone: (b.phone || '').trim() }))
+        .map(b => ({ ...b, targetPhone: (b.whatsapp_phone || b.phone || '').trim() }))
         .filter(b => b.targetPhone.length >= 9);
 
       if (targetBranches.length === 0) {
@@ -328,6 +323,11 @@ export default function ProcurementWhatsAppCenterTab({ currentOfficer = 'مسؤ�
         finalMsg = customMessage.replace(new RegExp(currentSelectedBranch?.name || 'الفرع', 'g'), b.name);
       }
 
+      let sentSuccess = false;
+      let usedBackup = false;
+      let lastErrMsg = '';
+
+      // محاولة 1: عبر جلسة المشتريات الأساسية
       try {
         const res = await fetch(`${waServerUrl}/api/send-message`, {
           method: 'POST',
@@ -341,33 +341,62 @@ export default function ProcurementWhatsAppCenterTab({ currentOfficer = 'مسؤ�
 
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.success) {
-          successCount++;
-          setDispatchLog(prev => [
-            {
-              id: Date.now() + Math.random(),
-              branchName: b.name,
-              phone: cleanPhone,
-              status: 'success',
-              time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
-            },
-            ...prev
-          ]);
+          sentSuccess = true;
         } else {
-          failedCount++;
-          setDispatchLog(prev => [
-            {
-              id: Date.now() + Math.random(),
-              branchName: b.name,
-              phone: cleanPhone,
-              status: 'error',
-              error: data.error || 'فشل الإرسال',
-              time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
-            },
-            ...prev
-          ]);
+          lastErrMsg = data.error || 'جلسة المشتريات غير متصلة';
         }
       } catch (err) {
+        lastErrMsg = err.message;
+      }
+
+      // محاولة 2: الاحتياطي عبر جلسة الإدارة العليا hr_main
+      if (!sentSuccess) {
+        try {
+          const backupRes = await fetch(`${waServerUrl}/api/send-message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true' },
+            body: JSON.stringify({
+              sessionId: 'hr_main',
+              phone: cleanPhone,
+              message: finalMsg
+            })
+          });
+          const backupData = await backupRes.json().catch(() => ({}));
+          if (backupRes.ok && backupData.success) {
+            sentSuccess = true;
+            usedBackup = true;
+          } else {
+            lastErrMsg = backupData.error || lastErrMsg;
+          }
+        } catch (_) {}
+      }
+
+      if (sentSuccess) {
+        successCount++;
+        setDispatchLog(prev => [
+          {
+            id: Date.now() + Math.random(),
+            branchName: b.name,
+            phone: cleanPhone,
+            status: 'success',
+            note: usedBackup ? 'عبر واتساب الإدارة الاحتياطي' : 'عبر واتساب المشتريات',
+            time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+          },
+          ...prev
+        ]);
+      } else {
         failedCount++;
+        setDispatchLog(prev => [
+          {
+            id: Date.now() + Math.random(),
+            branchName: b.name,
+            phone: cleanPhone,
+            status: 'error',
+            error: lastErrMsg || 'فشل الإرسال',
+            time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+          },
+          ...prev
+        ]);
       }
 
       // فاصل زمني 1.2 ثانية بين الفروع لمنع خوارزميات الحظر

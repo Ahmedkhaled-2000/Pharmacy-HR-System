@@ -228,6 +228,9 @@ export default function AppRoutes() {
       if (backup?.passwordSnapshot) {
         localStorage.setItem('app_owner_password_snapshot', backup.passwordSnapshot);
       }
+      if (backup?.usernameSnapshot) {
+        localStorage.setItem('app_owner_username_snapshot', backup.usernameSnapshot);
+      }
       if (backup?.displayName) {
         localStorage.setItem('app_owner_display_name', backup.displayName);
       }
@@ -261,6 +264,7 @@ export default function AppRoutes() {
         const ownerBackup = {
           authenticated: 'true',
           displayName: localStorage.getItem('app_owner_display_name') || ownerDisplayName || 'سيف',
+          usernameSnapshot: localStorage.getItem('app_owner_username_snapshot') || 'saif',
           passwordSnapshot: localStorage.getItem('app_owner_password_snapshot') || '',
           sessionVersion: localStorage.getItem('app_owner_session_version') || '1'
         };
@@ -430,19 +434,32 @@ export default function AppRoutes() {
     }
 
     if (isOwnerLoginGateActive && pendingOwnerAuth) {
-      const { cleanPass, dName, org } = pendingOwnerAuth;
+      const { cleanPass, dName, org, authResult } = pendingOwnerAuth;
+      const ownerUsername = authResult?.ownerUser?.username || 'saif';
       try {
         localStorage.setItem('app_auth_role', 'owner');
         localStorage.setItem('app_owner_authenticated', 'true');
         localStorage.setItem('app_owner_display_name', dName);
         localStorage.setItem('app_owner_password_snapshot', cleanPass);
-        localStorage.setItem('app_owner_session_version', String(org?.ownerSessionVersion || 1));
+        localStorage.setItem('app_owner_username_snapshot', ownerUsername);
+        localStorage.setItem('app_current_owner', JSON.stringify({
+          id: authResult?.ownerUser?.id || `owner_${ownerUsername}`,
+          username: ownerUsername,
+          fullName: dName,
+          name: dName,
+          isOwner: true,
+          password: cleanPass
+        }));
+        const ownerSessionVer = String(authResult?.ownerUser?.sessionVersion !== undefined ? authResult.ownerUser.sessionVersion : (org?.ownerSessionVersion || 1));
+        localStorage.setItem('app_owner_session_version', ownerSessionVer);
         sessionStorage.setItem('app_owner_authenticated', 'true');
+        sessionStorage.setItem('app_owner_username_snapshot', ownerUsername);
+        sessionStorage.setItem('app_owner_session_version', ownerSessionVer);
       } catch {}
       setIsOwnerLoginGateActive(false);
       setPendingOwnerAuth(null);
 
-      handleUnifiedLogin({ role: 'owner', redirectTab: targetTab });
+      handleUnifiedLogin({ role: 'owner', redirectTab: targetTab, user: authResult?.ownerUser });
       setActiveNavTab(targetTab);
       return;
     }
@@ -1103,7 +1120,7 @@ export default function AppRoutes() {
         return { role: 'developer', matched: true };
       }
 
-      // 1. Check Sovereign Primary Owner 'saif' (يوزر المالك المعتمد الوحيد)
+      // 1. Check Sovereign Primary Owner 'saif' or any multi-owner in systemOwners
       const isSaif = cleanUser === 'saif' || stdUser === 'saif';
       const saifPass = org.ownerPassword || savedOwnerPass || '181013';
       if (isSaif && (isPasswordMatch('181013', cleanPass) || isPasswordMatch(saifPass, cleanPass))) {
@@ -1111,7 +1128,52 @@ export default function AppRoutes() {
           role: 'owner',
           matched: true,
           org,
-          ownerUser: { username: 'saif', name: 'المالك سيف', isOwner: true }
+          ownerUser: { username: 'saif', name: 'المالك سيف', fullName: 'المالك سيف', isOwner: true, isPrimaryOwner: true, password: cleanPass }
+        };
+      }
+
+      // فحص المالك الأساسي المخصص في إعدادات المنظومة
+      const primaryOwnerUser = cleanStr(org.ownerUsername || 'saif').toLowerCase();
+      if ((cleanUser === primaryOwnerUser || stdUser === toStdDigits(primaryOwnerUser)) &&
+          (isPasswordMatch('181013', cleanPass) || isPasswordMatch(saifPass, cleanPass))) {
+        return {
+          role: 'owner',
+          matched: true,
+          org,
+          ownerUser: {
+            username: org.ownerUsername || 'saif',
+            name: org.ownerFullName || 'المالك سيف',
+            fullName: org.ownerFullName || 'المالك سيف',
+            isOwner: true,
+            isPrimaryOwner: true,
+            password: cleanPass
+          }
+        };
+      }
+
+      // فحص المالكين الإضافيين المسجلين في systemOwners
+      const systemOwners = Array.isArray(org.systemOwners) ? org.systemOwners : [];
+      const matchedMultiOwner = systemOwners.find((o) => {
+        if (!o || o.isActive === false) return false;
+        const u = cleanStr(o.username || '').toLowerCase();
+        const p = cleanStr(o.password || '');
+        const isUser = cleanUser === u || stdUser === toStdDigits(u);
+        return isUser && isPasswordMatch(p, cleanPass);
+      });
+      if (matchedMultiOwner) {
+        return {
+          role: 'owner',
+          matched: true,
+          org,
+          ownerUser: {
+            id: matchedMultiOwner.id || `owner_${matchedMultiOwner.username}`,
+            username: matchedMultiOwner.username,
+            name: matchedMultiOwner.fullName || matchedMultiOwner.name || 'مالك المنظومة',
+            fullName: matchedMultiOwner.fullName || matchedMultiOwner.name || 'مالك المنظومة',
+            isOwner: true,
+            isPrimaryOwner: Boolean(matchedMultiOwner.isPrimaryOwner),
+            password: cleanPass
+          }
         };
       }
 
@@ -1302,7 +1364,14 @@ export default function AppRoutes() {
               role: 'owner',
               matched: true,
               org: state?.orgSettings || {},
-              ownerUser: sUser || { name: 'مالك المنظومة', isOwner: true }
+              ownerUser: sUser ? {
+                ...sUser,
+                username: sUser.username || cleanUser,
+                name: sUser.fullName || sUser.name || 'مالك المنظومة',
+                fullName: sUser.fullName || sUser.name || 'مالك المنظومة',
+                isOwner: true,
+                password: cleanPass
+              } : { username: cleanUser, name: 'مالك المنظومة', fullName: 'مالك المنظومة', isOwner: true, password: cleanPass }
             };
           }
 
@@ -1414,29 +1483,31 @@ export default function AppRoutes() {
 
       // إصدار وحفظ توكن JWT رسمي من السيرفر للمصادقة وتفويض العمليات الحساسة
       try {
-        apiLogin({ username: cleanUser, password: cleanPass, role: role || 'auto' })
-          .then((res) => {
-            if (res && res.token) {
-              localStorage.setItem('app_auth_token', res.token);
-            }
-            if (res?.company) {
-              localStorage.setItem('app_company_subscription', JSON.stringify(res.company));
-            }
-            if (res?.isSuspended) {
-              const suspObj = {
-                isSuspended: true,
-                reason: res.suspensionReason || 'تم إيقاف حساب الشركة مؤقتاً',
-                customAdminMsg: res.customMsg || '',
-                customStaffMsg: res.customMsg || ''
-              };
-              setTenantSuspension(suspObj);
-              try { localStorage.setItem('app_tenant_suspension', JSON.stringify(suspObj)); } catch {}
-            }
-          })
-          .catch(() => {
-            // صامت في حالة عدم توفر الاتصال للحفاظ على ميزة العمل دون اتصال
-          });
-      } catch {}
+        const loginPromise = apiLogin({ username: cleanUser, password: cleanPass, role: role || 'auto' });
+        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 3500));
+        const res = await Promise.race([loginPromise, timeoutPromise]);
+        if (res && res.token) {
+          try {
+            localStorage.setItem('app_auth_token', res.token);
+            localStorage.setItem('outstock_token', res.token);
+          } catch {}
+        }
+        if (res?.company) {
+          try { localStorage.setItem('app_company_subscription', JSON.stringify(res.company)); } catch {}
+        }
+        if (res?.isSuspended) {
+          const suspObj = {
+            isSuspended: true,
+            reason: res.suspensionReason || 'تم إيقاف حساب الشركة مؤقتاً',
+            customAdminMsg: res.customMsg || '',
+            customStaffMsg: res.customMsg || ''
+          };
+          setTenantSuspension(suspObj);
+          try { localStorage.setItem('app_tenant_suspension', JSON.stringify(suspObj)); } catch {}
+        }
+      } catch (err) {
+        console.warn('[apiLogin handling in handleLogin]:', err);
+      }
 
       try {
         const currentOrgEpoch = String(org?.sessionInvalidationEpoch || state?.orgSettings?.sessionInvalidationEpoch || '0');
@@ -1460,6 +1531,22 @@ export default function AppRoutes() {
 
       if (role === 'owner') {
         const dName = authResult.ownerUser?.name || authResult.ownerUser?.fullName || 'المالك (Owner)';
+        const oUser = authResult.ownerUser?.username || cleanUser || 'saif';
+        const ownerSessionVer = String(authResult.ownerUser?.sessionVersion !== undefined ? authResult.ownerUser.sessionVersion : (org?.ownerSessionVersion || 1));
+        try {
+          localStorage.setItem('app_owner_username_snapshot', oUser);
+          localStorage.setItem('app_owner_password_snapshot', cleanPass);
+          localStorage.setItem('app_owner_session_version', ownerSessionVer);
+          localStorage.setItem('app_owner_display_name', dName);
+          localStorage.setItem('app_current_owner', JSON.stringify({
+            id: authResult.ownerUser?.id || `owner_${oUser}`,
+            username: oUser,
+            name: dName,
+            fullName: dName,
+            isOwner: true,
+            password: cleanPass
+          }));
+        } catch {}
         setOwnerDisplayName(dName);
         setPendingOwnerAuth({
           authResult,

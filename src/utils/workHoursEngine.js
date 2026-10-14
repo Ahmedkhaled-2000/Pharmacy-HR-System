@@ -176,15 +176,28 @@ export function calculateShiftMetrics(shift, state) {
     };
   }
 
-  // 1. فحص حالات الإلغاء والرفض الصريح
+  // 1. فحص حالات الإلغاء والرفض الصريح للبصمة / الوردية بأكملها (وليس مجرد رفض الساعات الإضافية)
+  const statusLabelStr = typeof shift.statusLabel === 'string' ? shift.statusLabel : '';
+  const isOvertimeOnlyRejection = Boolean(
+    shift.rejectedOvertime ||
+    shift.overtimeStatus === 'rejected' ||
+    statusLabelStr.includes('إضافي مرفوض') ||
+    statusLabelStr.includes('إضافي مستبعد')
+  );
+
   const isRejected = Boolean(
     shift.status === 'cancelled' ||
-    shift.status === 'rejected' ||
     shift.status === 'rejected_photo' ||
     shift.isRejectedPhoto ||
     shift.isCancelled ||
-    shift.rejected ||
-    (typeof shift.statusLabel === 'string' && (shift.statusLabel.includes('ملغي') || shift.statusLabel.includes('مرفوض')))
+    shift.attendanceRejected ||
+    (shift.status === 'rejected' && !isOvertimeOnlyRejection) ||
+    (statusLabelStr && (
+      statusLabelStr.includes('ملغي') ||
+      statusLabelStr.includes('بصمة مرفوضة') ||
+      statusLabelStr.includes('حضور مرفوض') ||
+      statusLabelStr.includes('رفض الصورة')
+    ) && !statusLabelStr.includes('إضافي مرفوض') && !statusLabelStr.includes('إضافي مستبعد'))
   );
 
   if (isRejected) {
@@ -280,21 +293,43 @@ export function calculateShiftMetrics(shift, state) {
   }
 
   // 4. الساعات المقررة للوردية (Scheduled Hours)
-  const scheduledHours = parseFloat(shift.scheduledHours || emp?.workHoursPerDay || emp?.workHours || 8);
-  const isFlexibleSchedule = Boolean(emp?.noMonthlySchedule);
+  const isFlexibleSchedule = Boolean(
+    emp?.noMonthlySchedule === true ||
+    emp?.noMonthlySchedule === 'true' ||
+    emp?.noMonthlySchedule === 1 ||
+    emp?.isVariableHours === true ||
+    emp?.variableHours === true ||
+    emp?.hasNoRoster === true ||
+    emp?.scheduleType === 'flexible' ||
+    emp?.scheduleType === 'variable'
+  );
+  const profileHours = parseFloat(emp?.workHoursPerDay || emp?.workHours || (emp?.branchesDetails && emp.branchesDetails[0]?.workHoursPerDay) || 8);
+  const scheduledHours = isFlexibleSchedule ? profileHours : parseFloat(shift.scheduledHours || profileHours);
 
   // 5. الساعات الأساسية والإضافية
   let regularHours = 0;
   let overtimeHours = 0;
 
-  if (isFlexibleSchedule) {
-    // موظف الساعات المتغيرة: تحسب كامل ساعاته الفعلية كساعات عمل عادية دون تقسيم لإضافي
-    regularHours = actualWorkedHours;
+  if (actualWorkedHours === 0) {
+    regularHours = 0;
     overtimeHours = 0;
   } else {
-    if (actualWorkedHours === 0) {
-      regularHours = 0;
-      overtimeHours = 0;
+    // التحقق مما إذا كان هناك إضافي مسجل صراحة أو معتمد على الوردية
+    const rawOtHours = parseFloat(shift.overtimeHours) || 0;
+    const hasExplicitOt = rawOtHours > 0 || shift.overtimeStatus === 'approved' || Boolean(shift.adminApproved);
+
+    if (isFlexibleSchedule) {
+      // للموظف المرن: يقارن العمل الفعلي مع ساعات ملفه الشخصي (profileHours)
+      if (actualWorkedHours > profileHours) {
+        regularHours = profileHours;
+        overtimeHours = Math.round((actualWorkedHours - profileHours) * 100) / 100;
+        if (rawOtHours > 0) {
+          overtimeHours = Math.max(rawOtHours, overtimeHours);
+        }
+      } else {
+        regularHours = actualWorkedHours;
+        overtimeHours = rawOtHours > 0 ? rawOtHours : 0;
+      }
     } else {
       regularHours = Math.round(Math.min(actualWorkedHours, scheduledHours) * 100) / 100;
       if (shift.regularHours !== undefined && parseFloat(shift.regularHours) > 0) {
@@ -302,40 +337,55 @@ export function calculateShiftMetrics(shift, state) {
       }
       const maxPossibleOt = Math.max(0, Math.round((actualWorkedHours - regularHours) * 100) / 100);
       overtimeHours = maxPossibleOt;
-      if (shift.overtimeHours !== undefined && parseFloat(shift.overtimeHours) > 0) {
-        overtimeHours = Math.min(maxPossibleOt, Math.round(parseFloat(shift.overtimeHours) * 100) / 100);
+      if (rawOtHours > 0) {
+        overtimeHours = Math.max(rawOtHours, maxPossibleOt);
       }
     }
   }
 
-  // 6. تحديد حالة الوقت الإضافي (Overtime Status)
+  // 6. تحديد حالة الوقت الإضافي (Overtime Status) والاعتماد المركزي
   let overtimeStatus = 'none';
-  if (!isFlexibleSchedule && overtimeHours > 0) {
+  if (overtimeHours > 0) {
     const dateStr = shift.date;
-    const linkedOtReq = (state?.requests || []).find(r => 
-      (r.id && (r.id === shift.linkedRequestId || r.id === shift.overtimeRequestId)) ||
-      ((String(r.employeeId) === String(shift.employeeId) || String(r.empId) === String(shift.employeeId)) &&
-       (r.date === dateStr || r.targetDate === dateStr || r.details?.shiftDate === dateStr) &&
-       (r.type === 'overtime' || r.type === 'طلب اضافي' || r.type === 'إضافي'))
-    );
+    const sEmpId = String(shift.employeeId || '');
+    const sEmpCode = String(shift.employeeCode || emp?.code || '');
+    const linkedOtReq = (state?.requests || []).find(r => {
+      if (!r) return false;
+      const isOtType = r.type === 'overtime' || r.type === 'extra_hours' || r.type === 'طلب اضافي' || r.type === 'إضافي' || (parseFloat(r.overtimeHours) > 0 && String(r.id || '').includes('ot'));
+      if (!isOtType) return false;
+      if (r.id && (r.id === shift.linkedRequestId || r.id === shift.overtimeRequestId)) return true;
+      if (shift.id && r.shiftId === shift.id) return true;
+      const rEmpId = String(r.employeeId || r.empId || '');
+      const rEmpCode = String(r.employeeCode || '');
+      const empMatch = (
+        (sEmpId && (rEmpId === sEmpId || rEmpCode === sEmpId)) ||
+        (sEmpCode && (rEmpId === sEmpCode || rEmpCode === sEmpCode)) ||
+        (emp?.id && (rEmpId === String(emp.id) || rEmpCode === String(emp.id))) ||
+        (emp?.code && (rEmpId === String(emp.code) || rEmpCode === String(emp.code)))
+      );
+      const dateMatch = r.date === dateStr || r.targetDate === dateStr || r.details?.shiftDate === dateStr;
+      return empMatch && dateMatch;
+    });
 
-    if (linkedOtReq) {
-      overtimeStatus = linkedOtReq.status === 'approved' ? 'approved' : linkedOtReq.status === 'rejected' ? 'rejected' : 'pending';
-    } else if (shift.overtimeStatus) {
-      overtimeStatus = shift.overtimeStatus;
+    const isShiftApproved = shift.overtimeStatus === 'approved' || shift.isOvertimeApproved === true;
+    const isReqApproved = Boolean(linkedOtReq && (linkedOtReq.status === 'approved' || linkedOtReq.adminApproved === true));
+
+    const isShiftRejected = shift.overtimeStatus === 'rejected' || shift.rejectedOvertime === true;
+    const isReqRejected = Boolean(linkedOtReq && (linkedOtReq.status === 'rejected' || linkedOtReq.adminRejected === true));
+
+    if (isShiftApproved || isReqApproved) {
+      overtimeStatus = 'approved';
+    } else if (isShiftRejected || isReqRejected) {
+      overtimeStatus = 'rejected';
+    } else if (shift.overtimeStatus === 'pending' || (linkedOtReq && (linkedOtReq.status === 'pending' || linkedOtReq.status === 'pending_admin'))) {
+      overtimeStatus = 'pending';
+    } else {
+      overtimeStatus = 'pending';
     }
   }
 
-  const isOtApproved = 
-    overtimeStatus === 'approved' || 
-    Boolean(shift.adminApproved) || 
-    Boolean(shift.isAdminCreated);
+  const isOtApproved = (overtimeStatus === 'approved');
 
-  if (isOtApproved) {
-    overtimeStatus = 'approved';
-  } else if (!isFlexibleSchedule && overtimeHours > 0 && (overtimeStatus === 'none' || !overtimeStatus)) {
-    overtimeStatus = 'pending';
-  }
 
   // 7. معالجة طلبات عدم الالتزام بالجدول (Schedule Deviation)
   if (shift.deviationStatus === 'rejected') {
@@ -403,7 +453,14 @@ export function getAuthoritativeShiftHours(shift, state) {
   const emp = (state?.employees || []).find(
     (e) => e && (String(e.id) === String(shift?.employeeId) || (shift?.employeeCode && String(e.code) === String(shift?.employeeCode)))
   );
-  if (emp?.noMonthlySchedule) {
+  const isFlex = Boolean(
+    emp?.noMonthlySchedule ||
+    emp?.isVariableHours ||
+    emp?.variableHours ||
+    emp?.hasNoRoster ||
+    emp?.scheduleType === 'flexible'
+  );
+  if (isFlex && metrics.overtimeHours === 0) {
     return metrics.actualWorkedHours;
   }
 

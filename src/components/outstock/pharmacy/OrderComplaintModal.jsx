@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { X, AlertTriangle, Clock, Send, CheckCircle2, Package, User, Phone, Building2 } from 'lucide-react';
+import { X, AlertTriangle, Clock, Send, CheckCircle2, Package, User, Phone, Building2, Check } from 'lucide-react';
 import { outstockSendOrderComplaint } from '../../../utils/outstockApiClient';
 
 /**
@@ -21,7 +21,9 @@ export default function OrderComplaintModal({
   showToast
 }) {
   const [complaintType, setComplaintType] = useState('delayed_response');
-  const [selectedItemId, setSelectedItemId] = useState('all');
+  // دعم التحديد المتعدد للأصناف المعنية بالشكوى (صنف واحد، أصناف محددة، أو كامل الطلب)
+  const [isAllSelected, setIsAllSelected] = useState(true);
+  const [selectedItemIds, setSelectedItemIds] = useState([]);
   const [notes, setNotes] = useState('');
   const [pharmacistName, setPharmacistName] = useState(
     currentPharmacist || order?.responsible_pharmacist || ''
@@ -91,6 +93,31 @@ export default function OrderComplaintModal({
     return { createdStr, repliedStr, durationStr, isReplied: Boolean(repliedAt) };
   }, [order]);
 
+  const toggleItemSelection = (itId) => {
+    if (isAllSelected) {
+      setIsAllSelected(false);
+      setSelectedItemIds([itId]);
+      return;
+    }
+
+    if (selectedItemIds.includes(itId)) {
+      const next = selectedItemIds.filter(id => id !== itId);
+      if (next.length === 0) {
+        setIsAllSelected(true);
+        setSelectedItemIds([]);
+      } else {
+        setSelectedItemIds(next);
+      }
+    } else {
+      setSelectedItemIds([...selectedItemIds, itId]);
+    }
+  };
+
+  const handleSelectAll = () => {
+    setIsAllSelected(true);
+    setSelectedItemIds([]);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!complaintType) {
@@ -106,17 +133,32 @@ export default function OrderComplaintModal({
     setErrorMsg('');
 
     try {
-      let selectedItemObj = null;
-      if (selectedItemId !== 'all' && Array.isArray(order?.items)) {
-        selectedItemObj = order.items.find(it => String(it.id) === String(selectedItemId));
+      let selectedItemsPayload = [];
+      let medicationNameString = null;
+      let primaryItemId = null;
+
+      if (!isAllSelected && selectedItemIds.length > 0 && Array.isArray(order?.items)) {
+        selectedItemsPayload = order.items
+          .filter(it => selectedItemIds.includes(String(it.id || '')))
+          .map(it => ({
+            id: it.id,
+            medicationName: it.medication_name || it.medicationName,
+            quantity: it.quantity,
+            unitType: it.unit_type
+          }));
+        
+        medicationNameString = selectedItemsPayload.map(i => i.medicationName).filter(Boolean).join('، ');
+        primaryItemId = selectedItemIds[0];
       }
 
       const res = await outstockSendOrderComplaint(order.id, {
         complaintType,
         notes: notes.trim(),
         pharmacistName: pharmacistName.trim(),
-        itemId: selectedItemId !== 'all' ? selectedItemId : null,
-        medicationName: selectedItemObj ? (selectedItemObj.medication_name || selectedItemObj.medicationName) : null
+        itemId: primaryItemId,
+        itemIds: selectedItemIds,
+        selectedItems: selectedItemsPayload,
+        medicationName: medicationNameString
       });
 
       if (res?.success) {
@@ -242,42 +284,45 @@ export default function OrderComplaintModal({
                 </div>
               </div>
 
-              {/* اختيار وتحديد الصنف المعني بالشكوى */}
+              {/* اختيار وتحديد الصنف المعني بالشكوى (دعم التحديد المتعدد) */}
               {Array.isArray(order?.items) && order.items.length > 0 && (
                 <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px dashed #cbd5e1' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '12.5px', fontWeight: '900', color: '#991b1b' }}>
-                      💊 حدد الصنف الذي تخصه الشكوى (اختياري):
+                    <span style={{ fontSize: '12.5px', fontWeight: '900', color: '#991b1b', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <span>💊</span>
+                      <span>حدد الأصناف التي تخصها الشكوى (يمكنك اختيار أكثر من صنف):</span>
                     </span>
-                    <span style={{ fontSize: '11px', color: '#64748b' }}>
-                      {selectedItemId === 'all' ? 'الشكوى على كامل الطلب' : 'تم تخصيص صنف محدد'}
+                    <span style={{ fontSize: '11px', fontWeight: '700', color: isAllSelected ? '#64748b' : '#dc2626' }}>
+                      {isAllSelected ? 'الشكوى على كامل الطلب' : `تم تحديد (${selectedItemIds.length}) من ${order.items.length}`}
                     </span>
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                     <button
                       type="button"
-                      onClick={() => setSelectedItemId('all')}
+                      onClick={handleSelectAll}
                       style={{
-                        background: selectedItemId === 'all' ? '#fee2e2' : '#ffffff',
-                        border: selectedItemId === 'all' ? '2px solid #dc2626' : '1px solid #cbd5e1',
+                        background: isAllSelected ? '#fee2e2' : '#ffffff',
+                        border: isAllSelected ? '2px solid #dc2626' : '1px solid #cbd5e1',
                         borderRadius: '8px',
                         padding: '6px 12px',
                         fontSize: '12px',
                         fontWeight: '800',
-                        color: selectedItemId === 'all' ? '#991b1b' : '#475569',
+                        color: isAllSelected ? '#991b1b' : '#475569',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '6px'
+                        gap: '6px',
+                        transition: 'all 0.15s ease'
                       }}
                     >
                       <Package size={14} />
                       <span>كامل الطلب (جميع الأصناف)</span>
+                      {isAllSelected && <Check size={13} color="#dc2626" />}
                     </button>
 
                     {order.items.map((it, idx) => {
                       const itId = String(it.id || idx);
-                      const isSelected = selectedItemId === itId;
+                      const isSelected = !isAllSelected && selectedItemIds.includes(itId);
                       const itName = it.medication_name || it.medicationName || 'صنف';
                       const uLabel = it.unit_type === 'strip' ? 'شريط' : 'علبة';
 
@@ -285,7 +330,7 @@ export default function OrderComplaintModal({
                         <button
                           key={itId}
                           type="button"
-                          onClick={() => setSelectedItemId(itId)}
+                          onClick={() => toggleItemSelection(itId)}
                           style={{
                             background: isSelected ? '#fee2e2' : '#ffffff',
                             border: isSelected ? '2px solid #dc2626' : '1px solid #cbd5e1',
@@ -298,9 +343,16 @@ export default function OrderComplaintModal({
                             display: 'flex',
                             alignItems: 'center',
                             gap: '6px',
-                            boxShadow: isSelected ? '0 2px 6px rgba(220, 38, 38, 0.15)' : 'none'
+                            boxShadow: isSelected ? '0 2px 6px rgba(220, 38, 38, 0.15)' : 'none',
+                            transition: 'all 0.15s ease'
                           }}
                         >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}} // handled by parent button onClick
+                            style={{ margin: 0, cursor: 'pointer', accentColor: '#dc2626' }}
+                          />
                           <span>💊</span>
                           <span>{itName}</span>
                           <span style={{ fontSize: '10.5px', background: isSelected ? '#ffffff' : '#f1f5f9', padding: '1px 6px', borderRadius: '4px', color: '#64748b' }}>

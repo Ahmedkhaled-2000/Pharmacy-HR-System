@@ -7,6 +7,8 @@
  * 3. إرسال مباشر عبر خادم الواتساب السحابي/المحلي
  */
 
+import { resolveBranchThermalDetails } from './thermalReceiptEngine.js';
+
 // ── جدول محارف الترميز المعياري العالمي Code 128 (ISO/IEC 15417) ──────────────
 const CODE128_PATTERNS = [
   '212222', '222122', '222221', '121223', '121322', '131222', '122213', '122312', '132212', '221213', // 0-9
@@ -99,9 +101,11 @@ export function generateQrSvgString(_code) {
  * بناء صفحة HTML للفاتورة الرسمية بأعلى معايير الطباعة والـ PDF مع دعم الشعار والخط العربي الأصيل
  */
 export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, options = {}) {
-  const branchName = branch?.name || order.branch_name || 'صيدلية النور والشفاء';
-  const branchPhone = branch?.phone || '';
-  const branchAddress = branch?.address || '';
+  // دمج واستخراج بيانات وهوية وهواتف الفرع بدقة بالغة
+  const branchDetails = resolveBranchThermalDetails(branch, order, options);
+  const branchName = branchDetails.branchName || branch?.name || order.branch_name || 'صيدلية النور والشفاء';
+  const branchPhone = branchDetails.phonesFormatted || branch?.phone || '';
+  const branchAddress = branchDetails.branchAddress || branch?.address || '';
   const orderNo = order.order_number || order.orderNumber || '0000';
   const customerName = order.customer_name || order.customerName || 'عميلنا العزيز';
   const customerPhone = order.customer_phone || order.customerPhone || '';
@@ -115,8 +119,8 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, 
   const pickupDate = order.expected_pickup_date || order.expectedPickupDate || '';
   const pickupTime = order.expected_pickup_time || order.expectedPickupTime || '';
 
-  // جلب شعار الصيدلية من الإعدادات المحفوظة أو الفرع أو الخيارات
-  let logoUrl = options?.logoUrl || branch?.logoUrl || order?.logoUrl || '';
+  // جلب شعار الصيدلية من بيانات الفرع المحلولة أو الإعدادات المحفوظة أو الخيارات
+  let logoUrl = options?.logoUrl || branchDetails.logoUrl || branch?.logoUrl || order?.logoUrl || '';
   let slogan = options?.slogan || 'إدارة الصيدليات ورعاية العملاء - قسم توفير النواقص';
   let footerNote = options?.footerNote || 'نسعد دائماً بخدمتكم وتوفير كافة احتياجاتكم الدوائية والطبية بأعلى معايير الجودة والسرعة ✨';
 
@@ -632,13 +636,38 @@ export async function sendInvoicePdfViaWhatsApp({ order, branch, waServerUrl, cu
 
   const rawDate = order.expected_pickup_date || order.expectedPickupDate || '';
   const pickupDate = rawDate ? String(rawDate).split('T')[0] : '';
-  const targetSessionId = sessionId || (branch?.id ? `branch_${branch.id}` : (order?.branch_id ? `branch_${order.branch_id}` : 'hr_main'));
+  // تحديد جلسة الواتساب التابعة للفرع بدقة بالغة وبدون أي تكرار لبادئة branch_
+  let resolvedSessionId = sessionId;
+  if (!resolvedSessionId) {
+    const rawBranchId = branch?.sessionId || branch?.whatsappSessionId || branch?.id || order?.branch_id || order?.branchId || '';
+    if (rawBranchId) {
+      const cleanBranchId = String(rawBranchId).trim().replace(/^(branch_)+/i, '');
+      if (cleanBranchId && cleanBranchId !== 'default' && cleanBranchId !== 'main') {
+        resolvedSessionId = `branch_${cleanBranchId}`;
+      }
+    }
+  }
+  if (!resolvedSessionId && typeof localStorage !== 'undefined') {
+    try {
+      const u = JSON.parse(localStorage.getItem('outstock_user') || '{}');
+      const userBId = u?.branchId || u?.branch_id;
+      if (userBId) {
+        const clean = String(userBId).trim().replace(/^(branch_)+/i, '');
+        if (clean && clean !== 'default' && clean !== 'main') {
+          resolvedSessionId = `branch_${clean}`;
+        }
+      }
+    } catch (_) {}
+  }
+  const targetSessionId = resolvedSessionId || 'default';
 
   const caption = customMessage || `السلام عليكم ورحمة الله وبركاته،\nأهلاً بك أ/ *${cName}* 🌸\n\nمرفق لسيادتكم الفاتورة الرسمية / إيصال حجز وتوفير الدواء الخاص بكم من *${bName}* كملف PDF معتمد.\n\n📋 رقم الإيصال: *#${orderNo}*\n💵 المبلغ المتبقي عند الاستلام: *${remaining}*${pickupDate ? `\n📅 موعد الاستلام المتوقع: *${pickupDate}*` : ''}\n\nنسعد دائماً بخدمتكم وتوفير كافة احتياجاتكم الطبية ✨`;
 
   const pdfHtml = buildInvoicePdfHtml(order, branch, null, null, options);
 
-  const res = await fetch(`${waServerUrl}/api/send-message`, {
+  const strictSession = options?.strictSession !== undefined ? options.strictSession : true;
+
+  let res = await fetch(`${waServerUrl}/api/send-message`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -649,11 +678,40 @@ export async function sendInvoicePdfViaWhatsApp({ order, branch, waServerUrl, cu
       phone,
       message: caption,
       pdfHtml,
-      fileName: `فاتورة_دواء_${orderNo}.pdf`
+      fileName: `فاتورة_دواء_${orderNo}.pdf`,
+      strictSession
     })
   });
 
-  const data = await res.json().catch(() => ({}));
+  let data = await res.json().catch(() => ({}));
+  
+  // يتم التحويل لواتساب الإدارة العامة الاحتياطي (hr_main) فقط إذا لم يكن التوجيه صارماً للفرع
+  if (!strictSession && (!res.ok || !data.success) && targetSessionId !== 'hr_main') {
+    try {
+      console.warn(`[Invoice WA] Branch session (${targetSessionId}) unavailable. Retrying with hr_main backup...`);
+      const fallbackRes = await fetch(`${waServerUrl}/api/send-message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'bypass-tunnel-reminder': 'true'
+        },
+        body: JSON.stringify({
+          sessionId: 'hr_main',
+          phone,
+          message: caption,
+          pdfHtml,
+          fileName: `فاتورة_دواء_${orderNo}.pdf`
+        })
+      });
+      const fallbackData = await fallbackRes.json().catch(() => ({}));
+      if (fallbackRes.ok && fallbackData.success) {
+        return { ...fallbackData, usedFallback: true };
+      }
+    } catch (fbErr) {
+      console.warn('[Invoice WA] Fallback attempt error:', fbErr.message);
+    }
+  }
+
   if (!res.ok || !data.success) {
     throw new Error(data.error || 'تعذر إرسال الفاتورة عبر خادم الواتساب');
   }

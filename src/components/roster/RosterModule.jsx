@@ -4,7 +4,7 @@ import RosterPreviewModal from './RosterPreviewModal';
 import EmployeeRosterEditModal from '../branches/EmployeeRosterEditModal';
 import { getEmpDisplayName, isEmployeeActive, getRealTodayStr } from '../../utils/formatters';
 import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
-import { getResolvedEmployeeRoster } from '../../utils/rosterEngine';
+import { getResolvedEmployeeRoster, normalizeSchedule as engineNormalizeSchedule } from '../../utils/rosterEngine';
 
 export const DEFAULT_ROSTER_SCHEDULE = {
   'السبت': { type: 'shift', start: '08:00', end: '16:00' },
@@ -17,64 +17,8 @@ export const DEFAULT_ROSTER_SCHEDULE = {
 };
 
 export function normalizeSchedule(rawSchedule) {
-  if (!rawSchedule || typeof rawSchedule !== 'object') return DEFAULT_ROSTER_SCHEDULE;
-  
-  const normalized = { ...DEFAULT_ROSTER_SCHEDULE };
-  
-  const dayKeyMap = {
-    'saturday': 'السبت',
-    'sunday': 'الأحد',
-    'monday': 'الاثنين',
-    'tuesday': 'الثلاثاء',
-    'wednesday': 'الأربعاء',
-    'thursday': 'الخميس',
-    'friday': 'الجمعة',
-    'السبت': 'السبت',
-    'الأحد': 'الأحد',
-    'الاحد': 'الأحد',
-    'الإثنين': 'الاثنين',
-    'الاثنين': 'الاثنين',
-    'الثلاثاء': 'الثلاثاء',
-    'الأربعاء': 'الأربعاء',
-    'الاربعاء': 'الأربعاء',
-    'الخميس': 'الخميس',
-    'الجمعة': 'الجمعة',
-    '0': 'الأحد',
-    '1': 'الاثنين',
-    '2': 'الثلاثاء',
-    '3': 'الأربعاء',
-    '4': 'الخميس',
-    '5': 'الجمعة',
-    '6': 'السبت',
-    'day_0': 'الأحد',
-    'day_1': 'الاثنين',
-    'day_2': 'الثلاثاء',
-    'day_3': 'الأربعاء',
-    'day_4': 'الخميس',
-    'day_5': 'الجمعة',
-    'day_6': 'السبت'
-  };
-
-  Object.entries(rawSchedule).forEach(([key, val]) => {
-    const rawKey = String(key).trim();
-    const cleanKey = rawKey.toLowerCase();
-    const mappedDay = dayKeyMap[cleanKey] || dayKeyMap[key];
-    const isIso = /^\d{4}-\d{2}-\d{2}$/.test(rawKey);
-    const targetKey = mappedDay || (isIso ? rawKey : null);
-
-    if (targetKey && val && typeof val === 'object') {
-      const isOff = val.type === 'off' || val.isOff === true || val.type === 'راحة';
-      normalized[targetKey] = {
-        ...val,
-        type: isOff ? 'off' : 'shift',
-        isOff,
-        start: isOff ? '' : (val.start || val.checkIn || '08:00'),
-        end: isOff ? '' : (val.end || val.checkOut || '16:00')
-      };
-    }
-  });
-
-  return normalized;
+  const norm = engineNormalizeSchedule(rawSchedule);
+  return norm || DEFAULT_ROSTER_SCHEDULE;
 }
 
 export { getResolvedEmployeeRoster };

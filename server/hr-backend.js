@@ -64,19 +64,28 @@ async function syncBranchesToOutstock(branches, dbInstance) {
     if (!b || !b.id || !b.name) continue;
     try {
       const bPhone = b.phone || (Array.isArray(b.phones) && b.phones[0]?.number) || null;
+      let bWhatsapp = b.whatsappPhone || b.whatsapp_phone || null;
+      if (!bWhatsapp && Array.isArray(b.phones)) {
+        const foundWa = b.phones.find(p => p.type === 'whatsapp' || (p.number && p.number.replace(/\D/g, '').startsWith('01') && p.number.replace(/\D/g, '').length === 11));
+        if (foundWa) bWhatsapp = foundWa.number;
+      }
+      if (!bWhatsapp && bPhone && String(bPhone).replace(/\D/g, '').startsWith('01') && String(bPhone).replace(/\D/g, '').length === 11) {
+        bWhatsapp = bPhone;
+      }
       const bCode = b.branchCode || b.code || b.id;
 
-      // مزامنة الدليل فقط (الاسم، الكود، الهاتف، العنوان) دون المساس ببيانات تسجيل الدخول المستقلة للنواقص
+      // مزامنة الدليل فقط (الاسم، الكود، الهاتف، رقم الواتساب المعتمد، العنوان)
       await dbInstance.query(`
-        INSERT INTO public.outstock_branches (id, name, code, phone, address, is_active, updated_at)
-        VALUES ($1, $2, $3, $4, $5, true, CURRENT_TIMESTAMP)
+        INSERT INTO public.outstock_branches (id, name, code, phone, whatsapp_phone, address, is_active, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, true, CURRENT_TIMESTAMP)
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           code = EXCLUDED.code,
-          phone = COALESCE(EXCLUDED.phone, public.outstock_branches.phone),
-          address = COALESCE(EXCLUDED.address, public.outstock_branches.address),
+          phone = CASE WHEN public.outstock_branches.phone IS NOT NULL AND public.outstock_branches.phone <> '' THEN public.outstock_branches.phone ELSE EXCLUDED.phone END,
+          whatsapp_phone = CASE WHEN public.outstock_branches.whatsapp_phone IS NOT NULL AND public.outstock_branches.whatsapp_phone <> '' THEN public.outstock_branches.whatsapp_phone ELSE EXCLUDED.whatsapp_phone END,
+          address = CASE WHEN public.outstock_branches.address IS NOT NULL AND public.outstock_branches.address <> '' THEN public.outstock_branches.address ELSE EXCLUDED.address END,
           updated_at = CURRENT_TIMESTAMP
-      `, [String(b.id), String(b.name), bCode, bPhone, b.address || null]);
+      `, [String(b.id), String(b.name), bCode, bPhone, bWhatsapp, b.address || null]);
     } catch (err) {
       console.warn(`[Sync Branch to Outstock Warn] Branch ${b.name}:`, err.message);
     }
@@ -581,6 +590,10 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
       stateValue._deletedIds = stateValue._deletedIds.slice(-500);
     }
 
+    if (Array.isArray(stateValue.approvalRules) && !stateValue._approvalRulesUpdatedAt) {
+      stateValue._approvalRulesUpdatedAt = new Date().toISOString();
+    }
+
     // حماية ضد المسح العرضي للكوادر والموظفين (Accidental Wipe Protection)
     const incomingEmpCount = Array.isArray(stateValue?.employees) ? stateValue.employees.length : 0;
     const isExplicitReset = Boolean(stateValue?._systemResetToken);
@@ -707,12 +720,39 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
 
     // 🛡️ COMPLETED SHIFTS PRESERVATION GUARD - حارس الورديات التاريخية والمكتملة
     // يضمن عدم مسح أي وردية مكتملة مخزنة مسبقاً إذا أرسل العميل مصفوفة ناقصة أو قديمة
+    // مع احترام شواهد القبور _deletedIds ومنع استرجاع أي وردية مكررة لنفس الموظف في نفس اليوم نهائياً
     if (!isExplicitReset && Array.isArray(stateValue.shifts)) {
       try {
         const existingForCompleted = await getSettingsFromStorage(key);
         if (Array.isArray(existingForCompleted?.shifts) && existingForCompleted.shifts.length > 0) {
+          const deletedIdsSet = new Set((stateValue._deletedIds || []).map(String));
           const incomingShiftIds = new Set(stateValue.shifts.map(s => s && s.id).filter(Boolean));
-          const missingShifts = existingForCompleted.shifts.filter(s => s && s.id && !incomingShiftIds.has(s.id));
+
+          // خريطة أيام الموظفين القائمة في البيانات الجديدة لمنع تدبيل الورديات لنفس الموظف في نفس اليوم
+          const incomingEmpDayMap = new Set();
+          stateValue.shifts.forEach(s => {
+            if (s && s.date) {
+              if (s.employeeId) incomingEmpDayMap.add(`${String(s.employeeId)}_${s.date}`);
+              if (s.employeeCode) incomingEmpDayMap.add(`${String(s.employeeCode)}_${s.date}`);
+            }
+          });
+
+          const missingShifts = existingForCompleted.shifts.filter(s => {
+            if (!s || !s.id) return false;
+            const sidStr = String(s.id);
+            if (incomingShiftIds.has(s.id) || incomingShiftIds.has(sidStr)) return false;
+            if (deletedIdsSet.has(sidStr) || deletedIdsSet.has(sidStr.replace(/^(shift_|punch_)/, ''))) return false;
+
+            // إذا كان الموظف لديه وردية بالفعل في ذلك اليوم، فإن هذه الوردية مكررة ومحذوفة صراحة -> لا نسترجعها أبداً
+            const empDayKey1 = s.employeeId ? `${String(s.employeeId)}_${s.date}` : null;
+            const empDayKey2 = s.employeeCode ? `${String(s.employeeCode)}_${s.date}` : null;
+            if ((empDayKey1 && incomingEmpDayMap.has(empDayKey1)) || (empDayKey2 && incomingEmpDayMap.has(empDayKey2))) {
+              return false;
+            }
+
+            return true;
+          });
+
           if (missingShifts.length > 0) {
             stateValue.shifts = [...stateValue.shifts, ...missingShifts];
             console.log(`[Shifts Guard] 🛡️ تم تأمين ودمج ${missingShifts.length} وردية مكتملة تاريخية لمنع فقدانها من التزامن.`);
@@ -932,6 +972,11 @@ app.post('/api/settings/slice', async (req, res) => {
     // تحديث الجزء المطلوب فقط في الحالة
     existing[sliceKey] = sliceValue;
 
+    // إذا كان التحديث يخص قواعد الموافقات، نحدث الطابع الزمني المرجعي
+    if (sliceKey === 'approvalRules') {
+      existing._approvalRulesUpdatedAt = new Date().toISOString();
+    }
+
     // إذا كان التحديث يخص الشفتات النشطة، نضع راية kiosk_slice لمنع الحارس من إعادة المحذوفات
     if (sliceKey === 'activeShifts') {
       existing._punchSource = 'kiosk_slice';
@@ -1009,9 +1054,8 @@ app.post('/api/punches/record', async (req, res) => {
     let closedRecord = null;
     let addedPauseMs = 0;
 
+    // ── 🧠 Smart Punch Direction Engine: فحص استباقي لمنع تسجيل حضور مكرر وتحويله لانصراف تلقائياً ──
     if (actionType === 'check_in' || actionType === 'start_shift') {
-      // ── تسجيل حضور ذري ───────────────────────────────────────────
-      // إذا كان الموظف لديه وردية نشطة بالفعل خلال آخر 24 ساعة ولم يغلقها بعد → تنبيه للكشك
       let existingActive = null;
       for (const k of possibleKeys) {
         if (currentActiveShifts[k]) {
@@ -1019,20 +1063,37 @@ app.post('/api/punches/record', async (req, res) => {
           break;
         }
       }
-      if (existingActive) {
-        const sDate = existingActive.date || date || egyptNowDate;
-        const sTime = (existingActive.timeIn || '09:00').slice(0, 5);
-        const elapsedH = calculatePunchMinutesDiff(sDate, sTime, date || egyptNowDate, time || egyptNowTime) / 60;
-        if (elapsedH >= 0 && elapsedH < 24) {
+      const openShiftRecord = currentShifts.find(s =>
+        s && (possibleKeys.has(String(s.employeeId)) || (s.employeeCode && possibleKeys.has(String(s.employeeCode)))) &&
+        (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === '-' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive)
+      );
+
+      const candidateOpen = existingActive || openShiftRecord;
+      if (candidateOpen) {
+        const sDate = candidateOpen.date || date || egyptNowDate;
+        const sTime = (candidateOpen.timeIn || '09:00').slice(0, 5);
+        const pDate = date || egyptNowDate;
+        const pTime = time || egyptNowTime;
+        const diffMinutes = calculatePunchMinutesDiff(sDate, sTime, pDate, pTime);
+        const elapsedH = diffMinutes / 60;
+
+        if (diffMinutes >= 0 && diffMinutes < 15) {
+          // بصمة حضور مكررة خلال أقل من 15 دقيقة → منع التكرار
           return res.status(409).json({
             success: false,
             alreadyCheckedIn: true,
-            existingShift: existingActive,
-            message: 'الموظف لديه وردية نشطة بالفعل لم يتم تسجيل انصرافها بعد'
+            existingShift: candidateOpen,
+            message: 'الموظف لديه وردية نشطة بالفعل تم تسجيل حضورها قبل قليل'
           });
+        } else if (diffMinutes >= 15 && elapsedH < 36) {
+          // الموظف لديه وردية مفتوحة مضى عليها أكثر من 15 دقيقة → تحويل ذكي فوري لانصراف
+          console.log(`[SMART-DIRECTION] Auto-converted record punch for ${employeeId} (${empObj?.name || ''}) from ${actionType} to check_out (Open shift at ${sDate} ${sTime}, elapsed: ${Math.round(diffMinutes)} mins)`);
+          actionType = 'check_out';
         }
       }
+    }
 
+    if (actionType === 'check_in' || actionType === 'start_shift') {
       // إدخال الوردية الجديدة في activeShifts بكافة المفاتيح
       const newShiftData = shiftData || {
         shiftId: shiftId || `shift_${employeeId}_${Date.now()}`,
@@ -1344,6 +1405,83 @@ app.get('/api/system/time-check', (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ⚡ GET /api/punches/probe-status/:employeeId - استعلام فوري ذري عن حالة وردية الموظف
+// يحل أي التباس أو عدم مزامنة في ذاكرة الكشك، ويحدد الاتجاه الصحيح للبصمة (حضور أو انصراف)
+// ══════════════════════════════════════════════════════════════════════════════
+app.get('/api/punches/probe-status/:employeeId', async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const storageKey = req.query.key || STORAGE_KEY;
+    const existing = await getSettingsFromStorage(storageKey);
+    if (!existing || typeof existing !== 'object') {
+      return res.status(500).json({ success: false, error: 'Storage unavailable' });
+    }
+
+    const empIdStr = String(employeeId).trim();
+    const employeesList = Array.isArray(existing.employees) ? existing.employees : [];
+    const empObj = employeesList.find(e => String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr));
+    const possibleKeys = new Set([
+      employeeId,
+      empIdStr,
+      empObj?.id ? String(empObj.id) : null,
+      empObj?.code ? String(empObj.code) : null
+    ].filter(Boolean));
+
+    const activeShifts = existing.activeShifts || {};
+    let activeShift = null;
+    for (const k of possibleKeys) {
+      if (activeShifts[k]) {
+        activeShift = activeShifts[k];
+        break;
+      }
+    }
+    if (!activeShift) {
+      for (const [k, v] of Object.entries(activeShifts)) {
+        if (v && (possibleKeys.has(String(v.employeeId)) || possibleKeys.has(String(v.employeeCode)))) {
+          activeShift = v;
+          break;
+        }
+      }
+    }
+
+    const shifts = Array.isArray(existing.shifts) ? existing.shifts : [];
+    const openShiftRecord = shifts.find(s => s &&
+      (possibleKeys.has(String(s.employeeId)) || (s.employeeCode && possibleKeys.has(String(s.employeeCode)))) &&
+      (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === '-' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive)
+    ) || null;
+
+    const hasOpenShift = Boolean(activeShift || openShiftRecord);
+    const effectiveShift = activeShift || openShiftRecord;
+    const isPaused = Boolean(effectiveShift?.isPaused || effectiveShift?.isOnBreak);
+
+    let recommendedAction = 'shift_start';
+    if (hasOpenShift) {
+      if (isPaused) {
+        recommendedAction = 'break_end';
+      } else {
+        recommendedAction = 'shift_end';
+      }
+    }
+
+    res.json({
+      success: true,
+      employeeId: empObj?.id || employeeId,
+      employeeCode: empObj?.code || '',
+      employeeName: empObj?.name || '',
+      hasOpenShift,
+      recommendedAction,
+      isPaused,
+      activeShift,
+      openShiftRecord,
+      serverTime: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('[API GET /punches/probe-status Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // 🚀 POST /api/punches/sync-outbox - مزامنة دفعات بصمات الكشك المعلقة أوفلاين
 // تطبق الحركات بالتسلسل الزمني الأصلي، تمنع التكرار (Idempotency)، ولا تمس إعدادات الإدارة
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1391,11 +1529,39 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
         empObj?.code ? String(empObj.code) : null
       ].filter(Boolean));
 
-      const actionType = p.actionType || 'check_in';
+      let actionType = p.actionType || 'check_in';
       const punchDate = p.punchDate || p.date || todayStr;
       const punchTime = p.punchTime || p.time || nowTimeStr;
       const shiftId = p.shiftId || `shift_${empIdStr}_${p.deviceLocalEpoch || Date.now()}`;
       const clientPunchId = p.clientPunchId || `${empIdStr}_${actionType}_${punchDate}_${punchTime}`;
+
+      // ── 🧠 Smart Direction Engine في مزامنة الأوفلاين ──
+      // إذا كانت البصمة حضور لكن الموظف لديه وردية مفتوحة سابقة مضى عليها أكثر من 15 دقيقة -> تحويل تلقائي لانصراف!
+      if (actionType === 'check_in' || actionType === 'start_shift') {
+        const openShift = currentShifts.find(s => s &&
+          (possibleKeys.has(String(s.employeeId)) || (s.employeeCode && possibleKeys.has(String(s.employeeCode)))) &&
+          (!s.timeOut || s.timeOut === '' || s.timeOut === '—' || s.timeOut === '-' || s.timeOut === 'قيد العمل الآن' || s.isLiveActive)
+        );
+        let activeObj = null;
+        for (const k of possibleKeys) {
+          if (currentActiveShifts[k]) {
+            activeObj = currentActiveShifts[k];
+            break;
+          }
+        }
+        const openRef = openShift || activeObj;
+        if (openRef) {
+          const sDate = openRef.date || punchDate;
+          const sTime = (openRef.timeIn || '09:00').slice(0, 5);
+          const diffMin = calculatePunchMinutesDiff(sDate, sTime, punchDate, punchTime);
+          const diffH = diffMin / 60;
+          if (diffMin >= 15 && diffH < 36) {
+            console.log(`[SMART-DIRECTION:OUTBOX] Auto-converting check_in to check_out for ${empIdStr} (${empObj?.name || ''}). Open shift started at ${sDate} ${sTime}, elapsed: ${Math.round(diffMin)} mins`);
+            actionType = 'check_out';
+            p.effectiveActionType = 'check_out';
+          }
+        }
+      }
 
       // فحص هل البصمة معالجة مسبقاً بنفس clientPunchId أو shiftId؟
       const alreadyProcessed = currentShifts.some(s =>
@@ -1463,9 +1629,10 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
             createdAt: new Date(p.deviceLocalEpoch || Date.now()).toISOString()
           };
 
+          // إضافة السجل بحذر دون حذف أي ورديات سابقة إطلاقاً
           currentShifts = [
             newShiftRecord,
-            ...currentShifts.filter(s => !(possibleKeys.has(String(s.employeeId)) && s.date === punchDate && (!s.timeOut || s.timeOut === '')))
+            ...currentShifts
           ];
         }
       } else if (actionType === 'break_start' || actionType === 'pause_shift') {
@@ -1763,7 +1930,7 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
         employeeId: punchEmpId,
         empIdStr: String(punchEmpId),
         branchId: sp.branchId || '',
-        actionType: sp.actionType || 'check_out',
+        actionType: sp.effectiveActionType || sp.actionType || 'check_out',
         date: sp.punchDate || sp.date || todayStr,
         time: sp.punchTime || sp.time || now.slice(11, 16),
         activeShifts: currentActiveShifts,
@@ -1791,7 +1958,7 @@ app.post('/api/punches/sync-outbox', async (req, res) => {
         if (punchEpoch >= twoHoursAgoEpoch) {
           const punchEmpId = sp.employeeId || sp.employeeCode;
           const empObj = employeesList.find(e => String(e.id) === String(punchEmpId) || (e.code && String(e.code) === String(punchEmpId)));
-          const normAction = sp.actionType || 'check_in';
+          const normAction = sp.effectiveActionType || sp.actionType || 'check_in';
           const recShift = currentShifts.find(s => String(s.employeeId) === String(punchEmpId) || (sp.employeeCode && String(s.employeeCode) === String(sp.employeeCode)));
 
           sendUniversalAttendanceWhatsAppAlert({
@@ -3142,6 +3309,12 @@ app.post('/api/auth/owners/manage', async (req, res) => {
         ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {}),
         updatedAt: nowIso
       };
+      if (owners[idx].isPrimaryOwner || owners[idx].username === 'saif') {
+        if (password) org.ownerPassword = String(password).trim();
+        if (username) org.ownerUsername = String(username).trim().toLowerCase();
+        if (fullName) org.ownerFullName = fullName;
+        if (phone !== undefined) org.ownerPhone = phone;
+      }
     } else if (action === 'delete') {
       const targetId = ownerId || ownerData?.id;
       const targetOwner = owners.find(o => o && (o.id === targetId || o.username === targetId));

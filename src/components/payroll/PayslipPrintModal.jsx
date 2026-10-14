@@ -2,7 +2,7 @@ import { getRealTodayStr } from '../../utils/timeEngine';
 import React, { useState, useEffect, useRef } from 'react';
 import { fmt, arabicWeekday, AR_MONTHS, getEmployeeApprovedLeaves } from '../../utils/formatters';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
-import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics } from '../../utils/latePenaltyEngine';
+import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics, isVariableScheduleEmployee } from '../../utils/latePenaltyEngine';
 import { triggerDirectPrint, generateOfficialPayslipHTML } from '../../utils/printHelper';
 import { getCycleDateRange } from '../../utils/periodEngine';
 import { computeEmployeeLoanDeductionsForPeriod } from '../../utils/loansEngine';
@@ -301,8 +301,9 @@ export default function PayslipPrintModal({
     ...unmappedReqItems
   ];
 
-  // 3. Late Incidents (التأخيرات)
-  const empLateIncidents = (state?.lateIncidents || []).filter(
+  // 3. Late Incidents (التأخيرات) - لا تنطبق على موظفي المواعيد المتغيرة
+  const isFlexibleEmp = isVariableScheduleEmployee(emp);
+  const empLateIncidents = isFlexibleEmp ? [] : (state?.lateIncidents || []).filter(
     (inc) =>
       String(inc.employeeId) === String(emp.id) &&
       inc.status !== 'cancelled' &&
@@ -348,7 +349,6 @@ export default function PayslipPrintModal({
   const empLoans = summary.loansBreakdown || loansCalc.items || [];
 
   // 5. Absence deductions (الغياب) - لا تنطبق على موظفي المواعيد المتغيرة
-  const isFlexibleEmp = Boolean(emp?.noMonthlySchedule);
   const absenceDaysCount = isFlexibleEmp ? 0 : (summary.absenceDaysCount || 0);
   const absenceDeductionTotal = isFlexibleEmp ? 0 : (summary.absenceDeduction || 0);
   const absenceItem = absenceDaysCount > 0 ? [{

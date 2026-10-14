@@ -209,6 +209,9 @@ export function getFormattedRequestBadge(type, leaveType, targetAction, fullReq 
   if (cleanType === 'emergency_cover' || cleanType === 'طلب تغطية طوارئ') {
     return <span className="badge" style={{ background: '#e11d48', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🚨 طلب تغطية طوارئ</span>;
   }
+  if (cleanType === 'device_punch_mapping' || cleanType === 'تعديل بصمه جهاز البصمه' || cleanType === 'تعديل بصمة جهاز البصمة' || cleanType === 'device_punch_edit') {
+    return <span className="badge" style={{ background: '#6366f1', color: '#fff', fontWeight: 800, padding: '4px 10px', borderRadius: '6px', border: '1px solid #4f46e5' }}>📟 تعديل بصمة جهاز البصمة</span>;
+  }
 
 
   // إذا كان النص يحتوي على حروف إنجليزية ولم يطابق ما سبق
@@ -275,6 +278,10 @@ export default function RequestsModule({
   const [customBreakNotes, setCustomBreakNotes] = useState('');
   const [isEditingBreak, setIsEditingBreak] = useState(false);
 
+  // Device Punch Mapping (تعديل بصمة جهاز البصمة - الكشف الذكي)
+  const [mappingSelectedEmpId, setMappingSelectedEmpId] = useState('');
+  const [mappingActionType, setMappingActionType] = useState('auto');
+
   const [showHiddenAdminRequests, setShowHiddenAdminRequests] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -322,6 +329,10 @@ export default function RequestsModule({
       setCustomBreakHours(String(initialBreak));
       setCustomBreakNotes(req.adminNotes || req.notes || '');
       setIsEditingBreak(false);
+    }
+    if (req && (req.type === 'device_punch_mapping' || req.type === 'تعديل بصمه جهاز البصمه' || req.type === 'تعديل بصمة جهاز البصمة')) {
+      setMappingSelectedEmpId(req.suggestedEmployeeId || req.employeeId || '');
+      setMappingActionType(req.targetAction || req.actionType || 'auto');
     }
   };
 
@@ -623,6 +634,7 @@ export default function RequestsModule({
     roster_edit: 'تعديلات الجداول الشهرية',
     shift_adjustment: 'تعديلات الشفتات والمواعيد',
     biometric: 'اعتمادات البصمة والكشك (AI)',
+    device_punch_mapping: 'تعديل بصمه جهاز البصمه',
     expense: 'فواتير ومصروفات الفروع',
     comp_off: 'إجازات بدل الراحة',
     recruitment_need: 'طلبات احتياج التوظيف للفروع',
@@ -634,6 +646,10 @@ export default function RequestsModule({
     all: {
       title: '📋 مركز إدارة طلبات الموظفين الموحد',
       desc: 'معاينة كافة الطلبات، الإجازات، الأذون، السلف، الأدوية، وتبديل الورديات واتخاذ قرارات الموافقة المزدوجة'
+    },
+    device_punch_mapping: {
+      title: '📟 إدارة طلبات تعديل بصمة جهاز البصمة (الكشف الذكي)',
+      desc: 'معاينة البصمات غير المعرّفة الواردة من أجهزة البصمة وربط أرقام الـ PIN بالموظفين وتصحيح الورديات تلقائياً'
     },
     recruitment_need: {
       title: '👥 إدارة طلبات احتياج التوظيف للفروع',
@@ -770,7 +786,9 @@ export default function RequestsModule({
     } else if (type === 'penalty_objection') {
       return r.type === 'penalty_objection' || r.type === 'objection' || Boolean(r.penaltyId) || Boolean(r.objection);
     } else if (type === 'biometric') {
-      return r.type === 'biometric_verification' || r.type === 'biometric_registration' || r.type === 'biometric_reset' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
+      return r.type === 'biometric_verification' || r.type === 'biometric_registration' || r.type === 'biometric_reset' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد' || r.type === 'device_punch_mapping' || r.type === 'تعديل بصمه جهاز البصمه';
+    } else if (type === 'device_punch_mapping' || type === 'تعديل بصمه جهاز البصمه') {
+      return r.type === 'device_punch_mapping' || r.type === 'تعديل بصمه جهاز البصمه' || r.type === 'تعديل بصمة جهاز البصمة' || r.type === 'device_punch_edit';
     } else if (type === 'shift_adjustment') {
       return r.type === 'shift_adjustment';
     } else if (type === 'comp_off') {
@@ -1195,6 +1213,12 @@ export default function RequestsModule({
         approvedTargetReq.adminNotes = customLoanData?.adminNotes || approvedTargetReq.adminNotes || '';
       }
 
+      // Apply device punch mapping data
+      if (customLoanData && (approvedTargetReq.type === 'device_punch_mapping' || approvedTargetReq.type === 'تعديل بصمه جهاز البصمه' || approvedTargetReq.type === 'تعديل بصمة جهاز البصمة')) {
+        if (customLoanData.mappingEmpId) approvedTargetReq.selectedEmployeeId = customLoanData.mappingEmpId;
+        if (customLoanData.mappingAction) approvedTargetReq.actionType = customLoanData.mappingAction;
+      }
+
       let updatedRequests = [...(state.requests || [])];
       const rIdx = updatedRequests.findIndex((r) => r.id === reqId);
       if (rIdx >= 0) {
@@ -1210,10 +1234,25 @@ export default function RequestsModule({
       let updatedActiveShifts = { ...(state.activeShifts || {}) };
 
       // 0. Overtime Request Approval
-      if (approvedTargetReq.type === 'overtime') {
-        const overtimeHrs = parseFloat(approvedTargetReq.hours) || 0;
+      if (approvedTargetReq.type === 'overtime' || approvedTargetReq.type === 'extra_hours' || approvedTargetReq.type === 'طلب اضافي' || approvedTargetReq.type === 'إضافي') {
+        const targetEmp = (state.employees || []).find(e => 
+          e && (String(e.id) === String(approvedTargetReq.employeeId) || (approvedTargetReq.employeeCode && String(e.code) === String(approvedTargetReq.employeeCode)))
+        );
+        const tEmpId = String(approvedTargetReq.employeeId || targetEmp?.id || '');
+        const tEmpCode = String(approvedTargetReq.employeeCode || targetEmp?.code || '');
+
         updatedShifts = updatedShifts.map((s) => {
-          if (s.id === approvedTargetReq.shiftId || (String(s.employeeId) === String(approvedTargetReq.employeeId) && s.date === approvedTargetReq.date)) {
+          const sEmpId = String(s.employeeId || '');
+          const sEmpCode = String(s.employeeCode || '');
+          const isEmpMatch = (
+            (tEmpId && (sEmpId === tEmpId || sEmpCode === tEmpId)) ||
+            (tEmpCode && (sEmpId === tEmpCode || sEmpCode === tEmpCode))
+          );
+          const reqDate = approvedTargetReq.date || approvedTargetReq.targetDate || approvedTargetReq.details?.shiftDate;
+          const isShiftMatch = (s.id && (s.id === approvedTargetReq.shiftId || s.id === approvedTargetReq.id)) || (isEmpMatch && reqDate && s.date === reqDate);
+
+          if (isShiftMatch) {
+            const overtimeHrs = parseFloat(approvedTargetReq.hours || approvedTargetReq.overtimeHours || approvedTargetReq.extraHours || approvedTargetReq.amount) || parseFloat(s.overtimeHours) || 0;
             const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || s.hours);
             const cleanExistingNotes = (s.notes || s.note || '')
               .replace(/⏳?\s*إضافي قيد الاعتماد\s*(\(\+?[0-9.]+\s*س\))?/g, '')
@@ -1225,8 +1264,11 @@ export default function RequestsModule({
             return {
               ...s,
               overtimeStatus: 'approved',
+              isOvertimeApproved: true,
+              rejectedOvertime: false,
               overtimeHours: overtimeHrs,
               adminApproved: true,
+              branchApproved: true,
               note: newNote,
               notes: newNote
             };
@@ -1346,14 +1388,43 @@ export default function RequestsModule({
           const overtimeStatus = overtimeHours > 0 ? 'approved' : 'none';
 
           const targetShiftId = dayItem.shiftId || (daysToProcess.length === 1 ? approvedTargetReq.shiftId : null);
-          const existingShiftIndex = updatedShifts.findIndex(s => 
-            (targetShiftId && s.id === targetShiftId) ||
-            ((String(s.employeeId) === String(approvedTargetReq.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
-            s.date === punchDate && (!s.timeOut || s.timeOut === '—' || targetShiftId))
+          const empMatch = (s) => (
+            Boolean(s && (
+              String(s.employeeId) === String(approvedTargetReq.employeeId) ||
+              (emp?.id && String(s.employeeId) === String(emp.id)) ||
+              (emp?.code && (String(s.employeeCode) === String(emp.code) || String(s.employeeId) === String(emp.code))) ||
+              (approvedTargetReq.employeeCode && String(s.employeeCode) === String(approvedTargetReq.employeeCode))
+            ))
           );
+
+          let existingShiftIndex = -1;
+          // 1. البحث بالمعرف المباشر للوردية إن وُجد
+          if (targetShiftId) {
+            existingShiftIndex = updatedShifts.findIndex(s => s && s.id === targetShiftId);
+          }
+          // 2. البحث عن أي وردية مفتوحة/نشطة للموظف في تاريخ الطلب
+          if (existingShiftIndex < 0) {
+            existingShiftIndex = updatedShifts.findIndex(s =>
+              empMatch(s) &&
+              s.date === punchDate &&
+              (!s.timeOut || s.timeOut === '—' || s.isLiveActive || s.status === 'active') &&
+              s.status !== 'cancelled' && !s.isCancelled
+            );
+          }
+          // 3. البحث عن أي وردية قائمة للموظف في تاريخ الطلب (بيومترية أو سابقة) لتعديلها ومنع تكرار الورديات نهائياً
+          if (existingShiftIndex < 0) {
+            existingShiftIndex = updatedShifts.findIndex(s =>
+              empMatch(s) &&
+              s.date === punchDate &&
+              s.status !== 'cancelled' && !s.isCancelled
+            );
+          }
+
+          let savedShiftId = '';
 
           if (existingShiftIndex >= 0) {
             const existingShift = updatedShifts[existingShiftIndex];
+            savedShiftId = existingShift.id;
             const hasExistingTimeOut = existingShift.timeOut && existingShift.timeOut !== '—';
 
             if (isCheckInOnly && !hasExistingTimeOut) {
@@ -1412,8 +1483,9 @@ export default function RequestsModule({
               };
             }
           } else {
+            savedShiftId = `shift_manual_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
             updatedShifts.unshift({
-              id: `shift_manual_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+              id: savedShiftId,
               employeeId: approvedTargetReq.employeeId,
               employeeCode: emp?.code || approvedTargetReq.employeeCode || '',
               employeeName: emp?.name || approvedTargetReq.employeeName || 'موظف',
@@ -1441,6 +1513,17 @@ export default function RequestsModule({
                 : `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString()
+            });
+          }
+
+          // 🛡️ صمام إزالة التكرار القهري (Strict Deduplication Guard):
+          // ضمان وجود وردية واحدة فقط للموظف في تاريخ البصمة وحذف أي ورديات مكررة أخرى
+          if (savedShiftId) {
+            updatedShifts = updatedShifts.filter(s => {
+              if (!s) return false;
+              if (s.id === savedShiftId) return true;
+              const isDuplicateSameDay = empMatch(s) && s.date === punchDate;
+              return !isDuplicateSameDay;
             });
           }
 
@@ -1517,13 +1600,72 @@ export default function RequestsModule({
 
         const reqTime = approvedTargetReq.time || (approvedTargetReq.createdAt ? approvedTargetReq.createdAt.slice(11, 16) : '');
 
-        // If this is an approved checkout, clean from activeShifts
-        if (actionType === 'shift_end' && updatedActiveShifts) {
-          delete updatedActiveShifts[empId];
-          delete updatedActiveShifts[String(empId)];
-          if (approvedTargetReq.employeeCode) {
-            delete updatedActiveShifts[approvedTargetReq.employeeCode];
-            delete updatedActiveShifts[String(approvedTargetReq.employeeCode)];
+        const reqEpoch = approvedTargetReq.epoch || (approvedTargetReq.createdAt ? new Date(approvedTargetReq.createdAt).getTime() : Date.now());
+
+        // 1. تحديث activeShifts بدقة بالغة وفقاً لنوع الإجراء (حضور، انصراف، بدء استراحة، إنهاء استراحة)
+        if (actionType === 'shift_end' || actionType === 'check_out') {
+          if (updatedActiveShifts) {
+            delete updatedActiveShifts[empId];
+            delete updatedActiveShifts[String(empId)];
+            if (approvedTargetReq.employeeCode) {
+              delete updatedActiveShifts[approvedTargetReq.employeeCode];
+              delete updatedActiveShifts[String(approvedTargetReq.employeeCode)];
+            }
+          }
+        } else if (actionType === 'break_start' || actionType === 'pause_shift') {
+          if (updatedActiveShifts) {
+            const active = updatedActiveShifts[empId] || updatedActiveShifts[String(empId)] ||
+              (approvedTargetReq.employeeCode ? updatedActiveShifts[approvedTargetReq.employeeCode] : null);
+            if (active) {
+              const paused = {
+                ...active,
+                isPaused: true,
+                isOnBreak: true,
+                breakStartTime: reqTime,
+                pauseStartEpoch: reqEpoch,
+                updatedAt: Date.now()
+              };
+              updatedActiveShifts[empId] = paused;
+              updatedActiveShifts[String(empId)] = paused;
+              if (approvedTargetReq.employeeCode) {
+                updatedActiveShifts[approvedTargetReq.employeeCode] = paused;
+                updatedActiveShifts[String(approvedTargetReq.employeeCode)] = paused;
+              }
+            }
+          }
+        } else if (actionType === 'break_end' || actionType === 'resume_shift') {
+          if (updatedActiveShifts) {
+            const active = updatedActiveShifts[empId] || updatedActiveShifts[String(empId)] ||
+              (approvedTargetReq.employeeCode ? updatedActiveShifts[approvedTargetReq.employeeCode] : null);
+            if (active) {
+              let addedPauseMs = 0;
+              if (active.pauseStartEpoch) {
+                addedPauseMs = Math.max(0, reqEpoch - active.pauseStartEpoch);
+              } else if (active.breakStartTime) {
+                const [bH, bM] = String(active.breakStartTime).split(':').map(Number);
+                const [eH, eM] = String(reqTime).split(':').map(Number);
+                if (!isNaN(bH) && !isNaN(eH)) {
+                  let diffM = (eH * 60 + (eM || 0)) - (bH * 60 + (bM || 0));
+                  if (diffM < 0) diffM += 24 * 60;
+                  addedPauseMs = diffM * 60000;
+                }
+              }
+              const resumed = {
+                ...active,
+                isPaused: false,
+                isOnBreak: false,
+                breakStartTime: null,
+                pauseStartEpoch: null,
+                accumulatedPauseMs: (active.accumulatedPauseMs || 0) + addedPauseMs,
+                updatedAt: Date.now()
+              };
+              updatedActiveShifts[empId] = resumed;
+              updatedActiveShifts[String(empId)] = resumed;
+              if (approvedTargetReq.employeeCode) {
+                updatedActiveShifts[approvedTargetReq.employeeCode] = resumed;
+                updatedActiveShifts[String(approvedTargetReq.employeeCode)] = resumed;
+              }
+            }
           }
         }
 
@@ -1531,8 +1673,7 @@ export default function RequestsModule({
           const isMatch = (s.id === approvedTargetReq.shiftId) ||
             ((String(s.employeeId) === String(empId) || (approvedTargetReq.employeeCode && String(s.employeeCode) === String(approvedTargetReq.employeeCode))) && s.date === reqDate);
           if (isMatch) {
-            const isStart = actionType === 'shift_start';
-            if (isStart) {
+            if (actionType === 'shift_start' || actionType === 'check_in') {
               return {
                 ...s,
                 statusLabel: 'حضور بالصورة (معتمد)',
@@ -1543,7 +1684,56 @@ export default function RequestsModule({
                 drivePhotoUrl: approvedTargetReq.drivePhotoUrl || s.drivePhotoUrl,
                 note: (s.note ? s.note.replace('بانتظار اعتماد الإدارة', 'معتمد من الإدارة العليا') : '')
               };
-            } else {
+            } else if (actionType === 'break_start' || actionType === 'pause_shift') {
+              // 🛡️ صمام الأمان: بدء الاستراحة لا ينهي الوردية إطلاقاً ولا يحدد timeOut
+              return {
+                ...s,
+                isPaused: true,
+                isOnBreak: true,
+                breakStartTime: reqTime,
+                pauseStartEpoch: reqEpoch,
+                statusLabel: s.isLiveActive ? 'في استراحة ☕ (معتمدة)' : s.statusLabel,
+                adminApproved: true,
+                approvedBy: 'الإدارة العليا',
+                approvedAt: new Date().toISOString(),
+                photoUrl: approvedTargetReq.photoUrl || s.photoUrl,
+                drivePhotoUrl: approvedTargetReq.drivePhotoUrl || s.drivePhotoUrl,
+                note: (s.note ? s.note + ' | ' : '') + `☕ بدء استراحة بالصورة في تمام ${reqTime} (معتمد من الإدارة العليا)`
+              };
+            } else if (actionType === 'break_end' || actionType === 'resume_shift') {
+              // 🛡️ صمام الأمان: انتهاء الاستراحة يحسب ساعات البريك ويبقي الوردية نشطة ومفتوحة
+              const curAccum = s.accumulatedPauseMs || 0;
+              let addedPauseMs = 0;
+              if (s.pauseStartEpoch) {
+                addedPauseMs = Math.max(0, reqEpoch - s.pauseStartEpoch);
+              } else if (s.breakStartTime) {
+                const [bH, bM] = String(s.breakStartTime).split(':').map(Number);
+                const [eH, eM] = String(reqTime).split(':').map(Number);
+                if (!isNaN(bH) && !isNaN(eH)) {
+                  let diffM = (eH * 60 + (eM || 0)) - (bH * 60 + (bM || 0));
+                  if (diffM < 0) diffM += 24 * 60;
+                  addedPauseMs = diffM * 60000;
+                }
+              }
+              const totalPauseMs = curAccum + addedPauseMs;
+              const trackedBreakHours = Math.round((totalPauseMs / 3600000) * 100) / 100;
+              return {
+                ...s,
+                isPaused: false,
+                isOnBreak: false,
+                breakStartTime: null,
+                pauseStartEpoch: null,
+                accumulatedPauseMs: totalPauseMs,
+                breakHours: trackedBreakHours,
+                statusLabel: s.isLiveActive ? 'حضور حي ⚡ (تم استئناف العمل)' : s.statusLabel,
+                adminApproved: true,
+                approvedBy: 'الإدارة العليا',
+                approvedAt: new Date().toISOString(),
+                photoUrl: approvedTargetReq.photoUrl || s.photoUrl,
+                drivePhotoUrl: approvedTargetReq.drivePhotoUrl || s.drivePhotoUrl,
+                note: (s.note ? s.note + ' | ' : '') + `⏱️ انتهاء استراحة بالصورة وعودة للعمل في تمام ${reqTime} (مدة البريك: ${Math.round(addedPauseMs / 60000)} د - معتمد من الإدارة العليا)`
+              };
+            } else if (actionType === 'shift_end' || actionType === 'check_out') {
               // shift_end: calculate hours and finalize timeOut and status
               const timeInVal = s.timeIn || s.startTime || '09:00';
               const timeOutVal = reqTime || (s.timeOut && s.timeOut !== '—' ? s.timeOut : '17:00');
@@ -1592,6 +1782,149 @@ export default function RequestsModule({
           }
           return s;
         });
+      }
+
+      // 0.25 Device Punch Mapping Approval ("تعديل بصمه جهاز البصمه" - الكشف الذكي)
+      if (approvedTargetReq.type === 'device_punch_mapping' || approvedTargetReq.type === 'تعديل بصمه جهاز البصمه' || approvedTargetReq.type === 'تعديل بصمة جهاز البصمة') {
+        const selectedEmpId = approvedTargetReq.selectedEmployeeId || approvedTargetReq.suggestedEmployeeId || approvedTargetReq.employeeId;
+        const targetEmp = updatedEmployees.find(e => String(e.id) === String(selectedEmpId) || (approvedTargetReq.employeeCode && String(e.code) === String(approvedTargetReq.employeeCode)));
+        const resolvedEmpId = targetEmp ? targetEmp.id : selectedEmpId;
+        const resolvedEmpName = targetEmp ? targetEmp.name : (approvedTargetReq.suggestedEmployeeName || 'الموظف');
+        const resolvedEmpCode = targetEmp ? targetEmp.code : (approvedTargetReq.suggestedEmployeeCode || '');
+        const pin = String(approvedTargetReq.devicePin || approvedTargetReq.pin || '');
+        const branchId = approvedTargetReq.branchId || targetEmp?.branchId || '';
+        const branchName = approvedTargetReq.branchName || targetEmp?.branchName || 'الفرع';
+        const punchDate = approvedTargetReq.date || new Date().toISOString().slice(0, 10);
+        const punchTime = approvedTargetReq.time || '12:00';
+        const actionType = approvedTargetReq.actionType || 'auto';
+        const serial = approvedTargetReq.deviceSerial || approvedTargetReq.deviceId || '';
+
+        // 1. ربط الـ PIN بالموظف في بيانات الموظفين
+        if (targetEmp && pin) {
+          updatedEmployees = updatedEmployees.map(e => {
+            if (String(e.id) === String(resolvedEmpId)) {
+              return {
+                ...e,
+                biometricPin: pin,
+                devicePin: pin,
+                branchPins: {
+                  ...(e.branchPins || {}),
+                  [branchId || 'default']: pin
+                }
+              };
+            }
+            return e;
+          });
+        }
+
+        // 2. تطبيق البصمة على الوردية
+        const active = updatedActiveShifts ? (updatedActiveShifts[resolvedEmpId] || updatedActiveShifts[String(resolvedEmpId)] || (resolvedEmpCode ? updatedActiveShifts[resolvedEmpCode] : null)) : null;
+
+        if (active && (actionType === 'shift_end' || actionType === 'auto')) {
+          // إغلاق الوردية المفتوحة (انصراف)
+          const timeInVal = active.timeIn || '09:00';
+          const [sH, sM] = String(timeInVal).split(':').map(Number);
+          const [eH, eM] = String(punchTime).split(':').map(Number);
+          let diffM = (eH * 60 + (eM || 0)) - (sH * 60 + (sM || 0));
+          if (diffM < 0) diffM += 24 * 60;
+          const breakHoursVal = parseFloat(active.breakHours || 0);
+          const netM = Math.max(0, diffM - Math.round(breakHoursVal * 60));
+          const netHoursVal = Math.round((netM / 60) * 100) / 100;
+
+          if (updatedActiveShifts) {
+            delete updatedActiveShifts[resolvedEmpId];
+            delete updatedActiveShifts[String(resolvedEmpId)];
+            if (resolvedEmpCode) {
+              delete updatedActiveShifts[resolvedEmpCode];
+              delete updatedActiveShifts[String(resolvedEmpCode)];
+            }
+          }
+
+          let matchedShift = false;
+          updatedShifts = updatedShifts.map(s => {
+            if ((s.id === active.shiftId) || (String(s.employeeId) === String(resolvedEmpId) && s.date === punchDate && (s.isLiveActive || !s.timeOut || s.timeOut === '—'))) {
+              matchedShift = true;
+              return {
+                ...s,
+                timeOut: punchTime,
+                endTime: punchTime,
+                hours: netHoursVal,
+                actualWorkedHours: netHoursVal,
+                netHours: netHoursVal,
+                regularHours: Math.min(netHoursVal, 8),
+                overtimeHours: Math.max(0, Math.round((netHoursVal - 8) * 100) / 100),
+                status: 'completed',
+                isLiveActive: false,
+                statusLabel: 'انصراف ماكينة (معتمد عبر تعديل البصمة)',
+                note: (s.note ? s.note + ' | ' : '') + `📟 تم تسجيل الانصراف ${punchTime} وربط PIN (${pin}) بالموظف تلقائياً (معتمد من الإدارة العليا)`,
+                adminApproved: true,
+                approvedBy: 'الإدارة العليا',
+                approvedAt: new Date().toISOString()
+              };
+            }
+            return s;
+          });
+        } else if (!active && (actionType === 'shift_start' || actionType === 'auto')) {
+          // تسجيل حضور جديد
+          const newShift = {
+            id: `shift_${resolvedEmpId}_${Date.now()}`,
+            employeeId: resolvedEmpId,
+            employeeCode: resolvedEmpCode || '',
+            employeeName: resolvedEmpName || '',
+            date: punchDate,
+            timeIn: punchTime,
+            startTime: punchTime,
+            timeOut: '—',
+            endTime: '—',
+            branchId: branchId || '',
+            branchName: branchName || '',
+            source: 'biometric_device',
+            verifyType: approvedTargetReq.verifyType || 'FINGERPRINT',
+            status: 'active',
+            isLiveActive: true,
+            statusLabel: 'حضور ماكينة (معتمد عبر تعديل البصمة)',
+            note: `📟 تم تسجيل الحضور ${punchTime} وربط PIN (${pin}) بالموظف تلقائياً (معتمد من الإدارة العليا)`,
+            createdAt: new Date().toISOString(),
+            startEpoch: Date.now(),
+            adminApproved: true,
+            approvedBy: 'الإدارة العليا',
+            approvedAt: new Date().toISOString()
+          };
+          updatedShifts.unshift(newShift);
+          if (updatedActiveShifts) {
+            updatedActiveShifts[resolvedEmpId] = {
+              date: punchDate,
+              timeIn: punchTime,
+              shiftId: newShift.id,
+              branchId: branchId || '',
+              branchName: branchName || '',
+              startEpoch: Date.now(),
+              updatedAt: Date.now()
+            };
+          }
+        }
+
+        // 3. تحديث بيانات الطلب نفسه
+        approvedTargetReq.matchedEmployeeId = resolvedEmpId;
+        approvedTargetReq.matchedEmployeeName = resolvedEmpName;
+        approvedTargetReq.matchedEmployeeCode = resolvedEmpCode;
+        approvedTargetReq.adminNotes = `تم ربط رقم مستخدم الماكينة (PIN: ${pin}) بالموظف ${resolvedEmpName} وتطبيق البصمة على سجل الحضور فورياً.`;
+
+        // 4. استدعاء خلفي لخادم الباك إند لتسجيل البروفايل وتحديث البصمات الخام
+        try {
+          fetch('/api/biometric/map-device-pin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              devicePin: pin,
+              employeeId: resolvedEmpId,
+              employeeName: resolvedEmpName,
+              branchId: branchId,
+              serial: serial,
+              rawPunchId: approvedTargetReq.rawPunchId
+            })
+          }).catch(e => console.warn('[Map PIN Fetch Warn]:', e.message));
+        } catch (_) {}
       }
 
       // ── Penalty, Early Exit, Disciplinary Violation, & Branch Adjustment Approval ──
@@ -1800,37 +2133,70 @@ export default function RequestsModule({
         });
       }
 
-      if (approvedTargetReq.type === 'roster_update' || approvedTargetReq.type === 'roster_edit' || approvedTargetReq.type === 'roster_edit_request') {
-        const targetEmp = (state.employees || []).find(e => String(e.id) === String(approvedTargetReq.employeeId));
-        const targetBStr = approvedTargetReq.branchId ? String(approvedTargetReq.branchId) : (targetEmp?.branchId ? String(targetEmp.branchId) : '');
-
-        const normalizedSch = normalizeSchedule(approvedTargetReq.schedule || approvedTargetReq.newSchedule);
-
-        const activeRosterObj = {
-          id: approvedTargetReq.id || `roster_${Date.now()}`,
-          employeeId: approvedTargetReq.employeeId,
-          branchId: targetBStr || approvedTargetReq.branchId || null,
-          month: approvedTargetReq.month || new Date().toISOString().slice(0, 7),
-          fromDate: approvedTargetReq.fromDate,
-          toDate: approvedTargetReq.toDate,
-          schedule: normalizedSch,
-          status: 'approved',
-          approvedAt: new Date().toISOString()
-        };
-
-        const existingIdx = updatedRosters.findIndex(
-          (ros) => String(ros.employeeId) === String(approvedTargetReq.employeeId) && 
-                   (ros.month === approvedTargetReq.month || !approvedTargetReq.month || !ros.month) && 
-                   (String(ros.branchId || '') === targetBStr || (!ros.branchId && !targetBStr))
+      const isRosterReq = ['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit', 'assign_roster'].includes(approvedTargetReq.type) || approvedTargetReq.requestType === 'roster_update';
+      if (isRosterReq) {
+        const targetEmp = (state.employees || []).find(e => 
+          e && (String(e.id) === String(approvedTargetReq.employeeId) || (approvedTargetReq.employeeCode && String(e.code) === String(approvedTargetReq.employeeCode)))
         );
+        const targetBStr = approvedTargetReq.branchId ? String(approvedTargetReq.branchId) : (targetEmp?.branchId ? String(targetEmp.branchId) : '');
+        const targetBName = approvedTargetReq.branchName || (state.branches?.find(b => String(b.id) === targetBStr)?.name) || '';
+        const candidateSchedules = [
+          approvedTargetReq.newSchedule,
+          approvedTargetReq.schedule,
+          approvedTargetReq.requestedSchedule,
+          approvedTargetReq.details?.schedule,
+          approvedTargetReq.roster?.schedule
+        ].filter(s => s && typeof s === 'object' && Object.keys(s).length > 0);
 
-        if (existingIdx >= 0) {
-          updatedRosters[existingIdx] = activeRosterObj;
-        } else {
-          updatedRosters = updatedRosters.filter(
-            (ros) => !(String(ros.employeeId) === String(approvedTargetReq.employeeId) && String(ros.branchId || '') === targetBStr && (ros.month === approvedTargetReq.month || !approvedTargetReq.month || !ros.month))
-          );
-          updatedRosters.unshift(activeRosterObj);
+        let bestSchedule = candidateSchedules[0] || null;
+        for (const cand of candidateSchedules) {
+          const candIsoCount = Object.keys(cand).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).length;
+          const bestIsoCount = bestSchedule ? Object.keys(bestSchedule).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).length : 0;
+          if (candIsoCount > bestIsoCount || (candIsoCount === bestIsoCount && Object.keys(cand).length > Object.keys(bestSchedule).length)) {
+            bestSchedule = cand;
+          }
+        }
+
+        const normalizedSch = normalizeSchedule(bestSchedule);
+
+        if (normalizedSch && Object.keys(normalizedSch).length > 0) {
+          const targetMonthNorm = (approvedTargetReq.month || approvedTargetReq.cycleMonth || new Date().toISOString().slice(0, 7)).slice(0, 7);
+          const rosterDocId = approvedTargetReq.id ? (String(approvedTargetReq.id).startsWith('roster_') ? String(approvedTargetReq.id) : `roster_${approvedTargetReq.id}`) : `roster_${Date.now()}`;
+          const activeRosterObj = {
+            id: rosterDocId,
+            employeeId: approvedTargetReq.employeeId || targetEmp?.id,
+            employeeCode: approvedTargetReq.employeeCode || targetEmp?.code || '',
+            employeeName: approvedTargetReq.employeeName || targetEmp?.name || '',
+            branchId: targetBStr || null,
+            branchName: targetBName,
+            month: targetMonthNorm,
+            fromDate: approvedTargetReq.fromDate,
+            toDate: approvedTargetReq.toDate,
+            schedule: normalizedSch,
+            status: 'approved',
+            adminApproved: true,
+            branchApproved: true,
+            approvedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+
+          // إزالة أي وثائق روستر سابقة لنفس الموظف لنفس الشهر أو نفس المعرف لمنع التضارب وتكرار الجداول القديمة
+          updatedRosters = updatedRosters.filter((ros) => {
+            if (!ros) return false;
+            const isSameId = String(ros.id) === String(approvedTargetReq.id) || String(ros.id) === String(rosterDocId);
+            const empMatch = (
+              String(ros.employeeId) === String(approvedTargetReq.employeeId) || 
+              String(ros.employeeId) === String(targetEmp?.id) || 
+              (targetEmp?.code && String(ros.employeeCode) === String(targetEmp.code)) || 
+              (approvedTargetReq.employeeCode && String(ros.employeeCode) === String(approvedTargetReq.employeeCode))
+            );
+            if (!empMatch && !isSameId) return true;
+            const rMonthNorm = ros.month ? String(ros.month).slice(0, 7) : null;
+            const isSameMonth = !rMonthNorm || !targetMonthNorm || rMonthNorm === targetMonthNorm;
+            return !(isSameMonth || isSameId);
+          });
+
+          updatedRosters = [activeRosterObj, ...updatedRosters];
         }
       }
 
@@ -2451,7 +2817,7 @@ export default function RequestsModule({
       const isDisc = reqType === 'disciplinary_penalty' || reqType === 'violation' || reqType === 'penalty' || reqType === 'early_exit' || String(targetReq.id || '').startsWith('disc_');
       const isSwap = ['swap', 'shift_swap', 'shift_edit', 'تبديل'].includes(reqType);
       const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit'].includes(reqType);
-      const isPunch = ['punch_correction', 'manual_punch', 'attendance_punch', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد', 'biometric_verification'].includes(reqType);
+      const isPunch = ['punch_correction', 'manual_punch', 'attendance_punch', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد', 'biometric_verification', 'device_punch_mapping', 'تعديل بصمه جهاز البصمه'].includes(reqType);
       const isBiometricReg = reqType === 'biometric_registration';
       const isBiometricReset = reqType === 'biometric_reset';
       const isResignation = ['resignation', 'resignation_request', 'استقالة'].includes(reqType);
@@ -2680,43 +3046,72 @@ export default function RequestsModule({
       const empId = rejectedTargetReq.employeeId;
       const reqDate = rejectedTargetReq.date || (rejectedTargetReq.createdAt ? rejectedTargetReq.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
       const targetAction = rejectedTargetReq.targetAction || rejectedTargetReq.actionType || 'shift_start';
-      const actionTitle = targetAction === 'shift_end' ? 'انصراف' : 'حضور';
+      const isBreakAction = targetAction === 'break_start' || targetAction === 'break_end' || targetAction === 'pause_shift' || targetAction === 'resume_shift';
+      const actionTitle = targetAction === 'shift_end' ? 'انصراف' : (isBreakAction ? 'استراحة' : 'حضور');
 
-      // 1. حذف الوردية النشطة نهائياً بكلا المعرفين
-      delete updatedActiveShifts[empId];
-      delete updatedActiveShifts[String(empId)];
+      if (!isBreakAction) {
+        // 1. حذف الوردية النشطة نهائياً بكلا المعرفين فقط في حال رفض حضور أو انصراف الوردية
+        delete updatedActiveShifts[empId];
+        delete updatedActiveShifts[String(empId)];
 
-      // 2. إلغاء وتصفير الوردية بالكامل من سجل الورديات وشطبها نهائياً
-      updatedShifts = updatedShifts.map((s) => {
-        const isTarget =
-          (rejectedTargetReq.shiftId && s.id === rejectedTargetReq.shiftId) ||
-          (s.requestId && (s.requestId === rejectedTargetReq.id || s.requestId === reqId)) ||
-          (String(s.employeeId) === String(empId) && s.date === reqDate && (s.punchType === 'photo_attendance' || s.requestId === rejectedTargetReq.id));
+        // 2. إلغاء وتصفير الوردية بالكامل من سجل الورديات وشطبها نهائياً
+        updatedShifts = updatedShifts.map((s) => {
+          const isTarget =
+            (rejectedTargetReq.shiftId && s.id === rejectedTargetReq.shiftId) ||
+            (s.requestId && (s.requestId === rejectedTargetReq.id || s.requestId === reqId)) ||
+            (String(s.employeeId) === String(empId) && s.date === reqDate && (s.punchType === 'photo_attendance' || s.requestId === rejectedTargetReq.id));
 
-        if (isTarget) {
-          return {
-            ...s,
-            status: 'rejected_photo',
-            isRejectedPhoto: true,
-            isCancelled: false,
-            isRejected: true,
-            rejected: true,
-            hours: 0,
-            actualWorkedHours: 0,
-            netHours: 0,
-            workHours: 0,
-            regularHours: 0,
-            overtimeHours: 0,
-            overtimeStatus: 'rejected',
-            statusLabel: 'مرفوضة (رفض الصورة)',
-            photoRejectionReason: 'تم رفض البصمة بسبب رفض الصورة من قِبل الإدارة العليا',
-            rejectedBy: 'الإدارة العليا',
-            rejectedAt: new Date().toISOString(),
-            note: (s.note ? s.note + ' | ' : '') + `⚠️ تم رفض البصمة بسبب رفض الصورة (${actionTitle}) من قِبل الإدارة العليا - غير محتسبة في الأجور لحين اعتمادها يدوياً.`
+          if (isTarget) {
+            return {
+              ...s,
+              status: 'rejected_photo',
+              isRejectedPhoto: true,
+              isCancelled: false,
+              isRejected: true,
+              rejected: true,
+              hours: 0,
+              actualWorkedHours: 0,
+              netHours: 0,
+              workHours: 0,
+              regularHours: 0,
+              overtimeHours: 0,
+              overtimeStatus: 'rejected',
+              statusLabel: 'مرفوضة (رفض الصورة)',
+              photoRejectionReason: 'تم رفض البصمة بسبب رفض الصورة من قِبل الإدارة العليا',
+              rejectedBy: 'الإدارة العليا',
+              rejectedAt: new Date().toISOString(),
+              note: (s.note ? s.note + ' | ' : '') + `⚠️ تم رفض البصمة بسبب رفض الصورة (${actionTitle}) من قِبل الإدارة العليا - غير محتسبة في الأجور لحين اعتمادها يدوياً.`
+            };
+          }
+          return s;
+        });
+      } else {
+        // 🛡️ صمام الأمان: عند رفض صورة الاستراحة، لا تُشطب الوردية ولا تصفر ساعاتها، بل يستمر الموظف على رأس العمل
+        if (updatedActiveShifts[empId]) {
+          updatedActiveShifts[empId] = {
+            ...updatedActiveShifts[empId],
+            isPaused: false,
+            isOnBreak: false,
+            breakStartTime: null
           };
         }
-        return s;
-      });
+        updatedShifts = updatedShifts.map((s) => {
+          const isTarget =
+            (rejectedTargetReq.shiftId && s.id === rejectedTargetReq.shiftId) ||
+            (s.requestId && (s.requestId === rejectedTargetReq.id || s.requestId === reqId)) ||
+            (String(s.employeeId) === String(empId) && s.date === reqDate);
+          if (isTarget) {
+            return {
+              ...s,
+              isPaused: false,
+              isOnBreak: false,
+              breakStartTime: null,
+              note: (s.note ? s.note + ' | ' : '') + `⚠️ تم رفض توثيق الاستراحة بالصورة بقرار الإدارة - استمرار الوردية في العمل الفعلي.`
+            };
+          }
+          return s;
+        });
+      }
     }
 
     if (rejectedTargetReq && rejectedTargetReq.type === 'overtime') {
@@ -2733,6 +3128,8 @@ export default function RequestsModule({
           return {
             ...s,
             overtimeStatus: 'rejected',
+            isOvertimeApproved: false,
+            rejectedOvertime: true,
             adminApproved: false,
             note: rejectedNote,
             notes: rejectedNote
@@ -4023,6 +4420,7 @@ export default function RequestsModule({
             <option value="shift_adjustment">⏱️ تعديلات الشفتات والمواعيد</option>
             <option value="roster_edit">📅 تعديلات الجداول الشهرية</option>
             <option value="biometric">📸 اعتمادات البصمة والكشك (AI)</option>
+            <option value="device_punch_mapping">📟 تعديل بصمه جهاز البصمه (كشف ذكي)</option>
             <option value="expense">📑 فواتير ومصروفات الفروع</option>
             <option value="recruitment_need">👥 طلبات احتياج توظيف للفروع</option>
             <option value="comp_off">🛋️ إجازات بدل الراحة والتشغيل</option>
@@ -4163,8 +4561,9 @@ export default function RequestsModule({
                     </td>
                     <td style={{ fontWeight: '800' }}>
                       {(() => {
-                        const emp = employees.find(e => e.id === req.employeeId || e.code === req.employeeCode);
-                        const empName = emp ? getEmpDisplayName(emp) : (req.employeeName || 'موظف');
+                        const isDeviceMapping = req.type === 'device_punch_mapping' || req.type === 'تعديل بصمه جهاز البصمه' || req.type === 'تعديل بصمة جهاز البصمة';
+                        const emp = employees.find(e => e.id === req.employeeId || e.code === req.employeeCode || e.id === req.suggestedEmployeeId);
+                        const empName = emp ? getEmpDisplayName(emp) : (req.suggestedEmployeeName || req.employeeName || (isDeviceMapping ? `بصمة غير معرّفة (PIN: ${req.devicePin || '—'})` : 'موظف'));
                         const isFromBranchMgr = Boolean(
                           req.submittedByBranchManager ||
                           req.createdRole === 'branch' ||
@@ -4177,6 +4576,23 @@ export default function RequestsModule({
                         return (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                             <span>{empName}</span>
+                            {isDeviceMapping && (
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontSize: '11px',
+                                fontWeight: '800',
+                                color: '#4338ca',
+                                background: '#ede9fe',
+                                border: '1px solid #c4b5fd',
+                                borderRadius: '6px',
+                                padding: '2px 6px',
+                                width: 'fit-content'
+                              }}>
+                                🎯 كشف ذكي: PIN {req.devicePin || '—'}
+                              </span>
+                            )}
                             {isFromBranchMgr && (
                               <span style={{
                                 display: 'inline-flex',
@@ -4420,8 +4836,9 @@ export default function RequestsModule({
         const isPermission = ['permission', 'permission_request', 'إذن', 'late_permission', 'early_leave'].includes(previewModalReq.type) || Boolean(previewModalReq.permType);
         const isLoan = ['loan', 'advance', 'meds', 'credit_medicine'].includes(previewModalReq.type);
         const isSwap = ['swap', 'shift_swap', 'shift_edit'].includes(previewModalReq.type);
-        const isPunch = ['punch_correction', 'manual_punch', 'attendance_punch', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد', 'biometric_verification'].includes(previewModalReq.type);
+        const isPunch = ['punch_correction', 'manual_punch', 'attendance_punch', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد', 'biometric_verification', 'device_punch_mapping', 'تعديل بصمه جهاز البصمه'].includes(previewModalReq.type);
         const isBiometricVerification = previewModalReq.type === 'biometric_verification' || previewModalReq.type === 'تأكيد بصمة الوجه' || previewModalReq.type === 'تأكيد بصمة اليد';
+        const isDevicePunchMapping = previewModalReq.type === 'device_punch_mapping' || previewModalReq.type === 'تعديل بصمه جهاز البصمه' || previewModalReq.type === 'تعديل بصمة جهاز البصمة';
         const isDisciplinaryViolation = previewModalReq.type === 'disciplinary_penalty' ||
           previewModalReq.type === 'violation' ||
           previewModalReq.subType === 'disciplinary_penalty' ||
@@ -5323,6 +5740,124 @@ export default function RequestsModule({
                         )}
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* ── DEVICE PUNCH MAPPING / AUTO-HEURISTIC DETAILS (تعديل بصمة جهاز البصمة) ── */}
+                {isDevicePunchMapping && (
+                  <div style={{ background: '#f5f3ff', padding: '18px', borderRadius: '14px', border: '1.5px solid #8b5cf6', boxShadow: '0 4px 14px rgba(139, 92, 246, 0.1)', marginTop: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                      <h4 style={{ margin: 0, color: '#6d28d9', fontSize: '15.5px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>📟</span>
+                        <span>تعديل بصمة جهاز البصمة (نظام الكشف الذكي Auto-Heuristic):</span>
+                      </h4>
+                      <span style={{ background: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 800 }}>
+                        {previewModalReq.status === 'approved' ? '🟢 تم الربط والاعتماد' : '🔍 رصد حركة غير معرّفة'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                      <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #ddd6fe' }}>
+                        <span style={{ fontSize: '11.5px', color: '#6d28d9', fontWeight: 600 }}>جهاز البصمة:</span>
+                        <div style={{ fontWeight: 800, color: '#4c1d95', fontSize: '14px', marginTop: '2px' }}>
+                          🏢 {previewModalReq.deviceName || previewModalReq.deviceSerial || 'جهاز بيومتري'}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#7c3aed', marginTop: '2px' }}>
+                          الرقم التسلسلي: {previewModalReq.deviceSerial || previewModalReq.deviceId || '—'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #ddd6fe' }}>
+                        <span style={{ fontSize: '11.5px', color: '#6d28d9', fontWeight: 600 }}>فرع الماكينة:</span>
+                        <div style={{ fontWeight: 800, color: '#4c1d95', fontSize: '14px', marginTop: '2px' }}>
+                          📍 {previewModalReq.branchName || branchObj?.name || 'الفرع'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #ddd6fe' }}>
+                        <span style={{ fontSize: '11.5px', color: '#6d28d9', fontWeight: 600 }}>رقم المستخدم بالماكينة (PIN):</span>
+                        <div style={{ fontWeight: 900, color: '#4338ca', fontSize: '20px', marginTop: '2px' }}>
+                          🔢 {previewModalReq.devicePin || previewModalReq.pin || '—'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #ddd6fe' }}>
+                        <span style={{ fontSize: '11.5px', color: '#6d28d9', fontWeight: 600 }}>وقت وتاريخ البصمة:</span>
+                        <div style={{ fontWeight: 800, color: '#4c1d95', fontSize: '14px', marginTop: '2px' }}>
+                          🕒 {previewModalReq.time || '—'} بتاريخ {previewModalReq.date || '—'}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#7c3aed', marginTop: '2px' }}>
+                          النوع: {previewModalReq.verifyType === 'FACE' ? 'بصمة وجه 👤' : 'بصمة إصبع 👆'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Auto-Heuristic Suggestion Box */}
+                    <div style={{ background: '#ffffff', padding: '14px 16px', borderRadius: '12px', border: '1.5px solid #a78bfa', marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '18px' }}>🎯</span>
+                        <span style={{ fontSize: '14px', fontWeight: 800, color: '#5b21b6' }}>
+                          تحليل الذكاء الاصطناعي (Auto-Heuristic Matcher):
+                        </span>
+                        {previewModalReq.matchConfidence === 'high' && (
+                          <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 800 }}>
+                            تطابق مؤكد بنسبة عالية جداً ⚡
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '13px', color: '#334155', lineHeight: 1.6, background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        {previewModalReq.matchReason || previewModalReq.details || 'رصد حركة بصمة غير مربوطة بموظف في قاعدة بيانات البصمات'}
+                      </div>
+                    </div>
+
+                    {/* Modification Controls before approval */}
+                    {previewModalReq.status === 'pending' && (
+                      <div style={{ background: '#ffffff', padding: '16px', borderRadius: '12px', border: '1.5px solid #c4b5fd' }}>
+                        <div style={{ fontWeight: 800, color: '#4c1d95', fontSize: '13.5px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>⚙️</span>
+                          <span>إعدادات اعتماد وربط البصمة بالموظف:</span>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: 'var(--text)', marginBottom: '5px' }}>
+                              👤 الموظف المراد ربط الـ PIN به وتطبيق البصمة له:
+                            </label>
+                            <select
+                              value={mappingSelectedEmpId}
+                              onChange={(e) => setMappingSelectedEmpId(e.target.value)}
+                              style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #8b5cf6', fontSize: '13px', fontWeight: 700 }}
+                            >
+                              <option value="">-- اختر موظفاً من القائمة --</option>
+                              {employees.map(e => (
+                                <option key={e.id} value={e.id}>
+                                  {e.name} (كود: {e.code || '—'}) {e.branchName ? `· ${e.branchName}` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: 'var(--text)', marginBottom: '5px' }}>
+                              🔄 نوع الإجراء المطلوب تطبيقه على الوردية:
+                            </label>
+                            <select
+                              value={mappingActionType}
+                              onChange={(e) => setMappingActionType(e.target.value)}
+                              style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #8b5cf6', fontSize: '13px', fontWeight: 700 }}
+                            >
+                              <option value="auto">🎯 تلقائي ذكي (إغلاق الوردية المفتوحة أو فتح وردية جديدة)</option>
+                              <option value="shift_end">🔴 تسجيل انصراف وإغلاق الوردية النشطة فورياً</option>
+                              <option value="shift_start">🟢 تسجيل حضور وفتح وردية عمل جديدة</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div style={{ marginTop: '12px', fontSize: '12px', color: '#6d28d9', background: '#ede9fe', padding: '8px 12px', borderRadius: '6px' }}>
+                          💡 <strong>ملاحظة هامة:</strong> عند الاعتماد سيتم ربط رقم PIN ({previewModalReq.devicePin}) بهذا الموظف دائماً في ذاكرة النظام، وسيتم تحديث وتصحيح كافة حركات البصمة السابقة لهذا الرقم تلقائياً.
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -6709,10 +7244,15 @@ export default function RequestsModule({
                           padding: '8px 22px',
                           fontSize: '13.5px',
                           fontWeight: 'bold',
-                          background: (isLoan && (isEditingLoan || (loanCustomAmount && parseFloat(loanCustomAmount) !== parseFloat(previewModalReq.amount)))) ? '#2563eb' : undefined
+                          background: isDevicePunchMapping ? '#4f46e5' : (isLoan && (isEditingLoan || (loanCustomAmount && parseFloat(loanCustomAmount) !== parseFloat(previewModalReq.amount)))) ? '#2563eb' : undefined
                         }}
                         onClick={() => {
-                          if (isLoan && (isEditingLoan || (loanCustomAmount && parseFloat(loanCustomAmount) !== parseFloat(previewModalReq.amount)))) {
+                          if (isDevicePunchMapping) {
+                            handleApprove(previewModalReq.id, {
+                              mappingEmpId: mappingSelectedEmpId || previewModalReq.suggestedEmployeeId || previewModalReq.employeeId,
+                              mappingAction: mappingActionType || 'auto'
+                            });
+                          } else if (isLoan && (isEditingLoan || (loanCustomAmount && parseFloat(loanCustomAmount) !== parseFloat(previewModalReq.amount)))) {
                             handleApprove(previewModalReq.id, {
                               amount: loanCustomAmount,
                               loanType: loanCustomType,
@@ -6727,7 +7267,9 @@ export default function RequestsModule({
                           setPreviewModalReq(null);
                         }}
                       >
-                        {isLoan && (isEditingLoan || (loanCustomAmount && parseFloat(loanCustomAmount) !== parseFloat(previewModalReq.amount)))
+                        {isDevicePunchMapping
+                          ? '✓ اعتماد وتطبيق البصمة وربط الماكينة بالموظف'
+                          : isLoan && (isEditingLoan || (loanCustomAmount && parseFloat(loanCustomAmount) !== parseFloat(previewModalReq.amount)))
                           ? `✓ اعتماد السلفة بالمبلغ المعتمد (${loanCustomAmount || previewModalReq.amount} ج.م)`
                           : isExpense
                           ? '✓ موافقة واعتماد الفاتورة / المصروف'

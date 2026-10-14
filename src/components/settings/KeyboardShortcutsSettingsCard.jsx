@@ -156,14 +156,18 @@ export default function KeyboardShortcutsSettingsCard({
     }
   };
 
-  const filteredShortcuts = shortcuts.filter((s) => {
+  const filteredShortcuts = (shortcuts || []).filter((s) => {
+    if (!s) return false;
     if (filterCategory !== 'all' && s.category !== filterCategory) return false;
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
+      const sName = String(s.name || '').toLowerCase();
+      const sDesc = String(s.desc || '').toLowerCase();
+      const sDisp = (formatShortcutDisplay(s) || '').toLowerCase();
       return (
-        s.name.toLowerCase().includes(q) ||
-        s.desc.toLowerCase().includes(q) ||
-        formatShortcutDisplay(s).toLowerCase().includes(q)
+        sName.includes(q) ||
+        sDesc.includes(q) ||
+        sDisp.includes(q)
       );
     }
     return true;

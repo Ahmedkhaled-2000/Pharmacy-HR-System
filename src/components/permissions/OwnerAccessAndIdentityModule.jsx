@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { applyBrandIdentityToDOM } from '../../utils/brandThemeEngine';
 import { TOP_MGMT_MODULES } from '../../utils/permissionUtils';
+import { apiSaveSettingsSlice } from '../../utils/apiClient';
 
 export default function OwnerAccessAndIdentityModule({
   state,
@@ -40,18 +41,32 @@ export default function OwnerAccessAndIdentityModule({
     return orgSettings?.employeeUnifiedAccess || {};
   }, [orgSettings?.employeeUnifiedAccess]);
 
-  // قائمة المالكين (المالك الوحيد المعتمد: سيف saif)
+  // قائمة المالكين المعتمدين (قراءة ديناميكية من orgSettings مع ضمان وجود المالك الأساسي سيف saif)
   const systemOwners = useMemo(() => {
-    return [{
-      id: 'owner_saif',
-      username: 'saif',
-      password: '***',
-      fullName: 'سيف (المالك المعتمد والوحيد)',
-      phone: '',
-      isActive: true,
-      isPrimaryOwner: true
-    }];
-  }, []);
+    const rawList = Array.isArray(orgSettings?.systemOwners) ? orgSettings.systemOwners : [];
+    const primaryUser = String(orgSettings?.ownerUsername || 'saif').toLowerCase();
+    const hasPrimary = rawList.some(o => o && String(o.username || '').toLowerCase() === primaryUser);
+    const list = rawList.map(o => {
+      const isPri = Boolean(o.isPrimaryOwner || String(o.username || '').toLowerCase() === primaryUser);
+      return {
+        ...o,
+        isPrimaryOwner: isPri,
+        password: o.password || (isPri ? (orgSettings?.ownerPassword || '181013') : '')
+      };
+    });
+    if (!hasPrimary) {
+      list.unshift({
+        id: 'owner_saif',
+        username: orgSettings?.ownerUsername || 'saif',
+        password: orgSettings?.ownerPassword || '181013',
+        fullName: orgSettings?.ownerFullName || 'سيف (المالك الأساسي المعتمد)',
+        phone: orgSettings?.ownerPhone || '',
+        isActive: true,
+        isPrimaryOwner: true
+      });
+    }
+    return list;
+  }, [orgSettings?.systemOwners, orgSettings?.ownerUsername, orgSettings?.ownerPassword, orgSettings?.ownerFullName, orgSettings?.ownerPhone]);
 
   // نموذج هوية النظام
   const [brandForm, setBrandForm] = useState(() => {
@@ -126,7 +141,14 @@ export default function OwnerAccessAndIdentityModule({
     const existing = employeeUnifiedAccess[emp.id] || employeeUnifiedAccess[emp.code] || null;
 
     if (existing) {
-      setEmpAccessForm(JSON.parse(JSON.stringify(existing)));
+      const parsed = JSON.parse(JSON.stringify(existing));
+      if (parsed.permissions?.topManagement) {
+        parsed.permissions.topManagement.canModifyOrExemptPenalties = Boolean(parsed.permissions.topManagement.canModifyOrExemptPenalties);
+      }
+      if (parsed.permissions?.branchManager) {
+        delete parsed.permissions.branchManager.canModifyOrExemptPenalties;
+      }
+      setEmpAccessForm(parsed);
     } else {
       // إعداد افتراضي نظيف (بدون تفعيل أي صلاحيات تلقائية لحين قيام المالك بمنحها)
       setEmpAccessForm({
@@ -143,7 +165,8 @@ export default function OwnerAccessAndIdentityModule({
           },
           topManagement: {
             enabled: false,
-            allowedModules: ['dashboard']
+            allowedModules: ['dashboard'],
+            canModifyOrExemptPenalties: false
           },
           outstockHandling: {
             enabled: false,
@@ -190,9 +213,13 @@ export default function OwnerAccessAndIdentityModule({
         isEnabled: empAccessForm.isEnabled !== undefined ? (empAccessForm.isEnabled || hasAnyRoleEnabled) : hasAnyRoleEnabled,
         permissions: {
           ...empAccessForm.permissions,
+          branchManager: {
+            ...empAccessForm.permissions?.branchManager
+          },
           topManagement: {
             ...empAccessForm.permissions?.topManagement,
-            allowedModules: topMgmtAllowed
+            allowedModules: topMgmtAllowed,
+            canModifyOrExemptPenalties: Boolean(empAccessForm.permissions?.topManagement?.canModifyOrExemptPenalties)
           },
           outstockHandling: {
             ...empAccessForm.permissions?.outstockHandling,
@@ -350,7 +377,12 @@ export default function OwnerAccessAndIdentityModule({
     const cleanU = String(ownerForm.username || '').trim().toLowerCase();
     const cleanP = String(ownerForm.password || '').trim();
 
-    if (!cleanU || !cleanP) {
+    const existingOwner = editingOwnerId
+      ? systemOwners.find(o => o.id === editingOwnerId || String(o.username || '').toLowerCase() === cleanU)
+      : null;
+    const finalPassword = cleanP || existingOwner?.password || '';
+
+    if (!cleanU || !finalPassword) {
       showToast?.('⚠️ يرجى إدخال اسم المستخدم وكلمة المرور');
       return;
     }
@@ -359,17 +391,21 @@ export default function OwnerAccessAndIdentityModule({
     try {
       const nowIso = new Date().toISOString();
       let updatedOwners = [...systemOwners];
+      let isEditingPrimary = false;
 
       if (editingOwnerId) {
         // تعديل مالك قائم
         updatedOwners = updatedOwners.map(o => {
           if (o.id === editingOwnerId || o.username === cleanU) {
+            const isPri = Boolean(o.isPrimaryOwner || o.username === 'saif');
+            if (isPri) isEditingPrimary = true;
             return {
               ...o,
               username: cleanU,
-              password: cleanP,
+              password: finalPassword,
               fullName: ownerForm.fullName || cleanU,
               phone: ownerForm.phone || '',
+              isPrimaryOwner: isPri,
               updatedAt: nowIso
             };
           }
@@ -383,9 +419,9 @@ export default function OwnerAccessAndIdentityModule({
           return;
         }
         updatedOwners.push({
-          id: `owner_${Date.now()}`,
+          id: `owner_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
           username: cleanU,
-          password: cleanP,
+          password: finalPassword,
           fullName: ownerForm.fullName || cleanU,
           phone: ownerForm.phone || '',
           isActive: true,
@@ -397,12 +433,31 @@ export default function OwnerAccessAndIdentityModule({
       const updatedOrg = {
         ...orgSettings,
         systemOwners: updatedOwners,
+        ...(isEditingPrimary ? {
+          ownerUsername: cleanU,
+          ownerPassword: finalPassword,
+          ownerFullName: ownerForm.fullName || cleanU,
+          ownerPhone: ownerForm.phone || ''
+        } : {}),
         updatedAt: nowIso
       };
 
-      const updatedState = { ...state, orgSettings: updatedOrg };
+      const updatedState = {
+        ...state,
+        orgSettings: updatedOrg,
+        _allowOwnerPasswordChange: true,
+        _ownerAuthorized: true
+      };
+
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
+
+      // حفظ مباشر في جدول السلايسات بقاعدة البيانات
+      try {
+        await apiSaveSettingsSlice('orgSettings', updatedOrg);
+      } catch (sliceErr) {
+        console.warn('[OwnerManagement] Slice save warning:', sliceErr);
+      }
 
       // مزامنة السيرفر
       fetch('/api/auth/owners/manage', {
@@ -413,12 +468,12 @@ export default function OwnerAccessAndIdentityModule({
           ownerData: {
             id: editingOwnerId,
             username: cleanU,
-            password: cleanP,
+            password: finalPassword,
             fullName: ownerForm.fullName,
             phone: ownerForm.phone
           }
         })
-      }).catch(() => {});
+      }).catch(err => console.warn('[OwnerManagement] Sync warn:', err));
 
       showToast?.(`✅ تم ${editingOwnerId ? 'تعديل بيانات' : 'إضافة'} المالك بنجاح`);
       setShowOwnerModal(false);
@@ -860,6 +915,11 @@ export default function OwnerAccessAndIdentityModule({
                                 {u.permissions?.topManagement?.enabled && (
                                   <span style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '2px 7px', borderRadius: '5px', fontSize: '10.5px', fontWeight: 800 }}>
                                     🛡️ إدارة عليا ({u.permissions?.topManagement?.allowedModules?.length || 0} شاشات)
+                                  </span>
+                                )}
+                                {u.permissions?.topManagement?.canModifyOrExemptPenalties && (
+                                  <span style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', padding: '2px 7px', borderRadius: '5px', fontSize: '10.5px', fontWeight: 800 }}>
+                                    ⚖️ استثناء وتعديل الجزاءات
                                   </span>
                                 )}
                                 {u.permissions?.outstockHandling?.enabled && (
@@ -1447,6 +1507,11 @@ export default function OwnerAccessAndIdentityModule({
                       <option key={b.id} value={b.id}>{b.name} (كود: {b.code || b.branchCode || b.id})</option>
                     ))}
                   </select>
+
+                  <div style={{ marginTop: '8px', padding: '6px 10px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>🔒</span>
+                    <span>تعديل واستثناء الجزاءات والخصومات محجوب تماماً عن مدير الفرع ومحصور بالإدارة العليا المصرح لها فقط.</span>
+                  </div>
                 </div>
               )}
             </div>
@@ -1577,6 +1642,41 @@ export default function OwnerAccessAndIdentityModule({
                         </label>
                       );
                     })}
+                  </div>
+
+                  {/* صلاحية استثناء وتعديل الجزاءات والخصومات */}
+                  <div style={{
+                    marginTop: '12px',
+                    padding: '12px 14px',
+                    background: empAccessForm.permissions?.topManagement?.canModifyOrExemptPenalties ? 'rgba(239, 68, 68, 0.05)' : '#f8fafc',
+                    borderRadius: '8px',
+                    border: empAccessForm.permissions?.topManagement?.canModifyOrExemptPenalties ? '1.5px solid #f87171' : '1px solid var(--border)'
+                  }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', margin: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(empAccessForm.permissions?.topManagement?.canModifyOrExemptPenalties)}
+                        onChange={(e) => setEmpAccessForm(prev => ({
+                          ...prev,
+                          permissions: {
+                            ...prev.permissions,
+                            topManagement: {
+                              ...prev.permissions?.topManagement,
+                              canModifyOrExemptPenalties: e.target.checked
+                            }
+                          }
+                        }))}
+                        style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#dc2626' }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: '13px', color: empAccessForm.permissions?.topManagement?.canModifyOrExemptPenalties ? '#dc2626' : 'var(--text)' }}>
+                          ⚖️ إمكانية التعديل أو استثناء الجزاءات (Modify & Exempt Penalties)
+                        </div>
+                        <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
+                          منح الموظف صلاحية تعديل الجزاءات والخصومات اللائحية أو استثناء وتخفيف خصومات التأخير والمخالفات في شاشات الإدارة العليا
+                        </div>
+                      </div>
+                    </label>
                   </div>
                 </div>
               )}
@@ -1929,14 +2029,14 @@ export default function OwnerAccessAndIdentityModule({
 
               <div style={{ marginBottom: '14px' }}>
                 <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 800, marginBottom: '5px' }}>
-                  كلمة المرور (Password):
+                  كلمة المرور (Password): {editingOwnerId && <span style={{ color: '#059669', fontSize: '11px', fontWeight: 600 }}>(اتركها فارغة للإبقاء على الحالية)</span>}
                 </label>
                 <input
                   type="text"
-                  required
+                  required={!editingOwnerId}
                   value={ownerForm.password}
                   onChange={(e) => setOwnerForm(prev => ({ ...prev, password: e.target.value }))}
-                  placeholder="كلمة المرور"
+                  placeholder={editingOwnerId ? 'اتركها فارغة للحفاظ على كلمة المرور القديمة' : 'كلمة المرور'}
                   style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', fontFamily: 'Cairo' }}
                 />
               </div>

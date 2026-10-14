@@ -630,42 +630,63 @@ export function mergeRosters(localRosters = [], remoteRosters = [], options = {}
   const remoteList = toSafeArray(remoteRosters);
   const deletedIds = options.deletedIds instanceof Set ? options.deletedIds : new Set(toSafeArray(options.deletedIds).map(String));
 
-  const getRosterKey = (r) => {
+  const getLogicalKey = (r) => {
     if (!r || typeof r !== 'object') return null;
+    const empId = String(r.employeeId || r.employeeCode || '').trim();
+    const m = r.month ? String(r.month).slice(0, 7) : '';
+    const bId = String(r.branchId || '').trim();
+    if (empId && m) return `${empId}_${m}_${bId}`;
     if (r.id) return String(r.id);
-    if (r.employeeId && r.month) return `${r.employeeId}_${r.month}`;
     return null;
   };
 
   const map = new Map();
 
+  const combineRosterEntries = (existing, incoming) => {
+    const existingSch = existing.schedule && typeof existing.schedule === 'object' ? existing.schedule : {};
+    const incomingSch = incoming.schedule && typeof incoming.schedule === 'object' ? incoming.schedule : {};
+    
+    const existingIsoCount = Object.keys(existingSch).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).length;
+    const incomingIsoCount = Object.keys(incomingSch).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).length;
+
+    // دمج الجداول مع إعطاء الأولوية للجدول الغني بالتواريخ الشهرية المفصلة ISO
+    const mergedSchedule = incomingIsoCount >= existingIsoCount
+      ? { ...existingSch, ...incomingSch }
+      : { ...incomingSch, ...existingSch };
+
+    const timeExist = new Date(existing.approvedAt || existing.updatedAt || 0).getTime() || 0;
+    const timeIncom = new Date(incoming.approvedAt || incoming.updatedAt || 0).getTime() || 0;
+    const base = timeIncom >= timeExist ? incoming : existing;
+    const other = timeIncom >= timeExist ? existing : incoming;
+
+    return {
+      ...other,
+      ...base,
+      schedule: mergedSchedule
+    };
+  };
+
   for (const r of remoteList) {
     if (!r || typeof r !== 'object') continue;
-    const key = getRosterKey(r) || `ros_${Math.random()}`;
-    if (!isItemDeleted(r, key, deletedIds)) {
+    const key = getLogicalKey(r) || `ros_${Math.random()}`;
+    if (isItemDeleted(r, r.id || key, deletedIds)) continue;
+
+    if (!map.has(key)) {
       map.set(key, r);
+    } else {
+      map.set(key, combineRosterEntries(map.get(key), r));
     }
   }
 
   for (const r of localList) {
     if (!r || typeof r !== 'object') continue;
-    const key = getRosterKey(r);
-    if (!key || isItemDeleted(r, key, deletedIds)) continue;
+    const key = getLogicalKey(r) || `ros_${Math.random()}`;
+    if (isItemDeleted(r, r.id || key, deletedIds)) continue;
 
     if (!map.has(key)) {
       map.set(key, r);
     } else {
-      const remoteRoster = map.get(key);
-      const mergedSchedule = {
-        ...(remoteRoster.schedule || {}),
-        ...(r.schedule || {})
-      };
-      const mergedRoster = {
-        ...remoteRoster,
-        ...r,
-        schedule: mergedSchedule
-      };
-      map.set(key, mergedRoster);
+      map.set(key, combineRosterEntries(map.get(key), r));
     }
   }
 
@@ -1327,14 +1348,29 @@ export function smartMergeStates(localState, remoteState) {
     employees: mergeArrays(effectiveLocal.employees, effectiveRemote.employees, { prefix: 'emp', deletedIds }),
     shifts: mergedShifts,
     approvalRules: (() => {
-      if (effectiveLocal._approvalRulesUpdatedAt || effectiveRemote._approvalRulesUpdatedAt) {
-        const localT = new Date(effectiveLocal._approvalRulesUpdatedAt || 0).getTime();
-        const remoteT = new Date(effectiveRemote._approvalRulesUpdatedAt || 0).getTime();
-        return localT >= remoteT ? (effectiveLocal.approvalRules || []) : (effectiveRemote.approvalRules || []);
-      }
-      return effectiveLocal.approvalRules && effectiveLocal.approvalRules.length > 0 
-        ? effectiveLocal.approvalRules 
-        : (effectiveRemote.approvalRules || []);
+      const localRules = Array.isArray(effectiveLocal.approvalRules) ? effectiveLocal.approvalRules : [];
+      const remoteRules = Array.isArray(effectiveRemote.approvalRules) ? effectiveRemote.approvalRules : [];
+      
+      const localT = new Date(effectiveLocal._approvalRulesUpdatedAt || 0).getTime();
+      const remoteT = new Date(effectiveRemote._approvalRulesUpdatedAt || 0).getTime();
+      
+      const primary = localT >= remoteT ? localRules : remoteRules;
+      const secondary = localT >= remoteT ? remoteRules : localRules;
+      
+      const map = new Map();
+      // 1. ضع القواعد الثانوية أولاً كقاعدة أساسية
+      secondary.forEach(r => {
+        if (!r || typeof r !== 'object') return;
+        const key = r.requestType || r.id || r.type;
+        if (key) map.set(key, r);
+      });
+      // 2. القواعد الأحدث (Primary) تفرض نفسها وتحدث أي تعارض
+      primary.forEach(r => {
+        if (!r || typeof r !== 'object') return;
+        const key = r.requestType || r.id || r.type;
+        if (key) map.set(key, r);
+      });
+      return Array.from(map.values());
     })(),
     authorizedDevices: mergeArrays(effectiveLocal.authorizedDevices, effectiveRemote.authorizedDevices, { prefix: 'dev', deletedIds }),
 
@@ -1415,6 +1451,11 @@ export function smartMergeStates(localState, remoteState) {
     branchDirectives: mergeArrays(effectiveLocal.branchDirectives, effectiveRemote.branchDirectives, { prefix: 'bdir', deletedIds }),
     adminDirectives: mergeArrays(effectiveLocal.adminDirectives, effectiveRemote.adminDirectives, { prefix: 'adir', deletedIds }),
     _notificationsClearedAt: effectiveLocal._notificationsClearedAt || effectiveRemote._notificationsClearedAt || null,
+    _approvalRulesUpdatedAt: (() => {
+      const localT = new Date(effectiveLocal._approvalRulesUpdatedAt || 0).getTime();
+      const remoteT = new Date(effectiveRemote._approvalRulesUpdatedAt || 0).getTime();
+      return (localT >= remoteT ? effectiveLocal._approvalRulesUpdatedAt : effectiveRemote._approvalRulesUpdatedAt) || null;
+    })(),
     _requestsClearedAt: effectiveReqClearTime > 0 ? (remoteReqClearTime >= localReqClearTime ? effectiveRemote._requestsClearedAt : effectiveLocal._requestsClearedAt) : (effectiveRemote._requestsClearedAt || effectiveLocal._requestsClearedAt || null),
     _wipedAt: isRemoteWipeNewer ? effectiveRemote._wipedAt : (isLocalWipeNewer ? effectiveLocal._wipedAt : (effectiveRemote._wipedAt || effectiveLocal._wipedAt || null)),
     _deletedIds: Array.from(deletedIds).slice(-10000)

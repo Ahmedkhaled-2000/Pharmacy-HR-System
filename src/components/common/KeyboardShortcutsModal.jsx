@@ -52,17 +52,20 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
   };
 
   const filteredShortcuts = useMemo(() => {
-    return activeList.filter((item) => {
+    return (activeList || []).filter((item) => {
+      if (!item) return false;
       if (selectedCategory !== 'all' && item.category !== selectedCategory) {
         return false;
       }
       if (!searchTerm.trim()) return true;
       const q = searchTerm.trim().toLowerCase();
-      const primaryDisp = formatShortcutDisplay(item).toLowerCase();
-      const fallbackDisp = formatShortcutFallback(item).toLowerCase();
+      const primaryDisp = (formatShortcutDisplay(item) || '').toLowerCase();
+      const fallbackDisp = (formatShortcutFallback(item) || '').toLowerCase();
+      const itemName = String(item.name || '').toLowerCase();
+      const itemDesc = String(item.desc || '').toLowerCase();
       return (
-        item.name.toLowerCase().includes(q) ||
-        item.desc.toLowerCase().includes(q) ||
+        itemName.includes(q) ||
+        itemDesc.includes(q) ||
         primaryDisp.includes(q) ||
         fallbackDisp.includes(q)
       );

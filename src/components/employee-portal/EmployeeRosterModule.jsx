@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { arabicWeekday } from '../../utils/formatters';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
-import { getEmployeeDaySchedule, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
+import { getEmployeeDaySchedule, getResolvedEmployeeRoster, normalizeSchedule } from '../../utils/rosterEngine';
 import { getCycleDateRange } from '../../utils/periodEngine';
 import PendingRosterModal from './PendingRosterModal';
 
@@ -83,7 +83,7 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = n
         let daySchedule = null;
         if (empId && state) {
           const dynamicSchedule = getEmployeeDaySchedule(empId, dateStr, state);
-          if (dynamicSchedule?.isSwapped) {
+          if (dynamicSchedule) {
             daySchedule = dynamicSchedule;
           } else if (hasApprovedSchedule) {
             daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
@@ -112,7 +112,7 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = n
     let daySchedule = null;
     if (empId && state) {
       const dynamicSchedule = getEmployeeDaySchedule(empId, dateStr, state);
-      if (dynamicSchedule?.isSwapped) {
+      if (dynamicSchedule) {
         daySchedule = dynamicSchedule;
       } else if (hasApprovedSchedule) {
         daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
@@ -128,68 +128,7 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = n
   return result;
 }
 
-// Normalize schedule to standard Arabic day names and structure
-export function normalizeSchedule(rawSchedule) {
-  if (!rawSchedule || typeof rawSchedule !== 'object' || Object.keys(rawSchedule).length === 0) return null;
-  
-  const normalized = {};
-  
-  const dayKeyMap = {
-    'saturday': 'السبت',
-    'sunday': 'الأحد',
-    'monday': 'الاثنين',
-    'tuesday': 'الثلاثاء',
-    'wednesday': 'الأربعاء',
-    'thursday': 'الخميس',
-    'friday': 'الجمعة',
-    'السبت': 'السبت',
-    'الأحد': 'الأحد',
-    'الاحد': 'الأحد',
-    'الإثنين': 'الاثنين',
-    'الاثنين': 'الاثنين',
-    'الثلاثاء': 'الثلاثاء',
-    'الأربعاء': 'الأربعاء',
-    'الاربعاء': 'الأربعاء',
-    'الخميس': 'الخميس',
-    'الجمعة': 'الجمعة',
-    '0': 'الأحد',
-    '1': 'الاثنين',
-    '2': 'الثلاثاء',
-    '3': 'الأربعاء',
-    '4': 'الخميس',
-    '5': 'الجمعة',
-    '6': 'السبت',
-    'day_0': 'الأحد',
-    'day_1': 'الاثنين',
-    'day_2': 'الثلاثاء',
-    'day_3': 'الأربعاء',
-    'day_4': 'الخميس',
-    'day_5': 'الجمعة',
-    'day_6': 'السبت'
-  };
-
-  Object.entries(rawSchedule).forEach(([key, val]) => {
-    const rawKey = String(key).trim();
-    const cleanKey = rawKey.toLowerCase();
-    const mappedDay = dayKeyMap[cleanKey] || dayKeyMap[key];
-    const isIso = /^\d{4}-\d{2}-\d{2}$/.test(rawKey);
-    const targetKey = mappedDay || (isIso ? rawKey : null);
-
-    if (targetKey && val && typeof val === 'object') {
-      const isOff = val.type === 'off' || val.isOff === true || val.type === 'راحة';
-      normalized[targetKey] = {
-        ...val,
-        type: isOff ? 'off' : 'shift',
-        isOff,
-        start: isOff ? '' : (val.start || val.checkIn || ''),
-        end: isOff ? '' : (val.end || val.checkOut || ''),
-        hours: val.hours !== undefined ? val.hours : (isOff ? 0 : 8)
-      };
-    }
-  });
-
-  return Object.keys(normalized).length > 0 ? normalized : null;
-}
+export { normalizeSchedule };
 
 export { getResolvedEmployeeRoster };
 
@@ -285,9 +224,10 @@ export default function EmployeeRosterModule({
   const pendingRosterReq = (state.requests || []).find(
     (r) =>
       (String(r.employeeId) === String(emp.id) || (emp.code && String(r.employeeCode) === String(emp.code))) &&
-      (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
+      (['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit', 'assign_roster'].includes(r.type) || r.requestType === 'roster_update') &&
       (r.month === selectedMonth || !r.month) &&
       (r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_branch') &&
+      !r.branchApproved && !r.adminApproved &&
       (String(r.branchId || '') === String(curBranch || '') || (!r.branchId && String(primaryBranch || '') === String(curBranch || '')))
   );
 
@@ -297,9 +237,10 @@ export default function EmployeeRosterModule({
       const targetReq = pendingRosterReq || (state?.requests || []).find(
         (r) =>
           (String(r.employeeId) === String(emp.id) || (emp.code && String(r.employeeCode) === String(emp.code))) &&
-          (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
+          (['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit', 'assign_roster'].includes(r.type) || r.requestType === 'roster_update') &&
           (r.month === selectedMonth || !r.month) &&
-          (r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_branch')
+          (r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_branch') &&
+          !r.branchApproved && !r.adminApproved
       );
       if (targetReq) {
         setActivePendingReq(targetReq);

@@ -371,32 +371,36 @@ export function getActiveShortcuts(customList) {
 export function formatShortcutDisplay(item) {
   if (!item) return '';
   const parts = [];
-  if (item.modifiers && item.modifiers.length > 0) {
-    item.modifiers.forEach((m) => parts.push(m));
+  if (Array.isArray(item.modifiers) && item.modifiers.length > 0) {
+    item.modifiers.forEach((m) => {
+      if (m) parts.push(String(m));
+    });
   }
-  let keyName = item.key;
+  let keyName = item.key || '';
   if (keyName === 'Escape') keyName = 'Esc';
   else if (keyName === 'ScrollLock') keyName = 'Scroll Lock';
   else if (keyName === 'Enter') keyName = 'Enter ↵';
   else if (keyName === 'Arrows') keyName = '← ↑ → ↓';
   else if (/^F\d{1,2}$/i.test(keyName)) keyName = keyName.toUpperCase();
   else if (keyName) keyName = keyName.toUpperCase();
-  parts.push(keyName);
+  if (keyName) parts.push(keyName);
   return parts.join(' + ');
 }
 
 export function formatShortcutFallback(item) {
   if (!item || !item.fallbackKey) return '';
   const parts = [];
-  if (item.fallbackModifiers && item.fallbackModifiers.length > 0) {
-    item.fallbackModifiers.forEach((m) => parts.push(m));
+  if (Array.isArray(item.fallbackModifiers) && item.fallbackModifiers.length > 0) {
+    item.fallbackModifiers.forEach((m) => {
+      if (m) parts.push(String(m));
+    });
   }
-  let keyName = item.fallbackKey;
+  let keyName = item.fallbackKey || '';
   if (keyName === 'Escape') keyName = 'Esc';
   else if (keyName === 'ScrollLock') keyName = 'Scroll Lock';
   else if (/^F\d{1,2}$/i.test(keyName)) keyName = keyName.toUpperCase();
   else if (keyName) keyName = keyName.toUpperCase();
-  parts.push(keyName);
+  if (keyName) parts.push(keyName);
   return parts.join(' + ');
 }
 
@@ -467,7 +471,8 @@ export function normalizeKeyFromEvent(e) {
     '٦': '6', '٧': '7', '٨': '8', '٩': '9', '٠': '0'
   };
 
-  const rawKey = (e.key || '').toLowerCase();
+  if (!e) return '';
+  const rawKey = (e?.key || '').toLowerCase();
   if (ARABIC_TO_LATIN[rawKey]) {
     return ARABIC_TO_LATIN[rawKey];
   }
@@ -479,21 +484,22 @@ export function normalizeKeyFromEvent(e) {
  * Checks if a keyboard event matches a configured shortcut item
  */
 export function matchesShortcutEvent(item, e) {
-  if (!item) return false;
+  if (!item || !e) return false;
 
   const eventChar = (normalizeKeyFromEvent(e) || '').toLowerCase();
-  const targetKey = (item.key || '').toLowerCase();
+  const targetKey = String(item.key || '').toLowerCase();
 
   const isCtrl = Boolean(e.ctrlKey || e.metaKey);
   const isAlt = Boolean(e.altKey);
   const isShift = Boolean(e.shiftKey);
 
-  const mods = item.modifiers || [];
+  const mods = Array.isArray(item.modifiers) ? item.modifiers : [];
   const reqCtrl = mods.includes('Ctrl');
   const reqAlt = mods.includes('Alt');
   const reqShift = mods.includes('Shift');
 
   const primaryMatch =
+    Boolean(targetKey) &&
     eventChar === targetKey &&
     isCtrl === reqCtrl &&
     isAlt === reqAlt &&
@@ -503,12 +509,13 @@ export function matchesShortcutEvent(item, e) {
 
   // Check fallback definition
   if (item.fallbackKey) {
-    const fallbackTarget = (item.fallbackKey || '').toLowerCase();
-    const fbMods = item.fallbackModifiers || [];
+    const fallbackTarget = String(item.fallbackKey || '').toLowerCase();
+    const fbMods = Array.isArray(item.fallbackModifiers) ? item.fallbackModifiers : [];
     const fbCtrl = fbMods.includes('Ctrl');
     const fbAlt = fbMods.includes('Alt');
     const fbShift = fbMods.includes('Shift');
     if (
+      Boolean(fallbackTarget) &&
       eventChar === fallbackTarget &&
       isCtrl === fbCtrl &&
       isAlt === fbAlt &&

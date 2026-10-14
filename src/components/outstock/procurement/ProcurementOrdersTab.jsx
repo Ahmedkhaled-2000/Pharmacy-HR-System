@@ -23,6 +23,7 @@ import {
   outstockGetProcurementAggregated,
   outstockProcurementItemAction,
   outstockProcurementBatchItemActions,
+  outstockConvertItemType,
   listenToOutstockLocalMessages
 } from '../../../utils/outstockApiClient';
 import { exportProcurementOrdersExcel } from '../../../utils/outstockExcelExporter';
@@ -118,6 +119,7 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
       socket.on('outstock:order_created', handleLiveOrder);
       socket.on('outstock:items_status_updated', handleLiveOrder);
       socket.on('outstock:item_restocked', handleLiveOrder);
+      socket.on('outstock:item_type_converted', handleLiveOrder);
     }
 
     // 2. الاستماع اللحظي عبر قناة المزامنة المحلية المشتركة بين التبويبات (BroadcastChannel)
@@ -150,6 +152,7 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
         socket.off('outstock:order_created', handleLiveOrder);
         socket.off('outstock:items_status_updated', handleLiveOrder);
         socket.off('outstock:item_restocked', handleLiveOrder);
+        socket.off('outstock:item_type_converted', handleLiveOrder);
       }
       unsubscribeLocal?.();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -336,6 +339,67 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // تحويل وتصحيح نوع الصنف (دوائي <-> تجميل) ونقله فوراً للمسؤول المختص وتحديث الكتالوج
+  const handleConvertItemTypePrompt = (item, explicitTargetType = null) => {
+    const isCurrentlyCosmetics = item.item_type === 'cosmetics';
+    const targetType = explicitTargetType || (isCurrentlyCosmetics ? 'medication' : 'cosmetics');
+    const isTargetingCosmetics = targetType === 'cosmetics';
+    const itemIds = (item.item_details || []).map(d => d.itemId).filter(Boolean);
+
+    const title = isTargetingCosmetics
+      ? 'تحويل الصنف إلى مستحضرات تجميل 💄'
+      : 'تحويل الصنف إلى صنف دوائي 💊';
+
+    const message = isTargetingCosmetics
+      ? `هل أنت متأكد من تحويل الصنف "${item.medication_name}" من صنف دوائي إلى مستحضرات تجميل؟\nسيتم نقله فوراً إلى شاشة مسؤول المستحضرات، وتحديث الكتالوج العام تلقائياً لتصحيح الطلبات المستقبلية.`
+      : `هل أنت متأكد من تحويل الصنف "${item.medication_name}" من مستحضرات تجميل إلى صنف دوائي؟\nسيتم نقله فوراً إلى شاشة مدير المشتريات، وتحديث الكتالوج العام تلقائياً لتصحيح الطلبات المستقبلية.`;
+
+    const badge = isTargetingCosmetics ? '💄 نقل لقسم التجميل' : '💊 نقل للأدوية';
+    const confirmText = isTargetingCosmetics ? 'نعم، تحويل لتجميل' : 'نعم، تحويل لدوائي';
+    const confirmBtnStyle = isTargetingCosmetics ? 'secondary' : 'primary';
+
+    setConfirmConfig({
+      isOpen: true,
+      title,
+      message,
+      iconType: 'warning',
+      badge,
+      confirmText,
+      cancelText: 'إلغاء',
+      confirmBtnStyle,
+      details: [
+        { label: 'الصنف', value: item.medication_name },
+        { label: 'الفرع الطالب', value: item.branch_name || item.branch_id },
+        { label: 'إجمالي الكمية المطلوبة', value: `${item.total_requested_qty} ${item.unit_type === 'strip' ? 'شريط' : 'علبة'}` },
+        { label: 'عدد الطلبات المتأثرة', value: `${itemIds.length || item.orders_count || 1} طلب معلق` }
+      ],
+      onConfirmAction: async () => {
+        setIsProcessing(true);
+        try {
+          const res = await outstockConvertItemType({
+            itemIds,
+            branchId: item.branch_id,
+            medicationName: item.medication_name,
+            targetItemType: targetType,
+            updateCatalog: true
+          });
+
+          if (res?.success) {
+            showToast?.(`✅ ${res.message || (isTargetingCosmetics ? 'تم تحويل الصنف إلى مستحضرات تجميل ونقله بنجاح' : 'تم تحويل الصنف إلى صنف دوائي ونقله بنجاح')}`);
+            fetchAggregatedOrders();
+          } else {
+            showToast?.(`⚠️ ${res?.error || 'تعذر تحويل نوع الصنف'}`);
+          }
+        } catch (err) {
+          showToast?.('حدث خطأ أثناء تحويل نوع الصنف');
+        } finally {
+          setIsProcessing(false);
+          setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
   };
 
   // إرسال دفعة القرارات المحددة معاً للفروع بنافذة تأكيد منبثقة
@@ -947,6 +1011,51 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
                             <Edit3 size={14} />
                             <span>تعديل الكمية</span>
                           </button>
+
+                          {/* 4. زر تحويل وتصحيح نوع الصنف (دوائي <-> تجميل) لنقله للمسؤول المختص فوراً وتصحيح خطأ الصيدلي */}
+                          {item.item_type === 'cosmetics' ? (
+                            <button
+                              type="button"
+                              className="outstock-btn outstock-btn-secondary"
+                              onClick={() => handleConvertItemTypePrompt(item, 'medication')}
+                              disabled={isProcessing}
+                              style={{
+                                padding: '6px 11px',
+                                fontSize: '12px',
+                                borderColor: '#bae6fd',
+                                color: '#0369a1',
+                                background: '#f0f9ff',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                              title="تصحيح تصنيف الصنف من تجميل إلى (صنف دوائي) ونقله فوراً لشاشة مدير المشتريات"
+                            >
+                              <Pill size={14} color="#0284c7" />
+                              <span>تحويل لدوائي</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="outstock-btn outstock-btn-secondary"
+                              onClick={() => handleConvertItemTypePrompt(item, 'cosmetics')}
+                              disabled={isProcessing}
+                              style={{
+                                padding: '6px 11px',
+                                fontSize: '12px',
+                                borderColor: '#fbcfe8',
+                                color: '#be185d',
+                                background: '#fdf2f8',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                              title="تصحيح تصنيف الصنف من دواء إلى (مستحضرات تجميل) ونقله فوراً لشاشة مسؤول التجميل"
+                            >
+                              <Sparkles size={14} color="#db2777" />
+                              <span>تحويل لتجميل</span>
+                            </button>
+                          )}
 
                           {/* زر الإرسال السريع الفردي في حال رغبة الصيدلي في إنهاء بند واحد فوراً */}
                           {decision && (

@@ -1077,6 +1077,9 @@ export function normalizeState(parsed) {
     },
     branchDirectives: toSafeArray(parsed.branchDirectives),
     adminDirectives: toSafeArray(parsed.adminDirectives),
+    _approvalRulesUpdatedAt: parsed._approvalRulesUpdatedAt || null,
+    _ipRestrictionsUpdatedAt: parsed._ipRestrictionsUpdatedAt || null,
+    _bylawsUpdatedAt: parsed._bylawsUpdatedAt || null,
     _notificationsClearedAt: parsed._notificationsClearedAt || null,
     _endedShiftEmpIds: Array.from(endedEmpIdsSet).slice(-1000),
     _deletedIds: Array.from(deletedSet).slice(-3000)

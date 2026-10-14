@@ -178,6 +178,7 @@ export function initOutstockSyncService() {
       'outstock:restocked_alert',
       'outstock:item_restocked',
       'outstock:customer_updated',
+      'outstock:customer_deleted',
       'outstock:deficiency_reordered',
       'outstock:refresh_notifications',
       'outstock:branch_order_replied',

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { shouldShowRequestToBranch } from '../../utils/formatters';
 import { shouldRouteDirectToAdmin, isBranchWithoutManager, isDualApprovalRequest } from '../../utils/jobsHelper';
 import { getFormattedRequestBadge } from '../requests/RequestsModule';
@@ -87,6 +87,12 @@ export default function ApprovalCenterModule({
       autoExecuteOnBoth: true
     }
   ]);
+
+  useEffect(() => {
+    if (Array.isArray(state?.approvalRules) && state.approvalRules.length > 0) {
+      setRules(state.approvalRules);
+    }
+  }, [state?.approvalRules]);
 
   const [newRuleName, setNewRuleName] = useState('');
   const [newRuleReqBranch, setNewRuleReqBranch] = useState(true);
@@ -187,12 +193,18 @@ export default function ApprovalCenterModule({
 
   const handleAddRule = () => {
     if (!newRuleName.trim()) return;
+    const nowIso = new Date().toISOString();
     const newRule = {
       id: `rule_${Date.now()}`,
       name: newRuleName.trim(),
+      typeLabel: newRuleName.trim(),
+      requestType: newRuleName.trim(),
+      reqBranch: newRuleReqBranch,
+      reqAdmin: newRuleReqAdmin,
       requiresBranchManager: newRuleReqBranch,
       requiresSuperAdmin: newRuleReqAdmin,
-      autoExecuteOnBoth: newRuleReqBranch && newRuleReqAdmin
+      autoExecuteOnBoth: Boolean(newRuleReqBranch && newRuleReqAdmin),
+      updatedAt: nowIso
     };
     const updated = [...rules, newRule];
     setRules(updated);

@@ -12,6 +12,7 @@ import { fmt, isEmployeeActive } from '../../utils/formatters';
 import { getBranchIdentifiers, isEmployeeInBranch } from '../../utils/disciplinaryPenaltyEngine';
 import { useUI } from '../../context/UIContext';
 import { notifyOnPenaltyApplied } from '../../utils/gmailService';
+import { canUserModifyOrExemptPenalties } from '../../utils/permissionUtils';
 
 export default function LatePenaltyPolicyModule({
   state,
@@ -20,6 +21,7 @@ export default function LatePenaltyPolicyModule({
   showToast,
   userRole = 'admin',
   currentEmpId = null,
+  currentEmpUser = null,
   currentBranchId = null,
   filterFn = null,
   monthPicker = null,
@@ -31,10 +33,28 @@ export default function LatePenaltyPolicyModule({
   const isAdmin = userRole === 'admin' || userRole === 'owner';
   const isBranchManager = userRole === 'branch';
   const isEmployee = userRole === 'employee';
-  const isManagerOrAdmin = isAdmin || isBranchManager;
 
   const employees = (state.employees || []).filter((e) => e && e.id);
   const branches = (state.branches || []).filter((b) => b && b.id);
+
+  // استخراج المستخدم الفعلي للتحقق الصارم من الصلاحيات
+  const resolvedCurrentUser = useMemo(() => {
+    if (currentEmpUser) return currentEmpUser;
+    if (currentEmpId) {
+      const found = employees.find((e) => e && (String(e.id) === String(currentEmpId) || (e.code && String(e.code) === String(currentEmpId))));
+      if (found) return found;
+    }
+    try {
+      const uStr = localStorage.getItem('app_current_emp_user') || localStorage.getItem('outstock_user');
+      if (uStr) return JSON.parse(uStr);
+    } catch {}
+    return null;
+  }, [currentEmpUser, currentEmpId, employees]);
+
+  // صلاحية تعديل أو استثناء الجزاءات: محظورة قطعياً عن مدير الفرع وتتطلب إذناً صريحاً للإدارة العليا
+  const canModifyOrExempt = useMemo(() => {
+    return canUserModifyOrExemptPenalties(resolvedCurrentUser, state?.orgSettings, userRole);
+  }, [resolvedCurrentUser, state?.orgSettings, userRole]);
 
   // Scoped Employee for Employee Portal
   const loggedInEmp = useMemo(() => {
@@ -252,6 +272,10 @@ export default function LatePenaltyPolicyModule({
 
   // Handler: Run Full Recalculation and Persist
   const handleTriggerFullRecalculation = async () => {
+    if (!canModifyOrExempt) {
+      showToast?.('🚫 ليس لديك صلاحية إعادة احتساب أو تعديل الجزاءات. هذه العملية مقتصرة حصرياً على الإدارة العليا المصرح لها.');
+      return;
+    }
     try {
       let updatedRequests = [...(state.requests || [])];
       const allNewIncidents = [];
@@ -286,6 +310,10 @@ export default function LatePenaltyPolicyModule({
   // Handler: Save Override / Exception
   const handleSaveIncidentOverride = async () => {
     if (!selectedIncidentForEdit) return;
+    if (!canModifyOrExempt) {
+      showToast?.('🚫 ليس لديك صلاحية تعديل أو استثناء الجزاءات. هذه العملية مقتصرة حصرياً على الإدارة العليا المصرح لها.');
+      return;
+    }
     if (!overrideReason.trim()) {
       showToast?.('⚠️ يرجى كتابة سبب التعديل أو الاستثناء لتوثيقه في سجل التدقيق');
       return;
@@ -308,9 +336,9 @@ export default function LatePenaltyPolicyModule({
             status: overrideStatus,
             overrideReason: overrideReason.trim(),
             modifiedBy: {
-              userId: currentEmpId || 'admin',
-              userName: isAdmin ? 'الإدارة العليا' : (isBranchManager ? 'مدير الفرع' : 'المستخدم'),
-              role: userRole
+              userId: resolvedCurrentUser?.id || currentEmpId || 'admin',
+              userName: resolvedCurrentUser?.name || 'الإدارة العليا',
+              role: 'admin'
             },
             modifiedAt: new Date().toISOString()
           };
@@ -377,6 +405,10 @@ export default function LatePenaltyPolicyModule({
 
   // Handler: Save Policy Configuration
   const handleSavePolicy = async () => {
+    if (!canModifyOrExempt || !isAdmin) {
+      showToast?.('🚫 ليس لديك صلاحية تعديل سياسة ولائحة الجزاءات. هذه العملية مقتصرة حصرياً على الإدارة العليا المصرح لها.');
+      return;
+    }
     const performSavePolicy = async () => {
       try {
         let updatedRequests = [...(state.requests || [])];
@@ -429,6 +461,10 @@ export default function LatePenaltyPolicyModule({
 
   // Handler: Restore Policy to Standard Defaults
   const handleRestoreDefaultPolicy = async () => {
+    if (!canModifyOrExempt || !isAdmin) {
+      showToast?.('🚫 ليس لديك صلاحية استعادة أو تعديل سياسة الجزاءات. هذه العملية مقتصرة حصرياً على الإدارة العليا المصرح لها.');
+      return;
+    }
     const isConfirmed = await showConfirm({
       title: 'استعادة لائحة جزاءات التأخير القياسية',
       message: 'هل ترغب بالتأكيد في استعادة اللائحة القياسية الافتراضية لجزاءات التأخير؟\nسيتم إعادة تعيين الشرائح وسلالم الخصم للوضع الافتراضي.',
@@ -540,7 +576,7 @@ export default function LatePenaltyPolicyModule({
         </div>
 
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          {isManagerOrAdmin && (
+          {canModifyOrExempt && (
             <button
               className="btn"
               onClick={handleTriggerFullRecalculation}
@@ -565,8 +601,8 @@ export default function LatePenaltyPolicyModule({
         </div>
       </div>
 
-      {/* Sub-Navigation Tabs (Policy settings tab only for Super Admin) */}
-      {isAdmin && (
+      {/* Sub-Navigation Tabs (Policy settings tab only for Super Admin with penalty modification permission) */}
+      {isAdmin && canModifyOrExempt && (
         <div style={{
           display: 'flex',
           gap: '10px',
@@ -869,7 +905,7 @@ export default function LatePenaltyPolicyModule({
                     <th style={{ padding: '12px 14px', width: '160px' }}>الجزاء اللائحي</th>
                     <th style={{ padding: '12px 14px', width: '100px' }}>الخصم المالي</th>
                     <th style={{ padding: '12px 14px', width: '115px' }}>الحالة</th>
-                    {isManagerOrAdmin && <th style={{ padding: '12px 14px', width: '125px', textAlign: 'center' }}>الإجراءات</th>}
+                    {canModifyOrExempt && <th style={{ padding: '12px 14px', width: '125px', textAlign: 'center' }}>الإجراءات</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -994,7 +1030,7 @@ export default function LatePenaltyPolicyModule({
                             </span>
                           )}
                         </td>
-                        {isManagerOrAdmin && (
+                        {canModifyOrExempt && (
                           <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                             <button
                               type="button"

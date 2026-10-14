@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { outstockGetBranches, outstockGetProcurementTeam } from '../../utils/outstockApiClient';
+import { outstockGetBranches, outstockGetProcurementTeam, getOutstockToken } from '../../utils/outstockApiClient';
 
 export default function OwnerCommandLaunchpadModal({
   isOpen,
@@ -56,6 +56,15 @@ export default function OwnerCommandLaunchpadModal({
     const fetchAsyncData = async () => {
       setIsLoadingAsyncData(true);
       try {
+        let token = getOutstockToken();
+        if (!token) {
+          await new Promise(r => setTimeout(r, 350));
+          token = getOutstockToken();
+        }
+        if (!token) {
+          return;
+        }
+
         const [branchRes, teamRes] = await Promise.allSettled([
           outstockGetBranches(),
           outstockGetProcurementTeam()

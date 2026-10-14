@@ -139,32 +139,68 @@ export function useRealtimeSync(props = {}) {
 
     if (isOwnerActive) {
       const myOwnerPass = localStorage.getItem('app_owner_password_snapshot');
+      const myOwnerUser = String(localStorage.getItem('app_owner_username_snapshot') || '').trim().toLowerCase();
       const myOwnerVer = Number(localStorage.getItem('app_owner_session_version') || 0);
-      const srvOwnerPass = normalized?.orgSettings?.ownerPassword;
-      const srvOwnerVer = Number(normalized?.orgSettings?.ownerSessionVersion || 0);
+
+      const systemOwners = Array.isArray(normalized?.orgSettings?.systemOwners) ? normalized.orgSettings.systemOwners : [];
+      const matchedOwner = systemOwners.find(o => o && String(o.username || '').trim().toLowerCase() === myOwnerUser);
+
+      if (matchedOwner && matchedOwner.isActive === false) {
+        if (handleLogout) {
+          handleLogout();
+        } else {
+          localStorage.removeItem('app_auth_role');
+          localStorage.removeItem('app_owner_authenticated');
+          localStorage.removeItem('app_owner_password_snapshot');
+          localStorage.removeItem('app_owner_session_version');
+          localStorage.removeItem('pharmacy_owner_password');
+          localStorage.removeItem('app_is_admin');
+          sessionStorage.clear();
+          setAuthRole('none');
+          setIsAdminLoggedIn(false);
+        }
+        showToast('🔒 تم تعطيل حساب المالك من قبل الإدارة العليا.');
+        return;
+      }
+
+      const srvOwnerPass = matchedOwner
+        ? matchedOwner.password
+        : (normalized?.orgSettings?.ownerPassword || '181013');
+
+      const srvOwnerVer = Number(
+        (matchedOwner?.sessionVersion !== undefined
+          ? matchedOwner.sessionVersion
+          : normalized?.orgSettings?.ownerSessionVersion) || 0
+      );
 
       if (myOwnerVer === 0 && srvOwnerVer > 0) {
         try { localStorage.setItem('app_owner_session_version', String(srvOwnerVer)); } catch {}
       } else {
-        const isRevoked = (myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
-                          (myOwnerVer > 0 && srvOwnerVer > 0 && srvOwnerVer > myOwnerVer);
+        const passwordMismatch = myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass;
+        const versionMismatch = myOwnerVer > 0 && srvOwnerVer > 0 && srvOwnerVer > myOwnerVer;
 
-        if (isRevoked) {
-          if (handleLogout) {
-            handleLogout();
-          } else {
-            localStorage.removeItem('app_auth_role');
-            localStorage.removeItem('app_owner_authenticated');
-            localStorage.removeItem('app_owner_password_snapshot');
-            localStorage.removeItem('app_owner_session_version');
-            localStorage.removeItem('pharmacy_owner_password');
-            localStorage.removeItem('app_is_admin');
-            sessionStorage.clear();
-            setAuthRole('none');
-            setIsAdminLoggedIn(false);
+        if (passwordMismatch || versionMismatch) {
+          const isStillValidPassword =
+            myOwnerPass === (normalized?.orgSettings?.ownerPassword || '181013') ||
+            systemOwners.some(o => o && o.isActive !== false && String(o.username || '').trim().toLowerCase() === myOwnerUser && o.password === myOwnerPass);
+
+          if (!isStillValidPassword || versionMismatch) {
+            if (handleLogout) {
+              handleLogout();
+            } else {
+              localStorage.removeItem('app_auth_role');
+              localStorage.removeItem('app_owner_authenticated');
+              localStorage.removeItem('app_owner_password_snapshot');
+              localStorage.removeItem('app_owner_session_version');
+              localStorage.removeItem('pharmacy_owner_password');
+              localStorage.removeItem('app_is_admin');
+              sessionStorage.clear();
+              setAuthRole('none');
+              setIsAdminLoggedIn(false);
+            }
+            showToast('🔒 تم إنهاء جلسات المالك أو تغيير كلمة المرور. تم تسجيل الخروج تلقائياً لضمان الأمان.');
+            return;
           }
-          showToast('🔒 تم إنهاء جلسات المالك أو تغيير كلمة المرور. تم تسجيل الخروج تلقائياً لضمان الأمان.');
-          return;
         }
       }
     } else if (isAdminActive) {

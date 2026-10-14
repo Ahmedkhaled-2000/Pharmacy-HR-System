@@ -4,8 +4,7 @@ import {
 } from '../utils/notificationEngine';
 import { notifyOnPenaltyApplied } from '../utils/gmailService';
 import { applyApprovedPermissionsToShifts } from '../utils/latePenaltyEngine';
-import { applyShiftSwapToRosters, getEmployeeDaySchedule } from '../utils/rosterEngine';
-import { normalizeSchedule } from '../components/roster/RosterModule';
+import { applyShiftSwapToRosters, getEmployeeDaySchedule, normalizeSchedule } from '../utils/rosterEngine';
 import { saveFaceDescriptor, saveHandDescriptor, deleteFaceDescriptor, deleteHandDescriptor } from '../utils/faceStorage';
 import { enqueueRequestDecision } from '../utils/syncEngine';
 import { emitLiveRequestUpdated } from '../utils/socketClient';
@@ -73,10 +72,25 @@ export function useRequestsManager() {
 
       if (isFullyApproved) {
         // 0. Overtime Request Approval
-        if (target.type === 'overtime') {
-          const overtimeHrs = parseFloat(target.hours) || 0;
+        if (target.type === 'overtime' || target.type === 'extra_hours' || target.type === 'طلب اضافي' || target.type === 'إضافي') {
+          const targetEmp = (state.employees || []).find(e => 
+            e && (String(e.id) === String(target.employeeId) || (target.employeeCode && String(e.code) === String(target.employeeCode)))
+          );
+          const tEmpId = String(target.employeeId || targetEmp?.id || '');
+          const tEmpCode = String(target.employeeCode || targetEmp?.code || '');
+
           updatedShifts = updatedShifts.map((s) => {
-            if (s.id === target.shiftId || (String(s.employeeId) === String(target.employeeId) && s.date === target.date)) {
+            const sEmpId = String(s.employeeId || '');
+            const sEmpCode = String(s.employeeCode || '');
+            const isEmpMatch = (
+              (tEmpId && (sEmpId === tEmpId || sEmpCode === tEmpId)) ||
+              (tEmpCode && (sEmpId === tEmpCode || sEmpCode === tEmpCode))
+            );
+            const reqDate = target.date || target.targetDate || target.details?.shiftDate;
+            const isShiftMatch = (s.id && (s.id === target.shiftId || s.id === target.id)) || (isEmpMatch && reqDate && s.date === reqDate);
+
+            if (isShiftMatch) {
+              const overtimeHrs = parseFloat(target.hours || target.overtimeHours || target.extraHours || target.amount) || parseFloat(s.overtimeHours) || 0;
               const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || s.hours);
               const cleanExistingNotes = (s.notes || s.note || '')
                 .replace(/⏳?\s*إضافي قيد الاعتماد\s*(\(\+?[0-9.]+\s*س\))?/g, '')
@@ -88,8 +102,11 @@ export function useRequestsManager() {
               return {
                 ...s,
                 overtimeStatus: 'approved',
+                isOvertimeApproved: true,
+                rejectedOvertime: false,
                 overtimeHours: overtimeHrs,
                 adminApproved: true,
+                branchApproved: true,
                 note: newNote,
                 notes: newNote
               };
@@ -340,6 +357,21 @@ export function useRequestsManager() {
                   ? `بصمة يدوية معتمدة من الإدارة العليا (${target.reason || 'بناءً على طلب مدير الفرع'}) — (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)`
                   : `بصمة يدوية معتمدة من الإدارة العليا (${target.reason || 'بناءً على طلب مدير الفرع'})`,
                 createdAt: new Date().toISOString()
+              });
+            }
+
+            // 🛡️ صمام إزالة التكرار القهري (Strict Deduplication Guard):
+            // ضمان وجود وردية واحدة فقط للموظف في تاريخ البصمة وحذف أي ورديات مكررة أخرى
+            const savedShiftId = existingShiftIndex >= 0 ? updatedShifts[existingShiftIndex]?.id : updatedShifts[0]?.id;
+            if (savedShiftId) {
+              updatedShifts = updatedShifts.filter(s => {
+                if (!s) return false;
+                if (s.id === savedShiftId) return true;
+                const isDup = (
+                  (String(s.employeeId) === String(target.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
+                  s.date === punchDate
+                );
+                return !isDup;
               });
             }
 
@@ -611,34 +643,67 @@ export function useRequestsManager() {
         }
 
         // 7. Roster Request Integration
-        if (target.type === 'roster_update' || target.type === 'roster_edit' || target.type === 'roster_edit_request') {
+        const isRosterType = ['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit', 'assign_roster'].includes(target.type) || target.requestType === 'roster_update';
+        if (isRosterType) {
           const empObj = (state.employees || []).find(e => e && (String(e.id) === String(target.employeeId) || (target.employeeCode && String(e.code) === String(target.employeeCode))));
           const targetBranch = target.branchId || empObj?.branchesDetails?.[0]?.branchId || empObj?.branchId || null;
-          const normalizedSch = normalizeSchedule(target.schedule || target.newSchedule);
+          const targetBName = target.branchName || (state.branches?.find(b => String(b.id) === String(targetBranch))?.name) || '';
+          const candidateSchedules = [
+            target.newSchedule,
+            target.schedule,
+            target.requestedSchedule,
+            target.details?.schedule,
+            target.roster?.schedule
+          ].filter(s => s && typeof s === 'object' && Object.keys(s).length > 0);
 
-          const activeRosterObj = {
-            id: target.id || `roster_${Date.now()}`,
-            employeeId: target.employeeId || empObj?.id,
-            employeeCode: target.employeeCode || empObj?.code,
-            branchId: targetBranch,
-            month: target.month || new Date().toISOString().slice(0, 7),
-            fromDate: target.fromDate,
-            toDate: target.toDate,
-            schedule: normalizedSch,
-            status: 'approved',
-            adminApproved: true,
-            approvedAt: new Date().toISOString()
-          };
+          let bestSchedule = candidateSchedules[0] || null;
+          for (const cand of candidateSchedules) {
+            const candIsoCount = Object.keys(cand).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).length;
+            const bestIsoCount = bestSchedule ? Object.keys(bestSchedule).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).length : 0;
+            if (candIsoCount > bestIsoCount || (candIsoCount === bestIsoCount && Object.keys(cand).length > Object.keys(bestSchedule).length)) {
+              bestSchedule = cand;
+            }
+          }
 
-          const existingIdx = updatedRosters.findIndex(
-            (ros) => (String(ros.employeeId) === String(target.employeeId) || (empObj?.code && String(ros.employeeCode) === String(empObj.code))) &&
-                     (ros.month === target.month || !target.month || !ros.month) &&
-                     (String(ros.branchId || '') === String(targetBranch || '') || (!ros.branchId && !targetBranch))
-          );
+          const normalizedSch = normalizeSchedule(bestSchedule);
 
-          if (existingIdx >= 0) {
-            updatedRosters = updatedRosters.map((ros, idx) => idx === existingIdx ? activeRosterObj : ros);
-          } else {
+          if (normalizedSch && Object.keys(normalizedSch).length > 0) {
+            const targetMonthNorm = (target.month || target.cycleMonth || new Date().toISOString().slice(0, 7)).slice(0, 7);
+            const rosterDocId = target.id ? (String(target.id).startsWith('roster_') ? String(target.id) : `roster_${target.id}`) : `roster_${Date.now()}`;
+            const activeRosterObj = {
+              id: rosterDocId,
+              employeeId: target.employeeId || empObj?.id,
+              employeeCode: target.employeeCode || empObj?.code || '',
+              employeeName: target.employeeName || empObj?.name || '',
+              branchId: targetBranch,
+              branchName: targetBName,
+              month: targetMonthNorm,
+              fromDate: target.fromDate,
+              toDate: target.toDate,
+              schedule: normalizedSch,
+              status: 'approved',
+              adminApproved: true,
+              branchApproved: true,
+              approvedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            };
+
+            // إزالة أي وثائق روستر سابقة لهذا الموظف لنفس الشهر أو نفس المعرف لمنع التضارب
+            updatedRosters = updatedRosters.filter((ros) => {
+              if (!ros) return false;
+              const isSameId = String(ros.id) === String(target.id) || String(ros.id) === String(rosterDocId);
+              const empMatch = (
+                String(ros.employeeId) === String(target.employeeId) || 
+                String(ros.employeeId) === String(empObj?.id) || 
+                (empObj?.code && String(ros.employeeCode) === String(empObj.code)) || 
+                (target.employeeCode && String(ros.employeeCode) === String(target.employeeCode))
+              );
+              if (!empMatch && !isSameId) return true;
+              const rMonthNorm = ros.month ? String(ros.month).slice(0, 7) : null;
+              const isSameMonth = !rMonthNorm || !targetMonthNorm || rMonthNorm === targetMonthNorm;
+              return !(isSameMonth || isSameId);
+            });
+
             updatedRosters = [activeRosterObj, ...updatedRosters];
           }
         }
@@ -787,12 +852,17 @@ export function useRequestsManager() {
               if (String(s.employeeId) === String(empId) && (s.date === reqDate || !s.timeOut || s.timeOut === '—')) {
                 return {
                   ...s,
+                  isPaused: true,
+                  isOnBreak: true,
+                  breakStartTime: reqTime,
+                  pauseStartEpoch: reqEpoch,
                   note: (s.note ? s.note + ' | ' : '') + `☕ بدء بريك بالصورة في نفس وقت إرسال الطلب (${reqTime}) معتمد من ${approverTitle}`
                 };
               }
               return s;
             });
           } else if (action === 'break_end') {
+            let addedBreakMs = 0;
             if (updatedActiveShifts[empId]) {
               let breakMin = 0;
               if (updatedActiveShifts[empId].breakStartTime) {
@@ -801,27 +871,125 @@ export function useRequestsManager() {
                 breakMin = (eH * 60 + eM) - (bH * 60 + bM);
                 if (breakMin < 0) breakMin += 24 * 60;
               }
-              const breakDurationMs = breakMin > 0 ? (breakMin * 60000) : (Date.now() - (updatedActiveShifts[empId].pauseStartEpoch || Date.now()));
+              addedBreakMs = breakMin > 0 ? (breakMin * 60000) : (Date.now() - (updatedActiveShifts[empId].pauseStartEpoch || Date.now()));
               updatedActiveShifts[empId] = {
                 ...updatedActiveShifts[empId],
                 isPaused: false,
                 isOnBreak: false,
                 breakStartTime: null,
                 pauseStartEpoch: null,
-                accumulatedPauseMs: (updatedActiveShifts[empId].accumulatedPauseMs || 0) + breakDurationMs,
+                accumulatedPauseMs: (updatedActiveShifts[empId].accumulatedPauseMs || 0) + addedBreakMs,
                 updatedAt: Date.now()
               };
             }
             updatedShifts = updatedShifts.map(s => {
               if (String(s.employeeId) === String(empId) && (s.date === reqDate || !s.timeOut || s.timeOut === '—')) {
+                const curPause = s.accumulatedPauseMs || 0;
+                let diffBreakMs = addedBreakMs;
+                if (!diffBreakMs && s.breakStartTime) {
+                  const [bH, bM] = String(s.breakStartTime).split(':').map(Number);
+                  const [eH, eM] = String(reqTime).split(':').map(Number);
+                  if (!isNaN(bH) && !isNaN(eH)) {
+                    let dm = (eH * 60 + eM) - (bH * 60 + bM);
+                    if (dm < 0) dm += 24 * 60;
+                    diffBreakMs = dm * 60000;
+                  }
+                }
+                const totalPause = curPause + diffBreakMs;
+                const trackedBreakHours = Math.round((totalPause / 3600000) * 100) / 100;
                 return {
                   ...s,
+                  isPaused: false,
+                  isOnBreak: false,
+                  breakStartTime: null,
+                  pauseStartEpoch: null,
+                  accumulatedPauseMs: totalPause,
+                  breakHours: trackedBreakHours,
                   note: (s.note ? s.note + ' | ' : '') + `⏱️ انتهاء بريك بالصورة في نفس وقت إرسال الطلب (${reqTime}) معتمد من ${approverTitle}`
                 };
               }
               return s;
             });
           }
+        }
+
+        // 7.55. Device Punch Mapping Approval Integration ("تعديل بصمه جهاز البصمه")
+        if (target.type === 'device_punch_mapping' || target.type === 'تعديل بصمه جهاز البصمه' || target.type === 'تعديل بصمة جهاز البصمة') {
+          const selectedEmpId = target.selectedEmployeeId || target.suggestedEmployeeId || target.employeeId;
+          const targetEmp = updatedEmps.find(e => String(e.id) === String(selectedEmpId) || (target.employeeCode && String(e.code) === String(target.employeeCode)));
+          const resolvedEmpId = targetEmp ? targetEmp.id : selectedEmpId;
+          const resolvedEmpName = targetEmp ? targetEmp.name : (target.suggestedEmployeeName || 'الموظف');
+          const resolvedEmpCode = targetEmp ? targetEmp.code : (target.suggestedEmployeeCode || '');
+          const pin = String(target.devicePin || target.pin || '');
+          const branchId = target.branchId || targetEmp?.branchId || '';
+          const punchDate = target.date || new Date().toISOString().slice(0, 10);
+          const punchTime = target.time || '12:00';
+          const actionType = target.actionType || 'auto';
+          const serial = target.deviceSerial || target.deviceId || '';
+
+          if (targetEmp && pin) {
+            updatedEmps = updatedEmps.map(e => {
+              if (String(e.id) === String(resolvedEmpId)) {
+                return {
+                  ...e,
+                  biometricPin: pin,
+                  devicePin: pin,
+                  branchPins: { ...(e.branchPins || {}), [branchId || 'default']: pin }
+                };
+              }
+              return e;
+            });
+          }
+
+          const active = updatedActiveShifts[resolvedEmpId] || (resolvedEmpCode ? updatedActiveShifts[resolvedEmpCode] : null);
+          if (active && (actionType === 'shift_end' || actionType === 'auto')) {
+            const timeInVal = active.timeIn || '09:00';
+            const [sH, sM] = String(timeInVal).split(':').map(Number);
+            const [eH, eM] = String(punchTime).split(':').map(Number);
+            let diffM = (eH * 60 + (eM || 0)) - (sH * 60 + (sM || 0));
+            if (diffM < 0) diffM += 24 * 60;
+            const breakHoursVal = parseFloat(active.breakHours || 0);
+            const netM = Math.max(0, diffM - Math.round(breakHoursVal * 60));
+            const netHoursVal = Math.round((netM / 60) * 100) / 100;
+
+            delete updatedActiveShifts[resolvedEmpId];
+            if (resolvedEmpCode) delete updatedActiveShifts[resolvedEmpCode];
+
+            updatedShifts = updatedShifts.map(s => {
+              if ((s.id === active.shiftId) || (String(s.employeeId) === String(resolvedEmpId) && s.date === punchDate && (s.isLiveActive || !s.timeOut || s.timeOut === '—'))) {
+                return {
+                  ...s,
+                  timeOut: punchTime,
+                  endTime: punchTime,
+                  hours: netHoursVal,
+                  actualWorkedHours: netHoursVal,
+                  netHours: netHoursVal,
+                  regularHours: Math.min(netHoursVal, 8),
+                  overtimeHours: Math.max(0, Math.round((netHoursVal - 8) * 100) / 100),
+                  status: 'completed',
+                  isLiveActive: false,
+                  statusLabel: 'انصراف ماكينة (معتمد عبر تعديل البصمة)',
+                  note: (s.note ? s.note + ' | ' : '') + `📟 تسجيل انصراف ${punchTime} وربط PIN (${pin}) تلقائياً`
+                };
+              }
+              return s;
+            });
+          }
+
+          try {
+            fetch('/api/biometric/map-device-pin', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                devicePin: pin,
+                employeeId: resolvedEmpId,
+                employeeName: resolvedEmpName,
+                branchId: branchId,
+                serial: serial,
+                rawPunchId: target.rawPunchId
+              })
+            }).catch(() => {});
+          } catch (_) {}
         }
 
         // 7.6. Biometric Self-Registration Approval Integration
@@ -1171,9 +1339,8 @@ export function useRequestsManager() {
       const isLoan = ['loan', 'advance', 'meds', 'credit_medicine'].includes(target.type);
       const isPermission = ['permission', 'permission_request'].includes(target.type);
       const isDisc = target.type === 'disciplinary_penalty' || target.type === 'violation' || target.type === 'penalty' || String(target.id || '').startsWith('disc_');
-      const isSwap = ['swap', 'shift_swap', 'shift_edit'].includes(target.type);
-      const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request'].includes(target.type);
-      const isPunch = ['punch_correction', 'manual_punch', 'attendance_punch', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد', 'biometric_verification'].includes(target.type);
+      const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit', 'assign_roster'].includes(target.type) || target.requestType === 'roster_update';
+      const isPunch = ['punch_correction', 'manual_punch', 'attendance_punch', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد', 'biometric_verification', 'device_punch_mapping', 'تعديل بصمه جهاز البصمه'].includes(target.type);
       const isResignation = target.type === 'resignation';
       const isBonus = target.type === 'bonus';
       const isComplaint = ['complaint', 'eval_edit_request', 'penalty_objection', 'objection'].includes(target.type);
@@ -1331,43 +1498,72 @@ export function useRequestsManager() {
         const reqDate = targetReq.date || (targetReq.createdAt ? targetReq.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
         const rejecterTitle = role === 'admin' ? 'الإدارة العليا' : 'مدير الفرع';
         const targetAction = targetReq.targetAction || targetReq.actionType || 'shift_start';
-        const actionTitle = targetAction === 'shift_end' ? 'انصراف' : 'حضور';
+        const isBreakAction = targetAction === 'break_start' || targetAction === 'break_end' || targetAction === 'pause_shift' || targetAction === 'resume_shift';
+        const actionTitle = targetAction === 'shift_end' ? 'انصراف' : (isBreakAction ? 'استراحة' : 'حضور');
 
-        // 1. حذف الوردية النشطة نهائياً بكلا المعرفين (سواء كان الرفض لحضور أو انصراف)
-        delete updatedActiveShifts[empId];
-        delete updatedActiveShifts[String(empId)];
+        if (!isBreakAction) {
+          // 1. حذف الوردية النشطة نهائياً بكلا المعرفين فقط في حال رفض حضور أو انصراف الوردية
+          delete updatedActiveShifts[empId];
+          delete updatedActiveShifts[String(empId)];
 
-        // 2. إلغاء وتصفير الوردية بالكامل من سجل الورديات وشطبها نهائياً
-        updatedShifts = updatedShifts.map((s) => {
-          const isTarget =
-            (targetReq.shiftId && s.id === targetReq.shiftId) ||
-            (s.requestId && (s.requestId === targetReq.id || s.requestId === requestId)) ||
-            (String(s.employeeId) === String(empId) && s.date === reqDate && (s.punchType === 'photo_attendance' || s.requestId === targetReq.id));
+          // 2. إلغاء وتصفير الوردية بالكامل من سجل الورديات وشطبها نهائياً
+          updatedShifts = updatedShifts.map((s) => {
+            const isTarget =
+              (targetReq.shiftId && s.id === targetReq.shiftId) ||
+              (s.requestId && (s.requestId === targetReq.id || s.requestId === requestId)) ||
+              (String(s.employeeId) === String(empId) && s.date === reqDate && (s.punchType === 'photo_attendance' || s.requestId === targetReq.id));
 
-          if (isTarget) {
-            return {
-              ...s,
-              status: 'rejected_photo',
-              isRejectedPhoto: true,
-              isCancelled: false,
-              isRejected: true,
-              rejected: true,
-              hours: 0,
-              actualWorkedHours: 0,
-              netHours: 0,
-              workHours: 0,
-              regularHours: 0,
-              overtimeHours: 0,
-              overtimeStatus: 'rejected',
-              statusLabel: 'مرفوضة (رفض الصورة)',
-              photoRejectionReason: `تم رفض البصمة بسبب رفض الصورة من ${rejecterTitle}`,
-              rejectedBy: rejecterTitle,
-              rejectedAt: new Date().toISOString(),
-              note: (s.note ? s.note + ' | ' : '') + `⚠️ تم رفض البصمة بسبب رفض الصورة (${actionTitle}) من ${rejecterTitle} - غير محتسبة في الأجور لحين اعتمادها يدوياً.`
+            if (isTarget) {
+              return {
+                ...s,
+                status: 'rejected_photo',
+                isRejectedPhoto: true,
+                isCancelled: false,
+                isRejected: true,
+                rejected: true,
+                hours: 0,
+                actualWorkedHours: 0,
+                netHours: 0,
+                workHours: 0,
+                regularHours: 0,
+                overtimeHours: 0,
+                overtimeStatus: 'rejected',
+                statusLabel: 'مرفوضة (رفض الصورة)',
+                photoRejectionReason: `تم رفض البصمة بسبب رفض الصورة من ${rejecterTitle}`,
+                rejectedBy: rejecterTitle,
+                rejectedAt: new Date().toISOString(),
+                note: (s.note ? s.note + ' | ' : '') + `⚠️ تم رفض البصمة بسبب رفض الصورة (${actionTitle}) من ${rejecterTitle} - غير محتسبة في الأجور لحين اعتمادها يدوياً.`
+              };
+            }
+            return s;
+          });
+        } else {
+          // 🛡️ صمام الأمان: عند رفض صورة الاستراحة، لا تُشطب الوردية بل يستمر الموظف في العمل الفعلي
+          if (updatedActiveShifts[empId]) {
+            updatedActiveShifts[empId] = {
+              ...updatedActiveShifts[empId],
+              isPaused: false,
+              isOnBreak: false,
+              breakStartTime: null
             };
           }
-          return s;
-        });
+          updatedShifts = updatedShifts.map((s) => {
+            const isTarget =
+              (targetReq.shiftId && s.id === targetReq.shiftId) ||
+              (s.requestId && (s.requestId === targetReq.id || s.requestId === requestId)) ||
+              (String(s.employeeId) === String(empId) && s.date === reqDate);
+            if (isTarget) {
+              return {
+                ...s,
+                isPaused: false,
+                isOnBreak: false,
+                breakStartTime: null,
+                note: (s.note ? s.note + ' | ' : '') + `⚠️ تم رفض توثيق الاستراحة بالصورة بقرار ${rejecterTitle} - استمرار الوردية في العمل الفعلي.`
+              };
+            }
+            return s;
+          });
+        }
       }
 
       if (targetReq && targetReq.type === 'overtime') {
@@ -1384,6 +1580,8 @@ export function useRequestsManager() {
             return {
               ...s,
               overtimeStatus: 'rejected',
+              isOvertimeApproved: false,
+              rejectedOvertime: true,
               adminApproved: false,
               note: rejectedNote,
               notes: rejectedNote
@@ -1654,7 +1852,7 @@ export function useRequestsManager() {
         _approvalRulesUpdatedAt: new Date().toISOString()
       };
       setState(updatedState);
-      await saveState(updatedState);
+      await saveState(updatedState, { entityType: 'approvalRules', data: rulesData });
       showToast('⚙️ تم حفظ قواعد الموافقة والاعتماد');
     };
 

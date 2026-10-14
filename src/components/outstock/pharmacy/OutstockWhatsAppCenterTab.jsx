@@ -19,7 +19,12 @@ import {
   Info,
   Lock,
   Search,
-  Users
+  Users,
+  Building2,
+  Megaphone,
+  Plus,
+  Trash2,
+  Crown
 } from 'lucide-react';
 import { getResolvedWhatsAppServerUrl } from '../../../utils/systemUrlHelper';
 import {
@@ -28,7 +33,8 @@ import {
   outstockGetSettings,
   outstockSaveSettings,
   outstockGetCosmeticsCustomers,
-  outstockSendCosmeticsPromoWhatsapp
+  outstockSendCosmeticsPromoWhatsapp,
+  outstockGetBranches
 } from '../../../utils/outstockApiClient';
 import { buildInvoicePdfHtml } from '../../../utils/invoicePdfGenerator';
 
@@ -170,23 +176,35 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
     }
   };
 
-  // أرقام واتساب التوجيه الآلي (إدارة المشتريات ومسؤول مستحضرات التجميل)
+  // أرقام واتساب التوجيه الآلي (إدارة المشتريات ومسؤول مستحضرات التجميل وأرقام المالك)
   const [procurementPhone, setProcurementPhone] = useState('');
   const [cosmeticsPhone, setCosmeticsPhone] = useState('');
+  const [ownerPhones, setOwnerPhones] = useState([]);
+  const [newOwnerPhoneInput, setNewOwnerPhoneInput] = useState('');
   const [isSavingPhones, setIsSavingPhones] = useState(false);
   const [isTestingProcPhone, setIsTestingProcPhone] = useState(false);
   const [isTestingCosmPhone, setIsTestingCosmPhone] = useState(false);
+  const [isTestingOwnerPhone, setIsTestingOwnerPhone] = useState(false);
+
+  // إدارة مراسلة وبث الفروع لحساب المالك
+  const [branches, setBranches] = useState([]);
+  const [isLoadingBranches, setIsLoadingBranches] = useState(false);
+  const [selectedBranchId, setSelectedBranchId] = useState('');
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const [broadcastProgress, setBroadcastProgress] = useState({ current: 0, total: 0 });
 
   // عنوان سيرفر الواتساب المعتمد
   const waServerUrl = useMemo(() => getResolvedWhatsAppServerUrl(), []);
 
   // معرف الجلسة المعزولة الخاصة بهذا الفرع حصراً
   const branchSessionId = useMemo(() => {
-    const raw = String(branchId || branch?.id || 'default');
-    return raw.startsWith('branch_') ? raw : `branch_${raw}`;
+    const raw = String(branchId || branch?.id || 'default').trim();
+    if (!raw || raw === 'default' || raw === 'main') return 'default';
+    const cleanId = raw.replace(/^(branch_)+/i, '');
+    return cleanId ? `branch_${cleanId}` : 'default';
   }, [branchId, branch?.id]);
 
-  // جلب إعدادات المشتريات ومستحضرات التجميل المحفوظة
+  // جلب إعدادات المشتريات ومستحضرات التجميل وأرقام المالك المحفوظة
   useEffect(() => {
     outstockGetSettings()
       .then(res => {
@@ -197,16 +215,58 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
           if (res.settings.cosmeticsWhatsappPhone) {
             setCosmeticsPhone(res.settings.cosmeticsWhatsappPhone);
           }
+          if (Array.isArray(res.settings.ownerWhatsappPhones) && res.settings.ownerWhatsappPhones.length > 0) {
+            setOwnerPhones(res.settings.ownerWhatsappPhones);
+          } else if (res.settings.ownerWhatsappPhone) {
+            setOwnerPhones([res.settings.ownerWhatsappPhone]);
+          }
         }
       })
       .catch(() => {});
   }, []);
 
-  // حفظ أرقام واتساب المشتريات ومستحضرات التجميل (للمالك فقط)
+  // جلب قائمة الفروع للمالك
+  useEffect(() => {
+    if (isOwner) {
+      setIsLoadingBranches(true);
+      outstockGetBranches()
+        .then(res => {
+          if (res?.success && Array.isArray(res.branches)) {
+            setBranches(res.branches);
+          }
+        })
+        .catch(err => console.warn('Fetch branches in wa center error:', err))
+        .finally(() => setIsLoadingBranches(false));
+    }
+  }, [isOwner]);
+
+  // إضافة رقم هاتف جديد للمالك
+  const handleAddOwnerPhone = () => {
+    const clean = String(newOwnerPhoneInput || '').replace(/\D/g, '');
+    if (!clean || clean.length !== 11 || !clean.startsWith('01')) {
+      showToast?.('⚠️ يرجى إدخال رقم هاتف مصري صحيح من 11 رقماً يبدأ بـ 01 (مثال: 01012345678)');
+      return;
+    }
+    if (ownerPhones.includes(clean)) {
+      showToast?.('⚠️ هذا الرقم مضاف بالفعل ضمن أرقام المالك');
+      return;
+    }
+    setOwnerPhones(prev => [...prev, clean]);
+    setNewOwnerPhoneInput('');
+    showToast?.('➕ تم إضافة الرقم إلى القائمة. اضغط "حفظ وتحديث" لتثبيت التغيير.');
+  };
+
+  // حذف رقم هاتف من قائمة المالك
+  const handleRemoveOwnerPhone = (phoneToRemove) => {
+    setOwnerPhones(prev => prev.filter(p => p !== phoneToRemove));
+    showToast?.('🗑️ تم حذف الرقم من القائمة. اضغط "حفظ وتحديث" لتأكيد التغيير.');
+  };
+
+  // حفظ أرقام واتساب المشتريات والتجميل والمالك (للمالك فقط)
   const handleSaveRoutingPhones = async (e) => {
     if (e) e.preventDefault();
     if (!isOwner) {
-      showToast?.('🔒 عذراً: تعديل رقم إدارة المشتريات أو مسؤول مستحضرات التجميل متاح لحساب المالك فقط!');
+      showToast?.('🔒 عذراً: تعديل أرقام التوجيه متاح لحساب المالك فقط!');
       return;
     }
     const cleanProc = String(procurementPhone || '').replace(/\D/g, '');
@@ -221,14 +281,21 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
       return;
     }
 
+    const validOwnerPhones = ownerPhones
+      .map(p => String(p).replace(/\D/g, ''))
+      .filter(p => p.length === 11);
+
     setIsSavingPhones(true);
     try {
       const res = await outstockSaveSettings({
         procurementWhatsappPhone: cleanProc,
-        cosmeticsWhatsappPhone: cleanCosm
+        cosmeticsWhatsappPhone: cleanCosm,
+        ownerWhatsappPhones: validOwnerPhones,
+        ownerWhatsappPhone: validOwnerPhones[0] || ''
       });
       if (res?.success) {
-        showToast?.('✅ تم حفظ وتأمين أرقام واتساب المشتريات ومستحضرات التجميل بنجاح!');
+        setOwnerPhones(validOwnerPhones);
+        showToast?.('✅ تم حفظ وتأمين أرقام واتساب المشتريات ومستحضرات التجميل والمالك بنجاح!');
       } else {
         showToast?.(res?.error || 'تعذر حفظ الأرقام');
       }
@@ -239,7 +306,7 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
     }
   };
 
-  // إرسال رسالة تجريبية لرقم إدارة المشتريات عبر جلسة واتساب الفرع المقترنة
+  // إرسال رسالة تجريبية لرقم إدارة المشتريات عبر جلسة واتساب الفرع المقترنة (مع احتياطي الإدارة)
   const handleTestProcurementPhone = async () => {
     const clean = String(procurementPhone || '').replace(/\D/g, '');
     if (!clean || clean.length !== 11) {
@@ -254,7 +321,8 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
         `👤 *المحرر:* ${currentPharmacist || 'صيدلي الفرع'}\n` +
         `✅ الربط الآلي وتوجيه طلبات الأدوية يعمل بنجاح!`;
 
-      const res = await fetch(`${waServerUrl}/send`, {
+      let usedBackup = false;
+      let res = await fetch(`${waServerUrl}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -263,11 +331,33 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
           message: testMsg
         })
       });
-      const data = await res.json().catch(() => ({}));
+      let data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data?.success) {
+        // Fallback الاحتياطي عبر hr_main
+        const backupRes = await fetch(`${waServerUrl}/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: 'hr_main',
+            phone: normalized,
+            message: testMsg + '\n\n*(تم الإرسال عبر واتساب الإدارة الاحتياطي)*'
+          })
+        });
+        const backupData = await backupRes.json().catch(() => ({}));
+        if (backupRes.ok && backupData?.success) {
+          res = backupRes;
+          data = backupData;
+          usedBackup = true;
+        }
+      }
+
       if (res.ok && data?.success) {
-        showToast?.('🎉 تم إرسال الرسالة التجريبية إلى رقم إدارة المشتريات بنجاح عبر واتساب الصيدلية!');
+        showToast?.(usedBackup
+          ? '🎉 تم إرسال الرسالة التجريبية بنجاح عبر واتساب الإدارة الاحتياطي (جلسة الفرع غير مقترنة)!'
+          : '🎉 تم إرسال الرسالة التجريبية إلى رقم إدارة المشتريات بنجاح عبر واتساب الصيدلية!');
       } else {
-        showToast?.(`⚠️ لم يتم التسليم: ${data?.error || 'تأكد من اقتران واتساب الصيدلية أولاً'}`);
+        showToast?.(`⚠️ لم يتم التسليم: ${data?.error || 'تأكد من اقتران واتساب الصيدلية أو الإدارة'}`);
       }
     } catch (err) {
       showToast?.('تعذر إرسال الرسالة التجريبية لخادم الواتساب');
@@ -276,7 +366,7 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
     }
   };
 
-  // إرسال رسالة تجريبية لرقم مسؤول مستحضرات التجميل عبر جلسة واتساب الفرع المقترنة
+  // إرسال رسالة تجريبية لرقم مسؤول مستحضرات التجميل عبر جلسة واتساب الفرع المقترنة (مع احتياطي الإدارة)
   const handleTestCosmeticsPhone = async () => {
     const clean = String(cosmeticsPhone || '').replace(/\D/g, '');
     if (!clean || clean.length !== 11) {
@@ -291,7 +381,8 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
         `👤 *المحرر:* ${currentPharmacist || 'صيدلي الفرع'}\n` +
         `✅ الربط الآلي وتوجيه طلبات مستحضرات التجميل يعمل بنجاح!`;
 
-      const res = await fetch(`${waServerUrl}/send`, {
+      let usedBackup = false;
+      let res = await fetch(`${waServerUrl}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -300,17 +391,130 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
           message: testMsg
         })
       });
-      const data = await res.json().catch(() => ({}));
+      let data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data?.success) {
+        // Fallback الاحتياطي عبر hr_main
+        const backupRes = await fetch(`${waServerUrl}/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: 'hr_main',
+            phone: normalized,
+            message: testMsg + '\n\n*(تم الإرسال عبر واتساب الإدارة الاحتياطي)*'
+          })
+        });
+        const backupData = await backupRes.json().catch(() => ({}));
+        if (backupRes.ok && backupData?.success) {
+          res = backupRes;
+          data = backupData;
+          usedBackup = true;
+        }
+      }
+
       if (res.ok && data?.success) {
-        showToast?.('🎉 تم إرسال الرسالة التجريبية إلى مسؤول مستحضرات التجميل بنجاح عبر واتساب الصيدلية!');
+        showToast?.(usedBackup
+          ? '🎉 تم إرسال الرسالة التجريبية بنجاح عبر واتساب الإدارة الاحتياطي (جلسة الفرع غير مقترنة)!'
+          : '🎉 تم إرسال الرسالة التجريبية إلى مسؤول مستحضرات التجميل بنجاح عبر واتساب الصيدلية!');
       } else {
-        showToast?.(`⚠️ لم يتم التسليم: ${data?.error || 'تأكد من اقتران واتساب الصيدلية أولاً'}`);
+        showToast?.(`⚠️ لم يتم التسليم: ${data?.error || 'تأكد من اقتران واتساب الصيدلية أو الإدارة'}`);
       }
     } catch (err) {
       showToast?.('تعذر إرسال الرسالة التجريبية لخادم الواتساب');
     } finally {
       setIsTestingCosmPhone(false);
     }
+  };
+
+  // إرسال رسالة تجريبية لأرقام المالك والمشرف العام
+  const handleTestOwnerPhones = async () => {
+    if (ownerPhones.length === 0) {
+      showToast?.('⚠️ يرجى إضافة وحفظ رقم هاتف للمالك أولاً');
+      return;
+    }
+    setIsTestingOwnerPhone(true);
+    try {
+      const testMsg = `👑 *رسالة اختبار اتصال واتساب للمالك والمشرف العام*\n` +
+        `🏢 *المرسل:* ${branch?.name ? `صيدلية ${branch.name}` : 'الإدارة المركزية'}\n` +
+        `👤 *المحرر:* ${currentUser?.name || currentPharmacist || 'المالك'}\n` +
+        `🛡️ نظام توجيه الشكاوى والتنبيهات الإدارية العاجلة للمالك يعمل بكفاءة تامة!`;
+
+      let successCount = 0;
+      for (const p of ownerPhones) {
+        const normalized = p.startsWith('01') ? ('2' + p) : p;
+        const res = await fetch(`${waServerUrl}/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: branchSessionId,
+            phone: normalized,
+            message: testMsg
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data?.success) successCount++;
+      }
+
+      if (successCount > 0) {
+        showToast?.(`🎉 تم إرسال رسالة الاختبار بنجاح إلى ${successCount} من أرقام المالك!`);
+      } else {
+        showToast?.('⚠️ تعذر تسليم الرسالة، يرجى التأكد من اقتران واتساب الصيدلية أولاً.');
+      }
+    } catch (err) {
+      showToast?.('تعذر إرسال الرسالة التجريبية لخادم الواتساب');
+    } finally {
+      setIsTestingOwnerPhone(false);
+    }
+  };
+
+  // بث تعميم إداري لكافة الفروع
+  const handleBroadcastToBranches = async () => {
+    if (!customMessage.trim()) {
+      showToast?.('⚠️ يرجى كتابة نص التعميم الإداري أولاً');
+      return;
+    }
+    const targetBranches = branches.filter(b => b.phone || b.whatsapp_phone);
+    if (targetBranches.length === 0) {
+      showToast?.('⚠️ لا توجد فروع مسجل لها أرقام هواتف للتواصل');
+      return;
+    }
+
+    if (!window.confirm(`هل أنت متأكد من بث هذا التعميم الإداري إلى ${targetBranches.length} فرع عبر الواتساب؟`)) {
+      return;
+    }
+
+    setIsBroadcasting(true);
+    setBroadcastProgress({ current: 0, total: targetBranches.length });
+
+    let sentCount = 0;
+    for (let i = 0; i < targetBranches.length; i++) {
+      const b = targetBranches[i];
+      setBroadcastProgress({ current: i + 1, total: targetBranches.length });
+      const raw = String(b.whatsapp_phone || b.phone || '').replace(/\D/g, '');
+      if (raw && raw.length >= 9) {
+        const normalized = raw.startsWith('01') ? ('2' + raw) : raw;
+        const bMsg = customMessage.replace(/\{branch_name\}/g, b.name || '');
+        try {
+          const res = await fetch(`${waServerUrl}/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId: branchSessionId,
+              phone: normalized,
+              message: bMsg
+            })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data?.success) sentCount++;
+        } catch (err) {
+          console.warn(`Failed to send to branch ${b.name}:`, err);
+        }
+      }
+      await new Promise(r => setTimeout(r, 600));
+    }
+
+    setIsBroadcasting(false);
+    showToast?.(`📢 اكتمل البث الإداري! تم تسليم التعميم إلى ${sentCount} فرع بنجاح.`);
   };
 
   // ── 1. فحص حالة الاتصال واسترجاع الـ QR الخاص بجلسة هذا الفرع ───────────────
@@ -429,6 +633,23 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
       chronic_reminder: {
         title: '⏰ تذكير شهري بتجهيز أدوية الأمراض المزمنة',
         text: `السلام عليكم ورحمة الله وبركاته،\n\nعزيزنا أستاذ/ة *${cName}*،\nحرصاً من *${bName}* على استمرار ختتكم العلاجية وصحتكم الغالية، نود تذكيركم بقرب موعد تجديد جرعتكم الشهرية من علاجكم الدائم.\n\nتم تجهيز حصتكم مسبقاً في الفرع لتفادي أي نقص في السوق، ويسعدنا زيارتكم أو طلب التوصيل في أي وقت 🩺`
+      },
+      // قوالب المالك الخاصة بمراسلة وبث الفروع
+      owner_admin_memo: {
+        title: '📢 تعميم إداري عاجل للفروع',
+        text: `السادة صيادلة وإدارة فرع {branch_name} المحترمين،\n\nنحيطكم علماً بالتعليمات الإدارية التالية:\nيرجى مراجعة وتدقيق النواقص المحجوزة وتحديث أرصدة الأصناف أولاً بأول والتأكيد على التواصل مع العملاء فور التوريد.\n\nشاكرين حرصكم والتزامكم الدائم 🏛️\nإدارة مجموعة الصيدليات`
+      },
+      owner_inventory_notice: {
+        title: '📝 تعليمات الجرد الدوري للنواقص والأرصدة',
+        text: `السادة الزملاء في فرع {branch_name}،\n\nنظراً لبدء أعمال الجرد الدوري ومطابقة النواقص، يرجى التكرم بحصر جميع الأصناف غير المتوفرة والطلبات المعلقة وتحديث حالتها في النظام قبل نهاية اليوم.\n\nشاكرين حسن تعاونكم ✨\nالإدارة العامة`
+      },
+      owner_supply_delivery: {
+        title: '📦 إشعار توريد دفعات نواقص جديدة',
+        text: `الزملاء الأعزاء في فرع {branch_name}،\n\nتم الانتهاء من تجهيز وتوريد شحنة جديدة من الأدوية والنواقص المسجلة لفرعكم. يرجى استلام الشحنة ومطابقتها فور وصولها والتواصل المباشر مع المرضى المحجوزة لهم الأدوية.\n\nإدارة المشتريات والتوريدات 🚚`
+      },
+      owner_urgent_alert: {
+        title: '⚠️ تنبيه إداري عاجل ومهم',
+        text: `تنبيه عاجل لإدارة فرع {branch_name}:\n\nيرجى الالتزام الصارم بتحديث سجلات تسليم الأدوية في النظام وتسجيل كود الموظف المحرر والمستلم بدقة لضمان احتساب حوافز النواقص ومتابعة مؤشرات الأداء.\n\nإدارة التفتيش والمتابعة المركزية 📋`
       }
     };
   }, [branch, recipientName, selectedOrder]);
@@ -840,19 +1061,21 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={handleTestProcurementPhone}
-                disabled={isTestingProcPhone || !procurementPhone || procurementPhone.length !== 11}
-                className="outstock-btn outstock-btn-secondary"
-                style={{ flex: '1', height: '36px', padding: '0 10px', fontSize: '12px', fontWeight: '700' }}
-                title="إرسال رسالة تجريبية فورية للرقم للتحقق من الاتصال عبر واتساب الفرع"
-              >
-                <Send size={13} />
-                <span>{isTestingProcPhone ? 'جاري الإرسال...' : 'اختبار اتصال المشتريات 🧪'}</span>
-              </button>
-            </div>
+            {isOwner && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={handleTestProcurementPhone}
+                  disabled={isTestingProcPhone || !procurementPhone || procurementPhone.length !== 11}
+                  className="outstock-btn outstock-btn-secondary"
+                  style={{ flex: '1', height: '36px', padding: '0 10px', fontSize: '12px', fontWeight: '700' }}
+                  title="إرسال رسالة تجريبية فورية للرقم للتحقق من الاتصال عبر واتساب الفرع"
+                >
+                  <Send size={13} />
+                  <span>{isTestingProcPhone ? 'جاري الإرسال...' : 'اختبار اتصال المشتريات 🧪'}</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* البطاقة الثانية: مسؤول مستحضرات التجميل */}
@@ -913,19 +1136,148 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={handleTestCosmeticsPhone}
-                disabled={isTestingCosmPhone || !cosmeticsPhone || cosmeticsPhone.length !== 11}
-                className="outstock-btn outstock-btn-secondary"
-                style={{ flex: '1', height: '36px', padding: '0 10px', fontSize: '12px', fontWeight: '700', borderColor: '#f0abfc', color: '#86198f' }}
-                title="إرسال رسالة تجريبية فورية للرقم للتحقق من الاتصال عبر واتساب الفرع"
-              >
-                <Send size={13} />
-                <span>{isTestingCosmPhone ? 'جاري الإرسال...' : 'اختبار اتصال التجميل 🧪'}</span>
-              </button>
+            {isOwner && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={handleTestCosmeticsPhone}
+                  disabled={isTestingCosmPhone || !cosmeticsPhone || cosmeticsPhone.length !== 11}
+                  className="outstock-btn outstock-btn-secondary"
+                  style={{ flex: '1', height: '36px', padding: '0 10px', fontSize: '12px', fontWeight: '700', borderColor: '#f0abfc', color: '#86198f' }}
+                  title="إرسال رسالة تجريبية فورية للرقم للتحقق من الاتصال عبر واتساب الفرع"
+                >
+                  <Send size={13} />
+                  <span>{isTestingCosmPhone ? 'جاري الإرسال...' : 'اختبار اتصال التجميل 🧪'}</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* البطاقة الثالثة: أرقام هواتف المالك والمشرف العام */}
+          <div style={{
+            background: '#f0fdf4',
+            border: '1.5px solid #86efac',
+            borderRadius: '14px',
+            padding: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            gap: '12px'
+          }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontSize: '14px', fontWeight: '900', color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Crown size={16} color="#eab308" />
+                  <span>أرقام هواتف المالك والمشرف العام</span>
+                </span>
+                {ownerPhones.length > 0 ? (
+                  <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '800' }}>
+                    ✓ {ownerPhones.length} مسجلة
+                  </span>
+                ) : (
+                  <span style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '800' }}>
+                    ⚠️ غير محددة
+                  </span>
+                )}
+              </div>
+              <p style={{ margin: '0 0 10px', fontSize: '11.5px', color: '#15803d' }}>
+                تصل إليها فوراً إشعارات الشكاوى المصعدة من الفروع وتنبيهات الطوارئ الإدارية.
+              </p>
+
+              {/* أرقام المالك المسجلة حالياً كشرائح */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px', minHeight: '32px' }}>
+                {ownerPhones.length === 0 ? (
+                  <span style={{ fontSize: '11.5px', color: '#94a3b8', fontStyle: 'italic' }}>لا توجد أرقام هواتف مضافة للمالك بعد</span>
+                ) : (
+                  ownerPhones.map((ph, idx) => (
+                    <span
+                      key={idx}
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid #86efac',
+                        borderRadius: '16px',
+                        padding: '3px 10px',
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        color: '#166534',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                      }}
+                    >
+                      <span dir="ltr">{ph}</span>
+                      {isOwner && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveOwnerPhone(ph)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: '#dc2626',
+                            padding: '0 2px',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                          title="حذف الرقم"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </span>
+                  ))
+                )}
+              </div>
+
+              {/* حقل إضافة رقم جديد للمالك */}
+              {isOwner && (
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input
+                    type="tel"
+                    value={newOwnerPhoneInput}
+                    onChange={(e) => setNewOwnerPhoneInput(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddOwnerPhone())}
+                    placeholder="أضف رقم هاتف مالك (01xxxxxxxxx)..."
+                    className="outstock-form-input"
+                    dir="ltr"
+                    style={{
+                      textAlign: 'right',
+                      height: '38px',
+                      fontSize: '12.5px',
+                      fontWeight: 'bold',
+                      flex: 1
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddOwnerPhone}
+                    className="outstock-btn outstock-btn-secondary"
+                    style={{ height: '38px', padding: '0 10px', fontSize: '12px', fontWeight: '800', borderColor: '#86efac', color: '#166534' }}
+                    title="إضافة الرقم للقائمة"
+                  >
+                    <Plus size={14} />
+                    <span>إضافة</span>
+                  </button>
+                </div>
+              )}
             </div>
+
+            {isOwner && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  onClick={handleTestOwnerPhones}
+                  disabled={isTestingOwnerPhone || ownerPhones.length === 0}
+                  className="outstock-btn outstock-btn-secondary"
+                  style={{ flex: '1', height: '36px', padding: '0 10px', fontSize: '12px', fontWeight: '700', borderColor: '#86efac', color: '#15803d' }}
+                  title="إرسال رسالة تجريبية فورية لهواتف المالك للتحقق من الاتصال"
+                >
+                  <Send size={13} />
+                  <span>{isTestingOwnerPhone ? 'جاري الإرسال...' : 'اختبار اتصال المالك 🧪'}</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -986,6 +1338,41 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
           </div>
 
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {isOwner && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRecipientType('branch_direct');
+                    setSelectedTemplate('owner_admin_memo');
+                  }}
+                  className={`outstock-btn ${selectedRecipientType === 'branch_direct' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
+                  style={{ flex: 1, padding: '6px 8px', fontSize: '12px' }}
+                >
+                  <Building2 size={13} style={{ marginLeft: '4px' }} />
+                  <span>مراسلة فرع</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRecipientType('branch_broadcast');
+                    setSelectedTemplate('owner_admin_memo');
+                  }}
+                  className={`outstock-btn ${selectedRecipientType === 'branch_broadcast' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
+                  style={{
+                    flex: 1.2,
+                    padding: '6px 8px',
+                    fontSize: '12px',
+                    background: selectedRecipientType === 'branch_broadcast' ? 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)' : undefined,
+                    color: selectedRecipientType === 'branch_broadcast' ? '#ffffff' : undefined,
+                    fontWeight: '900'
+                  }}
+                >
+                  <Megaphone size={13} style={{ marginLeft: '4px' }} />
+                  <span>📢 بث تعميم للفروع</span>
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={() => setSelectedRecipientType('recent_orders')}
@@ -1118,6 +1505,69 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </div>
+          ) : selectedRecipientType === 'branch_direct' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <label style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 'bold' }}>
+                اختر الفرع المستهدف للمراسلة:
+              </label>
+              <select
+                value={selectedBranchId}
+                onChange={(e) => {
+                  const bId = e.target.value;
+                  setSelectedBranchId(bId);
+                  const b = branches.find(item => String(item.id) === String(bId));
+                  if (b) {
+                    setRecipientName(`فرع ${b.name}`);
+                    setRecipientPhone(b.whatsapp_phone || b.phone || '');
+                  } else {
+                    setRecipientName('');
+                    setRecipientPhone('');
+                  }
+                }}
+                className="outstock-form-select"
+                style={{ minHeight: '38px', fontSize: '12.5px', fontWeight: '700' }}
+              >
+                <option value="">-- اضغط لاختيار الفرع ({branches.length} فروع متاحة) --</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>
+                    🏢 {b.name} ({b.whatsapp_phone || b.phone ? (b.whatsapp_phone || b.phone) : 'بدون هاتف مسجل'})
+                  </option>
+                ))}
+              </select>
+
+              {recipientPhone ? (
+                <div style={{ background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '8px', padding: '10px', fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontWeight: '800', color: '#0f766e' }}>{recipientName}</div>
+                    <div style={{ color: '#0d9488', direction: 'ltr', textAlign: 'right' }}>{recipientPhone}</div>
+                  </div>
+                  <span style={{ background: '#ccfbf1', color: '#115e59', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 'bold' }}>فرع معتمد</span>
+                </div>
+              ) : selectedBranchId ? (
+                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '8px 10px', fontSize: '11.5px', color: '#b45309' }}>
+                  ⚠️ لم يتم تسجيل رقم هاتف/واتساب لهذا الفرع في بطاقة الفروع.
+                </div>
+              ) : null}
+            </div>
+          ) : selectedRecipientType === 'branch_broadcast' ? (
+            <div style={{ background: '#f0fdfa', border: '1.5px solid #0d9488', borderRadius: '12px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#0f766e', fontWeight: '900', fontSize: '13.5px' }}>
+                <Megaphone size={18} />
+                <span>بث إداري موحد لكافة الفروع</span>
+              </div>
+              <p style={{ margin: 0, fontSize: '12px', color: '#134e4a', lineHeight: 1.6 }}>
+                سيتم إرسال هذا التعميم الإداري إلى <strong>{branches.filter(b => b.phone || b.whatsapp_phone).length} فرعاً</strong> مسجلاً لهواتف في النظام دفعة واحدة.
+              </p>
+              <div style={{ background: '#ffffff', borderRadius: '8px', padding: '8px 10px', border: '1px solid #99f6e4', fontSize: '11.5px', color: '#0d9488' }}>
+                💡 <strong>ملاحظة للمالك:</strong> يمكنك استخدام الرمز <code>{'{branch_name}'}</code> في نص الرسالة وسيتم استبداله باسم كل فرع تلقائياً عند البث.
+              </div>
+              {isBroadcasting && (
+                <div style={{ background: '#ccfbf1', padding: '8px 10px', borderRadius: '8px', fontSize: '12px', color: '#115e59', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <RefreshCw size={14} className="animate-spin" />
+                  <span>جاري البث للفرع {broadcastProgress.current} من أصل {broadcastProgress.total}...</span>
                 </div>
               )}
             </div>
@@ -1297,24 +1747,42 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
             <>
               <div>
                 <label style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
-                  اختر نوع الإشعار التلقائي:
+                  {(selectedRecipientType === 'branch_direct' || selectedRecipientType === 'branch_broadcast')
+                    ? 'اختر قالب التعميم الإداري للفروع:'
+                    : 'اختر نوع الإشعار التلقائي:'}
                 </label>
-                <select
-                  value={selectedTemplate}
-                  onChange={(e) => setSelectedTemplate(e.target.value)}
-                  className="outstock-form-select"
-                  style={{ minHeight: '38px', fontSize: '12.5px', fontWeight: '700' }}
-                >
-                  <option value="order_arrived">🎉 إشعار توفر الدواء وجاهزيته للاستلام بالفرع</option>
-                  <option value="order_confirmation">📦 تأكيد استلام حجز الدواء وقيمة العربون</option>
-                  <option value="substitute_suggestion">💡 اقتراح المثائل والبدائل المسجلة (Drug Eye)</option>
-                  <option value="chronic_reminder">⏰ تذكير شهري بتجهيز أدوية الأمراض المزمنة</option>
-                </select>
+                {(selectedRecipientType === 'branch_direct' || selectedRecipientType === 'branch_broadcast') ? (
+                  <select
+                    value={selectedTemplate}
+                    onChange={(e) => setSelectedTemplate(e.target.value)}
+                    className="outstock-form-select"
+                    style={{ minHeight: '38px', fontSize: '12.5px', fontWeight: '700' }}
+                  >
+                    <option value="owner_admin_memo">📢 تعميم إداري عاجل للفروع</option>
+                    <option value="owner_inventory_notice">📝 تعليمات الجرد الدوري ومراجعة النواقص</option>
+                    <option value="owner_supply_delivery">📦 إشعار توريد وتوزيع دفعات جديدة</option>
+                    <option value="owner_urgent_alert">⚠️ تنبيه إداري عاجل ومهم</option>
+                  </select>
+                ) : (
+                  <select
+                    value={selectedTemplate}
+                    onChange={(e) => setSelectedTemplate(e.target.value)}
+                    className="outstock-form-select"
+                    style={{ minHeight: '38px', fontSize: '12.5px', fontWeight: '700' }}
+                  >
+                    <option value="order_arrived">🎉 إشعار توفر الدواء وجاهزيته للاستلام بالفرع</option>
+                    <option value="order_confirmation">📦 تأكيد استلام حجز الدواء وقيمة العربون</option>
+                    <option value="substitute_suggestion">💡 اقتراح المثائل والبدائل المسجلة (Drug Eye)</option>
+                    <option value="chronic_reminder">⏰ تذكير شهري بتجهيز أدوية الأمراض المزمنة</option>
+                  </select>
+                )}
               </div>
 
               <div>
                 <label style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
-                  نص الرسالة التي ستصل للعميل:
+                  {(selectedRecipientType === 'branch_direct' || selectedRecipientType === 'branch_broadcast')
+                    ? 'نص الرسالة التي ستصل للفرع:'
+                    : 'نص الرسالة التي ستصل للعميل:'}
                 </label>
                 <textarea
                   rows={6}
@@ -1357,35 +1825,70 @@ export default function OutstockWhatsAppCenterTab({ branchId, branch, currentPha
                 </label>
               )}
 
-              {/* أزرار الإرسال الفردي */}
+              {/* أزرار الإرسال */}
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: 'auto' }}>
-                <button
-                  type="button"
-                  onClick={handleSendAutomated}
-                  disabled={isSending || waState.status !== 'CONNECTED'}
-                  className="outstock-btn outstock-btn-whatsapp"
-                  style={{
-                    flex: 1,
-                    padding: '10px 14px',
-                    fontSize: '13px',
-                    fontWeight: '800',
-                    opacity: waState.status !== 'CONNECTED' ? 0.6 : 1
-                  }}
-                >
-                  <Send size={16} />
-                  <span>{isSending ? 'جاري الإرسال عبر الخادم...' : 'إرسال تلقائي عبر خادم الواتساب ⚡'}</span>
-                </button>
+                {selectedRecipientType === 'branch_broadcast' ? (
+                  <button
+                    type="button"
+                    onClick={handleBroadcastToBranches}
+                    disabled={isBroadcasting || waState.status !== 'CONNECTED'}
+                    className="outstock-btn"
+                    style={{
+                      flex: 1,
+                      background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+                      color: '#ffffff',
+                      padding: '12px 18px',
+                      borderRadius: '10px',
+                      fontSize: '13.5px',
+                      fontWeight: '900',
+                      border: 'none',
+                      cursor: isBroadcasting || waState.status !== 'CONNECTED' ? 'not-allowed' : 'pointer',
+                      opacity: waState.status !== 'CONNECTED' ? 0.6 : 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)'
+                    }}
+                  >
+                    <Megaphone size={16} />
+                    <span>
+                      {isBroadcasting
+                        ? `جاري البث للفرع ${broadcastProgress.current} من أصل ${broadcastProgress.total}...`
+                        : `📢 بث التعميم الإداري لكافة الفروع (${branches.filter(b => b.phone || b.whatsapp_phone).length} فرع)`}
+                    </span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleSendAutomated}
+                      disabled={isSending || waState.status !== 'CONNECTED'}
+                      className="outstock-btn outstock-btn-whatsapp"
+                      style={{
+                        flex: 1,
+                        padding: '10px 14px',
+                        fontSize: '13px',
+                        fontWeight: '800',
+                        opacity: waState.status !== 'CONNECTED' ? 0.6 : 1
+                      }}
+                    >
+                      <Send size={16} />
+                      <span>{isSending ? 'جاري الإرسال عبر الخادم...' : 'إرسال تلقائي عبر خادم الواتساب ⚡'}</span>
+                    </button>
 
-                <button
-                  type="button"
-                  onClick={handleOpenWhatsAppWeb}
-                  className="outstock-btn outstock-btn-secondary"
-                  style={{ padding: '10px 14px', fontSize: '12.5px' }}
-                  title="فتح المحادثة مباشرة في WhatsApp Web"
-                >
-                  <ExternalLink size={15} />
-                  <span>فتح WhatsApp Web</span>
-                </button>
+                    <button
+                      type="button"
+                      onClick={handleOpenWhatsAppWeb}
+                      className="outstock-btn outstock-btn-secondary"
+                      style={{ padding: '10px 14px', fontSize: '12.5px' }}
+                      title="فتح المحادثة مباشرة في WhatsApp Web"
+                    >
+                      <ExternalLink size={15} />
+                      <span>فتح WhatsApp Web</span>
+                    </button>
+                  </>
+                )}
               </div>
             </>
           )}

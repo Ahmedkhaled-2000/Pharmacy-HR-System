@@ -87,6 +87,9 @@ export function findEmployeeRoster(empId, monthOrDate, state, targetBranchId = n
   if (!empId || !state) return null;
   const empIdStr = String(empId);
   const emp = (state.employees || []).find(e => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
+  if (emp && (emp.noMonthlySchedule || emp.isVariableHours || emp.variableHours || emp.hasNoRoster)) {
+    return null;
+  }
   const empCodeStr = emp?.code ? String(emp.code) : '';
   const dateStr = monthOrDate && monthOrDate.length >= 10 ? String(monthOrDate).slice(0, 10) : null;
   const monthStr = monthOrDate ? (monthOrDate.length === 7 ? monthOrDate : monthOrDate.slice(0, 7)) : null;
@@ -146,6 +149,12 @@ export function findEmployeeRoster(empId, monthOrDate, state, targetBranchId = n
   );
 
   if (approvedRosters.length > 0) {
+    // فرز الجداول بالأحدث أولاً لضمان سيادة آخر جدول معتمد
+    approvedRosters.sort((a, b) => {
+      const tA = new Date(a.updatedAt || a.approvedAt || a.createdAt || 0).getTime() || 0;
+      const tB = new Date(b.updatedAt || b.approvedAt || b.createdAt || 0).getTime() || 0;
+      return tB - tA;
+    });
     const exactDateMatch = dateStr ? approvedRosters.find(r => r.fromDate && r.toDate && dateStr >= r.fromDate && dateStr <= r.toDate) : null;
     if (exactDateMatch) return exactDateMatch;
     return approvedRosters[0];
@@ -172,6 +181,23 @@ export function findEmployeeRoster(empId, monthOrDate, state, targetBranchId = n
     return emp.roster;
   }
 
+  // 4. البحث عن أي جدول معتمد سابق للموظف لنفس الفرع (مثلاً من شهر سابق كسبتمبر) لترحيله وتطبيقه
+  const anyPriorApprovedRoster = (state.rosters || []).find(r =>
+    matchesEmployee(r) &&
+    matchesBranch(r) &&
+    (r.status === 'approved' || r.adminApproved || !r.status) &&
+    r.schedule && Object.keys(r.schedule).length > 0
+  );
+  if (anyPriorApprovedRoster) {
+    return anyPriorApprovedRoster;
+  }
+
+  // 5. استدعاء getResolvedEmployeeRoster للحصول على الجدول المعتمد أو المستنتج من تفاصيل فروع الموظف وملفه
+  const resolved = getResolvedEmployeeRoster(emp, targetBranchId, cycleMonth, state);
+  if (resolved && resolved.schedule) {
+    return resolved;
+  }
+
   return null;
 }
 
@@ -181,7 +207,7 @@ export function findEmployeeRoster(empId, monthOrDate, state, targetBranchId = n
 export function getEmployeeBaseDaySchedule(empId, dateStr, state) {
   const empIdStr = String(empId);
   const emp = (state?.employees || []).find(e => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
-  if (emp?.noMonthlySchedule) {
+  if (emp?.noMonthlySchedule || emp?.isVariableHours || emp?.variableHours || emp?.hasNoRoster) {
     const arDay = arabicWeekday(dateStr);
     const restDays = Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.length > 0 ? emp.weeklyRestDays : ['الجمعة'];
     const isRest = restDays.some(d => String(d).trim().replace(/[إأآ]/g, 'ا') === arDay.replace(/[إأآ]/g, 'ا'));
@@ -223,7 +249,7 @@ export function getEmployeeDaySchedule(empId, dateStr, state) {
   const empCodeStr = emp?.code ? String(emp.code) : '';
 
   // الموظف الذي ليس له جدول شهري (مواعيد متغيرة): يعتمد على أيام الراحة المحددة له
-  if (emp?.noMonthlySchedule) {
+  if (emp?.noMonthlySchedule || emp?.isVariableHours || emp?.variableHours || emp?.hasNoRoster) {
     const arDay = arabicWeekday(dateStr);
     const restDays = Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.length > 0 ? emp.weeklyRestDays : ['الجمعة'];
     const isRest = restDays.some(d => String(d).trim().replace(/[إأآ]/g, 'ا') === arDay.replace(/[إأآ]/g, 'ا'));
@@ -233,10 +259,10 @@ export function getEmployeeDaySchedule(empId, dateStr, state) {
     return { type: 'shift', isOff: false, hours: parseFloat(emp.workHoursPerDay || emp.workHours) || 8, start: '', end: '', variable: true, label: 'دوام حر بالساعات' };
   }
 
-  // 0. فحص طلبات تعديل الشيفت المعتمدة (Shift Adjustments) لهذا الموظف والتاريخ
+  // 0. فحص طلبات تعديل الشيفت أو الجداول الشهرية المعتمدة لهذا الموظف والتاريخ
   const approvedShiftAdj = (state?.requests || []).find(r => {
     if (!r) return false;
-    const isAdj = r.type === 'shift_adjustment' || r.type === 'roster_edit';
+    const isAdj = r.type === 'shift_adjustment' || r.type === 'roster_edit' || r.type === 'roster_update' || r.type === 'roster_edit_request' || r.type === 'schedule_edit';
     if (!isAdj) return false;
     const isApproved = r.status === 'approved' || r.adminApproved === true || (r.branchApproved && r.isDirectToAdmin);
     if (!isApproved) return false;
@@ -265,7 +291,7 @@ export function getEmployeeDaySchedule(empId, dateStr, state) {
         hours: isOff ? 0 : (schedItem.hours !== undefined ? schedItem.hours : 8),
         isAdjusted: true,
         adjustmentRequestId: approvedShiftAdj.id,
-        adjustmentLabel: isOff ? '🛋️ راحة معتمدة بطلب تعديل شيفت' : '🔄 شيفت معدل بطلب رسمي'
+        adjustmentLabel: isOff ? '🛋️ راحة معتمدة بطلب رسمي' : '🔄 وردية معتمدة بطلب رسمي'
       };
     }
 
@@ -325,6 +351,15 @@ export function getEmployeeDaySchedule(empId, dateStr, state) {
   });
 
   if (approvedSwap) {
+    const swapTime = new Date(approvedSwap.approvedAt || approvedSwap.createdAt || 0).getTime();
+    const activeRoster = findEmployeeRoster(empId, dateStr, state);
+    const rosterTime = activeRoster ? new Date(activeRoster.approvedAt || activeRoster.updatedAt || activeRoster.createdAt || 0).getTime() : 0;
+    const hasExplicitDateInRoster = Boolean(activeRoster && activeRoster.schedule && activeRoster.schedule[dateStr]);
+
+    // إذا كان الروستر المعتمد أحدث من التبديل وله إعداد مخصص لهذا التاريخ، نعتمد الروستر الأحدث ونتخطى التبديل السابق
+    if (rosterTime > swapTime && hasExplicitDateInRoster) {
+      // تم إلغاء/تجاوز التبديل القديم بواسطة الجدول المعتمد الأحدث
+    } else {
     const reqEmpId = approvedSwap.requesterEmpId || approvedSwap.employeeId;
     const tgtEmpId = approvedSwap.targetEmpId || approvedSwap.targetEmployeeId || approvedSwap.peerEmployeeId;
     const reqDate = approvedSwap.requesterDate || approvedSwap.date || approvedSwap.startDate;
@@ -372,6 +407,7 @@ export function getEmployeeDaySchedule(empId, dateStr, state) {
       prevHours,
       swapNote
     };
+    }
   }
 
   // 2. في حال عدم وجود تبديل معتمد، استخراج الجدول الطبيعي للموظف
@@ -686,6 +722,9 @@ export function normalizeSchedule(rawSchedule) {
   };
 
   const normalized = {};
+  const isoDates = [];
+  const arDayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+
   Object.entries(rawSchedule).forEach(([key, val]) => {
     const rawKey = String(key).trim();
     const cleanKey = rawKey.toLowerCase();
@@ -695,7 +734,7 @@ export function normalizeSchedule(rawSchedule) {
 
     if (targetKey && val && typeof val === 'object') {
       const isOff = val.type === 'off' || val.isOff === true || val.type === 'راحة';
-      normalized[targetKey] = {
+      const item = {
         ...val,
         type: isOff ? 'off' : 'shift',
         isOff,
@@ -703,8 +742,74 @@ export function normalizeSchedule(rawSchedule) {
         end: isOff ? '' : (val.end || val.checkOut || ''),
         hours: val.hours !== undefined ? val.hours : (isOff ? 0 : 8)
       };
+      normalized[targetKey] = item;
+
+      if (isIso) {
+        isoDates.push({ dateStr: rawKey, item });
+      }
     }
   });
+
+  // إذا كانت هناك تواريخ رقمية ISO محددة في الجدول (مثل تقويم شهر كامل):
+  // نقوم بمطابقة واستنتاج القالب الأسبوعي القياسي (السبت..الجمعة) من النمط الغالب لتلك التواريخ
+  // لضمان التناسق التام بين تقويم الأيام والقالب الأسبوعي
+  if (isoDates.length > 0) {
+    const weekdayBuckets = {
+      'الأحد': [], 'الاثنين': [], 'الثلاثاء': [], 'الأربعاء': [],
+      'الخميس': [], 'الجمعة': [], 'السبت': []
+    };
+
+    isoDates.forEach(({ dateStr, item }) => {
+      try {
+        const jsDay = new Date(dateStr + 'T00:00:00').getDay();
+        const arDay = arDayNames[jsDay];
+        if (arDay) {
+          weekdayBuckets[arDay].push(item);
+        }
+      } catch {}
+    });
+
+    Object.entries(weekdayBuckets).forEach(([arDay, items]) => {
+      if (items.length > 0) {
+        let offCount = 0;
+        let shiftCount = 0;
+        let sampleShift = null;
+
+        items.forEach((it) => {
+          if (it.type === 'off' || it.isOff) {
+            offCount++;
+          } else {
+            shiftCount++;
+            if (!sampleShift && it.start && it.end) {
+              sampleShift = it;
+            }
+          }
+        });
+
+        // إذا كان هناك إجماع أو أغلبية واضحة للأيام في الشهر
+        if (offCount > shiftCount) {
+          normalized[arDay] = {
+            type: 'off',
+            isOff: true,
+            start: '',
+            end: '',
+            hours: 0
+          };
+        } else if (shiftCount >= offCount && sampleShift) {
+          normalized[arDay] = {
+            ...sampleShift,
+            type: 'shift',
+            isOff: false,
+            start: sampleShift.start || '08:00',
+            end: sampleShift.end || '16:00',
+            hours: sampleShift.hours !== undefined ? sampleShift.hours : 8
+          };
+        } else if (!normalized[arDay] && items[0]) {
+          normalized[arDay] = items[0];
+        }
+      }
+    });
+  }
 
   return Object.keys(normalized).length > 0 ? normalized : null;
 }
@@ -898,6 +1003,10 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
     const sch = item.schedule || item.shifts || item.workSchedule || item.newSchedule;
     if (sch && typeof sch === 'object' && Object.keys(sch).length > 0) {
       score += 5;
+      // أولوية إضافية للجداول التي تحتوي على تواريخ تفصيلية للدورة الكاملة
+      if (Object.keys(sch).some(k => /^\d{4}-\d{2}-\d{2}$/.test(k))) {
+        score += 10;
+      }
     }
 
     return score;
@@ -1024,7 +1133,38 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
     }
   }
 
-  if (candidates.length === 0) return null;
+  if (candidates.length === 0) {
+    // 5. صمام الأمان النهائي: توليد جدول افتراضي يستند إلى ساعات العمل المقررة في ملف الموظف وفرعه
+    const rawHrs = parseFloat(employee.workHoursPerDay || employee.workHours || 8) || 8;
+    const hours = Math.min(16, Math.max(4, rawHrs));
+    
+    // حساب مواعيد الوردية القياسية بناءً على الساعات (افتراضياً تبدأ 09:00 صباحاً)
+    const startHour = 9;
+    const endTotal = (startHour + Math.round(hours)) % 24;
+    const startTimeStr = `${String(startHour).padStart(2, '0')}:00`;
+    const endTimeStr = `${String(endTotal).padStart(2, '0')}:00`;
+    
+    const defaultTemplate = {
+      'السبت': { type: 'shift', start: startTimeStr, end: endTimeStr, hours },
+      'الأحد': { type: 'shift', start: startTimeStr, end: endTimeStr, hours },
+      'الاثنين': { type: 'shift', start: startTimeStr, end: endTimeStr, hours },
+      'الثلاثاء': { type: 'shift', start: startTimeStr, end: endTimeStr, hours },
+      'الأربعاء': { type: 'shift', start: startTimeStr, end: endTimeStr, hours },
+      'الخميس': { type: 'shift', start: startTimeStr, end: endTimeStr, hours },
+      'الجمعة': { type: 'off', isOff: true, start: '', end: '', hours: 0 }
+    };
+
+    return {
+      id: `default_roster_${employee.id}_${selectedMonth || 'active'}`,
+      employeeId: employee.id,
+      branchId: targetBranchId || employee.branchId || null,
+      month: selectedMonth || null,
+      schedule: defaultTemplate,
+      status: 'approved',
+      source: 'profile_default_fallback',
+      isFallback: true
+    };
+  }
 
   // Sort candidates by score descending, then by approval timestamp descending
   candidates.sort((a, b) => {

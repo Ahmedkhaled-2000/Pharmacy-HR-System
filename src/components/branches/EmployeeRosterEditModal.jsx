@@ -4,7 +4,7 @@ import { arabicWeekday, fmt, isEmployeeActive } from '../../utils/formatters';
 import { DAYS_OF_WEEK, formatTime12H, formatShiftRange12H } from './BranchMonthlyRosterModule';
 import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
-import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
+import { getEmployeeDaySchedule, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
 
 const DEFAULT_SCHEDULE = {
   'السبت': { type: 'shift', start: '08:00', end: '16:00', hours: 8 },
@@ -172,13 +172,17 @@ export default function EmployeeRosterEditModal({
   // جلب الجدول المعتمد الحالي للموظف المستهدف لهذا الشهر إن وجد
   const existingRoster = useMemo(() => {
     if (!targetEmp) return null;
+    const resolved = getResolvedEmployeeRoster(targetEmp, targetEmp.branchId || branchId, state, selectedMonth);
+    if (resolved && resolved.schedule && typeof resolved.schedule === 'object' && Object.keys(resolved.schedule).length > 0) {
+      return resolved;
+    }
     return (state?.rosters || []).find(
       (r) =>
         (String(r.employeeId) === String(targetEmp.id) || (targetEmp.code && String(r.employeeCode) === String(targetEmp.code))) &&
         (r.month === selectedMonth || !r.month) &&
         (String(r.branchId || '') === String(targetEmp.branchId || branchId || '') || !r.branchId)
     );
-  }, [state?.rosters, targetEmp, selectedMonth, branchId]);
+  }, [state, targetEmp, selectedMonth, branchId]);
 
   // حالة المدخلات للـ 7 أيام
   const [scheduleInputs, setScheduleInputs] = useState(() => {
@@ -204,8 +208,9 @@ export default function EmployeeRosterEditModal({
     }
   }, [targetEmp?.id, existingRoster, cycleRange]);
 
-  // تعديل يوم محدد
+  // تعديل يوم محدد في النمط الأسبوعي وتطبيقه تلقائياً على كافة أيام الشهر المطابقة
   const handleDayChange = (dayLabel, field, value) => {
+    let nextDayConfig = null;
     setScheduleInputs((prev) => {
       const current = prev[dayLabel] || { type: 'shift', start: '08:00', end: '16:00', hours: 8 };
       let updated = { ...current };
@@ -240,10 +245,31 @@ export default function EmployeeRosterEditModal({
         }
       }
 
+      nextDayConfig = updated;
       return {
         ...prev,
         [dayLabel]: updated
       };
+    });
+
+    // تطبيق تلقائي وفوري على كافة تواريخ الشهر المطابقة لهذا اليوم
+    setMonthlyDaysSchedule((prevMonth) => {
+      if (!cycleDays || cycleDays.length === 0) return prevMonth;
+      const updatedMonth = { ...prevMonth };
+      cycleDays.forEach((day) => {
+        if (day.dayLabel === dayLabel && nextDayConfig) {
+          const curDay = updatedMonth[day.dateStr] || {};
+          updatedMonth[day.dateStr] = {
+            ...curDay,
+            type: nextDayConfig.type,
+            isOff: nextDayConfig.isOff,
+            start: nextDayConfig.start,
+            end: nextDayConfig.end,
+            hours: nextDayConfig.hours
+          };
+        }
+      });
+      return updatedMonth;
     });
   };
 
@@ -425,7 +451,7 @@ export default function EmployeeRosterEditModal({
     setMonthlyDaysSchedule(updated);
   };
 
-  // تطبيق قوالب الورديات السريعة للنمط الأسبوعي
+  // تطبيق قوالب الورديات السريعة للنمط الأسبوعي وتطبيقه تلقائياً وفورياً على كامل أيام الشهر
   const applyPreset = (presetType) => {
     const newInputs = {};
     DAYS_OF_WEEK.forEach((d) => {
@@ -452,6 +478,27 @@ export default function EmployeeRosterEditModal({
       }
     });
     setScheduleInputs(newInputs);
+
+    // تطبيق فوري وتلقائي على كافة تواريخ أيام الشهر
+    setMonthlyDaysSchedule((prevMonth) => {
+      if (!cycleDays || cycleDays.length === 0) return prevMonth;
+      const updatedMonth = { ...prevMonth };
+      cycleDays.forEach((day) => {
+        const pattern = newInputs[day.dayLabel];
+        if (pattern) {
+          const cur = updatedMonth[day.dateStr] || {};
+          updatedMonth[day.dateStr] = {
+            ...cur,
+            type: pattern.type,
+            isOff: pattern.isOff,
+            start: pattern.start,
+            end: pattern.end,
+            hours: pattern.hours
+          };
+        }
+      });
+      return updatedMonth;
+    });
   };
 
   // تطبيق مواعيد الوردية الافتراضية على جميع أيام العمل مع الحفاظ على الراحات
@@ -628,8 +675,43 @@ export default function EmployeeRosterEditModal({
 
     setSubmitting(true);
     try {
+      // مزامنة القالب الأسبوعي القياسي (السبت..الجمعة) مع النمط الفعلي لأيام الشهر
+      const syncedWeeklyInputs = { ...scheduleInputs };
+      if (cycleDays && cycleDays.length > 0) {
+        DAYS_OF_WEEK.forEach((d) => {
+          const matchingDays = cycleDays.filter((cd) => cd.dayLabel === d);
+          if (matchingDays.length > 0) {
+            let offCount = 0;
+            let shiftCount = 0;
+            let sampleShift = null;
+            matchingDays.forEach((cd) => {
+              const conf = monthlyDaysSchedule[cd.dateStr];
+              if (conf) {
+                if (conf.type === 'off' || conf.isOff === true) {
+                  offCount++;
+                } else {
+                  shiftCount++;
+                  if (!sampleShift && conf.start && conf.end) sampleShift = conf;
+                }
+              }
+            });
+            if (offCount > shiftCount) {
+              syncedWeeklyInputs[d] = { type: 'off', isOff: true, start: '', end: '', hours: 0 };
+            } else if (shiftCount >= offCount && sampleShift) {
+              syncedWeeklyInputs[d] = {
+                type: 'shift',
+                isOff: false,
+                start: sampleShift.start || '08:00',
+                end: sampleShift.end || '16:00',
+                hours: sampleShift.hours !== undefined ? sampleShift.hours : 8
+              };
+            }
+          }
+        });
+      }
+
       const safeInputs = {
-        ...scheduleInputs,
+        ...syncedWeeklyInputs,
         ...monthlyDaysSchedule
       };
       const effectiveBranchId = targetEmp.isFloatingStaff

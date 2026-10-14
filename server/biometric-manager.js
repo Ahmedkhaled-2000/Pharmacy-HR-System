@@ -12,6 +12,7 @@ if (typeof process !== 'undefined' && process.env) {
 }
 
 import express from 'express';
+import net from 'net';
 import {
   getEgyptDate,
   getEgyptTime,
@@ -21,6 +22,52 @@ import {
   parseDevicePunchEpoch,
   calculatePunchMinutesDiff
 } from './egypt-time.js';
+
+/**
+ * ⚡ فاحص الاتصال المباشر عبر بروتوكول ZK TCP Socket المباشر (Port 4370)
+ * للماكينات على نفس الشبكة المحلية أو عبر Site-to-Site VPN
+ */
+export async function probeZkDirectTcp(ipAddress, port = 4370, timeoutMs = 1500) {
+  if (!ipAddress || ipAddress === '127.0.0.1' || ipAddress.startsWith('10.0.0.') || !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ipAddress)) {
+    return { accessible: false, reason: 'Invalid or local IP' };
+  }
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let settled = false;
+
+    socket.setTimeout(timeoutMs);
+
+    socket.on('connect', () => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve({ accessible: true, ip: ipAddress, port });
+    });
+
+    socket.on('timeout', () => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve({ accessible: false, reason: 'Timeout' });
+    });
+
+    socket.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve({ accessible: false, reason: err.message });
+    });
+
+    try {
+      socket.connect(port, ipAddress);
+    } catch (e) {
+      if (!settled) {
+        settled = true;
+        resolve({ accessible: false, reason: e.message });
+      }
+    }
+  });
+}
 
 export {
   getEgyptDate,
@@ -506,8 +553,9 @@ export async function dispatchWatchdogWhatsAppAlert(alertType, vars, state) {
     const candidatePhones = [];
     if (Array.isArray(alertConfig.watchdogRecipientPhones) && alertConfig.watchdogRecipientPhones.length > 0) {
       candidatePhones.push(...alertConfig.watchdogRecipientPhones);
+    } else if (Array.isArray(alertConfig.recipientPhones) && alertConfig.recipientPhones.length > 0) {
+      candidatePhones.push(...alertConfig.recipientPhones);
     } else {
-      if (Array.isArray(alertConfig.recipientPhones)) candidatePhones.push(...alertConfig.recipientPhones);
       if (org.generalManagerPhone) candidatePhones.push(org.generalManagerPhone);
       if (org.adminPhone) candidatePhones.push(org.adminPhone);
       if (org.ownerPhone) candidatePhones.push(org.ownerPhone);
@@ -546,8 +594,9 @@ export async function dispatchReconciliationWhatsAppAlert(vars, state) {
     const candidatePhones = [];
     if (Array.isArray(alertConfig.reconciliationRecipientPhones) && alertConfig.reconciliationRecipientPhones.length > 0) {
       candidatePhones.push(...alertConfig.reconciliationRecipientPhones);
+    } else if (Array.isArray(alertConfig.recipientPhones) && alertConfig.recipientPhones.length > 0) {
+      candidatePhones.push(...alertConfig.recipientPhones);
     } else {
-      if (Array.isArray(alertConfig.recipientPhones)) candidatePhones.push(...alertConfig.recipientPhones);
       if (org.generalManagerPhone) candidatePhones.push(org.generalManagerPhone);
       if (org.adminPhone) candidatePhones.push(org.adminPhone);
       if (org.ownerPhone) candidatePhones.push(org.ownerPhone);
@@ -716,14 +765,15 @@ export async function sendUniversalAttendanceWhatsAppAlert(punchPayload, state) 
 
     // ── 2. إرسال إشعار لهواتف الإدارة العليا المسجلة ─────────────────────────────
     const candidatePhones = [];
-    if (Array.isArray(alertConfig.recipientPhones)) {
+    if (Array.isArray(alertConfig.recipientPhones) && alertConfig.recipientPhones.length > 0) {
       candidatePhones.push(...alertConfig.recipientPhones);
-    }
-    if (org.generalManagerPhone) candidatePhones.push(org.generalManagerPhone);
-    if (org.adminPhone) candidatePhones.push(org.adminPhone);
-    if (org.ownerPhone) candidatePhones.push(org.ownerPhone);
-    if (Array.isArray(org.systemOwners)) {
-      org.systemOwners.forEach(o => { if (o?.phone) candidatePhones.push(o.phone); });
+    } else {
+      if (org.generalManagerPhone) candidatePhones.push(org.generalManagerPhone);
+      if (org.adminPhone) candidatePhones.push(org.adminPhone);
+      if (org.ownerPhone) candidatePhones.push(org.ownerPhone);
+      if (Array.isArray(org.systemOwners)) {
+        org.systemOwners.forEach(o => { if (o?.phone) candidatePhones.push(o.phone); });
+      }
     }
 
     const uniquePhones = [...new Set(candidatePhones.map(p => String(p || '').replace(/\D/g, '')).filter(p => p.length >= 9))];
@@ -2516,13 +2566,114 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             [sn, pin, `${datePart} ${timePart}:00`, verifyType, rawState, line]
           );
 
+          // 🧠 نظام الكشف الذكي عن البصمات غير المعرفة (Auto-Heuristic Punch Mapper)
+          const branchEmployees = employees.filter(e => 
+            e && (
+              String(e.branchId) === String(physicalBranchId) || 
+              (Array.isArray(e.branches) && e.branches.some(b => String(b) === String(physicalBranchId))) || 
+              e.isFloating || 
+              String(e.branchId) === 'floating' ||
+              String(e.branchId) === 'all'
+            )
+          );
+
+          let candidateEmp = null;
+          let candidateConfidence = 'low';
+          let candidateReason = 'لا يوجد موظف نشط متطابق حالياً في هذا الفرع';
+          let candidateAction = 'check_out';
+
+          // أ) فحص وجود موظف في نفس الفرع لديه وردية نشطة حالياً (بدأت ولم تنصرف بعد) - ثقة فائقة
+          const activeCandidate = branchEmployees.find(e => {
+            const keys = [e.id, String(e.id), e.code ? String(e.code) : null].filter(Boolean);
+            return keys.some(k => currentActiveShifts[k]);
+          });
+
+          if (activeCandidate) {
+            const activeKey = [activeCandidate.id, String(activeCandidate.id), activeCandidate.code ? String(activeCandidate.code) : null].find(k => currentActiveShifts[k]);
+            const actShift = currentActiveShifts[activeKey];
+            candidateEmp = activeCandidate;
+            candidateConfidence = 'high';
+            candidateReason = `الموظف لديه وردية عمل نشطة حالياً في نفس الفرع بدأت الساعة ${actShift?.timeIn || '—'} بدون تسجيل انصراف`;
+            candidateAction = 'check_out';
+          } else {
+            // ب) فحص تطابق رقم الـ PIN مع كود الموظف
+            const codeCandidate = branchEmployees.find(e => String(e.code) === String(pin) || String(e.code).endsWith(String(pin)));
+            if (codeCandidate) {
+              candidateEmp = codeCandidate;
+              candidateConfidence = 'high';
+              candidateReason = `تطابق رقم PIN الماكينة (${pin}) مع كود الموظف (${codeCandidate.code})`;
+              candidateAction = 'check_in';
+            } else {
+              // ج) فحص الموظف المجدول بالفرع في هذا اليوم
+              const scheduledCandidate = branchEmployees.find(e => {
+                const sEnd = getEmployeeScheduledShiftEnd(e, datePart, state);
+                return Boolean(sEnd);
+              });
+              if (scheduledCandidate) {
+                candidateEmp = scheduledCandidate;
+                candidateConfidence = 'medium';
+                candidateReason = `الموظف مجدول للعمل في نفس الفرع بتاريخ ${datePart}`;
+                candidateAction = 'check_in';
+              }
+            }
+          }
+
+          // 📋 إدراج أو تحديث طلب "تعديل بصمه جهاز البصمه" في قائمة الطلبات (Requests)
+          const existingPendingReqIdx = currentRequests.findIndex(r => 
+            r && (r.type === 'device_punch_mapping' || r.type === 'تعديل بصمه جهاز البصمه') && 
+            r.status === 'pending' && 
+            String(r.pin) === String(pin) && 
+            r.deviceSerial === sn && 
+            r.date === datePart
+          );
+
+          const reqData = {
+            id: existingPendingReqIdx >= 0 ? currentRequests[existingPendingReqIdx].id : `req_dev_punch_${sn}_${pin}_${punchEpoch || Date.now()}`,
+            type: 'device_punch_mapping',
+            title: 'تعديل بصمه جهاز البصمه',
+            subTitle: `بصمة جهاز غير معرفة: PIN ${pin} - جهاز ${devObj?.device_name || sn}`,
+            employeeId: candidateEmp?.id || null,
+            employeeName: candidateEmp?.name || 'موظف غير محدد (كشف ذكي)',
+            employeeCode: candidateEmp?.code || null,
+            branchId: physicalBranchId || devObj?.branch_id || null,
+            branchName: physicalBranchName || devObj?.branch_name || 'فرع غير محدد',
+            deviceSerial: sn,
+            deviceName: devObj?.device_name || sn,
+            pin: String(pin),
+            punchTime: `${datePart} ${timePart}`,
+            date: datePart,
+            time: timePart,
+            verifyType,
+            candidateEmployee: candidateEmp ? {
+              id: candidateEmp.id,
+              name: candidateEmp.name,
+              code: candidateEmp.code,
+              branchId: candidateEmp.branchId,
+              confidence: candidateConfidence,
+              reason: candidateReason,
+              suggestedAction: candidateAction
+            } : null,
+            status: 'pending',
+            createdAt: existingPendingReqIdx >= 0 ? currentRequests[existingPendingReqIdx].createdAt : new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+
+          if (existingPendingReqIdx >= 0) {
+            currentRequests[existingPendingReqIdx] = reqData;
+          } else {
+            currentRequests.unshift(reqData);
+          }
+
           // بث تنبيه فوري للإدارة لربط الـ PIN بالموظف
+          io.emit('request:created', reqData);
+          io.emit('requests:updated', currentRequests);
           io.emit('biometric:unmapped_punch', {
             serialNumber: sn,
             pin,
             dateTime: `${datePart} ${timePart}`,
             verifyType,
-            deviceName: devObj?.device_name || sn
+            deviceName: devObj?.device_name || sn,
+            candidateEmployee: reqData.candidateEmployee
           });
 
           processedCount++;
@@ -2567,7 +2718,57 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
         let actionType = 'check_in';
         let isOvernightCheckOut = false;
-        const effectiveActive = activeShift || openShift;
+        let effectiveActive = activeShift || openShift;
+
+        // 🛡️ صمام الأمان الذكي الاستباقي (Intelligent Departure & Break Reconciliation):
+        // إذا لم تكن هناك وردية مفتوحة حالياً، نفحص ما إذا كان للموظف وردية مسجلة في نفس اليوم
+        // تم إغلاقها بالخطأ (مثلاً عند وقت بدء الاستراحة breakStartTime أو انصراف غير مقصود بالصورة)،
+        // بينما هذه البصمة على جهاز البصمة هي الانصراف الحقيقي الطبيعي للوردية (Check-Out)!
+        if (!effectiveActive) {
+          const sameDayShiftIdx = currentShifts.findIndex(s =>
+            possibleEmpKeys.some(k => String(s.employeeId) === String(k) || (s.employeeCode && String(s.employeeCode) === String(k))) &&
+            s.date === datePart &&
+            s.timeIn && s.timeIn !== ''
+          );
+
+          if (sameDayShiftIdx >= 0) {
+            const candShift = currentShifts[sameDayShiftIdx];
+            const candInTime = (candShift.timeIn || '09:00').slice(0, 5);
+            const minsSinceIn = calculatePunchMinutesDiff(datePart, candInTime, datePart, timePart);
+
+            // هل الوردية أغلقت في وقت بدء الاستراحة تحديداً؟
+            const closedAtBreakStart = Boolean(
+              candShift.breakStartTime && (
+                candShift.timeOut === candShift.breakStartTime ||
+                candShift.endTime === candShift.breakStartTime
+              )
+            );
+
+            // هل الموظف كان في استراحة أو ورديته المسجلة قصيرة جداً وغير مكتملة والوقت الحالي هو وقت الانصراف الفعلي؟
+            const hasBreakRecord = Boolean(
+              parseFloat(candShift.breakHours || 0) > 0 ||
+              Number(candShift.accumulatedPauseMs || 0) > 0 ||
+              candShift.breakStartTime ||
+              candShift.isOnBreak ||
+              candShift.isPaused
+            );
+
+            const isPrematureClosing = Boolean(
+              closedAtBreakStart ||
+              (hasBreakRecord && parseFloat(candShift.actualWorkedHours || candShift.hours || 0) < 3.0 && minsSinceIn >= 180) ||
+              (candShift.note && candShift.note.includes('انصراف بالصورة') && minsSinceIn >= 240)
+            );
+
+            if (isPrematureClosing && minsSinceIn >= 60 && minsSinceIn <= 20 * 60) {
+              console.log(`[Biometric Resolver] 🛡️ صمام التسوية الذكي: تم رصد انصراف فعلي للموظف ${matchedEmpName} (${timePart}) لوردية تم إغلاقها مبكراً بالخطأ في ${candShift.timeOut} - يتم تصحيحها وتسجيل الانصراف الحقيقي.`);
+              effectiveActive = candShift;
+              // نعيد فتح الوردية حتى تُغلق نظامياً كانصراف في المسار الطبيعي
+              currentShifts[sameDayShiftIdx].timeOut = '';
+              currentShifts[sameDayShiftIdx].isLiveActive = true;
+              currentShifts[sameDayShiftIdx].status = 'active';
+            }
+          }
+        }
 
         if (effectiveActive) {
           const shiftStartDate = effectiveActive.date || datePart;
@@ -4455,8 +4656,13 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     try {
       const limit = parseInt(req.query.limit || '100', 10);
       const q = await db.query(
-        `SELECT * FROM public.biometric_raw_punches 
-         ORDER BY punch_time DESC 
+        `SELECT 
+           p.*,
+           TO_CHAR(p.punch_time, 'YYYY-MM-DD') as punch_date,
+           TO_CHAR(p.punch_time, 'HH24:MI:SS') as punch_time_str,
+           TO_CHAR(p.punch_time, 'YYYY-MM-DD HH24:MI:SS') as punch_time_formatted
+         FROM public.biometric_raw_punches p
+         ORDER BY p.punch_time DESC 
          LIMIT $1`,
         [limit]
       );
@@ -4466,15 +4672,324 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     }
   });
 
-  // 5. ربط أو تحديث رقم PIN الموظف على الماكينة
-  app.post('/api/biometrics/map-pin', async (req, res) => {
+  // 4.1 استخراج وفحص ذاكرة أجهزة البصمة حياً وتصدير السجلات المدمجة الشاملة للفترة المحددة
+  app.post('/api/biometrics/extract-and-export-punches', async (req, res) => {
     try {
-      const { employeeId, pin, notes } = req.body;
+      const body = parseReqBody(req);
+      const deviceSerial = (body.deviceSerial || 'ALL').trim();
+      const startDate = (body.startDate || '').trim() || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      const endDate = (body.endDate || '').trim() || new Date().toISOString().slice(0, 10);
+      const branchId = (body.branchId || 'ALL').trim();
+      const employeeId = (body.employeeId || 'ALL').trim();
+      const punchType = (body.punchType || 'ALL').trim();
+      const enableLiveMemoryScan = body.enableLiveMemoryScan !== false;
+      const waitForDeviceSync = body.waitForDeviceSync !== false;
+      const detectAnomalies = body.detectAnomalies !== false;
+
+      const nowMs = Date.now();
+      const devicesQ = await db.query('SELECT * FROM public.biometric_devices');
+      const allDevices = devicesQ.rows || [];
+
+      let targetDevices = [];
+      if (deviceSerial !== 'ALL') {
+        targetDevices = allDevices.filter(d => String(d.serial_number) === String(deviceSerial));
+      } else if (branchId !== 'ALL') {
+        targetDevices = allDevices.filter(d => String(d.branch_id) === String(branchId));
+        if (targetDevices.length === 0) targetDevices = allDevices;
+      } else {
+        targetDevices = allDevices;
+      }
+
+      let contactedDevices = [];
+      let memoryScanTriggered = false;
+
+      // 🛰️ المرحلة 1: إرسال أمر فحص ذاكرة الماكينات المستهدفة حياً عبر ADMS Push Protocol
+      if (enableLiveMemoryScan && targetDevices.length > 0) {
+        for (const dev of targetDevices) {
+          const sn = dev.serial_number;
+          const lastHb = dev.last_heartbeat ? new Date(dev.last_heartbeat).getTime() : 0;
+          const isOnline = (nowMs - lastHb) < 180000; // متصل خلال آخر 3 دقائق
+
+          // 1. أمر استخراج سجلات الحركات من الذاكرة الفلاشية للفترة المحددة
+          const cmdAttLog = `DATA QUERY ATTLOG StartTime=${startDate} 00:00:00\tEndTime=${endDate} 23:59:59`;
+          queueDeviceCommand(sn, cmdAttLog, 'QUERY_ATTLOG');
+          
+          // 2. أمر فحص وتحديث مخزن الحركات وإجباره على التزامن اللحظي
+          queueDeviceCommand(sn, 'CHECK', 'DEVICE_CHECK');
+
+          // 3. فحص الاتصال المباشر عبر TCP 4370 إذا كان هناك IP متاح
+          if (dev.ip_address) {
+            probeZkDirectTcp(dev.ip_address, 4370, 800)
+              .then(tcpRes => {
+                if (tcpRes.accessible) console.log(`[ZK TCP Direct] ⚡ الجهاز ${sn} متاح للاتصال المباشر على ${dev.ip_address}:4370`);
+              })
+              .catch(() => {});
+          }
+
+          contactedDevices.push({
+            serialNumber: sn,
+            name: dev.device_name || sn,
+            branchId: dev.branch_id,
+            branchName: dev.branch_name,
+            status: isOnline ? 'ONLINE' : 'OFFLINE',
+            isOnline,
+            commandQueued: true
+          });
+          memoryScanTriggered = true;
+        }
+
+        // بث لحظي عبر Socket.io لشاشات المتابعة
+        io.emit('biometric:memory_scan_initiated', {
+          devices: contactedDevices,
+          startDate,
+          endDate,
+          timestamp: new Date().toISOString()
+        });
+
+        // إذا كان هناك أجهزة متصلة، انتظار وجيز (2.5 ثانية) لاستيعاب أي حركات واردة فورا من الماكينات
+        const hasOnlineDev = contactedDevices.some(d => d.isOnline);
+        if (waitForDeviceSync && hasOnlineDev) {
+          await new Promise(r => setTimeout(r, 2500));
+        }
+      }
+
+      // 📥 المرحلة 2: استعلام قاعدة البيانات لاستخراج كافة البصمات للفترة المحددة
+      const startTs = `${startDate} 00:00:00`;
+      const endTs = `${endDate} 23:59:59`;
+
+      let sql = `
+        SELECT 
+          p.id,
+          p.device_serial,
+          p.device_user_pin,
+          p.punch_time,
+          TO_CHAR(p.punch_time, 'YYYY-MM-DD') as punch_date,
+          TO_CHAR(p.punch_time, 'HH24:MI:SS') as punch_time_str,
+          TO_CHAR(p.punch_time, 'YYYY-MM-DD HH24:MI:SS') as punch_time_formatted,
+          p.verify_type,
+          p.raw_punch_state,
+          p.employee_id,
+          p.employee_name,
+          p.branch_id,
+          p.action_type,
+          p.process_status,
+          p.process_notes,
+          d.device_name,
+          d.branch_name as dev_branch_name
+        FROM public.biometric_raw_punches p
+        LEFT JOIN public.biometric_devices d ON d.serial_number = p.device_serial
+        WHERE p.punch_time >= $1::timestamptz 
+          AND p.punch_time <= $2::timestamptz
+      `;
+      const params = [startTs, endTs];
+      let pIdx = 3;
+
+      if (deviceSerial !== 'ALL') {
+        sql += ` AND p.device_serial = $${pIdx}`;
+        params.push(deviceSerial);
+        pIdx++;
+      }
+
+      if (branchId !== 'ALL') {
+        sql += ` AND (p.branch_id = $${pIdx} OR d.branch_id = $${pIdx})`;
+        params.push(branchId);
+        pIdx++;
+      }
+
+      if (employeeId !== 'ALL') {
+        sql += ` AND p.employee_id = $${pIdx}`;
+        params.push(employeeId);
+        pIdx++;
+      }
+
+      if (punchType !== 'ALL') {
+        if (punchType === 'check_in') {
+          sql += ` AND (p.action_type = 'check_in' OR p.action_type = 'shift_start' OR p.raw_punch_state = 0)`;
+        } else if (punchType === 'check_out') {
+          sql += ` AND (p.action_type = 'check_out' OR p.action_type = 'shift_end' OR p.raw_punch_state = 1)`;
+        }
+      }
+
+      sql += ` ORDER BY p.punch_time ASC`;
+
+      const rawPunchesRes = await db.query(sql, params);
+      const state = await getSettingsFromStorage(STORAGE_KEY).catch(() => null);
+      const employees = Array.isArray(state?.employees) ? state.employees : [];
+      const branches = Array.isArray(state?.branches) ? state.branches : [];
+      const empMap = new Map(employees.map(e => [String(e.id), e]));
+      const branchMap = new Map(branches.map(b => [String(b.id), b]));
+
+      let punches = (rawPunchesRes.rows || []).map(r => {
+        const emp = empMap.get(String(r.employee_id));
+        const b = branchMap.get(String(r.branch_id));
+        return {
+          ...r,
+          employee_name: r.employee_name || emp?.name || 'موظف غير معرف',
+          employee_code: emp?.code || r.device_user_pin || '',
+          job_title: emp?.jobTitle || '',
+          branch_name: b?.name || r.dev_branch_name || (r.branch_id ? `فرع (${r.branch_id})` : 'الإدارة العامة')
+        };
+      });
+
+      // 🔄 دمج أي حركات حضور وانصراف مسجلة عبر كشك الحضور الإلكتروني في state.shifts
+      try {
+        const state = await getSettingsFromStorage(STORAGE_KEY).catch(() => null);
+        const stateShifts = Array.isArray(state?.shifts) ? state.shifts : [];
+        const existingKeys = new Set(punches.map(p => {
+          const t = p.punch_time ? new Date(p.punch_time).toISOString().slice(0, 16) : '';
+          return `${p.employee_id || p.device_user_pin}_${t}`;
+        }));
+
+        stateShifts.forEach(s => {
+          if (!s || !s.date || s.date < startDate || s.date > endDate) return;
+          if (employeeId !== 'ALL' && String(s.employeeId) !== String(employeeId)) return;
+          if (branchId !== 'ALL' && String(s.branchId) !== String(branchId)) return;
+
+          if (s.timeIn && (punchType === 'ALL' || punchType === 'check_in')) {
+            const timeClean = s.timeIn.slice(0, 5);
+            const key = `${s.employeeId}_${s.date}T${timeClean}`;
+            if (!existingKeys.has(key)) {
+              punches.push({
+                id: `shift_in_${s.id || key}`,
+                device_serial: 'WEB_KIOSK',
+                device_name: 'كشك البصمة الإلكتروني',
+                device_user_pin: s.employeeCode || s.employeeId,
+                punch_time: `${s.date}T${timeClean}:00`,
+                punch_date: s.date,
+                punch_time_str: `${timeClean}:00`,
+                punch_time_formatted: `${s.date} ${timeClean}:00`,
+                verify_type: 'FACE_KIOSK',
+                raw_punch_state: 0,
+                employee_id: s.employeeId,
+                employee_name: s.employeeName,
+                branch_id: s.branchId,
+                branch_name: s.branchName,
+                action_type: 'check_in',
+                process_status: 'PROCESSED',
+                process_notes: 'حضور مسجل عبر كشك البصمة الإلكتروني'
+              });
+              existingKeys.add(key);
+            }
+          }
+
+          if (s.timeOut && s.timeOut !== '—' && s.timeOut !== '' && (punchType === 'ALL' || punchType === 'check_out')) {
+            const timeClean = s.timeOut.slice(0, 5);
+            const key = `${s.employeeId}_${s.date}T${timeClean}`;
+            if (!existingKeys.has(key)) {
+              punches.push({
+                id: `shift_out_${s.id || key}`,
+                device_serial: 'WEB_KIOSK',
+                device_name: 'كشك البصمة الإلكتروني',
+                device_user_pin: s.employeeCode || s.employeeId,
+                punch_time: `${s.date}T${timeClean}:00`,
+                verify_type: 'FACE_KIOSK',
+                raw_punch_state: 1,
+                employee_id: s.employeeId,
+                employee_name: s.employeeName,
+                branch_id: s.branchId,
+                branch_name: s.branchName,
+                action_type: 'check_out',
+                process_status: 'PROCESSED',
+                process_notes: 'انصراف مسجل عبر كشك البصمة الإلكتروني'
+              });
+              existingKeys.add(key);
+            }
+          }
+        });
+
+        punches.sort((a, b) => new Date(a.punch_time).getTime() - new Date(b.punch_time).getTime());
+      } catch (mergeErr) {
+        console.warn('[Export Punches Merge Shifts Warn]:', mergeErr.message);
+      }
+
+      // 🛡️ المرحلة 3: كشف الحركات الشاذة والتنقل المستحيل (Anomaly & Impossible Travel AI)
+      let anomaliesCount = 0;
+      if (detectAnomalies) {
+        const lastPunchByEmp = new Map();
+        punches = punches.map(p => {
+          const empId = p.employee_id || p.device_user_pin;
+          const pEpoch = new Date(p.punch_time).getTime();
+          const bId = p.branch_id;
+          const last = lastPunchByEmp.get(empId);
+
+          let isAnomaly = false;
+          let anomalyReason = '';
+
+          if (last && bId && last.branchId && String(bId) !== String(last.branchId)) {
+            const diffMins = Math.abs(pEpoch - last.epoch) / 60000;
+            if (diffMins < 20) {
+              isAnomaly = true;
+              anomalyReason = `⚠️ اشتباه انتقال مستحيل بين فرعين (${Math.round(diffMins)} دقيقة فقط بين ${last.branchName || last.branchId} و ${p.branch_name || bId})`;
+              anomaliesCount++;
+            }
+          }
+
+          lastPunchByEmp.set(empId, { epoch: pEpoch, branchId: bId, branchName: p.branch_name });
+
+          return {
+            ...p,
+            is_anomaly: isAnomaly,
+            anomaly_reason: anomalyReason
+          };
+        });
+      }
+
+      res.json({
+        success: true,
+        punches,
+        totalCount: punches.length,
+        anomaliesCount,
+        memoryScanTriggered,
+        contactedDevices,
+        syncReport: {
+          devicesTargeted: targetDevices.length,
+          onlineDevicesCount: contactedDevices.filter(d => d.isOnline).length,
+          startDate,
+          endDate
+        }
+      });
+    } catch (err) {
+      console.error('[Extract & Export Punches Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 🌙 مهمة الأرشفة والفحص التلقائي الليلي لذاكرة ماكينات البصمة (Nightly Memory Snapshot Auto-Archive)
+  let lastNightlyArchiveDate = '';
+  setInterval(async () => {
+    try {
+      const egyptDate = getEgyptDate();
+      const egyptTime = getEgyptTime();
+      if (egyptTime.startsWith('03:') && lastNightlyArchiveDate !== egyptDate) {
+        lastNightlyArchiveDate = egyptDate;
+        const devs = await db.query('SELECT serial_number FROM public.biometric_devices WHERE status = $1', ['ONLINE']);
+        if (devs.rows && devs.rows.length > 0) {
+          const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+          for (const d of devs.rows) {
+            queueDeviceCommand(d.serial_number, `DATA QUERY ATTLOG StartTime=${yesterday} 00:00:00\tEndTime=${egyptDate} 23:59:59`, 'NIGHTLY_ARCHIVE');
+            queueDeviceCommand(d.serial_number, 'CHECK', 'DEVICE_CHECK');
+          }
+          console.log(`[Biometric Manager] 🌙 [Nightly Archive] تم إرسال أمر فحص وسحب الذاكرة التلقائي لعدد ${devs.rows.length} جهاز بصمة بنجاح.`);
+        }
+      }
+    } catch (archiveErr) {
+      console.warn('[Biometric Nightly Archive Warn]:', archiveErr.message);
+    }
+  }, 60000);
+
+  // 5. ربط أو تحديث رقم PIN الموظف على الماكينة (وخدمة طلبات تعديل بصمة جهاز البصمة)
+  const handleMapPin = async (req, res) => {
+    try {
+      const { employeeId, pin, notes, branchId, employeeName, updateRawPunches } = req.body;
       if (!employeeId || !pin) {
         return res.status(400).json({ success: false, error: 'employeeId and pin are required' });
       }
 
-      const id = `map_${employeeId}_${Date.now()}`;
+      const cleanEmpId = String(employeeId);
+      const cleanPin = String(pin).trim();
+      const id = `map_${cleanEmpId}_${Date.now()}`;
+
+      // 1. تحديث الملف البيومتري المركزي للموظف
       const q = await db.query(
         `INSERT INTO public.employee_biometric_profiles (id, employee_id, device_user_pin, notes, updated_at)
          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
@@ -4483,14 +4998,47 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
            notes = EXCLUDED.notes,
            updated_at = CURRENT_TIMESTAMP
          RETURNING *`,
-        [id, String(employeeId), String(pin).trim(), notes || '']
+        [id, cleanEmpId, cleanPin, notes || 'تم الربط عبر طلب تعديل بصمة جهاز البصمة']
       );
+
+      // 2. تحديث جدول PIN الفروع إن وُجد
+      if (branchId) {
+        try {
+          await db.query(
+            `INSERT INTO public.employee_branch_pins (employee_id, branch_id, device_user_pin, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (employee_id, branch_id) DO UPDATE SET
+               device_user_pin = EXCLUDED.device_user_pin,
+               updated_at = CURRENT_TIMESTAMP`,
+            [cleanEmpId, String(branchId), cleanPin]
+          );
+        } catch (_) {}
+      }
+
+      // 3. تسوية حركات البصمة الخام غير المعرفة السابقة لهذا الـ PIN
+      if (updateRawPunches !== false) {
+        try {
+          await db.query(
+            `UPDATE public.biometric_raw_punches 
+             SET employee_id = $1, 
+                 employee_name = COALESCE($2, employee_name),
+                 process_status = 'PROCESSED',
+                 process_notes = 'تمت التسوية بأثر رجعي عبر اعتماد تعديل بصمة جهاز البصمة'
+             WHERE device_user_pin = $3 AND (process_status = 'UNMAPPED' OR employee_id IS NULL)`,
+            [cleanEmpId, employeeName || null, cleanPin]
+          );
+        } catch (_) {}
+      }
 
       res.json({ success: true, profile: q.rows[0] });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
-  });
+  };
+
+  app.post('/api/biometrics/map-pin', handleMapPin);
+  app.post('/api/biometric/map-device-pin', handleMapPin);
+  app.post('/api/biometrics/map-device-pin', handleMapPin);
 
   // 6. قائمة ملفات البصمات الحالية
   app.get('/api/biometrics/profiles', async (req, res) => {
@@ -5179,6 +5727,9 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           org.adminPhone,
           org.ownerPhone
         ].filter(Boolean),
+        // 👑 هاتف المالك وشكاوى النواقص
+        ownerWhatsAppNumber: rawConfig.ownerWhatsAppNumber || org.ownerPhone || '',
+        notifyOwnerOnOutstockComplaints: rawConfig.notifyOwnerOnOutstockComplaints !== false,
         // 🛰️ نظام المراقبة الذكي للأجهزة
         watchdogEnabled: rawConfig.watchdogEnabled !== false,
         watchdogTimeoutMinutes: parseInt(rawConfig.watchdogTimeoutMinutes || '10', 10) || 10,
@@ -5218,16 +5769,68 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       const { config } = parseReqBody(req);
       const state = await getSettingsFromStorage(STORAGE_KEY);
       const org = state?.orgSettings || {};
+
+      // تنظيف وتوحيد أرقام الهواتف (Auto-Sanitize & Normalization)
+      const sanitizePhone = (p) => {
+        if (!p) return '';
+        let c = String(p).replace(/\D/g, '');
+        if (c.startsWith('01') && c.length === 11) c = '2' + c;
+        else if (c.startsWith('1') && c.length === 10) c = '20' + c;
+        return c;
+      };
+
+      const cleanRecipients = Array.isArray(config?.recipientPhones)
+        ? [...new Set(config.recipientPhones.map(sanitizePhone).filter(p => p.length >= 9))]
+        : (org.biometricWhatsAppAlerts?.recipientPhones || []);
+
+      const cleanWatchdogRecipients = Array.isArray(config?.watchdogRecipientPhones)
+        ? [...new Set(config.watchdogRecipientPhones.map(sanitizePhone).filter(p => p.length >= 9))]
+        : (org.biometricWhatsAppAlerts?.watchdogRecipientPhones || []);
+
+      const cleanReconciliationRecipients = Array.isArray(config?.reconciliationRecipientPhones)
+        ? [...new Set(config.reconciliationRecipientPhones.map(sanitizePhone).filter(p => p.length >= 9))]
+        : (org.biometricWhatsAppAlerts?.reconciliationRecipientPhones || []);
+
+      const cleanOwnerPhone = config?.ownerWhatsAppNumber !== undefined
+        ? sanitizePhone(config.ownerWhatsAppNumber)
+        : (org.biometricWhatsAppAlerts?.ownerWhatsAppNumber || sanitizePhone(org.ownerPhone) || '');
+
+      const cleanConfig = {
+        ...(config || {}),
+        recipientPhones: cleanRecipients,
+        watchdogRecipientPhones: cleanWatchdogRecipients,
+        reconciliationRecipientPhones: cleanReconciliationRecipients,
+        ownerWhatsAppNumber: cleanOwnerPhone,
+        notifyOwnerOnOutstockComplaints: config?.notifyOwnerOnOutstockComplaints !== false
+      };
+
       org.biometricWhatsAppAlerts = {
         ...(org.biometricWhatsAppAlerts || {}),
-        ...config,
+        ...cleanConfig,
         templates: {
           ...DEFAULT_ATTENDANCE_TEMPLATES,
           ...(org.biometricWhatsAppAlerts?.templates || {}),
-          ...(config?.templates || {})
+          ...(cleanConfig?.templates || {})
         },
         updatedAt: new Date().toISOString()
       };
+
+      // مزامنة رقم هاتف المالك مع إعدادات المنشأة العامة ونظام النواقص لمنع التشتت
+      if (cleanOwnerPhone) {
+        org.ownerPhone = cleanOwnerPhone;
+        if (globalDb) {
+          try {
+            await globalDb.query(`
+              INSERT INTO public.outstock_settings (key, value, updated_at)
+              VALUES ('owner_whatsapp_phone', $1, NOW())
+              ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            `, [cleanOwnerPhone]);
+          } catch (dbErr) {
+            console.warn('[Biometric WA] Sync owner phone to outstock_settings warning:', dbErr.message);
+          }
+        }
+      }
+
       state.orgSettings = org;
       await saveSettingsToStorage(STORAGE_KEY, state, req.ip || 'system');
       res.json({ success: true, config: org.biometricWhatsAppAlerts, message: 'تم حفظ إعدادات إشعارات واتساب بنجاح' });
@@ -5320,6 +5923,36 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         }
       }
 
+      // معالجة تجربة تنبيه المالك لشكاوى النواقص (outstock_complaint)
+      if (actionType === 'outstock_complaint') {
+        const targetPhone = testPhone ||
+          baseAlertConfig.ownerWhatsAppNumber ||
+          org.ownerPhone;
+
+        if (!targetPhone) {
+          return res.status(400).json({ success: false, error: 'يرجى إدخال رقم هاتف المالك لاستلام التجربة أولاً' });
+        }
+
+        const dateStr = getEgyptDate();
+        const timeStr = getEgyptTime();
+        const msg = `🚨 *تنبيه سيادي تجريبي - تصعيد شكوى تأخر رد المشتريات*\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `🏢 *الفرع المُصعّد:* فرع المدينة الجامعية\n` +
+          `💊 *اسم الصنف المستعلم عنه:* *بانادول إكسترا 500 مجم*\n` +
+          `👤 *الصيدلي محرر الشكوى:* د. سيف الدين (فحص تجريبي)\n` +
+          `⏰ *وقت التصعيد:* ${dateStr} - ${timeStr}\n` +
+          `📝 *نوع الشكوى:* تأخر غير مبرر في الرد وتوفير الصنف للعميل\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `✅ هذه رسالة تجريبية لتأكيد ضبط هاتف المالك بنجاح لاستلام شكاوى النواقص الفورية.`;
+
+        const sent = await sendWhatsAppMessageDirect(targetPhone, msg);
+        if (sent) {
+          return res.json({ success: true, message: `تم إرسال إشعار شكوى تجريبي بنجاح إلى هاتف المالك (${targetPhone})` });
+        } else {
+          return res.status(500).json({ success: false, error: 'فشل إرسال الرسالة عبر خادم hr_main' });
+        }
+      }
+
       const isKiosk = source === 'kiosk' || actionType === 'break_start' || actionType === 'break_end';
 
       const payload = {
@@ -5393,6 +6026,156 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       res.status(500).json({ success: false, error: err.message });
     }
   });
+
+  // 21. نظام المزامنة والمسح الذكي للبصمات غير المعرفة لتوليد طلبات "تعديل بصمه جهاز البصمه"
+  async function syncUnmappedPunchesToRequests() {
+    try {
+      const q = await db.query(`
+        SELECT p.*, d.device_name, d.branch_id AS dev_branch_id, d.branch_name AS dev_branch_name
+        FROM public.biometric_raw_punches p
+        LEFT JOIN public.biometric_devices d ON d.serial_number = p.device_serial
+        WHERE p.process_status = 'UNMAPPED'
+          AND p.punch_time >= CURRENT_DATE - INTERVAL '7 days'
+        ORDER BY p.punch_time DESC
+        LIMIT 50
+      `);
+
+      if (!q.rows || q.rows.length === 0) return { count: 0 };
+
+      const state = await getSettingsFromStorage(STORAGE_KEY);
+      if (!state) return { count: 0 };
+
+      let currentRequests = Array.isArray(state.requests) ? [...state.requests] : [];
+      const employees = Array.isArray(state.employees) ? state.employees : [];
+      const currentActiveShifts = { ...(state.activeShifts || {}) };
+      let stateChanged = false;
+      let createdCount = 0;
+
+      for (const row of q.rows) {
+        const pin = String(row.device_user_pin || '').trim();
+        const sn = row.device_serial;
+        const pDate = new Date(row.punch_time);
+        const punchDate = row.raw_payload && row.raw_payload.includes('-')
+          ? (row.raw_payload.split(/[\t\s]+/)[1] || getEgyptDate(pDate))
+          : getEgyptDate(pDate);
+        const punchTime = row.raw_payload && row.raw_payload.includes(':')
+          ? (row.raw_payload.split(/[\t\s]+/)[2]?.slice(0, 5) || getEgyptTime(pDate))
+          : getEgyptTime(pDate);
+
+        const branchId = row.branch_id || row.dev_branch_id;
+        const branchName = row.dev_branch_name || 'فرع غير محدد';
+
+        // تحقق من عدم وجود طلب مسبق لهذا الـ PIN والجهاز والتاريخ
+        const exists = currentRequests.some(r =>
+          r && (r.type === 'device_punch_mapping' || r.type === 'تعديل بصمه جهاز البصمه') &&
+          String(r.pin) === pin &&
+          r.deviceSerial === sn &&
+          r.date === punchDate
+        );
+        if (exists) continue;
+
+        // Auto-Heuristic
+        const branchEmployees = employees.filter(e =>
+          e && (
+            String(e.branchId) === String(branchId) ||
+            (Array.isArray(e.branches) && e.branches.some(b => String(b) === String(branchId))) ||
+            e.isFloating ||
+            String(e.branchId) === 'floating' ||
+            String(e.branchId) === 'all'
+          )
+        );
+
+        let candidateEmp = null;
+        let candidateConfidence = 'low';
+        let candidateReason = 'لا يوجد موظف متطابق تلقائياً في الفرع';
+        let candidateAction = 'check_out';
+
+        // 1. هل الموظف نشط حالياً بالفرع بدون انصراف؟ (أعلى ثقة)
+        const activeCand = branchEmployees.find(e => {
+          const keys = [e.id, String(e.id), e.code ? String(e.code) : null].filter(Boolean);
+          return keys.some(k => currentActiveShifts[k]);
+        });
+
+        if (activeCand) {
+          const actKey = [activeCand.id, String(activeCand.id), activeCand.code ? String(activeCand.code) : null].find(k => currentActiveShifts[k]);
+          const actShift = currentActiveShifts[actKey];
+          candidateEmp = activeCand;
+          candidateConfidence = 'high';
+          candidateReason = `الموظف لديه وردية عمل نشطة حالياً في نفس الفرع بدأت الساعة ${actShift?.timeIn || '—'} بدون تسجيل انصراف`;
+          candidateAction = 'check_out';
+        } else {
+          // 2. فحص كود الموظف
+          const codeCand = branchEmployees.find(e => String(e.code) === pin || String(e.code).endsWith(pin));
+          if (codeCand) {
+            candidateEmp = codeCand;
+            candidateConfidence = 'high';
+            candidateReason = `تطابق رقم PIN الماكينة (${pin}) مع كود الموظف (${codeCand.code})`;
+            candidateAction = 'check_in';
+          }
+        }
+
+        const newReq = {
+          id: `req_dev_punch_${sn}_${pin}_${pDate.getTime()}_${Math.random().toString(36).slice(2, 6)}`,
+          type: 'device_punch_mapping',
+          title: 'تعديل بصمه جهاز البصمه',
+          subTitle: `بصمة جهاز غير معرفة: PIN ${pin} - جهاز ${row.device_name || sn}`,
+          employeeId: candidateEmp?.id || null,
+          employeeName: candidateEmp?.name || 'موظف غير محدد (كشف ذكي)',
+          employeeCode: candidateEmp?.code || null,
+          branchId: branchId || null,
+          branchName: branchName,
+          deviceSerial: sn,
+          deviceName: row.device_name || sn,
+          pin: pin,
+          punchTime: `${punchDate} ${punchTime}`,
+          date: punchDate,
+          time: punchTime,
+          verifyType: row.verify_type || 'FINGERPRINT',
+          candidateEmployee: candidateEmp ? {
+            id: candidateEmp.id,
+            name: candidateEmp.name,
+            code: candidateEmp.code,
+            branchId: candidateEmp.branchId,
+            confidence: candidateConfidence,
+            reason: candidateReason,
+            suggestedAction: candidateAction
+          } : null,
+          status: 'pending',
+          createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
+        currentRequests.unshift(newReq);
+        stateChanged = true;
+        createdCount++;
+      }
+
+      if (stateChanged) {
+        state.requests = currentRequests;
+        await saveSettingsToStorage(STORAGE_KEY, state, 'unmapped-punch-scanner');
+        io.emit('requests:updated', currentRequests);
+        console.log(`[Biometric Auto-Heuristic] 🔍 تم توليد ${createdCount} طلب 'تعديل بصمه جهاز البصمه' بنجاح!`);
+      }
+
+      return { count: createdCount };
+    } catch (e) {
+      console.warn('[Biometric Auto-Heuristic Sync Warn]:', e.message);
+      return { count: 0, error: e.message };
+    }
+  }
+
+  app.get('/api/biometrics/sync-unmapped-requests', async (req, res) => {
+    try {
+      const resData = await syncUnmappedPunchesToRequests();
+      res.json({ success: true, ...resData });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // تشغيل الفحص الذكي عند الإقلاع ودورياً
+  setTimeout(() => { syncUnmappedPunchesToRequests(); }, 4000);
+  setInterval(() => { syncUnmappedPunchesToRequests(); }, 5 * 60 * 1000);
 
   // 🛡️ تم تعطيل الترميم التلقائي الأعمى عند الإقلاع لمنع التدخل العشوائي في ورديات الموظفين
   // يمكن تشغيل الترميم يدوياً عند الحاجة عبر المسار المخصص POST /api/biometrics/repair-overnight-shifts
@@ -5549,6 +6332,16 @@ export async function repairOvernightShiftsFromRawLogs(db, getSettingsFromStorag
               const schedH = parseFloat(empObj?.workHoursPerDay || empObj?.workHours || 8);
               const regH = Math.min(calcH, schedH);
               const otH = Math.max(0, Math.round((calcH - regH) * 100) / 100);
+
+              // 🛡️ درع حماية البصمات اليدوية: منع الكتابة فوق أو تكرار أي وردية معتمدة يدوياً من الإدارة
+              const hasManualShift = currentShifts.some(s =>
+                possibleKeys.some(k => String(s.employeeId) === String(k)) &&
+                s.date === dateA &&
+                (s.isManual || s.manualPunch || s.adminApproved)
+              );
+              if (hasManualShift) {
+                break;
+              }
 
               // إيجاد أو إنشاء سجل الوردية الصحيحة لـ dateA
               const existingIdx = currentShifts.findIndex(s =>

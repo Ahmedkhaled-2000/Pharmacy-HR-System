@@ -1351,31 +1351,31 @@
    🖨️ طباعة الفاتورة الحرارية المزدوجة (POS Dual Cashier Receipt Print Styling)
    ══════════════════════════════════════════════════════════════════════════════ */
 .thermal-receipt-container {
-  width: 80mm;
+  width: 76mm;
   max-width: 100%;
   margin: 0 auto;
   background: #ffffff;
   color: #000000;
   font-family: 'Courier New', Courier, monospace, 'Cairo';
-  font-size: 12px;
+  font-size: 11.5px;
   padding: 8px;
   box-sizing: border-box;
 }
 
 .receipt-copy {
-  padding-bottom: 12px;
+  padding-bottom: 8px;
 }
 
 .receipt-header {
   text-align: center;
   margin-bottom: 8px;
-  border-bottom: 1px dashed #000;
+  border-bottom: 1.5px dashed #000;
   padding-bottom: 6px;
 }
 
 .receipt-header h3 {
-  margin: 0 0 4px;
-  font-size: 14px;
+  margin: 0 0 3px;
+  font-size: 14.5px;
   font-weight: 900;
 }
 
@@ -1388,31 +1388,35 @@
   margin-bottom: 8px;
   font-size: 11px;
   line-height: 1.4;
-  border-bottom: 1px dashed #000;
+  border-bottom: 1.5px dashed #000;
   padding-bottom: 6px;
 }
 
 .receipt-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: 10.5px;
   margin-bottom: 8px;
 }
 
 .receipt-table th, .receipt-table td {
   padding: 3px 2px;
-  text-align: right;
+  vertical-align: middle;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .receipt-table th {
-  border-bottom: 1px solid #000;
+  border-bottom: 1.5px solid #000;
+  font-weight: 900;
 }
 
 .receipt-totals {
-  border-top: 1px dashed #000;
+  border-top: 1.5px dashed #000;
   padding-top: 6px;
-  font-size: 11.5px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .receipt-barcode {
@@ -1424,7 +1428,7 @@
 
 .receipt-barcode svg {
   max-width: 100%;
-  height: 48px;
+  height: 44px;
 }
 
 .receipt-page-cut-line {
@@ -1447,6 +1451,12 @@
     margin: 0 !important;
     padding: 0 !important;
     font-family: 'Courier New', Courier, 'Cairo', monospace !important;
+  }
+  body {
+    width: 72mm !important;
+    max-width: 72mm !important;
+    margin: 0 auto !important;
+    padding: 1mm 2mm 18mm 2mm !important;
   }
   .outstock-root-shell,
   .outstock-top-header,
@@ -1475,12 +1485,22 @@
     padding: 0 !important;
   }
   .thermal-receipt-container {
-    width: 80mm !important;
-    max-width: 100% !important;
+    width: 72mm !important;
+    max-width: 72mm !important;
     border: none !important;
     box-shadow: none !important;
-    padding: 4px 2px !important;
+    padding: 2px !important;
     margin: 0 auto !important;
+  }
+  .receipt-logo-img {
+    filter: grayscale(100%) contrast(300%) brightness(90%) !important;
+    -webkit-filter: grayscale(100%) contrast(300%) brightness(90%) !important;
+    image-rendering: crisp-edges !important;
+  }
+  .receipt-table {
+    width: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
   }
   .receipt-page-cut-line {
     page-break-after: always !important;

@@ -458,6 +458,35 @@ export default function PharmacyMedicationSearchTab({
                   {/* شريط الشارات الجانبي */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      {(med.item_type === 'cosmetics' || med.item_type === 'cosmetic' || (med.category && med.category.includes('تجميل')) || (med.department && med.department.includes('تجميل'))) ? (
+                        <span
+                          style={{
+                            background: '#fdf2f8',
+                            color: '#db2777',
+                            border: '1px solid #fbcfe8',
+                            fontSize: '11px',
+                            fontWeight: '800',
+                            padding: '2px 8px',
+                            borderRadius: '6px'
+                          }}
+                        >
+                          💄 مستحضرات تجميل
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            background: '#ecfdf5',
+                            color: '#059669',
+                            border: '1px solid #a7f3d0',
+                            fontSize: '11px',
+                            fontWeight: '800',
+                            padding: '2px 8px',
+                            borderRadius: '6px'
+                          }}
+                        >
+                          💊 صنف دوائي
+                        </span>
+                      )}
                       {med.is_table_drug && (
                         <span
                           style={{

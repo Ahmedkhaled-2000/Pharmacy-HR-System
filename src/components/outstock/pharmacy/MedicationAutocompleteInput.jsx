@@ -918,6 +918,38 @@ export default function MedicationAutocompleteInput({
                             {highlightMatch(med.trade_name_en, inputValue)}
                           </span>
 
+                          {(med.item_type === 'cosmetics' || med.item_type === 'cosmetic' || (med.category && med.category.includes('تجميل')) || (med.department && med.department.includes('تجميل'))) ? (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              padding: '2px 7px',
+                              background: '#fdf2f8',
+                              color: '#db2777',
+                              border: '1px solid #fbcfe8',
+                              borderRadius: '6px',
+                              fontSize: '11px',
+                              fontWeight: '800'
+                            }}>
+                              💄 مستحضرات تجميل
+                            </span>
+                          ) : (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              padding: '2px 7px',
+                              background: '#ecfdf5',
+                              color: '#059669',
+                              border: '1px solid #a7f3d0',
+                              borderRadius: '6px',
+                              fontSize: '11px',
+                              fontWeight: '800'
+                            }}>
+                              💊 صنف دوائي
+                            </span>
+                          )}
+
                           {med.is_table_drug && (
                             <span style={{
                               display: 'inline-flex',

@@ -23,7 +23,14 @@ import {
   Camera,
   UploadCloud,
   AlertTriangle,
-  Eye
+  Eye,
+  Phone,
+  Printer,
+  ShoppingBag,
+  Coins,
+  CreditCard,
+  Layers,
+  Sparkle
 } from 'lucide-react';
 import {
   outstockGetMedicationRequests,
@@ -31,19 +38,26 @@ import {
   outstockReplyMedicationRequest,
   outstockApproveNewItemRequest,
   outstockSearchMedications,
-  outstockSendInquiryComplaint
+  outstockSendInquiryComplaint,
+  outstockGetCustomers,
+  outstockSendMedicationRequestWhatsApp,
+  outstockConvertMedicationRequestToOrder
 } from '../../../utils/outstockApiClient';
 import MedicationAutocompleteInput from '../pharmacy/MedicationAutocompleteInput';
+import NewCustomerOrderModal from '../pharmacy/NewCustomerOrderModal';
 import EmployeeCodeAuthModal from './EmployeeCodeAuthModal';
 import ProcurementReplyModal from './ProcurementReplyModal';
+import { printInquiryReceipt } from '../../../utils/printInquiryReceipt';
+import { useDeliveryZones } from '../../../utils/deliveryZonesService';
 
 /**
  * ItemInquiryAndCorrectionTab.jsx
  * وحدة الاستعلامات، تصحيح بيانات الأصناف، واعتماد الأصناف الجديدة
  * نظام تبادلي متقدم يربط فروع الصيدليات بإدارة المشتريات:
- * 1. استعلام عن سعر / توفر صنف
- * 2. طلب تصحيح بيانات صنف مسجل (سعر، حجم عبوة، مسمى)
- * 3. طلب اعتماد وإضافة صنف جديد كلياً للكتالوج
+ * 1. استعلام عن سعر / توفر صنف مع بيانات العميل والعربون
+ * 2. إيصال استلام عربون حراري مزدوج (نسخة العميل + نسخة الصيدلية)
+ * 3. تحويل الاستعلام المجاب عنه مباشرة لطلب عميل مسبق الحجز
+ * 4. زر تفاعلي للصيدلي لإرسال إشعار الواتساب للعميل يدوياً
  */
 export default function ItemInquiryAndCorrectionTab({
   userRole = 'branch', // 'branch' | 'procurement_manager' | 'procurement_officer' | 'owner'
@@ -90,11 +104,65 @@ export default function ItemInquiryAndCorrectionTab({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // ── قائمة المناطق المعتمدة من إعدادات المالك ──
+  const deliveryZones = useDeliveryZones();
+
+  // ── بيانات العميل والعربون وتوجيه الصنف ──
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
+  const [customerZone, setCustomerZone] = useState('');
+  const [customerId, setCustomerId] = useState(null);
+  const [depositAmount, setDepositAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [itemType, setItemType] = useState('medication'); // 'medication' | 'cosmetics'
+  const [requestedQuantity, setRequestedQuantity] = useState(1);
+  const [requestedUnit, setRequestedUnit] = useState('pack'); // 'pack' | 'strip' | 'ampoule' | 'unit'
+  const [printThermalReceipt, setPrintThermalReceipt] = useState(true);
+  const [isSearchingCustomer, setIsSearchingCustomer] = useState(false);
+
+  // ── تفريغ نموذج الاستعلام الجديد تماماً لمنع بقاء أي بيانات سابقة ──
+  const resetNewRequestForm = () => {
+    setMedicationName('');
+    setSelectedMed(null);
+    setNotes('');
+    setAttachmentImage(null);
+    setAttachmentName('');
+    setCustomerPhone('');
+    setCustomerName('');
+    setCustomerAddress('');
+    setCustomerZone('');
+    setCustomerId(null);
+    setDepositAmount('');
+    setPaymentMethod('cash');
+    setRequestedQuantity(1);
+    setRequestedUnit('pack');
+    setProposedData({
+      public_price: '',
+      pack_size: 1,
+      dosage_form: '',
+      manufacturer: '',
+      active_ingredient: '',
+      invoice_display_name: ''
+    });
+  };
+
+  // ── تحويل الاستعلام لطلب عميل وإرسال واتساب يدوي ──
+  const [orderModalPrefill, setOrderModalPrefill] = useState(null);
+  const [inquiryToConvert, setInquiryToConvert] = useState(null);
+  const [sendingWhatsAppId, setSendingWhatsAppId] = useState(null);
+
   // نافذة الرد على الطلب (للمشتريات)
   const [replyTargetRequest, setReplyTargetRequest] = useState(null);
   const [replyNotes, setReplyNotes] = useState('');
   const [replyStatus, setReplyStatus] = useState('resolved');
+  const [replyItems, setReplyItems] = useState([]);
   const [isReplying, setIsReplying] = useState(false);
+
+  // المصادقة الأمنية بكود الموظف قبل تحويل الاستعلام لطلب عميل
+  const [isConvertAuthModalOpen, setIsConvertAuthModalOpen] = useState(false);
+  const [inquiryPendingConversion, setInquiryPendingConversion] = useState(null);
+  const [orderReceiverEmployee, setOrderReceiverEmployee] = useState(null);
 
   // تصعيد شكوى لعدم الرد على الاستعلام
   const [complaintTargetInquiry, setComplaintTargetInquiry] = useState(null);
@@ -139,9 +207,62 @@ export default function ItemInquiryAndCorrectionTab({
 
   // عند نجاح التحقق من كود الموظف
   const handleAuthSuccess = (emp) => {
+    resetNewRequestForm();
     setAuthenticatedEmployee(emp);
     setIsAuthModalOpen(false);
     setIsNewRequestModalOpen(true);
+  };
+
+  // ── البحث التلقائي الدقيق عن العميل برقم الهاتف ──
+  const handleCustomerPhoneChange = async (val) => {
+    const digits = String(val || '').replace(/\D/g, '').slice(0, 11);
+    setCustomerPhone(digits);
+
+    // إذا تم تعديل أو مسح الرقم: تفريغ هوية العميل والاسم والعنوان فوراً لمنع بقاء أي اسم ثابت
+    if (customerId || !digits || digits.length < 11) {
+      setCustomerId(null);
+      setCustomerName('');
+      setCustomerAddress('');
+      setCustomerZone('');
+    }
+
+    if (digits.length === 11) {
+      setIsSearchingCustomer(true);
+      try {
+        const res = await outstockGetCustomers({ phone: digits });
+        if (res?.success && Array.isArray(res.customers) && res.customers.length > 0) {
+          // التحقق الصارم من تطابق الرقم مع بيانات العميل المسترجعة دون السقوط على عميل عشوائي
+          const matched = res.customers.find((c) => {
+            const p1 = String(c.whatsapp_phone || '').replace(/\D/g, '');
+            const p2 = String(c.landline_phone || '').replace(/\D/g, '');
+            return (p1 && (p1 === digits || (p1.length >= 10 && digits.endsWith(p1.slice(-10))) || (digits.length >= 10 && p1.endsWith(digits.slice(-10))))) ||
+                   (p2 && (p2 === digits || (p2.length >= 10 && digits.endsWith(p2.slice(-10)))));
+          });
+
+          if (matched) {
+            const resolvedName = matched.full_name || matched.name || matched.customer_name || '';
+            setCustomerName(resolvedName);
+            setCustomerAddress(matched.address || matched.customer_address || '');
+            setCustomerZone(matched.zone || matched.customer_zone || '');
+            setCustomerId(matched.id || null);
+            showToast(`✨ تم التعرف على العميل: ${resolvedName || 'عميل مسجل'}`);
+            return;
+          }
+        }
+        setCustomerId(null);
+        setCustomerName('');
+        setCustomerAddress('');
+        setCustomerZone('');
+        showToast(`ℹ️ رقم الهاتف غير مسجل مسبقاً، يمكنك كتابة بيانات العميل الجديد بحرية`);
+      } catch (_) {
+        setCustomerId(null);
+        setCustomerName('');
+        setCustomerAddress('');
+        setCustomerZone('');
+      } finally {
+        setIsSearchingCustomer(false);
+      }
+    }
   };
 
   // إرسال طلب جديد
@@ -149,6 +270,11 @@ export default function ItemInquiryAndCorrectionTab({
     e.preventDefault();
     if (!medicationName.trim()) {
       showToast('⚠️ يرجى إدخال اسم الدواء أو الصنف');
+      return;
+    }
+
+    if (customerPhone && customerPhone.length > 0 && customerPhone.length < 11) {
+      showToast('⚠️ رقم هاتف العميل يجب أن يتكون من 11 رقماً');
       return;
     }
 
@@ -165,12 +291,47 @@ export default function ItemInquiryAndCorrectionTab({
         employeeCode: authenticatedEmployee?.code || null,
         employeeName: authenticatedEmployee?.name || null,
         attachmentUrl: attachmentImage || null,
-        attachmentName: attachmentName || null
+        attachmentName: attachmentName || null,
+        itemType,
+        customerName: customerName.trim() || null,
+        customerPhone: customerPhone.trim() || null,
+        customerAddress: customerZone ? (customerAddress.trim() ? `${customerZone} - ${customerAddress.trim()}` : customerZone) : (customerAddress.trim() || null),
+        customerZone: customerZone.trim() || null,
+        customerId: customerId || null,
+        depositAmount: parseFloat(depositAmount) || 0,
+        paymentMethod,
+        requestedQuantity: parseInt(requestedQuantity, 10) || 1,
+        requestedUnit
       };
 
       const res = await outstockCreateMedicationRequest(payload);
       if (res?.success) {
         showToast('✅ تم إرسال الطلب لإدارة المشتريات بنجاح!');
+
+        // 🖨️ طباعة إيصال استلام العربون الحراري المزدوج (نسخة العميل + نسخة الصيدلية)
+        if (parseFloat(depositAmount) > 0 || (printThermalReceipt && customerName.trim())) {
+          try {
+            printInquiryReceipt({
+              inquiryId: res.request?.id || res.id,
+              customerName: customerName.trim(),
+              customerPhone: customerPhone.trim(),
+              customerAddress: customerZone ? `${customerZone} - ${customerAddress.trim()}` : customerAddress.trim(),
+              medicationName: medicationName.trim(),
+              requestedQuantity: parseInt(requestedQuantity, 10) || 1,
+              requestedUnit: requestedUnit === 'strip' ? 'شريط' : (requestedUnit === 'pack' ? 'علبة' : requestedUnit),
+              itemType,
+              depositAmount: parseFloat(depositAmount) || 0,
+              paymentMethod,
+              pharmacistNotes: notes.trim(),
+              employeeName: authenticatedEmployee?.name || currentUser?.name || 'صيدلي الفرع',
+              employeeCode: authenticatedEmployee?.code || '',
+              branchName: currentBranch?.name || 'فرع الصيدلية'
+            });
+          } catch (printErr) {
+            console.warn('Inquiry receipt print error:', printErr);
+          }
+        }
+
         setIsNewRequestModalOpen(false);
         setAuthenticatedEmployee(null);
         setMedicationName('');
@@ -178,6 +339,16 @@ export default function ItemInquiryAndCorrectionTab({
         setNotes('');
         setAttachmentImage(null);
         setAttachmentName('');
+        setCustomerPhone('');
+        setCustomerName('');
+        setCustomerAddress('');
+        setCustomerZone('');
+        setCustomerId(null);
+        setDepositAmount('');
+        setPaymentMethod('cash');
+        setItemType('medication');
+        setRequestedQuantity(1);
+        setRequestedUnit('pack');
         setProposedData({
           public_price: '',
           pack_size: 1,
@@ -197,20 +368,193 @@ export default function ItemInquiryAndCorrectionTab({
     }
   };
 
+  // 🛍️ طلب التحقق من كود الموظف أولاً قبل فتح نافذة إنشاء طلب العميل
+  const handleConvertToOrder = (reqItem) => {
+    setInquiryPendingConversion(reqItem);
+    setIsConvertAuthModalOpen(true);
+  };
+
+  // بعد نجاح التحقق من كود الصيدلي
+  const handleConvertAuthSuccess = (emp) => {
+    setOrderReceiverEmployee(emp);
+    setIsConvertAuthModalOpen(false);
+    if (inquiryPendingConversion) {
+      openOrderModalWithPrefill(inquiryPendingConversion, emp);
+    }
+  };
+
+  // فتح نافذة الطلب وتعبئة البيانات تلقائياً
+  const openOrderModalWithPrefill = (reqItem, emp) => {
+    setInquiryToConvert(reqItem);
+    const replyData = typeof reqItem.procurement_reply === 'object' && reqItem.procurement_reply !== null
+      ? reqItem.procurement_reply
+      : (typeof reqItem.procurement_reply === 'string'
+        ? (() => { try { return JSON.parse(reqItem.procurement_reply); } catch { return {}; } })()
+        : {});
+
+    const itemsFromReply = Array.isArray(replyData.items) && replyData.items.length > 0
+      ? replyData.items
+      : null;
+
+    let prefilledItems = [];
+    if (itemsFromReply) {
+      prefilledItems = itemsFromReply.map((it, idx) => ({
+        id: `item_${Date.now()}_${idx}`,
+        medicationName: it.medicationName || reqItem.medication_name,
+        unitType: it.unit || reqItem.requested_unit || 'pack',
+        quantity: parseInt(it.quantity || reqItem.requested_quantity || 1, 10),
+        unitPrice: it.price !== undefined && it.price !== null && it.price !== '' ? String(it.price) : '',
+        isPriceEstimated: false,
+        itemType: reqItem.item_type || 'medication',
+        imageUrl: reqItem.attachment_url || '',
+        itemStatus: it.isAvailable !== false ? 'available_by_procurement' : 'pending'
+      }));
+    } else {
+      const replyPrice = replyData.approvedPrice || replyData.price || replyData.current_price || reqItem.proposed_data?.public_price || '';
+      prefilledItems = [
+        {
+          id: `item_${Date.now()}`,
+          medicationName: reqItem.medication_name,
+          unitType: reqItem.requested_unit || 'pack',
+          quantity: reqItem.requested_quantity || 1,
+          unitPrice: replyPrice ? String(replyPrice) : '',
+          isPriceEstimated: false,
+          itemType: reqItem.item_type || 'medication',
+          imageUrl: reqItem.attachment_url || '',
+          itemStatus: replyData.isAvailable !== false ? 'available_by_procurement' : 'pending'
+        }
+      ];
+    }
+
+    setOrderModalPrefill({
+      customer_name: reqItem.customer_name || '',
+      customer_phone: reqItem.customer_phone || '',
+      customer_address: reqItem.customer_address || '',
+      customer_id: reqItem.customer_id || null,
+      paid_amount: reqItem.deposit_amount ? String(reqItem.deposit_amount) : '',
+      payment_method: reqItem.payment_method || 'cash',
+      customer_notes: `تحويل من استعلام #${reqItem.id?.slice(-6) || ''}: ${reqItem.pharmacist_notes || reqItem.notes || ''}`,
+      items: prefilledItems
+    });
+  };
+
+  // 📲 إرسال رسالة واتساب تفاعلية للعميل بطلب يدوي من الصيدلي بعد رد المشتريات
+  const handleSendWhatsAppToCustomer = async (reqItem) => {
+    if (!reqItem.customer_phone) {
+      showToast('⚠️ لا يوجد رقم هاتف مسجل للعميل في هذا الاستعلام');
+      return;
+    }
+    setSendingWhatsAppId(reqItem.id);
+    try {
+      const res = await outstockSendMedicationRequestWhatsApp(reqItem.id);
+      if (res?.success) {
+        if (res?.sent) {
+          showToast(res.message || '✅ تم إرسال رسالة الواتساب للعميل بنجاح عبر رقم الفرع المقترن 📲');
+        } else {
+          showToast('⚠️ جلسة واتساب الفرع غير متصلة حالياً، تم فتح المحادثة المجهزة للعميل مباشرة 📲');
+          if (res?.whatsappUrl) {
+            window.open(res.whatsappUrl, '_blank');
+          }
+        }
+        fetchRequests();
+      } else {
+        showToast(`⚠️ ${res?.error || 'تعذر إرسال الواتساب'}`);
+        if (res?.whatsappUrl) {
+          window.open(res.whatsappUrl, '_blank');
+        }
+      }
+    } catch (err) {
+      showToast(`❌ خطأ في إرسال الواتساب: ${err.message}`);
+    } finally {
+      setSendingWhatsAppId(null);
+    }
+  };
+
+  // 🖨️ إعادة طباعة إيصال استلام العربون والاستعلام
+  const handleReprintInquiryReceipt = (reqItem) => {
+    printInquiryReceipt({
+      inquiryId: reqItem.id,
+      customerName: reqItem.customer_name || '',
+      customerPhone: reqItem.customer_phone || '',
+      customerAddress: reqItem.customer_address || '',
+      medicationName: reqItem.medication_name,
+      requestedQuantity: reqItem.requested_quantity || 1,
+      requestedUnit: reqItem.requested_unit === 'strip' ? 'شريط' : (reqItem.requested_unit === 'pack' ? 'علبة' : reqItem.requested_unit || 'علبة'),
+      itemType: reqItem.item_type || 'medication',
+      depositAmount: parseFloat(reqItem.deposit_amount || 0),
+      paymentMethod: reqItem.payment_method || 'cash',
+      pharmacistNotes: reqItem.pharmacist_notes || reqItem.notes || '',
+      employeeName: reqItem.employee_name || reqItem.requested_by || 'صيدلي الفرع',
+      employeeCode: reqItem.employee_code || '',
+      branchName: reqItem.branch_name || currentBranch?.name || 'فرع الصيدلية',
+      date: reqItem.created_at || new Date()
+    });
+  };
+
+  // فتح نافذة الرد مع تهيئة جدول الأصناف والأسعار وحالة التوفر
+  const handleOpenReplyModal = (reqItem) => {
+    setReplyTargetRequest(reqItem);
+    const replyData = typeof reqItem.procurement_reply === 'object' && reqItem.procurement_reply !== null
+      ? reqItem.procurement_reply
+      : (typeof reqItem.procurement_reply === 'string'
+        ? (() => { try { return JSON.parse(reqItem.procurement_reply); } catch { return {}; } })()
+        : {});
+
+    const existingNotes = reqItem.response_notes || replyData.notes || replyData.message || '';
+    setReplyNotes(existingNotes);
+    setReplyStatus(reqItem.status === 'pending' ? 'resolved' : reqItem.status);
+
+    const initialItems = Array.isArray(replyData.items) && replyData.items.length > 0
+      ? replyData.items.map((it) => ({
+          medicationName: it.medicationName || reqItem.medication_name,
+          quantity: it.quantity || reqItem.requested_quantity || 1,
+          unit: it.unit || reqItem.requested_unit || 'علبة',
+          price: it.price !== undefined && it.price !== null ? String(it.price) : '',
+          isAvailable: it.isAvailable !== false,
+          notes: it.notes || ''
+        }))
+      : [{
+          medicationName: reqItem.medication_name,
+          quantity: reqItem.requested_quantity || 1,
+          unit: reqItem.requested_unit === 'strip' ? 'شريط' : (reqItem.requested_unit === 'pack' ? 'علبة' : (reqItem.requested_unit || 'علبة')),
+          price: replyData.approvedPrice || replyData.price || reqItem.proposed_data?.public_price ? String(replyData.approvedPrice || replyData.price || reqItem.proposed_data?.public_price) : '',
+          isAvailable: replyData.isAvailable !== false,
+          notes: ''
+        }];
+    setReplyItems(initialItems);
+  };
+
   // إرسال رد المشتريات
   const handleSendReply = async () => {
     if (!replyTargetRequest) return;
     setIsReplying(true);
     try {
+      const sanitizedItems = replyItems.map((it) => ({
+        medicationName: String(it.medicationName || '').trim(),
+        quantity: parseInt(it.quantity || 1, 10),
+        unit: String(it.unit || 'علبة').trim(),
+        price: it.price !== '' && it.price !== null && it.price !== undefined ? parseFloat(it.price) : null,
+        isAvailable: it.isAvailable !== false,
+        notes: String(it.notes || '').trim()
+      }));
+
+      const firstPrice = sanitizedItems[0]?.price !== null ? sanitizedItems[0]?.price : null;
+      const firstAvail = sanitizedItems[0]?.isAvailable !== undefined ? sanitizedItems[0]?.isAvailable : true;
+
       const res = await outstockReplyMedicationRequest(replyTargetRequest.id, {
         status: replyStatus,
+        notes: replyNotes.trim(),
         responseNotes: replyNotes.trim(),
+        items: sanitizedItems,
+        approvedPrice: firstPrice,
+        isAvailable: firstAvail,
         respondedBy: currentUser?.name || currentUser?.full_name || 'إدارة المشتريات'
       });
       if (res?.success) {
-        showToast('✅ تم تسجيل رد المشتريات بنجاح!');
+        showToast('✅ تم تسجيل رد المشتريات واعتماد الأصناف بنجاح!');
         setReplyTargetRequest(null);
         setReplyNotes('');
+        setReplyItems([]);
         fetchRequests();
       } else {
         showToast(`⚠️ ${res?.error || 'تعذر تسجيل الرد'}`);
@@ -522,6 +866,26 @@ export default function ItemInquiryAndCorrectionTab({
 
                       {/* الصنف */}
                       <td style={{ padding: '12px 16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' }}>
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: '800',
+                              padding: '2px 7px',
+                              borderRadius: '6px',
+                              background: reqItem.item_type === 'cosmetics' ? '#fdf2f8' : '#eff6ff',
+                              color: reqItem.item_type === 'cosmetics' ? '#db2777' : '#0284c7',
+                              border: reqItem.item_type === 'cosmetics' ? '1px solid #fbcfe8' : '1px solid #bfdbfe'
+                            }}
+                          >
+                            {reqItem.item_type === 'cosmetics' ? '💄 تجميل' : '💊 دواء'}
+                          </span>
+                          {reqItem.requested_quantity && (
+                            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold' }}>
+                              (الكمية: {reqItem.requested_quantity} {reqItem.requested_unit === 'strip' ? 'شريط' : (reqItem.requested_unit === 'pack' ? 'علبة' : reqItem.requested_unit || 'وحدة')})
+                            </span>
+                          )}
+                        </div>
                         <strong style={{ fontSize: '13.5px', color: '#0f172a', display: 'block' }}>
                           {reqItem.medication_name}
                         </strong>
@@ -549,7 +913,56 @@ export default function ItemInquiryAndCorrectionTab({
                       </td>
 
                       {/* البيانات المقترحة / الملاحظات */}
-                      <td style={{ padding: '12px 16px', maxWidth: '280px' }}>
+                      <td style={{ padding: '12px 16px', maxWidth: '300px' }}>
+                        {/* بيانات العميل والعربون (تظهر للفرع فقط لحماية الخصوصية) */}
+                        {!isProcurement && (reqItem.customer_name || reqItem.customer_phone || parseFloat(reqItem.deposit_amount) > 0) && (
+                          <div
+                            style={{
+                              background: '#f8fafc',
+                              border: '1px solid #e2e8f0',
+                              borderRadius: '8px',
+                              padding: '7px 10px',
+                              marginBottom: '6px',
+                              fontSize: '11.5px',
+                              lineHeight: '1.4'
+                            }}
+                          >
+                            {reqItem.customer_name && (
+                              <div style={{ fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                <User size={12} color="#0284c7" />
+                                <span>العميل: {reqItem.customer_name}</span>
+                              </div>
+                            )}
+                            {reqItem.customer_phone && (
+                              <div style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
+                                <Phone size={12} color="#16a34a" />
+                                <span style={{ direction: 'ltr', unicodeBidi: 'isolate', fontWeight: '700' }}>{reqItem.customer_phone}</span>
+                              </div>
+                            )}
+                            {reqItem.customer_address && (
+                              <div style={{ color: '#64748b', fontSize: '11px', marginTop: '2px' }}>
+                                📍 {reqItem.customer_address}
+                              </div>
+                            )}
+                            {parseFloat(reqItem.deposit_amount) > 0 && (
+                              <div style={{ color: '#15803d', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '5px', marginTop: '3px' }}>
+                                <Coins size={12} color="#16a34a" />
+                                <span>العربون: {parseFloat(reqItem.deposit_amount).toFixed(2)} ج.م ({reqItem.payment_method === 'cash' ? 'كاش' : (reqItem.payment_method || 'نقدي')})</span>
+                              </div>
+                            )}
+                            {reqItem.whatsapp_notified_at && (
+                              <div style={{ color: '#059669', fontSize: '10.5px', marginTop: '3px', fontWeight: 'bold' }}>
+                                📲 تم إشعار العميل بالواتساب ({new Date(reqItem.whatsapp_notified_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })})
+                              </div>
+                            )}
+                            {reqItem.converted_order_id && (
+                              <div style={{ color: '#0284c7', fontSize: '10.5px', marginTop: '3px', fontWeight: '800' }}>
+                                🛍️ محول لطلب عميل (#{reqItem.converted_order_id.slice(-6)})
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {reqItem.notes && (
                           <div style={{ fontSize: '12.5px', color: '#1e293b', marginBottom: '4px' }}>
                             "{reqItem.notes}"
@@ -683,11 +1096,7 @@ export default function ItemInquiryAndCorrectionTab({
 
                             <button
                               type="button"
-                              onClick={() => {
-                                setReplyTargetRequest(reqItem);
-                                setReplyNotes(replyText || '');
-                                setReplyStatus(reqItem.status === 'pending' ? 'resolved' : reqItem.status);
-                              }}
+                              onClick={() => handleOpenReplyModal(reqItem)}
                               style={{
                                 background: '#eff6ff',
                                 color: '#1d4ed8',
@@ -703,31 +1112,135 @@ export default function ItemInquiryAndCorrectionTab({
                             </button>
                           </div>
                         ) : (
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                             {isItemReplied ? (
-                              <button
-                                type="button"
-                                onClick={() => setPreviewReplyRequest(reqItem)}
-                                style={{
-                                  background: '#eff6ff',
-                                  color: '#0284c7',
-                                  border: '1.5px solid #38bdf8',
-                                  borderRadius: '8px',
-                                  padding: '6px 12px',
-                                  fontSize: '12px',
-                                  fontWeight: '800',
-                                  cursor: 'pointer',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                  boxShadow: '0 2px 4px rgba(2, 132, 199, 0.1)',
-                                  transition: 'all 0.15s ease'
-                                }}
-                                title="معاينة قرار ورد إدارة المشتريات في نافذة مفصلة"
-                              >
-                                <Eye size={13} color="#0284c7" />
-                                <span>معاينة رد المشتريات 👁️</span>
-                              </button>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', minWidth: '150px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewReplyRequest(reqItem)}
+                                  style={{
+                                    background: '#eff6ff',
+                                    color: '#0284c7',
+                                    border: '1.5px solid #38bdf8',
+                                    borderRadius: '8px',
+                                    padding: '5px 10px',
+                                    fontSize: '11.5px',
+                                    fontWeight: '800',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '5px',
+                                    boxShadow: '0 1px 3px rgba(2, 132, 199, 0.1)',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                  title="معاينة قرار ورد إدارة المشتريات في نافذة مفصلة"
+                                >
+                                  <Eye size={13} color="#0284c7" />
+                                  <span>معاينة رد المشتريات 👁️</span>
+                                </button>
+
+                                {reqItem.status !== 'converted_to_order' && !reqItem.converted_order_id ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleConvertToOrder(reqItem)}
+                                    style={{
+                                      background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      borderRadius: '8px',
+                                      padding: '6px 12px',
+                                      fontSize: '12px',
+                                      fontWeight: '800',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      gap: '6px',
+                                      boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                    title="فتح نافذة طلب عميل جديد ممتلئة تلقائياً ببيانات العميل والصنف والعربون"
+                                  >
+                                    <ShoppingBag size={13} color="#ffffff" />
+                                    <span>إنشاء طلب العميل 🛍️</span>
+                                  </button>
+                                ) : (
+                                  <span
+                                    style={{
+                                      fontSize: '11px',
+                                      background: '#dcfce7',
+                                      color: '#15803d',
+                                      border: '1px solid #86efac',
+                                      padding: '4px 8px',
+                                      borderRadius: '6px',
+                                      fontWeight: '800',
+                                      textAlign: 'center'
+                                    }}
+                                  >
+                                    تم التحويل لطلب عميل ✅
+                                  </span>
+                                )}
+
+                                {reqItem.customer_phone && (
+                                  <button
+                                    type="button"
+                                    disabled={sendingWhatsAppId === reqItem.id}
+                                    onClick={() => handleSendWhatsAppToCustomer(reqItem)}
+                                    style={{
+                                      background: reqItem.whatsapp_notified_at ? '#f0fdf4' : '#ecfdf5',
+                                      color: '#065f46',
+                                      border: '1.5px solid #10b981',
+                                      borderRadius: '8px',
+                                      padding: '5px 10px',
+                                      fontSize: '11.5px',
+                                      fontWeight: '800',
+                                      cursor: sendingWhatsAppId === reqItem.id ? 'wait' : 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      gap: '5px',
+                                      boxShadow: '0 1px 3px rgba(16, 185, 129, 0.15)',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                    title="إرسال رسالة واتساب تفاعلية للعميل بالرد وموقف الصنف"
+                                  >
+                                    <Send size={13} color="#059669" />
+                                    <span>
+                                      {sendingWhatsAppId === reqItem.id
+                                        ? 'جاري الإرسال...'
+                                        : reqItem.whatsapp_notified_at
+                                        ? 'إعادة إرسال واتساب 📲'
+                                        : 'إرسال واتساب للعميل 📲'}
+                                    </span>
+                                  </button>
+                                )}
+
+                                {parseFloat(reqItem.deposit_amount) > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleReprintInquiryReceipt(reqItem)}
+                                    style={{
+                                      background: '#f8fafc',
+                                      color: '#334155',
+                                      border: '1px solid #cbd5e1',
+                                      borderRadius: '8px',
+                                      padding: '4px 8px',
+                                      fontSize: '11px',
+                                      fontWeight: '700',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      gap: '4px'
+                                    }}
+                                    title="إعادة طباعة إيصال استلام العربون (نسخة العميل + نسخة الصيدلية)"
+                                  >
+                                    <Printer size={12} color="#475569" />
+                                    <span>طباعة إيصال العربون 🖨️</span>
+                                  </button>
+                                )}
+                              </div>
                             ) : reqItem.has_complaint || escalatedInquiryIds.has(reqItem.id) ? (
                               <span
                                 style={{
@@ -748,31 +1261,58 @@ export default function ItemInquiryAndCorrectionTab({
                                 <span>تم التصعيد 🚨</span>
                               </span>
                             ) : (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setComplaintTargetInquiry(reqItem);
-                                  setComplaintNotes('');
-                                }}
-                                style={{
-                                  background: '#fff1f2',
-                                  color: '#e11d48',
-                                  border: '1px solid #fecdd3',
-                                  borderRadius: '6px',
-                                  padding: '5px 9px',
-                                  fontSize: '11.5px',
-                                  fontWeight: '800',
-                                  cursor: 'pointer',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '4px',
-                                  transition: 'all 0.15s ease'
-                                }}
-                                title="تصعيد شكوى للمالك والمشتريات لعدم الرد على هذا الاستعلام"
-                              >
-                                <AlertTriangle size={13} color="#e11d48" />
-                                <span>تصعيد شكوى لعدم الرد 🚨</span>
-                              </button>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', width: '100%' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setComplaintTargetInquiry(reqItem);
+                                    setComplaintNotes('');
+                                  }}
+                                  style={{
+                                    background: '#fff1f2',
+                                    color: '#e11d48',
+                                    border: '1px solid #fecdd3',
+                                    borderRadius: '6px',
+                                    padding: '5px 9px',
+                                    fontSize: '11.5px',
+                                    fontWeight: '800',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '4px',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                  title="تصعيد شكوى للمالك والمشتريات لعدم الرد على هذا الاستعلام"
+                                >
+                                  <AlertTriangle size={13} color="#e11d48" />
+                                  <span>تصعيد شكوى لعدم الرد 🚨</span>
+                                </button>
+                                {parseFloat(reqItem.deposit_amount) > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleReprintInquiryReceipt(reqItem)}
+                                    style={{
+                                      background: '#f8fafc',
+                                      color: '#334155',
+                                      border: '1px solid #cbd5e1',
+                                      borderRadius: '6px',
+                                      padding: '4px 8px',
+                                      fontSize: '11px',
+                                      fontWeight: '700',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      gap: '4px'
+                                    }}
+                                    title="طباعة إيصال استلام العربون (نسخة العميل + نسخة الصيدلية)"
+                                  >
+                                    <Printer size={12} color="#475569" />
+                                    <span>إيصال العربون 🖨️</span>
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                         )}
@@ -867,6 +1407,63 @@ export default function ItemInquiryAndCorrectionTab({
                 </div>
               </div>
 
+              {/* تصنيف الصنف وتوجيه الطلب */}
+              <div>
+                <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
+                  تصنيف الصنف والجهة المختصة بالرد:
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setItemType('medication')}
+                    style={{
+                      padding: '9px 12px',
+                      borderRadius: '9px',
+                      fontSize: '12.5px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      border: itemType === 'medication' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                      background: itemType === 'medication' ? '#e0f2fe' : '#f8fafc',
+                      color: itemType === 'medication' ? '#0369a1' : '#475569',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <Pill size={16} color={itemType === 'medication' ? '#0284c7' : '#64748b'} />
+                    <span>صنف دوائي (إدارة المشتريات) 💊</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setItemType('cosmetics')}
+                    style={{
+                      padding: '9px 12px',
+                      borderRadius: '9px',
+                      fontSize: '12.5px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      border: itemType === 'cosmetics' ? '2px solid #ec4899' : '1px solid #cbd5e1',
+                      background: itemType === 'cosmetics' ? '#fdf2f8' : '#f8fafc',
+                      color: itemType === 'cosmetics' ? '#be185d' : '#475569',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <Sparkles size={16} color={itemType === 'cosmetics' ? '#ec4899' : '#64748b'} />
+                    <span>مستحضرات تجميل (مسؤول التجميل) 💄</span>
+                  </button>
+                </div>
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                  {itemType === 'cosmetics'
+                    ? '💄 سيتم توجيه الاستعلام والطلب مباشرة إلى مسؤول مستحضرات التجميل والعناية'
+                    : '💊 سيتم توجيه الاستعلام والطلب مباشرة إلى مدير المشتريات والأدوية'}
+                </div>
+              </div>
+
               {/* اختيار أو كتابة اسم الصنف */}
               <div style={{ position: 'relative', zIndex: 100 }}>
                 <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
@@ -888,6 +1485,11 @@ export default function ItemInquiryAndCorrectionTab({
                           active_ingredient: med.active_ingredient || '',
                           invoice_display_name: med.invoice_display_name || ''
                         });
+                        if (med.item_type) {
+                          setItemType(med.item_type);
+                        } else if (med.category?.includes('تجميل')) {
+                          setItemType('cosmetics');
+                        }
                       }
                     }}
                     onTextChange={(val) => setMedicationName(val)}
@@ -904,6 +1506,170 @@ export default function ItemInquiryAndCorrectionTab({
                     className="outstock-form-input"
                   />
                 )}
+              </div>
+
+              {/* الكمية والوحدة المطلوبة */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
+                    الكمية المطلوبة:
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={requestedQuantity}
+                    onChange={(e) => setRequestedQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="outstock-form-input"
+                    style={{ minHeight: '38px', fontWeight: 'bold' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
+                    الوحدة:
+                  </label>
+                  <select
+                    value={requestedUnit}
+                    onChange={(e) => setRequestedUnit(e.target.value)}
+                    className="outstock-form-select"
+                    style={{ minHeight: '38px', fontWeight: 'bold' }}
+                  >
+                    <option value="pack">علبة كاملة 📦</option>
+                    <option value="strip">شريط 💊</option>
+                    <option value="ampoule">أمبول / فيال 💉</option>
+                    <option value="unit">وحدة / قطعة 🧴</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* ── بيانات العميل وحجز الصنف ── */}
+              <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <User size={15} color="#0284c7" />
+                    <span>بيانات العميل (اختياري / لحجز الصنف وإشعار العميل):</span>
+                  </div>
+                  {isSearchingCustomer && (
+                    <span style={{ fontSize: '11px', color: '#0284c7', fontWeight: 'bold' }}>جاري البحث عن بيانات العميل...</span>
+                  )}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11.5px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
+                      رقم هاتف العميل (11 رقم):
+                    </label>
+                    <input
+                      type="tel"
+                      maxLength={11}
+                      placeholder="01xxxxxxxxx"
+                      value={customerPhone}
+                      onChange={(e) => handleCustomerPhoneChange(e.target.value)}
+                      className="outstock-form-input"
+                      style={{ minHeight: '36px', direction: 'ltr', textAlign: 'right' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '11.5px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
+                      اسم العميل:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="اكتب اسم العميل..."
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      className="outstock-form-input"
+                      style={{ minHeight: '36px' }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11.5px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
+                      المنطقة / الحي المعتمد (من إعدادات المالك):
+                    </label>
+                    <select
+                      value={customerZone}
+                      onChange={(e) => setCustomerZone(e.target.value)}
+                      className="outstock-form-select"
+                      style={{ minHeight: '36px' }}
+                    >
+                      <option value="">-- اختر المنطقة / الحي --</option>
+                      {deliveryZones.map((z) => (
+                        <option key={z} value={z}>{z}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '11.5px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
+                      تفاصيل الشارع / العنوان:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="الشارع، رقم العمارة، الشقة..."
+                      value={customerAddress}
+                      onChange={(e) => setCustomerAddress(e.target.value)}
+                      className="outstock-form-input"
+                      style={{ minHeight: '36px' }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* ── العربون وطريقة الدفع وإيصال الكاشير ── */}
+              <div style={{ background: '#f0fdf4', padding: '14px', borderRadius: '12px', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Coins size={15} color="#15803d" />
+                  <span>مبلغ العربون المستلم وطريقة الدفع:</span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11.5px', color: '#166534', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
+                      مبلغ العربون المسلم بالصيدلية (ج.م):
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      placeholder="0.00"
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      className="outstock-form-input"
+                      style={{ minHeight: '36px', fontWeight: 'bold', color: '#15803d' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '11.5px', color: '#166534', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
+                      طريقة دفع العربون:
+                    </label>
+                    <select
+                      value={paymentMethod}
+                      onChange={(e) => setPaymentMethod(e.target.value)}
+                      className="outstock-form-select"
+                      style={{ minHeight: '36px', fontWeight: 'bold' }}
+                    >
+                      <option value="cash">نقدي (كاش) 💵</option>
+                      <option value="card">بطاقة بنكية / فيزا 💳</option>
+                      <option value="wallet">محفظة إلكترونية / إنستاباي 📱</option>
+                      <option value="vodafone_cash">فودافون كاش 📱</option>
+                      <option value="delayed">آجل ⏳</option>
+                    </select>
+                  </div>
+                </div>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: '#166534', fontWeight: 'bold' }}>
+                  <input
+                    type="checkbox"
+                    checked={printThermalReceipt}
+                    onChange={(e) => setPrintThermalReceipt(e.target.checked)}
+                    style={{ width: '16px', height: '16px', accentColor: '#16a34a' }}
+                  />
+                  <span>طباعة نسختين من الإيصال الحراري فور الإرسال (نسخة للعميل + نسخة للصيدلية) 🖨️</span>
+                </label>
               </div>
 
               {/* تفاصيل إضافية للصنف الجديد أو تصحيح البيانات */}
@@ -1092,6 +1858,8 @@ export default function ItemInquiryAndCorrectionTab({
       {/* ─────────────────────────────────────────────────────────────────────── */}
       {/* ── 2. نافذة الرد وتحديث الحالة (لإدارة المشتريات) ── */}
       {/* ─────────────────────────────────────────────────────────────────────── */}
+      {/* ── 3. نافذة تسجيل رد المشتريات وجدول تسعير وتوفير الأصناف ── */}
+      {/* ─────────────────────────────────────────────────────────────────────── */}
       {replyTargetRequest && (
         <div
           className="outstock-modal-backdrop"
@@ -1101,12 +1869,15 @@ export default function ItemInquiryAndCorrectionTab({
           <div
             className="outstock-modal-panel"
             onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: '520px', width: '100%', background: '#ffffff', borderRadius: '18px', overflow: 'hidden' }}
+            style={{ maxWidth: '680px', width: '100%', background: '#ffffff', borderRadius: '18px', overflow: 'hidden' }}
           >
             <div style={{ padding: '16px 20px', background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>
-                رد إدارة المشتريات على طلب: {replyTargetRequest.medication_name}
-              </h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Pill size={20} />
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>
+                  رد إدارة المشتريات وتسعير الأصناف: {replyTargetRequest.medication_name}
+                </h3>
+              </div>
               <button
                 type="button"
                 onClick={() => setReplyTargetRequest(null)}
@@ -1116,7 +1887,7 @@ export default function ItemInquiryAndCorrectionTab({
               </button>
             </div>
 
-            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '80vh', overflowY: 'auto' }}>
               <div>
                 <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
                   تحديث حالة المعاملة:
@@ -1133,13 +1904,178 @@ export default function ItemInquiryAndCorrectionTab({
                 </select>
               </div>
 
+              {/* 📋 جدول الأصناف للتسعير وتحديد إمكانية التوفير 📋 */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Pill size={16} color="#0284c7" />
+                    <span>جدول الأصناف لتحديد السعر وإمكانية التوفير:</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReplyItems((prev) => [
+                        ...prev,
+                        { medicationName: '', quantity: 1, unit: 'علبة', price: '', isAvailable: true, notes: '' }
+                      ]);
+                    }}
+                    style={{
+                      background: '#eff6ff',
+                      color: '#0284c7',
+                      border: '1px solid #bfdbfe',
+                      borderRadius: '6px',
+                      padding: '4px 10px',
+                      fontSize: '11px',
+                      fontWeight: '800',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    + إضافة صنف / بديل إضافي
+                  </button>
+                </div>
+
+                <div style={{ border: '1px solid #cbd5e1', borderRadius: '10px', overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'right' }}>
+                    <thead>
+                      <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #cbd5e1' }}>
+                        <th style={{ padding: '8px 10px', fontWeight: 800 }}>الصنف الدوائي</th>
+                        <th style={{ padding: '8px 8px', fontWeight: 800, width: '90px' }}>الكمية</th>
+                        <th style={{ padding: '8px 8px', fontWeight: 800, width: '125px', textAlign: 'center' }}>سعر الصنف (ج.م)</th>
+                        <th style={{ padding: '8px 8px', fontWeight: 800, width: '135px', textAlign: 'center' }}>إمكانية التوفير</th>
+                        <th style={{ padding: '8px 6px', fontWeight: 800, width: '32px' }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {replyItems.map((itemRow, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9', background: itemRow.isAvailable ? '#ffffff' : '#fff5f5' }}>
+                          <td style={{ padding: '8px 10px' }}>
+                            <input
+                              type="text"
+                              value={itemRow.medicationName}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, medicationName: val } : it)));
+                              }}
+                              placeholder="اسم الصنف..."
+                              className="outstock-form-input"
+                              style={{ minHeight: '32px', fontSize: '12px', fontWeight: 'bold' }}
+                            />
+                            <input
+                              type="text"
+                              value={itemRow.notes || ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, notes: val } : it)));
+                              }}
+                              placeholder="ملاحظات المشتريات / البديل المقترح..."
+                              className="outstock-form-input"
+                              style={{ minHeight: '26px', fontSize: '11px', marginTop: '4px', color: '#64748b' }}
+                            />
+                          </td>
+                          <td style={{ padding: '8px 6px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <input
+                                type="number"
+                                min="1"
+                                value={itemRow.quantity}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value, 10) || 1;
+                                  setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, quantity: val } : it)));
+                                }}
+                                className="outstock-form-input"
+                                style={{ minHeight: '30px', fontSize: '11.5px', textAlign: 'center' }}
+                              />
+                              <span style={{ fontSize: '10.5px', color: '#64748b', textAlign: 'center' }}>{itemRow.unit || 'علبة'}</span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '8px 6px', textAlign: 'center' }}>
+                            <div style={{ position: 'relative' }}>
+                              <input
+                                type="number"
+                                step="0.5"
+                                min="0"
+                                placeholder="0.00"
+                                value={itemRow.price}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, price: val } : it)));
+                                }}
+                                className="outstock-form-input"
+                                style={{ minHeight: '32px', fontSize: '12.5px', fontWeight: '800', textAlign: 'center', color: '#15803d', borderColor: '#86efac' }}
+                              />
+                              <span style={{ position: 'absolute', left: '6px', top: '7px', fontSize: '10px', color: '#64748b' }}>ج.م</span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '8px 6px', textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, isAvailable: !it.isAvailable } : it)));
+                              }}
+                              style={{
+                                width: '100%',
+                                minHeight: '32px',
+                                borderRadius: '6px',
+                                border: itemRow.isAvailable ? '1.5px solid #10b981' : '1.5px solid #ef4444',
+                                background: itemRow.isAvailable ? '#ecfdf5' : '#fef2f2',
+                                color: itemRow.isAvailable ? '#065f46' : '#991b1b',
+                                fontSize: '11px',
+                                fontWeight: '800',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '3px',
+                                transition: 'all 0.15s ease'
+                              }}
+                              title="انقر لتبديل حالة التوفير"
+                            >
+                              {itemRow.isAvailable ? (
+                                <>
+                                  <CheckCircle2 size={13} color="#10b981" />
+                                  <span>متاح للتوفير 🟢</span>
+                                </>
+                              ) : (
+                                <>
+                                  <AlertCircle size={13} color="#ef4444" />
+                                  <span>غير متاح 🔴</span>
+                                </>
+                              )}
+                            </button>
+                          </td>
+                          <td style={{ padding: '8px 6px', textAlign: 'center' }}>
+                            {replyItems.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReplyItems((prev) => prev.filter((_, i) => i !== idx));
+                                }}
+                                style={{
+                                  background: 'transparent',
+                                  border: 'none',
+                                  color: '#ef4444',
+                                  cursor: 'pointer',
+                                  padding: '4px'
+                                }}
+                                title="حذف هذا الصنف"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
               <div>
                 <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
-                  نص رد المشتريات وتفاصيل التوفر / التسعير:
+                  نص تعليق رد المشتريات العام وتوجيهات الفرع:
                 </label>
                 <textarea
-                  rows={4}
-                  required
+                  rows={3}
                   placeholder="مثال: الصنف متوفر لدى شركة ابن سينا بخصم 20%، السعر الرسمي الجديد 45 ج.م وتم تحديثه..."
                   value={replyNotes}
                   onChange={(e) => setReplyNotes(e.target.value)}
@@ -1343,7 +2279,58 @@ export default function ItemInquiryAndCorrectionTab({
         onClose={() => setPreviewReplyRequest(null)}
         requestItem={previewReplyRequest}
         showToast={showToast}
+        onConvertToOrder={!isProcurement ? (reqItem) => {
+          setPreviewReplyRequest(null);
+          handleConvertToOrder(reqItem);
+        } : null}
+        onSendWhatsApp={!isProcurement ? (reqItem) => {
+          handleSendWhatsAppToCustomer(reqItem);
+        } : null}
       />
+
+      {/* ── نافذة التحقق من كود الصيدلي لتحويل الاستعلام لطلب عميل ── */}
+      <EmployeeCodeAuthModal
+        isOpen={isConvertAuthModalOpen}
+        onClose={() => {
+          setIsConvertAuthModalOpen(false);
+          setInquiryPendingConversion(null);
+        }}
+        onSuccess={handleConvertAuthSuccess}
+        title="التحقق من كود الصيدلي لتحويل الاستعلام لطلب عميل"
+        subtitle="يرجى إدخال كود الموظف المسجل لتثبيته كصيدلي مستلم للطلب ومتابعة الإجراء"
+        actionLabel="تأكيد الهوية ومتابعة إنشاء الطلب"
+      />
+
+      {/* ── 4. نافذة إنشاء طلب العميل المنبثقة عند التحويل من استعلام ── */}
+      {orderModalPrefill && (
+        <NewCustomerOrderModal
+          branchId={branchId || currentBranch?.id}
+          branch={currentBranch}
+          defaultPharmacist={orderReceiverEmployee?.name || currentUser?.name || currentUser?.full_name || 'د. الصيدلي'}
+          orderReceiver={orderReceiverEmployee}
+          editingOrder={orderModalPrefill}
+          onClose={() => {
+            setOrderModalPrefill(null);
+            setInquiryToConvert(null);
+            setOrderReceiverEmployee(null);
+          }}
+          onOrderCreated={async (createdOrder) => {
+            if (inquiryToConvert?.id) {
+              try {
+                await outstockConvertMedicationRequestToOrder(inquiryToConvert.id, {
+                  orderId: createdOrder?.id
+                });
+                showToast('✅ تم تحويل الاستعلام لطلب عميل رسمي بنجاح!');
+                fetchRequests();
+              } catch (_) {}
+            }
+            setOrderModalPrefill(null);
+            setInquiryToConvert(null);
+            setOrderReceiverEmployee(null);
+          }}
+          showToast={showToast}
+        />
+      )}
     </div>
   );
 }

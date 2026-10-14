@@ -15,7 +15,9 @@ import {
   Printer,
   Sparkles,
   Camera,
-  ExternalLink
+  ExternalLink,
+  ShoppingBag,
+  Send
 } from 'lucide-react';
 
 /**
@@ -26,7 +28,9 @@ export default function ProcurementReplyModal({
   isOpen,
   onClose,
   requestItem = null,
-  showToast = (msg) => alert(typeof msg === 'object' ? msg.message : msg)
+  showToast = (msg) => alert(typeof msg === 'object' ? msg.message : msg),
+  onConvertToOrder = null,
+  onSendWhatsApp = null
 }) {
   const [copied, setCopied] = useState(false);
   const [imagePreview, setImagePreview] = useState(null);
@@ -66,7 +70,7 @@ export default function ProcurementReplyModal({
 
   const replierName = requestItem.responded_by || requestItem.replied_by || replyData.repliedBy || 'إدارة المشتريات';
   const repliedAt = requestItem.replied_at || requestItem.updated_at || replyData.repliedAt;
-  const replyNotes = requestItem.response_notes || replyData.notes || replyData.message || (requestItem.status === 'approved' ? 'تم اعتماد الصنف وإدراجه رسمياً بكتالوج الأدوية.' : 'تم تسجيل الرد والاعتماد من قبل إدارة المشتريات.');
+  const replyNotes = requestItem.response_notes || replyData.notes || replyData.responseNotes || replyData.message || (requestItem.status === 'approved' ? 'تم اعتماد الصنف وإدراجه رسمياً بكتالوج الأدوية.' : 'تم تسجيل الرد والاعتماد من قبل إدارة المشتريات.');
   const propData = requestItem.proposed_data || {};
   const isApproved = requestItem.status === 'approved';
   const isRejected = requestItem.status === 'rejected';
@@ -311,7 +315,8 @@ export default function ProcurementReplyModal({
               borderRadius: '16px',
               padding: '18px 20px',
               boxShadow: '0 4px 15px rgba(0,0,0,0.04)',
-              position: 'relative'
+              position: 'relative',
+              marginBottom: '16px'
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
@@ -337,7 +342,7 @@ export default function ProcurementReplyModal({
               </div>
             </div>
 
-            {/* نص الرد التفصيلي */}
+            {/* نص الرد التفصيلي لإدارة المشتريات */}
             <div
               style={{
                 background: '#ffffff',
@@ -349,63 +354,123 @@ export default function ProcurementReplyModal({
                 lineHeight: '1.7',
                 fontWeight: 600,
                 whiteSpace: 'pre-wrap',
-                boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.02)'
+                boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.02)',
+                marginBottom: '14px'
               }}
             >
               {replyNotes}
             </div>
 
-            {/* تفاصيل الأسعار والبدائل إن وجدت في الرد */}
-            {(replyData.approvedPrice || replyData.price || replyData.substitutes || propData.public_price) && (
-              <div
-                style={{
-                  display: 'flex',
-                  gap: '12px',
-                  marginTop: '12px',
-                  flexWrap: 'wrap'
-                }}
-              >
-                {(replyData.approvedPrice || replyData.price || propData.public_price) && (
-                  <div
-                    style={{
-                      background: '#fff',
-                      border: '1px solid #bbf7d0',
-                      borderRadius: '8px',
-                      padding: '6px 12px',
-                      fontSize: '12px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      color: '#15803d',
-                      fontWeight: 700
-                    }}
-                  >
-                    <DollarSign size={14} />
-                    <span>السعر المعتمد: {parseFloat(replyData.approvedPrice || replyData.price || propData.public_price).toFixed(2)} ج.م</span>
-                  </div>
-                )}
+            {/* 📋 جدول الأصناف والأسعار المعتمدة وإمكانية التوفير 📋 */}
+            {(() => {
+              const itemsList = Array.isArray(replyData.items) && replyData.items.length > 0
+                ? replyData.items
+                : [{
+                    medicationName: requestItem.medication_name,
+                    quantity: requestItem.requested_quantity || 1,
+                    unit: requestItem.requested_unit === 'strip' ? 'شريط' : (requestItem.requested_unit === 'pack' ? 'علبة' : (requestItem.requested_unit || 'علبة')),
+                    price: replyData.approvedPrice || replyData.price || propData.public_price || null,
+                    isAvailable: replyData.isAvailable !== false,
+                    notes: replyData.substitutes || ''
+                  }];
 
-                {replyData.substitutes && (
-                  <div
-                    style={{
-                      background: '#fff',
-                      border: '1px solid #fed7aa',
-                      borderRadius: '8px',
-                      padding: '6px 12px',
-                      fontSize: '12px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      color: '#c2410c',
-                      fontWeight: 700
-                    }}
-                  >
-                    <Tag size={14} />
-                    <span>البديل المقترح: {replyData.substitutes}</span>
+              const totalEstimated = itemsList.reduce((acc, it) => {
+                const p = parseFloat(it.price || 0);
+                const q = parseInt(it.quantity || 1, 10);
+                return acc + (p * q);
+              }, 0);
+
+              const deposit = parseFloat(requestItem.deposit_amount || 0);
+              const remaining = Math.max(0, totalEstimated - deposit);
+
+              return (
+                <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '12px', overflow: 'hidden', marginBottom: '14px' }}>
+                  <div style={{ background: '#f8fafc', padding: '10px 14px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, fontSize: '12.5px', color: '#0f172a' }}>
+                      <Pill size={15} color="#0284c7" />
+                      <span>جدول الأصناف والأسعار المعتمدة وإمكانية التوفير:</span>
+                    </div>
+                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>
+                      عدد الأصناف: {itemsList.length}
+                    </span>
                   </div>
-                )}
-              </div>
-            )}
+
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'right' }}>
+                      <thead>
+                        <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #cbd5e1' }}>
+                          <th style={{ padding: '8px 12px', fontWeight: 800 }}>الصنف</th>
+                          <th style={{ padding: '8px 10px', fontWeight: 800, textAlign: 'center' }}>الكمية</th>
+                          <th style={{ padding: '8px 12px', fontWeight: 800, textAlign: 'center' }}>السعر المحدد</th>
+                          <th style={{ padding: '8px 12px', fontWeight: 800, textAlign: 'center' }}>إمكانية التوفير</th>
+                          <th style={{ padding: '8px 12px', fontWeight: 800 }}>ملاحظات / البديل</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {itemsList.map((itemRow, idx) => {
+                          const p = itemRow.price !== undefined && itemRow.price !== null && itemRow.price !== '' ? parseFloat(itemRow.price) : null;
+                          const avail = itemRow.isAvailable !== false;
+                          return (
+                            <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '10px 12px', fontWeight: 700, color: '#0f172a' }}>
+                                {itemRow.medicationName || requestItem.medication_name}
+                              </td>
+                              <td style={{ padding: '10px 10px', textAlign: 'center', color: '#334155', fontWeight: 600 }}>
+                                {itemRow.quantity || 1} {itemRow.unit || 'علبة'}
+                              </td>
+                              <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                {p !== null ? (
+                                  <span style={{ fontWeight: 800, color: '#15803d', background: '#dcfce7', padding: '3px 8px', borderRadius: '6px', display: 'inline-block' }}>
+                                    {p.toFixed(2)} ج.م
+                                  </span>
+                                ) : (
+                                  <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>غير محدد</span>
+                                )}
+                              </td>
+                              <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                {avail ? (
+                                  <span style={{ background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '3px 8px', borderRadius: '6px', fontWeight: 800, fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                    <span>متاح للتوفير 🟢</span>
+                                  </span>
+                                ) : (
+                                  <span style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '3px 8px', borderRadius: '6px', fontWeight: 800, fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                    <span>غير متوفر 🔴</span>
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ padding: '10px 12px', color: '#64748b', fontSize: '11.5px' }}>
+                                {itemRow.notes || '—'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* شريط الإجماليات المالية والعربون */}
+                  <div style={{ background: '#f8fafc', padding: '10px 14px', borderTop: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                      {totalEstimated > 0 && (
+                        <div>
+                          إجمالي القيمة: <strong style={{ color: '#0f172a' }}>{totalEstimated.toFixed(2)} ج.م</strong>
+                        </div>
+                      )}
+                      {deposit > 0 && (
+                        <div>
+                          العربون المسلم: <strong style={{ color: '#166534' }}>{deposit.toFixed(2)} ج.م</strong>
+                        </div>
+                      )}
+                      {totalEstimated > 0 && (
+                        <div style={{ color: '#b45309', fontWeight: 800 }}>
+                          المتبقي عند الاستلام: <span style={{ color: '#c2410c' }}>{remaining.toFixed(2)} ج.م</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* توقيع المسؤول القائم بالرد */}
             <div
@@ -413,7 +478,6 @@ export default function ProcurementReplyModal({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                marginTop: '14px',
                 paddingTop: '10px',
                 borderTop: '1px dashed rgba(0,0,0,0.08)',
                 fontSize: '12px'
@@ -495,6 +559,53 @@ export default function ProcurementReplyModal({
               <Printer size={14} />
               <span>طباعة</span>
             </button>
+
+            {onConvertToOrder && requestItem?.status !== 'converted_to_order' && (
+              <button
+                type="button"
+                onClick={() => onConvertToOrder(requestItem)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                  color: '#ffffff',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)'
+                }}
+              >
+                <ShoppingBag size={14} color="#ffffff" />
+                <span>إنشاء طلب العميل 🛍️</span>
+              </button>
+            )}
+
+            {onSendWhatsApp && requestItem?.customer_phone && (
+              <button
+                type="button"
+                onClick={() => onSendWhatsApp(requestItem)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  border: '1.5px solid #10b981',
+                  background: '#ecfdf5',
+                  color: '#065f46',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer'
+                }}
+              >
+                <Send size={14} color="#059669" />
+                <span>إرسال واتساب للعميل 📲</span>
+              </button>
+            )}
           </div>
 
           <button

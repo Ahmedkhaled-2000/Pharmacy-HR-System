@@ -14,6 +14,23 @@ import { arabicWeekday } from './formatters.js';
 import { getEmployeeDaySchedule } from './rosterEngine.js';
 import { getAuthoritativeShiftHours, calculateShiftMetrics, calcRawDurationMinutes } from './workHoursEngine.js';
 
+/**
+ * فحص ما إذا كان الموظف يعمل بنظام الدوام الحر/المتغير (ليس له جدول شهري ثابت)
+ */
+export function isVariableScheduleEmployee(emp) {
+  if (!emp) return false;
+  return Boolean(
+    emp.noMonthlySchedule === true ||
+    emp.noMonthlySchedule === 'true' ||
+    emp.noMonthlySchedule === 1 ||
+    emp.isVariableHours === true ||
+    emp.variableHours === true ||
+    emp.hasNoRoster === true ||
+    emp.scheduleType === 'flexible' ||
+    emp.scheduleType === 'variable'
+  );
+}
+
 // ── السياسة الافتراضية المعتمدة للائحة جزاءات التأخير ──
 export const DEFAULT_LATE_PENALTY_POLICY = {
   version: '2.0',
@@ -286,8 +303,8 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
   const emp = (state.employees || []).find((e) => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
   const empCodeStr = emp?.code ? String(emp.code) : '';
 
-  // الموظف الذي ليس له جدول شهري لا يمتلك مواعيد شفتات محددة أو ملزمة
-  if (emp?.noMonthlySchedule) return null;
+  // الموظف الذي ليس له جدول شهري أو مواعيد متغيرة لا يمتلك مواعيد شفتات محددة أو ملزمة
+  if (isVariableScheduleEmployee(emp)) return null;
 
   // 1. فحص طلبات تعديل الشيفت المعتمدة أولاً (Shift Adjustment Requests)
   const approvedShiftAdj = (state.requests || []).find(
@@ -453,6 +470,9 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
     }
   }
 
+  // إذا كان الموظف يعمل بنظام دوام حر / بدون جدول، لا يتم تطبيق الوردية الافتراضية
+  if (isVariableScheduleEmployee(emp)) return null;
+
   return {
     start: '08:00',
     end: '16:00',
@@ -553,8 +573,8 @@ export function recalculateEmployeeCycleLateness({
 
   const empCodeStr = emp?.code ? String(emp.code) : '';
 
-  // لا يتم تطبيق لائحة التأخيرات على الموظف الذي ليس له جدول شهري
-  if (emp.noMonthlySchedule) return { incidents: [], updatedRequests: state.requests || [] };
+  // لا يتم تطبيق لائحة التأخيرات على الموظف الذي ليس له جدول شهري أو مواعيد متغيرة
+  if (isVariableScheduleEmployee(emp)) return { incidents: [], updatedRequests: state.requests || [] };
 
   const policy = getEffectiveLatePolicy(state);
   if (!policy.enabled) return { incidents: [], updatedRequests: state.requests || [] };
@@ -926,8 +946,71 @@ export function syncAllEmployeesPermissionsAndLateness(state) {
     }
   }
 
-  return {
+  const syncedState = {
     ...stateWithShifts,
     lateIncidents: allIncidents
+  };
+
+  return auditAndCleanFlexibleStaffPenalties(syncedState);
+}
+
+/**
+ * فحص وتدقيق موظفي الدوام الحر والمتغير وإلغاء أي جزاءات تأخير أو خروج مبكر سابقة مسجلة لهم
+ */
+export function auditAndCleanFlexibleStaffPenalties(state) {
+  if (!state || !Array.isArray(state.employees)) return state;
+
+  const flexibleEmpIds = new Set();
+  state.employees.forEach((emp) => {
+    if (isVariableScheduleEmployee(emp)) {
+      if (emp.id) flexibleEmpIds.add(String(emp.id));
+      if (emp.code) flexibleEmpIds.add(String(emp.code));
+    }
+  });
+
+  if (flexibleEmpIds.size === 0) return state;
+
+  // 1. تصفية وإلغاء وقائع التأخير السابقة لهؤلاء الموظفين
+  const cleanedIncidents = (state.lateIncidents || []).filter((inc) => {
+    if (!inc) return false;
+    const incEmpId = String(inc.employeeId || inc.empId || '');
+    const incEmpCode = String(inc.employeeCode || '');
+    const isFlex = flexibleEmpIds.has(incEmpId) || (incEmpCode && flexibleEmpIds.has(incEmpCode));
+    return !isFlex;
+  });
+
+  // 2. إلغاء أي طلبات جزاءات تأخير أو انصراف مبكر مسجلة بحق هؤلاء الموظفين
+  const cleanedRequests = (state.requests || []).filter((r) => {
+    if (!r) return false;
+    const rEmpId = String(r.employeeId || r.empId || '');
+    const rEmpCode = String(r.employeeCode || '');
+    const isFlex = flexibleEmpIds.has(rEmpId) || (rEmpCode && flexibleEmpIds.has(rEmpCode));
+    if (isFlex) {
+      const isEarly = r.type === 'early_exit' || r.subType === 'early_exit' || String(r.id || '').startsWith('req_early_');
+      const isLate = r.type === 'lateness' || r.subType === 'lateness' || (r.type === 'penalty' && String(r.id || '').includes('late')) || String(r.id || '').startsWith('req_late_');
+      if (isEarly || isLate) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  // 3. تنظيف أي إشعارات تنبيهية قديمة للتأخير أو الانصراف المبكر لهؤلاء الموظفين
+  const cleanedNotifications = (state.notifications || []).filter((n) => {
+    if (!n) return false;
+    const nEmpId = String(n.empId || n.employeeId || '');
+    if (flexibleEmpIds.has(nEmpId)) {
+      if (n.type === 'early_exit_alert' || n.type === 'lateness_alert') {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  return {
+    ...state,
+    lateIncidents: cleanedIncidents,
+    requests: cleanedRequests,
+    notifications: cleanedNotifications
   };
 }

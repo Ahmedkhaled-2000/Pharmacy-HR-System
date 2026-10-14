@@ -110,25 +110,27 @@ export default function SystemLockScreen({
     const orgSettings = state?.orgSettings || {};
     const ownerPass = String(orgSettings.ownerPassword || 'owner123').trim();
     const adminPass = String(orgSettings.adminPassword || 'admin123').trim();
+    const systemOwners = Array.isArray(orgSettings.systemOwners) ? orgSettings.systemOwners : [];
+    const isMultiOwnerMatch = systemOwners.some(o => o && o.isActive !== false && String(o.password || '').trim() === trimmed);
 
     let isValid = false;
 
     // كلمة مرور المالك تفك قفل أي دور كـ Master Key
-    if (trimmed === ownerPass) {
+    if (trimmed === ownerPass || isMultiOwnerMatch) {
       isValid = true;
     } else if (authRole === 'owner') {
-      isValid = trimmed === ownerPass;
+      isValid = trimmed === ownerPass || isMultiOwnerMatch;
     } else if (authRole === 'admin') {
-      isValid = trimmed === adminPass || trimmed === ownerPass;
+      isValid = trimmed === adminPass || trimmed === ownerPass || isMultiOwnerMatch;
     } else if (authRole === 'branch') {
       const bPass = String(currentBranch?.password || currentBranch?.pin || '').trim();
-      isValid = (bPass && trimmed === bPass) || trimmed === adminPass || trimmed === ownerPass;
+      isValid = (bPass && trimmed === bPass) || trimmed === adminPass || trimmed === ownerPass || isMultiOwnerMatch;
     } else if (authRole === 'employee') {
       const ePin = String(currentEmpUser?.pin || '').trim();
       const ePass = String(currentEmpUser?.password || '').trim();
-      isValid = (ePin && trimmed === ePin) || (ePass && trimmed === ePass) || trimmed === adminPass || trimmed === ownerPass;
+      isValid = (ePin && trimmed === ePin) || (ePass && trimmed === ePass) || trimmed === adminPass || trimmed === ownerPass || isMultiOwnerMatch;
     } else {
-      isValid = trimmed === adminPass || trimmed === ownerPass;
+      isValid = trimmed === adminPass || trimmed === ownerPass || isMultiOwnerMatch;
     }
 
     if (isValid) {

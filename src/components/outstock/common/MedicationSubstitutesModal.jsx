@@ -11,13 +11,52 @@ export default function MedicationSubstitutesModal({
   medicationId,
   customerPhone = null,
   customerName = null,
-  branchName = null
+  branchName = null,
+  procurementSubstitutes = [],
+  procurementNotes = ''
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedId, setCopiedId] = useState(null);
+
+  // استخراج وتنسيق البدائل المقترحة من إدارة المشتريات
+  const formattedProcurementSubs = React.useMemo(() => {
+    let list = [];
+    if (Array.isArray(procurementSubstitutes) && procurementSubstitutes.length > 0) {
+      list = [...procurementSubstitutes];
+    } else if (procurementNotes && procurementNotes.includes('البدائل المقترحة:')) {
+      const match = procurementNotes.match(/البدائل المقترحة:\s*([^\]]+)\]?/);
+      if (match && match[1]) {
+        list = match[1].split('،').map(s => s.trim()).filter(Boolean);
+      }
+    }
+
+    return list.map((item, idx) => {
+      if (typeof item === 'string') {
+        return {
+          id: `proc_sub_${idx}`,
+          trade_name_ar: item,
+          trade_name_en: '',
+          public_price: '—',
+          dosage_form: 'بديل معتمد',
+          manufacturer: 'مقترح المشتريات',
+          isProcurement: true
+        };
+      }
+      return {
+        id: item.id || `proc_sub_${idx}`,
+        trade_name_ar: item.name || item.trade_name_ar || item.trade_name_en || 'بديل مقترح',
+        trade_name_en: item.trade_name_en || '',
+        public_price: item.public_price ? `${item.public_price}` : '—',
+        unit_price: item.unit_price || 0,
+        dosage_form: item.dosage_form || 'بديل معتمد',
+        manufacturer: item.manufacturer || 'مقترح المشتريات',
+        isProcurement: true
+      };
+    });
+  }, [procurementSubstitutes, procurementNotes]);
 
   useEffect(() => {
     if (isOpen && (medicationName || medicationId)) {
@@ -286,35 +325,158 @@ export default function MedicationSubstitutesModal({
             >
               ⚠️ {error}
             </div>
-          ) : !data?.substitutes || data.substitutes.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px 20px' }}>
-              <div style={{ fontSize: '42px', marginBottom: '12px' }}>🔍</div>
-              <h4 style={{ margin: '0 0 6px', color: '#334155' }}>
-                لم يتم العثور على بدائل مباشرة مسجلة
-              </h4>
-              <p style={{ margin: 0, color: '#64748b', fontSize: '13px' }}>
-                تأكد من كتابة الاسم التجاري بدقة أو جرب البحث بالمادة الفعالة مباشرة.
-              </p>
-            </div>
           ) : (
             <div>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: '16px'
-                }}
-              >
-                <div style={{ fontSize: '14px', fontWeight: '800', color: '#1e293b' }}>
-                  المثائل والبدائل المتاحة ({data.substitutes.length})
-                </div>
-                <div style={{ fontSize: '12px', color: '#0d9488', fontWeight: '700' }}>
-                  ✓ تطابق تام في المادة الفعالة (Same Active Ingredient)
-                </div>
-              </div>
+              {/* 🌟 1. البدائل المقترحة من إدارة المشتريات (الأولوية القصوى) */}
+              {formattedProcurementSubs.length > 0 && (
+                <div style={{ marginBottom: '20px' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      background: '#fffbeb',
+                      border: '1.5px solid #fde68a',
+                      padding: '8px 14px',
+                      borderRadius: '12px',
+                      marginBottom: '12px'
+                    }}
+                  >
+                    <span style={{ fontSize: '18px' }}>🌟</span>
+                    <div style={{ fontSize: '14px', fontWeight: '900', color: '#b45309' }}>
+                      البدائل المعتمدة والمقترحة من إدارة المشتريات ({formattedProcurementSubs.length})
+                    </div>
+                  </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px' }}>
+                    {formattedProcurementSubs.map((sub, idx) => (
+                      <div
+                        key={sub.id || idx}
+                        style={{
+                          border: '2px solid #f59e0b',
+                          borderRadius: '16px',
+                          padding: '12px 16px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          gap: '12px',
+                          background: '#fffdf5',
+                          boxShadow: '0 2px 8px rgba(245, 158, 11, 0.12)'
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: '220px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span
+                              style={{
+                                background: '#f59e0b',
+                                color: '#ffffff',
+                                fontSize: '11px',
+                                fontWeight: '900',
+                                padding: '3px 8px',
+                                borderRadius: '6px'
+                              }}
+                            >
+                              ⭐ ترشيح المشتريات
+                            </span>
+                            <h4 style={{ margin: 0, fontSize: '15.5px', fontWeight: '900', color: '#78350f' }}>
+                              {sub.trade_name_ar}
+                            </h4>
+                          </div>
+                          <div style={{ display: 'flex', gap: '12px', marginTop: '6px', fontSize: '12px', color: '#92400e' }}>
+                            <span>✓ متوفر لدى الموردين</span>
+                            {sub.dosage_form && <span>💊 {sub.dosage_form}</span>}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                          {sub.public_price !== '—' && (
+                            <div style={{ textAlign: 'left' }}>
+                              <div style={{ fontSize: '16px', fontWeight: '900', color: '#b45309' }}>
+                                {sub.public_price} <span style={{ fontSize: '12px' }}>ج.م</span>
+                              </div>
+                            </div>
+                          )}
+
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button
+                              onClick={() => copySubstituteToClipboard(sub)}
+                              style={{
+                                padding: '7px 11px',
+                                borderRadius: '9px',
+                                background: copiedId === sub.id ? '#dcfce7' : '#ffffff',
+                                color: copiedId === sub.id ? '#15803d' : '#334155',
+                                border: '1px solid #cbd5e1',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                cursor: 'pointer'
+                              }}
+                              title="نسخ بيانات البديل للحافظة"
+                            >
+                              {copiedId === sub.id ? 'تم النسخ ✓' : 'نسخ 📋'}
+                            </button>
+
+                            <button
+                              onClick={() => shareToWhatsApp(sub)}
+                              style={{
+                                padding: '7px 13px',
+                                borderRadius: '9px',
+                                background: '#25d366',
+                                color: '#ffffff',
+                                border: 'none',
+                                fontSize: '12px',
+                                fontWeight: '800',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                              title="إرسال بيانات البديل للعميل بالواتساب"
+                            >
+                              واتساب 💬
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 🔍 2. بدائل ومثائل قاعدة بيانات هيئة الدواء */}
+              {(!data?.substitutes || data.substitutes.length === 0) ? (
+                formattedProcurementSubs.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+                    <div style={{ fontSize: '42px', marginBottom: '12px' }}>🔍</div>
+                    <h4 style={{ margin: '0 0 6px', color: '#334155' }}>
+                      لم يتم العثور على بدائل مباشرة مسجلة
+                    </h4>
+                    <p style={{ margin: 0, color: '#64748b', fontSize: '13px' }}>
+                      تأكد من كتابة الاسم التجاري بدقة أو جرب البحث بالمادة الفعالة مباشرة.
+                    </p>
+                  </div>
+                )
+              ) : (
+                <div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '14px',
+                      borderTop: formattedProcurementSubs.length > 0 ? '1px dashed #cbd5e1' : 'none',
+                      paddingTop: formattedProcurementSubs.length > 0 ? '16px' : '0'
+                    }}
+                  >
+                    <div style={{ fontSize: '14px', fontWeight: '800', color: '#1e293b' }}>
+                      المثائل والبدائل بقاعدة هيئة الدواء ({data.substitutes.length})
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#0d9488', fontWeight: '700' }}>
+                      ✓ تطابق تام في المادة الفعالة (Same Active Ingredient)
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
                 {data.substitutes.map((sub, idx) => (
                   <div
                     key={sub.id || idx}
@@ -416,6 +578,8 @@ export default function MedicationSubstitutesModal({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
             </div>
           )}
         </div>

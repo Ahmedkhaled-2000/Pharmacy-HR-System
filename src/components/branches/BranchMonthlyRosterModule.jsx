@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { getResolvedEmployeeRoster } from '../roster/RosterModule';
+import { getResolvedEmployeeRoster, getDayScheduleFromMap } from '../../utils/rosterEngine';
 import { getEmpDisplayName, isEmployeeActive, getRealTodayStr, arabicMonthLabel } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
 import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
@@ -20,6 +20,18 @@ export const DAYS_OF_WEEK = [
   { key: 'thursday', label: 'الخميس', short: 'خميس', dayIndex: 4 },
   { key: 'friday', label: 'الجمعة', short: 'جمعة', dayIndex: 5 }
 ];
+
+export function getRosterDaySchedule(schedule, dayObj, dateStr = null) {
+  if (!schedule || typeof schedule !== 'object') return null;
+  if (dateStr && schedule[dateStr]) return schedule[dateStr];
+  if (dayObj && schedule[dayObj.label]) return schedule[dayObj.label];
+  if (dayObj && dayObj.dayIndex !== undefined) {
+    const fromMap = getDayScheduleFromMap(schedule, dayObj.dayIndex, dateStr);
+    if (fromMap) return fromMap;
+  }
+  if (dayObj && dayObj.key && schedule[dayObj.key]) return schedule[dayObj.key];
+  return null;
+}
 
 /**
  * تحويل الوقت من نظام 24 ساعة إلى نظام 12 ساعة للعرض الشكلي والتصميم فقط
@@ -69,7 +81,7 @@ function generateOfficialWeeklyShiftsHTML({
       if (!isApproved || !schedule) {
         return `<td style="border:1.5px solid #cbd5e1; padding:3px 2px; text-align:center; color:#94a3b8; font-size:9px; vertical-align:middle;">—</td>`;
       }
-      const dayConf = schedule[d.label];
+      const dayConf = getRosterDaySchedule(schedule, d) || { type: 'off' };
       const isShift = dayConf && dayConf.type === 'shift' && dayConf.start && dayConf.end;
       if (isShift) {
         return `
@@ -475,7 +487,7 @@ function generateOfficialMatrixHTML({
       if (!isApproved || !schedule) {
         return `<td style="border:1.5px solid #cbd5e1; padding:4px 3px; text-align:center; color:#94a3b8; font-size:9.5px; vertical-align:middle;">غير معتمد</td>`;
       }
-      const dInfo = schedule[d.label];
+      const dInfo = getRosterDaySchedule(schedule, d);
       const isShift = dInfo && dInfo.type === 'shift' && dInfo.start && dInfo.end;
       return `
         <td style="border:1.5px solid #cbd5e1; padding:4px 3px; text-align:center; background:${isShift ? '#f0fdf4' : '#fffbeb'}; vertical-align:middle;">
@@ -935,7 +947,10 @@ export default function BranchMonthlyRosterModule({
   // Staff members in this branch without an approved roster for this month
   const unapprovedStaff = useMemo(() => {
     if (!currentBranch) return [];
-    return branchEmployees.filter(emp => !resolvedRostersMap.get(String(emp.id))?.schedule);
+    return branchEmployees.filter(emp => {
+      if (emp.noMonthlySchedule || emp.isVariableHours) return false;
+      return !resolvedRostersMap.get(String(emp.id))?.schedule;
+    });
   }, [branchEmployees, currentBranch, resolvedRostersMap]);
 
   // Map each employee to their resolved schedule for this branch and month
@@ -951,7 +966,7 @@ export default function BranchMonthlyRosterModule({
 
       if (schedule) {
         DAYS_OF_WEEK.forEach(d => {
-          const dayInfo = schedule[d.label] || { type: 'off' };
+          const dayInfo = getRosterDaySchedule(schedule, d) || { type: 'off' };
           if (dayInfo.type === 'shift' && dayInfo.start && dayInfo.end) {
             workDaysCount++;
             const [sh, sm] = dayInfo.start.split(':').map(Number);
@@ -984,7 +999,7 @@ export default function BranchMonthlyRosterModule({
       staffSchedules.forEach(({ employee, schedule, isApproved }) => {
         if (!isApproved || !schedule) return;
 
-        const dayInfo = schedule[day.label] || { type: 'off', start: '', end: '' };
+        const dayInfo = getRosterDaySchedule(schedule, day) || { type: 'off', start: '', end: '' };
         if (dayInfo.type === 'shift' && dayInfo.start && dayInfo.end) {
           const shiftKey = `${dayInfo.start} - ${dayInfo.end}`;
           const [sh, sm] = dayInfo.start.split(':').map(Number);
@@ -1174,7 +1189,7 @@ export default function BranchMonthlyRosterModule({
           item.employee.jobTitle || '—',
           ...DAYS_OF_WEEK.map(d => {
             if (!item.isApproved || !item.schedule) return 'غير معتمد';
-            const dInfo = item.schedule[d.label];
+            const dInfo = getRosterDaySchedule(item.schedule, d);
             return (dInfo && dInfo.type === 'shift' && dInfo.start && dInfo.end)
               ? `${formatTime12H(dInfo.start)} إلى ${formatTime12H(dInfo.end)}`
               : 'راحة أسبوعية';
@@ -2038,6 +2053,13 @@ export default function BranchMonthlyRosterModule({
                         {/* 7 Days Columns */}
                         {DAYS_OF_WEEK.map(d => {
                           if (!isApproved || !schedule) {
+                            if (employee.noMonthlySchedule || employee.isVariableHours) {
+                              return (
+                                <td key={d.key} style={{ textAlign: 'center', verticalAlign: 'middle', padding: '8px 6px' }}>
+                                  <span style={{ fontSize: '10.5px', color: '#0369a1', background: '#e0f2fe', padding: '3px 8px', borderRadius: '6px', fontWeight: 800 }}>ساعات متغيرة</span>
+                                </td>
+                              );
+                            }
                             return (
                               <td key={d.key} style={{ textAlign: 'center', verticalAlign: 'middle', padding: '8px 6px' }}>
                                 <span style={{ fontSize: '11px', color: '#94a3b8' }}>لم يُعتمد جدول</span>
@@ -2045,7 +2067,7 @@ export default function BranchMonthlyRosterModule({
                             );
                           }
 
-                          const dInfo = schedule[d.label];
+                          const dInfo = getRosterDaySchedule(schedule, d);
                           const isShift = dInfo && dInfo.type === 'shift' && dInfo.start && dInfo.end;
 
                           return (
@@ -2097,12 +2119,20 @@ export default function BranchMonthlyRosterModule({
 
                         {/* Weekly Totals */}
                         <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-                          <div style={{ fontWeight: 800, color: 'var(--primary-dark)', fontSize: '14px' }}>
-                            {totalWeeklyHours} ساعة
-                          </div>
-                          <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px' }}>
-                            ({workDaysCount} أيام عمل)
-                          </div>
+                          {employee.noMonthlySchedule || employee.isVariableHours ? (
+                            <div style={{ fontWeight: 800, color: '#0369a1', fontSize: '12px' }}>
+                              دوام حر / ساعات فعلية
+                            </div>
+                          ) : (
+                            <>
+                              <div style={{ fontWeight: 800, color: 'var(--primary-dark)', fontSize: '14px' }}>
+                                {totalWeeklyHours} ساعة
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px' }}>
+                                ({workDaysCount} أيام عمل)
+                              </div>
+                            </>
+                          )}
                         </td>
 
                         {/* Actions / Edit Schedule */}
@@ -2388,7 +2418,7 @@ export default function BranchMonthlyRosterModule({
                             if (!isApproved || !schedule) {
                               return <td key={d.key} style={{ border: '1px solid #cbd5e1', padding: '4px', color: '#94a3b8', fontSize: '9.5px' }}>غير معتمد</td>;
                             }
-                            const dInfo = schedule[d.label];
+                            const dInfo = getRosterDaySchedule(schedule, d);
                             const isShift = dInfo && dInfo.type === 'shift' && dInfo.start && dInfo.end;
                             return (
                               <td key={d.key} style={{ border: '1px solid #cbd5e1', padding: '4px', background: isShift ? '#f0fdf4' : '#fffbeb' }}>

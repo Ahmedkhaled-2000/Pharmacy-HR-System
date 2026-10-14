@@ -325,6 +325,96 @@ export default function ProcurementComplaintsTab({ currentUser, showToast }) {
                   </div>
                 </div>
 
+                {/* قائمة الأصناف المشمولة بالطلب والشكوى */}
+                {(() => {
+                  let parsedSelected = [];
+                  try {
+                    if (Array.isArray(c.selected_items)) parsedSelected = c.selected_items;
+                    else if (typeof c.selected_items === 'string') parsedSelected = JSON.parse(c.selected_items);
+                  } catch (_) {}
+                  const selectedIds = new Set(parsedSelected.map(p => String(p.id)));
+                  const allItems = Array.isArray(c.order_items) ? c.order_items : [];
+
+                  if (allItems.length === 0 && parsedSelected.length === 0 && !c.medication_name) return null;
+
+                  return (
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 14px', marginBottom: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: 800, color: '#475569', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          <Package size={14} color="#0f766e" />
+                          <span>الأصناف المشمولة بالطلب والشكوى:</span>
+                        </span>
+                        {parsedSelected.length > 0 && (
+                          <span style={{ fontSize: '11px', background: '#fee2e2', color: '#991b1b', padding: '1px 8px', borderRadius: '99px', fontWeight: 800 }}>
+                            محدد بالشكوى: {parsedSelected.length} صنف
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        {allItems.length > 0 ? (
+                          allItems.map((it, idx) => {
+                            const isSpecific = selectedIds.has(String(it.id)) || (c.item_id && String(c.item_id) === String(it.id));
+                            const uLabel = it.unit_type === 'strip' ? 'شريط' : 'علبة';
+                            return (
+                              <span
+                                key={it.id || idx}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  background: isSpecific ? '#fef2f2' : '#ffffff',
+                                  border: isSpecific ? '1.5px solid #ef4444' : '1px solid #cbd5e1',
+                                  color: isSpecific ? '#991b1b' : '#334155',
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '11.5px',
+                                  fontWeight: isSpecific ? 900 : 700
+                                }}
+                              >
+                                <span>{isSpecific ? '⚠️' : '💊'}</span>
+                                <span>{it.medication_name}</span>
+                                <span style={{ fontSize: '10px', opacity: 0.8 }}>({it.quantity || 1} {uLabel})</span>
+                                {isSpecific && (
+                                  <span style={{ fontSize: '10px', background: '#dc2626', color: '#fff', padding: '0 4px', borderRadius: '4px' }}>
+                                    صنف الشكوى
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })
+                        ) : parsedSelected.length > 0 ? (
+                          parsedSelected.map((it, idx) => (
+                            <span
+                              key={it.id || idx}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                background: '#fef2f2',
+                                border: '1.5px solid #ef4444',
+                                color: '#991b1b',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontSize: '11.5px',
+                                fontWeight: 900
+                              }}
+                            >
+                              <span>⚠️</span>
+                              <span>{it.medicationName || it.medication_name}</span>
+                              <span style={{ fontSize: '10px', opacity: 0.8 }}>({it.quantity || 1} {it.unitType === 'strip' ? 'شريط' : 'علبة'})</span>
+                            </span>
+                          ))
+                        ) : (
+                          <span style={{ fontSize: '12px', fontWeight: 800, color: '#6d28d9', background: '#ede9fe', padding: '3px 8px', borderRadius: '6px' }}>
+                            💊 {c.medication_name}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* نص شكوى الفرع */}
                 <div style={{ background: '#fff5f5', border: '1px solid #fecaca', borderRadius: '10px', padding: '12px 14px', marginBottom: '12px' }}>
                   <div style={{ fontSize: '12px', fontWeight: 800, color: '#991b1b', marginBottom: '4px' }}>

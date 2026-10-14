@@ -1405,37 +1405,77 @@ export default function BranchManagerView({
     let updatedPermRequests = [...(state.permissionRequests || [])];
     let updatedSwaps = [...(state.shiftSwaps || [])];
 
-    // 1. If fully approved roster edit/update (only if admin approved)
-    if (isFullyApproved && (updatedTargetReq.type === 'roster_update' || updatedTargetReq.type === 'roster_edit' || updatedTargetReq.type === 'roster_edit_request')) {
-      const targetEmp = (state.employees || []).find(e => String(e.id) === String(updatedTargetReq.employeeId));
-      const targetBStr = updatedTargetReq.branchId ? String(updatedTargetReq.branchId) : (targetEmp?.branchId ? String(targetEmp.branchId) : (currentBranch?.id ? String(currentBranch.id) : ''));
-      const normalizedSch = normalizeSchedule(updatedTargetReq.schedule || updatedTargetReq.newSchedule);
+    // 1. Roster edit / assignment approval (اعتماد وتحديث الجدول الشهري فورياً عند موافقة مدير الفرع)
+    const isRosterReq = ['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit', 'assign_roster'].includes(updatedTargetReq.type) || updatedTargetReq.requestType === 'roster_update';
+    if (isRosterReq) {
+      updatedTargetReq.status = 'approved';
+      updatedTargetReq.branchApproved = true;
+      updatedTargetReq.branchDecision = 'approved';
+      updatedTargetReq.adminApproved = true;
+      updatedTargetReq.approvedAt = new Date().toISOString();
 
-      const activeRosterObj = {
-        id: updatedTargetReq.id || `roster_${Date.now()}`,
-        employeeId: updatedTargetReq.employeeId,
-        branchId: targetBStr || updatedTargetReq.branchId || currentBranch?.id || null,
-        month: updatedTargetReq.month || new Date().toISOString().slice(0, 7),
-        fromDate: updatedTargetReq.fromDate,
-        toDate: updatedTargetReq.toDate,
-        schedule: normalizedSch,
-        status: 'approved',
-        approvedAt: new Date().toISOString()
-      };
-
-      const existingIdx = updatedRosters.findIndex(
-        (ros) => String(ros.employeeId) === String(updatedTargetReq.employeeId) &&
-          (ros.month === updatedTargetReq.month || !updatedTargetReq.month || !ros.month) &&
-          (String(ros.branchId || '') === targetBStr || (!ros.branchId && !targetBStr))
+      const targetEmp = (state.employees || []).find(e => 
+        e && (String(e.id) === String(updatedTargetReq.employeeId) || (updatedTargetReq.employeeCode && String(e.code) === String(updatedTargetReq.employeeCode)))
       );
+      const targetBStr = updatedTargetReq.branchId ? String(updatedTargetReq.branchId) : (targetEmp?.branchId ? String(targetEmp.branchId) : (currentBranch?.id ? String(currentBranch.id) : ''));
+      const targetBName = updatedTargetReq.branchName || (state.branches?.find(b => String(b.id) === targetBStr)?.name) || currentBranch?.name || '';
+      const candidateSchedules = [
+        updatedTargetReq.newSchedule,
+        updatedTargetReq.schedule,
+        updatedTargetReq.requestedSchedule,
+        updatedTargetReq.details?.schedule,
+        updatedTargetReq.roster?.schedule
+      ].filter(s => s && typeof s === 'object' && Object.keys(s).length > 0);
 
-      if (existingIdx >= 0) {
-        updatedRosters[existingIdx] = activeRosterObj;
-      } else {
-        updatedRosters = updatedRosters.filter(
-          (ros) => !(String(ros.employeeId) === String(updatedTargetReq.employeeId) && String(ros.branchId || '') === targetBStr && (ros.month === updatedTargetReq.month || !updatedTargetReq.month || !ros.month))
-        );
-        updatedRosters.unshift(activeRosterObj);
+      let bestSchedule = candidateSchedules[0] || null;
+      for (const cand of candidateSchedules) {
+        const candIsoCount = Object.keys(cand).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).length;
+        const bestIsoCount = bestSchedule ? Object.keys(bestSchedule).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).length : 0;
+        if (candIsoCount > bestIsoCount || (candIsoCount === bestIsoCount && Object.keys(cand).length > Object.keys(bestSchedule).length)) {
+          bestSchedule = cand;
+        }
+      }
+
+      const normalizedSch = normalizeSchedule(bestSchedule);
+
+      if (normalizedSch && Object.keys(normalizedSch).length > 0) {
+        const targetMonthNorm = (updatedTargetReq.month || updatedTargetReq.cycleMonth || new Date().toISOString().slice(0, 7)).slice(0, 7);
+        const rosterDocId = updatedTargetReq.id ? (String(updatedTargetReq.id).startsWith('roster_') ? String(updatedTargetReq.id) : `roster_${updatedTargetReq.id}`) : `roster_${Date.now()}`;
+        const activeRosterObj = {
+          id: rosterDocId,
+          employeeId: updatedTargetReq.employeeId || targetEmp?.id,
+          employeeCode: updatedTargetReq.employeeCode || targetEmp?.code || '',
+          employeeName: updatedTargetReq.employeeName || targetEmp?.name || '',
+          branchId: targetBStr || currentBranch?.id || null,
+          branchName: targetBName,
+          month: targetMonthNorm,
+          fromDate: updatedTargetReq.fromDate,
+          toDate: updatedTargetReq.toDate,
+          schedule: normalizedSch,
+          status: 'approved',
+          adminApproved: true,
+          branchApproved: true,
+          approvedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
+        // إزالة أي وثائق روستر سابقة لهذا الموظف لنفس الشهر أو نفس المعرف لمنع التضارب وتكرار الجداول القديمة
+        updatedRosters = updatedRosters.filter((ros) => {
+          if (!ros) return false;
+          const isSameId = String(ros.id) === String(updatedTargetReq.id) || String(ros.id) === String(rosterDocId);
+          const empMatch = (
+            String(ros.employeeId) === String(updatedTargetReq.employeeId) || 
+            String(ros.employeeId) === String(targetEmp?.id) || 
+            (targetEmp?.code && String(ros.employeeCode) === String(targetEmp.code)) || 
+            (updatedTargetReq.employeeCode && String(ros.employeeCode) === String(updatedTargetReq.employeeCode))
+          );
+          if (!empMatch && !isSameId) return true;
+          const rMonthNorm = ros.month ? String(ros.month).slice(0, 7) : null;
+          const isSameMonth = !rMonthNorm || !targetMonthNorm || rMonthNorm === targetMonthNorm;
+          return !(isSameMonth || isSameId);
+        });
+
+        updatedRosters = [activeRosterObj, ...updatedRosters];
       }
     }
 
@@ -1450,15 +1490,46 @@ export default function BranchManagerView({
     }
 
     // 3. If overtime request (only if admin approved)
-    if (isFullyApproved && updatedTargetReq.type === 'overtime') {
+    if (isFullyApproved && (updatedTargetReq.type === 'overtime' || updatedTargetReq.type === 'extra_hours' || updatedTargetReq.type === 'طلب اضافي' || updatedTargetReq.type === 'إضافي')) {
+      const targetEmp = (state.employees || []).find(e => 
+        e && (String(e.id) === String(updatedTargetReq.employeeId) || (updatedTargetReq.employeeCode && String(e.code) === String(updatedTargetReq.employeeCode)))
+      );
+      const tEmpId = String(updatedTargetReq.employeeId || targetEmp?.id || '');
+      const tEmpCode = String(updatedTargetReq.employeeCode || targetEmp?.code || '');
       const targetDate = updatedTargetReq.date || updatedTargetReq.startDate;
-      const extraHours = parseFloat(updatedTargetReq.hours) || parseFloat(updatedTargetReq.amount) || 0;
-      const existingShiftIdx = updatedShifts.findIndex(s => s.employeeId === updatedTargetReq.employeeId && s.date === targetDate);
-      if (existingShiftIdx >= 0 && extraHours > 0) {
+      const extraHours = parseFloat(updatedTargetReq.hours || updatedTargetReq.overtimeHours || updatedTargetReq.extraHours || updatedTargetReq.amount) || 0;
+
+      const existingShiftIdx = updatedShifts.findIndex(s => {
+        const sEmpId = String(s.employeeId || '');
+        const sEmpCode = String(s.employeeCode || '');
+        const isEmpMatch = (
+          (tEmpId && (sEmpId === tEmpId || sEmpCode === tEmpId)) ||
+          (tEmpCode && (sEmpId === tEmpCode || sEmpCode === tEmpCode))
+        );
+        return (updatedTargetReq.shiftId && s.id === updatedTargetReq.shiftId) || (isEmpMatch && s.date === targetDate);
+      });
+
+      if (existingShiftIdx >= 0) {
+        const s = updatedShifts[existingShiftIdx];
+        const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || s.hours || 0);
+        const finalOt = extraHours > 0 ? extraHours : (parseFloat(s.overtimeHours) || 0);
+        const cleanExistingNotes = (s.notes || s.note || '')
+          .replace(/⏳?\s*إضافي قيد الاعتماد\s*(\(\+?[0-9.]+\s*س\))?/g, '')
+          .replace(/قيد الاعتماد/g, '')
+          .trim();
+        const newNote = cleanExistingNotes
+          ? `${cleanExistingNotes} | ✅ إضافي معتمد (+${finalOt} س)`
+          : `✅ ساعات عمل وإضافي معتمد (أساسي: ${regHours} س + إضافي: ${finalOt} س)`;
+
         updatedShifts[existingShiftIdx] = {
-          ...updatedShifts[existingShiftIdx],
-          hours: Math.round(((updatedShifts[existingShiftIdx].hours || 0) + extraHours) * 100) / 100,
-          overtimeHours: extraHours
+          ...s,
+          overtimeHours: finalOt,
+          overtimeStatus: finalOt > 0 ? 'approved' : 'none',
+          adminApproved: true,
+          branchApproved: true,
+          note: newNote,
+          notes: newNote,
+          updatedAt: new Date().toISOString()
         };
       }
     }

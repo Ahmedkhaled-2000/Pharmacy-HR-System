@@ -1,9 +1,11 @@
 /**
  * printCustomerWalletReceipt.js
- * طباعة إيصال استلام حراري (80mm / 58mm) لعمليات شحن وسحب محفظة العميل
+ * طباعة إيصال استلام حراري فائق الدقة (80mm / 58mm) لعمليات شحن وسحب محفظة العميل
+ * مدعوم بالمحرك الحراري المركزي thermalReceiptEngine لحماية الأرقام ومنع القص الميكانيكي
  */
 
-import { getEffectiveOrgLogo, getEffectiveOrgName } from './outstockLogoHelper.js';
+import { getEffectiveOrgName } from './outstockLogoHelper.js';
+import { resolveBranchThermalDetails } from './thermalReceiptEngine.js';
 
 export function printCustomerWalletReceipt({
   receiptNumber,
@@ -19,8 +21,9 @@ export function printCustomerWalletReceipt({
   notes = '',
   date = new Date()
 }) {
-  const orgLogo = getEffectiveOrgLogo();
-  const orgName = getEffectiveOrgName('مجموعة صيدليات د. سيف الدين');
+  const branchDetails = resolveBranchThermalDetails({ name: branchName });
+  const orgLogo = branchDetails.logoUrl;
+  const orgName = getEffectiveOrgName('مجموعة الصيدليات');
   const isDeposit = transactionType === 'deposit' || transactionType === 'refund_to_wallet';
   const typeLabel = isDeposit ? 'سند إيداع نقدي بالمحفظة' : 'سند صرف / خصم من المحفظة';
   const amountFormatted = Number(amount).toFixed(2);
@@ -54,47 +57,64 @@ export function printCustomerWalletReceipt({
   <style>
     @page {
       size: 80mm auto;
-      margin: 0;
+      margin: 0 !important;
     }
     * {
-      box-sizing: border-box;
+      box-sizing: border-box !important;
       margin: 0;
       padding: 0;
-      font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
     }
     body {
-      width: 78mm;
-      margin: 0 auto;
-      padding: 8px 4px 14px 4px;
-      color: #000;
-      background: #fff;
-      font-size: 12px;
-      line-height: 1.35;
-      text-align: right;
+      width: 72mm !important;
+      max-width: 72mm !important;
+      margin: 0 auto !important;
+      padding: 1mm 2mm 18mm 2mm !important;
+      color: #000 !important;
+      background: #fff !important;
+      font-family: 'Cairo', 'Segoe UI', Tahoma, 'Arial Black', Arial, sans-serif !important;
+      font-size: 11px !important;
+      font-weight: 800 !important;
+      line-height: 1.35 !important;
+      direction: rtl !important;
+      text-align: right !important;
+      -webkit-font-smoothing: antialiased;
+      -webkit-text-stroke: 0.35px #000;
     }
     .text-center { text-align: center; }
     .text-left { text-align: left; }
     .header {
       text-align: center;
-      border-bottom: 2px dashed #000;
-      padding-bottom: 8px;
-      margin-bottom: 8px;
+      border-bottom: 1.5px dashed #000;
+      padding-bottom: 6px;
+      margin-bottom: 7px;
+    }
+    .header-logo {
+      max-height: 60px;
+      max-width: 150px;
+      object-fit: contain;
+      margin: 0 auto 5px;
+      display: block;
+      filter: grayscale(100%) contrast(300%) brightness(90%);
+      -webkit-filter: grayscale(100%) contrast(300%) brightness(90%);
+      image-rendering: crisp-edges;
     }
     .header h1 {
-      font-size: 16px;
+      font-size: 14px;
       font-weight: 900;
       margin-bottom: 2px;
     }
     .header .subtitle {
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 600;
-      color: #333;
+      color: #222;
     }
     .badge {
       display: inline-block;
-      margin: 4px auto;
-      padding: 3px 10px;
-      font-size: 13px;
+      margin: 3px auto;
+      padding: 2px 9px;
+      font-size: 11.5px;
       font-weight: bold;
       border: 1.5px solid #000;
       border-radius: 4px;
@@ -103,64 +123,60 @@ export function printCustomerWalletReceipt({
     .info-row {
       display: flex;
       justify-content: space-between;
-      padding: 3px 0;
-      font-size: 11.5px;
-      border-bottom: 1px dotted #ccc;
+      align-items: center;
+      padding: 2px 0;
+      font-size: 10.5px;
+      border-bottom: 1px dotted #ddd;
     }
     .info-row strong {
       font-weight: 700;
     }
     .amount-box {
-      border: 2px solid #000;
+      border: 1.5px solid #000;
       border-radius: 6px;
-      padding: 8px 6px;
-      margin: 8px 0;
+      padding: 6px;
+      margin: 7px 0;
       text-align: center;
-      background: #fdfdfd;
+      background: #fafafa;
     }
     .amount-box .label {
-      font-size: 11px;
+      font-size: 10.5px;
       font-weight: bold;
     }
     .amount-box .val {
-      font-size: 19px;
+      font-size: 17px;
       font-weight: 900;
       direction: ltr;
+      unicode-bidi: isolate;
       display: inline-block;
+      margin-top: 2px;
     }
     .balances-table {
       width: 100%;
       border-collapse: collapse;
       margin: 6px 0;
+      font-size: 10.5px;
     }
     .balances-table td {
-      padding: 4px 2px;
-      font-size: 11.5px;
+      padding: 3px 2px;
     }
     .footer {
-      border-top: 2px dashed #000;
-      padding-top: 8px;
-      margin-top: 10px;
+      border-top: 1.5px dashed #000;
+      padding-top: 6px;
+      margin-top: 8px;
       text-align: center;
-      font-size: 10px;
+      font-size: 9.5px;
       line-height: 1.3;
-    }
-    .qr-box {
-      margin: 6px auto;
-      text-align: center;
-    }
-    @media print {
-      body { width: 100%; }
-      .no-print { display: none; }
     }
   </style>
 </head>
 <body>
   <div class="header">
-    ${orgLogo ? `<div style="text-align: center; margin-bottom: 6px;"><img src="${orgLogo}" alt="Logo" style="max-height: 48px; max-width: 140px; object-fit: contain; margin: 0 auto; display: block;" /></div>` : ''}
-    <h1>${orgName}</h1>
-    <div class="subtitle">منظومة النواقص والمشتريات الذكية</div>
-    <div style="font-size: 12px; font-weight: bold; margin-top: 3px;">${branchName}</div>
+    ${orgLogo ? `<img src="${orgLogo}" alt="Logo" class="header-logo" />` : ''}
+    <h1>${branchDetails.branchName || orgName}</h1>
+    <div class="subtitle">خدمات رعاية العملاء والمحفظة الذكية</div>
+    ${branchDetails.phonesFormatted ? `<div style="font-size: 10px; font-weight: bold; margin: 2px 0;">${branchDetails.phonesFormatted}</div>` : ''}
+    ${branchDetails.branchAddress ? `<div style="font-size: 9.5px; margin: 1px 0;">📍 ${branchDetails.branchAddress}</div>` : ''}
     <div class="badge">${typeLabel}</div>
   </div>
 
@@ -170,7 +186,7 @@ export function printCustomerWalletReceipt({
   </div>
   <div class="info-row">
     <span>التاريخ والوقت:</span>
-    <strong>${formattedDate}</strong>
+    <span>${formattedDate}</span>
   </div>
   <div class="info-row">
     <span>اسم العميل:</span>
@@ -182,7 +198,7 @@ export function printCustomerWalletReceipt({
   </div>
   <div class="info-row">
     <span>رقم الهاتف:</span>
-    <strong dir="ltr">${customer?.whatsapp_phone || customer?.phone || '—'}</strong>
+    <span style="direction: ltr; unicode-bidi: isolate;">${customer?.whatsapp_phone || customer?.phone || '—'}</span>
   </div>
   <div class="info-row">
     <span>الموظف المسؤول:</span>
@@ -201,37 +217,35 @@ export function printCustomerWalletReceipt({
   <table class="balances-table">
     <tr>
       <td>الرصيد السابق:</td>
-      <td class="text-left" style="font-weight: bold;" dir="ltr">${prevFormatted} ج.م</td>
+      <td class="text-left" style="font-weight: bold; direction: ltr; unicode-bidi: isolate;">${prevFormatted} ج.م</td>
     </tr>
-    <tr style="border-top: 1px solid #000; font-weight: bold; font-size: 12.5px;">
+    <tr style="border-top: 1px solid #000; font-weight: bold;">
       <td>الرصيد الجديد الحالي:</td>
-      <td class="text-left" style="font-weight: 900; font-size: 14px;" dir="ltr">${newFormatted} ج.م</td>
+      <td class="text-left" style="font-weight: 900; font-size: 13px; direction: ltr; unicode-bidi: isolate;">${newFormatted} ج.م</td>
     </tr>
   </table>
 
   ${notes ? `
-  <div style="margin: 6px 0; font-size: 11px; padding: 4px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px;">
+  <div style="margin: 5px 0; font-size: 10px; padding: 4px; background: #fafafa; border: 1px solid #e2e8f0; border-radius: 4px;">
     <strong>ملاحظات:</strong> ${notes}
   </div>` : ''}
 
   <div class="footer">
     <div>رصيد المحفظة صالح للاستخدام والخصم في كافة فروعنا.</div>
-    <div style="font-weight: bold; margin-top: 2px;">شكراً لاختياركم صيدليات د. سيف الدين</div>
-    <div style="margin-top: 3px; font-size: 9px; color: #555;">طبع بواسطة المنظومة الإلكترونية الموحدة</div>
+    <div style="font-weight: bold; margin-top: 3px;">نسعد دائماً بخدمتكم وتوفير احتياجاتكم ✨</div>
   </div>
 
   <script>
     window.onload = function() {
       setTimeout(function() {
         window.print();
-      }, 250);
+      }, 350);
     };
   </script>
 </body>
 </html>
   `;
 
-  // طباعة عبر نافذة منبثقة أو iframe مخفي
   const printFrame = document.createElement('iframe');
   printFrame.style.position = 'fixed';
   printFrame.style.right = '0';
@@ -239,6 +253,7 @@ export function printCustomerWalletReceipt({
   printFrame.style.width = '0';
   printFrame.style.height = '0';
   printFrame.style.border = '0';
+  printFrame.style.zIndex = '-9999';
   document.body.appendChild(printFrame);
 
   const doc = printFrame.contentWindow.document;

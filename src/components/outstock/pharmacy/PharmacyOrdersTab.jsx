@@ -18,6 +18,7 @@ import {
   Truck,
   Filter,
   X,
+  XCircle,
   Send,
   Sparkles,
   Archive,
@@ -44,6 +45,7 @@ import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
 import OrderComplaintModal from './OrderComplaintModal';
 import OrderReturnModal from '../common/OrderReturnModal';
 import MedicationSubstitutesModal from '../common/MedicationSubstitutesModal';
+import OrderDepositRefundModal from '../common/OrderDepositRefundModal';
 import { printReturnReceipt } from '../../../utils/printReturnReceipt';
 
 /**
@@ -117,6 +119,9 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
 
   // 🔄 حالة نافذة فحص البدائل والمثائل الدوائية الذكية (AI Drug Eye)
   const [substitutesModalData, setSubstitutesModalData] = useState(null);
+
+  // 💵 حالة نافذة تسوية واسترداد العربون قبل حذف وإلغاء الطلب
+  const [refundModalOrder, setRefundModalOrder] = useState(null);
 
   // جلب الطلبات النشطة
   const fetchOrders = useCallback(async () => {
@@ -365,26 +370,66 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     }
   };
 
-  // حذف الطلب بالكامل قبل رد المشتريات
+  // حذف وإلغاء الطلب بالكامل وتسوية العربون
   const handleDeleteOrder = async (orderId, orderNum) => {
     const targetOrder = orders.find((o) => o.id === orderId) || transferredOrders.find((o) => o.id === orderId);
-    if (targetOrder && isOrderReplied(targetOrder)) {
-      showToast?.('⚠️ لا يمكن حذف الطلب بعد أن قامت إدارة المشتريات بالرد عليه (كلياً أو جزئياً)');
+    if (!targetOrder) return;
+
+    const ordStatus = String(targetOrder.order_status || targetOrder.status || '').toLowerCase();
+    if (ordStatus === 'delivered' || ordStatus === 'completed') {
+      showToast?.('⚠️ لا يمكن حذف طلب تم تسليمه، يرجى استخدام نظام المرتجعات');
       return;
     }
-    if (!window.confirm(`هل أنت متأكد من حذف الطلب رقم (${orderNum}) بالكامل؟ لا يمكن التراجع عن هذا الإجراء.`)) {
+
+    const items = targetOrder.items || [];
+    const hasAvailable = items.some(i => i.item_status === 'available_by_procurement' || i.itemStatus === 'available_by_procurement' || i.status === 'available');
+    const isAllUnavailable = ordStatus === 'all_unavailable' || (items.length > 0 && items.every(i => i.pruned_from_bill || i.prunedFromBill || i.item_status === 'unavailable' || i.item_status === 'unavailable_in_market'));
+    const isPending = !targetOrder.procurement_replied_at && items.every(i => i.item_status === 'pending' || !i.item_status);
+
+    // إذا قامت المشتريات بتوفير الصنف بنجاح، يُمنع الحذف ويُطلب تسليمه أو عمل مرتجع
+    if (!isAllUnavailable && !isPending && hasAvailable) {
+      showToast?.('⚠️ لا يمكن حذف الطلب بعد أن قامت إدارة المشتريات بتوفيره، يرجى تسليمه للعميل أو عمل مرتجع');
+      return;
+    }
+
+    // فحص العربون: إذا كان هناك عربون مدفوع، نفتح نافذة تسوية واسترداد العربون الفاخرة
+    const paidAmount = parseFloat(targetOrder.paid_amount || targetOrder.paidAmount || 0);
+    if (paidAmount > 0) {
+      setRefundModalOrder(targetOrder);
+      return;
+    }
+
+    if (!window.confirm(`هل أنت متأكد من حذف وإلغاء الطلب رقم (${orderNum}) بالكامل؟ لا يمكن التراجع عن هذا الإجراء.`)) {
       return;
     }
     try {
-      const res = await outstockDeleteOrder(orderId);
+      const res = await outstockDeleteOrder(orderId, {});
       if (res?.success) {
-        showToast?.('✅ تم حذف الطلب بنجاح');
+        showToast?.('✅ تم إلغاء وحذف الطلب بنجاح');
         fetchOrders();
       } else {
         showToast?.(res?.error || 'تعذر حذف الطلب');
       }
     } catch {
       showToast?.('تعذر حذف الطلب، تحقق من الاتصال');
+    }
+  };
+
+  // تأكيد تسوية واسترداد العربون من نافذة OrderDepositRefundModal
+  const handleConfirmOrderRefund = async (refundData) => {
+    if (!refundModalOrder) return;
+    try {
+      const res = await outstockDeleteOrder(refundModalOrder.id, refundData);
+      if (res?.success) {
+        const destText = refundData.refundDestination === 'wallet' ? 'إيداع بمحفظة العميل' : 'استرداد نقدي فوري من درج الكاشير';
+        showToast?.(`✅ تم إلغاء الطلب واسترداد العربون بنجاح (${refundData.paidAmount} ج.م - ${destText})`);
+        setRefundModalOrder(null);
+        fetchOrders();
+      } else {
+        alert(res?.error || 'تعذر تسوية واسترداد العربون');
+      }
+    } catch (err) {
+      alert('خطأ أثناء تسوية العربون: ' + err.message);
     }
   };
 
@@ -472,20 +517,43 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     o?.deliveryTargetBranchId
   ), []);
 
-  // فلترة الطلبات النشطة (استبعاد المحولة بين الفروع لتظهر فقط في تبويبة المحولة)
+  // فلترة الطلبات النشطة (استبعاد المحولة بين الفروع والطلبات المحولة بالكامل لمرتجع لتظهر فقط في المرتجعات)
   const filteredActiveOrders = useMemo(() => {
-    let result = orders.filter((o) => !isTransferredOrder(o));
+    let result = orders.filter((o) => {
+      if (isTransferredOrder(o)) return false;
+      const st = String(o.order_status || o.status || '').toLowerCase();
+      if (st === 'returned' || st === 'all_returned') return false;
+      const allItems = o.items || [];
+      const activeItems = allItems.filter(
+        (it) => !it.pruned_from_bill && !it.prunedFromBill && it.item_status !== 'returned' && it.itemStatus !== 'returned'
+      );
+      const prunedItems = allItems.filter(
+        (it) => (it.pruned_from_bill || it.prunedFromBill) && it.item_status !== 'returned' && it.itemStatus !== 'returned'
+      );
+      // الطلب يظل ظاهراً إذا كان به بنود نشطة أو بنود غير متوفرة بالسوق (لمنع اختفاء الطلب عند تعذر توفير الصنف)
+      if (activeItems.length === 0 && prunedItems.length === 0 && allItems.length > 0) return false;
+      if (allItems.length === 0) return false;
+      return true;
+    });
 
     // فلتر الحالة الفرعي: الطلبات بانتظار رد المشتريات (تتضمن الطلبات التي ما زال بها أي بند معلق قيد الانتظار)
     if (activeSubFilter === 'waiting_procurement') {
       result = result.filter((o) => {
         const hasPendingItems = (o.items || []).some(
-          (it) => !it.pruned_from_bill && (it.item_status === 'pending' || !it.item_status || it.item_status === 'pending_procurement')
+          (it) => !it.pruned_from_bill && !it.prunedFromBill && it.item_status !== 'returned' && it.itemStatus !== 'returned' && (it.item_status === 'pending' || !it.item_status || it.item_status === 'pending_procurement')
         );
-        return !isOrderReplied(o) || hasPendingItems;
+        const isAllUnavail = ((o.items || []).length > 0 && (o.items || []).every(it => it.pruned_from_bill || it.prunedFromBill || it.item_status === 'unavailable_in_market' || it.item_status === 'unavailable')) || String(o.order_status || o.status || '').toLowerCase() === 'all_unavailable';
+        return (!isOrderReplied(o) || hasPendingItems) && !isAllUnavail;
       });
     } else if (activeSubFilter === 'replied') {
       result = result.filter((o) => isOrderReplied(o));
+    } else if (activeSubFilter === 'unavailable') {
+      result = result.filter((o) => {
+        const itemsList = o.items || [];
+        const act = itemsList.filter((i) => !i.prunedFromBill && !i.pruned_from_bill && i.itemStatus !== 'returned' && i.item_status !== 'returned');
+        const prn = itemsList.filter((i) => (i.prunedFromBill || i.pruned_from_bill) && i.itemStatus !== 'returned' && i.item_status !== 'returned');
+        return (act.length === 0 && prn.length > 0) || String(o.order_status || o.status || '').toLowerCase() === 'all_unavailable';
+      });
     }
 
     // فلتر البحث النصي
@@ -527,21 +595,47 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     return result.sort((a, b) => new Date(b.delivered_at || b.deliveredAt || b.created_at || 0) - new Date(a.delivered_at || a.deliveredAt || a.created_at || 0));
   }, [deliveredOrders, searchQuery, isTransferredOrder]);
 
-  // إحصائيات سريعة للطلبات النشطة (بدون المحولة)
+  // إحصائيات سريعة للطلبات النشطة (بدون المحولة والمرتجعة بالكامل)
   const activeStats = useMemo(() => {
     let waitingCount = 0;
     let repliedCount = 0;
     let readyCount = 0;
+    let unavailableCount = 0;
 
-    const nonTransferred = orders.filter((o) => !isTransferredOrder(o));
+    const nonTransferred = orders.filter((o) => {
+      if (isTransferredOrder(o)) return false;
+      const st = String(o.order_status || o.status || '').toLowerCase();
+      if (st === 'returned' || st === 'all_returned') return false;
+      const allItems = o.items || [];
+      const activeItems = allItems.filter(
+        (it) => !it.pruned_from_bill && !it.prunedFromBill && it.item_status !== 'returned' && it.itemStatus !== 'returned'
+      );
+      const prunedItems = allItems.filter(
+        (it) => (it.pruned_from_bill || it.prunedFromBill) && it.item_status !== 'returned' && it.itemStatus !== 'returned'
+      );
+      return activeItems.length > 0 || prunedItems.length > 0;
+    });
+
     nonTransferred.forEach((o) => {
-      const hasReplied = isOrderReplied(o);
       const items = o.items || [];
+      const activeItems = items.filter(
+        (it) => !it.pruned_from_bill && !it.prunedFromBill && it.item_status !== 'returned' && it.itemStatus !== 'returned'
+      );
+      const prunedItems = items.filter(
+        (it) => (it.pruned_from_bill || it.prunedFromBill) && it.item_status !== 'returned' && it.itemStatus !== 'returned'
+      );
+      const isAllUnavail = (activeItems.length === 0 && prunedItems.length > 0) || String(o.order_status || o.status || '').toLowerCase() === 'all_unavailable';
+
+      if (isAllUnavail) {
+        unavailableCount++;
+      }
+
+      const hasReplied = isOrderReplied(o);
       const hasReady = items.some((it) =>
-        (!it.pruned_from_bill && !it.prunedFromBill) &&
+        (!it.pruned_from_bill && !it.prunedFromBill && it.item_status !== 'returned' && it.itemStatus !== 'returned') &&
         (it.status === 'available' || it.itemStatus === 'available_by_procurement' || it.status === 'delivered')
       );
-      if (!hasReplied) waitingCount++;
+      if (!hasReplied && !isAllUnavail) waitingCount++;
       if (hasReplied) repliedCount++;
       if (hasReady) readyCount++;
     });
@@ -550,7 +644,8 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
       total: nonTransferred.length,
       waiting: waitingCount,
       replied: repliedCount,
-      ready: readyCount
+      ready: readyCount,
+      unavailable: unavailableCount
     };
   }, [orders, isOrderReplied, isTransferredOrder]);
 
@@ -679,6 +774,31 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
               {deliveredOrders.length}
             </span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveInnerTab('returns')}
+            style={{
+              padding: '8px 18px',
+              borderRadius: '10px',
+              fontSize: '13.5px',
+              fontWeight: '900',
+              cursor: 'pointer',
+              border: activeInnerTab === 'returns' ? '2px solid #db2777' : '1px solid #cbd5e1',
+              background: activeInnerTab === 'returns' ? '#fdf2f8' : '#ffffff',
+              color: activeInnerTab === 'returns' ? '#be185d' : '#64748b',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: activeInnerTab === 'returns' ? '0 2px 6px rgba(219, 39, 119, 0.2)' : 'none'
+            }}
+          >
+            <RotateCcw size={16} color={activeInnerTab === 'returns' ? '#db2777' : '#64748b'} />
+            <span>سجل المرتجعات ↩️</span>
+            <span style={{ background: '#db2777', color: '#ffffff', fontSize: '11px', padding: '1px 7px', borderRadius: '10px' }}>
+              {branchReturns.length}
+            </span>
+          </button>
         </div>
 
         {/* زر إنشاء طلب عميل جديد */}
@@ -794,6 +914,30 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                 <span>تم الرد من قبل مدير المشتريات 💬</span>
                 <span style={{ background: '#0284c7', color: '#ffffff', fontSize: '10.5px', padding: '1px 6px', borderRadius: '8px' }}>
                   {activeStats.replied}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSubFilter('unavailable')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  border: activeSubFilter === 'unavailable' ? '2px solid #ef4444' : '1px solid #cbd5e1',
+                  background: activeSubFilter === 'unavailable' ? '#fef2f2' : '#ffffff',
+                  color: activeSubFilter === 'unavailable' ? '#dc2626' : '#64748b',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <AlertTriangle size={13} color={activeSubFilter === 'unavailable' ? '#ef4444' : '#64748b'} />
+                <span>غير متوفر بالسوق ⚠️</span>
+                <span style={{ background: '#dc2626', color: '#ffffff', fontSize: '10.5px', padding: '1px 6px', borderRadius: '8px' }}>
+                  {activeStats.unavailable}
                 </span>
               </button>
             </div>
@@ -946,6 +1090,47 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
             </h3>
           </div>
 
+          {/* تنبيه الصيدلي بوجود طلبات اعتذرت المشتريات عن توفير أصنافها */}
+          {activeStats.unavailable > 0 && activeSubFilter !== 'unavailable' && (
+            <div
+              style={{
+                background: '#fff1f2',
+                border: '1.5px solid #fecdd3',
+                borderRadius: '10px',
+                padding: '10px 16px',
+                margin: '12px 16px 0 16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '10px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertTriangle size={18} color="#e11d48" />
+                <span style={{ color: '#9f1239', fontWeight: '800', fontSize: '13px' }}>
+                  تنبيه: يوجد لديك ({activeStats.unavailable}) طلب أبلغت إدارة المشتريات بعدم توفر أصنافها بالسوق – تتطلب تواصلك مع العميل أو استعراض البدائل أو إلغاء الطلب واسترداد العربون.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveSubFilter('unavailable')}
+                style={{
+                  background: '#e11d48',
+                  color: '#ffffff',
+                  fontSize: '11.5px',
+                  fontWeight: '800',
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                عرض الطلبات غير المتوفرة ⬅️
+              </button>
+            </div>
+          )}
+
           {isLoading ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
               <RefreshCw size={26} className="animate-spin" style={{ margin: '0 auto 10px auto', color: '#0d9488' }} />
@@ -965,24 +1150,26 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {filteredActiveOrders.map((order) => {
                 const itemsList = order.items || [];
-                const activeItems = itemsList.filter((i) => !i.prunedFromBill && !i.pruned_from_bill);
-                const prunedItems = itemsList.filter((i) => i.prunedFromBill || i.pruned_from_bill);
+                const activeItems = itemsList.filter((i) => !i.prunedFromBill && !i.pruned_from_bill && i.itemStatus !== 'returned' && i.item_status !== 'returned');
+                const prunedItems = itemsList.filter((i) => (i.prunedFromBill || i.pruned_from_bill) && i.itemStatus !== 'returned' && i.item_status !== 'returned');
 
                 const hasReplied = isOrderReplied(order);
-                const allAvailable = activeItems.length > 0 && prunedItems.length === 0 && activeItems.every((i) => i.itemStatus === 'available_by_procurement' || i.status === 'available');
-                const isPendingProcurement = !hasReplied;
+                const isAllUnavailable = (activeItems.length === 0 && prunedItems.length > 0) || String(order.order_status || order.status || '').toLowerCase() === 'all_unavailable';
+                const allAvailable = !isAllUnavailable && activeItems.length > 0 && prunedItems.length === 0 && activeItems.every((i) => i.itemStatus === 'available_by_procurement' || i.status === 'available');
+                const isPendingProcurement = !hasReplied && !isAllUnavailable;
                 const hasUnavailableOrPending = itemsList.some((i) => {
                   const s = String(i.itemStatus || i.item_status || i.status || '').toLowerCase();
                   const isP = Boolean(i.prunedFromBill || i.pruned_from_bill);
                   return isP || s === 'unavailable' || s === 'unavailable_in_market' || s === 'pending';
                 });
-                const isPartiallyAvailable = (activeItems.some((i) => i.itemStatus === 'available_by_procurement' || i.status === 'available') && (prunedItems.length > 0 || activeItems.some((i) => i.status === 'pending' || i.itemStatus === 'pending')));
+                const isPartiallyAvailable = !isAllUnavailable && (activeItems.some((i) => i.itemStatus === 'available_by_procurement' || i.status === 'available') && (prunedItems.length > 0 || activeItems.some((i) => i.status === 'pending' || i.itemStatus === 'pending')));
                 const slaTime = calculateResponseTime(order.sent_to_procurement_at || order.created_at, order.procurement_replied_at);
 
                 return (
                   <div
                     key={order.id}
                     className={`outstock-order-card ${allAvailable ? 'ready-state' : ''}`}
+                    style={isAllUnavailable ? { border: '2px solid #ef4444', background: '#fffafa' } : {}}
                   >
                     {/* رأس بطاقة الطلب */}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
@@ -1022,7 +1209,12 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                           </span>
                         )}
 
-                        {allAvailable ? (
+                        {isAllUnavailable ? (
+                          <span className="outstock-badge" style={{ background: '#fee2e2', color: '#b91c1c', border: '1.5px solid #ef4444', fontWeight: '900' }}>
+                            <XCircle size={13} color="#b91c1c" />
+                            <span>🔴 اعتذار المشتريات: الصنف غير متوفر بالأسواق</span>
+                          </span>
+                        ) : allAvailable ? (
                           <span className="outstock-badge ready">
                             <CheckCircle size={13} />
                             <span>متوفر بالكامل - جاهز للتسليم 🟢</span>
@@ -1068,6 +1260,91 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                         </span>
                       </div>
                     </div>
+
+                    {/* تنبيه بارز في حالة تعذر توفير الصنف من المشتريات */}
+                    {isAllUnavailable && (
+                      <div
+                        style={{
+                          background: '#fef2f2',
+                          border: '1.5px solid #f87171',
+                          borderRadius: '8px',
+                          padding: '10px 14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: '10px',
+                          margin: '6px 0 8px 0'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '20px' }}>🔴</span>
+                          <div>
+                            <div style={{ color: '#991b1b', fontWeight: '900', fontSize: '13px' }}>
+                              اعتذار إدارة المشتريات: الصنف غير متوفر بالأسواق والمستودعات حالياً
+                            </div>
+                            {order.procurement_notes && (
+                              <div style={{ color: '#7f1d1d', fontSize: '12px', marginTop: '2px' }}>
+                                💬 ملاحظات المشتريات: <strong>{order.procurement_notes}</strong>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          {order.items?.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const targetItem = order.items.find(it => (it.suggested_substitutes?.length > 0) || (it.suggestedSubstitutes?.length > 0)) || order.items[0];
+                                setSubstitutesModalData({
+                                  medicationName: targetItem.medicationName || targetItem.medication_name || '',
+                                  medicationId: targetItem.medication_id || targetItem.medicationId,
+                                  customerPhone: order.customer_phone || order.customerPhone,
+                                  customerName: order.customer_name || order.customerName,
+                                  branchName: branch?.name,
+                                  procurementSubstitutes: targetItem.suggested_substitutes || targetItem.suggestedSubstitutes || [],
+                                  procurementNotes: targetItem.procurement_notes || targetItem.procurementNotes || order.procurement_notes || ''
+                                });
+                              }}
+                              className="outstock-btn"
+                              style={{
+                                background: '#047857',
+                                color: '#ffffff',
+                                fontWeight: '900',
+                                fontSize: '12px',
+                                padding: '6px 12px',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                              title="استعراض البدائل والمثائل المقترحة من إدارة المشتريات (AI Drug Eye)"
+                            >
+                              <span>استعراض البدائل المقترحة 🔄</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteOrder(order.id, order.order_number || order.orderNumber)}
+                            className="outstock-btn"
+                            style={{
+                              background: '#dc2626',
+                              color: '#ffffff',
+                              fontWeight: '900',
+                              fontSize: '12px',
+                              padding: '6px 12px',
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <span>إلغاء الطلب وتسوية واسترداد العربون 💵</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {/* سطر تواريخ الإرسال والرد وتتبع SLA */}
                     <div
@@ -1224,9 +1501,12 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                                   type="button"
                                   onClick={() => setSubstitutesModalData({
                                     medicationName: item.medicationName || item.medication_name,
+                                    medicationId: item.medication_id || item.medicationId,
                                     customerPhone: order.customer_phone || order.customerPhone,
                                     customerName: order.customer_name || order.customerName,
-                                    branchName: branch?.name
+                                    branchName: branch?.name,
+                                    procurementSubstitutes: item.suggested_substitutes || item.suggestedSubstitutes || [],
+                                    procurementNotes: item.procurement_notes || item.procurementNotes || order.procurement_notes || ''
                                   })}
                                   style={{
                                     background: '#f0fdfa',
@@ -1313,9 +1593,12 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                               type="button"
                               onClick={() => setSubstitutesModalData({
                                 medicationName: item.medicationName || item.medication_name,
+                                medicationId: item.medication_id || item.medicationId,
                                 customerPhone: order.customer_phone || order.customerPhone,
                                 customerName: order.customer_name || order.customerName,
-                                branchName: branch?.name
+                                branchName: branch?.name,
+                                procurementSubstitutes: item.suggested_substitutes || item.suggestedSubstitutes || [],
+                                procurementNotes: item.procurement_notes || item.procurementNotes || order.procurement_notes || ''
                               })}
                               style={{
                                 background: '#ecfdf5',
@@ -1646,8 +1929,8 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {filteredTransferredOrders.map((order) => {
                 const itemsList = order.items || [];
-                const activeItems = itemsList.filter((i) => !i.prunedFromBill && !i.pruned_from_bill);
-                const prunedItems = itemsList.filter((i) => i.prunedFromBill || i.pruned_from_bill);
+                const activeItems = itemsList.filter((i) => !i.prunedFromBill && !i.pruned_from_bill && i.itemStatus !== 'returned' && i.item_status !== 'returned');
+                const prunedItems = itemsList.filter((i) => (i.prunedFromBill || i.pruned_from_bill) && i.itemStatus !== 'returned' && i.item_status !== 'returned');
 
                 const isTargetBranch = String(order.delivery_target_branch_id) === String(branchId) ||
                   (order.delivery_target_branch && branch?.name && order.delivery_target_branch === branch.name);
@@ -2447,6 +2730,19 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
           customerPhone={substitutesModalData.customerPhone}
           customerName={substitutesModalData.customerName}
           branchName={substitutesModalData.branchName || branch?.name}
+          procurementSubstitutes={substitutesModalData.procurementSubstitutes || []}
+          procurementNotes={substitutesModalData.procurementNotes || ''}
+        />
+      )}
+
+      {/* ── نافذة تسوية واسترداد العربون قبل حذف أو إلغاء الطلب ── */}
+      {refundModalOrder && (
+        <OrderDepositRefundModal
+          isOpen={Boolean(refundModalOrder)}
+          onClose={() => setRefundModalOrder(null)}
+          order={refundModalOrder}
+          onConfirmRefund={handleConfirmOrderRefund}
+          currentPharmacist={currentPharmacist}
         />
       )}
     </div>

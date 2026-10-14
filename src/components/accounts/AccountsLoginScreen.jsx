@@ -56,20 +56,24 @@ export default function AccountsLoginScreen({
     const expectedAccountsUser = cleanStr(orgSettings.accountsUsername || 'accounts').toLowerCase();
     const expectedAccountsPass = cleanStr(orgSettings.accountsPassword || '123456');
 
-    // بيانات المالك (Master Credentials)
-    const ownerUser = cleanStr(orgSettings.ownerUsername || 'owner').toLowerCase();
-    const ownerPass = cleanStr(orgSettings.ownerPassword || 'owner123');
+    // بيانات المالك (Master Credentials & Multi-Owners)
+    let savedOwnerPass = '';
+    try { savedOwnerPass = localStorage.getItem('pharmacy_owner_password') || ''; } catch {}
+    const primaryOwnerUser = cleanStr(orgSettings.ownerUsername || 'saif').toLowerCase();
+    const primaryOwnerPass = cleanStr(orgSettings.ownerPassword || savedOwnerPass || '181013');
+    const systemOwners = Array.isArray(orgSettings.systemOwners) ? orgSettings.systemOwners : [];
 
-    const cleanInputUser = cleanStr(trimmedUser).toLowerCase();
-    const cleanInputPass = cleanStr(trimmedPass);
+    const isPrimaryOwnerMatch = (isUserMatch('saif', cleanInputUser) || isUserMatch(primaryOwnerUser, cleanInputUser)) &&
+      (isPassMatch('181013', cleanInputPass) || isPassMatch(primaryOwnerPass, cleanInputPass));
 
-    const isPassMatch = (expected, input) => expected === input || toStdDigits(expected) === toStdDigits(input);
-    const isUserMatch = (expected, input) => expected === input || toStdDigits(expected) === toStdDigits(input);
+    const isMultiOwnerMatch = systemOwners.some(o => {
+      if (!o || o.isActive === false) return false;
+      const u = cleanStr(o.username || '').toLowerCase();
+      const p = cleanStr(o.password || '');
+      return isUserMatch(u, cleanInputUser) && isPassMatch(p, cleanInputPass);
+    });
 
-    const isAccountsMatch = isUserMatch(expectedAccountsUser, cleanInputUser) && isPassMatch(expectedAccountsPass, cleanInputPass);
-    const isOwnerMatch = isUserMatch(ownerUser, cleanInputUser) && isPassMatch(ownerPass, cleanInputPass);
-
-    if (isAccountsMatch || isOwnerMatch) {
+    if (isAccountsMatch || isPrimaryOwnerMatch || isMultiOwnerMatch) {
       try {
         sessionStorage.setItem('accounts_session_unlocked', 'true');
       } catch {}

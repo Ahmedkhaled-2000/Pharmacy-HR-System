@@ -25,22 +25,40 @@ import {
   buildInvoicePdfHtml,
   sendInvoicePdfViaWhatsApp
 } from '../../../utils/invoicePdfGenerator';
-import { outstockGetSettings } from '../../../utils/outstockApiClient';
-import { getEffectiveOrgLogo } from '../../../utils/outstockLogoHelper';
+import { outstockGetSettings, outstockGetBranches } from '../../../utils/outstockApiClient';
+import {
+  resolveBranchThermalDetails,
+  executeThermalPrintJob
+} from '../../../utils/thermalReceiptEngine';
 
 /**
  * DualCashierReceiptModal.jsx
  * طباعة فاتورة الكاشير الحرارية المزدوجة (نسخة العميل + نسخة الصيدلية)
  * المميزات الاحترافية المضافة:
- * 1. أمر قص منفصل (Auto-Cut) لكل نسخة على حدة لمنع التصاق الورق
- * 2. إرسال الفاتورة الرسمية PDF للعميل عبر الواتساب مباشرة بضغطة زر مع الشعار
- * 3. إمكانية تنزيل الفاتورة PDF أو فتح محادثة WhatsApp Web كبديل فوري
- * 4. خيارات طباعة متعددة: نسختين مقصوصتين، نسخة العميل فقط، أو نسخة الصيدلية فقط
- * 5. باركود Code 128 قياسي فائق الدقة مقروء بنسبة 100%
+ * 1. مساحة طباعة آمنة 72mm (80mm) و 48mm (58mm) مانعة تماماً لقص الأرقام أو الأعمدة
+ * 2. محرك دمج أرقام هواتف الفرع المعتمدة (أرضي + موبايل + واتساب) وعنوان الفرع بدقة
+ * 3. شعار أحادي اللون عالي التباين (1-Bit High-Contrast) يطبع بحدة 100% بدون بهتان
+ * 4. أمر قص منفصل (Auto-Cut) لكل نسخة على حدة مع هامش أمان 18mm لحماية الباركود
+ * 5. إرسال الفاتورة الرسمية PDF للعميل عبر الواتساب مباشرة بضغطة زر
  */
 export default function DualCashierReceiptModal({ order, branch, onClose }) {
   const printAreaRef = useRef(null);
-  const [printProfile, setPrintProfile] = useState('pos'); // 'pos' (80mm) | 'a4'
+  const [printProfile, setPrintProfile] = useState(() => {
+    try {
+      const saved = localStorage.getItem('pos_receipt_printer_profile');
+      return saved === 'pos58' || saved === 'a4' ? saved : 'pos80';
+    } catch {
+      return 'pos80';
+    }
+  });
+
+  const handleSetPrintProfile = (p) => {
+    setPrintProfile(p);
+    try {
+      localStorage.setItem('pos_receipt_printer_profile', p);
+    } catch {}
+  };
+
   const [isPrinting, setIsPrinting] = useState(false);
   const [printStatusText, setPrintStatusText] = useState('');
 
@@ -54,10 +72,21 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
     }
   });
 
+  const [branchesList, setBranchesList] = useState([]);
+
   useEffect(() => {
     outstockGetSettings().then(res => {
       if (res?.success && res.settings) {
         setPharmacySettings(res.settings);
+      }
+    }).catch(() => {});
+
+    outstockGetBranches().then(res => {
+      if (res?.success && Array.isArray(res.branches)) {
+        setBranchesList(res.branches);
+        try {
+          localStorage.setItem('outstock_branches', JSON.stringify(res.branches));
+        } catch {}
       }
     }).catch(() => {});
   }, []);
@@ -75,176 +104,20 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
     return d.toLocaleDateString('ar-EG') + ' - ' + d.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
   }, [order]);
 
-  const branchName = branch?.name || order?.branch_name || 'صيدلية النور والشفاء';
-  const branchPhone = branch?.phone || '';
-  const branchAddress = branch?.address || '';
+  // دمج واستخراج تفاصيل وهوية وهواتف الفرع والشعار فائق الدقة
+  const branchDetails = useMemo(() => {
+    return resolveBranchThermalDetails(branch, order, pharmacySettings);
+  }, [branch, order, pharmacySettings, branchesList]);
+
+  const branchName = branchDetails.branchName;
+  const branchPhone = branchDetails.phonesFormatted;
+  const branchAddress = branchDetails.branchAddress;
   const barcodeValue = String(order?.barcode_data || order?.barcodeData || order?.order_number || order?.orderNumber || '00000000');
-  const pharmacyLogo = getEffectiveOrgLogo(pharmacySettings?.pharmacyLogo || pharmacySettings?.logoUrl || branch?.logoUrl || '');
+  const pharmacyLogo = branchDetails.logoUrl;
 
   // ── 1. محرك الطباعة مع أمر القص التلقائي لكل نسخة على حدة (Sequential Multi-Job Auto-Cut) ──
   const executeIsolatedPrintJob = useCallback((innerHtmlContent, jobTitle = 'Receipt') => {
-    return new Promise((resolve) => {
-      // إزالة أي iframe طباعة قديم
-      const oldFrame = document.getElementById('isolated-thermal-print-frame');
-      if (oldFrame) {
-        try { document.body.removeChild(oldFrame); } catch {}
-      }
-
-      const iframe = document.createElement('iframe');
-      iframe.id = 'isolated-thermal-print-frame';
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.border = 'none';
-      iframe.style.zIndex = '-9999';
-      document.body.appendChild(iframe);
-
-      const isPos = printProfile === 'pos';
-
-      // مسافة 26mm لتجاوز شفرة القاطع التلقائي بعد نهاية النصوص
-      const pageStyles = isPos
-        ? `
-          @page {
-            size: 80mm auto;
-            margin: 0mm !important;
-          }
-          body {
-            width: 78mm;
-            max-width: 78mm;
-            margin: 0 auto;
-            padding: 2mm 2mm 26mm 2mm;
-          }
-        `
-        : `
-          @page {
-            size: A4 portrait;
-            margin: 12mm 15mm;
-          }
-          body {
-            width: 100%;
-            max-width: 180mm;
-            margin: 0 auto;
-            padding: 10px;
-          }
-        `;
-
-      const htmlDocument = `
-        <!DOCTYPE html>
-        <html dir="rtl" lang="ar">
-        <head>
-          <meta charset="utf-8" />
-          <title>${jobTitle}</title>
-          <style>
-            ${pageStyles}
-            * {
-              box-sizing: border-box;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-            }
-            body {
-              font-family: 'Courier New', Courier, 'Cairo', monospace, sans-serif;
-              color: #000000;
-              background: #ffffff;
-              font-size: 11.5px;
-              line-height: 1.35;
-              direction: rtl;
-              text-align: right;
-            }
-            .receipt-copy {
-              padding-bottom: 6px;
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-            }
-            .receipt-header {
-              text-align: center;
-              margin-bottom: 8px;
-              border-bottom: 1.5px dashed #000;
-              padding-bottom: 6px;
-            }
-            .receipt-header h3 {
-              margin: 0 0 3px;
-              font-size: 15px;
-              font-weight: 900;
-            }
-            .receipt-header p {
-              margin: 2px 0;
-              font-size: 11px;
-            }
-            .receipt-meta {
-              margin-bottom: 8px;
-              font-size: 11px;
-              line-height: 1.4;
-              border-bottom: 1.5px dashed #000;
-              padding-bottom: 6px;
-            }
-            .receipt-table {
-              width: 100%;
-              border-collapse: collapse;
-              font-size: 11px;
-              margin-bottom: 8px;
-            }
-            .receipt-table th, .receipt-table td {
-              padding: 4px 2px;
-              text-align: right;
-            }
-            .receipt-table th {
-              border-bottom: 1.5px solid #000;
-              font-weight: 900;
-            }
-            .receipt-totals {
-              border-top: 1.5px dashed #000;
-              padding-top: 6px;
-              margin-bottom: 10px;
-            }
-            .receipt-totals .row {
-              display: flex;
-              justify-content: space-between;
-              margin: 2px 0;
-            }
-            .receipt-totals .row.grand-total {
-              font-size: 13px;
-              font-weight: 900;
-              border-top: 1px solid #000;
-              padding-top: 4px;
-              margin-top: 4px;
-            }
-            .receipt-barcode {
-              text-align: center;
-              margin: 8px 0;
-            }
-            .receipt-footer-notes {
-              text-align: center;
-              font-size: 10px;
-              margin-top: 6px;
-              border-top: 1px dashed #000;
-              padding-top: 6px;
-            }
-          </style>
-        </head>
-        <body>
-          ${innerHtmlContent}
-        </body>
-        </html>
-      `;
-
-      const doc = iframe.contentWindow.document;
-      doc.open();
-      doc.write(htmlDocument);
-      doc.close();
-
-      setTimeout(() => {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-        setTimeout(() => {
-          try {
-            document.body.removeChild(iframe);
-          } catch {}
-          resolve(true);
-        }, 1200);
-      }, 350);
-    });
+    return executeThermalPrintJob(innerHtmlContent, jobTitle, printProfile);
   }, [printProfile]);
 
   /**
@@ -325,6 +198,14 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
     setPrintStatusText('');
   };
 
+  // معرف جلسة الواتساب للفرع المقترن بدقة وبدون تكرار لبادئة branch_
+  const branchSessionId = useMemo(() => {
+    const raw = String(branch?.sessionId || branch?.whatsappSessionId || branch?.id || order?.branch_id || order?.branchId || '').trim();
+    if (!raw || raw === 'default' || raw === 'main') return undefined;
+    const cleanId = raw.replace(/^(branch_)+/i, '');
+    return cleanId ? `branch_${cleanId}` : undefined;
+  }, [branch, order]);
+
   // ── 2. إرسال الفاتورة الرسمية PDF للعميل عبر خادم الواتساب ──────────────────
   const handleSendInvoicePdf = async () => {
     const rawPhone = order.customer_phone || order.customerPhone || '';
@@ -340,10 +221,11 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
     setWaSendFeedback(null);
 
     try {
-      await sendInvoicePdfViaWhatsApp({
+      const sendRes = await sendInvoicePdfViaWhatsApp({
         order,
         branch,
         waServerUrl,
+        sessionId: branchSessionId,
         options: {
           logoUrl: pharmacyLogo,
           slogan: pharmacySettings?.slogan,
@@ -353,7 +235,9 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
 
       setWaSendFeedback({
         type: 'success',
-        msg: '✅ تم إرسال الفاتورة PDF للعميل بنجاح عبر الواتساب!'
+        msg: sendRes?.usedFallback
+          ? '⚠️ تم إرسال الفاتورة عبر واتساب الإدارة الاحتياطي لأن جلسة واتساب الفرع لم تكن متصلة.'
+          : '✅ تم إرسال الفاتورة PDF للعميل بنجاح عبر واتساب الفرع المقترن!'
       });
     } catch (err) {
       console.warn('Send invoice PDF failed:', err);
@@ -474,17 +358,28 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
             <div style={{ display: 'flex', gap: '4px' }}>
               <button
                 type="button"
-                className={'outstock-btn ' + (printProfile === 'pos' ? 'outstock-btn-primary' : 'outstock-btn-secondary')}
-                style={{ padding: '4px 10px', fontSize: '11.5px', borderRadius: '6px' }}
-                onClick={() => setPrintProfile('pos')}
+                className={'outstock-btn ' + (printProfile === 'pos80' ? 'outstock-btn-primary' : 'outstock-btn-secondary')}
+                style={{ padding: '4px 9px', fontSize: '11.5px', borderRadius: '6px' }}
+                onClick={() => handleSetPrintProfile('pos80')}
+                title="طابعة كاشير حرارية قياسية (80mm) بعرض طباعة آمن 72mm"
               >
-                طابعة حرارية (80mm)
+                حرارية (80mm)
+              </button>
+              <button
+                type="button"
+                className={'outstock-btn ' + (printProfile === 'pos58' ? 'outstock-btn-primary' : 'outstock-btn-secondary')}
+                style={{ padding: '4px 9px', fontSize: '11.5px', borderRadius: '6px' }}
+                onClick={() => handleSetPrintProfile('pos58')}
+                title="طابعة كاشير حرارية صغيرة (58mm) بعرض طباعة آمن 48mm"
+              >
+                حرارية صغيرة (58mm)
               </button>
               <button
                 type="button"
                 className={'outstock-btn ' + (printProfile === 'a4' ? 'outstock-btn-primary' : 'outstock-btn-secondary')}
-                style={{ padding: '4px 10px', fontSize: '11.5px', borderRadius: '6px' }}
-                onClick={() => setPrintProfile('a4')}
+                style={{ padding: '4px 9px', fontSize: '11.5px', borderRadius: '6px' }}
+                onClick={() => handleSetPrintProfile('a4')}
+                title="ورقة عادية مقاس A4"
               >
                 ورقة عادية (A4)
               </button>
@@ -579,7 +474,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
           }}>
             <Scissors size={16} />
             <span>
-              <strong>خاصية القص التلقائي (Auto-Cutter) مفعلة:</strong> يتم إرسال أمر قص مستقل لنسخة العميل ثم أمر قص مستقل لنسخة الصيدلية.
+              <strong>خاصية القص التلقائي (Auto-Cutter) مفعلة:</strong> يتم إرسال أمر قص مستقل لنسخة العميل ثم أمر قص مستقل لنسخة الصيدلية مع هامش حماية أوتوماتيكي.
             </span>
           </div>
 
@@ -588,60 +483,112 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
             ref={printAreaRef}
             className="thermal-receipt-container"
             style={{
-              width: printProfile === 'pos' ? '80mm' : '100%',
+              width: printProfile === 'pos58' ? '58mm' : (printProfile === 'pos80' ? '76mm' : '100%'),
               maxWidth: '100%',
               margin: '0 auto',
               border: '1px solid #cbd5e1',
               borderRadius: '8px',
               boxShadow: '0 4px 14px rgba(0,0,0,0.06)',
               background: '#ffffff',
-              padding: '12px 10px'
+              padding: printProfile === 'pos58' ? '8px 6px' : '12px 10px',
+              fontFamily: "'Cairo', 'Segoe UI', Tahoma, 'Arial Black', Arial, sans-serif",
+              fontWeight: '800',
+              WebkitTextStroke: '0.35px #000'
             }}
           >
             {/* ── 1. نسخة العميل ── */}
             <div className="receipt-copy" id="receipt-copy-customer">
-              <div className="receipt-header">
+              <div className="receipt-header" style={{ textAlign: 'center', marginBottom: '8px', borderBottom: '1.5px dashed #000', paddingBottom: '6px' }}>
                 {pharmacyLogo ? (
-                  <div style={{ textAlign: 'center', marginBottom: '6px' }}>
+                  <div className="receipt-logo-wrapper" style={{ textAlign: 'center', marginBottom: '6px' }}>
                     <img
                       src={pharmacyLogo}
                       alt="شعار الصيدلية"
-                      style={{ maxHeight: '48px', maxWidth: '120px', objectFit: 'contain' }}
+                      className="receipt-logo-img"
+                      style={{
+                        maxHeight: printProfile === 'pos58' ? '50px' : '65px',
+                        maxWidth: printProfile === 'pos58' ? '130px' : '160px',
+                        objectFit: 'contain',
+                        display: 'inline-block',
+                        filter: 'grayscale(100%) contrast(300%) brightness(90%)',
+                        WebkitFilter: 'grayscale(100%) contrast(300%) brightness(90%)',
+                        imageRendering: 'crisp-edges'
+                      }}
                     />
                   </div>
-                ) : null}
-                <h3>{branchName}</h3>
-                <p>إيصال حجز وتوفير دواء (نسخة العميل)</p>
-                {branchPhone && <p><Phone size={10} style={{ display: 'inline' }} /> {branchPhone}</p>}
-                {branchAddress && <p><MapPin size={10} style={{ display: 'inline' }} /> {branchAddress}</p>}
+                ) : (
+                  <div style={{ textAlign: 'center', marginBottom: '6px' }}>
+                    <span style={{ display: 'inline-block', border: '1.5px solid #000', padding: '2px 8px', borderRadius: '4px', fontWeight: '900', fontSize: '12px' }}>
+                      ❖ {branchName} ❖
+                    </span>
+                  </div>
+                )}
+                <h3 style={{ margin: '0 0 3px', fontSize: printProfile === 'pos58' ? '13px' : '15px', fontWeight: '900' }}>{branchName}</h3>
+                <p className="receipt-subtitle" style={{ margin: '2px 0 3px', fontSize: printProfile === 'pos58' ? '9.5px' : '11px', fontWeight: '700' }}>إيصال حجز وتوفير دواء (نسخة العميل)</p>
+                {branchPhone && (
+                  <p className="receipt-branch-phones" style={{ margin: '3px 0', fontSize: printProfile === 'pos58' ? '9.5px' : '10.5px', fontWeight: '700', lineHeight: 1.35 }}>
+                    {branchPhone}
+                  </p>
+                )}
+                {branchAddress && (
+                  <p className="receipt-branch-address" style={{ margin: '2px 0 0', fontSize: printProfile === 'pos58' ? '9px' : '10px', color: '#111' }}>
+                    📍 {branchAddress}
+                  </p>
+                )}
               </div>
 
-              <div className="receipt-meta">
-                <div>رقم الإيصال: <strong>{order.order_number || order.orderNumber}</strong></div>
-                <div>العميل: <strong>{order.customer_name || order.customerName}</strong></div>
-                <div>الهاتف: {order.customer_phone || order.customerPhone}</div>
-                <div>طريقة التسليم: <strong>
-                  {order.delivery_type === 'home_delivery' || order.deliveryType === 'home_delivery'
-                    ? '🛵 توصيل دليفري للعنوان'
-                    : (order.delivery_type === 'other_branch_pickup' || order.deliveryType === 'other_branch_pickup'
-                        ? `🔄 استلام من فرع: ${order.delivery_target_branch || order.deliveryTargetBranch || 'فرع آخر'}`
-                        : '🏪 استلام من الفرع')}
-                </strong></div>
-                <div>التاريخ: {formattedDate}</div>
+              <div className="receipt-meta" style={{ marginBottom: '8px', fontSize: printProfile === 'pos58' ? '9.5px' : '11px', lineHeight: 1.4, borderBottom: '1.5px dashed #000', paddingBottom: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
+                  <span>رقم الإيصال:</span>
+                  <strong>{order.order_number || order.orderNumber}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
+                  <span>العميل:</span>
+                  <strong>{order.customer_name || order.customerName}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
+                  <span>الهاتف:</span>
+                  <span>{order.customer_phone || order.customerPhone}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
+                  <span>طريقة التسليم:</span>
+                  <strong>
+                    {order.delivery_type === 'home_delivery' || order.deliveryType === 'home_delivery'
+                      ? '🛵 دليفري للعنوان'
+                      : (order.delivery_type === 'other_branch_pickup' || order.deliveryType === 'other_branch_pickup'
+                          ? `🔄 استلام من فرع: ${order.delivery_target_branch || order.deliveryTargetBranch || 'فرع آخر'}`
+                          : '🏪 استلام من الفرع')}
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
+                  <span>التاريخ:</span>
+                  <span>{formattedDate}</span>
+                </div>
                 {order.order_category === 'cosmetics' ? (
                   <div style={{ color: '#be185d', fontWeight: 'bold' }}>التصنيف: 💄 مستحضرات تجميل وعناية</div>
                 ) : null}
-                <div>الصيدلي المستلم: <strong>{order.order_receiver_name || order.responsible_pharmacist || order.responsiblePharmacist || 'د. صيدلي'}</strong> {order.order_receiver_code ? `(كود: ${order.order_receiver_code})` : ''}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
+                  <span>الصيدلي المستلم:</span>
+                  <strong>{order.order_receiver_name || order.responsible_pharmacist || order.responsiblePharmacist || 'د. صيدلي'} {order.order_receiver_code ? `(كود: ${order.order_receiver_code})` : ''}</strong>
+                </div>
               </div>
 
-              <table className="receipt-table">
+              {/* جدول الأصناف الثابت المانع للتداخل والقص */}
+              <table className="receipt-table" style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: printProfile === 'pos58' ? '9px' : '10.5px', marginBottom: '8px' }}>
+                <colgroup>
+                  <col style={{ width: '40%' }} />
+                  <col style={{ width: '14%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '17%' }} />
+                  <col style={{ width: '17%' }} />
+                </colgroup>
                 <thead>
                   <tr>
-                    <th>الصنف</th>
-                    <th>الوحدة</th>
-                    <th>الكمية</th>
-                    <th>السعر</th>
-                    <th>الإجمالي</th>
+                    <th className="col-name" style={{ textAlign: 'right', padding: '3px 2px', borderBottom: '1.5px solid #000', fontWeight: '900' }}>الصنف</th>
+                    <th className="col-num" style={{ textAlign: 'center', padding: '3px 1px', borderBottom: '1.5px solid #000', fontWeight: '900' }}>الوحدة</th>
+                    <th className="col-num" style={{ textAlign: 'center', padding: '3px 1px', borderBottom: '1.5px solid #000', fontWeight: '900' }}>الكمية</th>
+                    <th className="col-price" style={{ textAlign: 'left', padding: '3px 1px', borderBottom: '1.5px solid #000', fontWeight: '900' }}>السعر</th>
+                    <th className="col-price" style={{ textAlign: 'left', padding: '3px 1px', borderBottom: '1.5px solid #000', fontWeight: '900' }}>الإجمالي</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -658,22 +605,26 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                     const total = qty * unitPrice;
 
                     return (
-                      <tr key={idx}>
-                        <td>
+                      <tr key={idx} style={{ borderBottom: '1.5px dashed #000' }}>
+                        <td className="col-name" style={{ textAlign: 'right', padding: '3px 2px', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
                           <strong>{item.medicationName || item.medication_name}</strong>
                           {isEstimated ? (
-                            <small style={{ display: 'block', color: '#b45309', fontSize: '9.5px', marginTop: '1px' }}>
+                            <small style={{ display: 'block', color: '#b45309', fontSize: '9px', marginTop: '1px' }}>
                               (سعر تقديري)
                             </small>
                           ) : null}
                         </td>
-                        <td>{item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة'}</td>
-                        <td>{qty}</td>
-                        <td style={{ fontSize: isEstimated ? '10px' : undefined, fontWeight: isEstimated ? 'bold' : undefined }}>
-                          {isEstimated ? `من ${priceMin.toFixed(2)} إلى ${priceMax.toFixed(2)}` : unitPrice.toFixed(2)}
+                        <td className="col-num" style={{ textAlign: 'center', padding: '3px 1px' }}>
+                          {item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة'}
                         </td>
-                        <td style={{ fontSize: isEstimated ? '10px' : undefined, fontWeight: 'bold', color: isEstimated ? '#b45309' : undefined }}>
-                          {isEstimated ? `من ${(priceMin * qty).toFixed(2)} إلى ${(priceMax * qty).toFixed(2)}` : total.toFixed(2)}
+                        <td className="col-num" style={{ textAlign: 'center', padding: '3px 1px', fontWeight: 'bold' }}>
+                          {qty}
+                        </td>
+                        <td className="col-price" style={{ textAlign: 'left', padding: '3px 1px', direction: 'ltr', unicodeBidi: 'isolate', whiteSpace: 'nowrap', fontSize: isEstimated ? '9px' : undefined }}>
+                          {isEstimated ? `${priceMin.toFixed(2)}-${priceMax.toFixed(2)}` : unitPrice.toFixed(2)}
+                        </td>
+                        <td className="col-price" style={{ textAlign: 'left', padding: '3px 1px', direction: 'ltr', unicodeBidi: 'isolate', whiteSpace: 'nowrap', fontWeight: 'bold', fontSize: isEstimated ? '9px' : undefined, color: isEstimated ? '#b45309' : undefined }}>
+                          {isEstimated ? `${(priceMin * qty).toFixed(2)}-${(priceMax * qty).toFixed(2)}` : total.toFixed(2)}
                         </td>
                       </tr>
                     );
@@ -681,7 +632,8 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                 </tbody>
               </table>
 
-              <div className="receipt-totals">
+              {/* مربعات الإجماليات الآمنة ضد القص الميكانيكي */}
+              <div className="receipt-totals" style={{ borderTop: '1.5px dashed #000', paddingTop: '6px', marginBottom: '8px', paddingLeft: '4px', paddingRight: '4px' }}>
                 {(() => {
                   const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill);
                   let totalMin = 0;
@@ -738,9 +690,9 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
 
                   return (
                     <>
-                      <div className="row">
-                        <span>إجمالي الأصناف:</span>
-                        <span>
+                      <div className="row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '3px 0', fontSize: printProfile === 'pos58' ? '9.5px' : '11px' }}>
+                        <span style={{ textAlign: 'right' }}>إجمالي الأصناف:</span>
+                        <span style={{ direction: 'ltr', unicodeBidi: 'isolate', textAlign: 'left', whiteSpace: 'nowrap', fontWeight: '700', paddingLeft: '2px' }}>
                           {hasEstimated ? (
                             <strong style={{ color: '#b45309' }}>
                               من {totalMin.toFixed(2)} إلى {totalMax.toFixed(2)} ج.م
@@ -751,14 +703,16 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                         </span>
                       </div>
                       {discVal > 0 && (
-                        <div className="row">
-                          <span>الخصم:</span>
-                          <span>{discVal} {isPercent ? '%' : 'ج.م'}</span>
+                        <div className="row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '3px 0', fontSize: printProfile === 'pos58' ? '9.5px' : '11px' }}>
+                          <span style={{ textAlign: 'right' }}>الخصم:</span>
+                          <span style={{ direction: 'ltr', unicodeBidi: 'isolate', textAlign: 'left', whiteSpace: 'nowrap', fontWeight: '700', paddingLeft: '2px' }}>
+                            {discVal} {isPercent ? '%' : 'ج.م'}
+                          </span>
                         </div>
                       )}
-                      <div className="row grand-total">
-                        <span>الصافي المطلوب:</span>
-                        <span>
+                      <div className="row grand-total" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #000', borderBottom: '1px solid #000', padding: '3px 0', margin: '4px 0', fontWeight: '900', fontSize: printProfile === 'pos58' ? '11px' : '12.5px' }}>
+                        <span style={{ textAlign: 'right' }}>الصافي المطلوب:</span>
+                        <span style={{ direction: 'ltr', unicodeBidi: 'isolate', textAlign: 'left', whiteSpace: 'nowrap', fontWeight: '900', paddingLeft: '2px', fontSize: printProfile === 'pos58' ? '11px' : '12.5px' }}>
                           {hasEstimated ? (
                             <strong style={{ color: '#0f766e' }}>
                               من {netMin.toFixed(2)} إلى {netMax.toFixed(2)} ج.م
@@ -768,13 +722,15 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                           )}
                         </span>
                       </div>
-                      <div className="row">
-                        <span>المبلغ المدفوع (مقدماً):</span>
-                        <span>{paid.toFixed(2)} ج.م</span>
+                      <div className="row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '3px 0', fontSize: printProfile === 'pos58' ? '9.5px' : '11px' }}>
+                        <span style={{ textAlign: 'right' }}>المبلغ المدفوع (مقدماً):</span>
+                        <span style={{ direction: 'ltr', unicodeBidi: 'isolate', textAlign: 'left', whiteSpace: 'nowrap', fontWeight: '700', paddingLeft: '2px' }}>
+                          {paid.toFixed(2)} ج.م
+                        </span>
                       </div>
-                      <div className="row" style={{ fontWeight: 'bold', color: '#b91c1c' }}>
-                        <span>المتبقي عند الاستلام:</span>
-                        <span>
+                      <div className="row remaining-highlight" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1.5px solid #000', padding: '3px 4px', borderRadius: '4px', margin: '4px 0', fontWeight: '900', color: '#b91c1c', fontSize: printProfile === 'pos58' ? '11px' : '12.5px' }}>
+                        <span style={{ textAlign: 'right' }}>المتبقي عند الاستلام:</span>
+                        <span style={{ direction: 'ltr', unicodeBidi: 'isolate', textAlign: 'left', whiteSpace: 'nowrap', fontWeight: '900', paddingLeft: '2px', fontSize: printProfile === 'pos58' ? '11px' : '12.5px' }}>
                           {hasEstimated ? (
                             <strong style={{ color: '#b91c1c' }}>
                               من {remMin.toFixed(2)} إلى {remMax.toFixed(2)} ج.م
@@ -793,8 +749,8 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                         if ((!hasEstimated && refundDue > 0) || (hasEstimated && refundMax > 0)) {
                           return (
                             <div className="row" style={{ fontWeight: '900', color: '#059669', background: '#ecfdf5', padding: '3px 6px', borderRadius: '4px', border: '1px dashed #10b981', margin: '3px 0' }}>
-                              <span>المتبقي للعميل من مبلغ العربون (مستحق رده):</span>
-                              <span>
+                              <span>المتبقي للعميل (مستحق رده):</span>
+                              <span style={{ direction: 'ltr', unicodeBidi: 'isolate', textAlign: 'left', whiteSpace: 'nowrap' }}>
                                 {hasEstimated ? (
                                   <strong style={{ color: '#059669' }}>
                                     من {refundMin.toFixed(2)} إلى {refundMax.toFixed(2)} ج.م
@@ -814,14 +770,14 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
               </div>
 
               {order.expected_pickup_date || order.expectedPickupDate ? (
-                <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', fontSize: '11px', margin: '6px 0', border: '1px solid #e2e8f0' }}>
+                <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', fontSize: printProfile === 'pos58' ? '9px' : '11px', margin: '6px 0', border: '1px solid #e2e8f0', textAlign: 'center' }}>
                   📅 موعد الاستلام المتوقع: <strong>{String(order.expected_pickup_date || order.expectedPickupDate).split('T')[0]}</strong> {order.expected_pickup_time || order.expectedPickupTime ? ('(' + (order.expected_pickup_time || order.expectedPickupTime) + ')') : ''}
                 </div>
               ) : null}
 
-              <div className="receipt-barcode">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px', margin: '4px 0' }}>
-                  <div dangerouslySetInnerHTML={{ __html: generateBarcodeSvgString(barcodeValue, { moduleWidth: 1.45, height: 44 }) }} />
+              <div className="receipt-barcode" style={{ textAlign: 'center', margin: '8px 0 4px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', margin: '4px 0' }}>
+                  <div dangerouslySetInnerHTML={{ __html: generateBarcodeSvgString(barcodeValue, { moduleWidth: printProfile === 'pos58' ? 1.25 : 1.45, height: 42 }) }} />
                   <div dangerouslySetInnerHTML={{ __html: generateQrSvgString(barcodeValue) }} />
                 </div>
                 <div style={{ fontSize: '10px', marginTop: '2px', fontWeight: 'bold' }}>
@@ -834,11 +790,11 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
             </div>
 
             {/* خط فاصل للقص التلقائي والطباعة */}
-            <div className="receipt-page-cut-line" style={{
+            <div className="receipt-page-cut-line receipt-cut-separator" style={{
               textAlign: 'center',
               fontSize: '10px',
               color: '#475569',
-              margin: '16px 0',
+              margin: '16px 0 12px',
               borderTop: '1.5px dashed #000',
               paddingTop: '6px',
               pageBreakAfter: 'always',
@@ -849,22 +805,61 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
 
             {/* ── 2. نسخة الصيدلية (مرفقة مع علبة الدواء) ── */}
             <div className="receipt-copy" id="receipt-copy-pharmacy">
-              <div className="receipt-header">
-                <h3>{branchName}</h3>
-                <p>إيصال حجز وتوفير دواء (نسخة الصيدلية)</p>
-                <small>تُحفظ مع علبة الدواء في درج النواقص لحين حضور العميل</small>
+              <div className="receipt-header" style={{ textAlign: 'center', marginBottom: '8px', borderBottom: '1.5px dashed #000', paddingBottom: '6px' }}>
+                {pharmacyLogo ? (
+                  <div className="receipt-logo-wrapper" style={{ textAlign: 'center', marginBottom: '5px' }}>
+                    <img
+                      src={pharmacyLogo}
+                      alt="شعار الصيدلية"
+                      className="receipt-logo-img"
+                      style={{
+                        maxHeight: printProfile === 'pos58' ? '42px' : '52px',
+                        maxWidth: printProfile === 'pos58' ? '110px' : '140px',
+                        objectFit: 'contain',
+                        display: 'inline-block',
+                        filter: 'grayscale(100%) contrast(300%) brightness(90%)',
+                        WebkitFilter: 'grayscale(100%) contrast(300%) brightness(90%)',
+                        imageRendering: 'crisp-edges'
+                      }}
+                    />
+                  </div>
+                ) : null}
+                <h3 style={{ margin: '0 0 3px', fontSize: printProfile === 'pos58' ? '13px' : '15px', fontWeight: '900' }}>{branchName}</h3>
+                <p className="receipt-subtitle" style={{ margin: '2px 0 3px', fontSize: printProfile === 'pos58' ? '9.5px' : '11px', fontWeight: '700' }}>إيصال حجز وتوفير دواء (نسخة الصيدلية)</p>
+                {branchPhone && (
+                  <p className="receipt-branch-phones" style={{ margin: '2px 0', fontSize: printProfile === 'pos58' ? '9px' : '10px', fontWeight: 'bold' }}>
+                    {branchPhone}
+                  </p>
+                )}
+                {branchAddress && (
+                  <p className="receipt-branch-address" style={{ margin: '1px 0', fontSize: printProfile === 'pos58' ? '8.5px' : '9.5px' }}>
+                    📍 {branchAddress}
+                  </p>
+                )}
+                <small style={{ fontSize: '9.5px', display: 'block', marginTop: '3px' }}>
+                  تُحفظ مع علبة الدواء في درج النواقص لحين حضور العميل
+                </small>
               </div>
 
-              <div className="receipt-meta">
-                <div>رقم الإيصال: <strong>{order.order_number || order.orderNumber}</strong></div>
-                <div>العميل: <strong>{order.customer_name || order.customerName}</strong> ({order.customer_phone || order.customerPhone})</div>
-                <div>طريقة التسليم: <strong>
-                  {order.delivery_type === 'home_delivery' || order.deliveryType === 'home_delivery'
-                    ? '🛵 دليفري'
-                    : (order.delivery_type === 'other_branch_pickup' || order.deliveryType === 'other_branch_pickup'
-                        ? `🔄 تحويل استلام لفرع: ${order.delivery_target_branch || order.deliveryTargetBranch || ''}`
-                        : '🏪 استلام من الفرع')}
-                </strong></div>
+              <div className="receipt-meta" style={{ marginBottom: '8px', fontSize: printProfile === 'pos58' ? '9.5px' : '11px', lineHeight: 1.4, borderBottom: '1.5px dashed #000', paddingBottom: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
+                  <span>رقم الإيصال:</span>
+                  <strong>{order.order_number || order.orderNumber}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
+                  <span>العميل:</span>
+                  <strong>{order.customer_name || order.customerName} ({order.customer_phone || order.customerPhone})</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
+                  <span>طريقة التسليم:</span>
+                  <strong>
+                    {order.delivery_type === 'home_delivery' || order.deliveryType === 'home_delivery'
+                      ? '🛵 دليفري'
+                      : (order.delivery_type === 'other_branch_pickup' || order.deliveryType === 'other_branch_pickup'
+                          ? `🔄 تحويل استلام لفرع: ${order.delivery_target_branch || order.deliveryTargetBranch || ''}`
+                          : '🏪 استلام من الفرع')}
+                  </strong>
+                </div>
                 {(() => {
                   const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill);
                   let tMin = 0, tMax = 0, tAvg = 0, hasEst = false;
@@ -902,12 +897,26 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
 
                   return (
                     <>
-                      <div>المتبقي تحصيله: <strong style={{ color: '#dc2626', fontSize: '12.5px' }}>
-                        {hasEst ? `من ${rMin.toFixed(2)} إلى ${rMax.toFixed(2)} ج.م` : `${parseFloat(order.remaining_amount || order.remainingAmount || rAvg || 0).toFixed(2)} ج.م`}
-                      </strong></div>
+                      <div className="deposit-highlight" style={{ border: '2px solid #000', padding: '5px 7px', borderRadius: '4px', margin: '4px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', color: '#000', fontWeight: '900' }}>
+                        <span style={{ fontSize: printProfile === 'pos58' ? '11px' : '12px', color: '#000' }}>العربون المدفوع بالفرع:</span>
+                        <strong style={{ fontSize: printProfile === 'pos58' ? '12.5px' : '14px', direction: 'ltr', unicodeBidi: 'isolate', whiteSpace: 'nowrap', color: '#000' }}>
+                          {paid.toFixed(2)} ج.م
+                        </strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0', fontSize: printProfile === 'pos58' ? '9px' : '10.5px', fontWeight: '800' }}>
+                        <span>طريقة السداد:</span>
+                        <span>{order.payment_method === 'card' || order.paymentMethod === 'card' ? 'بطاقة ائتمانية / فيزا' : order.payment_method === 'wallet' || order.paymentMethod === 'wallet' ? 'محفظة إلكترونية' : order.payment_method === 'instapay' || order.paymentMethod === 'instapay' ? 'إنستاباي (InstaPay)' : 'نقدي (كاش)'}</span>
+                      </div>
+                      <div className="remaining-info" style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0', fontSize: printProfile === 'pos58' ? '9px' : '10px', color: '#222' }}>
+                        <span>المتبقي تحصيله عند التسليم:</span>
+                        <strong style={{ direction: 'ltr', unicodeBidi: 'isolate', color: '#000' }}>
+                          {hasEst ? `من ${rMin.toFixed(2)} إلى ${rMax.toFixed(2)} ج.م` : `${parseFloat(order.remaining_amount || order.remainingAmount || rAvg || 0).toFixed(2)} ج.م`}
+                        </strong>
+                      </div>
                       {((!hasEst && refundDue > 0) || (hasEst && refundMax > 0)) && (
-                        <div style={{ color: '#059669', fontWeight: 'bold', background: '#ecfdf5', padding: '3px 6px', borderRadius: '4px', border: '1px dashed #10b981', marginTop: '3px', fontSize: '11px' }}>
-                          المتبقي للعميل من مبلغ العربون (مستحق رده): <strong>
+                        <div style={{ color: '#000', fontWeight: '900', border: '1.5px dashed #000', padding: '3px 6px', borderRadius: '4px', marginTop: '3px', fontSize: '10.5px', display: 'flex', justifyContent: 'space-between' }}>
+                          <span>مستحق رده للعميل من العربون:</span>
+                          <strong style={{ direction: 'ltr', unicodeBidi: 'isolate' }}>
                             {hasEst ? `من ${refundMin.toFixed(2)} إلى ${refundMax.toFixed(2)} ج.م` : `${refundDue.toFixed(2)} ج.م`}
                           </strong>
                         </div>
@@ -917,9 +926,18 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                 })()}
               </div>
 
-              <table className="receipt-table">
+              <table className="receipt-table" style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: printProfile === 'pos58' ? '9px' : '10.5px' }}>
+                <colgroup>
+                  <col style={{ width: '60%' }} />
+                  <col style={{ width: '20%' }} />
+                  <col style={{ width: '20%' }} />
+                </colgroup>
                 <thead>
-                  <tr><th>الصنف</th><th>النوع</th><th>الكمية</th></tr>
+                  <tr>
+                    <th className="col-name" style={{ textAlign: 'right', padding: '3px 2px', borderBottom: '1.5px solid #000', fontWeight: '900' }}>الصنف</th>
+                    <th className="col-num" style={{ textAlign: 'center', padding: '3px 1px', borderBottom: '1.5px solid #000', fontWeight: '900' }}>النوع</th>
+                    <th className="col-num" style={{ textAlign: 'center', padding: '3px 1px', borderBottom: '1.5px solid #000', fontWeight: '900' }}>الكمية</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {(order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill).map((item, idx) => {
@@ -932,17 +950,21 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                       : (rawPrice > 0 ? rawPrice : ((priceMin + priceMax) / 2));
 
                     return (
-                      <tr key={idx}>
-                        <td>
+                      <tr key={idx} style={{ borderBottom: '1.5px dashed #000' }}>
+                        <td className="col-name" style={{ textAlign: 'right', padding: '3px 2px', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
                           <strong>{item.medicationName || item.medication_name}</strong>
                           {isEstimated ? (
                             <small style={{ display: 'block', color: '#b45309', fontSize: '9px' }}>
-                              (سعر تقديري: من ${priceMin.toFixed(2)} إلى ${priceMax.toFixed(2)} ج.م)
+                              (سعر تقديري: من {priceMin.toFixed(2)} إلى {priceMax.toFixed(2)} ج.م)
                             </small>
                           ) : null}
                         </td>
-                        <td>{item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة'}</td>
-                        <td><strong>{item.quantity}</strong></td>
+                        <td className="col-num" style={{ textAlign: 'center', padding: '3px 1px' }}>
+                          {item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة'}
+                        </td>
+                        <td className="col-num" style={{ textAlign: 'center', padding: '3px 1px', fontWeight: 'bold' }}>
+                          <strong>{item.quantity}</strong>
+                        </td>
                       </tr>
                     );
                   })}
@@ -951,8 +973,8 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
 
               <div style={{ marginTop: '14px', borderTop: '1px dashed #000', paddingTop: '8px', fontSize: '11px' }}>
                 <p style={{ margin: '0 0 10px' }}>توقيع العميل بالاستلام: ..............................</p>
-                <div className="receipt-barcode">
-                  <div dangerouslySetInnerHTML={{ __html: generateBarcodeSvgString(barcodeValue, { moduleWidth: 1.45, height: 44 }) }} />
+                <div className="receipt-barcode" style={{ textAlign: 'center' }}>
+                  <div dangerouslySetInnerHTML={{ __html: generateBarcodeSvgString(barcodeValue, { moduleWidth: printProfile === 'pos58' ? 1.25 : 1.45, height: 42 }) }} />
                 </div>
               </div>
             </div>

@@ -3,6 +3,7 @@ import { Search, Plus, Phone, MapPin, Calendar, Clock, Edit2, History, X, User, 
 import { outstockGetCustomers, outstockSaveCustomer, outstockGetCustomerHistory, outstockDeleteCustomer, outstockGetBranches } from '../../../utils/outstockApiClient';
 import CustomerWalletModal from '../common/CustomerWalletModal';
 import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
+import { useDeliveryZones } from '../../../utils/deliveryZonesService';
 
 /**
  * PharmacyCustomersTab.jsx
@@ -21,19 +22,8 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // ── قائمة المناطق / الأحياء المعتمدة من إعدادات المالك ──
-  const [deliveryZones] = useState(() => {
-    try {
-      const saved = localStorage.getItem('outstock_delivery_zones');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((z) => (typeof z === 'string' ? z : z.name)).filter(Boolean);
-        }
-      }
-    } catch (e) {}
-    return ['وسط البلد', 'حي الجامعة', 'المنطقة الأولى', 'المنطقة الثانية', 'حي النزهة', 'أخرى / خارج النطاق'];
-  });
+  // ── قائمة المناطق / الأحياء المعتمدة من إعدادات المالك (الخدمة المركزية) ──
+  const deliveryZones = useDeliveryZones();
 
   // نافذة إضافة/تعديل عميل
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);

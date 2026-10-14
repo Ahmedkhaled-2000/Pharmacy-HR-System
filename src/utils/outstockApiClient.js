@@ -132,13 +132,28 @@ export async function outstockSaveUser(userData) {
 export async function outstockGetCustomers(params = {}) {
   const qs = new URLSearchParams();
   if (params.search) qs.append('search', params.search);
+  if (params.phone) qs.append('phone', params.phone);
   if (params.productSearch) qs.append('productSearch', params.productSearch);
   if (params.category_scope) qs.append('category_scope', params.category_scope);
   if (params.branchId) qs.append('branchId', params.branchId);
 
   const res = await outstockRequest(`customers?${qs.toString()}`, { method: 'GET' });
   if (res?.success && Array.isArray(res.customers)) {
-    cacheCustomers(res.customers);
+    // تحديث الكاش العام إذا كان الطلب لكامل قائمة العملاء، أو دمج العميل بالذاكرة المحلية
+    if (!params.phone && !params.search && !params.productSearch) {
+      cacheCustomers(res.customers);
+    } else if (res.customers.length > 0) {
+      try {
+        const cached = getCachedCustomers() || [];
+        const merged = [...cached];
+        res.customers.forEach((nc) => {
+          const idx = merged.findIndex((c) => c.id === nc.id || (c.whatsapp_phone && c.whatsapp_phone === nc.whatsapp_phone));
+          if (idx >= 0) merged[idx] = { ...merged[idx], ...nc };
+          else merged.unshift(nc);
+        });
+        cacheCustomers(merged.slice(0, 500));
+      } catch (_) {}
+    }
     return res;
   }
 
@@ -153,6 +168,13 @@ export async function outstockGetCustomers(params = {}) {
           (c.full_name && c.full_name.toLowerCase().includes(s)) ||
           (c.whatsapp_phone && c.whatsapp_phone.includes(s)) ||
           (c.customer_code && c.customer_code.toLowerCase().includes(s))
+        );
+      }
+      if (params.phone) {
+        const ph = String(params.phone).replace(/\D/g, '');
+        filtered = filtered.filter(c =>
+          (c.whatsapp_phone && c.whatsapp_phone.includes(ph)) ||
+          (c.landline_phone && c.landline_phone.includes(ph))
         );
       }
       return { success: true, customers: filtered, isFromCache: true };
@@ -305,6 +327,13 @@ export async function outstockProcurementBatchItemActions(actions) {
   return await outstockRequest('procurement/batch-item-actions', {
     method: 'POST',
     body: JSON.stringify({ actions })
+  });
+}
+
+export async function outstockConvertItemType(payload) {
+  return await outstockRequest('procurement/convert-item-type', {
+    method: 'POST',
+    body: JSON.stringify(payload)
   });
 }
 
@@ -607,6 +636,20 @@ export async function outstockApproveNewItemRequest(id, medicationData) {
   return await outstockRequest(`medication-requests/${id}/approve-new-item`, {
     method: 'POST',
     body: JSON.stringify({ medicationData })
+  });
+}
+
+export async function outstockSendMedicationRequestWhatsApp(id, payload = {}) {
+  return await outstockRequest(`medication-requests/${id}/whatsapp`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function outstockConvertMedicationRequestToOrder(id, payload = {}) {
+  return await outstockRequest(`medication-requests/${id}/convert-to-order`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
   });
 }
 
@@ -1035,9 +1078,10 @@ export async function outstockUpdateOrderDeposit(orderId, payload) {
   });
 }
 
-export async function outstockDeleteOrder(orderId) {
+export async function outstockDeleteOrder(orderId, refundPayload = {}) {
   return outstockRequest(`orders/${encodeURIComponent(orderId)}`, {
-    method: 'DELETE'
+    method: 'DELETE',
+    body: JSON.stringify(refundPayload)
   });
 }
 
@@ -1135,7 +1179,54 @@ export async function outstockGetCosmeticsCustomerOrders(customerId) {
   return outstockRequest(`cosmetics/customers/${encodeURIComponent(customerId)}/orders`);
 }
 
-// ── 22. تصفير ومسح طلبات النظام ─────────────────────────────────────────────
+// ── 22. تصفير ومسح بيانات النظام وإدارة النسخ الاحتياطية ────────────────────────
+export async function outstockGetPurgeTelemetry() {
+  return outstockRequest('admin/purge-telemetry');
+}
+
+export async function outstockPurgeSystem({ confirmationPhrase, ownerPassword, scope = 'full_operational', resetCustomerStats = true }) {
+  return outstockRequest('admin/purge-system', {
+    method: 'POST',
+    body: JSON.stringify({ confirmationPhrase, ownerPassword, scope, resetCustomerStats })
+  });
+}
+
+export async function outstockGetBackupArchives() {
+  return outstockRequest('admin/backups');
+}
+
+export async function outstockDownloadBackup(backupId) {
+  const token = getOutstockToken();
+  const url = `${API_BASE_URL}/outstock/admin/backups/${encodeURIComponent(backupId)}/download`;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      }
+    });
+    if (!res.ok) throw new Error('فشل تحميل ملف النسخة الاحتياطية');
+    const blob = await res.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = `${backupId}.json`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(downloadUrl);
+    document.body.removeChild(a);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function outstockRestoreBackup(backupId, { confirmationPhrase, ownerPassword }) {
+  return outstockRequest(`admin/backups/${encodeURIComponent(backupId)}/restore`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmationPhrase, ownerPassword })
+  });
+}
+
 export async function outstockPurgeOrders(confirmationPhrase) {
   return outstockRequest('admin/purge-orders', {
     method: 'POST',

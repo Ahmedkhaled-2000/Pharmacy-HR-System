@@ -497,20 +497,22 @@ export default function EmployeeLoansModule({
                 {loanType === 'installment' && (
                   <div className="field" style={{ flex: '1 1 140px' }}>
                     <label style={{ fontWeight: '700' }}>عدد شهور التقسيط</label>
-                    <select value={monthsCount} onChange={(e) => setMonthsCount(e.target.value)}>
-                      <option value="2">2 شهر (نصف المبلغ شهرياً)</option>
-                      <option value="3">3 شهور</option>
-                      <option value="4">4 شهور</option>
-                      <option value="5">5 شهور</option>
-                      <option value="6">6 شهور</option>
-                    </select>
+                    <input
+                      type="number"
+                      min="2"
+                      max="36"
+                      placeholder="أدخل عدد الشهور (مثال: 3)..."
+                      value={monthsCount}
+                      onChange={(e) => setMonthsCount(e.target.value)}
+                      required
+                    />
                   </div>
                 )}
               </div>
 
-              {loanType === 'installment' && parseFloat(loanAmount) > 0 && (
+              {loanType === 'installment' && parseFloat(loanAmount) > 0 && parseInt(monthsCount, 10) > 1 && (
                 <div style={{ marginTop: '10px', fontSize: '13px', color: 'var(--primary)', fontWeight: '700' }}>
-                  💡 القسط الشهرى المحسوب: {fmt(parseFloat(loanAmount) / parseInt(monthsCount, 10))} ج.م / شهر لمده {monthsCount} أشهر.
+                  💡 القسط الشهرى المحسوب: {fmt(Math.round((parseFloat(loanAmount) / parseInt(monthsCount, 10)) * 100) / 100)} ج.م / شهر لمده {monthsCount} أشهر.
                 </div>
               )}
 
@@ -633,11 +635,15 @@ export default function EmployeeLoansModule({
                           {medRepayPlan === 'installment' && (
                             <div className="field">
                               <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>عدد شهور التقسيط</label>
-                              <select value={medMonthsCount} onChange={(e) => setMedMonthsCount(e.target.value)}>
-                                {Array.from({ length: Math.max(1, creditMedicineMaxInstallments - 1) }, (_, i) => i + 2).map((m) => (
-                                  <option key={m} value={m}>{m} شهور ({fmt(Math.round((totalCost / m) * 100) / 100)} ج.م / شهر)</option>
-                                ))}
-                              </select>
+                              <input
+                                type="number"
+                                min="2"
+                                max={creditMedicineMaxInstallments || 24}
+                                placeholder="أدخل عدد الشهور (مثال: 3)..."
+                                value={medMonthsCount}
+                                onChange={(e) => setMedMonthsCount(e.target.value)}
+                                required
+                              />
                             </div>
                           )}
                         </div>
@@ -645,7 +651,7 @@ export default function EmployeeLoansModule({
                         {medRepayPlan === 'installment' && (
                           <div style={{ marginTop: '10px', padding: '8px 12px', background: '#dbeafe', borderRadius: '6px', fontSize: '12.5px', color: '#1e40af', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between' }}>
                             <span>القسط الشهري المستحق:</span>
-                            <span>{fmt(Math.round((totalCost / (parseInt(medMonthsCount, 10) || 2)) * 100) / 100)} ج.م / شهر</span>
+                            <span>{fmt(Math.round((totalCost / Math.max(1, parseInt(medMonthsCount, 10) || 1)) * 100) / 100)} ج.م / شهر {parseInt(medMonthsCount, 10) > 0 ? `(لمدة ${medMonthsCount} أشهر)` : ''}</span>
                           </div>
                         )}
                       </div>
