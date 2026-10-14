@@ -1365,6 +1365,28 @@ export default function EmployeeCardsGrid({
                             📁
                           </a>
                         )}
+                        {/* 🗂️ زر أيقونة سجل الموظف الشامل 360° (بدون عنوان بجانبه) */}
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title="سجل الموظف الشامل 360° (الملف العام، البصمات، الجدول، الإجازات، السلف، الجزاءات، المكافآت)"
+                          style={{
+                            background: '#eff6ff',
+                            borderColor: '#93c5fd',
+                            color: '#1d4ed8',
+                            fontSize: '14px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'all 0.2s ease'
+                          }}
+                          onClick={() => {
+                            setDossierInitialTab('summary');
+                            setDossierModalEmp(emp);
+                          }}
+                        >
+                          🗂️
+                        </button>
                         <button
                           className="icon-btn"
                           title="تفاصيل مفردات المرتب والبدلات التعاقدية"
@@ -1412,6 +1434,12 @@ export default function EmployeeCardsGrid({
         <EmployeeComprehensiveDossierModal
           emp={dossierModalEmp}
           state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          monthPicker={monthPicker}
+          computeEmpSummary={computeEmpSummary}
+          executeWithOwnerGuard={executeWithOwnerGuard}
           initialTab={dossierInitialTab}
           onClose={() => {
             setDossierModalEmp(null);
