@@ -684,8 +684,10 @@ export default function PayslipPrintModal({
   const absenceDayItems = [];
   if (!isFlexibleEmp) {
     const today = getRealTodayStr();
+    const hireDate = emp?.hireDate || emp?.hiring_date || emp?.contractStartDate;
     cycleDates.forEach(dateStr => {
       if (dateStr >= today) return; // لا تحتسب الأيام الحالية أو المستقبلية كغياب
+      if (hireDate && dateStr < hireDate) return; // 🛡️ حصانة مطلقة: لا غياب إطلاقاً قبل تاريخ التعيين الرسمي
       if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;
       const daySched = getEmployeeDaySchedule(emp.id, dateStr, state);
       if (daySched && daySched.type !== 'off' && !daySched.isOff) {

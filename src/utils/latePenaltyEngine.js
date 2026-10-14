@@ -305,6 +305,20 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
   // الموظف الذي ليس له جدول شهري أو مواعيد متغيرة لا يمتلك مواعيد شفتات محددة أو ملزمة
   if (isVariableScheduleEmployee(emp)) return null;
 
+  // 🛡️ القاعدة الذهبية المركزية: الحصانة المطلقة لما قبل تاريخ التعيين الرسمي للموظف
+  const hireDate = emp?.hireDate || emp?.hiring_date || emp?.contractStartDate;
+  if (hireDate && dateStr && dateStr < hireDate) {
+    return {
+      type: 'off',
+      isOff: true,
+      isPreHire: true,
+      start: '',
+      end: '',
+      branchId: emp?.branchId || '',
+      source: 'pre_hire_immunity'
+    };
+  }
+
   // 1. فحص طلبات تعديل الشيفت المعتمدة أولاً (Shift Adjustment Requests)
   const approvedShiftAdj = (state.requests || []).find(
     (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&

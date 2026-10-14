@@ -1584,8 +1584,11 @@ export default function EmployeePortalView({
       }
     }
 
+    const hireDate = emp?.hireDate || emp?.hiring_date || emp?.contractStartDate;
     for (const dateStr of dates) {
       if (dateStr >= today) continue; // future/today days
+      // 🛡️ الحصانة المطلقة لما قبل تاريخ التعيين: لا غياب إطلاقاً قبل تاريخ التعيين الرسمي
+      if (hireDate && dateStr < hireDate) continue;
 
       // Dynamic day schedule taking into account shift swaps and off swaps
       const daySchedule = getEmployeeDaySchedule(emp.id, dateStr, state);

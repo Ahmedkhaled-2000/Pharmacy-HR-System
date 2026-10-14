@@ -253,11 +253,12 @@ export default function EmployeeRosterEditModal({
       };
     });
 
-    // تطبيق تلقائي وفوري على كافة تواريخ الشهر المطابقة لهذا اليوم
+    // تطبيق تلقائي وفوري على كافة تواريخ الشهر المطابقة لهذا اليوم (باستثناء أيام ما قبل التعيين)
     setMonthlyDaysSchedule((prevMonth) => {
       if (!cycleDays || cycleDays.length === 0) return prevMonth;
       const updatedMonth = { ...prevMonth };
       cycleDays.forEach((day) => {
+        if (day.isPreHire) return;
         if (day.dayLabel === dayLabel && nextDayConfig) {
           const curDay = updatedMonth[day.dateStr] || {};
           updatedMonth[day.dateStr] = {
@@ -279,7 +280,9 @@ export default function EmployeeRosterEditModal({
   const [defaultShiftStart, setDefaultShiftStart] = useState('08:00');
   const [defaultShiftEnd, setDefaultShiftEnd] = useState('16:00');
 
-  // توليد كافة أيام دورة الرواتب الفعلية للشهر المحدد
+  const targetEmpHireDate = targetEmp?.hireDate || targetEmp?.hiring_date || targetEmp?.contractStartDate;
+
+  // توليد كافة أيام دورة الرواتب الفعلية للشهر المحدد مع تدقيق تاريخ التعيين
   const cycleDays = useMemo(() => {
     if (!cycleRange?.startDate || !cycleRange?.endDate) return [];
     const days = [];
@@ -292,12 +295,15 @@ export default function EmployeeRosterEditModal({
         const d = String(cur.getDate()).padStart(2, '0');
         const dateStr = `${y}-${m}-${d}`;
         const dayLabel = arabicWeekday(dateStr) || arabicWeekday(cur);
+        const isPreHire = Boolean(targetEmpHireDate && dateStr < targetEmpHireDate);
         days.push({
           dateStr,
           dayLabel,
           dayNumber: cur.getDate(),
           monthNumber: cur.getMonth() + 1,
-          jsDayIndex: cur.getDay()
+          jsDayIndex: cur.getDay(),
+          isPreHire,
+          hireDate: targetEmpHireDate
         });
         cur.setDate(cur.getDate() + 1);
       }
@@ -305,7 +311,7 @@ export default function EmployeeRosterEditModal({
       console.warn('Error generating cycle days:', e);
     }
     return days;
-  }, [cycleRange]);
+  }, [cycleRange, targetEmpHireDate]);
 
   // خريطة أيام الشهر التفاعلية المفصلة (YYYY-MM-DD -> { type, start, end, hours, isOff })
   const [monthlyDaysSchedule, setMonthlyDaysSchedule] = useState(() => {
@@ -330,6 +336,18 @@ export default function EmployeeRosterEditModal({
       const defBName = defBObj ? defBObj.name : (branchName || '');
 
       cycleDays.forEach((day) => {
+        if (day.isPreHire) {
+          updated[day.dateStr] = {
+            type: 'off',
+            isOff: true,
+            isPreHire: true,
+            hours: 0,
+            start: '',
+            end: '',
+            label: `خارج نطاق التعاقد (تاريخ التعيين: ${day.hireDate})`
+          };
+          return;
+        }
         if (existingRoster?.schedule && existingRoster.schedule[day.dateStr]) {
           const rawItem = existingRoster.schedule[day.dateStr];
           const bObj = allBranches.find(b => String(b.id) === String(rawItem.branchId));
@@ -514,10 +532,11 @@ export default function EmployeeRosterEditModal({
     if (diff <= 0) diff += 24 * 60;
     const hours = Math.round((diff / 60) * 10) / 10;
 
-    // تطبيق على الأيام في التقويم الشهري
+    // تطبيق على الأيام في التقويم الشهري (مع استثناء أيام ما قبل التعيين)
     setMonthlyDaysSchedule((prev) => {
       const updated = { ...prev };
       cycleDays.forEach((day) => {
+        if (day.isPreHire) return;
         const cur = updated[day.dateStr] || { type: 'shift', isOff: false };
         if (cur.type !== 'off' && !cur.isOff) {
           updated[day.dateStr] = {
@@ -744,6 +763,22 @@ export default function EmployeeRosterEditModal({
         ...syncedWeeklyInputs,
         ...monthlyDaysSchedule
       };
+      // 🛡️ الحصانة المطلقة: تأمين وتثبيت أيام ما قبل التعيين كأيام راحة خارج نطاق التعاقد
+      if (cycleDays && cycleDays.length > 0) {
+        cycleDays.forEach((cd) => {
+          if (cd.isPreHire) {
+            safeInputs[cd.dateStr] = {
+              type: 'off',
+              isOff: true,
+              isPreHire: true,
+              hours: 0,
+              start: '',
+              end: '',
+              label: `خارج نطاق التعاقد (تاريخ التعيين: ${cd.hireDate})`
+            };
+          }
+        });
+      }
       const effectiveBranchId = targetEmp.isFloatingStaff
         ? (defaultBranchId || 'floating')
         : (targetEmp.primaryBranchId || targetEmp.branchId || branchId || '');
@@ -1421,6 +1456,47 @@ export default function EmployeeRosterEditModal({
                     </thead>
                     <tbody>
                       {cycleDays.map((day) => {
+                        if (day.isPreHire) {
+                          return (
+                            <tr
+                              key={day.dateStr}
+                              style={{
+                                background: '#f8fafc',
+                                borderBottom: '1px solid #e2e8f0',
+                                opacity: 0.8
+                              }}
+                            >
+                              <td style={{ fontWeight: 800, padding: '7px 8px', direction: 'ltr', textAlign: 'center', boxSizing: 'border-box' }}>
+                                <span style={{ background: '#e2e8f0', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', color: '#64748b' }}>
+                                  {day.dateStr}
+                                </span>
+                              </td>
+                              <td style={{ fontWeight: 700, padding: '7px 8px', textAlign: 'center', color: '#64748b', fontSize: '12.5px', boxSizing: 'border-box' }}>
+                                {day.dayLabel || arabicWeekday(day.dateStr)}
+                              </td>
+                              {isMultiBranchEmp && (
+                                <td style={{ textAlign: 'center', color: '#94a3b8', fontSize: '11.5px', boxSizing: 'border-box' }}>—</td>
+                              )}
+                              <td colSpan={4} style={{ padding: '6px 12px', textAlign: 'center', boxSizing: 'border-box' }}>
+                                <span style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  padding: '4px 12px',
+                                  borderRadius: '20px',
+                                  background: '#e0f2fe',
+                                  color: '#0369a1',
+                                  fontSize: '11.5px',
+                                  fontWeight: 800,
+                                  border: '1px solid #bae6fd'
+                                }}>
+                                  🔒 خارج نطاق التعاقد (تاريخ التعيين الرسمي: {day.hireDate})
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        }
+
                         const conf = monthlyDaysSchedule[day.dateStr] || { type: 'shift', start: '08:00', end: '16:00', hours: 8, branchId: defaultBranchId };
                         const isOff = conf.type === 'off' || conf.isOff === true;
                         const isFri = day.dayLabel === 'الجمعة';

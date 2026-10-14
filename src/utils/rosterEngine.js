@@ -207,6 +207,23 @@ export function findEmployeeRoster(empId, monthOrDate, state, targetBranchId = n
 export function getEmployeeBaseDaySchedule(empId, dateStr, state) {
   const empIdStr = String(empId);
   const emp = (state?.employees || []).find(e => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
+
+  // 🛡️ القاعدة الذهبية المركزية: الحصانة المطلقة لما قبل تاريخ التعيين الرسمي للموظف
+  const hireDate = emp?.hireDate || emp?.hiring_date || emp?.contractStartDate;
+  if (hireDate && dateStr && dateStr < hireDate) {
+    return {
+      type: 'off',
+      isOff: true,
+      isPreHire: true,
+      hireDate,
+      hours: 0,
+      start: '',
+      end: '',
+      label: `خارج نطاق التعاقد (تاريخ التعيين: ${hireDate})`,
+      disabled: true
+    };
+  }
+
   if (emp?.noMonthlySchedule || emp?.isVariableHours || emp?.variableHours || emp?.hasNoRoster) {
     const arDay = arabicWeekday(dateStr);
     const restDays = Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.length > 0 ? emp.weeklyRestDays : ['الجمعة'];
@@ -247,6 +264,22 @@ export function getEmployeeDaySchedule(empId, dateStr, state) {
   const empIdStr = String(empId);
   const emp = (state?.employees || []).find(e => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
   const empCodeStr = emp?.code ? String(emp.code) : '';
+
+  // 🛡️ القاعدة الذهبية المركزية: الحصانة المطلقة لما قبل تاريخ التعيين الرسمي للموظف
+  const hireDate = emp?.hireDate || emp?.hiring_date || emp?.contractStartDate;
+  if (hireDate && dateStr && dateStr < hireDate) {
+    return {
+      type: 'off',
+      isOff: true,
+      isPreHire: true,
+      hireDate,
+      hours: 0,
+      start: '',
+      end: '',
+      label: `خارج نطاق التعاقد (تاريخ التعيين: ${hireDate})`,
+      disabled: true
+    };
+  }
 
   // الموظف الذي ليس له جدول شهري (مواعيد متغيرة): يعتمد على أيام الراحة المحددة له
   if (emp?.noMonthlySchedule || emp?.isVariableHours || emp?.variableHours || emp?.hasNoRoster) {

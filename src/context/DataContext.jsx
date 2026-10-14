@@ -1375,10 +1375,13 @@ export function DataProvider({ children, showToast = () => {} }) {
     }
 
     const today = getRealTodayStr();
+    const hireDate = emp?.hireDate || emp?.hiring_date || emp?.contractStartDate;
     let count = 0;
 
     for (const dateStr of dates) {
       if (dateStr >= today) continue;
+      // 🛡️ الحصانة المطلقة لما قبل تاريخ التعيين: لا غياب إطلاقاً قبل مباشرة العمل التعاقدية
+      if (hireDate && dateStr < hireDate) continue;
       const daySchedule = getEmployeeDaySchedule(empIdStr, dateStr, state);
       if (!daySchedule || daySchedule.type === 'off' || daySchedule.isOff) continue;
       const hasShift = (state.shifts || []).some(s => {
