@@ -41,8 +41,11 @@ import {
 } from '../utils/jobsHelper';
 import {
   getEffectiveShiftHours,
-  syncAllEmployeesPermissionsAndLateness
+  syncAllEmployeesPermissionsAndLateness,
+  isVariableScheduleEmployee,
+  auditAndCleanFlexibleStaffPenalties
 } from '../utils/latePenaltyEngine';
+import { calculateShiftMetrics } from '../utils/workHoursEngine';
 import { useAuth } from './AuthContext';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
 import {
@@ -143,7 +146,10 @@ function detectEntityDeltas(prevState, nextState) {
       deltas.push({ entityType: 'branches', entityId: 'all', data: nextState.branches, action: 'update' });
     }
 
-    // 7. اللائحة والإعدادات
+    // 7. اللائحة والإعدادات وقواعد الموافقات
+    if (prevState.approvalRules !== nextState.approvalRules) {
+      deltas.push({ entityType: 'approvalRules', entityId: 'all', data: nextState.approvalRules, action: 'update' });
+    }
     if (prevState.bylaws !== nextState.bylaws) {
       deltas.push({ entityType: 'bylaws', entityId: 'bylaws', data: nextState.bylaws, action: 'update' });
     }
@@ -613,19 +619,53 @@ export function DataProvider({ children, showToast = () => {} }) {
 
       if (activeRole === 'owner') {
         const myOwnerPass = localStorage.getItem('app_owner_password_snapshot');
+        const myOwnerUser = String(localStorage.getItem('app_owner_username_snapshot') || '').trim().toLowerCase();
         const myOwnerVer = Number(localStorage.getItem('app_owner_session_version') || 0);
-        const srvOwnerPass = normalized?.orgSettings?.ownerPassword;
-        const srvOwnerVer = Number(normalized?.orgSettings?.ownerSessionVersion || 0);
-        if (myOwnerVer === 0 && srvOwnerVer > 0) {
-          try { localStorage.setItem('app_owner_session_version', String(srvOwnerVer)); } catch {}
-        } else if ((myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
-            (myOwnerVer > 0 && srvOwnerVer > 0 && srvOwnerVer > myOwnerVer)) {
+
+        const systemOwners = Array.isArray(normalized?.orgSettings?.systemOwners) ? normalized.orgSettings.systemOwners : [];
+        const matchedOwner = systemOwners.find(o => o && String(o.username || '').trim().toLowerCase() === myOwnerUser);
+
+        if (matchedOwner && matchedOwner.isActive === false) {
           if (handleLogout) handleLogout();
           else {
             localStorage.removeItem('app_auth_role');
             localStorage.removeItem('app_owner_authenticated');
             setAuthRole('none');
             setIsAdminLoggedIn(false);
+          }
+          return;
+        }
+
+        const srvOwnerPass = matchedOwner
+          ? matchedOwner.password
+          : (normalized?.orgSettings?.ownerPassword || '181013');
+
+        const srvOwnerVer = Number(
+          (matchedOwner?.sessionVersion !== undefined
+            ? matchedOwner.sessionVersion
+            : normalized?.orgSettings?.ownerSessionVersion) || 0
+        );
+
+        if (myOwnerVer === 0 && srvOwnerVer > 0) {
+          try { localStorage.setItem('app_owner_session_version', String(srvOwnerVer)); } catch {}
+        } else if (
+          (myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
+          (myOwnerVer > 0 && srvOwnerVer > 0 && srvOwnerVer > myOwnerVer)
+        ) {
+          const isStillValidPassword =
+            myOwnerPass === (normalized?.orgSettings?.ownerPassword || '181013') ||
+            systemOwners.some(o => o && o.isActive !== false && String(o.username || '').trim().toLowerCase() === myOwnerUser && o.password === myOwnerPass);
+
+          const isVersionStale = myOwnerVer > 0 && srvOwnerVer > 0 && srvOwnerVer > myOwnerVer;
+
+          if (!isStillValidPassword || isVersionStale) {
+            if (handleLogout) handleLogout();
+            else {
+              localStorage.removeItem('app_auth_role');
+              localStorage.removeItem('app_owner_authenticated');
+              setAuthRole('none');
+              setIsAdminLoggedIn(false);
+            }
           }
         }
       } else if (activeRole === 'admin') {
@@ -1308,7 +1348,7 @@ export function DataProvider({ children, showToast = () => {} }) {
   const getAbsenceDaysCount = useCallback((empId, monthStr) => {
     if (!monthStr || monthStr.length !== 7) return 0;
     const emp = getEmp(empId);
-    if (emp?.noMonthlySchedule) return 0;
+    if (isVariableScheduleEmployee(emp)) return 0;
     const empIdStr = String(empId);
     const empCodeStr = emp?.code ? String(emp.code) : '';
     const range = getPayrollCutoffRange(monthStr);
@@ -1464,12 +1504,23 @@ export function DataProvider({ children, showToast = () => {} }) {
 
       const { dailyRate, hourlyRate: rate, monthlySalary } = rates;
 
+      const isEmpMatch = (targetId, targetCode) => {
+        const tId = String(targetId || '');
+        const tCode = String(targetCode || '');
+        const eId = String(emp.id || empId || '');
+        const eCode = String(emp.code || '');
+        return (
+          (eId && (tId === eId || tCode === eId)) ||
+          (eCode && (tId === eCode || tCode === eCode))
+        );
+      };
+
       // حصر ورديات هذا الفرع بدقة بالغة وبدون تسريب ورديات الفروع الأخرى (واستبعاد أي ورديات ملغاة أو مرفوضة نهائياً)
       const bShifts = (state.shifts || []).filter(s => {
         if (!s) return false;
         if (s.status === 'cancelled' || s.status === 'rejected' || s.status === 'rejected_photo' || s.isRejectedPhoto || s.isCancelled || s.rejected) return false;
         if (typeof s.statusLabel === 'string' && (s.statusLabel.includes('ملغي') || s.statusLabel.includes('مرفوض'))) return false;
-        if (String(s.employeeId) !== String(empId)) return false;
+        if (!isEmpMatch(s.employeeId, s.employeeCode)) return false;
         if (!effectiveFilterFn(s.date)) return false;
         if (s.branchId) {
           return isBranchMatch(s.branchId, bObj);
@@ -1482,21 +1533,56 @@ export function DataProvider({ children, showToast = () => {} }) {
       const hours = bShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
       const baseEarnings = hours * rate;
 
-      const isFlexibleSchedule = Boolean(emp?.noMonthlySchedule);
+      // احتساب الساعات الإضافية المعتمدة والمعلقة بدقة متناهية عبر محرك الورديات المركزي
+      let approvedOtHours = 0;
+      let pendingOtHours = 0;
 
-      const approvedOtHours = isFlexibleSchedule ? 0 : bShifts
-        .filter(s => s.overtimeStatus === 'approved' || (parseFloat(s.overtimeHours) > 0 && (s.adminApproved || s.isAdminCreated)))
-        .reduce((acc, s) => acc + (parseFloat(s.overtimeHours) || 0), 0);
+      bShifts.forEach(s => {
+        const metrics = calculateShiftMetrics(s, state);
+        if (metrics.isOvertimeApproved && metrics.overtimeHours > 0) {
+          approvedOtHours += metrics.overtimeHours;
+        } else if (metrics.overtimeStatus === 'pending' && metrics.overtimeHours > 0) {
+          pendingOtHours += metrics.overtimeHours;
+        }
+      });
 
-      const pendingOtHours = isFlexibleSchedule ? 0 : bShifts
-        .filter(s => s.overtimeStatus === 'pending' || (parseFloat(s.overtimeHours) > 0 && !s.overtimeStatus && !s.adminApproved && !s.isAdminCreated))
-        .reduce((acc, s) => acc + (parseFloat(s.overtimeHours) || 0), 0);
+      // التحقق من أي طلبات إضافي معتمدة مستقلة للموظف (كأيام راحة أو عمل إضافي معتمد لم يرتبط بوردية عادية)
+      const matchedShiftDates = new Set(
+        bShifts.filter(s => {
+          const m = calculateShiftMetrics(s, state);
+          return m.isOvertimeApproved && m.overtimeHours > 0;
+        }).map(s => s.date)
+      );
 
+      const standaloneOtRequests = (state.requests || []).filter(r => {
+        if (!r) return false;
+        if (!isEmpMatch(r.employeeId, r.employeeCode)) return false;
+        const isOtType = r.type === 'overtime' || r.type === 'extra_hours' || r.type === 'طلب اضافي' || r.type === 'إضافي';
+        if (!isOtType) return false;
+        const isApproved = (r.status === 'approved' || r.adminApproved === true) && r.status !== 'rejected' && !r.isCancelled;
+        if (!isApproved) return false;
+        const rDate = r.date || r.targetDate;
+        if (!rDate || !effectiveFilterFn(rDate)) return false;
+        if (r.shiftId && bShifts.some(s => s.id === r.shiftId)) return false;
+        if (matchedShiftDates.has(rDate)) return false;
+        return true;
+      });
+
+      standaloneOtRequests.forEach(r => {
+        const otH = parseFloat(r.hours || r.overtimeHours || r.amount) || 0;
+        if (otH > 0) {
+          approvedOtHours += otH;
+        }
+      });
+
+      approvedOtHours = Math.round(approvedOtHours * 100) / 100;
+      pendingOtHours = Math.round(pendingOtHours * 100) / 100;
       const otEarnings = Math.round(approvedOtHours * rate * 100) / 100;
 
       let absenceDaysCount = 0;
       let absenceDeduction = 0;
       // استقطاع الغياب يُحسب على الفرع الأساسي فقط للموظف حتى لا يتكرر (ويُعفى منه الموظف الذي ليس له جدول شهري)
+      const isFlexibleSchedule = isVariableScheduleEmployee(emp);
       const isPrimaryBranch = isBranchMatch(emp.branchId || (emp.branchesDetails && emp.branchesDetails[0]?.branchId), bObj);
       if (!isFlexibleSchedule && (isPrimaryBranch || (!isTargetFilterActive && bId === branches[0]?.branchId))) {
         absenceDaysCount = getAbsenceDaysCount(empId, monthStr);
@@ -1529,9 +1615,20 @@ export function DataProvider({ children, showToast = () => {} }) {
 
     const isPrimaryForAdjustments = !isTargetFilterActive || isBranchMatch(emp.branchId || (emp.branchesDetails && emp.branchesDetails[0]?.branchId), targetBranchObj);
 
+    const isEmpMatchGlobal = (targetId, targetCode) => {
+      const tId = String(targetId || '');
+      const tCode = String(targetCode || '');
+      const eId = String(emp.id || empId || '');
+      const eCode = String(emp.code || '');
+      return (
+        (eId && (tId === eId || tCode === eId)) ||
+        (eCode && (tId === eCode || tCode === eCode))
+      );
+    };
+
     // المكافآت والخصومات
     const empAdjs = (state.adjustments || []).filter(a => {
-      if (String(a.employeeId) !== String(empId)) return false;
+      if (!isEmpMatchGlobal(a.employeeId, a.employeeCode)) return false;
       if (!effectiveFilterFn(a.date)) return false;
       if (isTargetFilterActive) {
         if (a.branchId) return isBranchMatch(a.branchId, targetBranchObj);
@@ -1547,12 +1644,17 @@ export function DataProvider({ children, showToast = () => {} }) {
 
     const unmappedPenaltyRequests = (state.requests || []).filter(r => {
       if (!r) return false;
-      if (String(r.employeeId) !== String(empId)) return false;
+      if (!isEmpMatchGlobal(r.employeeId, r.employeeCode)) return false;
       const isApproved = (r.status === 'approved' || r.adminApproved === true) && !r.isCancelled && r.status !== 'cancelled' && r.status !== 'rejected';
       if (!isApproved) return false;
       if (r.objection?.status === 'approved') return false;
       const isPen = r.type === 'penalty' || r.type === 'disciplinary_penalty' || r.subType === 'disciplinary_penalty' || r.type === 'violation' || r.type === 'deduction' || String(r.id || '').startsWith('disc_');
       if (!isPen) return false;
+      // حظر أي جزاءات تأخير أو انصراف مبكر عن الموظف ذي المواعيد المتغيرة
+      if (isVariableScheduleEmployee(emp)) {
+        const isEarlyOrLate = r.type === 'early_exit' || r.subType === 'early_exit' || r.type === 'lateness' || r.subType === 'lateness' || String(r.id || '').startsWith('req_early_') || String(r.id || '').startsWith('req_late_');
+        if (isEarlyOrLate) return false;
+      }
       if (existingAdjReqIds.has(r.id) || existingAdjReqIds.has(`adj_pen_${r.id}`) || existingAdjReqIds.has(`adj_disc_${r.id}`)) return false;
       const rDate = r.date || r.startDate || (r.createdAt ? r.createdAt.slice(0, 10) : '');
       if (!rDate || !effectiveFilterFn(rDate)) return false;
@@ -1577,7 +1679,7 @@ export function DataProvider({ children, showToast = () => {} }) {
 
     const unmappedBonusRequests = (state.requests || []).filter(r => {
       if (!r) return false;
-      if (String(r.employeeId) !== String(empId)) return false;
+      if (!isEmpMatchGlobal(r.employeeId, r.employeeCode)) return false;
       const isApproved = (r.status === 'approved' || r.adminApproved === true) && !r.isCancelled && r.status !== 'cancelled';
       if (!isApproved) return false;
       if (r.type !== 'bonus') return false;
@@ -1596,20 +1698,20 @@ export function DataProvider({ children, showToast = () => {} }) {
     const manualDeduction = empAdjs.filter(a => a.type === 'deduction' || a.type === 'penalty' || a.type === 'خصم').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0) + unmappedPenaltyTotal;
 
     // الجزاءات والتأخيرات (لا تطبق على موظف الساعات المتغيرة بدون جدول)
-    const isFlexibleSchedule = Boolean(emp?.noMonthlySchedule);
-    const empLateIncidents = isFlexibleSchedule ? [] : (state.lateIncidents || []).filter(i => {
-      if (String(i.employeeId) !== String(empId)) return false;
+    const isFlexibleSchedule = isVariableScheduleEmployee(emp);
+    const isFlexibleScheduleEmp = isFlexibleSchedule;
+    const empLateIncidents = isFlexibleScheduleEmp ? [] : (state.lateIncidents || []).filter(i => {
+      if (!isEmpMatchGlobal(i.employeeId, i.employeeCode)) return false;
       if (!effectiveFilterFn(i.date)) return false;
       if (i.status === 'cancelled') return false;
       if (isTargetFilterActive) {
         if (i.branchId) return isBranchMatch(i.branchId, targetBranchObj);
         return isPrimaryForAdjustments;
       }
-      return true;
     });
 
-    const lateDeduction = isFlexibleSchedule ? 0 : empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.penaltyAmount) || 0), 0);
-    const lateDeductionMinutes = isFlexibleSchedule ? 0 : empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.deductionMinutes) || 0), 0);
+    const lateDeduction = isFlexibleScheduleEmp ? 0 : empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.penaltyAmount) || 0), 0);
+    const lateDeductionMinutes = isFlexibleScheduleEmp ? 0 : empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.deductionMinutes) || 0), 0);
 
     // السلف والأقساط الشهرية (محسوبة بدقة عبر محرك السلف الموحد loansEngine)
     const activeTargetMonth = (monthStr && typeof monthStr === 'string' && monthStr.length >= 7)
