@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { arabicWeekday, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import {
   DEFAULT_PERMISSION_POLICY,
@@ -33,6 +33,14 @@ export default function EmployeePermissionsManagementModule({
   const [cycleStartDay, setCycleStartDay] = useState(permPolicy.cycleStartDay || state.orgSettings?.payrollPayoutStartDay || 21);
   const [cycleEndDay, setCycleEndDay] = useState(permPolicy.cycleEndDay || state.orgSettings?.payrollPayoutEndDay || 20);
   const [isSavingPolicy, setIsSavingPolicy] = useState(false);
+
+  // مزامنة أيام دورة الشهر تلقائياً مع إعدادات المؤسسة أو سياسة الأذونات عند تحديثها
+  useEffect(() => {
+    const sDay = permPolicy.cycleStartDay || state.orgSettings?.payrollPayoutStartDay || 21;
+    const eDay = permPolicy.cycleEndDay || state.orgSettings?.payrollPayoutEndDay || 20;
+    setCycleStartDay(sDay);
+    setCycleEndDay(eDay);
+  }, [permPolicy.cycleStartDay, permPolicy.cycleEndDay, state.orgSettings?.payrollPayoutStartDay, state.orgSettings?.payrollPayoutEndDay]);
 
   // ── الفلاتر ──
   const [selectedMonth, setSelectedMonth] = useState(() => monthPicker || new Date().toISOString().slice(0, 7));

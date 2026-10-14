@@ -154,7 +154,7 @@ function detectEntityDeltas(prevState, nextState) {
       deltas.push({ entityType: 'bylaws', entityId: 'bylaws', data: nextState.bylaws, action: 'update' });
     }
     if (prevState.orgSettings !== nextState.orgSettings) {
-      deltas.push({ entityType: 'settings', entityId: 'orgSettings', data: nextState.orgSettings, action: 'update' });
+      deltas.push({ entityType: 'orgSettings', entityId: 'orgSettings', data: nextState.orgSettings, action: 'update' });
     }
 
     // 8. الطلبات والإجازات والسلف وتظلمات الجزاءات (Instant Delta Broadcast < 5ms)
@@ -1159,13 +1159,14 @@ export function DataProvider({ children, showToast = () => {} }) {
 
   // Save State with Optimistic UI, WebSocket Atomic Delta Broadcasting, & Auto-Backup
   const saveState = async (updatedState, deltaHint = null) => {
+    let detectedDeltas = [];
     // 1. بث ذري فوري عبر WebSockets لكافة الأجهزة والتبويبات (< 20ms)
     try {
       if (deltaHint && deltaHint.entityType) {
         emitEntityChange(deltaHint);
       } else {
-        const deltas = detectEntityDeltas(state, updatedState);
-        for (const d of deltas.slice(0, 5)) {
+        detectedDeltas = detectEntityDeltas(state, updatedState);
+        for (const d of detectedDeltas.slice(0, 5)) {
           emitEntityChange(d);
         }
       }
@@ -1174,7 +1175,7 @@ export function DataProvider({ children, showToast = () => {} }) {
     }
 
     // استخراج sliceKey إن وُجد لتسريع الحفظ السحابي وتفادي إرسال 4.2MB
-    const sliceKey = deltaHint?.entityType || null;
+    const sliceKey = deltaHint?.entityType || (detectedDeltas.length === 1 ? detectedDeltas[0].entityType : null);
     const sliceValue = sliceKey && updatedState[sliceKey] !== undefined ? updatedState[sliceKey] : null;
 
     startSyncing();

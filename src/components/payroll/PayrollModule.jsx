@@ -145,7 +145,12 @@ export default function PayrollModule({
 
     const updatedState = { ...state, orgSettings: updatedSettings };
     if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
+    if (saveState) await saveState(updatedState, {
+      entityType: 'orgSettings',
+      entityId: 'all',
+      data: updatedSettings,
+      action: 'update'
+    });
     
     if (newType === 'custom') {
       showToast?.(`✅ تم حفظ وتطبيق الفترة اليدوية المخصصة (من ${fromVal} إلى ${toVal}) على رواتب المنظومة وصفحة الموظف بنجاح`);

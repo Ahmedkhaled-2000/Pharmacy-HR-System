@@ -138,7 +138,12 @@ export default function DatesPeriodsSettingsCard({
 
       const updatedState = { ...state, orgSettings: updatedOrgSettings };
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
+      if (saveState) await saveState(updatedState, {
+        entityType: 'orgSettings',
+        entityId: 'all',
+        data: updatedOrgSettings,
+        action: 'update'
+      });
 
       showToast?.('💾 تم حفظ وتطبيق إعدادات الفترات ودورات الرواتب وتحديث كافة الشاشات بنجاح');
     };
