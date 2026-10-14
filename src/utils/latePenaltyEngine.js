@@ -299,7 +299,6 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
   if (!employeeId || !dateStr || !state) return null;
 
   const empIdStr = String(employeeId);
-  const monthKey = String(dateStr).slice(0, 7);
   const emp = (state.employees || []).find((e) => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
   const empCodeStr = emp?.code ? String(emp.code) : '';
 
@@ -309,9 +308,9 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
   // 1. فحص طلبات تعديل الشيفت المعتمدة أولاً (Shift Adjustment Requests)
   const approvedShiftAdj = (state.requests || []).find(
     (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
-      r.type === 'shift_adjustment' &&
-      (r.status === 'approved' || r.adminApproved) &&
-      (r.date === dateStr || (Array.isArray(r.dates) && r.dates.includes(dateStr)) || (r.schedule && r.schedule[dateStr]))
+      (r.type === 'shift_adjustment' || r.type === 'roster_edit' || r.type === 'roster_update' || r.type === 'roster_edit_request' || r.type === 'schedule_edit') &&
+      (r.status === 'approved' || r.adminApproved || (r.branchApproved && r.isDirectToAdmin)) &&
+      (r.date === dateStr || (Array.isArray(r.dates) && r.dates.includes(dateStr)) || (r.schedule && r.schedule[dateStr]) || (r.newSchedule && r.newSchedule[dateStr]) || r.replacementRestDate === dateStr)
   );
 
   if (approvedShiftAdj) {
@@ -323,9 +322,10 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
         return { type: 'off', isOff: true, start: '', end: '', branchId: emp?.branchId || '', source: 'shift_adjustment' };
       }
       return {
-        start: schedItem.start,
-        end: schedItem.end || '',
+        start: schedItem.start?.slice(0, 5) || '',
+        end: schedItem.end?.slice(0, 5) || '',
         type: schedItem.type || 'work',
+        isOff: false,
         branchId: approvedShiftAdj.branchId || schedItem.branchId || emp?.branchId || '',
         rosterId: approvedShiftAdj.id,
         source: 'shift_adjustment'
@@ -336,9 +336,10 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
     }
     if (approvedShiftAdj.newStartTime) {
       return {
-        start: approvedShiftAdj.newStartTime,
-        end: approvedShiftAdj.newEndTime || '',
+        start: approvedShiftAdj.newStartTime?.slice(0, 5),
+        end: approvedShiftAdj.newEndTime?.slice(0, 5) || '',
         type: 'work',
+        isOff: false,
         branchId: approvedShiftAdj.branchId || emp?.branchId || '',
         rosterId: approvedShiftAdj.id,
         source: 'shift_adjustment'
@@ -346,140 +347,124 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
     }
   }
 
-  // 2. فحص طلبات تبديل الورديات المعتمدة
-  const approvedSwaps = (state.shiftSwaps || state.requests || []).filter(
-    (s) => (s.type === 'shift_swap' || s.subType === 'shift_swap') &&
+  // 2. فحص طلبات تبديل الورديات المعتمدة (Shift Swaps)
+  const allSwaps = [...(state.shiftSwaps || []), ...(state.requests || [])];
+  const approvedSwap = allSwaps.find(
+    (s) => (s.type === 'shift_swap' || s.subType === 'shift_swap' || s.type === 'swap') &&
       (s.status === 'approved' || s.adminApproved) &&
-      (s.date === dateStr || s.requesterDate === dateStr || s.targetDate === dateStr) &&
-      (String(s.requesterId || s.employeeId || s.requesterEmpId) === empIdStr || String(s.targetEmployeeId || s.targetEmpId) === empIdStr || (empCodeStr && (String(s.employeeCode) === empCodeStr || String(s.targetEmpCode) === empCodeStr)))
+      (s.date === dateStr || s.requesterDate === dateStr || s.targetDate === dateStr || s.targetSwapDate === dateStr) &&
+      (String(s.requesterId || s.employeeId || s.requesterEmpId) === empIdStr || String(s.targetEmployeeId || s.targetEmpId || s.peerEmployeeId) === empIdStr || (empCodeStr && (String(s.employeeCode || s.requesterEmpCode) === empCodeStr || String(s.targetEmpCode) === empCodeStr)))
   );
 
-  if (approvedSwaps.length > 0) {
-    const swap = approvedSwaps[0];
-    const isRequester = String(swap.requesterId || swap.employeeId || swap.requesterEmpId) === empIdStr;
-    const schedObj = isRequester ? (swap.targetSchedule || swap.schedule) : (swap.requesterSchedule || swap.schedule);
-    if (schedObj && schedObj.start) {
-      return {
-        start: schedObj.start,
-        end: schedObj.end || '',
-        type: schedObj.type || 'shift',
-        branchId: swap.targetBranchId || swap.branchId || emp?.branchId || '',
-        source: 'swap'
-      };
-    }
-  }
-
-  // 2. البحث في الجداول الشهرية المعتمدة (state.rosters)
-  const approvedRosters = (state.rosters || []).filter(
-    (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
-      (r.month === monthKey || !r.month) &&
-      (r.status === 'approved' || !r.status)
-  );
-
-  const arDay = arabicWeekday(dateStr);
-  const normalizedArDay = arDay.replace(/[\u0625\u0623\u0622]/g, 'ا');
-
-  for (const ros of approvedRosters) {
-    if (ros.schedule) {
-      let sched = ros.schedule[dateStr] || ros.schedule[arDay];
-      if (!sched) {
-        sched = Object.entries(ros.schedule).find(
-          ([k]) => k === dateStr || k.replace(/[\u0625\u0623\u0622]/g, 'ا') === normalizedArDay
-        )?.[1];
-      }
-
-      if (sched && sched.type !== 'off' && !sched.isOff && sched.start) {
+  if (approvedSwap) {
+    const isRequester = String(approvedSwap.requesterId || approvedSwap.employeeId || approvedSwap.requesterEmpId) === empIdStr;
+    const schedObj = isRequester ? (approvedSwap.targetSchedule || approvedSwap.schedule) : (approvedSwap.requesterSchedule || approvedSwap.schedule);
+    if (schedObj) {
+      const isOff = schedObj.type === 'off' || schedObj.isOff === true;
+      if (isOff) return { type: 'off', isOff: true, start: '', end: '', source: 'swap' };
+      if (schedObj.start) {
         return {
-          start: sched.start,
-          end: sched.end || '',
-          type: sched.type || 'work',
-          branchId: ros.branchId || sched.branchId || emp?.branchId || '',
-          rosterId: ros.id,
-          source: 'roster'
+          start: schedObj.start?.slice(0, 5),
+          end: schedObj.end?.slice(0, 5) || '',
+          type: schedObj.type || 'shift',
+          isOff: false,
+          branchId: approvedSwap.targetBranchId || approvedSwap.branchId || emp?.branchId || '',
+          source: 'swap'
         };
       }
     }
   }
 
-  // 3. فحص طلبات تعديل الروستر المعتمدة في requests
-  const approvedRosterReqs = (state.requests || []).filter(
-    (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
-      (r.type === 'roster_edit' || r.type === 'roster_update' || r.type === 'roster_edit_request') &&
-      (r.month === monthKey || !r.month) &&
-      (r.status === 'approved' || r.adminApproved) &&
-      r.schedule
-  );
-
-  for (const req of approvedRosterReqs) {
-    let sched = req.schedule[dateStr] || req.schedule[arDay];
-    if (!sched) {
-      sched = Object.entries(req.schedule).find(
-        ([k]) => k === dateStr || k.replace(/[\u0625\u0623\u0622]/g, 'ا') === normalizedArDay
-      )?.[1];
-    }
-    if (sched && sched.type !== 'off' && !sched.isOff && sched.start) {
-      return {
-        start: sched.start,
-        end: sched.end || '',
-        type: sched.type || 'work',
-        branchId: req.branchId || sched.branchId || emp?.branchId || '',
-        rosterId: req.id,
-        source: 'roster_request'
-      };
-    }
-  }
-
-  // 4. جدول الموظف العام أو الافتراضي من rosterEngine
+  // 3. جدول الموظف المركزي من rosterEngine مع مراعاة كافة التبديلات والتعديلات
   try {
     const daySchedule = getEmployeeDaySchedule(empIdStr, dateStr, state);
-    if (daySchedule && daySchedule.type !== 'off' && !daySchedule.isOff && daySchedule.start) {
-      return {
-        start: daySchedule.start,
-        end: daySchedule.end || '',
-        type: daySchedule.type || 'work',
-        branchId: emp?.branchId || '',
-        source: 'roster_engine'
-      };
+    if (daySchedule) {
+      const isOff = daySchedule.type === 'off' || daySchedule.isOff === true;
+      if (isOff) {
+        // حاسم: اليوم راحة معتمدة، يُعاد كراحة حتى لا يتم تطبيق موعد افتراضي 08:00
+        return {
+          type: 'off',
+          isOff: true,
+          start: '',
+          end: '',
+          branchId: daySchedule.branchId || emp?.branchId || '',
+          source: 'roster_engine_off'
+        };
+      }
+      if (daySchedule.start) {
+        return {
+          start: daySchedule.start?.slice(0, 5),
+          end: daySchedule.end?.slice(0, 5) || '',
+          type: daySchedule.type || 'work',
+          isOff: false,
+          branchId: daySchedule.branchId || emp?.branchId || '',
+          source: 'roster_engine'
+        };
+      }
     }
   } catch (e) {
     console.error('Error fetching employee day schedule in getScheduledShiftForDate:', e);
   }
 
-  // 5. فحص الجداول العامة للموظف كـ Fallback في حال اختلاف اسم الشهر
-  const anyEmpRoster = (state.rosters || []).find(
-    (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
-      (r.status === 'approved' || !r.status) &&
+  // 4. فحص الجداول المعتمدة مباشرة مع دعم نطاق التواريخ الكامل (fromDate <= dateStr <= toDate)
+  const allEmpRosters = (state.rosters || []).filter(
+    (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) &&
+      (r.status === 'approved' || r.adminApproved || !r.status) &&
       r.schedule
   );
-  if (anyEmpRoster && anyEmpRoster.schedule) {
-    let sched = anyEmpRoster.schedule[dateStr] || anyEmpRoster.schedule[arDay];
+
+  // فرز الجداول: التي تحتوي على التاريخ الدقيق أولاً، ثم التي في نطاق fromDate/toDate، ثم حسب حداثة التحديث
+  allEmpRosters.sort((a, b) => {
+    const hasDateA = a.schedule && a.schedule[dateStr] ? 1 : 0;
+    const hasDateB = b.schedule && b.schedule[dateStr] ? 1 : 0;
+    if (hasDateA !== hasDateB) return hasDateB - hasDateA;
+    const inRangeA = a.fromDate && a.toDate && dateStr >= a.fromDate && dateStr <= a.toDate ? 1 : 0;
+    const inRangeB = b.fromDate && b.toDate && dateStr >= b.fromDate && dateStr <= b.toDate ? 1 : 0;
+    if (inRangeA !== inRangeB) return inRangeB - inRangeA;
+    const tA = new Date(a.updatedAt || a.approvedAt || a.createdAt || 0).getTime() || 0;
+    const tB = new Date(b.updatedAt || b.approvedAt || b.createdAt || 0).getTime() || 0;
+    return tB - tA;
+  });
+
+  const arDay = arabicWeekday(dateStr);
+  const normalizedArDay = arDay.replace(/[\u0625\u0623\u0622]/g, 'ا');
+
+  for (const ros of allEmpRosters) {
+    let sched = ros.schedule[dateStr] || ros.schedule[arDay];
     if (!sched) {
-      sched = Object.entries(anyEmpRoster.schedule).find(
+      sched = Object.entries(ros.schedule).find(
         ([k]) => k === dateStr || k.replace(/[\u0625\u0623\u0622]/g, 'ا') === normalizedArDay
       )?.[1];
     }
-    if (sched && sched.type !== 'off' && !sched.isOff && sched.start) {
-      return {
-        start: sched.start,
-        end: sched.end || '',
-        type: sched.type || 'work',
-        branchId: anyEmpRoster.branchId || sched.branchId || emp?.branchId || '',
-        rosterId: anyEmpRoster.id,
-        source: 'roster_fallback'
-      };
+    if (sched) {
+      const isOff = sched.type === 'off' || sched.isOff === true;
+      if (isOff) {
+        return {
+          type: 'off',
+          isOff: true,
+          start: '',
+          end: '',
+          branchId: ros.branchId || sched.branchId || emp?.branchId || '',
+          rosterId: ros.id,
+          source: 'roster_direct_off'
+        };
+      }
+      if (sched.start) {
+        return {
+          start: sched.start?.slice(0, 5),
+          end: sched.end?.slice(0, 5) || '',
+          type: sched.type || 'work',
+          isOff: false,
+          branchId: ros.branchId || sched.branchId || emp?.branchId || '',
+          rosterId: ros.id,
+          source: 'roster_direct'
+        };
+      }
     }
   }
 
-  // إذا كان الموظف يعمل بنظام دوام حر / بدون جدول، لا يتم تطبيق الوردية الافتراضية
-  if (isVariableScheduleEmployee(emp)) return null;
-
-  return {
-    start: '08:00',
-    end: '16:00',
-    type: 'work',
-    branchId: emp?.branchId || '',
-    source: 'default_fallback'
-  };
+  // إذا لم يتوفر أي جدول إطلاقاً، نرجع null منعاً لفرض جزاء 08:00 تلقائي على الموظف
+  return null;
 }
 
 /**
@@ -611,10 +596,21 @@ export function recalculateEmployeeCycleLateness({
 
     // استخراج بداية الشيفت المجدول
     const sched = getScheduledShiftForDate(emp.id, shift.date, state);
-    if (!sched || !sched.start) continue;
+    if (!sched || sched.isOff || sched.type === 'off' || !sched.start) continue;
 
     const diffMinutes = calculateLatenessMinutes(sched.start, shift.timeIn);
     if (diffMinutes <= 0) continue; // حضور في الموعد أو مبكر
+
+    // فحص ذكي: هل البصمة هي بصمة انصراف عند نهاية الوردية سجلت خطأ كحضور؟
+    if (sched.end) {
+      const [eH, eM] = sched.end.split(':').map((v) => parseInt(v, 10) || 0);
+      const [aH, aM] = shift.timeIn.split(':').map((v) => parseInt(v, 10) || 0);
+      let endDiff = Math.abs((aH * 60 + aM) - (eH * 60 + eM));
+      if (endDiff > 720) endDiff = 1440 - endDiff;
+      // إذا كانت البصمة خلال 60 دقيقة من موعد نهاية الوردية والفارق عن البداية أكثر من 3 ساعات:
+      // فهذه بصمة انصراف حتمية وليست بصمة حضور متأخر!
+      if (endDiff <= 60 && diffMinutes > 180) continue;
+    }
 
     // تحديد الفئة
     const tier = classifyLateTier(diffMinutes, policy);

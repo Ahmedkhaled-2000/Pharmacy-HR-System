@@ -913,7 +913,7 @@ export function getEmployeeScheduledDayDetails(empObj, dateStr, stateData) {
   } catch {}
 
   // 1. الموظف بدون جدول شهري (مواعيد حرة)
-  if (empObj.noMonthlySchedule) {
+  if (empObj.noMonthlySchedule || empObj.isVariableHours || empObj.variableHours || empObj.hasNoRoster) {
     const restDays = Array.isArray(empObj.weeklyRestDays) && empObj.weeklyRestDays.length > 0
       ? empObj.weeklyRestDays
       : ['الجمعة'];

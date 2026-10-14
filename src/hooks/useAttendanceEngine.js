@@ -133,10 +133,19 @@ export function useAttendanceEngine() {
     if (isVariableScheduleEmployee(emp)) return currentState;
 
     const sched = getScheduledShiftForDate(empId, dateStr, currentState);
-    if (!sched || !sched.start) return currentState;
+    if (!sched || sched.isOff || sched.type === 'off' || !sched.start) return currentState;
 
     const diffMinutes = calculateLatenessMinutes(sched.start, timeInStr);
     if (diffMinutes <= 0) return currentState;
+
+    // فحص ذكي: هل البصمة هي بصمة انصراف عند نهاية الوردية؟
+    if (sched.end) {
+      const [eH, eM] = sched.end.split(':').map((v) => parseInt(v, 10) || 0);
+      const [aH, aM] = timeInStr.split(':').map((v) => parseInt(v, 10) || 0);
+      let endDiff = Math.abs((aH * 60 + aM) - (eH * 60 + eM));
+      if (endDiff > 720) endDiff = 1440 - endDiff;
+      if (endDiff <= 60 && diffMinutes > 180) return currentState;
+    }
 
     const policy = getEffectiveLatePolicy(currentState);
     if (!policy.enabled) return currentState;
