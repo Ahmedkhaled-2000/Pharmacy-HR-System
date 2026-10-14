@@ -13,6 +13,7 @@ import {
   Moon,
   Sun,
   Shield,
+  ShieldCheck,
   Activity,
   ChevronDown,
   Wifi,
@@ -478,6 +479,12 @@ export default function OutstockSystemView({
       title: 'تخصيص اختصارات لوحة المفاتيح',
       desc: 'تعيين مفاتيح سريعة للوصول للعمليات والأقسام فوراً',
       icon: Keyboard
+    },
+    {
+      id: 'danger_zone',
+      title: 'منطقة مسح وتصفير النظام وحفظ النسخ الاحتياطية',
+      desc: 'تصفير دورة العمل السابقة مع إنشاء نسخة احتياطية وحماية تامة لقاعدة بيانات الأدوية والإعدادات',
+      icon: ShieldCheck
     }
   ];
 

@@ -669,9 +669,9 @@ export default function OwnerSettingsTab({
               fontWeight: '800',
               padding: '5px 12px',
               borderRadius: '999px',
-              background: '#f0fdfa',
-              color: '#0f766e',
-              border: '1px solid #99f6e4',
+              background: activeSubSection === 'danger_zone' ? '#fee2e2' : '#f0fdfa',
+              color: activeSubSection === 'danger_zone' ? '#991b1b' : '#0f766e',
+              border: activeSubSection === 'danger_zone' ? '1px solid #fecaca' : '1px solid #99f6e4',
               display: 'inline-flex',
               alignItems: 'center',
               gap: '6px'
@@ -681,6 +681,56 @@ export default function OwnerSettingsTab({
             <span>القسم النشط حالياً</span>
           </span>
         </div>
+      </div>
+
+      {/* ── شريط تبويبات أقسام الإعدادات والصلاحيات المباشر ── */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          overflowX: 'auto',
+          paddingBottom: '10px',
+          marginBottom: '18px',
+          scrollbarWidth: 'thin'
+        }}
+      >
+        {SETTINGS_SECTIONS.map((sec) => {
+          const isActive = activeSubSection === sec.id;
+          const isDanger = sec.id === 'danger_zone';
+          return (
+            <button
+              key={sec.id}
+              type="button"
+              onClick={() => changeSubSection(sec.id)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '9px 16px',
+                borderRadius: '12px',
+                fontSize: '13px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s ease',
+                border: isActive
+                  ? (isDanger ? '2px solid #dc2626' : '2px solid #0d9488')
+                  : '1.5px solid #e2e8f0',
+                background: isActive
+                  ? (isDanger ? '#fee2e2' : '#f0fdfa')
+                  : '#ffffff',
+                color: isActive
+                  ? (isDanger ? '#991b1b' : '#0f766e')
+                  : '#475569',
+                boxShadow: isActive ? '0 2px 8px rgba(0,0,0,0.06)' : 'none'
+              }}
+            >
+              <span style={{ fontSize: '15px' }}>{sec.iconText}</span>
+              <span>{sec.title}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* ── 0. قسم هوية وشعار الصيدلية بالفاتورة ── */}
