@@ -666,8 +666,18 @@ export default function EmployeeComprehensiveDossierModal({
     if (!isConfirmed) return;
 
     const updatedShifts = (state?.shifts || []).filter((s) => s.id !== shiftId);
-    const nextState = { ...state, shifts: updatedShifts };
+    const existingDeletedSet = new Set(Array.isArray(state?._deletedIds) ? state._deletedIds.map(String) : []);
+    existingDeletedSet.add(String(shiftId));
+    existingDeletedSet.add(`shift_${shiftId}`);
+    const updatedDeletedIds = Array.from(existingDeletedSet);
+
+    const nextState = { ...state, shifts: updatedShifts, _deletedIds: updatedDeletedIds };
     await commitStateChange(nextState, '🗑️ تم حذف الوردية بنجاح', 'shifts', updatedShifts);
+    try {
+      await apiSaveSettingsSlice('_deletedIds', updatedDeletedIds);
+    } catch (sliceErr) {
+      console.warn('[EmployeeDossier] Failed to save _deletedIds slice:', sliceErr);
+    }
   };
 
   // ── ب. دوال الجدول الشهري (Roster Editing) ──

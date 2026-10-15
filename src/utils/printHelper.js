@@ -757,8 +757,36 @@ export function generateOfficialPayslipHTML({
          (r.month === month || !r.month) && (r.status === 'approved' || r.adminApproved)
   );
 
+  const normalizeDateStr = (d) => {
+    if (!d) return '';
+    const s = String(d).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    if (s.includes('/')) {
+      const parts = s.split('/');
+      if (parts.length === 3) {
+        if (parts[0].length === 4) {
+          return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        }
+        const year = parts[2];
+        if (parseInt(parts[0], 10) > 12) {
+          return `${year}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        } else if (parseInt(parts[1], 10) > 12) {
+          return `${year}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+        } else {
+          return `${year}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+      }
+    }
+    return s.slice(0, 10);
+  };
+
+  const rawHireDate = emp?.hireDate || emp?.hiring_date || emp?.contractStartDate;
+  const hireDate = rawHireDate ? normalizeDateStr(rawHireDate) : '';
+
   // 1. Rest days (الراحات الأسبوعية والمجدولة المأخوذة بما فيها التبديلات المعتمدة)
+  // 🛡️ الأيام السابقة لتاريخ التعيين الرسمي للموظف: تظهر كـ "خارج العمل" وغير مدفوعة الأجر وليست راحة أسبوعية
   const restDayItems = [];
+  const preHireDayItems = [];
   const shiftDatesSet = new Set((shifts || []).map(s => s.date));
   const leaveDatesSet = new Set();
 
@@ -780,8 +808,45 @@ export function generateOfficialPayslipHTML({
 
   cycleDates.forEach(dateStr => {
     if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;
+
+    // 🛡️ فحص حاسم: هل هذا اليوم قبل تاريخ التعيين الرسمي؟
+    if (hireDate && dateStr < hireDate) {
+      preHireDayItems.push({
+        id: `prehire_${dateStr}`,
+        date: dateStr,
+        dateRangeLabel: `${arabicWeekday(dateStr)} ${dateStr}`,
+        dayName: arabicWeekday(dateStr),
+        category: 'pre_hire',
+        categoryBadge: '<span style="background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🔒 خارج العمل</span>',
+        typeLabel: 'خارج العمل (قبل تاريخ التعيين)',
+        daysCount: 0,
+        effectLabel: 'غير مدفوعة (قبل التعيين)',
+        effectColor: '#64748b',
+        financialStatus: 'غير مدفوعة (قبل تاريخ التعيين)',
+        reason: `يوم يسبق تاريخ التعيين ومباشرة العمل الرسمي (${hireDate})`
+      });
+      return;
+    }
+
     const daySched = getEmployeeDaySchedule(emp.id, dateStr, state);
     if (daySched && (daySched.type === 'off' || daySched.isOff)) {
+      if (daySched.isPreHire) {
+        preHireDayItems.push({
+          id: `prehire_${dateStr}`,
+          date: dateStr,
+          dateRangeLabel: `${arabicWeekday(dateStr)} ${dateStr}`,
+          dayName: arabicWeekday(dateStr),
+          category: 'pre_hire',
+          categoryBadge: '<span style="background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🔒 خارج العمل</span>',
+          typeLabel: 'خارج العمل (قبل تاريخ التعيين)',
+          daysCount: 0,
+          effectLabel: 'غير مدفوعة (قبل التعيين)',
+          effectColor: '#64748b',
+          financialStatus: 'غير مدفوعة (قبل تاريخ التعيين)',
+          reason: `يوم يسبق تاريخ التعيين ومباشرة العمل الرسمي (${hireDate || daySched.hireDate || '—'})`
+        });
+        return;
+      }
       const isSwapRest = !!daySched.isSwapped;
       restDayItems.push({
         id: `rest_${dateStr}`,
@@ -943,6 +1008,26 @@ export function generateOfficialPayslipHTML({
     });
   });
 
+  // Pre-hire days (خارج العمل قبل تاريخ التعيين - لا يحتسب لها راتب وليست راحة أسبوعية)
+  preHireDayItems.forEach((r) => {
+    unifiedTableRows.push({
+      id: r.id,
+      date: r.date,
+      type: 'pre_hire',
+      dayName: r.dayName || arabicWeekday(r.date),
+      timeIn: '—',
+      timeOut: '—',
+      breakHours: 0,
+      effHours: 0,
+      earnings: 0,
+      badge: r.categoryBadge,
+      statusLabel: r.typeLabel,
+      effectLabel: r.financialStatus || 'غير مدفوعة (قبل تاريخ التعيين)',
+      effectColor: r.effectColor || '#64748b',
+      reason: r.reason
+    });
+  });
+
   // Approved leaves (annual, unpaid, sick, weekly_rest)
   empApprovedLeaves.forEach((l) => {
     const isWeeklyRest = l.leaveType === 'weekly_rest' || l.type === 'weekly_rest';
@@ -1022,8 +1107,29 @@ export function generateOfficialPayslipHTML({
     }
   });
 
-  // Sort unified table chronologically
-  unifiedTableRows.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  // Sort unified table chronologically and enforce STRICT deduplication per date (عدم تكرار الأيام في كشف الرواتب المطبوع نهائياً):
+  unifiedTableRows.sort((a, b) => {
+    const dComp = (a.date || '').localeCompare(b.date || '');
+    if (dComp !== 0) return dComp;
+    // إذا تطابق التاريخ: الوردية (shift) أولاً ثم الإجازة (leave) ثم الراحة (rest) ثم خارج العمل (pre_hire)
+    const priority = { shift: 1, leave: 2, rest: 3, pre_hire: 4 };
+    const pA = priority[a.type] || 5;
+    const pB = priority[b.type] || 5;
+    if (pA !== pB) return pA - pB;
+    return (b.effHours || 0) - (a.effHours || 0);
+  });
+
+  const seenPrintDates = new Set();
+  const cleanPrintUnifiedTableRows = [];
+  unifiedTableRows.forEach(item => {
+    if (!item || !item.date) return;
+    if (!seenPrintDates.has(item.date)) {
+      seenPrintDates.add(item.date);
+      cleanPrintUnifiedTableRows.push(item);
+    }
+  });
+  unifiedTableRows.length = 0;
+  unifiedTableRows.push(...cleanPrintUnifiedTableRows);
 
   // 3. Absence days (أيام الغياب غير المبرر عن الورديات المجدولة - للأيام المنقضية فقط)
   // لا تنطبق على الموظفين ذوي طبيعة العمل المتغيرة بدون جدول شهري ثابت
@@ -1408,6 +1514,22 @@ export function generateOfficialPayslipHTML({
                         item.isOtApproved ? `${fmt(item.totalShiftHours)} س<div style="font-size: 7.5px; color: #16a34a;">(أساسي: ${fmt(item.effHours)} + إضافي: ${fmt(item.otHours)})</div>` : `${fmt(item.effHours)} س`
                       )}</td>
                       <td style="padding: 2px; font-weight: bold; color: ${isRej ? '#dc2626;' : '#0d9488;'}">${isRej ? '0.00 ج.م' : `${fmt(item.earnings)} ج.م`}</td>
+                    </tr>
+                  `;
+                } else if (item.type === 'pre_hire') {
+                  return `
+                    <tr style="background: #f8fafc;">
+                      <td style="padding: 2px; border: 1px solid #cbd5e1; color: #94a3b8;">${idx + 1}</td>
+                      <td style="padding: 2px; border: 1px solid #cbd5e1; font-weight: bold; color: #64748b;">
+                        ${item.dayName} ${item.date}
+                      </td>
+                      <td style="padding: 2px; border: 1px solid #cbd5e1; color: #94a3b8;">—</td>
+                      <td style="padding: 2px; border: 1px solid #cbd5e1; color: #94a3b8;">—</td>
+                      <td style="padding: 2px; border: 1px solid #cbd5e1; color: #94a3b8;">—</td>
+                      <td style="padding: 2px; border: 1px solid #cbd5e1;">${item.badge || item.statusLabel}</td>
+                      <td style="padding: 2px; border: 1px solid #cbd5e1; font-weight: bold; color: ${item.effectColor};">
+                        ${item.effectLabel}
+                      </td>
                     </tr>
                   `;
                 } else if (item.type === 'rest') {

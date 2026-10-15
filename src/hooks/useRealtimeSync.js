@@ -307,6 +307,50 @@ export function useRealtimeSync(props = {}) {
         }
       }
 
+      // 🛡️ حماية الورديات والخصومات والجداول والطلبات المحدثة محلياً حديثاً من ارتداد الكاش
+      const preserveRecentEntities = (localList, remoteList, idField = 'id') => {
+        if (!Array.isArray(localList) || localList.length === 0) return remoteList || [];
+        const recents = localList.filter(item => {
+          if (!item) return false;
+          const t = new Date(item.updatedAt || item.createdAt || item.editedAt || 0).getTime();
+          return (now - t) < 120000;
+        });
+        if (recents.length === 0) return remoteList || [];
+
+        const remoteMap = new Map((remoteList || []).map(r => [String(r?.[idField] || ''), r]));
+        const res = [...(remoteList || [])];
+
+        for (const loc of recents) {
+          const locId = String(loc?.[idField] || '');
+          if (!locId) continue;
+          if (!remoteMap.has(locId)) {
+            res.unshift(loc);
+          } else {
+            const rem = remoteMap.get(locId);
+            const remTime = new Date(rem?.updatedAt || rem?.createdAt || rem?.editedAt || 0).getTime();
+            const locTime = new Date(loc?.updatedAt || loc?.createdAt || loc?.editedAt || 0).getTime();
+            if (locTime > remTime) {
+              const idx = res.findIndex(r => String(r?.[idField] || '') === locId);
+              if (idx >= 0) res[idx] = loc;
+            }
+          }
+        }
+        return res;
+      };
+
+      merged.shifts = preserveRecentEntities(prev.shifts, merged.shifts, 'id');
+      merged.rosters = preserveRecentEntities(prev.rosters, merged.rosters, 'id');
+      merged.requests = preserveRecentEntities(prev.requests, merged.requests, 'id');
+      merged.adjustments = preserveRecentEntities(prev.adjustments, merged.adjustments, 'id');
+
+      // 🛡️ الحفاظ على شواهد القبور _deletedIds من المسح العرضي
+      if (Array.isArray(prev._deletedIds) && prev._deletedIds.length > 0) {
+        merged._deletedIds = Array.from(new Set([
+          ...(merged._deletedIds || []),
+          ...prev._deletedIds
+        ])).slice(-25000);
+      }
+
       // تحديث بيانات الموظف المسجل حالياً إذا طرأت تغييرات
       setCurrentEmpUser((prevEmp) => {
         if (!prevEmp) return prevEmp;
@@ -545,6 +589,9 @@ export function useRealtimeSync(props = {}) {
         switch (entityType) {
           case 'employee':
           case 'employees': {
+            if (entityId === 'all' || Array.isArray(data)) {
+              return { ...prev, employees: Array.isArray(data) ? [...data] : prev.employees, _lastDeltaSyncAt: nowIso };
+            }
             const list = Array.isArray(prev.employees) ? [...prev.employees] : [];
             const targetId = entityId ? String(entityId) : (data?.id ? String(data.id) : null);
             if (action === 'delete') {
@@ -565,6 +612,9 @@ export function useRealtimeSync(props = {}) {
 
           case 'shift':
           case 'shifts': {
+            if (entityId === 'all' || Array.isArray(data)) {
+              return { ...prev, shifts: Array.isArray(data) ? [...data] : prev.shifts, _lastDeltaSyncAt: nowIso };
+            }
             const list = Array.isArray(prev.shifts) ? [...prev.shifts] : [];
             const targetId = entityId ? String(entityId) : (data?.id ? String(data.id) : null);
             if (action === 'delete') {
@@ -598,6 +648,9 @@ export function useRealtimeSync(props = {}) {
 
           case 'roster':
           case 'rosters': {
+            if (entityId === 'all' || Array.isArray(data)) {
+              return { ...prev, rosters: Array.isArray(data) ? [...data] : prev.rosters, _lastDeltaSyncAt: nowIso };
+            }
             if (Array.isArray(prev.rosters)) {
               const list = [...prev.rosters];
               const targetId = entityId ? String(entityId) : (data?.id ? String(data.id) : null);
@@ -621,8 +674,30 @@ export function useRealtimeSync(props = {}) {
             return prev;
           }
 
+          case 'request':
+          case 'requests': {
+            if (entityId === 'all' || Array.isArray(data)) {
+              return { ...prev, requests: Array.isArray(data) ? [...data] : prev.requests, _lastDeltaSyncAt: nowIso };
+            }
+            const list = Array.isArray(prev.requests) ? [...prev.requests] : [];
+            const targetId = entityId ? String(entityId) : (data?.id ? String(data.id) : null);
+            if (action === 'delete') {
+              return { ...prev, requests: list.filter((r) => r && String(r.id) !== targetId), _lastDeltaSyncAt: nowIso };
+            }
+            const idx = list.findIndex((r) => r && String(r.id) === targetId);
+            if (idx >= 0) {
+              list[idx] = { ...list[idx], ...data, updatedAt: nowIso };
+            } else if (data) {
+              list.unshift({ ...data, updatedAt: nowIso });
+            }
+            return { ...prev, requests: list, _lastDeltaSyncAt: nowIso };
+          }
+
           case 'adjustment':
           case 'adjustments': {
+            if (entityId === 'all' || Array.isArray(data)) {
+              return { ...prev, adjustments: Array.isArray(data) ? [...data] : prev.adjustments, _lastDeltaSyncAt: nowIso };
+            }
             const list = Array.isArray(prev.adjustments) ? [...prev.adjustments] : [];
             const targetId = entityId ? String(entityId) : (data?.id ? String(data.id) : null);
             if (action === 'delete') {
@@ -639,6 +714,9 @@ export function useRealtimeSync(props = {}) {
 
           case 'loan':
           case 'loans': {
+            if (entityId === 'all' || Array.isArray(data)) {
+              return { ...prev, loans: Array.isArray(data) ? [...data] : prev.loans, _lastDeltaSyncAt: nowIso };
+            }
             const list = Array.isArray(prev.loans) ? [...prev.loans] : [];
             const targetId = entityId ? String(entityId) : (data?.id ? String(data.id) : null);
             if (action === 'delete') {
@@ -655,6 +733,9 @@ export function useRealtimeSync(props = {}) {
 
           case 'branch':
           case 'branches': {
+            if (entityId === 'all' || Array.isArray(data)) {
+              return { ...prev, branches: Array.isArray(data) ? [...data] : prev.branches, _lastDeltaSyncAt: nowIso };
+            }
             const list = Array.isArray(prev.branches) ? [...prev.branches] : [];
             const targetId = entityId ? String(entityId) : (data?.id ? String(data.id) : null);
             if (action === 'delete') {
@@ -667,6 +748,15 @@ export function useRealtimeSync(props = {}) {
               list.push({ ...data, updatedAt: nowIso });
             }
             return { ...prev, branches: list, _lastDeltaSyncAt: nowIso };
+          }
+
+          case '_deletedIds': {
+            const arr = Array.isArray(data) ? data : (data ? [data] : []);
+            return {
+              ...prev,
+              _deletedIds: Array.from(new Set([...(prev._deletedIds || []), ...arr])).slice(-25000),
+              _lastDeltaSyncAt: nowIso
+            };
           }
 
           case 'bylaws': {

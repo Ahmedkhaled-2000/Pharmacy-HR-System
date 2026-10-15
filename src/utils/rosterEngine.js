@@ -22,6 +22,29 @@ export const DEFAULT_WEEKLY_SCHEDULE = {
   'الجمعة': { type: 'off', isOff: true, start: '', end: '', hours: 0 }
 };
 
+export function normalizeDateStr(d) {
+  if (!d) return '';
+  const s = String(d).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (s.includes('/')) {
+    const parts = s.split('/');
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+      }
+      const year = parts[2];
+      if (parseInt(parts[0], 10) > 12) {
+        return `${year}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+      } else if (parseInt(parts[1], 10) > 12) {
+        return `${year}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+      } else {
+        return `${year}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+      }
+    }
+  }
+  return s.slice(0, 10);
+}
+
 /**
  * دالة استخراج جدول يوم محدد من خريطة الجدول (سواء كانت بالتواريخ أو أيام الأسبوع بالعربي أو الإنجليزي)
  * تعيد null في حال عدم وجود جدول معتمد لهذا اليوم، منعاً لفرض مواعيد عمل افتراضية تلقائية
@@ -209,7 +232,8 @@ export function getEmployeeBaseDaySchedule(empId, dateStr, state) {
   const emp = (state?.employees || []).find(e => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
 
   // 🛡️ القاعدة الذهبية المركزية: الحصانة المطلقة لما قبل تاريخ التعيين الرسمي للموظف
-  const hireDate = emp?.hireDate || emp?.hiring_date || emp?.contractStartDate;
+  const rawHireDate = emp?.hireDate || emp?.hiring_date || emp?.contractStartDate;
+  const hireDate = rawHireDate ? normalizeDateStr(rawHireDate) : '';
   if (hireDate && dateStr && dateStr < hireDate) {
     return {
       type: 'off',
@@ -219,7 +243,7 @@ export function getEmployeeBaseDaySchedule(empId, dateStr, state) {
       hours: 0,
       start: '',
       end: '',
-      label: `خارج نطاق التعاقد (تاريخ التعيين: ${hireDate})`,
+      label: `خارج العمل (تاريخ التعيين: ${hireDate})`,
       disabled: true
     };
   }
@@ -266,7 +290,8 @@ export function getEmployeeDaySchedule(empId, dateStr, state) {
   const empCodeStr = emp?.code ? String(emp.code) : '';
 
   // 🛡️ القاعدة الذهبية المركزية: الحصانة المطلقة لما قبل تاريخ التعيين الرسمي للموظف
-  const hireDate = emp?.hireDate || emp?.hiring_date || emp?.contractStartDate;
+  const rawHireDate = emp?.hireDate || emp?.hiring_date || emp?.contractStartDate;
+  const hireDate = rawHireDate ? normalizeDateStr(rawHireDate) : '';
   if (hireDate && dateStr && dateStr < hireDate) {
     return {
       type: 'off',
@@ -276,7 +301,7 @@ export function getEmployeeDaySchedule(empId, dateStr, state) {
       hours: 0,
       start: '',
       end: '',
-      label: `خارج نطاق التعاقد (تاريخ التعيين: ${hireDate})`,
+      label: `خارج العمل (تاريخ التعيين: ${hireDate})`,
       disabled: true
     };
   }

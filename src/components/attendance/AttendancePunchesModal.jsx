@@ -250,8 +250,17 @@ export default function AttendancePunchesModal({
         seenByDate.set(key, p);
       } else {
         const existing = seenByDate.get(key);
-        const pIsManual = Boolean(p.isManual || p.manualPunch || p.adminApproved);
-        const exIsManual = Boolean(existing.isManual || existing.manualPunch || existing.adminApproved);
+        // الوردية الحية لليوم الحالي لها أولوية قصوى
+        if (p.isLiveActive && !existing.isLiveActive) {
+          seenByDate.set(key, p);
+          return;
+        }
+        if (!p.isLiveActive && existing.isLiveActive) {
+          return;
+        }
+
+        const pIsManual = Boolean(p.isManual || p.manualPunch || p.adminApproved || p.editedByAdmin);
+        const exIsManual = Boolean(existing.isManual || existing.manualPunch || existing.adminApproved || existing.editedByAdmin);
 
         // إذا كان أحدهما يدوياً معتمداً من الإدارة: اليدوي المعتمد يفوز ويستبدل البيومتري القديم
         if (pIsManual && !exIsManual) {
@@ -259,14 +268,17 @@ export default function AttendancePunchesModal({
         } else if (!pIsManual && exIsManual) {
           // keep existing manual
         } else {
-          // إذا كان كلاهما بنفس الصفة: تفضيل من له وقت انصراف حقيقي وساعات أكبر من 0
-          const pHasOut = Boolean(p.timeOut && p.timeOut !== '—' && p.timeOut !== '' && p.timeOut !== 'غير مسجل');
-          const exHasOut = Boolean(existing.timeOut && existing.timeOut !== '—' && existing.timeOut !== '' && existing.timeOut !== 'غير مسجل');
-          const pHrs = parseFloat(p.hours || p.actualWorkedHours || 0);
-          const exHrs = parseFloat(existing.hours || existing.actualWorkedHours || 0);
+          // تفضيل من له وقت انصراف حقيقي ثم من له ساعات عمل أكبر وأصح
+          const pHasOut = Boolean(p.timeOut && p.timeOut !== '—' && p.timeOut !== '' && p.timeOut !== 'غير مسجل' && p.timeOut !== 'قيد العمل الآن');
+          const exHasOut = Boolean(existing.timeOut && existing.timeOut !== '—' && existing.timeOut !== '' && existing.timeOut !== 'غير مسجل' && existing.timeOut !== 'قيد العمل الآن');
+          const pHrs = parseFloat(p.actualWorkedHours || p.hours || 0);
+          const exHrs = parseFloat(existing.actualWorkedHours || existing.hours || 0);
+
           if (pHasOut && !exHasOut) {
             seenByDate.set(key, p);
           } else if (pHrs > 0 && exHrs === 0) {
+            seenByDate.set(key, p);
+          } else if (pHrs > exHrs) {
             seenByDate.set(key, p);
           }
         }
@@ -660,6 +672,8 @@ export default function AttendancePunchesModal({
       let updatedShifts;
       let finalSavedShiftId = '';
 
+      const duplicateShiftIdsToTombstone = [];
+
       if (snapIsAdding) {
         const existingIdx = (state.shifts || []).findIndex(s =>
           (String(s.employeeId) === String(employee.id) || (employee.code && String(s.employeeCode) === String(employee.code))) &&
@@ -710,6 +724,9 @@ export default function AttendancePunchesModal({
           if (!s) return false;
           if (s.id === finalSavedShiftId) return true;
           const isSameDay = (String(s.employeeId) === String(employee.id) || (employee.code && String(s.employeeCode) === String(employee.code))) && s.date === snapDate;
+          if (isSameDay && s.id) {
+            duplicateShiftIdsToTombstone.push(String(s.id));
+          }
           return !isSameDay;
         });
       } else {
@@ -751,9 +768,19 @@ export default function AttendancePunchesModal({
           if (!s) return false;
           if (String(s.id) === finalSavedShiftId) return true;
           const isSameDay = (String(s.employeeId) === String(employee.id) || (employee.code && String(s.employeeCode) === String(employee.code))) && s.date === snapDate;
+          if (isSameDay && s.id) {
+            duplicateShiftIdsToTombstone.push(String(s.id));
+          }
           return !isSameDay;
         });
       }
+
+      const existingDeletedSet = new Set(Array.isArray(state._deletedIds) ? state._deletedIds.map(String) : []);
+      duplicateShiftIdsToTombstone.forEach(id => {
+        existingDeletedSet.add(id);
+        existingDeletedSet.add(`shift_${id}`);
+      });
+      const updatedDeletedIds = Array.from(existingDeletedSet);
 
       // إذا كانت البصمة المعدلة هي الوردية الحية النشطة، نقوم بتحديث فرعها وتوقيتها في activeShifts أيضاً
       let updatedActiveShifts = { ...(state.activeShifts || {}) };
@@ -771,7 +798,7 @@ export default function AttendancePunchesModal({
         if (employee.code) updatedActiveShifts[String(employee.code)] = updatedActiveItem;
       }
 
-      let updatedState = { ...state, shifts: updatedShifts, activeShifts: updatedActiveShifts };
+      let updatedState = { ...state, shifts: updatedShifts, activeShifts: updatedActiveShifts, _deletedIds: updatedDeletedIds };
 
       // Auto recalculate late incidents and reconcile via unified engine
       const { updatedState: reconState } = reconcileEmployeeScheduleOrPunchChange({
@@ -809,6 +836,12 @@ export default function AttendancePunchesModal({
       try {
         await apiSaveSettingsSlice('shifts', updatedShifts);
         await apiSaveSettingsSlice('requests', finalRequests);
+        if (updatedState.lateIncidents) {
+          await apiSaveSettingsSlice('lateIncidents', updatedState.lateIncidents);
+        }
+        if (updatedState._deletedIds) {
+          await apiSaveSettingsSlice('_deletedIds', updatedState._deletedIds);
+        }
       } catch (sliceErr) {
         console.warn('[AttendancePunchesModal] Slice save in handleSaveEdit:', sliceErr);
       }
@@ -947,6 +980,18 @@ export default function AttendancePunchesModal({
       updatedState = reconState;
 
       if (setState) setState(updatedState);
+      try {
+        await apiSaveSettingsSlice('shifts', updatedState.shifts);
+        await apiSaveSettingsSlice('requests', updatedState.requests);
+        if (updatedState.lateIncidents) {
+          await apiSaveSettingsSlice('lateIncidents', updatedState.lateIncidents);
+        }
+        if (updatedState._deletedIds) {
+          await apiSaveSettingsSlice('_deletedIds', updatedState._deletedIds);
+        }
+      } catch (sliceErr) {
+        console.warn('[AttendancePunchesModal] Slice save in handleDeletePunch:', sliceErr);
+      }
       if (saveState) await saveState(updatedState);
 
       showToast?.('🗑️ تم حذف البصمة بنجاح واستبعاد هذا اليوم بالكامل من كشف المرتبات ونظام الأجور');
@@ -1075,6 +1120,18 @@ export default function AttendancePunchesModal({
       updatedState = reconState;
 
       if (setState) setState(updatedState);
+      try {
+        await apiSaveSettingsSlice('shifts', updatedState.shifts);
+        await apiSaveSettingsSlice('requests', updatedState.requests);
+        if (updatedState.lateIncidents) {
+          await apiSaveSettingsSlice('lateIncidents', updatedState.lateIncidents);
+        }
+        if (updatedState._deletedIds) {
+          await apiSaveSettingsSlice('_deletedIds', updatedState._deletedIds);
+        }
+      } catch (sliceErr) {
+        console.warn('[AttendancePunchesModal] Slice save in performApproveAndCalculate:', sliceErr);
+      }
       if (saveState) await saveState(updatedState);
 
       showToast?.(`✅ تم احتساب البصمة وتفعيل الوردية (${netHours} س) في نظام الأجور والرواتب بنجاح!`);

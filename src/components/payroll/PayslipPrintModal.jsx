@@ -66,12 +66,46 @@ export default function PayslipPrintModal({
   const endCutoff = cycleRange.endDate;
 
   // Filter shifts and adjustments for this cutoff period
-  const empShifts = shifts.filter((s) =>
-    String(s.employeeId) === String(emp.id) &&
-    s.date >= startCutoff &&
-    s.date <= endCutoff &&
-    (!currentBranchId || String(s.branchId) === String(currentBranchId))
-  );
+  const rawEmpShifts = shifts.filter((s) => {
+    if (!s) return false;
+    if (s.status === 'cancelled' || s.isCancelled) return false;
+    const isEmp = String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeCode) === String(emp.code));
+    return isEmp && s.date >= startCutoff && s.date <= endCutoff && (!currentBranchId || String(s.branchId) === String(currentBranchId));
+  });
+
+  // 🛡️ صمام منع تكرار الأيام في كشف المرتب الرسمي (Strict Canonical Deduplication per Date for Payslip):
+  const seenShiftDates = new Map();
+  rawEmpShifts.forEach(s => {
+    if (!s || !s.date) return;
+    const dKey = s.date;
+    if (!seenShiftDates.has(dKey)) {
+      seenShiftDates.set(dKey, s);
+    } else {
+      const existing = seenShiftDates.get(dKey);
+      const sIsManual = Boolean(s.isManual || s.manualPunch || s.adminApproved || s.editedByAdmin);
+      const exIsManual = Boolean(existing.isManual || existing.manualPunch || existing.adminApproved || existing.editedByAdmin);
+
+      if (sIsManual && !exIsManual) {
+        seenShiftDates.set(dKey, s);
+      } else if (!sIsManual && exIsManual) {
+        // keep existing manual
+      } else {
+        const sHasOut = Boolean(s.timeOut && s.timeOut !== '—' && s.timeOut !== '' && s.timeOut !== 'غير مسجل');
+        const exHasOut = Boolean(existing.timeOut && existing.timeOut !== '—' && existing.timeOut !== '' && existing.timeOut !== 'غير مسجل');
+        const sHrs = parseFloat(s.actualWorkedHours || s.hours || 0);
+        const exHrs = parseFloat(existing.actualWorkedHours || existing.hours || 0);
+
+        if (sHasOut && !exHasOut) {
+          seenShiftDates.set(dKey, s);
+        } else if (sHrs > 0 && exHrs === 0) {
+          seenShiftDates.set(dKey, s);
+        } else if (sHrs > exHrs) {
+          seenShiftDates.set(dKey, s);
+        }
+      }
+    }
+  });
+  const empShifts = Array.from(seenShiftDates.values()).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
   const empAdjs = adjustments.filter((a) =>
     (String(a.employeeId) === String(emp.id) || a.employeeId === 'all') &&
@@ -399,8 +433,36 @@ export default function PayslipPrintModal({
          (r.month === month || !r.month) && (r.status === 'approved' || r.adminApproved)
   );
 
+  const normalizeDateStr = (d) => {
+    if (!d) return '';
+    const s = String(d).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    if (s.includes('/')) {
+      const parts = s.split('/');
+      if (parts.length === 3) {
+        if (parts[0].length === 4) {
+          return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        }
+        const year = parts[2];
+        if (parseInt(parts[0], 10) > 12) {
+          return `${year}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        } else if (parseInt(parts[1], 10) > 12) {
+          return `${year}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+        } else {
+          return `${year}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+      }
+    }
+    return s.slice(0, 10);
+  };
+
+  const rawHireDate = emp?.hireDate || emp?.hiring_date || emp?.contractStartDate;
+  const hireDate = rawHireDate ? normalizeDateStr(rawHireDate) : '';
+
   // 1. Rest days (الراحات الأسبوعية والمجدولة المأخوذة بما فيها التبديلات المعتمدة)
+  // 🛡️ الأيام السابقة لتاريخ التعيين الرسمي للموظف: تظهر كـ "خارج العمل" وغير مدفوعة الأجر وليست راحة أسبوعية
   const restDayItems = [];
+  const preHireDayItems = [];
   const shiftDatesSet = new Set((empShifts || []).map(s => s.date));
   const leaveDatesSet = new Set();
 
@@ -422,8 +484,53 @@ export default function PayslipPrintModal({
 
   cycleDates.forEach(dateStr => {
     if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;
+
+    // 🛡️ فحص حاسم: هل هذا اليوم قبل تاريخ التعيين الرسمي؟
+    if (hireDate && dateStr < hireDate) {
+      preHireDayItems.push({
+        id: `prehire_${dateStr}`,
+        date: dateStr,
+        dateRangeLabel: `${arabicWeekday(dateStr)} ${dateStr}`,
+        dayName: arabicWeekday(dateStr),
+        category: 'pre_hire',
+        categoryBadge: (
+          <span style={{ background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '9px' }}>
+            🔒 خارج العمل
+          </span>
+        ),
+        typeLabel: 'خارج العمل (قبل تاريخ التعيين)',
+        daysCount: 0,
+        effectLabel: 'غير مدفوعة (قبل التعيين)',
+        effectColor: '#64748b',
+        financialStatus: 'غير مدفوعة (قبل تاريخ التعيين)',
+        reason: `يوم يسبق تاريخ التعيين ومباشرة العمل الرسمي (${hireDate})`
+      });
+      return;
+    }
+
     const daySched = getEmployeeDaySchedule(emp.id, dateStr, state);
     if (daySched && (daySched.type === 'off' || daySched.isOff)) {
+      if (daySched.isPreHire) {
+        preHireDayItems.push({
+          id: `prehire_${dateStr}`,
+          date: dateStr,
+          dateRangeLabel: `${arabicWeekday(dateStr)} ${dateStr}`,
+          dayName: arabicWeekday(dateStr),
+          category: 'pre_hire',
+          categoryBadge: (
+            <span style={{ background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '9px' }}>
+              🔒 خارج العمل
+            </span>
+          ),
+          typeLabel: 'خارج العمل (قبل تاريخ التعيين)',
+          daysCount: 0,
+          effectLabel: 'غير مدفوعة (قبل التعيين)',
+          effectColor: '#64748b',
+          financialStatus: 'غير مدفوعة (قبل تاريخ التعيين)',
+          reason: `يوم يسبق تاريخ التعيين ومباشرة العمل الرسمي (${hireDate || daySched.hireDate || '—'})`
+        });
+        return;
+      }
       const isSwapRest = !!daySched.isSwapped;
       restDayItems.push({
         id: `rest_${dateStr}`,
@@ -602,6 +709,26 @@ export default function PayslipPrintModal({
     });
   });
 
+  // Pre-hire days (خارج العمل قبل تاريخ التعيين - لا يحتسب لها راتب وليست راحة أسبوعية)
+  preHireDayItems.forEach((r) => {
+    unifiedTableRows.push({
+      id: r.id,
+      date: r.date,
+      type: 'pre_hire',
+      dayName: r.dayName || arabicWeekday(r.date),
+      timeIn: '—',
+      timeOut: '—',
+      breakHours: 0,
+      effHours: 0,
+      earnings: 0,
+      badge: r.categoryBadge,
+      statusLabel: r.typeLabel,
+      effectLabel: r.financialStatus || 'غير مدفوعة (قبل تاريخ التعيين)',
+      effectColor: r.effectColor || '#64748b',
+      reason: r.reason
+    });
+  });
+
   // Approved leaves (annual, unpaid, sick)
   empApprovedLeaves.forEach((l) => {
     const isUnpaid = l.leaveType === 'unpaid' || l.type === 'unpaid_leave' || l.isUnpaid === true;
@@ -676,8 +803,29 @@ export default function PayslipPrintModal({
     }
   });
 
-  // Sort unified table chronologically
-  unifiedTableRows.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  // Sort unified table chronologically and enforce STRICT deduplication per date (عدم تكرار الأيام في كشف الرواتب نهائياً):
+  unifiedTableRows.sort((a, b) => {
+    const dComp = (a.date || '').localeCompare(b.date || '');
+    if (dComp !== 0) return dComp;
+    // إذا تطابق التاريخ: الوردية (shift) أولاً ثم الإجازة (leave) ثم الراحة (rest) ثم خارج العمل (pre_hire)
+    const priority = { shift: 1, leave: 2, rest: 3, pre_hire: 4 };
+    const pA = priority[a.type] || 5;
+    const pB = priority[b.type] || 5;
+    if (pA !== pB) return pA - pB;
+    return (b.effHours || 0) - (a.effHours || 0);
+  });
+
+  const seenTableDates = new Set();
+  const cleanUnifiedTableRows = [];
+  unifiedTableRows.forEach(item => {
+    if (!item || !item.date) return;
+    if (!seenTableDates.has(item.date)) {
+      seenTableDates.add(item.date);
+      cleanUnifiedTableRows.push(item);
+    }
+  });
+  unifiedTableRows.length = 0;
+  unifiedTableRows.push(...cleanUnifiedTableRows);
 
   // 3. Absence days (أيام الغياب غير المبرر عن الورديات المجدولة - للأيام المنقضية فقط)
   // لا تنطبق إطلاقاً على موظفي المواعيد المتغيرة (ليس له جدول شهري)
@@ -1347,6 +1495,22 @@ export default function PayslipPrintModal({
                               <td style={{ padding: '3px', border: '1px solid #bae6fd', color: '#64748b' }}>—</td>
                               <td style={{ padding: '3px', border: '1px solid #bae6fd' }}>{item.badge || item.statusLabel}</td>
                               <td style={{ padding: '3px', border: '1px solid #bae6fd', fontWeight: 'bold', color: item.effectColor }}>
+                                {item.effectLabel}
+                              </td>
+                            </tr>
+                          );
+                        } else if (item.type === 'pre_hire') {
+                          return (
+                            <tr key={item.id || idx} style={{ background: '#f8fafc' }}>
+                              <td style={{ padding: '3px', border: '1px solid #e2e8f0', color: '#94a3b8' }}>{idx + 1}</td>
+                              <td style={{ padding: '3px', border: '1px solid #e2e8f0', fontWeight: 'bold', color: '#64748b' }}>
+                                {item.dayName} {item.date}
+                              </td>
+                              <td style={{ padding: '3px', border: '1px solid #e2e8f0', color: '#94a3b8' }}>—</td>
+                              <td style={{ padding: '3px', border: '1px solid #e2e8f0', color: '#94a3b8' }}>—</td>
+                              <td style={{ padding: '3px', border: '1px solid #e2e8f0', color: '#94a3b8' }}>—</td>
+                              <td style={{ padding: '3px', border: '1px solid #e2e8f0' }}>{item.badge || item.statusLabel}</td>
+                              <td style={{ padding: '3px', border: '1px solid #e2e8f0', fontWeight: 'bold', color: item.effectColor || '#64748b' }}>
                                 {item.effectLabel}
                               </td>
                             </tr>
