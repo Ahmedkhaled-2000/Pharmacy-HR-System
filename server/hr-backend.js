@@ -23,6 +23,7 @@ import crypto from 'crypto';
 import { initSaasTables, registerSaasRoutes, DEFAULT_DEV_USER, DEFAULT_DEV_PASS } from './saas-manager.js';
 import { initOutstockTables, registerOutstockRoutes } from './outstock-manager.js';
 import { initBiometricTables, registerBiometricRoutes, sendUniversalAttendanceWhatsAppAlert, sendBreakTimeoutWarningWhatsAppAlert } from './biometric-manager.js';
+import { EnterpriseBackupEngine, SYSTEM_SCOPES } from './backup-engine.js';
 import {
   getEgyptDate,
   getEgyptTime,
@@ -234,6 +235,9 @@ const db = new Pool(pgConfig);
 db.on('error', (err) => {
   console.error('[PostgreSQL Pool Error]:', err.message);
 });
+
+// 🛡️ تهيئة محرك النسخ الاحتياطي وإدارة الطوارئ الشامل للأنظمة
+const backupEngine = new EnterpriseBackupEngine(db, io, forwardToGoogleDrive);
 
 // ── 3. إعداد الاتصال بـ Redis (In-Memory Caching & Pub/Sub) ─────────────────
 const redisConfig = {
@@ -468,6 +472,7 @@ async function initDatabaseTables() {
     await initSaasTables(db);
     await initOutstockTables(db);
     await initBiometricTables(db);
+    await backupEngine.initDatabase();
   } catch (err) {
     console.error('❌ [PostgreSQL Init Error]:', err.message);
   }
@@ -4544,7 +4549,208 @@ app.post('/api/drive/schedule', async (req, res) => {
   }
 });
 
-// ── محرك النسخ الاحتياطي التلقائي المجدول على Google Drive (24/7 Daily Auto-Backup) ──
+// ════════════════════════════════════════════════════════════════════════════════
+// 🛡️ منظومة ومسارات محرك النسخ الاحتياطي وإدارة الطوارئ الشامل للأنظمة (VPS Backup Hub)
+// ════════════════════════════════════════════════════════════════════════════════
+
+// 1. فحص حالة المنظومات وسجلات النسخ الاحتياطي وحالة التخزين
+app.get('/api/system-backups/status', async (req, res) => {
+  try {
+    const status = await backupEngine.getSystemStatus();
+    res.json(status);
+  } catch (err) {
+    console.error('[API /system-backups/status Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. تشغيل نسخ احتياطي فوري لنظام محدد أو لكافة الأنظمة
+app.post('/api/system-backups/trigger', async (req, res) => {
+  try {
+    const auth = verifyClientRequest(req);
+    const { scope = 'ALL', pushToDrive = false } = req.body || {};
+    const createdBy = auth?.user?.username || req.body?.createdBy || 'المطور العام';
+
+    console.log(`🚀 [API Backup Trigger] Manual backup requested for scope: ${scope} by ${createdBy}`);
+    
+    // جلب إعدادات Google Drive الحالية
+    const stored = await getSettingsFromStorage(STORAGE_KEY);
+    const driveConfig = stored?.orgSettings?.driveConfig || null;
+
+    const result = await backupEngine.createBackup({
+      scope,
+      backupType: 'manual',
+      createdBy,
+      pushToDrive: Boolean(pushToDrive),
+      driveConfig
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('[API Backup Trigger Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 3. استعراض سجل وأرشيف النسخ الاحتياطية المتوفرة
+app.get('/api/system-backups/history', async (req, res) => {
+  try {
+    const { scope, limit = 50 } = req.query || {};
+    const history = await backupEngine.getBackupsHistory({ scope, limit });
+    res.json({ success: true, history });
+  } catch (err) {
+    console.error('[API Backup History Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 4. تنزيل ملف النسخة الاحتياطية المضغوط مباشرة إلى جهاز المطور
+app.get('/api/system-backups/download/:backupId', async (req, res) => {
+  try {
+    const { backupId } = req.params;
+    const bkpRes = await db.query(`SELECT file_path, file_name FROM public.system_backups_registry WHERE id = $1`, [backupId]);
+    const bkp = bkpRes.rows[0];
+    if (!bkp || !fs.existsSync(bkp.file_path)) {
+      return res.status(404).json({ success: false, error: 'ملف النسخة الاحتياطية غير موجود على الخادم' });
+    }
+
+    res.download(bkp.file_path, bkp.file_name);
+  } catch (err) {
+    console.error('[API Backup Download Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5. رفع نسخة موجودة محلياً إلى Google Drive
+app.post('/api/system-backups/push-to-drive', async (req, res) => {
+  try {
+    const { backupId } = req.body || {};
+    if (!backupId) return res.status(400).json({ success: false, error: 'معرف النسخة الاحتياطية مطلوب' });
+
+    const driveRes = await backupEngine.pushExistingBackupToDrive(backupId);
+    res.json({ success: true, data: driveRes });
+  } catch (err) {
+    console.error('[API Backup Push to Drive Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 6. الفحص التجريبي قبل الاستعادة (Dry-Run Validation)
+app.post('/api/system-backups/restore/dry-run', async (req, res) => {
+  try {
+    const { backupId } = req.body || {};
+    if (!backupId) return res.status(400).json({ success: false, error: 'معرف النسخة الاحتياطية مطلوب' });
+
+    const report = await backupEngine.dryRunValidation(backupId);
+    res.json(report);
+  } catch (err) {
+    console.error('[API Restore Dry-Run Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 7. تنفيذ الاستعادة الآمنة مع شبكة الأمان وعزل العمليات
+app.post('/api/system-backups/restore/execute', async (req, res) => {
+  try {
+    const auth = verifyClientRequest(req);
+    const { backupId, mode = 'replace', confirmPhrase, takeSafetySnapshot = true } = req.body || {};
+    const createdBy = auth?.user?.username || req.body?.createdBy || 'المطور العام';
+
+    console.log(`⚠️ [API Restore Execute] Restoring backup ${backupId} by ${createdBy} (Mode: ${mode})`);
+
+    const result = await backupEngine.executeRestore({
+      backupId,
+      mode,
+      confirmPhrase,
+      createdBy,
+      takeSafetySnapshot: Boolean(takeSafetySnapshot)
+    });
+
+    // تفريغ كاش الريديس لإجبار كافة الشاشات على قراءة البيانات المستعادة
+    if (redis && isRedisConnected) {
+      await redis.del(`hr:settings:${STORAGE_KEY}`).catch(() => {});
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('[API Restore Execute Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 8. جلب إعدادات الجدولة والربط السحابي مع Google Drive
+app.get('/api/system-backups/config', async (req, res) => {
+  try {
+    const stored = await getSettingsFromStorage(STORAGE_KEY);
+    const driveConfig = stored?.orgSettings?.driveConfig || {};
+    res.json({
+      success: true,
+      config: {
+        autoBackupEnabled: Boolean(driveConfig.autoBackupEnabled),
+        autoBackupTime: driveConfig.autoBackupTime || '03:00',
+        autoScope: driveConfig.autoScope || 'ALL',
+        retentionCount: parseInt(driveConfig.retentionCount, 10) || 30,
+        googleDriveSyncEnabled: Boolean(driveConfig.enabled),
+        serviceUrl: driveConfig.serviceUrl || '',
+        parentFolderId: driveConfig.parentFolderId || '',
+        lastAutoBackupAt: driveConfig.lastAutoBackupAt || null,
+        lastScheduledBackupDate: driveConfig.lastScheduledBackupDate || null
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 9. تحديث إعدادات الجدولة ومزامنة Google Drive
+app.post('/api/system-backups/config', async (req, res) => {
+  try {
+    const {
+      autoBackupEnabled,
+      autoBackupTime,
+      autoScope,
+      retentionCount,
+      googleDriveSyncEnabled,
+      serviceUrl,
+      parentFolderId
+    } = req.body || {};
+
+    const stored = await getSettingsFromStorage(STORAGE_KEY);
+    if (!stored) return res.status(500).json({ success: false, error: 'تعذر تحميل إعدادات المنظومة' });
+    if (!stored.orgSettings) stored.orgSettings = {};
+    if (!stored.orgSettings.driveConfig) stored.orgSettings.driveConfig = {};
+
+    const dc = stored.orgSettings.driveConfig;
+    if (autoBackupEnabled !== undefined) dc.autoBackupEnabled = Boolean(autoBackupEnabled);
+    if (autoBackupTime !== undefined) dc.autoBackupTime = String(autoBackupTime).trim();
+    if (autoScope !== undefined) dc.autoScope = String(autoScope).trim().toUpperCase();
+    if (retentionCount !== undefined) dc.retentionCount = parseInt(retentionCount, 10) || 30;
+    if (googleDriveSyncEnabled !== undefined) dc.enabled = Boolean(googleDriveSyncEnabled);
+    if (serviceUrl !== undefined) dc.serviceUrl = String(serviceUrl).trim();
+    if (parentFolderId !== undefined) dc.parentFolderId = String(parentFolderId).trim();
+
+    await saveSettingsToStorage(STORAGE_KEY, stored, req.ip || 'system-backup-config');
+    io.emit('system-backup:config-updated', dc);
+
+    res.json({ success: true, config: dc });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 10. حذف نسخة احتياطية من السجل وقرص الخادم
+app.delete('/api/system-backups/:backupId', async (req, res) => {
+  try {
+    const { backupId } = req.params;
+    const delRes = await backupEngine.deleteBackup(backupId);
+    res.json(delRes);
+  } catch (err) {
+    console.error('[API Delete Backup Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── محرك النسخ الاحتياطي التلقائي المجدول الشامل يومياً الساعة 03:00 فجراً (24/7 Daily Auto-Backup) ──
 let isRunningAutoBackup = false;
 
 function getSchedulerHourMinute(date = new Date()) {
@@ -4556,13 +4762,13 @@ function getSchedulerDateKey(date = new Date()) {
 }
 
 async function checkAndRunScheduledDriveBackup() {
-  if (isRunningAutoBackup) return;
+  if (isRunningAutoBackup || backupEngine.isBackingUp || backupEngine.isRestoring) return;
   try {
     const stored = await getSettingsFromStorage(STORAGE_KEY);
     if (!stored) return;
 
     const driveConfig = stored?.orgSettings?.driveConfig;
-    if (!driveConfig || !driveConfig.enabled || !driveConfig.autoBackupEnabled || !driveConfig.serviceUrl) {
+    if (!driveConfig || !driveConfig.autoBackupEnabled) {
       return;
     }
 
@@ -4581,53 +4787,38 @@ async function checkAndRunScheduledDriveBackup() {
       return;
     }
 
-    console.log(`⏰ [Drive Scheduled Backup] حان موعد النسخ الاحتياطي التلقائي اليومي (${currentTime}). جاري البدء بأخذ اللقطة...`);
+    console.log(`⏰ [03:00 AM Scheduled Backup Engine] حان موعد النسخ الاحتياطي الشامل التلقائي (${currentTime}). بدء التشغيل...`);
     isRunningAutoBackup = true;
 
-    const dateStr = todayDateKey;
-    const timeStr = currentTime.replace(':', '-');
-    const version = stored.version || 1;
-    const fileName = `Auto_Backup_${dateStr}_${timeStr}_v${version}.json`;
+    const targetScope = (driveConfig.autoScope || 'ALL').toUpperCase();
+    const pushToDrive = Boolean(driveConfig.enabled && driveConfig.serviceUrl);
 
-    const backupPayload = {
-      export_date: now.toISOString(),
-      version,
-      type: 'automated_daily_backup',
-      state: stored
-    };
-
-    const forwardRes = await forwardToGoogleDrive(driveConfig.serviceUrl, {
-      action: 'upload_system_backup',
-      parentFolderId: driveConfig.parentFolderId || '',
-      fileName,
-      backupJson: JSON.stringify(backupPayload),
-      retentionLimit: driveConfig.retentionCount || 20
+    const bkpResult = await backupEngine.createBackup({
+      scope: targetScope,
+      backupType: 'scheduled_daily',
+      createdBy: 'DAILY_0300_SCHEDULER_DAEMON',
+      pushToDrive,
+      driveConfig
     });
 
-    if (forwardRes.success && forwardRes.data?.success) {
-      console.log(`✅ [Drive Scheduled Backup] تم حفظ النسخة الاحتياطية اليومية بنجاح على Google Drive: ${fileName}`);
-      driveConfig.lastScheduledBackupDate = todayDateKey;
-      driveConfig.lastAutoBackupAt = now.toISOString();
-      driveConfig.lastBackupStatus = 'success';
+    console.log(`✅ [03:00 AM Scheduled Backup Engine] اكتمل النسخ الاحتياطي اليومي بنجاح: ${bkpResult.fileName} (${bkpResult.formattedSize})`);
+    
+    driveConfig.lastScheduledBackupDate = todayDateKey;
+    driveConfig.lastAutoBackupAt = now.toISOString();
+    driveConfig.lastBackupStatus = 'success';
+    await saveSettingsToStorage(STORAGE_KEY, stored, 'auto-drive-scheduler');
 
-      await saveSettingsToStorage(STORAGE_KEY, stored, 'auto-drive-scheduler');
+    io.emit('drive:backup-completed', {
+      timestamp: now.toISOString(),
+      fileName: bkpResult.fileName,
+      scope: targetScope,
+      fileSize: bkpResult.formattedSize,
+      isScheduled: true,
+      success: true
+    });
 
-      io.emit('drive:backup-completed', {
-        timestamp: now.toISOString(),
-        fileName: forwardRes.data.fileName,
-        fileUrl: forwardRes.data.fileUrl,
-        downloadUrl: forwardRes.data.downloadUrl,
-        folderUrl: forwardRes.data.folderUrl,
-        isScheduled: true,
-        success: true
-      });
-    } else {
-      console.error(`❌ [Drive Scheduled Backup] تعذر حفظ النسخة الاحتياطية:`, forwardRes.data?.error || forwardRes.error);
-      driveConfig.lastBackupStatus = 'failed: ' + (forwardRes.data?.error || forwardRes.error);
-      await saveSettingsToStorage(STORAGE_KEY, stored, 'auto-drive-scheduler');
-    }
   } catch (err) {
-    console.error('❌ [Drive Scheduled Backup Error]:', err.message);
+    console.error('❌ [03:00 AM Scheduled Backup Engine Error]:', err.message);
   } finally {
     isRunningAutoBackup = false;
   }

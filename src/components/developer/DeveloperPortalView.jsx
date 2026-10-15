@@ -48,6 +48,7 @@ import {
 } from 'lucide-react';
 import { API_BASE_URL } from '../../utils/apiClient';
 import ContractsManagementModule from './ContractsManagementModule';
+import DeveloperBackupsModule from './DeveloperBackupsModule';
 
 export default function DeveloperPortalView({ onLogout, showToast }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -1195,7 +1196,7 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
         <div className="dev-nav-group">
           <button
             type="button"
-            className={`dev-nav-group-btn ${['pricing', 'whatsapp', 'maintenance'].includes(activeTab) ? 'is-active-group is-current-active' : ''}`}
+            className={`dev-nav-group-btn ${['pricing', 'whatsapp', 'maintenance', 'backups'].includes(activeTab) ? 'is-active-group is-current-active' : ''}`}
             onClick={(e) => {
               e.stopPropagation();
               setOpenDropdown(openDropdown === 'system_group' ? null : 'system_group');
@@ -1212,6 +1213,17 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
           </button>
           {openDropdown === 'system_group' && (
             <div className="dev-nav-dropdown">
+              <button
+                type="button"
+                className={`dev-dropdown-item ${activeTab === 'backups' ? 'is-selected' : ''}`}
+                onClick={() => { setActiveTab('backups'); setOpenDropdown(null); }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Database size={15} color="#38bdf8" />
+                  <span>مركز النسخ الاحتياطي والطوارئ</span>
+                </div>
+                <span className="dev-dropdown-item-badge" style={{ background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8' }}>شامل</span>
+              </button>
               <button
                 type="button"
                 className={`dev-dropdown-item ${activeTab === 'pricing' ? 'is-selected' : ''}`}
@@ -3525,6 +3537,11 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
               </div>
             </div>
           )}
+
+          {/* TAB: BACKUPS & DISASTER RECOVERY */}
+          {activeTab === 'backups' && (
+            <DeveloperBackupsModule showToast={showToast} />
+          )}
         </main>
       </div>
 
@@ -3537,6 +3554,10 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
         <button className={`dev-mobile-dock-btn ${activeTab === 'companies' ? 'is-active' : ''}`} onClick={() => setActiveTab('companies')}>
           <Building2 size={20} />
           <span>الشركات</span>
+        </button>
+        <button className={`dev-mobile-dock-btn ${activeTab === 'backups' ? 'is-active' : ''}`} onClick={() => setActiveTab('backups')}>
+          <Database size={20} />
+          <span>النسخ</span>
         </button>
         <button className={`dev-mobile-dock-btn ${activeTab === 'contracts' ? 'is-active' : ''}`} onClick={() => setActiveTab('contracts')}>
           <ShieldCheck size={20} />
@@ -3553,10 +3574,6 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
         <button className={`dev-mobile-dock-btn ${activeTab === 'financials' ? 'is-active' : ''}`} onClick={() => setActiveTab('financials')}>
           <DollarSign size={20} />
           <span>المالية</span>
-        </button>
-        <button className={`dev-mobile-dock-btn ${activeTab === 'payment_methods' ? 'is-active' : ''}`} onClick={() => setActiveTab('payment_methods')}>
-          <CreditCard size={20} />
-          <span>الدفع</span>
         </button>
       </nav>
 
