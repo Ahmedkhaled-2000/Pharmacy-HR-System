@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics, recalculateEmployeeCycleLateness, reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
 import { calcRawDurationMinutes } from '../../utils/workHoursEngine';
-import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
+import { getEmployeeDaySchedule, findEmployeeRoster } from '../../utils/rosterEngine';
 import {
   getEmployeeManualPunchesCount,
   isShiftManualPunch,
@@ -44,6 +44,34 @@ export default function AttendancePunchesModal({
   const [editBreakHours, setEditBreakHours] = useState('0');
   const [editBranchId, setEditBranchId] = useState('');
   const [editNotes, setEditNotes] = useState('');
+
+  // 🛡️ معالج زر Escape المخصص والآمن لنافذة سجل البصمات (يمنع أي تداخل أو ضغط بالخطأ على أزرار الحذف)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' || e.key === 'Esc') {
+        if (selectedDayDetails) {
+          e.preventDefault();
+          e.stopPropagation();
+          setSelectedDayDetails(null);
+          return;
+        }
+        if (editingPunch || isAddingNewPunch) {
+          e.preventDefault();
+          e.stopPropagation();
+          setEditingPunch(null);
+          setIsAddingNewPunch(false);
+          return;
+        }
+        if (typeof onClose === 'function') {
+          e.preventDefault();
+          e.stopPropagation();
+          onClose();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [selectedDayDetails, editingPunch, isAddingNewPunch, onClose]);
 
   if (!employee) return null;
 
@@ -685,18 +713,48 @@ export default function AttendancePunchesModal({
       const daySched = getEmployeeDaySchedule(employee.id, snapDate, state);
       const profileHours = parseFloat(employee.workHoursPerDay || employee.workHours) || 8;
       let scheduledShiftHours = profileHours;
-      if (daySched && daySched.start && daySched.end && daySched.type !== 'off') {
+
+      const isFlexEmp = employee.noMonthlySchedule || employee.isVariableHours || employee.variableHours || employee.hasNoRoster || employee.scheduleType === 'flexible' || employee.scheduleType === 'variable';
+      const activeRoster = !isFlexEmp ? findEmployeeRoster(employee.id, snapDate, state) : null;
+      const hasApprovedRoster = !isFlexEmp && Boolean(activeRoster && (activeRoster.status === 'approved' || activeRoster.adminApproved === true || activeRoster.isApproved === true));
+
+      let regularHours = calculatedHours;
+      let overtimeHours = 0;
+
+      // ── الحالة الأولى: الموظفون الذين لديهم جدول شهري معتمد (حصراً) ──
+      if (hasApprovedRoster && daySched && daySched.start && daySched.end && daySched.type !== 'off' && snapTimeIn && snapTimeOut) {
         const [sH, sM] = daySched.start.split(':').map(Number);
-        const [eH, eM] = daySched.end.split(':').map(Number);
-        let sMins = sH * 60 + (sM || 0);
-        let eMins = eH * 60 + (eM || 0);
-        if (eMins <= sMins) eMins += 24 * 60;
-        scheduledShiftHours = Math.round(((eMins - sMins) / 60) * 100) / 100;
-      } else if (daySched && daySched.hours && daySched.type !== 'off') {
-        scheduledShiftHours = parseFloat(daySched.hours) || profileHours;
+        let [eH, eM] = daySched.end.split(':').map(Number);
+        let schedStartMins = sH * 60 + (sM || 0);
+        let schedEndMins = eH * 60 + (eM || 0);
+        if (schedEndMins <= schedStartMins) schedEndMins += 24 * 60;
+        scheduledShiftHours = Math.round(((schedEndMins - schedStartMins) / 60) * 100) / 100;
+
+        const [inH, inM] = String(snapTimeIn).split(':').map(Number);
+        let [outH, outM] = String(snapTimeOut).split(':').map(Number);
+        let actInMins = inH * 60 + (inM || 0);
+        let actOutMins = outH * 60 + (outM || 0);
+        if (actOutMins <= actInMins) actOutMins += 24 * 60;
+
+        const earlyArrivalMins = actInMins < schedStartMins ? (schedStartMins - actInMins) : 0;
+        const lateDepartureMins = actOutMins > schedEndMins ? (actOutMins - schedEndMins) : 0;
+
+        const earlyOtHours = Math.round((earlyArrivalMins / 60) * 100) / 100;
+        const lateOtHours = Math.round((lateDepartureMins / 60) * 100) / 100;
+        overtimeHours = Math.round((earlyOtHours + lateOtHours) * 100) / 100;
+        regularHours = Math.max(0, Math.round((calculatedHours - overtimeHours) * 100) / 100);
       }
-      const regularHours = Math.min(calculatedHours, scheduledShiftHours);
-      const overtimeHours = Math.max(0, Math.round((calculatedHours - scheduledShiftHours) * 100) / 100);
+      // ── الحالة الثانية: الموظفون الذين ليس لديهم جدول شهري معتمد / دوام حر ──
+      else {
+        if (calculatedHours > profileHours) {
+          regularHours = profileHours;
+          overtimeHours = Math.round((calculatedHours - profileHours) * 100) / 100;
+        } else {
+          regularHours = calculatedHours;
+          overtimeHours = 0;
+        }
+      }
+
       const otStatus = overtimeHours > 0 ? 'approved' : 'none';
 
       const editedBObj = (state.branches || []).find(b => isBranchMatch(snapBranchId, b));
@@ -1789,7 +1847,14 @@ export default function AttendancePunchesModal({
             >
               ➕ تسجيل بصمة يدوية للموظف
             </button>
-            <button className="btn btn-ghost" onClick={onClose}>✕ إغلاق Window</button>
+            <button
+              className="btn btn-ghost modal-close-btn attendance-punches-close-btn"
+              data-action="close"
+              aria-label="إغلاق النافذة"
+              onClick={onClose}
+            >
+              ✕ إغلاق Window
+            </button>
           </div>
         </div>
 
@@ -2063,10 +2128,38 @@ export default function AttendancePunchesModal({
                                (r.date === dateStr || r.targetDate === dateStr || r.details?.shiftDate === dateStr) &&
                                (r.type === 'overtime' || r.type === 'طلب اضافي' || r.type === 'إضافي'))
                             );
-                            const effectiveOtStatus = (p.overtimeStatus === 'approved' || p.overtimeStatus === 'rejected')
-                              ? p.overtimeStatus
-                              : (linkedOtReq ? (linkedOtReq.status === 'approved' ? 'approved' : linkedOtReq.status === 'rejected' ? 'rejected' : 'pending') : (p.overtimeStatus || (shiftMetrics.isOvertimeApproved ? 'approved' : shiftMetrics.overtimeStatus) || 'none'));
-                            const effectiveOtHours = parseFloat(linkedOtReq?.hours || p.overtimeHours || (effectiveOtStatus === 'approved' ? otH : 0) || 0);
+
+                            // 🛡️ تحديد حالة الساعات الإضافية الموحدة مع سيادة الرفض التامة لمنع ظهور شارات متناقضة
+                            const isOtExplicitlyRejected = Boolean(
+                              p.overtimeStatus === 'rejected' ||
+                              p.rejectedOvertime === true ||
+                              shiftMetrics.overtimeStatus === 'rejected' ||
+                              (linkedOtReq && (linkedOtReq.status === 'rejected' || linkedOtReq.adminRejected === true))
+                            );
+
+                            const isOtExplicitlyApproved = !isOtExplicitlyRejected && Boolean(
+                              p.overtimeStatus === 'approved' ||
+                              p.isOvertimeApproved === true ||
+                              shiftMetrics.isOvertimeApproved === true ||
+                              (linkedOtReq && (linkedOtReq.status === 'approved' || linkedOtReq.adminApproved === true))
+                            );
+
+                            const isOtPending = !isOtExplicitlyRejected && !isOtExplicitlyApproved && Boolean(
+                              p.overtimeStatus === 'pending' ||
+                              shiftMetrics.overtimeStatus === 'pending' ||
+                              (linkedOtReq && (linkedOtReq.status === 'pending' || linkedOtReq.status === 'pending_admin'))
+                            );
+
+                            const finalOtHours = shiftMetrics.overtimeHours > 0 ? shiftMetrics.overtimeHours : (parseFloat(p.overtimeHours) || 0);
+
+                            const effectiveOtStatus = isOtExplicitlyRejected
+                              ? 'rejected'
+                              : isOtExplicitlyApproved
+                              ? 'approved'
+                              : isOtPending
+                              ? 'pending'
+                              : (p.overtimeStatus || 'none');
+                            const effectiveOtHours = isOtExplicitlyApproved ? finalOtHours : (linkedOtReq?.hours || p.overtimeHours || 0);
 
                             const linkedPenaltyReq = (state?.requests || []).find(r => 
                               (r.id && (r.id === p.penaltyRequestId || r.id === p.linkedPenaltyId)) ||
@@ -2173,19 +2266,19 @@ export default function AttendancePunchesModal({
                                   <div style={{ color: isRejectedPhoto ? '#dc2626' : '#0d9488', fontWeight: '800', fontSize: '13.5px' }}>
                                     {isRejectedPhoto ? '0.00 س' : `${parseFloat(totalH).toFixed(2)} س`}
                                   </div>
-                                  {!isRejectedPhoto && otH > 0 && (
+                                  {!isRejectedPhoto && isOtExplicitlyApproved && finalOtHours > 0 && (
                                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginTop: '3px', background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800 }}>
-                                      ⭐ +{otH.toFixed(2)} س إضافي معتمد
+                                      ⭐ +{finalOtHours.toFixed(2)} س إضافي معتمد
                                     </span>
                                   )}
-                                  {!isRejectedPhoto && !shiftMetrics.isOvertimeApproved && (shiftMetrics.overtimeStatus === 'pending' || effectiveOtStatus === 'pending') && shiftMetrics.overtimeHours > 0 && (
+                                  {!isRejectedPhoto && isOtPending && finalOtHours > 0 && (
                                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginTop: '3px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800 }}>
-                                      ⏳ +{shiftMetrics.overtimeHours.toFixed(2)} س إضافي معلق
+                                      ⏳ +{finalOtHours.toFixed(2)} س إضافي معلق
                                     </span>
                                   )}
-                                  {!isRejectedPhoto && (shiftMetrics.overtimeStatus === 'rejected' || p.overtimeStatus === 'rejected' || p.rejectedOvertime || effectiveOtStatus === 'rejected') && shiftMetrics.overtimeHours > 0 && (
+                                  {!isRejectedPhoto && isOtExplicitlyRejected && finalOtHours > 0 && (
                                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginTop: '3px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800 }}>
-                                      ❌ إضافي مرفوض (+{shiftMetrics.overtimeHours.toFixed(2)} س)
+                                      ❌ إضافي مرفوض (+{finalOtHours.toFixed(2)} س)
                                     </span>
                                   )}
                                 </td>
@@ -2311,7 +2404,7 @@ export default function AttendancePunchesModal({
                                             ✅ احتساب البصمة
                                           </button>
                                         )}
-                                        {!shiftMetrics.isOvertimeApproved && (shiftMetrics.overtimeStatus === 'pending' || effectiveOtStatus === 'pending') && shiftMetrics.overtimeHours > 0 && (
+                                        {!isRejectedPhoto && isOtPending && finalOtHours > 0 && (
                                           <>
                                             <button
                                               className="btn btn-success"
@@ -2319,7 +2412,7 @@ export default function AttendancePunchesModal({
                                               title="اعتماد الساعات الإضافية فوراً في نظام الرواتب"
                                               onClick={() => handleQuickApproveOvertime(p)}
                                             >
-                                              ✅ اعتماد الإضافي (+{shiftMetrics.overtimeHours.toFixed(2)} س)
+                                              ✅ اعتماد الإضافي (+{finalOtHours.toFixed(2)} س)
                                             </button>
                                             <button
                                               className="btn btn-danger"
@@ -2437,11 +2530,37 @@ export default function AttendancePunchesModal({
                     const permHours = p.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
 
                     const linkedOtReq = (state?.requests || []).find(r => r && (r.id === p.requestId || r.id === p.linkedRequestId || r.id === p.overtimeRequestId || r.shiftId === p.id || (String(r.employeeId) === String(employee.id) && r.date === dateStr && (r.type === 'overtime' || r.type === 'extra_hours' || r.type === 'طلب اضافي' || r.type === 'إضافي'))));
-                    const effectiveOtStatus = (p.overtimeStatus === 'approved' || p.overtimeStatus === 'rejected')
-                      ? p.overtimeStatus
-                      : (linkedOtReq
-                        ? (linkedOtReq.status === 'approved' ? 'approved' : linkedOtReq.status === 'rejected' ? 'rejected' : 'pending')
-                        : (p.overtimeStatus || (shiftMetrics.isOvertimeApproved ? 'approved' : shiftMetrics.overtimeStatus) || 'none'));
+
+                    // 🛡️ تحديد حالة الساعات الإضافية الموحدة مع سيادة الرفض التامة لمنع ظهور شارات متناقضة
+                    const isOtExplicitlyRejected = Boolean(
+                      p.overtimeStatus === 'rejected' ||
+                      p.rejectedOvertime === true ||
+                      shiftMetrics.overtimeStatus === 'rejected' ||
+                      (linkedOtReq && (linkedOtReq.status === 'rejected' || linkedOtReq.adminRejected === true))
+                    );
+
+                    const isOtExplicitlyApproved = !isOtExplicitlyRejected && Boolean(
+                      p.overtimeStatus === 'approved' ||
+                      p.isOvertimeApproved === true ||
+                      shiftMetrics.isOvertimeApproved === true ||
+                      (linkedOtReq && (linkedOtReq.status === 'approved' || linkedOtReq.adminApproved === true))
+                    );
+
+                    const isOtPending = !isOtExplicitlyRejected && !isOtExplicitlyApproved && Boolean(
+                      p.overtimeStatus === 'pending' ||
+                      shiftMetrics.overtimeStatus === 'pending' ||
+                      (linkedOtReq && (linkedOtReq.status === 'pending' || linkedOtReq.status === 'pending_admin'))
+                    );
+
+                    const finalOtHours = shiftMetrics.overtimeHours > 0 ? shiftMetrics.overtimeHours : (parseFloat(p.overtimeHours) || 0);
+
+                    const effectiveOtStatus = isOtExplicitlyRejected
+                      ? 'rejected'
+                      : isOtExplicitlyApproved
+                      ? 'approved'
+                      : isOtPending
+                      ? 'pending'
+                      : (p.overtimeStatus || 'none');
 
                     return (
                       <tr key={p.id || index} style={{ background: isRejectedPhoto ? '#fff1f2' : (hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent') }}>
@@ -2572,19 +2691,19 @@ export default function AttendancePunchesModal({
                           <div style={{ color: isRejectedPhoto ? '#dc2626' : '#0d9488', fontWeight: '800', fontSize: '13.5px' }}>
                             {isRejectedPhoto ? '0.00 س' : `${parseFloat(totalH).toFixed(2)} س`}
                           </div>
-                          {!isRejectedPhoto && otH > 0 && (
+                          {!isRejectedPhoto && isOtExplicitlyApproved && finalOtHours > 0 && (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginTop: '3px', background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800 }}>
-                              ⭐ +{otH.toFixed(2)} س إضافي معتمد
+                              ⭐ +{finalOtHours.toFixed(2)} س إضافي معتمد
                             </span>
                           )}
-                          {!isRejectedPhoto && !shiftMetrics.isOvertimeApproved && (shiftMetrics.overtimeStatus === 'pending' || effectiveOtStatus === 'pending') && shiftMetrics.overtimeHours > 0 && (
+                          {!isRejectedPhoto && isOtPending && finalOtHours > 0 && (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginTop: '3px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800 }}>
-                              ⏳ +{shiftMetrics.overtimeHours.toFixed(2)} س إضافي معلق
+                              ⏳ +{finalOtHours.toFixed(2)} س إضافي معلق
                             </span>
                           )}
-                          {!isRejectedPhoto && (shiftMetrics.overtimeStatus === 'rejected' || p.overtimeStatus === 'rejected' || p.rejectedOvertime || effectiveOtStatus === 'rejected') && shiftMetrics.overtimeHours > 0 && (
+                          {!isRejectedPhoto && isOtExplicitlyRejected && finalOtHours > 0 && (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginTop: '3px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800 }}>
-                              ❌ إضافي مرفوض (+{shiftMetrics.overtimeHours.toFixed(2)} س)
+                              ❌ إضافي مرفوض (+{finalOtHours.toFixed(2)} س)
                             </span>
                           )}
                         </td>
@@ -2714,7 +2833,7 @@ export default function AttendancePunchesModal({
                                     ✅ احتساب البصمة
                                   </button>
                                 )}
-                                {!shiftMetrics.isOvertimeApproved && (shiftMetrics.overtimeStatus === 'pending' || effectiveOtStatus === 'pending') && shiftMetrics.overtimeHours > 0 && (
+                                {!isRejectedPhoto && isOtPending && finalOtHours > 0 && (
                                   <>
                                     <button
                                       className="btn btn-success"
@@ -2722,7 +2841,7 @@ export default function AttendancePunchesModal({
                                       title="اعتماد الساعات الإضافية فوراً في نظام الرواتب"
                                       onClick={() => handleQuickApproveOvertime(p)}
                                     >
-                                      ✅ اعتماد الإضافي (+{shiftMetrics.overtimeHours.toFixed(2)} س)
+                                      ✅ اعتماد الإضافي (+{finalOtHours.toFixed(2)} س)
                                     </button>
                                     <button
                                       className="btn btn-danger"

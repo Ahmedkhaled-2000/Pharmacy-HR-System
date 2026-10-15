@@ -191,7 +191,7 @@ export default function UniversalShortcutsController() {
           // Try clicking close / cancel button
           const closeBtn =
             topModal.querySelector(
-              '.modal-close-circle-btn, .modal-close-btn, .del-btn, [data-action="close"], [aria-label*="إغلاق"], [aria-label*="Close"], .btn-close, .acc-action-icon-btn, .outstock-modal-close-btn, .outstock-btn-close, .outstock-modal-close'
+              '.modal-close-circle-btn, .modal-close-btn, .attendance-punches-close-btn, [data-action="close"], [aria-label*="إغلاق"], [aria-label*="Close"], .btn-close, .acc-action-icon-btn, .outstock-modal-close-btn, .outstock-btn-close, .outstock-modal-close'
             ) ||
             Array.from(topModal.querySelectorAll('button')).find((b) => {
               const text = (b.textContent || '').trim();

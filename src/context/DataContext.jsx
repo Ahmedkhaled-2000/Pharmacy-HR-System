@@ -26,6 +26,7 @@ import {
   smartSaveState,
   smartLoadState,
   loadLocalStateFast,
+  saveStateLocally,
   clearLocalDatabase
 } from '../utils/offlineSync';
 import {
@@ -726,7 +727,11 @@ export function DataProvider({ children, showToast = () => {} }) {
       }
 
       const synced = syncAllEmployeesPermissionsAndLateness(normalized);
-      setState((prev) => normalizeState(smartMergeStates(prev, synced)));
+      setState((prev) => {
+        const mergedFinal = normalizeState(smartMergeStates(prev, synced));
+        saveStateLocally(mergedFinal).catch(() => {});
+        return mergedFinal;
+      });
       setLastSyncTime(nowTimeStr());
       syncSessionWithFreshData(synced);
 

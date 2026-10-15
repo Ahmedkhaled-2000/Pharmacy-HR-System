@@ -22,7 +22,7 @@ import {
 } from '../../utils/kioskOutbox';
 import { subscribeToPunchRecorded } from '../../utils/socketClient';
 import { playFingerprintChime, speakKioskPrompt } from '../../hooks/useAudio';
-import { calcRawDurationMinutes } from '../../utils/workHoursEngine';
+import { calcRawDurationMinutes, calculateShiftMetrics } from '../../utils/workHoursEngine';
 import '../../kiosk-modern.css';
 
 export default function ElectronicKioskView({
@@ -1187,6 +1187,8 @@ export default function ElectronicKioskView({
       readBy: []
     };
 
+    let extraOvertimeRequest = null;
+    let extraOvertimeNotif = null;
     let updatedActiveShifts = { ...(state?.activeShifts || {}) };
     let updatedShifts = [...(state?.shifts || [])];
 
@@ -1319,15 +1321,88 @@ export default function ElectronicKioskView({
       const effectiveBreak = trackedBreak > 0 ? trackedBreak : (totalElapsedHours >= 4.5 && !currentEmp?.noMonthlySchedule ? Math.min(configuredBreak, Math.max(0, totalElapsedHours - 1)) : 0);
       const netHours = Math.max(0, Math.round((totalElapsedHours - effectiveBreak) * 100) / 100);
 
-      let scheduledHours = parseFloat(currentEmp?.workHoursPerDay) || 8;
-      let regularHours = netHours;
-      let overtimeHours = 0;
-      let overtimeStatus = 'none';
+      // حساب الساعات الأساسية والإضافية طبقاً لجدول الموظف المعتمد أو الساعات التعاقدية
+      const shiftForMetrics = {
+        ...(active || {}),
+        id: targetShiftId,
+        employeeId: currentEmp.id,
+        employeeCode: currentEmp.code || '',
+        branchId: effectiveBranchId,
+        date: effectiveShiftDate,
+        timeIn: effectiveTimeIn,
+        timeOut: punchTime,
+        startEpoch: startMs,
+        endEpoch: now.getTime(),
+        accumulatedPauseMs: currentPauseMs,
+        breakHours: effectiveBreak,
+        actualWorkedHours: netHours,
+        netHours: netHours,
+        isOvernight: active?.isOvernight
+      };
 
-      if (netHours > scheduledHours) {
-        overtimeHours = Math.round((netHours - scheduledHours) * 100) / 100;
-        regularHours = scheduledHours;
-        overtimeStatus = 'pending';
+      const metrics = calculateShiftMetrics(shiftForMetrics, state);
+      const scheduledHours = metrics.scheduledHours || parseFloat(currentEmp?.workHoursPerDay) || 8;
+      const regularHours = metrics.regularHours;
+      const overtimeHours = metrics.overtimeHours;
+      const overtimeStatus = overtimeHours > 0 ? 'pending' : 'none';
+
+      if (overtimeHours > 0) {
+        const extraOvertimeRequestId = 'REQ-OT-' + now.getTime();
+        extraOvertimeRequest = {
+          id: extraOvertimeRequestId,
+          shiftId: targetShiftId,
+          type: 'overtime',
+          requestType: 'overtime',
+          typeLabel: 'طلب اعتماد ساعات إضافية (Overtime)',
+          employeeId: currentEmp.id,
+          employeeCode: currentEmp.code || '',
+          employeeName: currentEmp.name || '',
+          jobTitle: currentEmp.jobTitle || '',
+          branchId: effectiveBranchId,
+          branchName: branchName,
+          date: effectiveShiftDate,
+          hours: overtimeHours,
+          overtimeHours: overtimeHours,
+          regularHours: regularHours,
+          totalShiftHours: netHours,
+          profileHours: scheduledHours,
+          timeIn: effectiveTimeIn,
+          timeOut: punchTime,
+          actualIn: effectiveTimeIn,
+          actualOut: punchTime,
+          reason: `ساعات عمل إضافية تم توثيقها تلقائياً عند انصراف الموظف من الكشك (+ ${overtimeHours} س)`,
+          details: `الوردية المقررة: ${scheduledHours} س | إجمالي الساعات الفعلية: ${netHours} س | الساعات الإضافية المطلوب اعتمادها: +${overtimeHours} س`,
+          status: 'pending',
+          targetApproval: 'both',
+          requiresBranchManager: true,
+          requiresSuperAdmin: true,
+          branchApproved: false,
+          adminApproved: false,
+          managerStatus: 'pending',
+          branchApprovalStatus: 'pending',
+          source: 'kiosk_overtime',
+          createdAt: now.toISOString(),
+          timestamp: now.toISOString(),
+          epoch: now.getTime()
+        };
+
+        extraOvertimeNotif = {
+          id: 'NOTIF-OT-' + now.getTime(),
+          type: 'overtime_alert',
+          targetRole: 'branch_and_admin',
+          branchId: effectiveBranchId,
+          title: `⏱️ طلب اعتماد ساعات إضافية: ${currentEmp.name} (+${overtimeHours} س)`,
+          message: `أتم الموظف ${currentEmp.name} بفرع ${branchName} عدد (+${overtimeHours} س) ساعات إضافية فوق الساعات المقررة (${scheduledHours} س). إجمالي الفعلي: ${netHours} س. يتطلب اعتماد مدير الفرع والإدارة العليا.`,
+          requestId: extraOvertimeRequestId,
+          shiftId: targetShiftId,
+          employeeId: currentEmp.id,
+          employeeName: currentEmp.name,
+          date: effectiveShiftDate,
+          hours: overtimeHours,
+          createdAt: now.toISOString(),
+          read: false,
+          readBy: []
+        };
       }
 
       // حذف الوردية من الورديات النشطة
@@ -1361,6 +1436,7 @@ export default function ElectronicKioskView({
         source: 'kiosk',
         photoUrl: photoUrl || null,
         requestId: requestId,
+        overtimeRequestId: extraOvertimeRequest?.id || null,
         statusLabel: 'انصراف بالصورة (بانتظار الاعتماد)',
         note: `تسجيل انصراف بالصورة في تمام ${displayTime} (${punchTime}) - الساعات: ${netHours} س (بانتظار اعتماد الإدارة)`,
         isLiveActive: false,
@@ -1513,8 +1589,16 @@ export default function ElectronicKioskView({
       ...state,
       shifts: updatedShifts,
       activeShifts: updatedActiveShifts,
-      requests: [requestData, ...(state?.requests || [])],
-      notifications: [newNotif, ...(state?.notifications || [])],
+      requests: [
+        requestData,
+        ...(extraOvertimeRequest ? [extraOvertimeRequest] : []),
+        ...(state?.requests || [])
+      ],
+      notifications: [
+        newNotif,
+        ...(extraOvertimeNotif ? [extraOvertimeNotif] : []),
+        ...(state?.notifications || [])
+      ],
       _requestsUpdatedAt: now.toISOString(),
       _notificationsUpdatedAt: now.toISOString()
     };
@@ -1581,6 +1665,20 @@ export default function ElectronicKioskView({
       enqueueNewRequest(requestData, effectiveBranchId).catch(err => {
         console.warn('[Kiosk Photo Attendance] Outbox enqueue warning:', err);
       });
+
+      if (extraOvertimeRequest) {
+        try {
+          if (submitRequest) submitRequest(extraOvertimeRequest);
+          apiSubmitRequestAtomic(extraOvertimeRequest, extraOvertimeNotif).catch(err => {
+            console.warn('[Kiosk Overtime Request] Atomic submission warning:', err);
+          });
+          enqueueNewRequest(extraOvertimeRequest, effectiveBranchId).catch(err => {
+            console.warn('[Kiosk Overtime Request] Outbox enqueue warning:', err);
+          });
+        } catch (otErr) {
+          console.warn('[Kiosk Overtime Request] Dispatch warning:', otErr);
+        }
+      }
     } catch (netErr) {
       console.warn('[Kiosk Photo Attendance] Network dispatch warning:', netErr);
     }

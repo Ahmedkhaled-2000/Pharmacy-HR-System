@@ -157,7 +157,7 @@ async function request(endpoint, options = {}) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const cleanUrl = `${API_BASE_URL}/${endpoint.replace(/^\/+/, '')}`;
     const separator = endpoint.includes('?') ? '&' : '?';
-    const antiCacheQuery = options.useETag ? '' : (options.noCache !== false ? `${separator}_t=${Date.now()}_${Math.random().toString(36).slice(2, 7)}` : '');
+    const antiCacheQuery = options.useETag ? '' : (options.noCache !== false ? `${separator}_cb=${Date.now()}_${Math.random().toString(36).slice(2, 7)}` : '');
     const url = options.useETag ? cleanUrl : `${cleanUrl}${antiCacheQuery}`;
     const timeoutMs = baseTimeoutMs;
     
@@ -201,6 +201,7 @@ async function request(endpoint, options = {}) {
       'Accept': 'application/json',
       'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
       'Pragma': 'no-cache',
+      'Expires': '0',
       ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
       'X-App-Role': appRole,
       'X-App-Password': appPass,

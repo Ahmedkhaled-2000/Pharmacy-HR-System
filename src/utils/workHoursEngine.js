@@ -9,6 +9,26 @@
  * 4. توزيع الساعات (أساسي، إضافي معتمد، معلق، مرفوض) ومنع تسمم الحسابات بقيم غير رقمية (NaN).
  */
 
+import { findEmployeeRoster, getEmployeeDaySchedule } from './rosterEngine.js';
+
+/**
+ * فحص ما إذا كان للموظف جدول شهري معتمد رسمي
+ */
+export function hasEmployeeApprovedRoster(employeeId, dateStr, state) {
+  if (!employeeId || !state) return false;
+  const emp = (state.employees || []).find((e) => e && (String(e.id) === String(employeeId) || (e.code && String(e.code) === String(employeeId))));
+  if (!emp) return false;
+
+  // إذا كان الموظف مصنفاً كدوام مرن أو بدون جدول شهري
+  if (emp.noMonthlySchedule || emp.isVariableHours || emp.variableHours || emp.hasNoRoster || emp.scheduleType === 'flexible' || emp.scheduleType === 'variable') {
+    return false;
+  }
+
+  // البحث عن جدول معتمد رسمي لهذا الموظف
+  const roster = findEmployeeRoster(emp.id, dateStr, state);
+  return Boolean(roster && (roster.status === 'approved' || roster.adminApproved === true || roster.isApproved === true));
+}
+
 /**
  * فحص ما إذا كان هناك إذن معتمد رسمي للموظف لتاريخ معين
  */
@@ -305,7 +325,28 @@ export function calculateShiftMetrics(shift, state) {
     emp?.scheduleType === 'variable'
   );
   const profileHours = parseFloat(emp?.workHoursPerDay || emp?.workHours || (emp?.branchesDetails && emp.branchesDetails[0]?.workHoursPerDay) || 8);
-  const scheduledHours = isFlexibleSchedule ? profileHours : parseFloat(shift.scheduledHours || profileHours);
+  
+  // فحص ما إذا كان للموظف جدول شهري معتمد رسمي لهذا اليوم
+  const hasApprovedRoster = !isFlexibleSchedule && hasEmployeeApprovedRoster(shift.employeeId || emp?.id, shift.date, state);
+  const daySchedule = hasApprovedRoster ? getEmployeeDaySchedule(shift.employeeId || emp?.id, shift.date, state) : null;
+  const hasScheduledShiftWindow = Boolean(daySchedule && daySchedule.start && daySchedule.end && daySchedule.type !== 'off');
+
+  const schedStartStr = (hasApprovedRoster && (shift.scheduledStart || daySchedule?.start)) || '';
+  const schedEndStr = (hasApprovedRoster && (shift.scheduledEnd || daySchedule?.end)) || '';
+
+  let scheduledHours = profileHours;
+  if (hasApprovedRoster && hasScheduledShiftWindow && schedStartStr && schedEndStr) {
+    const [sH, sM] = schedStartStr.split(':').map(Number);
+    let [eH, eM] = schedEndStr.split(':').map(Number);
+    if (!isNaN(sH) && !isNaN(eH)) {
+      let sMins = sH * 60 + (sM || 0);
+      let eMins = eH * 60 + (eM || 0);
+      if (eMins <= sMins) eMins += 24 * 60;
+      scheduledHours = Math.round(((eMins - sMins) / 60) * 100) / 100;
+    }
+  } else if (!isFlexibleSchedule && shift.scheduledHours) {
+    scheduledHours = parseFloat(shift.scheduledHours) || profileHours;
+  }
 
   // 5. الساعات الأساسية والإضافية
   let regularHours = 0;
@@ -317,10 +358,41 @@ export function calculateShiftMetrics(shift, state) {
   } else {
     // التحقق مما إذا كان هناك إضافي مسجل صراحة أو معتمد على الوردية
     const rawOtHours = parseFloat(shift.overtimeHours) || 0;
-    const hasExplicitOt = rawOtHours > 0 || shift.overtimeStatus === 'approved' || Boolean(shift.adminApproved);
 
-    if (isFlexibleSchedule) {
-      // للموظف المرن: يقارن العمل الفعلي مع ساعات ملفه الشخصي (profileHours)
+    // ── الحالة الأولى: موظف لديه جدول شهري معتمد (Approved Monthly Schedule) ──
+    // يتم احتساب الساعات الإضافية حصراً خارج مواعيد الوردية المجدولة (قبل البداية وبعد النهاية)
+    if (hasApprovedRoster && hasScheduledShiftWindow && schedStartStr && schedEndStr && timeIn && hasRealTimeOut) {
+      const [sH, sM] = schedStartStr.split(':').map(Number);
+      let [eH, eM] = schedEndStr.split(':').map(Number);
+      let schedStartMins = sH * 60 + (sM || 0);
+      let schedEndMins = eH * 60 + (eM || 0);
+      if (schedEndMins <= schedStartMins) schedEndMins += 24 * 60;
+
+      const [inH, inM] = String(timeIn).trim().slice(0, 5).split(':').map(Number);
+      let [outH, outM] = String(timeOut).trim().slice(0, 5).split(':').map(Number);
+      let actInMins = inH * 60 + (inM || 0);
+      let actOutMins = outH * 60 + (outM || 0);
+      if (actOutMins <= actInMins) actOutMins += 24 * 60;
+
+      // الساعات الإضافية خارج ساعات عمل الجدول: قبل الموعد + بعد الموعد
+      const earlyArrivalMins = actInMins < schedStartMins ? (schedStartMins - actInMins) : 0;
+      const lateDepartureMins = actOutMins > schedEndMins ? (actOutMins - schedEndMins) : 0;
+
+      const earlyOtHours = Math.round((earlyArrivalMins / 60) * 100) / 100;
+      const lateOtHours = Math.round((lateDepartureMins / 60) * 100) / 100;
+      let calculatedOt = Math.round((earlyOtHours + lateOtHours) * 100) / 100;
+
+      if (rawOtHours > 0) {
+        calculatedOt = Math.max(rawOtHours, calculatedOt);
+      }
+      overtimeHours = calculatedOt;
+
+      // الساعات الأساسية: ساعات العمل المنفذة داخل نافذة الوردية المجدولة
+      regularHours = Math.max(0, Math.round((actualWorkedHours - overtimeHours) * 100) / 100);
+    }
+    // ── الحالة الثانية: موظفون ليس لديهم جدول شهري معتمد / دوام حر (No Monthly Schedule) ──
+    // يتم احتساب الساعات الإضافية عندما تكون ساعات العمل الفعلية أكبر من ساعات ملف الموظف
+    else {
       if (actualWorkedHours > profileHours) {
         regularHours = profileHours;
         overtimeHours = Math.round((actualWorkedHours - profileHours) * 100) / 100;
@@ -330,16 +402,6 @@ export function calculateShiftMetrics(shift, state) {
       } else {
         regularHours = actualWorkedHours;
         overtimeHours = rawOtHours > 0 ? rawOtHours : 0;
-      }
-    } else {
-      regularHours = Math.round(Math.min(actualWorkedHours, scheduledHours) * 100) / 100;
-      if (shift.regularHours !== undefined && parseFloat(shift.regularHours) > 0) {
-        regularHours = Math.round(Math.min(actualWorkedHours, parseFloat(shift.regularHours)) * 100) / 100;
-      }
-      const maxPossibleOt = Math.max(0, Math.round((actualWorkedHours - regularHours) * 100) / 100);
-      overtimeHours = maxPossibleOt;
-      if (rawOtHours > 0) {
-        overtimeHours = Math.max(rawOtHours, maxPossibleOt);
       }
     }
   }
@@ -368,16 +430,17 @@ export function calculateShiftMetrics(shift, state) {
       return empMatch && dateMatch;
     });
 
-    const isShiftApproved = shift.overtimeStatus === 'approved' || shift.isOvertimeApproved === true;
-    const isReqApproved = Boolean(linkedOtReq && (linkedOtReq.status === 'approved' || linkedOtReq.adminApproved === true));
-
+    // 🛡️ سيادة الرفض: إذا تم رفض الإضافي، يلغي أي اعتماد سابق
     const isShiftRejected = shift.overtimeStatus === 'rejected' || shift.rejectedOvertime === true;
     const isReqRejected = Boolean(linkedOtReq && (linkedOtReq.status === 'rejected' || linkedOtReq.adminRejected === true));
 
-    if (isShiftApproved || isReqApproved) {
-      overtimeStatus = 'approved';
-    } else if (isShiftRejected || isReqRejected) {
+    const isShiftApproved = !isShiftRejected && !isReqRejected && (shift.overtimeStatus === 'approved' || shift.isOvertimeApproved === true);
+    const isReqApproved = !isShiftRejected && !isReqRejected && Boolean(linkedOtReq && (linkedOtReq.status === 'approved' || linkedOtReq.adminApproved === true));
+
+    if (isShiftRejected || isReqRejected) {
       overtimeStatus = 'rejected';
+    } else if (isShiftApproved || isReqApproved) {
+      overtimeStatus = 'approved';
     } else if (shift.overtimeStatus === 'pending' || (linkedOtReq && (linkedOtReq.status === 'pending' || linkedOtReq.status === 'pending_admin'))) {
       overtimeStatus = 'pending';
     } else {

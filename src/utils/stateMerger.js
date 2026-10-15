@@ -317,6 +317,18 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
       const mergedItem = resolveItemConflict(item, existingItem, options);
       map.set(targetKey, mergedItem);
     } else {
+      // فحص ما إذا كان العنصر جديداً أضيف محلياً دون اتصال، أو عنصراً قديماً تم حذفه من السحابة
+      const itemTime = getItemTime(item);
+      const isVeryRecent = itemTime > 0 && (Date.now() - itemTime) < 120000;
+      const isExplicitOffline = Boolean(item._offlinePending || item._pendingSync || item._offlineCreated || item.isLocalPending);
+      
+      // إذا كان العنصر يخص الموظفين أو الشفتات أو الفروع أو الطلبات وليس حديثاً جداً أو معلماً كأوفلاين، لا يعاد إحياؤه إذا حُذف سحابياً
+      const isStrictEntity = ['emp', 'branch', 'shift', 'roster', 'adj'].includes(options.prefix || '');
+      if (isStrictEntity && !isVeryRecent && !isExplicitOffline) {
+        deletedIds.add(key);
+        continue;
+      }
+
       // عنصر جديد غير موجود في السحابة أضيف محلياً -> الحفاظ عليه
       map.set(key, item);
       if (isRequestEntity) {
@@ -539,7 +551,7 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
   const localTime = getItemTime(localItem);
   const remoteTime = getItemTime(remoteItem);
 
-  let mergedBase = localTime >= remoteTime
+  let mergedBase = localTime > remoteTime
     ? { ...remoteItem, ...localItem }
     : { ...localItem, ...remoteItem };
 
@@ -1080,8 +1092,8 @@ export function smartMergeStates(localState, remoteState) {
   const mergedShifts = mergeArrays(effectiveLocal.shifts, effectiveRemote.shifts, { prefix: 'shift', deletedIds });
 
   return {
-    ...effectiveRemote,
     ...effectiveLocal,
+    ...effectiveRemote,
 
     // 1. الإعدادات واللائحة
     orgSettings: (() => {

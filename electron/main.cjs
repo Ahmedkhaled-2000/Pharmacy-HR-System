@@ -514,8 +514,9 @@ function startLocalStaticServer(distDir) {
 // دالة جلب البيانات المركزية المباشرة من خادم VPS السحابي مع ضغط GZIP وفك الضغط التلقائي
 function fetchCloudDataDirect() {
   return new Promise((resolve, reject) => {
-    const targetUrl = 'https://63-183-147-199.sslip.io/api/settings?key=pharmacy-tracker-data';
-    const fallbackUrl = 'http://63.183.147.199/api/settings?key=pharmacy-tracker-data';
+    const cb = `_cb=${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const targetUrl = `https://63-183-147-199.sslip.io/api/settings?key=pharmacy-tracker-data&${cb}`;
+    const fallbackUrl = `http://63.183.147.199/api/settings?key=pharmacy-tracker-data&${cb}`;
 
     const executeFetch = (urlToUse) => {
       const isHttps = urlToUse.startsWith('https');
@@ -530,7 +531,10 @@ function fetchCloudDataDirect() {
         headers: {
           'Accept-Encoding': 'gzip, deflate, br',
           'Accept': 'application/json, text/plain, */*',
-          'User-Agent': 'PharmaDesktopClient/1.2.61 (Windows NT 10.0; Win64; x64)',
+          'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'User-Agent': 'PharmaDesktopClient/1.2.63 (Windows NT 10.0; Win64; x64)',
           'Connection': 'close'
         },
         timeout: 15000
@@ -786,6 +790,11 @@ function createMainWindow() {
       }, 300);
     }
   });
+
+  // مسح كاش المتصفح الداخلي عند بدء التشغيل لمنع أي ارتداد للكود أو البيانات القديمة
+  try {
+    mainWindow.webContents.session.clearCache().catch(() => {});
+  } catch {}
 
   // تحميل مسار الواجهة عبر 127.0.0.1 لدعم WebAuthn وبصمة Windows Hello بدون الاعتماد على الـ DNS
   if (isDev) {

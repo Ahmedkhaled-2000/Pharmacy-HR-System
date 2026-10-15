@@ -12,6 +12,7 @@ import { broadcastStateChange } from '../utils/offlineSync';
 import { useData } from '../context/DataContext';
 import { useUI } from '../context/UIContext';
 import { sendEmployeeRequestDecisionWhatsApp } from '../utils/whatsappTemplates';
+import { calculateShiftMetrics } from '../utils/workHoursEngine';
 
 export function useRequestsManager() {
   const { state, setState, saveState } = useData();
@@ -910,14 +911,88 @@ export function useRequestsManager() {
               const [eH, eM] = reqTime.split(':').map(Number);
               let diffM = (eH * 60 + eM) - (sH * 60 + sM);
               if (diffM < 0) diffM += 24 * 60;
-              const calcHours = Math.round((diffM / 60) * 100) / 100;
+              const grossHours = Math.round((diffM / 60) * 100) / 100;
+              const breakHours = parseFloat(shiftRecord.breakHours) || 0;
+              const netHours = Math.max(0, Math.round((grossHours - breakHours) * 100) / 100);
+
+              const metrics = calculateShiftMetrics({
+                ...shiftRecord,
+                employeeId: empId,
+                employeeCode: emp?.code || target.employeeCode || '',
+                date: reqDate,
+                timeIn: timeInVal,
+                timeOut: reqTime,
+                breakHours
+              }, state);
+
+              const scheduledHours = metrics.scheduledHours || parseFloat(shiftRecord.scheduledHours) || parseFloat(emp?.workHoursPerDay) || 8;
+              const regHours = metrics.regularHours;
+              const otHours = metrics.overtimeHours;
+
+              // Overtime status resolution with rejection sovereignty
+              const isOtRejected = shiftRecord.overtimeStatus === 'rejected' || shiftRecord.rejectedOvertime;
+              const isOtApproved = !isOtRejected && (shiftRecord.overtimeStatus === 'approved' || shiftRecord.isOvertimeApproved);
+              const effectiveOtStatus = isOtRejected ? 'rejected' : (isOtApproved ? 'approved' : (otHours > 0 ? 'pending' : 'none'));
+
+              // Ensure overtime request is created and pushed into updatedRequests if pending
+              if (otHours > 0 && !isOtRejected && !isOtApproved) {
+                const existingOtReq = updatedRequests.find(r =>
+                  r && (r.id === shiftRecord.overtimeRequestId || r.shiftId === shiftRecord.id || ((String(r.employeeId) === String(empId) || (emp?.code && String(r.employeeCode) === String(emp?.code))) && r.date === reqDate && (r.type === 'overtime' || r.type === 'extra_hours' || r.type === 'طلب اضافي' || r.type === 'إضافي')))
+                );
+                if (!existingOtReq) {
+                  const newOtReqId = 'REQ-OT-' + Date.now();
+                  const newOtReq = {
+                    id: newOtReqId,
+                    shiftId: shiftRecord.id,
+                    type: 'overtime',
+                    requestType: 'overtime',
+                    typeLabel: 'طلب اعتماد ساعات إضافية (Overtime)',
+                    employeeId: empId,
+                    employeeCode: emp?.code || target.employeeCode || '',
+                    employeeName: emp?.name || target.employeeName || '',
+                    branchId: target.branchId || shiftRecord.branchId || emp?.branchId || null,
+                    branchName: target.branchName || shiftRecord.branchName || emp?.branchName || 'الفرع الرئيسي',
+                    date: reqDate,
+                    hours: otHours,
+                    overtimeHours: otHours,
+                    regularHours: regHours,
+                    totalShiftHours: netHours,
+                    profileHours: scheduledHours,
+                    timeIn: timeInVal,
+                    timeOut: reqTime,
+                    actualIn: timeInVal,
+                    actualOut: reqTime,
+                    reason: `ساعات عمل إضافية تم توثيقها بالبصمة عند الانصراف (+${otHours} س)`,
+                    details: `الوردية المقررة: ${scheduledHours} س | إجمالي الساعات الفعلية: ${netHours} س | الساعات الإضافية المطلوب اعتمادها: +${otHours} س`,
+                    status: 'pending',
+                    targetApproval: 'both',
+                    requiresBranchManager: true,
+                    requiresSuperAdmin: true,
+                    branchApproved: false,
+                    adminApproved: false,
+                    managerStatus: 'pending',
+                    branchApprovalStatus: 'pending',
+                    source: 'photo_attendance_shift_end',
+                    createdAt: new Date().toISOString(),
+                    timestamp: new Date().toISOString()
+                  };
+                  updatedRequests.unshift(newOtReq);
+                }
+              }
 
               updatedShifts[openShiftIdx] = {
                 ...shiftRecord,
                 timeOut: reqTime,
                 endTime: reqTime,
-                hours: calcHours,
-                actualWorkedHours: calcHours,
+                hours: effectiveOtStatus === 'approved' ? netHours : regHours,
+                actualWorkedHours: netHours,
+                netHours: netHours,
+                scheduledHours: scheduledHours,
+                regularHours: regHours,
+                overtimeHours: otHours,
+                overtimeStatus: effectiveOtStatus,
+                isOvertimeApproved: isOtApproved,
+                rejectedOvertime: isOtRejected,
                 source: 'photo_attendance_approved',
                 approvedBy: approverTitle,
                 photoUrl: target.photoUrl || shiftRecord.photoUrl,
@@ -926,6 +1001,7 @@ export function useRequestsManager() {
                 note: (shiftRecord.note ? shiftRecord.note + ' | ' : '') + `✅ انصراف بالصورة في نفس وقت إرسال الطلب (${reqTime}) معتمد من ${approverTitle}`
               };
             } else {
+              const defaultScheduled = parseFloat(emp?.workHoursPerDay) || 8;
               updatedShifts.unshift({
                 id: `shift_${Date.now()}`,
                 employeeId: empId,
@@ -936,8 +1012,12 @@ export function useRequestsManager() {
                 startTime: '09:00',
                 timeOut: reqTime,
                 endTime: reqTime,
-                hours: 8,
-                actualWorkedHours: 8,
+                hours: defaultScheduled,
+                actualWorkedHours: defaultScheduled,
+                scheduledHours: defaultScheduled,
+                regularHours: defaultScheduled,
+                overtimeHours: 0,
+                overtimeStatus: 'none',
                 branchId: target.branchId || emp?.branchId || null,
                 branchName: target.branchName || emp?.branchName || 'الفرع الرئيسي',
                 source: 'photo_attendance_approved',
@@ -1678,9 +1758,14 @@ export function useRequestsManager() {
         }
       }
 
-      if (targetReq && targetReq.type === 'overtime') {
+      if (targetReq && (targetReq.type === 'overtime' || targetReq.type === 'extra_hours' || targetReq.type === 'طلب اضافي' || targetReq.type === 'إضافي')) {
+        const tDate = targetReq.date || targetReq.targetDate || targetReq.details?.shiftDate;
         updatedShifts = updatedShifts.map((s) => {
-          if (s.id === targetReq.shiftId || (String(s.employeeId) === String(targetReq.employeeId) && s.date === targetReq.date)) {
+          const isMatch = (s.id && (s.id === targetReq.shiftId || s.id === targetReq.id)) ||
+            (s.overtimeRequestId && s.overtimeRequestId === targetReq.id) ||
+            ((String(s.employeeId) === String(targetReq.employeeId) || (targetReq.employeeCode && String(s.employeeCode) === String(targetReq.employeeCode))) && tDate && s.date === tDate);
+
+          if (isMatch) {
             const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || 8);
             const cleanExistingNotes = (s.notes || s.note || '')
               .replace(/⏳?\s*إضافي قيد الاعتماد\s*(\(\+?[0-9.]+\s*س\))?/g, '')
@@ -1688,13 +1773,16 @@ export function useRequestsManager() {
               .trim();
             const rejectedNote = cleanExistingNotes
               ? `${cleanExistingNotes} | ❌ إضافي مرفوض من الإدارة`
-              : `ساعات الوردية الأساسية (${regHours} س) — ❌ تم استبعاد الإضافي (${targetReq.hours} س) بواسطة الإدارة`;
+              : `ساعات الوردية الأساسية (${regHours} س) — ❌ تم استبعاد الإضافي (${targetReq.hours || targetReq.overtimeHours || s.overtimeHours || 0} س) بواسطة الإدارة`;
             return {
               ...s,
+              hours: regHours,
+              netHours: regHours,
+              regularHours: regHours,
               overtimeStatus: 'rejected',
               isOvertimeApproved: false,
               rejectedOvertime: true,
-              adminApproved: false,
+              adminApproved: true,
               note: rejectedNote,
               notes: rejectedNote
             };

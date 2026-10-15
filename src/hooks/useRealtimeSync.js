@@ -27,6 +27,7 @@ import { clearAllRequestsLocal } from '../utils/localDatabase';
 import {
   listenToLiveBroadcasts,
   listenToConnectionChanges,
+  saveStateLocally,
   syncNow
 } from '../utils/offlineSync';
 import {
@@ -280,10 +281,28 @@ export function useRealtimeSync(props = {}) {
       // دمج ذكي دائم بين الحالة المحلية والحالة السحابية لحماية الموظفين والطلبات من المسح العرضي
       const merged = normalizeState(smartMergeStates(prev, normalized));
 
+      // 🛡️ تجميع شواهد القبور _deletedIds لضمان عدم إحياء أي كيان تم حذفه على السيرفر أو جهاز آخر
+      const allDeletedIds = new Set([
+        ...(merged._deletedIds || []),
+        ...(prev._deletedIds || []),
+        ...(normalized._deletedIds || [])
+      ]);
+      try {
+        const rawSnap = localStorage.getItem('app_deleted_ids_snapshot');
+        if (rawSnap) {
+          JSON.parse(rawSnap).forEach(id => allDeletedIds.add(String(id)));
+        }
+      } catch {}
+
       // تأمين أولوية الموظفين المضافين أو المحدثين محلياً حديثاً (خلال آخر 120 ثانية) من ارتداد الكاش السحابي
       const now = Date.now();
       const localRecentEmps = (prev.employees || []).filter(e => {
         if (!e) return false;
+        const eId = String(e.id || '');
+        const eCode = String(e.code || '').trim().toLowerCase();
+        if (allDeletedIds.has(eId) || (eCode && allDeletedIds.has(eCode)) || e._isDeleted || e.isDeleted || e.status === 'deleted') {
+          return false;
+        }
         const eTime = new Date(e.updatedAt || e.createdAt || 0).getTime();
         return (now - eTime) < 120000;
       });
@@ -296,6 +315,7 @@ export function useRealtimeSync(props = {}) {
         for (const le of localRecentEmps) {
           const leId = String(le.id);
           const leCode = String(le.code || '').trim().toLowerCase();
+          if (allDeletedIds.has(leId) || (leCode && allDeletedIds.has(leCode))) continue;
           const exists = remoteEmpIds.has(leId) || (leCode && remoteEmpCodes.has(leCode));
           if (!exists) {
             missingEmps.push(le);
@@ -307,11 +327,15 @@ export function useRealtimeSync(props = {}) {
         }
       }
 
-      // 🛡️ حماية الورديات والخصومات والجداول والطلبات المحدثة محلياً حديثاً من ارتداد الكاش
+      // 🛡️ حماية الورديات والخصومات والجداول والطلبات المحدثة محلياً حديثاً من ارتداد الكاش مع منع إحياء المحذوفات
       const preserveRecentEntities = (localList, remoteList, idField = 'id') => {
         if (!Array.isArray(localList) || localList.length === 0) return remoteList || [];
         const recents = localList.filter(item => {
           if (!item) return false;
+          const itemId = String(item?.[idField] || '');
+          if (!itemId || allDeletedIds.has(itemId) || item._isDeleted || item.isDeleted || item.status === 'deleted') {
+            return false;
+          }
           const t = new Date(item.updatedAt || item.createdAt || item.editedAt || 0).getTime();
           return (now - t) < 120000;
         });
@@ -322,7 +346,7 @@ export function useRealtimeSync(props = {}) {
 
         for (const loc of recents) {
           const locId = String(loc?.[idField] || '');
-          if (!locId) continue;
+          if (!locId || allDeletedIds.has(locId)) continue;
           if (!remoteMap.has(locId)) {
             res.unshift(loc);
           } else {
@@ -344,12 +368,10 @@ export function useRealtimeSync(props = {}) {
       merged.adjustments = preserveRecentEntities(prev.adjustments, merged.adjustments, 'id');
 
       // 🛡️ الحفاظ على شواهد القبور _deletedIds من المسح العرضي
-      if (Array.isArray(prev._deletedIds) && prev._deletedIds.length > 0) {
-        merged._deletedIds = Array.from(new Set([
-          ...(merged._deletedIds || []),
-          ...prev._deletedIds
-        ])).slice(-25000);
-      }
+      merged._deletedIds = Array.from(allDeletedIds).slice(-25000);
+
+      // حفظ الحالة المدمجة النظيفة في IndexedDB فوراً
+      saveStateLocally(merged).catch(() => {});
 
       // تحديث بيانات الموظف المسجل حالياً إذا طرأت تغييرات
       setCurrentEmpUser((prevEmp) => {

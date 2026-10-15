@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { uid, arabicWeekday, nowTimeStr, parseArabicFloat } from '../utils/formatters';
 import { getRealTodayStr } from '../utils/timeEngine';
-import { getEmployeeDaySchedule } from '../utils/rosterEngine';
+import { getEmployeeDaySchedule, findEmployeeRoster } from '../utils/rosterEngine';
 import { playFingerprintChime } from './useAudio';
 import { calcRawDurationMinutes } from '../utils/workHoursEngine';
 import {
@@ -1020,15 +1020,20 @@ export function useAttendanceEngine() {
     const bObj = (state.branches || []).find((b) => isBranchMatch(rawBId, b));
     const bId = bObj ? bObj.id : rawBId;
 
+    const isFlexEmp = isVariableScheduleEmployee(emp);
     const daySchedule = getEmployeeDaySchedule(empId, active.date, state, bId);
     const profileHours = parseFloat(emp?.workHoursPerDay || emp?.workHours || (emp?.branchesDetails && emp.branchesDetails[0]?.workHoursPerDay)) || 8;
     let scheduledHours = profileHours;
+
+    // فحص ما إذا كان للموظف جدول شهري معتمد رسمي لهذا اليوم
+    const activeRoster = !isFlexEmp ? findEmployeeRoster(empId, active.date, state) : null;
+    const hasApprovedMonthlySchedule = !isFlexEmp && Boolean(activeRoster && (activeRoster.status === 'approved' || activeRoster.adminApproved === true || activeRoster.isApproved === true));
 
     let hasValidScheduledShift = false;
     let schedStartMins = 0;
     let schedEndMins = 0;
 
-    if (daySchedule && daySchedule.start && daySchedule.end && daySchedule.type !== 'off' && !isVariableScheduleEmployee(emp)) {
+    if (hasApprovedMonthlySchedule && daySchedule && daySchedule.start && daySchedule.end && daySchedule.type !== 'off') {
       const [sH, sM] = daySchedule.start.split(':').map(Number);
       const [eH, eM] = daySchedule.end.split(':').map(Number);
       if (!isNaN(sH) && !isNaN(eH)) {
@@ -1051,7 +1056,19 @@ export function useAttendanceEngine() {
     let earlyArrivalMinutes = 0;
     let lateArrivalMinutes = 0;
     let lateDepartureMinutes = 0;
+    let earlyDepartureMinutes = 0;
 
+    let regularHours = netHours;
+    let overtimeHours = 0;
+    let overtimeStatus = 'none';
+    let deviationStatus = 'none';
+    let isScheduleDeviation = false;
+    let deviationType = 'none';
+    let earlyOtHours = 0;
+    let lateOtHours = 0;
+
+    // ── الحالة الأولى: الموظفون الذين لديهم جدول شهري معتمد حصراً ──
+    // يتم احتساب الساعات الإضافية خارج مواعيد عمل الجدول (قبل البداية وبعد النهاية)
     if (hasValidScheduledShift) {
       if (actInMins < schedStartMins) {
         earlyArrivalMinutes = schedStartMins - actInMins;
@@ -1064,64 +1081,53 @@ export function useAttendanceEngine() {
       } else if (actOutMins < schedEndMins) {
         earlyDepartureMinutes = schedEndMins - actOutMins;
       }
-    }
 
-    let regularHours = netHours;
-    let overtimeHours = 0;
-    let overtimeStatus = 'none';
-    let deviationStatus = 'none';
-    let isScheduleDeviation = false;
-    let deviationType = 'none';
-    let earlyOtHours = 0;
-    let lateOtHours = 0;
-
-    // ── الحالة 1: عدم الالتزام بالجدول (حضور متأخر وانصراف متأخر) -> البند 4 ──
-    if (hasValidScheduledShift && lateArrivalMinutes > 0 && lateDepartureMinutes > 0) {
-      isScheduleDeviation = true;
-      deviationType = 'late_in_late_out';
-      deviationStatus = 'pending';
-
-      // قبل الاعتماد: تُحتسب الساعات فقط من وقت الدخول حتى موعد نهاية الوردية المجدولة
-      // وتُستبعد الساعات التي بعد موعد الانصراف لحين موافقة الإدارة ومدير الفرع
-      const windowEndMins = Math.min(actOutMins, schedEndMins);
-      const windowHours = Math.max(0, Math.round(((windowEndMins - actInMins) / 60 - breakHours) * 100) / 100);
-      regularHours = windowHours;
-      overtimeHours = 0;
-      overtimeStatus = 'pending';
-    }
-    // ── الحالة 1.ب: عدم الالتزام بالجدول (حضور مبكر وانصراف مبكر عن موعد الوردية) ──
-    else if (hasValidScheduledShift && earlyArrivalMinutes > 0 && earlyDepartureMinutes > 0) {
-      isScheduleDeviation = true;
-      deviationType = 'early_in_early_out';
-      deviationStatus = 'pending';
-
-      // احتساب الساعات الفعلية والأجر الأساسي والإضافي لحين اعتماد الإدارة العليا وتعديل الجدول
-      regularHours = Math.min(netHours, scheduledHours);
-      overtimeHours = Math.max(0, Math.round((netHours - scheduledHours) * 100) / 100);
-      overtimeStatus = overtimeHours > 0 ? 'pending' : 'none';
-    }
-    // ── الحالة 2: حضور مبكر وانصراف متأخر عن الوردية المجدولة -> البند 3 ──
-    else if (hasValidScheduledShift && earlyArrivalMinutes > 0 && lateDepartureMinutes > 0) {
-      earlyOtHours = Math.round((earlyArrivalMinutes / 60) * 100) / 100;
-      lateOtHours = Math.round((lateDepartureMinutes / 60) * 100) / 100;
-      overtimeHours = Math.round((earlyOtHours + lateOtHours) * 100) / 100;
-      regularHours = Math.min(netHours, scheduledHours);
-      overtimeStatus = overtimeHours > 0 ? 'pending' : 'none';
-    }
-    // ── الحالة 3: زيادة ساعات عامة فوق الوردية المجدولة أو ملف الموظف ──
-    else if (netHours > scheduledHours) {
-      overtimeHours = Math.round((netHours - scheduledHours) * 100) / 100;
-      regularHours = scheduledHours;
-      overtimeStatus = 'pending';
-      if (lateDepartureMinutes > 0) {
-        lateOtHours = overtimeHours;
-      } else if (earlyArrivalMinutes > 0) {
-        earlyOtHours = overtimeHours;
+      // 1. عدم الالتزام بالجدول (حضور متأخر وانصراف متأخر)
+      if (lateArrivalMinutes > 0 && lateDepartureMinutes > 0) {
+        isScheduleDeviation = true;
+        deviationType = 'late_in_late_out';
+        deviationStatus = 'pending';
+        const windowEndMins = Math.min(actOutMins, schedEndMins);
+        const windowHours = Math.max(0, Math.round(((windowEndMins - actInMins) / 60 - breakHours) * 100) / 100);
+        regularHours = windowHours;
+        overtimeHours = 0;
+        overtimeStatus = 'pending';
       }
-    } else {
-      regularHours = netHours;
-      overtimeHours = 0;
-      overtimeStatus = 'none';
+      // 2. حضور مبكر وانصراف مبكر عن موعد الوردية
+      else if (earlyArrivalMinutes > 0 && earlyDepartureMinutes > 0) {
+        isScheduleDeviation = true;
+        deviationType = 'early_in_early_out';
+        deviationStatus = 'pending';
+        regularHours = Math.min(netHours, scheduledHours);
+        overtimeHours = Math.max(0, Math.round((netHours - scheduledHours) * 100) / 100);
+        overtimeStatus = overtimeHours > 0 ? 'pending' : 'none';
+      }
+      // 3. ساعات إضافية خارج ساعات عمل الجدول (قبل بداية الوردية و/أو بعد نهايتها)
+      else if (earlyArrivalMinutes > 0 || lateDepartureMinutes > 0) {
+        earlyOtHours = Math.round((earlyArrivalMinutes / 60) * 100) / 100;
+        lateOtHours = Math.round((lateDepartureMinutes / 60) * 100) / 100;
+        overtimeHours = Math.round((earlyOtHours + lateOtHours) * 100) / 100;
+        regularHours = Math.max(0, Math.round((netHours - overtimeHours) * 100) / 100);
+        overtimeStatus = overtimeHours > 0 ? 'pending' : 'none';
+      } else {
+        regularHours = netHours;
+        overtimeHours = 0;
+        overtimeStatus = 'none';
+      }
+    }
+    // ── الحالة الثانية: الموظفون الذين ليس لديهم جدول شهري معتمد / دوام حر ──
+    // يتم احتساب وإرسال طلب الإضافي عندما تكون ساعات العمل الفعلية أكبر من ساعات العمل الموضوعة في ملف الموظف
+    else {
+      if (netHours > profileHours) {
+        overtimeHours = Math.round((netHours - profileHours) * 100) / 100;
+        regularHours = profileHours;
+        overtimeStatus = 'pending';
+        lateOtHours = overtimeHours;
+      } else {
+        regularHours = netHours;
+        overtimeHours = 0;
+        overtimeStatus = 'none';
+      }
     }
 
     let existingShifts = [...(state.shifts || [])];
@@ -1287,21 +1293,22 @@ export function useAttendanceEngine() {
     if (overtimeHours > 0 && !isScheduleDeviation) {
       const isFlexEmp = isVariableScheduleEmployee(emp);
       const noBranchMgr = isBranchWithoutManager(bId, state);
-      const isDirectAdmin = isFlexEmp || noBranchMgr || shouldRouteDirectToAdmin(emp, bId, state);
-      const targetApproval = isFlexEmp ? 'admin_only' : (isDirectAdmin ? 'admin_only' : 'both');
+      // قواعد الموافقة المزدوجة الموضوعة من قبل الإدارة: يلزم موافقة مدير الفرع أولاً ثم الإدارة العليا في كافة الأحوال
+      const targetApproval = noBranchMgr ? 'admin_only' : 'both';
+      const isDirectAdmin = noBranchMgr;
       const reqId = `req_ot_${empId}_${active.date}_${shiftId}`;
 
-      const reasonText = isFlexEmp
-        ? `عمل الموظف ${emp?.name} (مواعيد متغيرة / دوام حر) عدد ${overtimeHours} ساعات إضافية فوق ساعات ملفه الشخصي (${profileHours} س).`
+      const reasonText = !hasApprovedMonthlySchedule
+        ? `عمل الموظف ${emp?.name} (بدون جدول شهري معتمد) عدد ${overtimeHours} ساعات إضافية فوق ساعات ملفه الشخصي (${profileHours} س).`
         : (earlyOtHours > 0 && lateOtHours > 0)
           ? `حضور مبكر قبل الوردية (+${earlyOtHours} س) وانصراف متأخر بعد الوردية (+${lateOtHours} س) بإجمالي إضافي (+${overtimeHours} س).`
-          : `عمل الموظف ${emp?.name} عدد ${overtimeHours} ساعات إضافية فوق ساعات الوردية بالجدول (${scheduledHours} س).`;
+          : earlyOtHours > 0
+            ? `حضور مبكر قبل موعد بداية الوردية المجدولة في الجدول (+${earlyOtHours} س إضافي).`
+            : `انصراف متأخر بعد موعد نهاية الوردية المجدولة في الجدول (+${lateOtHours} س إضافي).`;
 
-      const detailsText = isFlexEmp
-        ? `الموظف يعمل بمواعيد متغيرة (دوام حر بدون جدول شهري) | الساعات المسجلة بملفه الشخصي: ${profileHours} س | إجمالي الساعات الفعلية: ${netHours} س | الساعات الإضافية المطلوب اعتمادها: +${overtimeHours} س`
-        : (earlyOtHours > 0 && lateOtHours > 0)
-          ? `الوردية المقررة: ${daySchedule?.start || '—'} إلى ${daySchedule?.end || '—'} (${scheduledHours} س) | الحضور: ${active.timeIn} (تبكير ${earlyArrivalMinutes} د = +${earlyOtHours} س) | الانصراف: ${timeOut} (تأخير ${lateDepartureMinutes} د = +${lateOtHours} س) | إجمالي الساعات الفعلية: ${netHours} س | الإضافي المطلوب: +${overtimeHours} س`
-          : `الوردية المقررة: ${scheduledHours} س | الساعات الفعلية: ${netHours} س | الساعات الإضافية المطلوب اعتمادها: +${overtimeHours} س`;
+      const detailsText = !hasApprovedMonthlySchedule
+        ? `الموظف ليس لديه جدول شهري معتمد | ساعات ملفه الشخصي: ${profileHours} س | الساعات الفعلية: ${netHours} س | الساعات الإضافية المطلوب اعتمادها: +${overtimeHours} س`
+        : `الوردية المجدولة بالجدول المعتمد: ${daySchedule?.start || '—'} إلى ${daySchedule?.end || '—'} (${scheduledHours} س) | الحضور: ${active.timeIn}${earlyOtHours > 0 ? ` (تبكير +${earlyOtHours} س)` : ''} | الانصراف: ${timeOut}${lateOtHours > 0 ? ` (تأخير +${lateOtHours} س)` : ''} | الساعات الفعلية: ${netHours} س | الإضافي المطلوب: +${overtimeHours} س`;
 
       const overtimeReq = {
         id: reqId,
@@ -1313,14 +1320,14 @@ export function useAttendanceEngine() {
         branchId: bId,
         branchName: bObj?.name || 'الفرع الرئيسي',
         type: 'overtime',
-        subType: isFlexEmp ? 'flexible_overtime' : ((earlyOtHours > 0 && lateOtHours > 0) ? 'early_and_late' : 'extra_hours'),
+        subType: !hasApprovedMonthlySchedule ? 'flexible_overtime' : ((earlyOtHours > 0 && lateOtHours > 0) ? 'early_and_late' : (earlyOtHours > 0 ? 'early_arrival' : 'late_departure')),
         hours: overtimeHours,
         earlyOtHours,
         lateOtHours,
         regularHours: regularHours,
         totalShiftHours: netHours,
-        scheduledStart: isFlexEmp ? 'دوام حر' : (daySchedule?.start || ''),
-        scheduledEnd: isFlexEmp ? 'دوام حر' : (daySchedule?.end || ''),
+        scheduledStart: !hasApprovedMonthlySchedule ? 'دوام حر' : (daySchedule?.start || ''),
+        scheduledEnd: !hasApprovedMonthlySchedule ? 'دوام حر' : (daySchedule?.end || ''),
         profileHours: profileHours,
         actualIn: active.timeIn,
         actualOut: timeOut,
@@ -1329,14 +1336,14 @@ export function useAttendanceEngine() {
         details: detailsText,
         targetApproval,
         isDirectToAdmin: isDirectAdmin,
-        branchNotRequired: isDirectAdmin,
-        managerStatus: (noBranchMgr || isFlexEmp) ? 'skipped' : (isDirectAdmin ? 'skipped' : 'pending'),
-        branchApprovalStatus: (noBranchMgr || isFlexEmp) ? 'skipped' : (isDirectAdmin ? 'skipped' : undefined),
+        branchNotRequired: noBranchMgr,
+        managerStatus: noBranchMgr ? 'skipped' : 'pending',
+        branchApprovalStatus: noBranchMgr ? 'skipped' : 'pending',
         branchApproved: false,
         adminApproved: false,
         status: 'pending',
         createdAt: new Date().toISOString(),
-        source: isFlexEmp ? 'flexible_schedule_overtime_tracker' : 'system_overtime_tracker'
+        source: !hasApprovedMonthlySchedule ? 'flexible_schedule_overtime_tracker' : 'system_overtime_tracker'
       };
       updatedRequests = [overtimeReq, ...updatedRequests];
 
