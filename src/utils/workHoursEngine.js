@@ -45,6 +45,7 @@ export function findApprovedPermission(employeeId, dateStr, state) {
       t === 'permission';
 
     if (!isPermType) return false;
+    if (r.voidedOnShiftDelete || r.isCancelled || r.status === 'cancelled' || r.status === 'rejected') return false;
 
     return r.status === 'approved' || r.adminApproved || r.managerApproved;
   }) || null;

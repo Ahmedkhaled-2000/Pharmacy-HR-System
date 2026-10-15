@@ -643,10 +643,44 @@ export default function AttendancePunchesModal({
     const performSave = async () => {
       const inParts = (snapTimeIn || '09:00').split(':').map(Number);
       const outParts = (snapTimeOut || '17:00').split(':').map(Number);
-      let diff = ((outParts[0] || 0) + (outParts[1] || 0) / 60) - ((inParts[0] || 0) + (inParts[1] || 0) / 60);
-      if (diff <= 0) diff += 24;
+      const inH = inParts[0] || 0;
+      const inM = inParts[1] || 0;
+      const outH = outParts[0] || 0;
+      const outM = outParts[1] || 0;
+      let diff = 0;
+      if (inH === outH && inM === outM) {
+        diff = 0;
+      } else {
+        diff = (outH + outM / 60) - (inH + inM / 60);
+        if (diff < 0) diff += 24;
+      }
       const bH = parseFloat(snapBreakHours) || 0;
       const calculatedHours = Math.max(0, Math.round((diff - bH) * 100) / 100);
+
+      const empIdStr = String(employee.id);
+      const empCodeStr = employee.code ? String(employee.code) : '';
+      const allPerms = [
+        ...(state.requests || []),
+        ...(state.permissions || []),
+        ...(state.employeePermissions || [])
+      ];
+      const pastPerm = allPerms.find(p => {
+        if (!p) return false;
+        const pEmpId = String(p.employeeId || p.empId || '');
+        if (pEmpId !== empIdStr && (!empCodeStr || pEmpId !== empCodeStr)) return false;
+        const pDate = String(p.date || p.startDate || p.effectiveDate || (p.createdAt ? p.createdAt.slice(0, 10) : '')).slice(0, 10);
+        if (pDate !== snapDate) return false;
+        const t = String(p.type || p.requestType || p.subType || '').toLowerCase();
+        return t.includes('perm') || t.includes('إذن') || t.includes('اذن') || p.permType === 'late' || p.permType === 'early';
+      });
+
+      let permNoteFragment = '';
+      if (pastPerm) {
+        const pDur = pastPerm.originalHours || pastPerm.hours || (pastPerm.durationMinutes ? Math.round((pastPerm.durationMinutes / 60) * 100) / 100 : 0);
+        const pStart = pastPerm.originalStartTime || pastPerm.startTime || '—';
+        const pEnd = pastPerm.originalEndTime || pastPerm.endTime || '—';
+        permNoteFragment = `كان يوجد إذن في هذا اليوم مدته (${pDur} س) من ${pStart} إلى ${pEnd}`;
+      }
 
       const daySched = getEmployeeDaySchedule(employee.id, snapDate, state);
       const profileHours = parseFloat(employee.workHoursPerDay || employee.workHours) || 8;
@@ -682,6 +716,12 @@ export default function AttendancePunchesModal({
         );
 
         finalSavedShiftId = existingIdx >= 0 ? state.shifts[existingIdx].id : `punch_manual_${Date.now()}`;
+        const noteParts = [];
+        if (snapNotes.trim()) noteParts.push(snapNotes.trim());
+        noteParts.push('تسجيل بصمة يدوية بواسطة الإدارة العليا' + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ''));
+        if (permNoteFragment) noteParts.push(permNoteFragment);
+        const combinedNote = noteParts.join(' | ');
+
         const newShiftPayload = {
           id: finalSavedShiftId,
           employeeId: employee.id,
@@ -708,7 +748,8 @@ export default function AttendancePunchesModal({
           isAdminCreated: true,
           adminApproved: true,
           statusLabel: overtimeHours > 0 ? 'تسجيل يدوي (مع إضافي معتمد)' : 'تسجيل يدوي من الإدارة',
-          note: (snapNotes.trim() ? snapNotes.trim() + ' | ' : '') + 'تسجيل بصمة يدوية بواسطة الإدارة العليا' + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ''),
+          note: combinedNote,
+          notes: combinedNote,
           createdAt: existingIdx >= 0 ? (state.shifts[existingIdx].createdAt || new Date().toISOString()) : new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
@@ -750,8 +791,8 @@ export default function AttendancePunchesModal({
               adminApproved: true,
               branchId: canonicalBranchId,
               branchName: canonicalBranchName,
-              note: (snapNotes.trim() ? snapNotes.trim() + ' | ' : '') + (s.note || 'تم تعديل البصمة بواسطة الإدارة العليا') + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ''),
-              notes: (snapNotes.trim() ? snapNotes.trim() + ' | ' : '') + (s.notes || 'تم تعديل البصمة بواسطة الإدارة العليا') + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ''),
+              note: (snapNotes.trim() ? snapNotes.trim() + ' | ' : '') + (s.note || 'تم تعديل البصمة بواسطة الإدارة العليا') + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : '') + (permNoteFragment && !String(s.note || '').includes('كان يوجد إذن') ? ` | ${permNoteFragment}` : ''),
+              notes: (snapNotes.trim() ? snapNotes.trim() + ' | ' : '') + (s.notes || 'تم تعديل البصمة بواسطة الإدارة العليا') + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : '') + (permNoteFragment && !String(s.notes || '').includes('كان يوجد إذن') ? ` | ${permNoteFragment}` : ''),
               statusLabel: overtimeHours > 0 ? 'معدلة من الإدارة (مع إضافي معتمد)' : 'معدلة من الإدارة',
               isManual: true,
               manualPunch: true,
@@ -939,6 +980,52 @@ export default function AttendancePunchesModal({
         return true;
       });
 
+      // 3.5 عند حذف الوردية: تسقط ساعات الإذن لهذا اليوم ولا يتم جمعها مرة أخرى
+      const voidedRequests = (updatedRequests || []).map((r) => {
+        if (!r) return r;
+        const isEmpMatch = String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr);
+        const isDateMatch = r.date === punchDate || r.startDate === punchDate || (r.createdAt && r.createdAt.slice(0, 10) === punchDate);
+        const t = String(r.type || r.requestType || r.subType || '').toLowerCase();
+        const isPerm = t.includes('perm') || t.includes('إذن') || t.includes('اذن') || r.permType === 'late' || r.permType === 'early';
+        if (isEmpMatch && isDateMatch && isPerm) {
+          const origHours = r.originalHours || r.hours || (r.durationMinutes ? Math.round((r.durationMinutes / 60) * 100) / 100 : 0);
+          return {
+            ...r,
+            voidedOnShiftDelete: true,
+            hours: 0,
+            effectiveHours: 0,
+            durationMinutes: 0,
+            originalHours: origHours,
+            originalStartTime: r.originalStartTime || r.startTime || '',
+            originalEndTime: r.originalEndTime || r.endTime || '',
+            originalDurationText: r.originalDurationText || r.durationText || '',
+            notes: (r.notes ? r.notes + ' | ' : '') + '[سقطت ساعات الإذن لحذف وردية اليوم ولن تُجمع مرة أخرى]'
+          };
+        }
+        return r;
+      });
+
+      const voidedPermissions = (state.permissions || []).map((p) => {
+        if (!p) return p;
+        const isEmpMatch = String(p.employeeId) === empIdStr || (empCodeStr && String(p.employeeCode) === empCodeStr);
+        const isDateMatch = p.date === punchDate || p.startDate === punchDate;
+        if (isEmpMatch && isDateMatch) {
+          const origHours = p.originalHours || p.hours || (p.durationMinutes ? Math.round((p.durationMinutes / 60) * 100) / 100 : 0);
+          return {
+            ...p,
+            voidedOnShiftDelete: true,
+            hours: 0,
+            effectiveHours: 0,
+            durationMinutes: 0,
+            originalHours: origHours,
+            originalStartTime: p.originalStartTime || p.startTime || '',
+            originalEndTime: p.originalEndTime || p.endTime || '',
+            notes: (p.notes ? p.notes + ' | ' : '') + '[سقطت ساعات الإذن لحذف وردية اليوم ولن تُجمع مرة أخرى]'
+          };
+        }
+        return p;
+      });
+
       // 4. حذف الشفت النشط إذا كان مسجلاً لهذا اليوم أو البصمة
       let updatedActiveShifts = { ...(state.activeShifts || {}) };
       if (updatedActiveShifts[empIdStr]) {
@@ -966,7 +1053,8 @@ export default function AttendancePunchesModal({
       let updatedState = {
         ...state,
         shifts: updatedShifts,
-        requests: updatedRequests,
+        requests: voidedRequests,
+        permissions: voidedPermissions,
         activeShifts: updatedActiveShifts,
         _deletedIds: updatedDeletedIds
       };

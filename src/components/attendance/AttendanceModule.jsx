@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
 import { recalculateEmployeeCycleLateness, getEffectiveShiftHours, reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
+import { apiSaveSettingsSlice } from '../../utils/apiClient';
 import {
   getEmpDisplayName,
   isEmployeeActive,
@@ -99,7 +100,7 @@ export default function AttendanceModule({
     const bH = Math.max(0, parseFloat(manualBreakHours) || 0);
     const workHours = Math.max(0, Math.round((elapsedHours - bH) * 100) / 100);
 
-    const performAdd = () => {
+    const performAdd = async () => {
       const daySched = getEmployeeDaySchedule(manualEmpId, manualDate, state);
       const profileHours = parseFloat(empObj?.workHoursPerDay || empObj?.workHours) || 8;
       let scheduledShiftHours = profileHours;
@@ -212,6 +213,19 @@ export default function AttendanceModule({
         showToast?.(`✅ تم تسجيل البصمة اليدوية واحتساب الوقت الإضافي تلقائياً: ${regularHours} س أساسي + ${overtimeHours} س إضافي معتمد`);
       } else {
         showToast?.('✅ تم إضافة البصمة اليدوية للموظف فوراً وحساب الساعات بنجاح (حضور في الموعد)');
+      }
+
+      try {
+        await apiSaveSettingsSlice('shifts', updatedShifts);
+        await apiSaveSettingsSlice('requests', updatedState.requests);
+        if (updatedState.lateIncidents) {
+          await apiSaveSettingsSlice('lateIncidents', updatedState.lateIncidents);
+        }
+        if (updatedState._deletedIds) {
+          await apiSaveSettingsSlice('_deletedIds', updatedState._deletedIds);
+        }
+      } catch (sliceErr) {
+        console.warn('[AttendanceModule] Slice save error:', sliceErr);
       }
 
       // Non-blocking background sync

@@ -1535,19 +1535,19 @@ export default function BranchManagerView({
     }
 
     // 3.b If schedule deviation request (only if admin approved as well)
-    if (isFullyApproved && updatedTargetReq.type === 'schedule_deviation') {
+    if (isFullyApproved && (updatedTargetReq.type === 'schedule_deviation' || updatedTargetReq.type === 'عدم الالتزام بالجدول')) {
       const targetDate = updatedTargetReq.date || updatedTargetReq.startDate;
       const existingShiftIdx = updatedShifts.findIndex(
         s => (updatedTargetReq.shiftId && s.id === updatedTargetReq.shiftId) ||
           (String(s.employeeId) === String(updatedTargetReq.employeeId) && s.date === targetDate)
       );
+      const actualHours = parseFloat(updatedTargetReq.actualWorkedHours || (existingShiftIdx >= 0 ? updatedShifts[existingShiftIdx].actualWorkedHours : 0)) || 0;
+      const profileHours = parseFloat(updatedTargetReq.profileHours) || (existingShiftIdx >= 0 ? parseFloat(updatedShifts[existingShiftIdx].scheduledHours) : 8) || 8;
+      const extraHours = Math.max(0, Math.round((actualHours - profileHours) * 100) / 100);
+      const regularHours = Math.min(actualHours, profileHours);
+
       if (existingShiftIdx >= 0) {
         const s = updatedShifts[existingShiftIdx];
-        const actualHours = parseFloat(updatedTargetReq.actualWorkedHours || s.actualWorkedHours || s.hours) || 0;
-        const profileHours = parseFloat(updatedTargetReq.profileHours) || parseFloat(s.scheduledHours) || 8;
-        const extraHours = Math.max(0, Math.round((actualHours - profileHours) * 100) / 100);
-        const regularHours = Math.min(actualHours, profileHours);
-
         updatedShifts[existingShiftIdx] = {
           ...s,
           deviationStatus: 'approved',
@@ -1558,6 +1558,82 @@ export default function BranchManagerView({
           lateArrivalMinutes: 0,
           updatedAt: new Date().toISOString()
         };
+      }
+
+      if (targetDate) {
+        const monthKey = targetDate.slice(0, 7);
+        const empIdStr = String(updatedTargetReq.employeeId);
+        const empCodeStr = updatedTargetReq.employeeCode ? String(updatedTargetReq.employeeCode) : '';
+
+        let rosterIdx = updatedRosters.findIndex((r) =>
+          (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) &&
+          (r.month === monthKey || (!r.month && (!r.fromDate || r.fromDate.slice(0, 7) === monthKey)))
+        );
+
+        const shiftStart = updatedTargetReq.actualIn || '08:00';
+        const shiftEnd = updatedTargetReq.actualOut || '17:00';
+        const shiftHours = regularHours || parseFloat(updatedTargetReq.scheduledHours) || 8;
+
+        const updatedDaySchedule = {
+          type: 'shift',
+          isOff: false,
+          start: shiftStart,
+          end: shiftEnd,
+          hours: shiftHours,
+          branchId: updatedTargetReq.branchId,
+          label: 'وردية عمل معدلة (اعتماد عدم التزام بالجدول)',
+          modifiedByScheduleDeviation: true,
+          deviationRequestId: updatedTargetReq.id
+        };
+
+        if (rosterIdx >= 0) {
+          const existingRoster = updatedRosters[rosterIdx];
+          const newSchedule = { ...(existingRoster.schedule || {}) };
+          newSchedule[targetDate] = updatedDaySchedule;
+          updatedRosters[rosterIdx] = {
+            ...existingRoster,
+            schedule: newSchedule,
+            status: 'approved',
+            updatedAt: new Date().toISOString()
+          };
+        } else {
+          const newRoster = {
+            id: `roster_${empIdStr}_${monthKey}_${Date.now()}`,
+            employeeId: empIdStr,
+            employeeCode: empCodeStr,
+            branchId: updatedTargetReq.branchId || null,
+            month: monthKey,
+            schedule: {
+              [targetDate]: updatedDaySchedule
+            },
+            status: 'approved',
+            adminApproved: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          updatedRosters.push(newRoster);
+        }
+
+        updatedRequests = updatedRequests.map((r) => {
+          const matchEmp = String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr);
+          const matchDate = r.date === targetDate || String(r.id || '').includes(`_${targetDate}_`);
+          const isLatePenalty = r.type === 'penalty' || r.type === 'late_penalty' || r.subType === 'lateness' || String(r.id || '').startsWith('req_late_inc_') || String(r.id || '').startsWith('late_inc_');
+          if (matchEmp && matchDate && isLatePenalty) {
+            return {
+              ...r,
+              status: 'cancelled',
+              isCancelled: true,
+              amount: 0,
+              penaltyAmount: 0,
+              deductionMinutes: 0,
+              adminApproved: false,
+              branchApproved: false,
+              cancellationReason: 'تم إسقاط الجزاء تلقائياً لاعتماد طلب عدم الالتزام بالجدول وتعديل الوردية في الجدول الشهري',
+              notes: (r.notes ? r.notes + ' | ' : '') + 'تم إسقاط الجزاء وتعديل موعد الوردية بالجدول الشهري'
+            };
+          }
+          return r;
+        });
       }
     }
 

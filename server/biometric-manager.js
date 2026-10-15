@@ -1080,18 +1080,30 @@ export function resolveOvernightOperationalDate({
     const todaySched = getEmployeeScheduledDayDetails(empObj, datePart, stateData);
     const tmrwSched = getEmployeeScheduledDayDetails(empObj, nextDate, stateData);
 
-    if ((!todaySched || todaySched.isOff) && tmrwSched && !tmrwSched.isOff && tmrwSched.start) {
+    if (tmrwSched && !tmrwSched.isOff && tmrwSched.start) {
       const [tmrwH] = tmrwSched.start.split(':').map(Number);
       if (tmrwH <= 2) {
-        return {
-          operationalDate: nextDate,
-          actualPunchDate: datePart,
-          isOvernight: true,
-          isEarlyOvernightIn: true,
-          isPostMidnightInForYesterday: false,
-          scheduledDetails: tmrwSched,
-          reason: `حضور مبكر لوردية الغد المجدولة (${tmrwSched.start})`
-        };
+        // فحص هل اليوم راحة، أو أن وردية اليوم تم حضورها بالفعل، أو أن موعد الدخول أقرب بكثير لبداية وردية الغد
+        const isTodayOffOrNoSched = !todaySched || todaySched.isOff || !todaySched.start;
+        const hasExistingShiftToday = (currentShifts || []).some(s =>
+          matchEmpKeys.some(k => String(s.employeeId) === String(k) || (s.employeeCode && String(s.employeeCode) === String(k))) &&
+          s.date === datePart &&
+          parseFloat(s.hours || s.actualWorkedHours || 0) >= 1
+        );
+        const [todayStartH] = (todaySched?.start || '00:00').split(':').map(Number);
+        const isTodayDaytime = todayStartH < 18;
+
+        if (isTodayOffOrNoSched || hasExistingShiftToday || isTodayDaytime || inHour === 23) {
+          return {
+            operationalDate: nextDate,
+            actualPunchDate: datePart,
+            isOvernight: true,
+            isEarlyOvernightIn: true,
+            isPostMidnightInForYesterday: false,
+            scheduledDetails: tmrwSched,
+            reason: `حضور مبكر لوردية الغد المجدولة (${tmrwSched.start})`
+          };
+        }
       }
     }
 
@@ -1112,7 +1124,24 @@ export function resolveOvernightOperationalDate({
     const yesterdaySched = getEmployeeScheduledDayDetails(empObj, yesterday, stateData);
     const todaySched = getEmployeeScheduledDayDetails(empObj, datePart, stateData);
 
-    // 🛡️ الاستثناء الحاسم: هل كان الموظف في راحة أسبوعية (OFF) بالأمس؟
+    // أ) هل اليوم الحالي مجدول له وردية تبدأ بعد منتصف الليل (00:00 - 03:00)؟
+    // إذا كان الموظف مجدولاً لليوم الحالي بوردية ليلية تبدأ فجراً، فالبصمة حتماً تخص جدول اليوم الحالي!
+    if (todaySched && !todaySched.isOff && todaySched.start) {
+      const [todayStartH] = todaySched.start.split(':').map(Number);
+      if (todayStartH <= 3) {
+        return {
+          operationalDate: datePart,
+          actualPunchDate: datePart,
+          isOvernight: false,
+          isEarlyOvernightIn: false,
+          isPostMidnightInForYesterday: false,
+          scheduledDetails: todaySched,
+          reason: `دخول بعد منتصف الليل (${timePart}) ينسب لليوم الحالي لمطابقته جدول اليوم (${todaySched.start})`
+        };
+      }
+    }
+
+    // ب) 🛡️ الاستثناء الحاسم: هل كان الموظف في راحة أسبوعية (OFF) بالأمس؟
     const isYesterdayOff = Boolean(yesterdaySched && yesterdaySched.isOff);
 
     if (isYesterdayOff) {
@@ -1128,10 +1157,10 @@ export function resolveOvernightOperationalDate({
       };
     }
 
-    // فحص هل يوجد بالفعل وردية عمل حقيقية مكتملة بالأمس للموظف؟
+    // ج) فحص هل يوجد بالفعل وردية عمل حقيقية مكتملة بالأمس للموظف (سواء بدأت بالأمس أو انتهت بالأمس صباحاً)?
     const yesterdayExistingShift = (currentShifts || []).find(s =>
       matchEmpKeys.some(k => String(s.employeeId) === String(k) || (s.employeeCode && String(s.employeeCode) === String(k))) &&
-      s.date === yesterday &&
+      (s.date === yesterday || s.timeOutDate === yesterday || s.actualPunchDate === yesterday) &&
       parseFloat(s.hours || s.actualWorkedHours || 0) >= 3
     );
 
@@ -1143,12 +1172,12 @@ export function resolveOvernightOperationalDate({
         isEarlyOvernightIn: false,
         isPostMidnightInForYesterday: false,
         scheduledDetails: todaySched,
-        reason: `دخول بعد منتصف الليل ينسب لليوم الحالي لوجود وردية مكتملة بالأمس (${yesterdayExistingShift.timeIn} - ${yesterdayExistingShift.timeOut})`
+        reason: `دخول بعد منتصف الليل ينسب لليوم الحالي لوجود وردية عمل بالأمس انتهت/عملت في (${yesterdayExistingShift.timeOutDate || yesterdayExistingShift.date})`
       };
     }
 
-    // إذا لم يكن الأمس راحة أسبوعية، وليس لديه وردية مكتملة بالأمس:
-    // ننسب الوردية للأمس فوراً كحضور لوردية الليل!
+    // د) إذا لم يكن الأمس راحة أسبوعية، وليس لديه وردية مكتملة بالأمس:
+    // ننسب الوردية للأمس كحضور لوردية الليل!
     return {
       operationalDate: yesterday,
       actualPunchDate: datePart,
@@ -2771,13 +2800,19 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         }
 
         if (effectiveActive) {
-          const shiftStartDate = effectiveActive.date || datePart;
+          // 🛡️ استخدام تاريخ البصمة الحقيقي actualPunchDate والـ Epoch بدقة مطلقة لتفادي وهم الـ 24 ساعة للورديات الليلية
+          const shiftStartDate = effectiveActive.actualPunchDate || effectiveActive.date || datePart;
           const shiftStartTime = (effectiveActive.timeIn || '00:00').slice(0, 5);
           const shiftStartEpoch = Number(effectiveActive.startEpoch) ||
             new Date(`${shiftStartDate}T${shiftStartTime}:00`).getTime();
 
           // ⚡ حساب الفارق الزمني الحقيقي بالدقائق بين بصمة الدخول والبصمة الحالية بدقة تامة
-          const shiftDurationMins = calculatePunchMinutesDiff(shiftStartDate, shiftStartTime, datePart, timePart);
+          let shiftDurationMins = 0;
+          if (shiftStartEpoch && safePunchEpoch && safePunchEpoch >= shiftStartEpoch) {
+            shiftDurationMins = Math.round((safePunchEpoch - shiftStartEpoch) / 60000);
+          } else {
+            shiftDurationMins = calculatePunchMinutesDiff(shiftStartDate, shiftStartTime, datePart, timePart);
+          }
           const shiftDurationHours = shiftDurationMins / 60;
           const isDifferentDate = shiftStartDate !== datePart;
 
@@ -3155,7 +3190,14 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
           // ⚡ حساب دقيق لساعات العمل الصافية من الفارق الفعلي بين بصمة الدخول وبصمة الخروج
           let calcHours = 0;
-          const durationMins = calculatePunchMinutesDiff(effectiveDate, inTime, datePart, outTime);
+          let durationMins = 0;
+          const shiftStartEpoch = Number(origShift?.startEpoch) || Number(effectiveActive?.startEpoch);
+          if (shiftStartEpoch && safePunchEpoch && safePunchEpoch >= shiftStartEpoch) {
+            durationMins = Math.round((safePunchEpoch - shiftStartEpoch) / 60000);
+          } else {
+            const actualInDate = origShift?.actualPunchDate || effectiveActive?.actualPunchDate || effectiveDate;
+            durationMins = calculatePunchMinutesDiff(actualInDate, inTime, datePart, outTime);
+          }
 
           if (durationMins <= 1) {
             calcHours = 0; // حماية البصمة المزدوجة المتطابقة
@@ -4804,9 +4846,9 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
       if (punchType !== 'ALL') {
         if (punchType === 'check_in') {
-          sql += ` AND (p.action_type = 'check_in' OR p.action_type = 'shift_start' OR p.raw_punch_state = 0)`;
+          sql += ` AND (p.action_type = 'check_in' OR p.action_type = 'shift_start' OR (p.action_type IS NULL AND p.raw_punch_state = 0))`;
         } else if (punchType === 'check_out') {
-          sql += ` AND (p.action_type = 'check_out' OR p.action_type = 'shift_end' OR p.raw_punch_state = 1)`;
+          sql += ` AND (p.action_type = 'check_out' OR p.action_type = 'shift_end' OR (p.action_type IS NULL AND p.raw_punch_state = 1))`;
         }
       }
 
@@ -5039,6 +5081,31 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
   app.post('/api/biometrics/map-pin', handleMapPin);
   app.post('/api/biometric/map-device-pin', handleMapPin);
   app.post('/api/biometrics/map-device-pin', handleMapPin);
+
+  // 5.1 تعديل وتصحيح نوع حركة البصمة الخام (حضور / انصراف)
+  app.post('/api/biometrics/correct-punch-action', async (req, res) => {
+    try {
+      const { punchId, actionType, processNotes } = req.body;
+      if (!punchId || !actionType) {
+        return res.status(400).json({ success: false, error: 'يجب تحديد رقم البصمة punchId ونوع الحركة actionType' });
+      }
+      const q = await db.query(
+        `UPDATE public.biometric_raw_punches
+         SET action_type = $1,
+             raw_punch_state = CASE WHEN $1 = 'check_out' THEN 1 ELSE 0 END,
+             process_notes = COALESCE($2, process_notes)
+         WHERE id = $3
+         RETURNING *`,
+        [actionType, processNotes || 'تم تصحيح نوع الحركة يدوياً من لوحة التحكم', punchId]
+      );
+      if (!q.rows || q.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'لم يتم العثور على سجل البصمة المحدد' });
+      }
+      res.json({ success: true, punch: q.rows[0] });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
 
   // 6. قائمة ملفات البصمات الحالية
   app.get('/api/biometrics/profiles', async (req, res) => {

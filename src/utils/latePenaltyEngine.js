@@ -286,7 +286,8 @@ export function isApprovedPermissionForDate(employeeId, dateStr, state) {
       r.status === 'rejected' ||
       r.isRejected === true ||
       r.status === 'cancelled' ||
-      r.isCancelled === true;
+      r.isCancelled === true ||
+      r.voidedOnShiftDelete === true;
 
     return isApproved && !isRejected;
   }) || null;
@@ -593,7 +594,22 @@ export function recalculateEmployeeCycleLateness({
   };
 
   const newIncidents = [];
-  const existingIncidentsMap = new Map((state.lateIncidents || []).filter((inc) => inc && inc.id).map((inc) => [inc.id, inc]));
+  const supersededIncidentIds = [];
+  const existingIncidentsMap = new Map();
+  const existingIncidentsByDate = new Map();
+  const existingIncidentsByShift = new Map();
+
+  (state.lateIncidents || []).forEach((inc) => {
+    if (!inc || !inc.id) return;
+    existingIncidentsMap.set(String(inc.id), inc);
+    const dateKey = `${inc.employeeId}_${inc.date}`;
+    if (!existingIncidentsByDate.has(dateKey)) {
+      existingIncidentsByDate.set(dateKey, inc);
+    }
+    if (inc.shiftId) {
+      existingIncidentsByShift.set(`${inc.employeeId}_${inc.shiftId}`, inc);
+    }
+  });
 
   // جلب كافة طلبات الأذونات المعتمدة للموظف (إذن تأخير / إذن خروج مبكر / إذن عام)
   const approvedPermissions = (state.requests || []).filter(
@@ -634,7 +650,14 @@ export function recalculateEmployeeCycleLateness({
     const approvedPerm = isApprovedPermissionForDate(emp.id, shift.date, state);
 
     const incId = `late_inc_${emp.id}_${shift.date}_${shift.timeIn.replace(':', '')}`;
-    const prevInc = existingIncidentsMap.get(incId);
+    const canonicalDateKey = `${emp.id}_${shift.date}`;
+    const shiftKey = shift.id ? `${emp.id}_${shift.id}` : null;
+    
+    // مطابقة ذكية: البحث عن واقعة سابقة بالمعرف المباشر أولاً، ثم بالوردية، ثم بتاريخ اليوم
+    const prevInc = existingIncidentsMap.get(incId) || (shiftKey && existingIncidentsByShift.get(shiftKey)) || existingIncidentsByDate.get(canonicalDateKey);
+    if (prevInc && prevInc.id && String(prevInc.id) !== incId) {
+      supersededIncidentIds.push(String(prevInc.id));
+    }
 
     const effectiveShiftBranchId = shift.branchId || sched.branchId || emp.branchId;
     const branchObj = (state.branches || []).find((b) => b && b.id === effectiveShiftBranchId);
@@ -835,7 +858,8 @@ export function recalculateEmployeeCycleLateness({
 
   return {
     incidents: newIncidents,
-    updatedRequests: [...newLateRequests, ...otherReqs]
+    updatedRequests: [...newLateRequests, ...otherReqs],
+    supersededIncidentIds
   };
 }
 
@@ -903,8 +927,13 @@ export function applyApprovedPermissionsToShifts(stateOrPerms, maybeShifts, mayb
     if (!permHours && perm.startTime && perm.endTime) {
       const [h1, m1] = perm.startTime.split(':').map(Number);
       const [h2, m2] = perm.endTime.split(':').map(Number);
-      let diff = (h2 * 60 + (m2 || 0)) - (h1 * 60 + (m1 || 0));
-      if (diff <= 0) diff += 24 * 60;
+      let diff = 0;
+      if (h1 === h2 && (m1 || 0) === (m2 || 0)) {
+        diff = 0;
+      } else {
+        diff = (h2 * 60 + (m2 || 0)) - (h1 * 60 + (m1 || 0));
+        if (diff < 0) diff += 24 * 60;
+      }
       permHours = Math.round((diff / 60) * 100) / 100;
     }
 
@@ -1065,6 +1094,7 @@ export function reconcileEmployeeScheduleOrPunchChange({
   }
 
   // 1. حساب دقائق الخصم والمبالغ السابقة لهذا الموظف قبل التسوية
+  const isFlex = isVariableScheduleEmployee(emp);
   let prevDedMins = 0;
   let prevMoney = 0;
   const prevEmpIncidents = (state.lateIncidents || []).filter(
@@ -1078,21 +1108,26 @@ export function reconcileEmployeeScheduleOrPunchChange({
   });
 
   // 2. إعادة احتساب وقائع التأخير للدورة كاملة وفق الجداول والبصمات المحدثة
-  const recRes = recalculateEmployeeCycleLateness({
-    employeeId: emp.id,
-    cycleFilterFn: null,
-    state,
-    payrollCycleId: null
-  });
+  const recRes = isFlex
+    ? { incidents: [], updatedRequests: state.requests || [], supersededIncidentIds: [] }
+    : recalculateEmployeeCycleLateness({
+        employeeId: emp.id,
+        cycleFilterFn: null,
+        state,
+        payrollCycleId: null
+      });
 
-  const newIncidentsForEmp = recRes.incidents || [];
-  const newIncidentIds = new Set(newIncidentsForEmp.map((i) => i.id));
+  const newIncidentsForEmp = isFlex ? [] : (recRes.incidents || []);
   const newIncidentsMap = new Map(newIncidentsForEmp.map((i) => [i.id, i]));
 
   // 3. تحديد الوقائع التي ألغيت أو تم تصفير خصمها لتسوية طلبات الجزاء المقابلة لها
   const eliminatedOrWaivedIncidents = [];
   prevEmpIncidents.forEach((oldInc) => {
-    const newInc = newIncidentsMap.get(oldInc.id);
+    if (isFlex) {
+      eliminatedOrWaivedIncidents.push(oldInc);
+      return;
+    }
+    const newInc = newIncidentsMap.get(oldInc.id) || newIncidentsForEmp.find(i => i.date === oldInc.date);
     const oldDed = parseFloat(oldInc.deductionMinutes) || 0;
     const newDed = newInc ? (parseFloat(newInc.deductionMinutes) || 0) : 0;
     if (!newInc || (oldDed > 0 && newDed === 0) || (newInc && (newInc.actionType === 'grace' || newInc.status === 'cancelled'))) {
@@ -1104,7 +1139,7 @@ export function reconcileEmployeeScheduleOrPunchChange({
   const otherEmployeesIncidents = (state.lateIncidents || []).filter(
     (inc) => inc && String(inc.employeeId) !== empIdStr && (!emp.code || String(inc.employeeCode) !== String(emp.code))
   );
-  const updatedLateIncidents = [...otherEmployeesIncidents, ...newIncidentsForEmp];
+  const updatedLateIncidents = isFlex ? otherEmployeesIncidents : [...otherEmployeesIncidents, ...newIncidentsForEmp];
 
   // 5. تسوية وإلغاء طلبات الجزاء المرتبطة في requests
   const waivedIncidentIds = new Set(eliminatedOrWaivedIncidents.map((i) => i.id));
@@ -1118,6 +1153,19 @@ export function reconcileEmployeeScheduleOrPunchChange({
     const isPenaltyReq = req.type === 'penalty' || req.type === 'lateness' || req.subType === 'lateness' || String(req.id || '').startsWith('req_late_inc_');
     if (!isPenaltyReq) return req;
 
+    if (isFlex) {
+      return {
+        ...req,
+        status: 'cancelled',
+        isCancelled: true,
+        amount: 0,
+        deductionMinutes: 0,
+        cancelledAt: new Date().toISOString(),
+        cancellationReason: 'معفى تماماً من لائحة التأخيرات (ليس له جدول شهري - مواعيد متغيرة)',
+        adminNote: (req.adminNote ? req.adminNote + ' | ' : '') + 'ملغى آلياً: نظام دوام مرن'
+      };
+    }
+
     const reqIncId = req.penaltyId || (String(req.id || '').startsWith('req_') ? req.id.replace('req_', '') : null);
     const isTargetIncident = (reqIncId && waivedIncidentIds.has(reqIncId)) || (req.date && waivedDates.has(req.date));
 
@@ -1126,6 +1174,8 @@ export function reconcileEmployeeScheduleOrPunchChange({
         ...req,
         status: 'cancelled',
         isCancelled: true,
+        amount: 0,
+        deductionMinutes: 0,
         cancelledAt: new Date().toISOString(),
         cancellationReason: options.reason
           ? `تم إلغاء الجزاء تلقائياً لتطابق الحضور الفعلي مع (${options.reason})`
@@ -1136,7 +1186,25 @@ export function reconcileEmployeeScheduleOrPunchChange({
     return req;
   });
 
-  // 6. حساب دقائق الخصم والمبالغ بعد التسوية
+  // 6. تجميع الشواهد المحذوفة (Tombstones) لمنع قيامة السجلات القديمة عند المزامنة
+  const tombstoneIds = new Set(Array.isArray(state._deletedIds) ? state._deletedIds : []);
+  eliminatedOrWaivedIncidents.forEach((oldInc) => {
+    if (oldInc && oldInc.id) {
+      tombstoneIds.add(String(oldInc.id));
+      tombstoneIds.add(`req_${oldInc.id}`);
+      tombstoneIds.add(`adj_${oldInc.id}`);
+      tombstoneIds.add(`notif_late_${emp.id}_${oldInc.date}`);
+    }
+  });
+  (recRes.supersededIncidentIds || []).forEach((oldId) => {
+    if (oldId) {
+      tombstoneIds.add(String(oldId));
+      tombstoneIds.add(`req_${oldId}`);
+      tombstoneIds.add(`adj_${oldId}`);
+    }
+  });
+
+  // 7. حساب دقائق الخصم والمبالغ بعد التسوية
   let newDedMins = 0;
   let newMoney = 0;
   newIncidentsForEmp.forEach((inc) => {
@@ -1152,7 +1220,8 @@ export function reconcileEmployeeScheduleOrPunchChange({
   const updatedState = {
     ...state,
     lateIncidents: updatedLateIncidents,
-    requests: updatedRequests
+    requests: updatedRequests,
+    _deletedIds: Array.from(tombstoneIds)
   };
 
   return {

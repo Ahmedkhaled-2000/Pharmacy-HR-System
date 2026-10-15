@@ -2385,6 +2385,127 @@ export default function RequestsModule({
         }
       }
 
+      // Schedule Deviation Approval: Update shift, update monthly roster, and waive late penalties
+      if (approvedTargetReq.type === 'schedule_deviation' || approvedTargetReq.type === 'عدم الالتزام بالجدول' || approvedTargetReq.type === 'deviation') {
+        const actHours = parseFloat(approvedTargetReq.actualWorkedHours) || 0;
+        const profHours = parseFloat(approvedTargetReq.profileHours) || 8;
+        const otHours = Math.max(0, Math.round((actHours - profHours) * 100) / 100);
+        const regHours = Math.min(actHours, profHours);
+
+        updatedShifts = updatedShifts.map((s) => {
+          if (s.id === approvedTargetReq.shiftId || (String(s.employeeId) === String(approvedTargetReq.employeeId) && s.date === approvedTargetReq.date)) {
+            return {
+              ...s,
+              hours: regHours,
+              regularHours: regHours,
+              actualWorkedHours: actHours,
+              overtimeHours: otHours,
+              overtimeStatus: otHours > 0 ? 'approved' : 'none',
+              deviationStatus: 'approved',
+              adminApproved: true,
+              note: `معتمد بعدم الالتزام بالجدول (ساعات فعلية: ${actHours} س | أساسي: ${regHours} س | إضافي: ${otHours} س)`
+            };
+          }
+          return s;
+        });
+
+        const targetDate = approvedTargetReq.date || approvedTargetReq.startDate;
+        if (targetDate) {
+          const monthKey = targetDate.slice(0, 7);
+          const empIdStr = String(approvedTargetReq.employeeId);
+          const empCodeStr = approvedTargetReq.employeeCode ? String(approvedTargetReq.employeeCode) : '';
+
+          let rosterIdx = updatedRosters.findIndex((r) =>
+            (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) &&
+            (r.month === monthKey || (!r.month && (!r.fromDate || r.fromDate.slice(0, 7) === monthKey)))
+          );
+
+          const shiftStart = approvedTargetReq.actualIn || '08:00';
+          const shiftEnd = approvedTargetReq.actualOut || '17:00';
+          const shiftHours = regHours || parseFloat(approvedTargetReq.scheduledHours) || 8;
+
+          const updatedDaySchedule = {
+            type: 'shift',
+            isOff: false,
+            start: shiftStart,
+            end: shiftEnd,
+            hours: shiftHours,
+            branchId: approvedTargetReq.branchId,
+            label: 'وردية عمل معدلة (اعتماد عدم التزام بالجدول)',
+            modifiedByScheduleDeviation: true,
+            deviationRequestId: approvedTargetReq.id
+          };
+
+          if (rosterIdx >= 0) {
+            const existingRoster = updatedRosters[rosterIdx];
+            const newSchedule = { ...(existingRoster.schedule || {}) };
+            newSchedule[targetDate] = updatedDaySchedule;
+            updatedRosters[rosterIdx] = {
+              ...existingRoster,
+              schedule: newSchedule,
+              status: 'approved',
+              updatedAt: new Date().toISOString()
+            };
+          } else {
+            const newRoster = {
+              id: `roster_${empIdStr}_${monthKey}_${Date.now()}`,
+              employeeId: empIdStr,
+              employeeCode: empCodeStr,
+              branchId: approvedTargetReq.branchId || null,
+              month: monthKey,
+              schedule: {
+                [targetDate]: updatedDaySchedule
+              },
+              status: 'approved',
+              adminApproved: true,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            };
+            updatedRosters.push(newRoster);
+          }
+
+          updatedLateIncidents = updatedLateIncidents.map((inc) => {
+            const matchEmp = String(inc.employeeId) === empIdStr || (empCodeStr && String(inc.employeeCode) === empCodeStr);
+            const matchDate = inc.date === targetDate;
+            if (matchEmp && matchDate) {
+              return {
+                ...inc,
+                status: 'cancelled',
+                isCancelled: true,
+                deductionMinutes: 0,
+                deductionHours: 0,
+                penaltyAmount: 0,
+                actionType: 'grace',
+                actionLabel: 'سماح (إسقاط الجزاء لاعتماد عدم الالتزام بالجدول)',
+                notes: 'تم إسقاط الجزاء وتعديل موعد الوردية بالجدول الشهري لاعتماد الإدارة لطلب عدم الالتزام بالجدول'
+              };
+            }
+            return inc;
+          }).filter((inc) => !(inc.status === 'cancelled' && (String(inc.employeeId) === empIdStr || (empCodeStr && String(inc.employeeCode) === empCodeStr)) && inc.date === targetDate));
+
+          updatedRequests = updatedRequests.map((r) => {
+            const matchEmp = String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr);
+            const matchDate = r.date === targetDate || String(r.id || '').includes(`_${targetDate}_`);
+            const isLatePenalty = r.type === 'penalty' || r.type === 'late_penalty' || r.subType === 'lateness' || String(r.id || '').startsWith('req_late_inc_') || String(r.id || '').startsWith('late_inc_');
+            if (matchEmp && matchDate && isLatePenalty) {
+              return {
+                ...r,
+                status: 'cancelled',
+                isCancelled: true,
+                amount: 0,
+                penaltyAmount: 0,
+                deductionMinutes: 0,
+                adminApproved: false,
+                branchApproved: false,
+                cancellationReason: 'تم إسقاط الجزاء تلقائياً لاعتماد طلب عدم الالتزام بالجدول وتعديل الوردية في الجدول الشهري',
+                notes: (r.notes ? r.notes + ' | ' : '') + 'تم إسقاط الجزاء وتعديل موعد الوردية بالجدول الشهري'
+              };
+            }
+            return r;
+          });
+        }
+      }
+
       let updatedLeaveRequests = [...(state.leaveRequests || [])];
       let updatedLeaveHistory = [...(state.leaveHistory || [])];
       if (['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave', 'leave_comp_off', 'comp_off'].includes(approvedTargetReq.type) || approvedTargetReq.leaveType === 'comp_off') {

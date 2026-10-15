@@ -9,7 +9,8 @@ import {
   computeLatenessFinancialAmount,
   isApprovedPermissionForDate,
   getScheduledShiftForDate,
-  calculateLatenessMinutes
+  calculateLatenessMinutes,
+  isVariableScheduleEmployee
 } from '../../utils/latePenaltyEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 
@@ -991,6 +992,7 @@ export default function Dashboard({
           const timeIn = punchToday?.timeIn || activeShiftToday?.timeIn;
 
           if (!timeIn) return;
+          if (isVariableScheduleEmployee(emp)) return;
 
           // Find scheduled shift on targetDate
           const sched = getScheduledShiftForDate(emp.id, targetDate, state);

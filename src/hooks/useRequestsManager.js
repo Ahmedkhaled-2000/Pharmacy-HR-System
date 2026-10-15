@@ -3,7 +3,7 @@ import {
   createRequestDecisionNotification
 } from '../utils/notificationEngine';
 import { notifyOnPenaltyApplied } from '../utils/gmailService';
-import { applyApprovedPermissionsToShifts } from '../utils/latePenaltyEngine';
+import { applyApprovedPermissionsToShifts, recalculateEmployeeCycleLateness } from '../utils/latePenaltyEngine';
 import { applyShiftSwapToRosters, getEmployeeDaySchedule, normalizeSchedule } from '../utils/rosterEngine';
 import { saveFaceDescriptor, saveHandDescriptor, deleteFaceDescriptor, deleteHandDescriptor } from '../utils/faceStorage';
 import { enqueueRequestDecision } from '../utils/syncEngine';
@@ -42,7 +42,7 @@ export function useRequestsManager() {
           ? Math.max(0, parseFloat(target.adjustedBreakHours) || 0)
           : Math.max(0, parseFloat(target.currentBreakHours || target.breakHours || 0)));
 
-      const updatedRequests = currentRequests.map((r) => {
+      let updatedRequests = currentRequests.map((r) => {
         if (r.id === requestId) {
           return {
             ...r,
@@ -177,10 +177,122 @@ export function useRequestsManager() {
             return s;
           });
 
-          // إعفاء الموظف من واقعة التأخير الصباحي لهذا اليوم لكون الوردية اعتُمدت بعدم الالتزام بالجدول
-          updatedLateIncidents = updatedLateIncidents.filter(inc =>
-            !(String(inc.employeeId) === String(target.employeeId) && inc.date === target.date)
-          );
+          // 1. تعديل هذا اليوم في الجدول الشهري الخاص بالموظف
+          const targetDate = target.date || target.startDate;
+          if (targetDate) {
+            const monthKey = targetDate.slice(0, 7);
+            const empIdStr = String(target.employeeId);
+            const empCodeStr = target.employeeCode ? String(target.employeeCode) : '';
+
+            let rosterIdx = updatedRosters.findIndex((r) =>
+              (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) &&
+              (r.month === monthKey || (!r.month && (!r.fromDate || r.fromDate.slice(0, 7) === monthKey)))
+            );
+
+            const shiftStart = target.actualIn || '08:00';
+            const shiftEnd = target.actualOut || '17:00';
+            const shiftHours = regHours || parseFloat(target.scheduledHours) || 8;
+
+            const updatedDaySchedule = {
+              type: 'shift',
+              isOff: false,
+              start: shiftStart,
+              end: shiftEnd,
+              hours: shiftHours,
+              branchId: target.branchId,
+              label: 'وردية عمل معدلة (اعتماد عدم التزام بالجدول)',
+              modifiedByScheduleDeviation: true,
+              deviationRequestId: target.id
+            };
+
+            if (rosterIdx >= 0) {
+              const existingRoster = updatedRosters[rosterIdx];
+              const newSchedule = { ...(existingRoster.schedule || {}) };
+              newSchedule[targetDate] = updatedDaySchedule;
+              updatedRosters[rosterIdx] = {
+                ...existingRoster,
+                schedule: newSchedule,
+                status: 'approved',
+                updatedAt: new Date().toISOString()
+              };
+            } else {
+              const newRoster = {
+                id: `roster_${empIdStr}_${monthKey}_${Date.now()}`,
+                employeeId: empIdStr,
+                employeeCode: empCodeStr,
+                branchId: target.branchId || null,
+                month: monthKey,
+                schedule: {
+                  [targetDate]: updatedDaySchedule
+                },
+                status: 'approved',
+                adminApproved: true,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              };
+              updatedRosters.push(newRoster);
+            }
+
+            // 2. إسقاط وإلغاء أي جزاء تأخير واقع على الموظف في هذا اليوم
+            updatedLateIncidents = updatedLateIncidents.map((inc) => {
+              const matchEmp = String(inc.employeeId) === empIdStr || (empCodeStr && String(inc.employeeCode) === empCodeStr);
+              const matchDate = inc.date === targetDate;
+              if (matchEmp && matchDate) {
+                return {
+                  ...inc,
+                  status: 'cancelled',
+                  isCancelled: true,
+                  deductionMinutes: 0,
+                  deductionHours: 0,
+                  penaltyAmount: 0,
+                  actionType: 'grace',
+                  actionLabel: 'سماح (إسقاط الجزاء لاعتماد عدم الالتزام بالجدول)',
+                  notes: 'تم إسقاط الجزاء وتعديل موعد الوردية بالجدول الشهري لاعتماد الإدارة لطلب عدم الالتزام بالجدول'
+                };
+              }
+              return inc;
+            }).filter((inc) => !(inc.status === 'cancelled' && (String(inc.employeeId) === empIdStr || (empCodeStr && String(inc.employeeCode) === empCodeStr)) && inc.date === targetDate));
+
+            updatedRequests = updatedRequests.map((r) => {
+              const matchEmp = String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr);
+              const matchDate = r.date === targetDate || String(r.id || '').includes(`_${targetDate}_`);
+              const isLatePenalty = r.type === 'penalty' || r.type === 'late_penalty' || r.subType === 'lateness' || String(r.id || '').startsWith('req_late_inc_') || String(r.id || '').startsWith('late_inc_');
+              if (matchEmp && matchDate && isLatePenalty) {
+                return {
+                  ...r,
+                  status: 'cancelled',
+                  isCancelled: true,
+                  amount: 0,
+                  penaltyAmount: 0,
+                  deductionMinutes: 0,
+                  adminApproved: false,
+                  branchApproved: false,
+                  cancellationReason: 'تم إسقاط الجزاء تلقائياً لاعتماد طلب عدم الالتزام بالجدول وتعديل الوردية في الجدول الشهري',
+                  notes: (r.notes ? r.notes + ' | ' : '') + 'تم إسقاط الجزاء وتعديل موعد الوردية بالجدول الشهري'
+                };
+              }
+              return r;
+            });
+
+            // 3. إعادة احتساب تسلسل التأخيرات للدورة
+            try {
+              const { incidents: recomputedIncidents, updatedRequests: recomputedReqs } = recalculateEmployeeCycleLateness({
+                employeeId: empIdStr,
+                state: {
+                  ...state,
+                  rosters: updatedRosters,
+                  requests: updatedRequests,
+                  shifts: updatedShifts,
+                  lateIncidents: updatedLateIncidents
+                },
+                payrollCycleId: monthKey
+              });
+              updatedLateIncidents = recomputedIncidents;
+              updatedRequests = recomputedReqs;
+            } catch (e) {
+              console.warn('Recalculate cycle lateness after schedule deviation approval:', e);
+            }
+          }
         }
 
         // 0.2 Manual Punch / Punch Correction Request Approval (Supports single-day and multi-day batch)

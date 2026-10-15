@@ -47,6 +47,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { API_BASE_URL } from '../../utils/apiClient';
+import ContractsManagementModule from './ContractsManagementModule';
 
 export default function DeveloperPortalView({ onLogout, showToast }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -1131,14 +1132,14 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
         <div className="dev-nav-group">
           <button
             type="button"
-            className={`dev-nav-group-btn ${['overview', 'companies', 'affiliates'].includes(activeTab) ? 'is-active-group is-current-active' : ''}`}
+            className={`dev-nav-group-btn ${['overview', 'companies', 'contracts', 'affiliates'].includes(activeTab) ? 'is-active-group is-current-active' : ''}`}
             onClick={(e) => {
               e.stopPropagation();
               setOpenDropdown(openDropdown === 'companies_group' ? null : 'companies_group');
             }}
           >
             <Building2 size={16} />
-            <span>الشركات والمشتركون</span>
+            <span>الشركات والتعاقدات</span>
             <ChevronDown size={14} style={{ transform: openDropdown === 'companies_group' ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
           </button>
           {openDropdown === 'companies_group' && (
@@ -1152,6 +1153,17 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
                   <TrendingUp size={15} />
                   <span>نظرة عامة والنبض الحي</span>
                 </div>
+              </button>
+              <button
+                type="button"
+                className={`dev-dropdown-item ${activeTab === 'contracts' ? 'is-selected' : ''}`}
+                onClick={() => { setActiveTab('contracts'); setOpenDropdown(null); }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ShieldCheck size={15} color="#10b981" />
+                  <span>العقود والاشتراكات القانونية</span>
+                </div>
+                <span className="dev-dropdown-item-badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#34d399' }}>جديد</span>
               </button>
               <button
                 type="button"
@@ -1858,6 +1870,15 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* TAB: CONTRACTS & SUBSCRIPTIONS */}
+          {activeTab === 'contracts' && (
+            <ContractsManagementModule
+              companies={companies}
+              plans={plans}
+              showToast={showToast}
+            />
           )}
 
           {/* TAB 3: DISCOUNT STUDIO */}
@@ -3516,6 +3537,10 @@ export default function DeveloperPortalView({ onLogout, showToast }) {
         <button className={`dev-mobile-dock-btn ${activeTab === 'companies' ? 'is-active' : ''}`} onClick={() => setActiveTab('companies')}>
           <Building2 size={20} />
           <span>الشركات</span>
+        </button>
+        <button className={`dev-mobile-dock-btn ${activeTab === 'contracts' ? 'is-active' : ''}`} onClick={() => setActiveTab('contracts')}>
+          <ShieldCheck size={20} />
+          <span>العقود</span>
         </button>
         <button className={`dev-mobile-dock-btn ${activeTab === 'discounts' ? 'is-active' : ''}`} onClick={() => setActiveTab('discounts')}>
           <TicketPercent size={20} />

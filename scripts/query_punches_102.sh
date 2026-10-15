@@ -1,0 +1,1 @@
+docker exec hr-postgres psql -U postgres -d postgres -c "SELECT id, device_user_pin, punch_time, raw_punch_state, action_type, process_status FROM biometric_raw_punches WHERE device_user_pin = '102' ORDER BY punch_time ASC;"

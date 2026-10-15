@@ -302,6 +302,13 @@ export async function outstockDeliverOrder(orderId, settlementData = {}) {
 
 export const outstockSettleAndDeliverOrder = outstockDeliverOrder;
 
+export async function outstockCancelOrderItem(orderId, payload = {}) {
+  return await outstockRequest(`orders/${orderId}/cancel-item`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function outstockMarkWhatsappNotified(orderId) {
   return await outstockRequest(`orders/${orderId}/whatsapp`, {
     method: 'POST'

@@ -1,5 +1,6 @@
 import { isManagementJob, isBranchWithoutManager, getJobsList, shouldRouteDirectToAdmin, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from './jobsHelper.js';
 import { getActivePayrollMonth } from './periodEngine.js';
+import { isVariableScheduleEmployee } from './latePenaltyEngine.js';
 export { getRealDate, getRealTodayStr, getRealNowTimeStr } from './timeEngine.js';
 import { getRealDate, getRealTodayStr } from './timeEngine.js';
 
@@ -585,12 +586,125 @@ export function normalizeState(parsed) {
     if (orgSettings.payrollCustomTo) localStorage.setItem('payroll_custom_to', orgSettings.payrollCustomTo);
   } catch {}
 
-  const shifts = toSafeArray(parsed.shifts)
+  let rawShifts = toSafeArray(parsed.shifts)
     .filter((s) => s && typeof s === 'object')
     .map((s) => ({
       ...s,
       employeeId: remapEmpId(s.employeeId || s.jobId || (employees[0] ? employees[0].id : ''))
     }));
+
+  // 1. فلترة الورديات المحذوفة وفق شواهد القبور (_deletedIds)
+  rawShifts = rawShifts.filter((s) => {
+    if (!s) return false;
+    const sId = String(s.id || '').trim().toLowerCase();
+    if (deletedSet.has(sId) || deletedSet.has(`shift_${sId}`)) return false;
+    return true;
+  });
+
+  // 2. معالجة وتصحيح بصمات الحضور المبكر قبل منتصف الليل (Overnight Early Arrival Shift Alignment):
+  // إذا حضر الموظف بين 23:20 و 23:59 وامتدت الوردية لصباح الغد، وكان للموظف بالفعل وردية أخرى نهارية في نفس التاريخ
+  // فإن هذه الوردية الليلية تنسب حتماً لتاريخ الغد (operationalDate = nextDate)
+  rawShifts = rawShifts.map((s) => {
+    if (!s || !s.date || !s.timeIn) return s;
+    const tIn = String(s.timeIn).slice(0, 5);
+    const [inH, inM] = tIn.split(':').map(Number);
+    const tOut = String(s.timeOut || '').slice(0, 5);
+    const [outH] = tOut.split(':').map(Number);
+    // حضور بين 23:20 و 23:59 وانصراف صباحي في الغد (بين 06:00 و 14:00)
+    const isLateNightArrivalCrossingMidnight = (inH === 23 && inM >= 20) && (outH >= 6 && outH <= 14);
+    if (isLateNightArrivalCrossingMidnight) {
+      // فحص هل يوجد بالفعل وردية أخرى للموظف في نفس التاريخ s.date؟
+      const otherDayShift = rawShifts.find(os =>
+        os && os.id !== s.id &&
+        String(os.employeeId) === String(s.employeeId) &&
+        os.date === s.date &&
+        (String(os.timeIn).slice(0, 2) !== '23')
+      );
+      if (otherDayShift) {
+        // ننسب هذه الوردية للغد
+        const curDate = new Date(s.date);
+        curDate.setDate(curDate.getDate() + 1);
+        const y = curDate.getFullYear();
+        const m = String(curDate.getMonth() + 1).padStart(2, '0');
+        const d = String(curDate.getDate()).padStart(2, '0');
+        const nextDateStr = `${y}-${m}-${d}`;
+        return {
+          ...s,
+          date: nextDateStr,
+          actualPunchDate: s.date,
+          isEarlyOvernightIn: true,
+          isOvernight: true
+        };
+      }
+    }
+    return s;
+  });
+
+  // 3. الاستشفاء الذاتي لمنع تكرار الورديات (Self-Healing Daily Shift Deduplication):
+  // فحص كل موظف وكل تاريخ: إذا وُجد أكثر من وردية في نفس اليوم لنفس الموظف:
+  // اختيار الوردية الأصح (الوردية المعتمدة يدوياً من الإدارة أولاً، ثم المكتملة ذات الساعات الحقيقية)،
+  // وحذف الورديات الزائدة وشطبها فوراً وتضمين معرّفاتها في deletedSet لمنع قيامها مجدداً من localStorage
+  const shiftsByEmpAndDate = new Map();
+  rawShifts.forEach((s) => {
+    if (!s || !s.employeeId || !s.date) return;
+    const groupKey = `${s.employeeId}_${s.date}`;
+    if (!shiftsByEmpAndDate.has(groupKey)) {
+      shiftsByEmpAndDate.set(groupKey, []);
+    }
+    shiftsByEmpAndDate.get(groupKey).push(s);
+  });
+
+  const validShiftIds = new Set();
+  shiftsByEmpAndDate.forEach((group) => {
+    if (group.length === 1) {
+      if (group[0].id) validShiftIds.add(String(group[0].id));
+      return;
+    }
+
+    // فرز واختيار الوردية الأصح
+    const sortedGroup = [...group].sort((a, b) => {
+      // أ. الوردية اليدوية / المعتمدة من الإدارة تفوز على البيومترية التلقائية
+      const aManual = Boolean(a.isManual || a.manualPunch || a.adminApproved || a.editedByAdmin);
+      const bManual = Boolean(b.isManual || b.manualPunch || b.adminApproved || b.editedByAdmin);
+      if (aManual && !bManual) return -1;
+      if (!aManual && bManual) return 1;
+
+      // ب. الوردية ذات وقت الانصراف المكتمل والساعات الحقيقية تفوز
+      const aHasOut = Boolean(a.timeOut && a.timeOut !== '—' && a.timeOut !== '' && a.timeOut !== 'غير مسجل');
+      const bHasOut = Boolean(b.timeOut && b.timeOut !== '—' && b.timeOut !== '' && b.timeOut !== 'غير مسجل');
+      if (aHasOut && !bHasOut) return -1;
+      if (!aHasOut && bHasOut) return 1;
+
+      const aHrs = parseFloat(a.actualWorkedHours || a.hours || 0);
+      const bHrs = parseFloat(b.actualWorkedHours || b.hours || 0);
+      if (aHrs > 0 && bHrs === 0) return -1;
+      if (aHrs === 0 && bHrs > 0) return 1;
+
+      // ج. تفضيل الساعات الأكبر المعقولة
+      if (Math.abs(aHrs - bHrs) > 0.1) return bHrs - aHrs;
+
+      // د. الأحدث تعديلاً أو إنشاءً
+      const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+      const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+      return bTime - aTime;
+    });
+
+    const canonicalShift = sortedGroup[0];
+    if (canonicalShift && canonicalShift.id) {
+      validShiftIds.add(String(canonicalShift.id));
+    }
+
+    // إدراج كافة الورديات الأخرى المكررة في deletedSet لشطبها نهائياً
+    sortedGroup.slice(1).forEach((loser) => {
+      if (loser && loser.id) {
+        const loserId = String(loser.id);
+        deletedSet.add(loserId.toLowerCase());
+        deletedSet.add(`shift_${loserId.toLowerCase()}`);
+      }
+    });
+  });
+
+  const shifts = rawShifts.filter((s) => !s.id || validShiftIds.has(String(s.id)));
 
   const adjustments = toSafeArray(parsed.adjustments)
     .filter((a) => a && typeof a === 'object')
@@ -891,6 +1005,89 @@ export function normalizeState(parsed) {
       });
     });
   }
+
+  // ── الاستشفاء الذاتي وتنظيف وقائع التأخير (Self-Healing & Deduplication for Late Incidents) ──
+  // 1. إعفاء وحذف أي وقائع أو طلبات تأخير لموظفي الدوام المرن (ليس له جدول شهري)
+  const variableScheduleEmpIds = new Set(
+    employees.filter(e => isVariableScheduleEmployee(e)).map(e => String(e.id))
+  );
+
+  if (variableScheduleEmpIds.size > 0) {
+    lateIncidents = lateIncidents.filter((inc) => {
+      if (variableScheduleEmpIds.has(String(inc.employeeId))) {
+        if (inc.id) {
+          deletedSet.add(String(inc.id).toLowerCase());
+          deletedSet.add(`req_${String(inc.id).toLowerCase()}`);
+        }
+        return false;
+      }
+      return true;
+    });
+
+    requests = requests.map((r) => {
+      if (variableScheduleEmpIds.has(String(r.employeeId)) && (r.subType === 'lateness' || r.type === 'late_penalty' || String(r.id).startsWith('req_late_inc_'))) {
+        return {
+          ...r,
+          status: 'cancelled',
+          isCancelled: true,
+          amount: 0,
+          deductionMinutes: 0,
+          cancellationReason: 'معفى تماماً من لائحة التأخيرات (ليس له جدول شهري - مواعيد متغيرة)'
+        };
+      }
+      return r;
+    });
+  }
+
+  // 2. فحص وإزالة الوقائع المكررة لنفس الموظف في نفس اليوم (مثل حالة الموظف 9 في 2026-09-26)
+  // حيث يتم الإبقاء فقط على الواقعة المتطابقة مع البصمة الفعلية الحالية في shifts وحذف الزوائد
+  const incByEmpAndDate = new Map();
+  lateIncidents.forEach((inc) => {
+    if (!inc || !inc.employeeId || !inc.date) return;
+    const groupKey = `${inc.employeeId}_${inc.date}`;
+    if (!incByEmpAndDate.has(groupKey)) {
+      incByEmpAndDate.set(groupKey, []);
+    }
+    incByEmpAndDate.get(groupKey).push(inc);
+  });
+
+  const validIncIds = new Set();
+  incByEmpAndDate.forEach((group, groupKey) => {
+    if (group.length === 1) {
+      validIncIds.add(group[0].id);
+      return;
+    }
+    // أكثر من واقعة لنفس اليوم! نحدد الوردية الفعلية للموظف في هذا اليوم
+    const [empId, dateStr] = groupKey.split('_');
+    const matchingShift = (shifts || []).find(s => String(s.employeeId) === empId && s.date === dateStr);
+    
+    // إذا وُجدت وردية، نبحث عن الواقعة التي تطابق timeIn الخاص بها
+    let bestMatch = null;
+    if (matchingShift && matchingShift.timeIn) {
+      bestMatch = group.find(inc => inc.actualPunchInTime === matchingShift.timeIn);
+    }
+    // إذا لم تتطابق بالأوقات، نختار الواقعة الأحدث تعديلاً
+    if (!bestMatch) {
+      bestMatch = [...group].sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))[0];
+    }
+
+    if (bestMatch && bestMatch.id) {
+      validIncIds.add(bestMatch.id);
+    }
+
+    // إدراج كل المعرفات الأخرى المكررة في شواهد القبور المحذوفة
+    group.forEach(inc => {
+      if (!bestMatch || inc.id !== bestMatch.id) {
+        if (inc.id) {
+          deletedSet.add(String(inc.id).toLowerCase());
+          deletedSet.add(`req_${String(inc.id).toLowerCase()}`);
+          deletedSet.add(`adj_${String(inc.id).toLowerCase()}`);
+        }
+      }
+    });
+  });
+
+  lateIncidents = lateIncidents.filter(inc => !inc.id || validIncIds.has(inc.id));
 
   let rawActiveShifts = {};
   if (parsed.activeShifts) {

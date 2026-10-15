@@ -1301,7 +1301,7 @@ export default function EmployeePortalView({
       }
     }
 
-    return combined.sort((a, b) => {
+    const sortedCombined = combined.sort((a, b) => {
       // 1. 🔄 الترتيب الصارم حسب التاريخ من الأحدث إلى الأقدم (Newest to Oldest)
       const dateA = String(a?.date || '').trim();
       const dateB = String(b?.date || '').trim();
@@ -1320,6 +1320,56 @@ export default function EmployeePortalView({
 
       // 4. في حالة التطابق: الترتيب حسب المعرف تنازلياً
       return String(b?.createdAt || b?.id || '').localeCompare(String(a?.createdAt || a?.id || ''));
+    });
+
+    // 🛡️ صمام إزالة التكرار الذكي للعرض في صفحة الموظف (Display Deduplication Guard for Employee Portal):
+    // مطابقة تامة مع شاشة الإدارة وكشف الرواتب لمنع ظهور نفس اليوم مرتين
+    const seenByDate = new Map();
+    sortedCombined.forEach(p => {
+      if (!p || !p.date) return;
+      const key = p.date;
+      if (!seenByDate.has(key)) {
+        seenByDate.set(key, p);
+      } else {
+        const existing = seenByDate.get(key);
+        // الوردية الحية لليوم الحالي لها أولوية قصوى
+        if (p.isLiveActive && !existing.isLiveActive) {
+          seenByDate.set(key, p);
+          return;
+        }
+        if (!p.isLiveActive && existing.isLiveActive) {
+          return;
+        }
+
+        const pIsManual = Boolean(p.isManual || p.manualPunch || p.adminApproved || p.editedByAdmin);
+        const exIsManual = Boolean(existing.isManual || existing.manualPunch || existing.adminApproved || existing.editedByAdmin);
+
+        if (pIsManual && !exIsManual) {
+          seenByDate.set(key, p);
+        } else if (!pIsManual && exIsManual) {
+          // keep existing manual
+        } else {
+          const pHasOut = Boolean(p.timeOut && p.timeOut !== '—' && p.timeOut !== '' && p.timeOut !== 'غير مسجل' && p.timeOut !== 'قيد العمل الآن');
+          const exHasOut = Boolean(existing.timeOut && existing.timeOut !== '—' && existing.timeOut !== '' && existing.timeOut !== 'غير مسجل' && existing.timeOut !== 'قيد العمل الآن');
+          const pHrs = parseFloat(p.actualWorkedHours || p.hours || 0);
+          const exHrs = parseFloat(existing.actualWorkedHours || existing.hours || 0);
+
+          if (pHasOut && !exHasOut) {
+            seenByDate.set(key, p);
+          } else if (pHrs > 0 && exHrs === 0) {
+            seenByDate.set(key, p);
+          } else if (pHrs > exHrs) {
+            seenByDate.set(key, p);
+          }
+        }
+      }
+    });
+
+    return Array.from(seenByDate.values()).sort((a, b) => {
+      const dateA = String(a?.date || '').trim();
+      const dateB = String(b?.date || '').trim();
+      if (dateA !== dateB) return dateB.localeCompare(dateA);
+      return String(b?.timeIn || '').localeCompare(String(a?.timeIn || ''));
     });
   }, [emp, state.shifts, state.activeShifts, filterFn, selectedBranchId, isMultiBranchEmp, todayStrNow]);
 

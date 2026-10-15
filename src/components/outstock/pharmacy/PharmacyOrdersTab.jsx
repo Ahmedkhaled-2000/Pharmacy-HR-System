@@ -36,17 +36,24 @@ import {
   outstockDeleteOrder,
   outstockDeleteOrderItem,
   outstockUpdateOrderDeposit,
-  outstockGetOrderReturns
+  outstockGetOrderReturns,
+  outstockGetSettings
 } from '../../../utils/outstockApiClient';
 import NewCustomerOrderModal from './NewCustomerOrderModal';
 import DualCashierReceiptModal from './DualCashierReceiptModal';
 import OrderDeliverySettlementModal from './OrderDeliverySettlementModal';
+import OrderRemainingCompletionModal from './OrderRemainingCompletionModal';
 import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
 import OrderComplaintModal from './OrderComplaintModal';
 import OrderReturnModal from '../common/OrderReturnModal';
 import MedicationSubstitutesModal from '../common/MedicationSubstitutesModal';
 import OrderDepositRefundModal from '../common/OrderDepositRefundModal';
 import { printReturnReceipt } from '../../../utils/printReturnReceipt';
+import {
+  calculateNetBusinessMinutes,
+  formatSlaDuration,
+  DEFAULT_SLA_WORKING_HOURS_CONFIG
+} from '../../../utils/outstockSlaEngine';
 
 /**
  * PharmacyOrdersTab.jsx
@@ -122,6 +129,41 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
 
   // 💵 حالة نافذة تسوية واسترداد العربون قبل حذف وإلغاء الطلب
   const [refundModalOrder, setRefundModalOrder] = useState(null);
+
+  // 📦 حالة نافذة استكمال ومتابعة الطلب المنبثقة بعد التسليم الجزئي
+  const [completionModalData, setCompletionModalData] = useState(null);
+
+  // ⚙️ مهلة المرتجعات المحددة من المالك وإعدادات ساعات عمل المشتريات
+  const [allowedReturnDays, setAllowedReturnDays] = useState(14);
+  const [slaBusinessHoursConfig, setSlaBusinessHoursConfig] = useState(DEFAULT_SLA_WORKING_HOURS_CONFIG);
+
+  useEffect(() => {
+    outstockGetSettings().then((res) => {
+      if (res?.success && res.settings) {
+        const s = res.settings;
+        if (s.returns_allowed_days || s.returnsAllowedDays) {
+          setAllowedReturnDays(parseInt(s.returns_allowed_days || s.returnsAllowedDays, 10));
+        }
+        if (s.procurementSlaWorkingHours || s.procurement_sla_working_hours) {
+          setSlaBusinessHoursConfig(s.procurementSlaWorkingHours || s.procurement_sla_working_hours);
+        }
+      }
+    }).catch(() => {});
+
+    const handleSettingsUpdate = (e) => {
+      const s = e?.detail?.settings;
+      if (s) {
+        if (s.returns_allowed_days || s.returnsAllowedDays) {
+          setAllowedReturnDays(parseInt(s.returns_allowed_days || s.returnsAllowedDays, 10));
+        }
+        if (s.procurementSlaWorkingHours || s.procurement_sla_working_hours) {
+          setSlaBusinessHoursConfig(s.procurementSlaWorkingHours || s.procurement_sla_working_hours);
+        }
+      }
+    };
+    window.addEventListener('outstock:settings_updated', handleSettingsUpdate);
+    return () => window.removeEventListener('outstock:settings_updated', handleSettingsUpdate);
+  }, []);
 
   // جلب الطلبات النشطة
   const fetchOrders = useCallback(async () => {
@@ -293,13 +335,27 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
         ? orderOrId
         : orders.find((o) => o.id === orderOrId) || transferredOrders.find((o) => o.id === orderOrId);
 
-    // التحقق الصارم: حظر تسليم الطلب إذا كان به أي صنف معلق بانتظار رد المشتريات
-    const pendingItems = (targetOrder?.items || []).filter(
-      (it) => !it.procurement_replied_at && (it.item_status === 'pending' || it.status === 'pending')
-    );
-    if (pendingItems.length > 0) {
-      const itemNames = pendingItems.map((it) => it.medication_name || it.item_name || it.medicationName).join(' ، ');
-      showToast?.(`🚫 محظور تسليم الطلب للعميل! يوجد (${pendingItems.length}) أصناف معلقة بانتظار رد المشتريات: (${itemNames})`);
+    const items = targetOrder?.items || [];
+
+    // فحص الأصناف الجاهزة للتسليم (ردت المشتريات عليها بالتوفر ولم تسلَّم بعد)
+    const availableItems = items.filter((it) => {
+      const isPruned = Boolean(it.pruned_from_bill || it.prunedFromBill);
+      const itmStatus = String(it.item_status || it.itemStatus || it.status || '').toLowerCase();
+      const isDelivered = itmStatus === 'delivered';
+      const hasProcurementApproval = Boolean(it.procurement_replied_at) || itmStatus === 'available_by_procurement' || itmStatus === 'available';
+      return !isPruned && !isDelivered && hasProcurementApproval;
+    });
+
+    if (availableItems.length === 0) {
+      const pendingItems = items.filter(
+        (it) => !it.procurement_replied_at && (it.item_status === 'pending' || it.status === 'pending' || !it.item_status)
+      );
+      if (pendingItems.length > 0) {
+        const itemNames = pendingItems.map((it) => it.medication_name || it.item_name || it.medicationName).join(' ، ');
+        showToast?.(`⏳ لا توجد أصناف متوفرة جاهزة للتسليم حالياً! يوجد (${pendingItems.length}) أصناف قيد انتظار رد المشتريات: (${itemNames})`);
+      } else {
+        showToast?.('⚠️ لا توجد أي أصناف جاهزة للتسليم في هذا الطلب.');
+      }
       return;
     }
 
@@ -466,18 +522,12 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
     }
   };
 
-  // حساب زمن الاستجابة (SLA) بين الإرسال والرد
+  // حساب زمن الاستجابة (SLA) الفعلي بين الإرسال والرد مستبعداً العطلات وساعات الإغلاق
   const calculateResponseTime = (sentIso, repliedIso) => {
     if (!sentIso || !repliedIso) return null;
     try {
-      const sentTime = new Date(sentIso).getTime();
-      const repliedTime = new Date(repliedIso).getTime();
-      const diffMinutes = Math.round((repliedTime - sentTime) / (1000 * 60));
-      if (diffMinutes < 1) return 'خلال أقل من دقيقة';
-      if (diffMinutes < 60) return `خلال ${diffMinutes} دقيقة`;
-      const hours = Math.floor(diffMinutes / 60);
-      const remainingMins = diffMinutes % 60;
-      return `خلال ${hours} س و ${remainingMins} د`;
+      const netMinutes = calculateNetBusinessMinutes(sentIso, repliedIso, slaBusinessHoursConfig);
+      return `خلال ${formatSlaDuration(netMinutes)}`;
     } catch {
       return null;
     }
@@ -1163,6 +1213,8 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                   return isP || s === 'unavailable' || s === 'unavailable_in_market' || s === 'pending';
                 });
                 const isPartiallyAvailable = !isAllUnavailable && (activeItems.some((i) => i.itemStatus === 'available_by_procurement' || i.status === 'available') && (prunedItems.length > 0 || activeItems.some((i) => i.status === 'pending' || i.itemStatus === 'pending')));
+                const deliveredItemsList = activeItems.filter((i) => String(i.item_status || i.itemStatus || '').toLowerCase() === 'delivered' || i.is_delivered);
+                const isPartiallyDelivered = String(order.order_status || order.status || '').toLowerCase() === 'partially_delivered' || (deliveredItemsList.length > 0 && activeItems.some((i) => !i.is_delivered && String(i.item_status || i.itemStatus || '').toLowerCase() !== 'delivered'));
                 const slaTime = calculateResponseTime(order.sent_to_procurement_at || order.created_at, order.procurement_replied_at);
 
                 return (
@@ -1209,7 +1261,12 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                           </span>
                         )}
 
-                        {isAllUnavailable ? (
+                        {isPartiallyDelivered ? (
+                          <span className="outstock-badge" style={{ background: '#ecfdf5', color: '#15803d', border: '1.5px solid #86efac', fontWeight: '900', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <CheckCircle2 size={13} color="#16a34a" />
+                            <span>🟢 تسليم جزئي (متبقي أصناف قيد المشتريات ⏳)</span>
+                          </span>
+                        ) : isAllUnavailable ? (
                           <span className="outstock-badge" style={{ background: '#fee2e2', color: '#b91c1c', border: '1.5px solid #ef4444', fontWeight: '900' }}>
                             <XCircle size={13} color="#b91c1c" />
                             <span>🔴 اعتذار المشتريات: الصنف غير متوفر بالأسواق</span>
@@ -1430,7 +1487,9 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                           const pMin = parseFloat(item.price_min || item.priceMin || 0);
                           const pMax = parseFloat(item.price_max || item.priceMax || pMin || 0);
                           const isCosmetics = item.item_type === 'cosmetics';
-                          const isAvail = item.status === 'available' || item.itemStatus === 'available_by_procurement';
+                          const itmStatus = String(item.item_status || item.itemStatus || item.status || '').toLowerCase();
+                          const isItemDelivered = itmStatus === 'delivered' || Boolean(item.is_delivered);
+                          const isAvail = !isItemDelivered && (item.status === 'available' || itmStatus === 'available_by_procurement');
 
                           const isModified = Boolean(item.procurement_modified_qty || item.procurementModifiedQty);
                           const unitLabel = item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة';
@@ -1439,9 +1498,9 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                             <div
                               key={idx}
                               style={{
-                                background: isModified ? '#fffbeb' : (isAvail ? '#f0fdf4' : '#ffffff'),
+                                background: isItemDelivered ? '#f0fdf4' : isModified ? '#fffbeb' : (isAvail ? '#f0fdf4' : '#ffffff'),
                                 border: '1px solid',
-                                borderColor: isModified ? '#fde68a' : (isAvail ? '#86efac' : isEst ? '#fde68a' : '#cbd5e1'),
+                                borderColor: isItemDelivered ? '#86efac' : isModified ? '#fde68a' : (isAvail ? '#86efac' : isEst ? '#fde68a' : '#cbd5e1'),
                                 borderRadius: '8px',
                                 padding: '8px 12px',
                                 fontSize: '12.5px',
@@ -1457,16 +1516,22 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                                     fontWeight: '800',
                                     padding: '1px 5px',
                                     borderRadius: '5px',
-                                    background: isCosmetics ? '#fce7f3' : '#e0f2fe',
-                                    color: isCosmetics ? '#be185d' : '#0369a1'
+                                    background: isItemDelivered ? '#dcfce7' : (isCosmetics ? '#fce7f3' : '#e0f2fe'),
+                                    color: isItemDelivered ? '#15803d' : (isCosmetics ? '#be185d' : '#0369a1')
                                   }}
                                 >
-                                  {isCosmetics ? '💄 مستحضر' : '💊 دواء'}
+                                  {isItemDelivered ? '✓ تم التسليم' : (isCosmetics ? '💄 مستحضر' : '💊 دواء')}
                                 </span>
 
-                                <strong>{item.medicationName || item.medication_name}</strong>
+                                <strong style={isItemDelivered ? { textDecoration: 'line-through', textDecorationColor: '#16a34a', textDecorationThickness: '2px', color: '#15803d' } : {}}>
+                                  {item.medicationName || item.medication_name}
+                                </strong>
 
-                                {isModified ? (
+                                {isItemDelivered ? (
+                                  <span style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac', padding: '1px 7px', borderRadius: '5px', fontSize: '11px', fontWeight: '900' }}>
+                                    ✓ تم التسليم للعميل ({item.quantity} {unitLabel})
+                                  </span>
+                                ) : isModified ? (
                                   <span style={{ fontSize: '12px', color: '#1e293b', fontWeight: '800' }}>
                                     (<s style={{ color: '#dc2626' }}>{item.original_quantity || item.originalQuantity}</s> ⬅️ <strong style={{ color: '#0d9488' }}>{item.quantity}</strong> {unitLabel})
                                   </span>
@@ -1476,19 +1541,19 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                                   </span>
                                 )}
 
-                                {isEst && (
+                                {!isItemDelivered && isEst && (
                                   <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', borderRadius: '4px', padding: '1px 5px', fontSize: '10.5px', fontWeight: 'bold' }}>
                                     ({pMin.toFixed(0)} - {pMax.toFixed(0)} ج.م)
                                   </span>
                                 )}
 
-                                {isModified && (
+                                {!isItemDelivered && isModified && (
                                   <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', borderRadius: '4px', padding: '1px 6px', fontSize: '10.5px', fontWeight: '900' }}>
                                     ⚠️ تم تعديل الكمية من المشتريات
                                   </span>
                                 )}
 
-                                {isAvail ? (
+                                {isItemDelivered ? null : isAvail ? (
                                   <span style={{ color: '#16a34a', fontWeight: '900', fontSize: '11px' }}>✓ متوفر</span>
                                 ) : item.status === 'unavailable' ? (
                                   <span style={{ color: '#dc2626', fontWeight: '900', fontSize: '11px' }}>✕ غير متوفر</span>
@@ -1790,29 +1855,99 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
                             </>
                           )}
 
-                          {/* زر المرتجع متاح في حال رد المشتريات */}
-                          {hasReplied && (
+                          {/* زر استكمال ومتابعة المتبقي في حالة التسليم الجزئي */}
+                          {isPartiallyDelivered && (
                             <button
                               type="button"
-                              onClick={() => setReturnAuthOrder(order)}
+                              onClick={() => {
+                                const delivered = activeItems.filter((it) => String(it.item_status || it.itemStatus || '').toLowerCase() === 'delivered' || it.is_delivered);
+                                const remaining = activeItems.filter((it) => {
+                                  const isDel = String(it.item_status || it.itemStatus || '').toLowerCase() === 'delivered' || it.is_delivered;
+                                  return !isDel;
+                                });
+                                setCompletionModalData({
+                                  order,
+                                  deliveredItems: delivered,
+                                  remainingItems: remaining,
+                                  initialReservedDeposit: parseFloat(order.paid_amount || 0)
+                                });
+                              }}
                               className="outstock-btn"
                               style={{
                                 padding: '7px 11px',
                                 fontSize: '12px',
                                 fontWeight: '800',
-                                background: '#fdf2f8',
-                                color: '#be185d',
-                                border: '1px solid #fbcfe8',
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                border: '1.5px solid #93c5fd',
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 gap: '4px'
                               }}
-                              title="تسجيل طلب مرتجع كلي أو جزئي لأصناف الطلب المعتمدة"
+                              title="إدارة عربون الأصناف المتبقية أو إلغاء الصنف فورياً من المشتريات أو مراسلة العميل"
                             >
-                              <RotateCcw size={14} />
-                              <span>مرتجع ↩️</span>
+                              <FileText size={14} />
+                              <span>استكمال ومتابعة المتبقي 📋</span>
                             </button>
                           )}
+
+                          {/* زر المرتجع متاح في حال رد المشتريات مع التحقق من مهلة المرتجع المسموحة */}
+                          {hasReplied && (() => {
+                            const replyTime = order.procurement_replied_at || order.created_at;
+                            const replyDate = replyTime ? new Date(replyTime).getTime() : Date.now();
+                            const daysSinceReply = (Date.now() - replyDate) / (1000 * 60 * 60 * 24);
+                            const isReturnExpired = daysSinceReply > allowedReturnDays;
+                            const remainingDays = Math.max(0, Math.ceil(allowedReturnDays - daysSinceReply));
+
+                            if (isReturnExpired) {
+                              return (
+                                <button
+                                  type="button"
+                                  disabled={true}
+                                  className="outstock-btn"
+                                  style={{
+                                    padding: '7px 11px',
+                                    fontSize: '12px',
+                                    fontWeight: '800',
+                                    background: '#f1f5f9',
+                                    color: '#94a3b8',
+                                    border: '1px solid #cbd5e1',
+                                    cursor: 'not-allowed',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                  }}
+                                  title={`مهلة المرتجع منتهية 🔒 (المهلة المحددة: ${allowedReturnDays} يوم من تاريخ رد المشتريات)`}
+                                >
+                                  <RotateCcw size={14} />
+                                  <span>مرتجع 🔒 (منتهي)</span>
+                                </button>
+                              );
+                            }
+
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => setReturnAuthOrder(order)}
+                                className="outstock-btn"
+                                style={{
+                                  padding: '7px 11px',
+                                  fontSize: '12px',
+                                  fontWeight: '800',
+                                  background: '#fdf2f8',
+                                  color: '#be185d',
+                                  border: '1px solid #fbcfe8',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                                title={`تسجيل طلب مرتجع كلي أو جزئي لأصناف الطلب المعتمدة (متبقي ${remainingDays} يوم من مهلة ${allowedReturnDays} يوم)`}
+                              >
+                                <RotateCcw size={14} />
+                                <span>مرتجع ↩️ ({remainingDays}ي)</span>
+                              </button>
+                            );
+                          })()}
 
                           {/* تعديل العربون متاح دائماً */}
                           <button
@@ -2662,10 +2797,25 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
             setDeliveryConfirmOrder(null);
             setAuthenticatedDeliverer(null);
           }}
-          onDeliveredSuccess={(deliveredOrder) => {
-            setOrders((prev) => prev.filter((o) => o.id !== deliveredOrder.id));
+          onDeliveredSuccess={(deliveredOrder, meta) => {
+            const wasPartial = meta?.wasPartial || deliveredOrder.order_status === 'partially_delivered';
+            const remainingPending = meta?.remainingPendingItems || [];
+
+            if (wasPartial && remainingPending.length > 0) {
+              setOrders((prev) => prev.map((o) => (o.id === deliveredOrder.id ? deliveredOrder : o)));
+              setCompletionModalData({
+                order: deliveredOrder,
+                deliveredItems: meta?.deliveredItems || [],
+                remainingItems: remainingPending,
+                initialReservedDeposit: meta?.reservedDeposit || 0,
+                authenticatedEmployee: authenticatedDeliverer
+              });
+            } else {
+              setOrders((prev) => prev.filter((o) => o.id !== deliveredOrder.id));
+            }
+
             setTransferredOrders((prev) =>
-              prev.map((o) => (o.id === deliveredOrder.id ? { ...o, status: 'delivered', delivered_at: new Date().toISOString() } : o))
+              prev.map((o) => (o.id === deliveredOrder.id ? { ...o, status: wasPartial ? 'partially_delivered' : 'delivered', delivered_at: new Date().toISOString() } : o))
             );
             setDeliveryConfirmOrder(null);
             setAuthenticatedDeliverer(null);
@@ -2743,6 +2893,27 @@ export default function PharmacyOrdersTab({ branchId, branch, currentPharmacist 
           order={refundModalOrder}
           onConfirmRefund={handleConfirmOrderRefund}
           currentPharmacist={currentPharmacist}
+        />
+      )}
+
+      {/* ── نافذة استكمال ومتابعة الطلب بعد التسليم الجزئي (عربون، إلغاء فوري من المشتريات، واتساب يدوي) ── */}
+      {completionModalData && (
+        <OrderRemainingCompletionModal
+          order={completionModalData.order}
+          deliveredItems={completionModalData.deliveredItems}
+          remainingItems={completionModalData.remainingItems}
+          initialReservedDeposit={completionModalData.initialReservedDeposit}
+          branch={branch}
+          currentPharmacist={currentPharmacist}
+          authenticatedEmployee={completionModalData.authenticatedEmployee}
+          onClose={() => setCompletionModalData(null)}
+          onOrderUpdated={(updatedOrder) => {
+            fetchOrders();
+            if (updatedOrder) {
+              setOrders((prev) => prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o)));
+            }
+          }}
+          showToast={showToast}
         />
       )}
     </div>

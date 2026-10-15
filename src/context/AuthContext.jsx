@@ -199,14 +199,14 @@ export function AuthProvider({ children }) {
       }
 
       // 4. طرد فوري للموظف
-      if (role === 'employee' && activeRole === 'employee') {
+      if (role === 'employee') {
         const eSnapshotId = localStorage.getItem('app_emp_id_snapshot');
         const eSnapshotCode = localStorage.getItem('app_emp_code_snapshot');
         const eCurrId = currentEmpUser?.id;
         const eCurrCode = currentEmpUser?.code;
         const isMatch = (targetId && (String(eSnapshotId) === String(targetId) || String(eCurrId) === String(targetId))) ||
                         (targetCode && (String(eSnapshotCode).toLowerCase() === String(targetCode).toLowerCase() || String(eCurrCode).toLowerCase() === String(targetCode).toLowerCase()));
-        if (isMatch) {
+        if (isMatch && activeRole !== 'admin' && activeRole !== 'owner') {
           console.warn('🔒 [AuthContext] تم استلام أمر طرد فوري لحساب الموظف:', targetId || targetCode);
           handleLogout();
           setTimeout(() => {
@@ -373,6 +373,12 @@ export function AuthProvider({ children }) {
       }
       if (user?.password) {
         localStorage.setItem('app_emp_password_snapshot', String(user.password));
+      }
+      if (user?.id) {
+        localStorage.setItem('app_emp_id_snapshot', String(user.id));
+      }
+      if (user?.code) {
+        localStorage.setItem('app_emp_code_snapshot', String(user.code));
       }
     } catch {}
 

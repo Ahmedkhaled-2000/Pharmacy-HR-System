@@ -23,7 +23,9 @@ import {
 import {
   outstockGetOrderReturns,
   outstockReplyOrderReturn,
-  outstockGetBranches
+  outstockGetBranches,
+  outstockGetSettings,
+  outstockSaveSettings
 } from '../../../utils/outstockApiClient';
 import { printReturnReceipt } from '../../../utils/printReturnReceipt';
 
@@ -35,6 +37,12 @@ export default function ProcurementReturnsTab({ showToast, categoryScope = null 
   const [selectedBranchId, setSelectedBranchId] = useState('all');
   const [branches, setBranches] = useState([]);
 
+  // ⚙️ إعدادات مهلة المرتجع المسموحة بالأيام من تاريخ رد المشتريات
+  const [allowedReturnDays, setAllowedReturnDays] = useState(14);
+  const [isReturnSettingsOpen, setIsReturnSettingsOpen] = useState(false);
+  const [editReturnDays, setEditReturnDays] = useState(14);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+
   // نافذة اعتماد المرتجع التفاعلية
   const [approvingReturn, setApprovingReturn] = useState(null);
 
@@ -43,14 +51,53 @@ export default function ProcurementReturnsTab({ showToast, categoryScope = null 
   const [rejectionReason, setRejectionReason] = useState('');
   const [isSubmittingReply, setIsSubmittingReply] = useState(false);
 
-  // تحميل قائمة الفروع
+  // تحميل قائمة الفروع وإعدادات مهلة المرتجع
   useEffect(() => {
     outstockGetBranches().then((res) => {
       if (res?.success && Array.isArray(res.branches)) {
         setBranches(res.branches);
       }
     }).catch(() => {});
+
+    outstockGetSettings().then((res) => {
+      if (res?.success && res.settings) {
+        const s = res.settings;
+        const days = parseInt(s.returns_allowed_days || s.returnsAllowedDays, 10);
+        if (days > 0) {
+          setAllowedReturnDays(days);
+          setEditReturnDays(days);
+        }
+      }
+    }).catch(() => {});
   }, []);
+
+  const handleSaveReturnDays = async (e) => {
+    if (e) e.preventDefault();
+    const d = parseInt(editReturnDays, 10);
+    if (isNaN(d) || d < 1) {
+      showToast?.('⚠️ يرجى إدخال مهلة أيام صحيحة للمرتجع (يوم واحد على الأقل)');
+      return;
+    }
+
+    setIsSavingSettings(true);
+    try {
+      const res = await outstockSaveSettings({
+        returns_allowed_days: d,
+        returnsAllowedDays: d
+      });
+      if (res?.success) {
+        setAllowedReturnDays(d);
+        setIsReturnSettingsOpen(false);
+        showToast?.(`✅ تم حفظ وتحديث مهلة المرتجع بنجاح (${d} يوم من تاريخ رد المشتريات)`);
+      } else {
+        showToast?.(`⚠️ فشل الحفظ: ${res?.error || 'خطأ غير معروف'}`);
+      }
+    } catch (err) {
+      showToast?.(`❌ خطأ: ${err.message}`);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
 
   // جلب المرتجعات
   const fetchReturns = useCallback(async () => {
@@ -243,8 +290,34 @@ export default function ProcurementReturnsTab({ showToast, categoryScope = null 
           </div>
         </div>
 
-        {/* بطاقات الإحصائيات السريعة */}
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        {/* بطاقات الإحصائيات السريعة وضبط المهلة */}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => {
+              setEditReturnDays(allowedReturnDays);
+              setIsReturnSettingsOpen(true);
+            }}
+            style={{
+              background: 'rgba(236, 72, 153, 0.25)',
+              border: '1.5px solid rgba(244, 114, 182, 0.6)',
+              borderRadius: '12px',
+              padding: '10px 16px',
+              color: '#ffffff',
+              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: '110px',
+              transition: 'all 0.15s ease'
+            }}
+            title="انقر لتعديل مهلة المرتجع بالأيام المسموحة للفروع من تاريخ رد المشتريات"
+          >
+            <div style={{ fontSize: '11px', color: '#fbcfe8', fontWeight: 'bold' }}>⚙️ مهلة المرتجع</div>
+            <div style={{ fontSize: '16px', fontWeight: '900', color: '#ffffff' }}>{allowedReturnDays} يوم</div>
+          </button>
+
           <div
             style={{
               background: 'rgba(255, 255, 255, 0.08)',
@@ -860,6 +933,116 @@ export default function ProcurementReturnsTab({ showToast, categoryScope = null 
                 {isSubmittingReply ? 'جاري الاعتماد...' : 'تأكيد الاعتماد ✅'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── نافذة ضبط مهلة المرتجع المسموحة بالأيام ── */}
+      {isReturnSettingsOpen && (
+        <div
+          className="outstock-modal-backdrop"
+          onClick={() => !isSavingSettings && setIsReturnSettingsOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.7)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px'
+          }}
+        >
+          <div
+            className="outstock-modal-panel"
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              maxWidth: '460px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+              direction: 'rtl'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <RotateCcw size={20} color="#be185d" />
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0f172a' }}>
+                  تحديد مهلة قبول طلبات المرتجع ↩️
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isSavingSettings && setIsReturnSettingsOpen(false)}
+                disabled={isSavingSettings}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveReturnDays} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: '1.6' }}>
+                بصفتك المالك أو إدارة المشتريات، يمكنك تحديد المدة القصوى (بالأيام) التي يحق للصيدلي خلالها تسجيل طلب مرتجع للعميل، بدءاً من <strong>تاريخ رد المشتريات</strong> على الطلب:
+              </p>
+
+              <div style={{ background: '#fdf2f8', border: '1.5px solid #fbcfe8', borderRadius: '12px', padding: '16px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '800', color: '#9d174d', marginBottom: '8px' }}>
+                  المهلة المسموحة بالأيام (من تاريخ رد المشتريات):
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <input
+                    type="number"
+                    min="1"
+                    max="365"
+                    value={editReturnDays}
+                    onChange={(e) => setEditReturnDays(e.target.value)}
+                    required
+                    disabled={isSavingSettings}
+                    style={{
+                      width: '120px',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #db2777',
+                      fontSize: '16px',
+                      fontWeight: '800',
+                      textAlign: 'center',
+                      outline: 'none'
+                    }}
+                  />
+                  <span style={{ fontSize: '14px', fontWeight: '800', color: '#be185d' }}>
+                    يوم (الافتراضي 14 يوم)
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: '#64748b' }}>
+                ℹ️ فور مرور هذه المهلة، يتم تعطيل زر المرتجع تلقائياً في شاشة الصيدلية مع إظهار إشعار بانتهاء المهلة الزمنية.
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsReturnSettingsOpen(false)}
+                  disabled={isSavingSettings}
+                  className="outstock-btn outstock-btn-secondary"
+                  style={{ padding: '8px 16px', fontSize: '13px' }}
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingSettings}
+                  className="outstock-btn outstock-btn-primary"
+                  style={{ padding: '8px 20px', fontSize: '13px', fontWeight: '800', background: '#be185d', borderColor: '#be185d' }}
+                >
+                  {isSavingSettings ? 'جاري الحفظ...' : 'حفظ المهلة وتعميمها فوراً'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

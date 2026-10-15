@@ -220,6 +220,7 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
 
   const map = new Map();
   const isRequestEntity = ['req', 'leave', 'loan', 'swap', 'perm', 'res'].includes(options.prefix || '');
+  const isLateIncEntity = options.prefix === 'late_inc';
   const seenSigMap = new Map();
 
   // 1. إضافة كل عناصر السحابة (Remote) ما لم تكن محذوفة
@@ -234,6 +235,26 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
         if (empId && rDate) {
           const sig = `${empId}_${rType}_${rDate}`;
           if (seenSigMap.has(sig)) continue; // تخطي التكرار المباشر
+          seenSigMap.set(sig, key);
+        }
+      } else if (isLateIncEntity) {
+        const empId = String(item.employeeId || item.employeeCode || '');
+        const incDate = String(item.date || item.shiftDate || '');
+        if (empId && incDate) {
+          const sig = `late_${empId}_${incDate}`;
+          if (seenSigMap.has(sig)) {
+            const prevKey = seenSigMap.get(sig);
+            const prevItem = map.get(prevKey);
+            if (getItemTime(item) > getItemTime(prevItem)) {
+              map.delete(prevKey);
+              deletedIds.add(prevKey);
+              map.set(key, item);
+              seenSigMap.set(sig, key);
+            } else {
+              deletedIds.add(key);
+            }
+            continue;
+          }
           seenSigMap.set(sig, key);
         }
       }
@@ -267,6 +288,28 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
           }
         }
       }
+    } else if (isLateIncEntity) {
+      const empId = String(item.employeeId || item.employeeCode || '');
+      const incDate = String(item.date || item.shiftDate || '');
+      if (empId && incDate) {
+        const sig = `late_${empId}_${incDate}`;
+        if (seenSigMap.has(sig)) {
+          const sigKey = seenSigMap.get(sig);
+          if (map.has(sigKey)) {
+            existingItem = map.get(sigKey);
+            targetKey = sigKey;
+            if (key !== sigKey) {
+              if (getItemTime(item) >= getItemTime(existingItem)) {
+                deletedIds.add(sigKey);
+                targetKey = key;
+                map.delete(sigKey);
+              } else {
+                deletedIds.add(key);
+              }
+            }
+          }
+        }
+      }
     }
 
     if (existingItem) {
@@ -282,6 +325,12 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
         const rDate = String(item.createdAt || item.date || item.timestamp || '').slice(0, 16);
         if (empId && rDate) {
           seenSigMap.set(`${empId}_${rType}_${rDate}`, key);
+        }
+      } else if (isLateIncEntity) {
+        const empId = String(item.employeeId || item.employeeCode || '');
+        const incDate = String(item.date || item.shiftDate || '');
+        if (empId && incDate) {
+          seenSigMap.set(`late_${empId}_${incDate}`, key);
         }
       }
     }

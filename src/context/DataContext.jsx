@@ -1521,7 +1521,7 @@ export function DataProvider({ children, showToast = () => {} }) {
       };
 
       // حصر ورديات هذا الفرع بدقة بالغة وبدون تسريب ورديات الفروع الأخرى (واستبعاد أي ورديات ملغاة أو مرفوضة نهائياً)
-      const bShifts = (state.shifts || []).filter(s => {
+      const bShiftsRaw = (state.shifts || []).filter(s => {
         if (!s) return false;
         if (s.status === 'cancelled' || s.status === 'rejected' || s.status === 'rejected_photo' || s.isRejectedPhoto || s.isCancelled || s.rejected) return false;
         if (typeof s.statusLabel === 'string' && (s.statusLabel.includes('ملغي') || s.statusLabel.includes('مرفوض'))) return false;
@@ -1534,6 +1534,40 @@ export function DataProvider({ children, showToast = () => {} }) {
         const primaryBId = emp.branchId || branches[0]?.branchId;
         return isBranchMatch(primaryBId, bObj);
       });
+
+      // 🛡️ صمام الأمان المالي لمنع ازدواج صرف الراتب لنفس اليوم نهائياً (Daily Shift Deduplication Guard for Payroll):
+      const canonicalShiftByDate = new Map();
+      bShiftsRaw.forEach(s => {
+        if (!s || !s.date) return;
+        const dKey = s.date;
+        if (!canonicalShiftByDate.has(dKey)) {
+          canonicalShiftByDate.set(dKey, s);
+        } else {
+          const existing = canonicalShiftByDate.get(dKey);
+          const sIsManual = Boolean(s.isManual || s.manualPunch || s.adminApproved || s.editedByAdmin);
+          const exIsManual = Boolean(existing.isManual || existing.manualPunch || existing.adminApproved || existing.editedByAdmin);
+
+          if (sIsManual && !exIsManual) {
+            canonicalShiftByDate.set(dKey, s);
+          } else if (!sIsManual && exIsManual) {
+            // keep existing manual
+          } else {
+            const sHasOut = Boolean(s.timeOut && s.timeOut !== '—' && s.timeOut !== '' && s.timeOut !== 'غير مسجل');
+            const exHasOut = Boolean(existing.timeOut && existing.timeOut !== '—' && existing.timeOut !== '' && existing.timeOut !== 'غير مسجل');
+            const sHrs = parseFloat(s.actualWorkedHours || s.hours || 0);
+            const exHrs = parseFloat(existing.actualWorkedHours || existing.hours || 0);
+
+            if (sHasOut && !exHasOut) {
+              canonicalShiftByDate.set(dKey, s);
+            } else if (sHrs > 0 && exHrs === 0) {
+              canonicalShiftByDate.set(dKey, s);
+            } else if (sHrs > exHrs) {
+              canonicalShiftByDate.set(dKey, s);
+            }
+          }
+        }
+      });
+      const bShifts = Array.from(canonicalShiftByDate.values());
 
       const hours = bShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
       const baseEarnings = hours * rate;

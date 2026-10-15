@@ -6,6 +6,7 @@ import EmployeeTerminationModal from './EmployeeTerminationModal';
 import EmployeeComprehensiveDossierModal from './EmployeeComprehensiveDossierModal';
 import EmployeeSalaryDetailsModal from './EmployeeSalaryDetailsModal';
 import SalaryIncreasesHub from './SalaryIncreasesHub';
+import EmployeeCredentialsModal from './EmployeeCredentialsModal';
 
 export default function EmployeeCardsGrid({
   state,
@@ -59,6 +60,7 @@ export default function EmployeeCardsGrid({
   const [isRehiring, setIsRehiring] = useState(false);
   const [previewPhotoEmp, setPreviewPhotoEmp] = useState(null);
   const [showSalaryIncreasesHub, setShowSalaryIncreasesHub] = useState(false);
+  const [showCredentialsModal, setShowCredentialsModal] = useState(false);
   const [stoppingEmpIds, setStoppingEmpIds] = useState(new Set());
 
   const openRehireModal = (emp) => {
@@ -679,6 +681,25 @@ export default function EmployeeCardsGrid({
             }}
           >
             <span>📞</span> أرقام الموظفين
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => setShowCredentialsModal(true)}
+            style={{
+              background: 'linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)',
+              color: '#4338ca',
+              border: '1.5px solid #c7d2fe',
+              fontWeight: 800,
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 4px rgba(67, 56, 202, 0.08)'
+            }}
+            title="سجل بيانات دخول ويوزريات وباسوردات الموظفين وإدارتها"
+          >
+            <span>🔐</span> يوزريات الموظفين
           </button>
           <button
             type="button"
@@ -1668,6 +1689,21 @@ export default function EmployeeCardsGrid({
           onClose={() => setShowSalaryIncreasesHub(false)}
           state={state}
           showToast={showToast}
+        />
+      )}
+
+      {/* ── MODAL 6: EMPLOYEE CREDENTIALS & PASSWORDS DIRECTORY ── */}
+      {showCredentialsModal && (
+        <EmployeeCredentialsModal
+          isOpen={showCredentialsModal}
+          onClose={() => setShowCredentialsModal(false)}
+          employees={state?.employees || []}
+          branches={branches}
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          openEditEmpModal={openEditEmpModal}
         />
       )}
     </>

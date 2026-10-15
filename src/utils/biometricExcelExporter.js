@@ -305,7 +305,18 @@ export async function exportBiometricPunchesExcel({
       const empName = p.employee_name || p.employeeName || 'موظف غير معرف';
       const bName = p.branch_name || p.branchName || (p.branch_id ? `فرع (${p.branch_id})` : 'الإدارة العامة');
       const action = p._normalizedAction || p.action_type || p.actionType;
-      const isCheckIn = action === 'check_in' || action === 'shift_start' || p.raw_punch_state === 0;
+      let isCheckIn;
+      if (action === 'check_in' || action === 'shift_start') {
+        isCheckIn = true;
+      } else if (action === 'check_out' || action === 'shift_end') {
+        isCheckIn = false;
+      } else if (p.raw_punch_state === 1) {
+        isCheckIn = false;
+      } else if (p.raw_punch_state === 0) {
+        isCheckIn = true;
+      } else {
+        isCheckIn = true;
+      }
       const actionLabel = isCheckIn ? 'حضور (Check-In)' : 'انصراف (Check-Out)';
 
       let verifyLabel = '👆 بصمة الإصبع';
@@ -467,7 +478,18 @@ export async function exportBiometricPunchesExcel({
         const epoch = dt.epoch || p._epoch || 0;
 
         const action = p._normalizedAction || p.action_type || p.actionType;
-        const isCheckIn = action === 'check_in' || action === 'shift_start' || p.raw_punch_state === 0;
+        let isCheckIn;
+        if (action === 'check_in' || action === 'shift_start') {
+          isCheckIn = true;
+        } else if (action === 'check_out' || action === 'shift_end') {
+          isCheckIn = false;
+        } else if (p.raw_punch_state === 1) {
+          isCheckIn = false;
+        } else if (p.raw_punch_state === 0) {
+          isCheckIn = true;
+        } else {
+          isCheckIn = true;
+        }
 
         return {
           ...p,

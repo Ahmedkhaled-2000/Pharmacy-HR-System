@@ -99,8 +99,11 @@ export default function EmployeePermissionsManagementModule({
     if (!start || !end) return { hours: 0, minutes: 0, text: '—' };
     const [h1, m1] = start.split(':').map(Number);
     const [h2, m2] = end.split(':').map(Number);
+    if (h1 === h2 && (m1 || 0) === (m2 || 0)) {
+      return { hours: 0, minutes: 0, text: '0 دقيقة' };
+    }
     let diff = (h2 * 60 + (m2 || 0)) - (h1 * 60 + (m1 || 0));
-    if (diff <= 0) diff += 24 * 60;
+    if (diff < 0) diff += 24 * 60;
     const hrs = Math.floor(diff / 60);
     const mins = diff % 60;
     let txt = '';

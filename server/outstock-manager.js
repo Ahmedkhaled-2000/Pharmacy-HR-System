@@ -2938,7 +2938,9 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         receiptNumber = '',
         deliveredByCode = null,
         deliveredByName = null,
-        paymentSplits = null
+        paymentSplits = null,
+        deliveredItemIds = null,
+        depositUsed = null
       } = req.body || {};
 
       const orderRes = await db.query(`
@@ -2954,60 +2956,174 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
       const order = orderRes.rows[0];
 
-      // ── التحقق السيادي: عدم السماح بتسليم الطلب للعميل إلا بعد رد المشتريات على الأصناف ──
-      const pendingItemsRes = await db.query(`
-        SELECT id, medication_name
-        FROM public.outstock_order_items
-        WHERE order_id = $1 
-          AND COALESCE(pruned_from_bill, false) = false
-          AND item_status = 'pending'
-          AND procurement_replied_at IS NULL
+      // جلب جميع الأصناف النشطة للطلب (غير المشطوبة)
+      const allItemsRes = await db.query(`
+        SELECT * FROM public.outstock_order_items
+        WHERE order_id = $1 AND COALESCE(pruned_from_bill, false) = false
       `, [orderId]);
+      const allActiveItems = allItemsRes.rows;
 
-      if (pendingItemsRes.rows.length > 0) {
-        const itemNames = pendingItemsRes.rows.map(r => `"${r.medication_name}"`).join('، ');
-        return res.status(400).json({
-          success: false,
-          error: `⚠️ لا يمكن تسليم هذا الطلب للعميل لوجود أصناف معلقة بانتظار رد المشتريات: (${itemNames}). يرجى انتظار رد المشتريات أو استبعاد الصنف من الفاتورة أولاً.`
-        });
+      if (allActiveItems.length === 0) {
+        return res.status(400).json({ success: false, error: 'لا توجد أصناف نشطة في هذا الطلب' });
       }
 
+      let targetItems = [];
+      let isPartialDelivery = false;
+      let remainingActiveItems = [];
+
+      if (Array.isArray(deliveredItemIds) && deliveredItemIds.length > 0) {
+        // تحديد الأصناف المختارة للتسليم
+        const targetIdsStr = deliveredItemIds.map(String);
+        targetItems = allActiveItems.filter(i => targetIdsStr.includes(String(i.id)));
+
+        if (targetItems.length === 0) {
+          return res.status(400).json({ success: false, error: 'الأصناف المحددة للتسليم غير موجودة في هذا الطلب' });
+        }
+
+        // التحقق من الأصناف المختارة: يجب أن تكون المشتريات قد ردت عليها
+        const unrepliedInTarget = targetItems.filter(
+          i => !i.procurement_replied_at && i.item_status === 'pending'
+        );
+        if (unrepliedInTarget.length > 0) {
+          const itemNames = unrepliedInTarget.map(r => `"${r.medication_name}"`).join('، ');
+          return res.status(400).json({
+            success: false,
+            error: `⚠️ لا يمكن تسليم الأصناف المختارة لوجود صنف معلق بانتظار رد المشتريات: (${itemNames})`
+          });
+        }
+
+        // فحص الأصناف المتبقية التي لم تسلَّم بعد
+        remainingActiveItems = allActiveItems.filter(
+          i => !targetIdsStr.includes(String(i.id)) && i.item_status !== 'delivered' && i.item_status !== 'returned'
+        );
+        isPartialDelivery = remainingActiveItems.length > 0;
+      } else {
+        // في حال لم يتم تمرير أصناف محددة: التحقق التقليدي من عدم وجود أي صنف معلق
+        const pendingItems = allActiveItems.filter(
+          i => !i.procurement_replied_at && i.item_status === 'pending'
+        );
+        if (pendingItems.length > 0) {
+          const itemNames = pendingItems.map(r => `"${r.medication_name}"`).join('، ');
+          return res.status(400).json({
+            success: false,
+            error: `⚠️ لا يمكن تسليم الطلب بالكامل لوجود أصناف معلقة بانتظار رد المشتريات: (${itemNames}). يرجى اختيار الأصناف المتوفرة لتسليمها جزئياً أو انتظار رد المشتريات.`
+          });
+        }
+        targetItems = allActiveItems.filter(i => i.item_status !== 'delivered');
+        isPartialDelivery = false;
+        remainingActiveItems = [];
+      }
+
+      // حساب إجمالي قيمة الأصناف المسلمة في هذه العملية
+      let deliveringItemsTotal = 0;
+      targetItems.forEach(it => {
+        deliveringItemsTotal += parseInt(it.quantity || 1, 10) * parseFloat(it.unit_price || 0);
+      });
+
       const previousPaid = parseFloat(order.paid_amount || 0);
-      const netTotal = parseFloat(order.net_amount || 0);
-      const remainingDue = Math.max(0, netTotal - previousPaid);
 
-      // احتساب المبلغ المحصل فعلياً عند التسليم
-      const nowCollected = collectedAmount !== undefined ? Math.max(0, parseFloat(collectedAmount)) : remainingDue;
-      const newTotalPaid = previousPaid + nowCollected;
-      const newRemaining = Math.max(0, netTotal - newTotalPaid);
+      // تحديد مقدار العربون المستقطع لهذه الأصناف المسلمة (سحب كامل العربون أم الاحتفاظ به للمتبقي أم تخصيص يدوي)
+      let actualDepositUsed = 0;
+      if (depositUsed !== undefined && depositUsed !== null) {
+        actualDepositUsed = Math.min(previousPaid, Math.max(0, parseFloat(depositUsed)));
+      } else if (isPartialDelivery) {
+        actualDepositUsed = Math.min(previousPaid, deliveringItemsTotal);
+      } else {
+        actualDepositUsed = previousPaid;
+      }
 
-      await db.query(`
-        UPDATE public.outstock_orders
-        SET order_status = 'delivered',
-            paid_amount = $1,
-            remaining_amount = $2,
-            delivered_by_code = COALESCE($3, delivered_by_code),
-            delivered_by_name = COALESCE($4, delivered_by_name),
-            payment_splits = COALESCE($5::jsonb, payment_splits),
-            delivered_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = $6
-      `, [
-        newTotalPaid, newRemaining,
-        deliveredByCode, deliveredByName,
-        paymentSplits ? JSON.stringify(paymentSplits) : null,
-        orderId
-      ]);
+      // حساب المتبقي المطلوب تحصيله الآن للأصناف المسلمة
+      const deliveryDue = Math.max(0, deliveringItemsTotal - actualDepositUsed);
+      const nowCollected = collectedAmount !== undefined ? Math.max(0, parseFloat(collectedAmount)) : deliveryDue;
 
+      // تحديث الأصناف المسلمة فقط
+      const targetItemIds = targetItems.map(t => t.id);
       await db.query(`
         UPDATE public.outstock_order_items
-        SET item_status = 'delivered', updated_at = CURRENT_TIMESTAMP
-        WHERE order_id = $1 AND pruned_from_bill = false
-      `, [orderId]);
+        SET item_status = 'delivered',
+            delivered_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ANY($1) AND order_id = $2
+      `, [targetItemIds, orderId]);
+
+      // خصم الكميات من رصيد الفرع المؤقت للأصناف المسلمة فقط
+      for (const item of targetItems) {
+        await db.query(`
+          UPDATE public.outstock_branch_stock
+          SET available_quantity = GREATEST(0, available_quantity - $1),
+              delivered_quantity = delivered_quantity + $1,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE branch_id = $2 AND LOWER(medication_name) = LOWER($3) AND unit_type = $4
+        `, [item.quantity, order.branch_id, item.medication_name, item.unit_type]);
+      }
+
+      let newOrderStatus = 'delivered';
+      let newRemaining = 0;
+      let remainingDeposit = 0;
+
+      if (isPartialDelivery) {
+        newOrderStatus = 'partially_delivered';
+        // العربون المتبقي المحجوز للأصناف قيد الرد
+        remainingDeposit = Math.max(0, previousPaid - actualDepositUsed);
+
+        // إجمالي قيمة الأصناف المتبقية
+        let remainingItemsTotal = 0;
+        remainingActiveItems.forEach(it => {
+          remainingItemsTotal += parseInt(it.quantity || 1, 10) * parseFloat(it.unit_price || 0);
+        });
+        newRemaining = Math.max(0, remainingItemsTotal - remainingDeposit);
+
+        await db.query(`
+          UPDATE public.outstock_orders
+          SET order_status = $1,
+              paid_amount = $2,
+              remaining_amount = $3,
+              delivered_by_code = COALESCE($4, delivered_by_code),
+              delivered_by_name = COALESCE($5, delivered_by_name),
+              payment_splits = COALESCE($6::jsonb, payment_splits),
+              delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP),
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $7
+        `, [
+          newOrderStatus,
+          remainingDeposit,
+          newRemaining,
+          deliveredByCode,
+          deliveredByName,
+          paymentSplits ? JSON.stringify(paymentSplits) : null,
+          orderId
+        ]);
+      } else {
+        newOrderStatus = 'delivered';
+        const netTotal = parseFloat(order.net_amount || deliveringItemsTotal);
+        const newTotalPaid = previousPaid + nowCollected;
+        newRemaining = Math.max(0, netTotal - newTotalPaid);
+
+        await db.query(`
+          UPDATE public.outstock_orders
+          SET order_status = 'delivered',
+              paid_amount = $1,
+              remaining_amount = $2,
+              delivered_by_code = COALESCE($3, delivered_by_code),
+              delivered_by_name = COALESCE($4, delivered_by_name),
+              payment_splits = COALESCE($5::jsonb, payment_splits),
+              delivered_at = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $6
+        `, [
+          newTotalPaid,
+          newRemaining,
+          deliveredByCode,
+          deliveredByName,
+          paymentSplits ? JSON.stringify(paymentSplits) : null,
+          orderId
+        ]);
+      }
 
       // في حال وجود فائض مدفوع (عربون أكثر من الإجمالي) واختيار إضافته للمحفظة
-      if (req.body.refundToWallet && order.customer_id && previousPaid > netTotal) {
-        const refundAmt = previousPaid - netTotal;
+      const netTotalForCheck = isPartialDelivery ? deliveringItemsTotal : parseFloat(order.net_amount || 0);
+      if (req.body.refundToWallet && order.customer_id && previousPaid > netTotalForCheck && !isPartialDelivery) {
+        const refundAmt = previousPaid - netTotalForCheck;
         await db.query(`
           UPDATE public.outstock_customers
           SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = CURRENT_TIMESTAMP
@@ -3021,25 +3137,13 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         `, [transId, order.customer_id, orderId, refundAmt, `استرداد فائض عربون طلب رقم ${order.order_number || ''}`, cashierName || 'صيدلي الفرع']);
       }
 
-      // خصم الكميات من رصيد الفرع المؤقت
-      const itemsRes = await db.query(
-        'SELECT * FROM public.outstock_order_items WHERE order_id = $1 AND pruned_from_bill = false',
-        [orderId]
-      );
-      for (const item of itemsRes.rows) {
-        await db.query(`
-          UPDATE public.outstock_branch_stock
-          SET available_quantity = GREATEST(0, available_quantity - $1),
-              delivered_quantity = delivered_quantity + $1,
-              updated_at = CURRENT_TIMESTAMP
-          WHERE branch_id = $2 AND LOWER(medication_name) = LOWER($3) AND unit_type = $4
-        `, [item.quantity, order.branch_id, item.medication_name, item.unit_type]);
-      }
-
       // إدراج حركة التحصيل في جدول مبيعات الفروع المباشرة
       const saleId = `sale_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
       const cashier = cashierName || deliveredByName || req.outstockUser?.username || req.outstockUser?.full_name || 'صيدلي الفرع';
       const rcpt = receiptNumber || `REC-${order.order_number || Date.now()}`;
+      const saleNotes = isPartialDelivery
+        ? [notes, `(تسليم جزئي لـ ${targetItems.length} صنف متوفر - متبقي ${remainingActiveItems.length} صنف قيد الرد)`].filter(Boolean).join(' - ')
+        : (notes || `تسليم طلب العميل ${order.customer_name || ''}`);
 
       await db.query(`
         INSERT INTO public.outstock_branch_sales (
@@ -3049,8 +3153,8 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, CURRENT_TIMESTAMP)
       `, [
         saleId, order.branch_id, orderId, order.customer_name || 'عميل نقدي', order.customer_phone || '',
-        netTotal, previousPaid, nowCollected, nowCollected,
-        paymentMethod, cashier, rcpt, notes,
+        deliveringItemsTotal, actualDepositUsed, nowCollected, nowCollected,
+        paymentMethod, cashier, rcpt, saleNotes,
         paymentSplits ? JSON.stringify(paymentSplits) : null,
         deliveredByCode || null
       ]);
@@ -3137,20 +3241,126 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         saleId,
         branchId: order.branch_id,
         orderId,
-        netTotal,
+        netTotal: deliveringItemsTotal,
         collectedAmount: nowCollected
       });
 
       res.json({
         success: true,
-        message: `تم تسليم الطلب للعميل بنجاح وتحصيل ${nowCollected.toFixed(2)} ج.م وإدراجها في مبيعات الفرع`,
+        message: isPartialDelivery
+          ? `✅ تم التسليم الجزئي بنجاح (${targetItems.length} صنف متوفر) وتحصيل ${nowCollected.toFixed(2)} ج.م (عربون مستقطع: ${actualDepositUsed.toFixed(2)} ج.م، محجوز للمتبقي: ${remainingDeposit.toFixed(2)} ج.م)`
+          : `✅ تم تسليم الطلب للعميل بنجاح وتحصيل ${nowCollected.toFixed(2)} ج.م وإدراجها في مبيعات الفرع`,
         saleId,
         orderId,
+        isPartialDelivery,
+        deliveredItemsCount: targetItems.length,
+        remainingItemsCount: remainingActiveItems.length,
+        actualDepositUsed,
+        remainingDeposit,
         collectedAmount: nowCollected,
         remainingAmount: newRemaining
       });
     } catch (err) {
       console.error('[Deliver Order Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // إلغاء صنف محدد من الطلب من قِبل الفرع (استبعاده تلقائياً من طلبات المشتريات وتسوية العربون)
+  // ───────────────────────────────────────────────────────────────────────────
+  app.post('/api/outstock/orders/:id/cancel-item', authMiddleware, async (req, res) => {
+    try {
+      const orderId = req.params.id;
+      const {
+        itemId,
+        reason = 'إلغاء الصنف بطلب من العميل',
+        refundDestination = 'wallet', // 'cash' | 'wallet' | 'keep_as_deposit'
+        refundAmount = 0,
+        employeeCode = '',
+        employeeName = ''
+      } = req.body || {};
+
+      if (!itemId) {
+        return res.status(400).json({ success: false, error: 'معرّف الصنف مطلوب للإلغاء' });
+      }
+
+      const ordRes = await db.query(`
+        SELECT o.*, c.full_name as customer_name, c.whatsapp_phone as customer_phone, b.name as branch_name
+        FROM public.outstock_orders o
+        LEFT JOIN public.outstock_customers c ON o.customer_id = c.id
+        LEFT JOIN public.outstock_branches b ON o.branch_id = b.id
+        WHERE o.id = $1
+      `, [orderId]);
+
+      if (ordRes.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'الطلب غير موجود' });
+      }
+      const order = ordRes.rows[0];
+
+      const itRes = await db.query('SELECT * FROM public.outstock_order_items WHERE id = $1 AND order_id = $2', [itemId, orderId]);
+      if (itRes.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'الصنف غير موجود بهذا الطلب' });
+      }
+      const item = itRes.rows[0];
+
+      if (item.item_status === 'delivered') {
+        return res.status(400).json({ success: false, error: 'لا يمكن إلغاء صنف تم تسليمه للعميل بالفعل، يرجى استخدام نظام المرتجعات' });
+      }
+
+      // وسم الصنف كمشطوب وملغي بطلب العميل
+      await db.query(`
+        UPDATE public.outstock_order_items
+        SET item_status = 'cancelled_by_customer',
+            pruned_from_bill = true,
+            pruned_at = CURRENT_TIMESTAMP,
+            procurement_notes = $1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2 AND order_id = $3
+      `, [`تم إلغاء الصنف بطلب العميل: ${reason}`, itemId, orderId]);
+
+      // تسوية العربون المسترد إن وُجد
+      const refundNum = parseFloat(refundAmount) || 0;
+      let walletTxId = null;
+      if (refundNum > 0) {
+        const curPaid = parseFloat(order.paid_amount || 0);
+        const updatedPaid = Math.max(0, curPaid - refundNum);
+        await db.query('UPDATE public.outstock_orders SET paid_amount = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [updatedPaid, orderId]);
+
+        if (refundDestination === 'wallet' && order.customer_id) {
+          await db.query('UPDATE public.outstock_customers SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [refundNum, order.customer_id]);
+          walletTxId = `wtx_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+          await db.query(`
+            INSERT INTO public.outstock_customer_wallet_transactions (
+              id, customer_id, order_id, transaction_type, amount, notes,
+              created_by_code, created_by_name, branch_id, verification_method, payment_method, created_at
+            ) VALUES ($1, $2, $3, 'refund_to_wallet', $4, $5, $6, $7, $8, 'employee_code', 'return_settlement', CURRENT_TIMESTAMP)
+          `, [
+            walletTxId, order.customer_id, orderId, refundNum,
+            `استرداد عربون صنف ملغي (${item.medication_name}) من طلب #${order.order_number}`,
+            employeeCode || 'PHARMACIST', employeeName || 'صيدلي الفرع', order.branch_id
+          ]);
+          broadcastOutstock('outstock:customer_wallet_updated', { customerId: order.customer_id, transactionId: walletTxId, amount: refundNum });
+        }
+      }
+
+      // إعادة حساب إجماليات الطلب وحالته
+      await recalculateOrderTotals(db, orderId);
+      await updateOrderStatusByItems(db, orderId);
+
+      // بث تحديث الطلب لجميع الواجهات (المشتريات والصيدلية)
+      broadcastOutstock('outstock:order_updated', { orderId, branchId: order.branch_id });
+      broadcastOutstock('outstock:item_cancelled', { orderId, itemId, medicationName: item.medication_name });
+
+      res.json({
+        success: true,
+        message: `تم إلغاء الصنف (${item.medication_name}) بنجاح واستبعاده تلقائياً من قوائم المشتريات`,
+        itemId,
+        refundAmount: refundNum,
+        walletTxId
+      });
+    } catch (err) {
+      console.error('[Cancel Item Error]:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -4401,6 +4611,26 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         return res.status(404).json({ success: false, error: 'الطلب غير موجود' });
       }
       const order = ordRes.rows[0];
+
+      // ── التحقق من مهلة المرتجع المحددة يدوياً من إعدادات المالك (returns_allowed_days) ──
+      try {
+        const settingsRow = await db.query("SELECT setting_value FROM public.outstock_settings WHERE setting_key = 'general_settings'");
+        const genSettings = settingsRow.rows[0]?.setting_value || {};
+        const allowedDays = parseInt(genSettings.returns_allowed_days ?? genSettings.returnsAllowedDays ?? 14, 10);
+
+        const baseActionDate = order.procurement_replied_at || order.delivered_at || order.created_at;
+        if (baseActionDate && allowedDays > 0) {
+          const diffDays = (Date.now() - new Date(baseActionDate).getTime()) / (1000 * 60 * 60 * 24);
+          if (diffDays > allowedDays) {
+            return res.status(400).json({
+              success: false,
+              error: `⚠️ انتهت مهلة المرتجع المسموحة لهذا الطلب (${allowedDays} يوم من تاريخ رد المشتريات). لا يمكن قبول طلب المرتجع بعد انقضاء هذه المهلة المحددة من المالك.`
+            });
+          }
+        }
+      } catch (checkErr) {
+        console.warn('[Return Allowed Days Check Warning]:', checkErr.message);
+      }
 
       const returnId = `ret_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
       const effBranchId = order.branch_id || req.outstockUser?.branchId || 'main';
@@ -11768,13 +11998,17 @@ async function updateOrderStatusByItems(db, orderId) {
 
     if (validItems.length === 0) {
       const anyReturned = allItems.some(i => i.item_status === 'returned');
-      newStatus = anyReturned ? 'returned' : 'all_unavailable';
+      const anyDelivered = allItems.some(i => i.item_status === 'delivered');
+      newStatus = anyReturned ? 'returned' : (anyDelivered ? 'delivered' : 'all_unavailable');
     } else {
+      const allDelivered = validItems.length > 0 && validItems.every(i => i.item_status === 'delivered');
       const allAvailable = validItems.every(i => i.item_status === 'available_by_procurement' || i.item_status === 'delivered');
       const someAvailable = validItems.some(i => i.item_status === 'available_by_procurement' || i.item_status === 'delivered');
       const hasUnavailable = allItems.some(i => i.pruned_from_bill || i.item_status === 'unavailable_in_market' || i.item_status === 'unavailable');
 
-      if (allAvailable && !hasUnavailable) {
+      if (allDelivered) {
+        newStatus = 'delivered';
+      } else if (allAvailable && !hasUnavailable) {
         newStatus = 'ready_for_pickup';
       } else if (someAvailable || hasUnavailable) {
         newStatus = 'partially_available';

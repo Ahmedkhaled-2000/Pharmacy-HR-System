@@ -6,7 +6,8 @@ import {
   getPenaltyForOccurrence,
   computeLatenessFinancialAmount,
   recalculateEmployeeCycleLateness,
-  countEmployeeTierOccurrences
+  countEmployeeTierOccurrences,
+  isVariableScheduleEmployee
 } from '../../utils/latePenaltyEngine';
 import { fmt, isEmployeeActive } from '../../utils/formatters';
 import { getBranchIdentifiers, isEmployeeInBranch } from '../../utils/disciplinaryPenaltyEngine';
@@ -152,8 +153,15 @@ export default function LatePenaltyPolicyModule({
   const allIncidents = useMemo(() => {
     const map = new Map();
 
+    // خريطة لتسريع التحقق من الموظفين المعفيين (مواعيد متغيرة واحتساب الراتب بالساعات الفعلية)
+    const variableScheduleEmpIds = new Set(
+      (state.employees || []).filter(e => isVariableScheduleEmployee(e)).map(e => String(e.id))
+    );
+
     // 1. تضمين الوقائع المسجلة مسبقاً في state.lateIncidents والمتطابقة مع تصفية الفترة الحالية
     (state.lateIncidents || []).forEach((inc) => {
+      if (!inc || !inc.date || !inc.employeeId) return;
+      if (variableScheduleEmpIds.has(String(inc.employeeId))) return; // معفى تماماً من لائحة التأخيرات
       if (filterFn && !filterFn(inc.date)) return;
       if (isEmployee) {
         if (String(inc.employeeId) !== String(currentEmpId)) return;
@@ -165,15 +173,18 @@ export default function LatePenaltyPolicyModule({
         if (filterBranch && String(inc.branchId) !== String(filterBranch)) return;
         if (filterEmpId && String(inc.employeeId) !== String(filterEmpId)) return;
       }
-      map.set(inc.id, inc);
+
+      // المفتاح الموحد باليوم والوردية لمنع أي دبلرة لنفس اليوم
+      const canonicalKey = `${inc.employeeId}_${inc.date}${inc.shiftId ? '_' + inc.shiftId : ''}`;
+      map.set(canonicalKey, inc);
     });
 
     // 2. فحص وإعادة حساب أي ورديات جديدة بالدورة
-    let empsToProcess = targetEmployees;
+    let empsToProcess = targetEmployees.filter(e => !isVariableScheduleEmployee(e));
     if (isEmployee) {
-      empsToProcess = loggedInEmp ? [loggedInEmp] : [];
+      empsToProcess = loggedInEmp && !isVariableScheduleEmployee(loggedInEmp) ? [loggedInEmp] : [];
     } else if (filterEmpId) {
-      empsToProcess = targetEmployees.filter((e) => String(e.id) === String(filterEmpId));
+      empsToProcess = targetEmployees.filter((e) => String(e.id) === String(filterEmpId) && !isVariableScheduleEmployee(e));
     }
 
     empsToProcess.forEach((emp) => {
@@ -185,6 +196,19 @@ export default function LatePenaltyPolicyModule({
           payrollCycleId: monthPicker || 'current'
         });
 
+        // تجميع تواريخ الوقائع المحسوبة حالياً لهذا الموظف
+        const currentCalculatedDates = new Set(incidents.map(i => i.date));
+
+        // إذا كان لدى الموظف شفتات في الدورة، نحذف أي واقعة قديمة في الـ Map لم تعد موجودة في الحسابات الجديدة
+        // (مثلاً: تم تعديل البصمة لتصبح في الموعد diffMinutes <= 0)
+        (state.shifts || []).filter(s => String(s.employeeId) === String(emp.id) && (!filterFn || filterFn(s.date))).forEach(s => {
+          if (!currentCalculatedDates.has(s.date)) {
+            const staleKey = `${emp.id}_${s.date}${s.id ? '_' + s.id : ''}`;
+            map.delete(staleKey);
+            map.delete(`${emp.id}_${s.date}`);
+          }
+        });
+
         incidents.forEach((inc) => {
           if (filterFn && !filterFn(inc.date)) return;
           if (isEmployee) {
@@ -194,7 +218,10 @@ export default function LatePenaltyPolicyModule({
           } else if (filterBranch) {
             if (String(inc.branchId) !== String(filterBranch)) return;
           }
-          map.set(inc.id, inc);
+          const canonicalKey = `${inc.employeeId}_${inc.date}${inc.shiftId ? '_' + inc.shiftId : ''}`;
+          // مسح أي مفتاح قديم لنفس اليوم
+          map.delete(`${inc.employeeId}_${inc.date}`);
+          map.set(canonicalKey, inc);
         });
       } catch (e) {
         console.error('Error recalculating in policy module:', e);
