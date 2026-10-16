@@ -320,16 +320,77 @@ export default function DayDetailsModal({ details, onClose }) {
                 </div>
               )}
 
-              {/* Row 5: الملاحظات النصية */}
-              {cleanNotes && (
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '8px 10px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px' }}>
-                  <span style={{ fontSize: '16px' }}>💬</span>
-                  <div>
-                    <span style={{ fontWeight: 700, color: '#334155' }}>ملاحظات الوردية: </span>
-                    <span style={{ color: '#475569' }}>{cleanNotes}</span>
+              {/* Row 5: سجل الملاحظات والتدقيق التفصيلي */}
+              {cleanNotes && (() => {
+                const rawStr = String(cleanNotes || '').trim();
+                const segments = rawStr
+                  .split(/\s*\|\s*/)
+                  .map(s => s.trim())
+                  .filter(Boolean);
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '2px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>
+                      <span style={{ fontSize: '16px' }}>💬</span>
+                      <span>سجل الإجراءات والتدقيق الإداري لهذا اليوم:</span>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {segments.map((seg, sIdx) => {
+                        const isAudit = seg.includes('تعديل يدوي') || seg.includes('تسجيل بصمة يدوية') || seg.includes('الإدارة العليا');
+                        const isApprovedOt = seg.includes('إضافي معتمد') || seg.includes('فك رفض الإضافي');
+                        const isNoOt = seg.includes('استبعاد شارة الإضافي') || seg.includes('بدون إضافي');
+                        
+                        let bColor = '#e2e8f0';
+                        let bg = '#f8fafc';
+                        let textColor = '#334155';
+                        let icon = '📌';
+
+                        if (isApprovedOt) {
+                          bColor = '#86efac';
+                          bg = '#f0fdf4';
+                          textColor = '#166534';
+                          icon = '⭐';
+                        } else if (isNoOt) {
+                          bColor = '#cbd5e1';
+                          bg = '#f1f5f9';
+                          textColor = '#475569';
+                          icon = '✔️';
+                        } else if (isAudit) {
+                          bColor = '#7dd3fc';
+                          bg = '#f0f9ff';
+                          textColor = '#0369a1';
+                          icon = '✏️';
+                        }
+
+                        return (
+                          <div
+                            key={sIdx}
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              background: bg,
+                              border: `1px solid ${bColor}`,
+                              color: textColor,
+                              fontSize: '12.5px',
+                              lineHeight: '1.6',
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: '8px',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                            }}
+                          >
+                            <span style={{ fontSize: '14px', flexShrink: 0, marginTop: '2px' }}>{icon}</span>
+                            <div style={{ flex: 1, wordBreak: 'break-word', fontWeight: isAudit ? '600' : '500' }}>
+                              {seg}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {!hasPerm && !linkedPenaltyReq && !isRejectedPhoto && !cleanNotes && (
                 <div style={{ fontSize: '12.5px', color: 'var(--muted, #64748b)', padding: '4px 0' }}>

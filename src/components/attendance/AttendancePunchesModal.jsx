@@ -652,8 +652,18 @@ export default function AttendancePunchesModal({
     const currentBId = punch.branchId || employee.branchId || '';
     const matchingDetail = (employee.branchesDetails || []).find(bd => isBranchMatch(currentBId, { id: bd.branchId, branchId: bd.branchId, name: bd.branchName }));
     setEditBranchId(matchingDetail ? matchingDetail.branchId : currentBId);
-    setEditNotes(punch.note || punch.notes || '');
-    setEditApproveOvertime(punch.overtimeStatus !== 'rejected');
+
+    // تنظيف الملاحظات من أي نصوص رفض إضافي قديمة حتى لا تتكرر داخل حقل الإدخال
+    const rawNotes = punch.note || punch.notes || '';
+    const cleanedNotes = rawNotes
+      .replace(/❌\s*(تم رفض الساعات الإضافية|إضافي مرفوض)[^|]*/g, '')
+      .replace(/\|\s*\|/g, '|')
+      .trim()
+      .replace(/^\|\s*|\s*\|$/g, '');
+    setEditNotes(cleanedNotes);
+
+    // عند تعديل البصمة بواسطة الإدارة العليا، يتم تفعيل اعتماد الساعات الإضافية وفك الارتباط تلقائياً
+    setEditApproveOvertime(true);
     setEditDecouplePriorDayRequests(true);
   };
 
@@ -811,11 +821,58 @@ export default function AttendancePunchesModal({
       }
 
       const isOtApproved = Boolean(overtimeHours > 0 && snapApproveOt);
-      const otStatus = (overtimeHours > 0) ? (snapApproveOt ? 'approved' : 'pending') : 'none';
+      const otStatus = (overtimeHours > 0) ? (isOtApproved ? 'approved' : 'pending') : 'none';
 
       const editedBObj = (state.branches || []).find(b => isBranchMatch(snapBranchId, b));
       const canonicalBranchId = editedBObj ? editedBObj.id : (snapBranchId || employee.branchId || '');
       const canonicalBranchName = editedBObj ? editedBObj.name : getBranchName(canonicalBranchId);
+
+      // التقاط الحالة السابقة للبصمة قبل التعديل لتوثيق الفروق وسجل الإجراءات بدقة
+      const prevIn = snapEditingPunch.timeIn || '—';
+      const prevOut = snapEditingPunch.timeOut || '—';
+      const prevWorked = parseFloat(snapEditingPunch.actualWorkedHours || snapEditingPunch.hours || snapEditingPunch.netHours || 0);
+      const prevOt = parseFloat(snapEditingPunch.overtimeHours || 0);
+      const wasOtRejected = Boolean(
+        snapEditingPunch.overtimeStatus === 'rejected' ||
+        snapEditingPunch.rejectedOvertime === true ||
+        (typeof snapEditingPunch.statusLabel === 'string' && snapEditingPunch.statusLabel.includes('إضافي مرفوض'))
+      );
+
+      // صياغة الختم الزمني للتدقيق باللغة العربية
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true });
+      const dateFormatted = now.toLocaleDateString('ar-EG', { year: 'numeric', month: '2-digit', day: '2-digit' });
+      const timestampTag = `[${dateFormatted} ${timeStr}]`;
+
+      // تنظيف أي ملاحظات يدوية مدخلة من نصوص الرفض السابقة
+      const cleanInputNotes = (snapNotes || '')
+        .replace(/❌\s*(تم رفض الساعات الإضافية|إضافي مرفوض)[^|]*/g, '')
+        .replace(/\|\s*\|/g, '|')
+        .trim()
+        .replace(/^\|\s*|\s*\|$/g, '');
+
+      const noteParts = [];
+      if (cleanInputNotes) noteParts.push(cleanInputNotes);
+
+      let auditText = `${timestampTag} ✏️ ${snapIsAdding ? 'تسجيل بصمة يدوية' : 'تعديل بصمة يدوي'} بواسطة الإدارة العليا: `;
+      if (wasOtRejected) {
+        if (overtimeHours > 0 && isOtApproved) {
+          auditText += `تم فك رفض الإضافي السابق (${prevOt.toFixed(2)} س) واعتماد إضافي جديد معتمد (+${overtimeHours.toFixed(2)} س) | `;
+        } else {
+          auditText += `تم فك رفض الإضافي السابق (${prevOt.toFixed(2)} س) واستبعاد شارة الإضافي لعدم وجود ساعات زائدة | `;
+        }
+      }
+      if (!snapIsAdding && (prevIn !== snapTimeIn || prevOut !== snapTimeOut)) {
+        auditText += `التوقيت: من (${prevIn} -> ${snapTimeIn}) إلى (${prevOut} -> ${snapTimeOut}) | `;
+      } else {
+        auditText += `التوقيت: ${snapTimeIn} إلى ${snapTimeOut} | `;
+      }
+      auditText += `صافي ساعات العمل: ${calculatedHours.toFixed(2)} س (أساسي: ${regularHours.toFixed(2)} س${overtimeHours > 0 && isOtApproved ? ` + إضافي معتمد: ${overtimeHours.toFixed(2)} س` : ''})`;
+      if (bH > 0) auditText += ` [استراحة: ${bH.toFixed(2)} س]`;
+      if (snapDecouplePrior) auditText += ` — تم فك الارتباط التام بطلبات اليوم السابقة`;
+
+      noteParts.push(auditText);
+      const combinedNote = noteParts.join(' | ');
 
       let updatedShifts;
       let finalSavedShiftId = '';
@@ -830,10 +887,6 @@ export default function AttendancePunchesModal({
         );
 
         finalSavedShiftId = existingIdx >= 0 ? state.shifts[existingIdx].id : `punch_manual_${Date.now()}`;
-        const noteParts = [];
-        if (snapNotes.trim()) noteParts.push(snapNotes.trim());
-        noteParts.push('تسجيل بصمة يدوية بواسطة الإدارة العليا' + (overtimeHours > 0 ? (isOtApproved ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ` (أساسي: ${regularHours} س + إضافي معلق: ${overtimeHours} س)`) : ''));
-        const combinedNote = noteParts.join(' | ');
 
         const newShiftPayload = {
           id: finalSavedShiftId,
@@ -857,6 +910,8 @@ export default function AttendancePunchesModal({
           overtimeStatus: otStatus,
           isOvertimeApproved: isOtApproved,
           rejectedOvertime: false,
+          rejectedBy: null,
+          rejectedAt: null,
           isManual: true,
           manualPunch: true,
           createdBy: 'admin',
@@ -912,6 +967,8 @@ export default function AttendancePunchesModal({
               overtimeStatus: otStatus,
               isOvertimeApproved: isOtApproved,
               rejectedOvertime: false,
+              rejectedBy: null,
+              rejectedAt: null,
               unlinkPriorRequests: snapDecouplePrior,
               decoupledDay: snapDecouplePrior,
               ignorePermissions: snapDecouplePrior,
@@ -920,8 +977,8 @@ export default function AttendancePunchesModal({
               adminApproved: true,
               branchId: canonicalBranchId,
               branchName: canonicalBranchName,
-              note: (snapNotes.trim() ? snapNotes.trim() + ' | ' : '') + 'تم تعديل البصمة بواسطة الإدارة العليا' + (overtimeHours > 0 ? (isOtApproved ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ` (أساسي: ${regularHours} س + إضافي معلق: ${overtimeHours} س)`) : ''),
-              notes: (snapNotes.trim() ? snapNotes.trim() + ' | ' : '') + 'تم تعديل البصمة بواسطة الإدارة العليا' + (overtimeHours > 0 ? (isOtApproved ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ` (أساسي: ${regularHours} س + إضافي معلق: ${overtimeHours} س)`) : ''),
+              note: combinedNote,
+              notes: combinedNote,
               statusLabel: overtimeHours > 0 ? (isOtApproved ? 'معدلة من الإدارة (مع إضافي معتمد)' : 'معدلة من الإدارة (إضافي معلق)') : 'معدلة من الإدارة',
               isManual: true,
               manualPunch: true,
@@ -1022,6 +1079,7 @@ export default function AttendancePunchesModal({
                   status: 'cancelled',
                   isCancelled: true,
                   adminRejected: false,
+                  rejected: false,
                   adminNote: 'تم إلغاء الطلب بعد تعديل البصمة اليدوية لعدم وجود إضافي'
                 };
               }
@@ -2245,25 +2303,32 @@ export default function AttendancePunchesModal({
                                (r.type === 'overtime' || r.type === 'طلب اضافي' || r.type === 'إضافي'))
                             );
 
-                            // 🛡️ تحديد حالة الساعات الإضافية الموحدة مع سيادة الرفض التامة لمنع ظهور شارات متناقضة
-                            const isOtExplicitlyRejected = Boolean(
-                              p.overtimeStatus === 'rejected' ||
-                              p.rejectedOvertime === true ||
-                              shiftMetrics.overtimeStatus === 'rejected' ||
-                              (linkedOtReq && (linkedOtReq.status === 'rejected' || linkedOtReq.adminRejected === true))
+                            const isManualAdminShift = Boolean(
+                              p.isManual || p.manualPunch || p.editedByAdmin || p.isAdminCreated || p.unlinkPriorRequests || p.decoupledDay
                             );
+
+                            // 🛡️ تحديد حالة الساعات الإضافية الموحدة:
+                            // إذا كانت الوردية معدلة يدوياً من الإدارة، لا تسري عليها طلبات الرفض السابقة المعزولة
+                            const isOtExplicitlyRejected = !isManualAdminShift
+                              ? Boolean(
+                                  p.overtimeStatus === 'rejected' ||
+                                  p.rejectedOvertime === true ||
+                                  shiftMetrics.overtimeStatus === 'rejected' ||
+                                  (linkedOtReq && (linkedOtReq.status === 'rejected' || linkedOtReq.adminRejected === true))
+                                )
+                              : Boolean(p.overtimeStatus === 'rejected' && p.rejectedOvertime === true);
 
                             const isOtExplicitlyApproved = !isOtExplicitlyRejected && Boolean(
                               p.overtimeStatus === 'approved' ||
                               p.isOvertimeApproved === true ||
                               shiftMetrics.isOvertimeApproved === true ||
-                              (linkedOtReq && (linkedOtReq.status === 'approved' || linkedOtReq.adminApproved === true))
+                              (!isManualAdminShift && linkedOtReq && (linkedOtReq.status === 'approved' || linkedOtReq.adminApproved === true))
                             );
 
                             const isOtPending = !isOtExplicitlyRejected && !isOtExplicitlyApproved && Boolean(
                               p.overtimeStatus === 'pending' ||
                               shiftMetrics.overtimeStatus === 'pending' ||
-                              (linkedOtReq && (linkedOtReq.status === 'pending' || linkedOtReq.status === 'pending_admin'))
+                              (!isManualAdminShift && linkedOtReq && (linkedOtReq.status === 'pending' || linkedOtReq.status === 'pending_admin'))
                             );
 
                             const finalOtHours = shiftMetrics.overtimeHours > 0 ? shiftMetrics.overtimeHours : (parseFloat(p.overtimeHours) || 0);
@@ -2287,9 +2352,22 @@ export default function AttendancePunchesModal({
 
                             let cleanNotes = p.notes || p.note || p.statusLabel || '';
                             if (effectiveOtStatus === 'approved') {
-                              cleanNotes = cleanNotes.replace(/إضافي\s*قيد\s*الاعتماد/g, 'إضافي معتمد').replace(/قيد\s*الاعتماد/g, 'معتمد');
+                              cleanNotes = cleanNotes
+                                .replace(/❌\s*(تم رفض الساعات الإضافية|إضافي مرفوض)[^|]*/g, '')
+                                .replace(/إضافي\s*قيد\s*الاعتماد/g, 'إضافي معتمد')
+                                .replace(/قيد\s*الاعتماد/g, 'معتمد')
+                                .replace(/\|\s*\|/g, '|')
+                                .trim()
+                                .replace(/^\|\s*|\s*\|$/g, '');
                             } else if (effectiveOtStatus === 'rejected') {
                               cleanNotes = cleanNotes.replace(/إضافي\s*قيد\s*الاعتماد/g, 'إضافي مرفوض').replace(/قيد\s*الاعتماد/g, 'مرفوض');
+                            } else if (effectiveOtStatus === 'none') {
+                              cleanNotes = cleanNotes
+                                .replace(/❌\s*(تم رفض الساعات الإضافية|إضافي مرفوض)[^|]*/g, '')
+                                .replace(/⏳?\s*إضافي\s*قيد\s*الاعتماد[^|]*/g, '')
+                                .replace(/\|\s*\|/g, '|')
+                                .trim()
+                                .replace(/^\|\s*|\s*\|$/g, '');
                             }
                             if (effectivePenaltyStatus === 'approved') {
                               cleanNotes = cleanNotes.replace(/جزاء\s*قيد\s*الاعتماد/g, 'جزاء معتمد').replace(/خصم\s*قيد\s*الاعتماد/g, 'خصم معتمد');
@@ -2647,25 +2725,32 @@ export default function AttendancePunchesModal({
 
                     const linkedOtReq = (state?.requests || []).find(r => r && (r.id === p.requestId || r.id === p.linkedRequestId || r.id === p.overtimeRequestId || r.shiftId === p.id || (String(r.employeeId) === String(employee.id) && r.date === dateStr && (r.type === 'overtime' || r.type === 'extra_hours' || r.type === 'طلب اضافي' || r.type === 'إضافي'))));
 
-                    // 🛡️ تحديد حالة الساعات الإضافية الموحدة مع سيادة الرفض التامة لمنع ظهور شارات متناقضة
-                    const isOtExplicitlyRejected = Boolean(
-                      p.overtimeStatus === 'rejected' ||
-                      p.rejectedOvertime === true ||
-                      shiftMetrics.overtimeStatus === 'rejected' ||
-                      (linkedOtReq && (linkedOtReq.status === 'rejected' || linkedOtReq.adminRejected === true))
+                    const isManualAdminShift = Boolean(
+                      p.isManual || p.manualPunch || p.editedByAdmin || p.isAdminCreated || p.unlinkPriorRequests || p.decoupledDay
                     );
+
+                    // 🛡️ تحديد حالة الساعات الإضافية الموحدة:
+                    // إذا كانت الوردية معدلة يدوياً من الإدارة، لا تسري عليها طلبات الرفض السابقة المعزولة
+                    const isOtExplicitlyRejected = !isManualAdminShift
+                      ? Boolean(
+                          p.overtimeStatus === 'rejected' ||
+                          p.rejectedOvertime === true ||
+                          shiftMetrics.overtimeStatus === 'rejected' ||
+                          (linkedOtReq && (linkedOtReq.status === 'rejected' || linkedOtReq.adminRejected === true))
+                        )
+                      : Boolean(p.overtimeStatus === 'rejected' && p.rejectedOvertime === true);
 
                     const isOtExplicitlyApproved = !isOtExplicitlyRejected && Boolean(
                       p.overtimeStatus === 'approved' ||
                       p.isOvertimeApproved === true ||
                       shiftMetrics.isOvertimeApproved === true ||
-                      (linkedOtReq && (linkedOtReq.status === 'approved' || linkedOtReq.adminApproved === true))
+                      (!isManualAdminShift && linkedOtReq && (linkedOtReq.status === 'approved' || linkedOtReq.adminApproved === true))
                     );
 
                     const isOtPending = !isOtExplicitlyRejected && !isOtExplicitlyApproved && Boolean(
                       p.overtimeStatus === 'pending' ||
                       shiftMetrics.overtimeStatus === 'pending' ||
-                      (linkedOtReq && (linkedOtReq.status === 'pending' || linkedOtReq.status === 'pending_admin'))
+                      (!isManualAdminShift && linkedOtReq && (linkedOtReq.status === 'pending' || linkedOtReq.status === 'pending_admin'))
                     );
 
                     const finalOtHours = shiftMetrics.overtimeHours > 0 ? shiftMetrics.overtimeHours : (parseFloat(p.overtimeHours) || 0);
@@ -2677,6 +2762,27 @@ export default function AttendancePunchesModal({
                       : isOtPending
                       ? 'pending'
                       : (p.overtimeStatus || 'none');
+                    const effectiveOtHours = isOtExplicitlyApproved ? finalOtHours : (linkedOtReq?.hours || p.overtimeHours || 0);
+
+                    let cleanNotes = p.notes || p.note || p.statusLabel || '';
+                    if (effectiveOtStatus === 'approved') {
+                      cleanNotes = cleanNotes
+                        .replace(/❌\s*(تم رفض الساعات الإضافية|إضافي مرفوض)[^|]*/g, '')
+                        .replace(/إضافي\s*قيد\s*الاعتماد/g, 'إضافي معتمد')
+                        .replace(/قيد\s*الاعتماد/g, 'معتمد')
+                        .replace(/\|\s*\|/g, '|')
+                        .trim()
+                        .replace(/^\|\s*|\s*\|$/g, '');
+                    } else if (effectiveOtStatus === 'rejected') {
+                      cleanNotes = cleanNotes.replace(/إضافي\s*قيد\s*الاعتماد/g, 'إضافي مرفوض').replace(/قيد\s*الاعتماد/g, 'مرفوض');
+                    } else if (effectiveOtStatus === 'none') {
+                      cleanNotes = cleanNotes
+                        .replace(/❌\s*(تم رفض الساعات الإضافية|إضافي مرفوض)[^|]*/g, '')
+                        .replace(/⏳?\s*إضافي\s*قيد\s*الاعتماد[^|]*/g, '')
+                        .replace(/\|\s*\|/g, '|')
+                        .trim()
+                        .replace(/^\|\s*|\s*\|$/g, '');
+                    }
 
                     return (
                       <tr key={p.id || index} style={{ background: isRejectedPhoto ? '#fff1f2' : (hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent') }}>
@@ -2843,14 +2949,14 @@ export default function AttendancePunchesModal({
                               hasPerm,
                               perm,
                               permHours,
-                              effectiveOtStatus: p.overtimeStatus,
-                              effectiveOtHours: parseFloat(p.overtimeHours || otH || 0),
+                              effectiveOtStatus,
+                              effectiveOtHours: isOtExplicitlyApproved ? finalOtHours : (linkedOtReq?.hours || p.overtimeHours || otH || 0),
                               effectivePenaltyStatus: p.penaltyStatus,
                               linkedPenaltyReq: null,
-                              linkedOtReq: null,
+                              linkedOtReq,
                               isManualShift: isShiftManualPunch(p),
                               isRejectedPhoto,
-                              cleanNotes: p.notes || p.note || p.statusLabel || '',
+                              cleanNotes,
                               source: p.source || 'kiosk'
                             })}
                             title="عرض تفاصيل اليوم"
@@ -3229,6 +3335,28 @@ export default function AttendancePunchesModal({
                           {editPreviewMetrics.breakHours > 0 && (
                             <span style={{ color: '#f59e0b' }}>■ استراحة ({editPreviewMetrics.breakHours.toFixed(2)} س)</span>
                           )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Smart Alert Banner when editing punch with prior rejected overtime */}
+                    {Boolean(editingPunch && (editingPunch.overtimeStatus === 'rejected' || editingPunch.rejectedOvertime || (typeof editingPunch.statusLabel === 'string' && editingPunch.statusLabel.includes('إضافي مرفوض')))) && (
+                      <div style={{
+                        background: '#eff6ff',
+                        border: '1.5px solid #93c5fd',
+                        borderRadius: '10px',
+                        padding: '10px 14px',
+                        fontSize: '12px',
+                        color: '#1e40af',
+                        fontWeight: '700',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                      }}>
+                        <span style={{ fontSize: '16px' }}>ℹ️</span>
+                        <div>
+                          <strong>تنبيه الإدارة الذكي:</strong> هذا اليوم كان يحتوي على إضافي مرفوض سابقاً. سيتم الآن فك الرفض تلقائياً، واعتماد الساعات الجديدة إن وُجدت، وتوثيق سجل التعديل بالكامل في ملاحظات اليوم.
                         </div>
                       </div>
                     )}

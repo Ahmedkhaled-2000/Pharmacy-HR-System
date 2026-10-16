@@ -457,7 +457,9 @@ export function calculateShiftMetrics(shift, state) {
     );
 
     // إذا كانت الوردية يدوية ولم ترفضها الإدارة صراحة على مستوى الوردية نفسها، نتجاهل أي رفض قديم خارجي في linkedOtReq
-    const isShiftRejected = shift.overtimeStatus === 'rejected' || shift.rejectedOvertime === true;
+    const isShiftRejected = isManualAdminShift
+      ? Boolean(shift.overtimeStatus === 'rejected' && shift.rejectedOvertime === true)
+      : Boolean(shift.overtimeStatus === 'rejected' || shift.rejectedOvertime === true);
     const isReqRejected = !isManualAdminShift && Boolean(linkedOtReq && (linkedOtReq.status === 'rejected' || linkedOtReq.adminRejected === true));
 
     const isShiftApproved = !isShiftRejected && (
