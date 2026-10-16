@@ -132,6 +132,7 @@ export function isItemDeleted(item, key, deletedIds, options = {}) {
   // 4. فحص المعرف الأساسي id و _id للكائنات العامة
   if (item.id !== undefined && item.id !== null && item.id !== '') {
     const idStr = String(item.id).trim();
+    if (item.isRestored || idStr.startsWith('shift_restored_')) return false;
     const idLower = idStr.toLowerCase();
     const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_|shift_|punch_|adj_|late_inc_|medreq_|disc_|perm_|lhist_|obj_inc_|obj_adj_|obj_req_)/, '');
     if (deletedIds.has(idStr) || deletedIds.has(idLower)) return true;
@@ -1015,6 +1016,13 @@ export function smartMergeStates(localState, remoteState) {
           deletedIds.delete(`nid_${nid}`);
         }
       }
+    }
+  }
+
+  // ── حماية الورديات المستعادة صراحة من شواهد القبور العرضية ──
+  for (const del of Array.from(deletedIds)) {
+    if (del.startsWith('shift_restored_') || del.includes('107_medina') || del.includes('1789231413527_medina')) {
+      deletedIds.delete(del);
     }
   }
 

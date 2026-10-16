@@ -1344,18 +1344,28 @@ export default function EmployeePortalView({
     });
 
     // 🛡️ صمام إزالة التكرار الذكي للعرض في صفحة الموظف (Display Deduplication Guard for Employee Portal):
-    // مطابقة تامة مع شاشة الإدارة وكشف الرواتب لمنع ظهور نفس اليوم مرتين
-    const seenByDate = new Map();
+    // منع تكرار نفس الوردية في نفس الفرع في نفس اليوم مع السماح بتعدد الفروع للموظف في نفس اليوم
+    const getCanonicalBranchKey = (shift) => {
+      if (!shift) return 'default';
+      const bObj = (state.branches || []).find((b) => (b.id && shift.branchId && String(b.id) === String(shift.branchId)) || (shift.branchName && b.name && shift.branchName.trim() === b.name.trim()));
+      if (bObj?.id) return String(bObj.id);
+      if (shift.branchId) return String(shift.branchId);
+      if (shift.branchName) return String(shift.branchName).trim();
+      return 'default';
+    };
+
+    const seenByBranchAndDate = new Map();
     sortedCombined.forEach(p => {
       if (!p || !p.date) return;
-      const key = p.date;
-      if (!seenByDate.has(key)) {
-        seenByDate.set(key, p);
+      const bKey = getCanonicalBranchKey(p);
+      const key = `${bKey}_${p.date}`;
+      if (!seenByBranchAndDate.has(key)) {
+        seenByBranchAndDate.set(key, p);
       } else {
-        const existing = seenByDate.get(key);
+        const existing = seenByBranchAndDate.get(key);
         // الوردية الحية لليوم الحالي لها أولوية قصوى
         if (p.isLiveActive && !existing.isLiveActive) {
-          seenByDate.set(key, p);
+          seenByBranchAndDate.set(key, p);
           return;
         }
         if (!p.isLiveActive && existing.isLiveActive) {
@@ -1366,7 +1376,7 @@ export default function EmployeePortalView({
         const exIsManual = Boolean(existing.isManual || existing.manualPunch || existing.adminApproved || existing.editedByAdmin);
 
         if (pIsManual && !exIsManual) {
-          seenByDate.set(key, p);
+          seenByBranchAndDate.set(key, p);
         } else if (!pIsManual && exIsManual) {
           // keep existing manual
         } else {
@@ -1376,17 +1386,17 @@ export default function EmployeePortalView({
           const exHrs = parseFloat(existing.actualWorkedHours || existing.hours || 0);
 
           if (pHasOut && !exHasOut) {
-            seenByDate.set(key, p);
+            seenByBranchAndDate.set(key, p);
           } else if (pHrs > 0 && exHrs === 0) {
-            seenByDate.set(key, p);
+            seenByBranchAndDate.set(key, p);
           } else if (pHrs > exHrs) {
-            seenByDate.set(key, p);
+            seenByBranchAndDate.set(key, p);
           }
         }
       }
     });
 
-    return Array.from(seenByDate.values()).sort((a, b) => {
+    return Array.from(seenByBranchAndDate.values()).sort((a, b) => {
       const dateA = String(a?.date || '').trim();
       const dateB = String(b?.date || '').trim();
       if (dateA !== dateB) return dateB.localeCompare(dateA);

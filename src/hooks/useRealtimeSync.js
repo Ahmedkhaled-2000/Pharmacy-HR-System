@@ -294,6 +294,13 @@ export function useRealtimeSync(props = {}) {
         }
       } catch {}
 
+      // 🛡️ حماية الورديات المستعادة صراحة من شواهد القبور المتراكمة محلياً
+      for (const del of Array.from(allDeletedIds)) {
+        if (del.startsWith('shift_restored_') || del.includes('107_medina') || del.includes('1789231413527_medina')) {
+          allDeletedIds.delete(del);
+        }
+      }
+
       // تأمين أولوية الموظفين المضافين أو المحدثين محلياً حديثاً (خلال آخر 120 ثانية) من ارتداد الكاش السحابي
       const now = Date.now();
       const localRecentEmps = (prev.employees || []).filter(e => {

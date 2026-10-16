@@ -601,9 +601,10 @@ export function normalizeState(parsed) {
       employeeId: remapEmpId(s.employeeId || s.jobId || (employees[0] ? employees[0].id : ''))
     }));
 
-  // 1. فلترة الورديات المحذوفة وفق شواهد القبور (_deletedIds)
+  // 1. فلترة الورديات المحذوفة وفق شواهد القبور (_deletedIds) مع حصانة الورديات المستعادة
   rawShifts = rawShifts.filter((s) => {
     if (!s) return false;
+    if (s.isRestored || String(s.id || '').startsWith('shift_restored_')) return true;
     const sId = String(s.id || '').trim().toLowerCase();
     if (deletedSet.has(sId) || deletedSet.has(`shift_${sId}`)) return false;
     return true;
