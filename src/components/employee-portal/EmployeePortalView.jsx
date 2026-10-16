@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { AR_MONTHS, arabicWeekday, fmt, arabicMonthLabel, getActivePayrollCycleMonth, getEmpDisplayName, getEmployeeManualPunchesCount, isShiftManualPunch, getEmployeeApprovedLeaves, getShiftStartEpoch } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
-import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '../../utils/periodEngine';
+import { getCycleDateRange, createDatePredicate, getActivePayrollMonth, isBranchTerminatedInCycle } from '../../utils/periodEngine';
 import { getRealDate, getRealTodayStr, getRealNowTimeStr } from '../../utils/timeEngine';
 import { filterEmployeeNotifications, countUnreadEmployeeNotifications, getNotificationTargetTab, getNotificationTabLabel } from '../../utils/notificationEngine';
 
@@ -332,15 +332,36 @@ export default function EmployeePortalView({
     return getCycleDateRange(selectedMonth, orgSettings || state?.orgSettings);
   }, [selectedMonth, orgSettings, state?.orgSettings]);
 
-  const primaryEmpBranchId = emp?.branchesDetails?.[0]?.branchId || emp?.branchId || '';
+  const activeWorkingBranches = useMemo(() => {
+    if (!Array.isArray(emp?.branchesDetails)) {
+      return emp?.branchId ? [{ branchId: emp.branchId }] : [];
+    }
+    const filtered = emp.branchesDetails.filter((b) => !isBranchTerminatedInCycle(b));
+    return filtered.length > 0 ? filtered : emp.branchesDetails;
+  }, [emp?.branchesDetails, emp?.branchId]);
+
+  const primaryEmpBranchId = activeWorkingBranches[0]?.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId || '';
   const [selectedBranchId, setSelectedBranchId] = useState(primaryEmpBranchId);
   const [isBranchSelected, setIsBranchSelected] = useState(Boolean(primaryEmpBranchId));
   const [punchTargetBranchId, setPunchTargetBranchId] = useState(primaryEmpBranchId);
 
+  const selectedBranchDetails = useMemo(() => {
+    if (!selectedBranchId || !Array.isArray(emp?.branchesDetails)) return null;
+    return emp.branchesDetails.find((b) => String(b.branchId) === String(selectedBranchId)) || null;
+  }, [emp?.branchesDetails, selectedBranchId]);
+
+  const isSelectedBranchTerminated = useMemo(() => {
+    return isBranchTerminatedInCycle(selectedBranchDetails);
+  }, [selectedBranchDetails]);
+
   useEffect(() => {
     if (currentEmpUser) {
       const currentEmp = (state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser;
-      const primaryBId = currentEmp?.branchesDetails?.[0]?.branchId || currentEmp?.branchId || '';
+      const activeBranches = Array.isArray(currentEmp?.branchesDetails)
+        ? currentEmp.branchesDetails.filter((b) => !isBranchTerminatedInCycle(b))
+        : [];
+      const primaryBId = activeBranches[0]?.branchId || currentEmp?.branchesDetails?.[0]?.branchId || currentEmp?.branchId || '';
+
       if (!currentEmp || !currentEmp.branchesDetails || currentEmp.branchesDetails.length <= 1) {
         setSelectedBranchId(primaryBId);
         setIsBranchSelected(true);
@@ -2445,14 +2466,20 @@ export default function EmployeePortalView({
             </button>
             {emp.branchesDetails.map(bd => {
               const b = state.branches?.find(br => br.id === bd.branchId);
+              const isTerminated = isBranchTerminatedInCycle(bd);
               return (
                 <button
                   key={bd.branchId}
-                  className="btn btn-start"
-                  style={{ justifyContent: 'center', padding: '12px', fontSize: '15px' }}
+                  className={isTerminated ? "btn btn-outline" : "btn btn-start"}
+                  style={{
+                    justifyContent: 'center',
+                    padding: '12px',
+                    fontSize: '15px',
+                    ...(isTerminated ? { borderColor: '#f59e0b', color: '#b45309', background: '#fffbeb' } : {})
+                  }}
                   onClick={() => { setSelectedBranchId(bd.branchId); setIsBranchSelected(true); }}
                 >
-                  📍 {b?.name || 'فرع غير معروف'}
+                  📍 {b?.name || 'فرع غير معروف'} {isTerminated ? `🔒 (منتهي - دورة ${bd.terminatedCycleMonth || 'الحالية'})` : ''}
                 </button>
               );
             })}
@@ -2951,7 +2978,12 @@ export default function EmployeePortalView({
                 <option value="">🌐 الكل</option>
                 {emp.branchesDetails.map((bd) => {
                   const b = state.branches?.find((br) => br.id === bd.branchId);
-                  return <option key={bd.branchId} value={bd.branchId}>📍 {b?.name || bd.branchId}</option>;
+                  const isTerminated = isBranchTerminatedInCycle(bd);
+                  return (
+                    <option key={bd.branchId} value={bd.branchId}>
+                      📍 {b?.name || bd.branchId} {isTerminated ? `🔒(منتهي ${bd.terminatedCycleMonth || ''})` : ''}
+                    </option>
+                  );
                 })}
               </select>
             )}
@@ -3028,7 +3060,12 @@ export default function EmployeePortalView({
                     <option value="">🌐 جميع الفروع (ملخص شامل)</option>
                     {emp.branchesDetails.map((bd) => {
                       const b = state.branches?.find((br) => br.id === bd.branchId);
-                      return <option key={bd.branchId} value={bd.branchId}>📍 فرع {b?.name || bd.branchId}</option>;
+                      const isTerminated = isBranchTerminatedInCycle(bd);
+                      return (
+                        <option key={bd.branchId} value={bd.branchId}>
+                          📍 فرع {b?.name || bd.branchId} {isTerminated ? `🔒 (منتهي - دورة ${bd.terminatedCycleMonth || 'الحالية'})` : ''}
+                        </option>
+                      );
                     })}
                   </select>
                 </div>
@@ -4532,7 +4569,9 @@ export default function EmployeePortalView({
               {/* Quick Branch Switcher Buttons */}
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '12px', color: '#0f766e', fontWeight: 700 }}>الانتقال لفرع لتقديم طلب:</span>
-                {emp.branchesDetails.map((bd) => {
+                {emp.branchesDetails
+                  .filter((bd) => !isBranchTerminatedInCycle(bd))
+                  .map((bd) => {
                   const br = state.branches?.find(b => String(b.id) === String(bd.branchId));
                   return (
                     <button
@@ -4619,6 +4658,47 @@ export default function EmployeePortalView({
                 </div>
               </div>
 
+              {/* ── Grace Period Banner for Terminated Branch ── */}
+              {isSelectedBranchTerminated && (
+                <div
+                  className="card fade-in"
+                  style={{
+                    marginBottom: '20px',
+                    background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(251, 191, 36, 0.05))',
+                    border: '1px solid rgba(245, 158, 11, 0.35)',
+                    borderRadius: '14px',
+                    padding: '16px 20px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '14px',
+                    boxShadow: '0 4px 12px rgba(245, 158, 11, 0.08)'
+                  }}
+                >
+                  <div style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    background: 'rgba(245, 158, 11, 0.2)',
+                    color: '#b45309',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '22px',
+                    flexShrink: 0
+                  }}>
+                    ℹ️
+                  </div>
+                  <div style={{ flex: 1, fontSize: '13px', lineHeight: 1.6 }}>
+                    <div style={{ fontWeight: 800, color: '#92400e', fontSize: '14px', marginBottom: '2px' }}>
+                      تم إنهاء خدمتك من فرع ({state.branches?.find(b => String(b.id) === String(selectedBranchId))?.name || `فرع ${selectedBranchId}`}) بتاريخ {selectedBranchDetails?.terminationDate || 'مسبقاً'}
+                    </div>
+                    <div style={{ color: '#78350f' }}>
+                      جميع سجلات حضورك، وبصماتك، ومستحقاتك المالية لهذا الفرع محفوظة بالكامل ومدرجة ضمن كشف راتب دورة شهر ({selectedBranchDetails?.terminatedCycleMonth || 'الحالية'}). يحق لك استعراض ومراجعة بياناتك حتى نهاية دورة الشهر الحالية (تنتهي في {selectedBranchDetails?.cycleEndDate || 'نهاية الشهر'}).
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* ── Live Punch Clock Widget (always shown, button hidden if permission revoked) ── */}
               {(() => {
                 const activeShift = state.activeShifts[emp.id];
@@ -4660,7 +4740,22 @@ export default function EmployeePortalView({
                       </div>
 
                       {/* Show shift buttons only when canStartEnd is true */}
-                      {canStartEnd && (
+                      {isSelectedBranchTerminated ? (
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          background: '#fef3c7',
+                          border: '1px solid #f59e0b',
+                          color: '#92400e',
+                          padding: '10px 16px',
+                          borderRadius: '10px',
+                          fontSize: '12.5px',
+                          fontWeight: 700
+                        }}>
+                          🔒 تم إنهاء الخدمة من هذا الفرع — متاح للمراجعة فقط. لتسجيل البصمة، يرجى التبديل إلى أحد فروعك النشطة.
+                        </div>
+                      ) : canStartEnd && (
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                           {!activeShift ? (
                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -4668,14 +4763,16 @@ export default function EmployeePortalView({
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                   <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>📍 اختر الفرع:</label>
                                   <select
-                                    value={punchTargetBranchId || emp.branchesDetails[0]?.branchId || ''}
+                                    value={punchTargetBranchId || activeWorkingBranches[0]?.branchId || ''}
                                     onChange={(e) => setPunchTargetBranchId(e.target.value)}
                                     style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '12.5px', fontWeight: 'bold' }}
                                   >
-                                    {emp.branchesDetails.map((bd) => {
-                                      const b = (state.branches || []).find((br) => String(br.id) === String(bd.branchId));
-                                      return <option key={bd.branchId} value={bd.branchId}>فرع {b?.name || bd.branchId}</option>;
-                                    })}
+                                    {emp.branchesDetails
+                                      .filter((bd) => !isBranchTerminatedInCycle(bd))
+                                      .map((bd) => {
+                                        const b = (state.branches || []).find((br) => String(br.id) === String(bd.branchId));
+                                        return <option key={bd.branchId} value={bd.branchId}>فرع {b?.name || bd.branchId}</option>;
+                                      })}
                                   </select>
                                 </div>
                               )}
@@ -4686,7 +4783,7 @@ export default function EmployeePortalView({
                                     showToast('❌ تم تقييد الصلاحيات: ليس لديك صلاحية لبدء الوردية عبر البصمة الحية');
                                     return;
                                   }
-                                  const targetBId = punchTargetBranchId || (isMultiBranch ? emp.branchesDetails[0]?.branchId : emp.branchId);
+                                  const targetBId = punchTargetBranchId || activeWorkingBranches[0]?.branchId || emp.branchId;
                                   if (startShift) startShift(emp.id, 'employee', targetBId);
                                 }}
                               >
@@ -4884,6 +4981,21 @@ export default function EmployeePortalView({
                               <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
                                 كود: {bObj?.code || bd.branchId} &nbsp;|&nbsp; المدير: {bObj?.managerName || 'مدير الفرع'}
                               </span>
+                              {isBranchTerminatedInCycle(bd) && (
+                                <div style={{
+                                  background: '#fef3c7',
+                                  border: '1px solid #fcd34d',
+                                  color: '#92400e',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '11px',
+                                  fontWeight: 800,
+                                  marginTop: '4px',
+                                  display: 'inline-block'
+                                }}>
+                                  ⚠️ منتهي الخدمة في {bd.terminationDate || ''} (متاح للمراجعة لدورة {bd.terminatedCycleMonth || ''})
+                                </div>
+                              )}
                             </div>
 
                             {/* Live Badge */}
@@ -5217,7 +5329,9 @@ export default function EmployeePortalView({
                           value={empManualBranchId || emp.branchesDetails[0]?.branchId}
                           onChange={(e) => setEmpManualBranchId(e.target.value)}
                         >
-                          {emp.branchesDetails.map((bd) => {
+                          {emp.branchesDetails
+                            .filter((bd) => !isBranchTerminatedInCycle(bd))
+                            .map((bd) => {
                             const b = (state.branches || []).find((br) => br.id === bd.branchId);
                             return (
                               <option key={bd.branchId} value={bd.branchId}>
@@ -6963,39 +7077,108 @@ export default function EmployeePortalView({
 
           {/* ── 4. Tab: Leaves ── */}
           {activeTab === 'leaves' && canApplyLeave && (
-            <EmployeeLeaveModule
-              emp={emp}
-              state={state}
-              setState={setState}
-              saveState={saveState}
-              showToast={showToast}
-              selectedMonth={selectedMonth}
-              selectedBranchId={selectedBranchId || null}
-            />
+            isSelectedBranchTerminated ? (
+              <div className="card text-center fade-in" style={{ padding: '40px 20px', maxWidth: '600px', margin: '30px auto' }}>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔒</div>
+                <h3 style={{ margin: '0 0 10px', color: 'var(--text)' }}>الفرع المحدد منتهي الخدمة</h3>
+                <p style={{ color: 'var(--muted)', fontSize: '14px', lineHeight: 1.6, marginBottom: '20px' }}>
+                  تم إنهاء خدمتك من فرع ({state.branches?.find(b => String(b.id) === String(selectedBranchId))?.name || `فرع ${selectedBranchId}`}) بتاريخ {selectedBranchDetails?.terminationDate || ''}. لا يمكن تقديم طلبات إجازة جديدة لهذا الفرع، ولكن يمكنك استعراض سجلاتك السابقة.
+                </p>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button className="btn btn-outline" onClick={() => setActiveTab('dashboard')}>
+                    العودة للوحة المؤشرات
+                  </button>
+                  {activeWorkingBranches[0] && (
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => setSelectedBranchId(activeWorkingBranches[0].branchId)}
+                    >
+                      الانتقال إلى فرع ({state.branches?.find(b => String(b.id) === String(activeWorkingBranches[0].branchId))?.name || 'النشط'})
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <EmployeeLeaveModule
+                emp={emp}
+                state={state}
+                setState={setState}
+                saveState={saveState}
+                showToast={showToast}
+                selectedMonth={selectedMonth}
+                selectedBranchId={selectedBranchId || null}
+              />
+            )
           )}
 
           {/* ── 5. Tab: Loans ── */}
           {activeTab === 'loans' && canApplyLoan && (
-            <EmployeeLoansModule
-              emp={emp}
-              state={state}
-              setState={setState}
-              saveState={saveState}
-              showToast={showToast}
-              selectedBranchId={selectedBranchId || null}
-            />
+            isSelectedBranchTerminated ? (
+              <div className="card text-center fade-in" style={{ padding: '40px 20px', maxWidth: '600px', margin: '30px auto' }}>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔒</div>
+                <h3 style={{ margin: '0 0 10px', color: 'var(--text)' }}>الفرع المحدد منتهي الخدمة</h3>
+                <p style={{ color: 'var(--muted)', fontSize: '14px', lineHeight: 1.6, marginBottom: '20px' }}>
+                  تم إنهاء خدمتك من هذا الفرع بتاريخ {selectedBranchDetails?.terminationDate || ''}. لا يمكن طلب سلف جديدة لهذا الفرع.
+                </p>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button className="btn btn-outline" onClick={() => setActiveTab('dashboard')}>
+                    العودة للوحة المؤشرات
+                  </button>
+                  {activeWorkingBranches[0] && (
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => setSelectedBranchId(activeWorkingBranches[0].branchId)}
+                    >
+                      الانتقال إلى فرع ({state.branches?.find(b => String(b.id) === String(activeWorkingBranches[0].branchId))?.name || 'النشط'})
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <EmployeeLoansModule
+                emp={emp}
+                state={state}
+                setState={setState}
+                saveState={saveState}
+                showToast={showToast}
+                selectedBranchId={selectedBranchId || null}
+              />
+            )
           )}
 
           {/* ── 6. Tab: Permissions ── */}
           {activeTab === 'permissions' && canApplyPermission && (
-            <EmployeePermissionsModule
-              emp={emp}
-              state={state}
-              setState={setState}
-              saveState={saveState}
-              showToast={showToast}
-              selectedBranchId={selectedBranchId || null}
-            />
+            isSelectedBranchTerminated ? (
+              <div className="card text-center fade-in" style={{ padding: '40px 20px', maxWidth: '600px', margin: '30px auto' }}>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔒</div>
+                <h3 style={{ margin: '0 0 10px', color: 'var(--text)' }}>الفرع المحدد منتهي الخدمة</h3>
+                <p style={{ color: 'var(--muted)', fontSize: '14px', lineHeight: 1.6, marginBottom: '20px' }}>
+                  تم إنهاء خدمتك من هذا الفرع بتاريخ {selectedBranchDetails?.terminationDate || ''}. لا يمكن تقديم طلبات إذن وتأخير جديدة لهذا الفرع.
+                </p>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button className="btn btn-outline" onClick={() => setActiveTab('dashboard')}>
+                    العودة للوحة المؤشرات
+                  </button>
+                  {activeWorkingBranches[0] && (
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => setSelectedBranchId(activeWorkingBranches[0].branchId)}
+                    >
+                      الانتقال إلى فرع ({state.branches?.find(b => String(b.id) === String(activeWorkingBranches[0].branchId))?.name || 'النشط'})
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <EmployeePermissionsModule
+                emp={emp}
+                state={state}
+                setState={setState}
+                saveState={saveState}
+                showToast={showToast}
+                selectedBranchId={selectedBranchId || null}
+              />
+            )
           )}
 
           {/* ── 8. Tab: Monthly Roster ── */}
@@ -7017,16 +7200,39 @@ export default function EmployeePortalView({
 
           {/* ── 8.5. Tab: Shift Adjustment (تعديل الشيفت والجدول الشهري) ── */}
           {activeTab === 'shift-adjustment' && (
-            <ShiftAdjustmentModule
-              mode="employee"
-              emp={emp}
-              state={state}
-              setState={setState}
-              saveState={saveState}
-              showToast={showToast}
-              selectedMonth={selectedMonth}
-              selectedBranchId={selectedBranchId || null}
-            />
+            isSelectedBranchTerminated ? (
+              <div className="card text-center fade-in" style={{ padding: '40px 20px', maxWidth: '600px', margin: '30px auto' }}>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔒</div>
+                <h3 style={{ margin: '0 0 10px', color: 'var(--text)' }}>الفرع المحدد منتهي الخدمة</h3>
+                <p style={{ color: 'var(--muted)', fontSize: '14px', lineHeight: 1.6, marginBottom: '20px' }}>
+                  تم إنهاء خدمتك من هذا الفرع بتاريخ {selectedBranchDetails?.terminationDate || ''}. لا يمكن تعديل الجداول أو الورديات لهذا الفرع.
+                </p>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button className="btn btn-outline" onClick={() => setActiveTab('dashboard')}>
+                    العودة للوحة المؤشرات
+                  </button>
+                  {activeWorkingBranches[0] && (
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => setSelectedBranchId(activeWorkingBranches[0].branchId)}
+                    >
+                      الانتقال إلى فرع ({state.branches?.find(b => String(b.id) === String(activeWorkingBranches[0].branchId))?.name || 'النشط'})
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <ShiftAdjustmentModule
+                mode="employee"
+                emp={emp}
+                state={state}
+                setState={setState}
+                saveState={saveState}
+                showToast={showToast}
+                selectedMonth={selectedMonth}
+                selectedBranchId={selectedBranchId || null}
+              />
+            )
           )}
 
           {/* ── 8.6. Tab: Administrative Punch Edit Request (إرسال تعديل بصمة) ── */}
@@ -7043,15 +7249,38 @@ export default function EmployeePortalView({
 
           {/* ── 9. Tab: Shift Swaps ── */}
           {activeTab === 'swaps' && canApplySwap && (
-            <EmployeeShiftSwapModule
-              emp={emp}
-              state={state}
-              setState={setState}
-              saveState={saveState}
-              showToast={showToast}
-              selectedMonth={selectedMonth}
-              selectedBranchId={selectedBranchId || null}
-            />
+            isSelectedBranchTerminated ? (
+              <div className="card text-center fade-in" style={{ padding: '40px 20px', maxWidth: '600px', margin: '30px auto' }}>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔒</div>
+                <h3 style={{ margin: '0 0 10px', color: 'var(--text)' }}>الفرع المحدد منتهي الخدمة</h3>
+                <p style={{ color: 'var(--muted)', fontSize: '14px', lineHeight: 1.6, marginBottom: '20px' }}>
+                  تم إنهاء خدمتك من هذا الفرع بتاريخ {selectedBranchDetails?.terminationDate || ''}. لا يمكن تقديم طلبات تبديل ورديات لهذا الفرع.
+                </p>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button className="btn btn-outline" onClick={() => setActiveTab('dashboard')}>
+                    العودة للوحة المؤشرات
+                  </button>
+                  {activeWorkingBranches[0] && (
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => setSelectedBranchId(activeWorkingBranches[0].branchId)}
+                    >
+                      الانتقال إلى فرع ({state.branches?.find(b => String(b.id) === String(activeWorkingBranches[0].branchId))?.name || 'النشط'})
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <EmployeeShiftSwapModule
+                emp={emp}
+                state={state}
+                setState={setState}
+                saveState={saveState}
+                showToast={showToast}
+                selectedMonth={selectedMonth}
+                selectedBranchId={selectedBranchId || null}
+              />
+            )
           )}
 
           {/* ── 10. Tab: Evaluations ── */}

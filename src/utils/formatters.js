@@ -1,5 +1,5 @@
 import { isManagementJob, isBranchWithoutManager, getJobsList, shouldRouteDirectToAdmin, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from './jobsHelper.js';
-import { getActivePayrollMonth } from './periodEngine.js';
+import { getActivePayrollMonth, reconcileCycleTerminatedBranches } from './periodEngine.js';
 import { isVariableScheduleEmployee } from './latePenaltyEngine.js';
 export { getRealDate, getRealTodayStr, getRealNowTimeStr } from './timeEngine.js';
 import { getRealDate, getRealTodayStr } from './timeEngine.js';
@@ -385,6 +385,14 @@ export function normalizeState(parsed) {
       branchId: isBranchValid ? bId : ''
     };
   });
+
+  // ── 3. الترحيل التلقائي الذاتي للفروع المنتهية عند انقضاء دورتها الشهرية (Auto-Rollover) ──
+  try {
+    const { updatedEmployees: rolledOverEmployees } = reconcileCycleTerminatedBranches(employees, parsed.orgSettings || {});
+    employees = rolledOverEmployees;
+  } catch (err) {
+    console.warn('reconcileCycleTerminatedBranches in normalizeState:', err);
+  }
 
   const remapEmpId = (id) => {
     if (!id || !idRemap || idRemap.size === 0) return id;

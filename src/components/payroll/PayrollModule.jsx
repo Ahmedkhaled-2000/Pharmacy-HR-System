@@ -494,11 +494,13 @@ export default function PayrollModule({
                 if (isMultiBranch) {
                   if (filterBranch) {
                     const targetB = branches.find((br) => br.id === filterBranch);
-                    branchNameDisplay = targetB?.name || 'فرع مخصص';
+                    const isTerm = emp.branchesDetails?.some((bd) => String(bd.branchId) === String(filterBranch) && (bd.status === 'cycle_terminated' || bd.isTerminatedInCycle));
+                    branchNameDisplay = (targetB?.name || 'فرع مخصص') + (isTerm ? ' (منتهي خلال الدورة)' : '');
                   } else {
                     branchNameDisplay = emp.branchesDetails.map((bd) => {
                       const brObj = branches.find((br) => br.id === bd.branchId);
-                      return brObj?.name || bd.branchId;
+                      const isTerm = bd.status === 'cycle_terminated' || bd.isTerminatedInCycle;
+                      return (brObj?.name || bd.branchId) + (isTerm ? ' 🔒(منتهي)' : '');
                     }).join(' + ');
                   }
                 }

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { fmt, getRealTodayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { getJobsList } from '../../utils/jobsHelper';
+import { getActivePayrollMonth, getCycleDateRange } from '../../utils/periodEngine';
 import { useUI } from '../../context/UIContext';
 import EmployeeTerminationModal from './EmployeeTerminationModal';
 import EmployeeComprehensiveDossierModal from './EmployeeComprehensiveDossierModal';
@@ -274,13 +275,35 @@ export default function EmployeeCardsGrid({
         return;
       }
 
-      // Case A: Single-Branch Termination (Employee stays active in other branches)
+      // Case A: Single-Branch Termination (Employee stays active in other branches, branch remains in grace period for current cycle)
       if (data.terminationScope === 'single_branch' && data.targetBranchId) {
-        const remainingBranches = (targetEmp?.branchesDetails || []).filter(
-          (b) => String(b.branchId) !== String(data.targetBranchId)
-        );
-        const newPrimaryBranchId = remainingBranches[0]?.branchId || targetEmp?.branchId || 'main';
-        const newPrimaryRate = remainingBranches[0]?.salary || targetEmp?.salary;
+        const activeCycleMonth = getActivePayrollMonth(state.orgSettings);
+        const cycleRange = getCycleDateRange(activeCycleMonth, state.orgSettings);
+
+        // وسم الفرع المنتهي بحالة cycle_terminated مع بقائه في branchesDetails حتى نهاية دورة الشهر
+        const updatedBranchesDetails = (targetEmp?.branchesDetails || []).map((b) => {
+          if (String(b.branchId) === String(data.targetBranchId)) {
+            return {
+              ...b,
+              status: 'cycle_terminated',
+              isTerminatedInCycle: true,
+              terminationDate: data.terminationDate,
+              terminationReason: data.terminationReason || 'إنهاء خدمة من الفرع',
+              terminatedCycleMonth: activeCycleMonth,
+              cycleEndDate: cycleRange.endDate,
+              finalSettlement: data.settlement,
+              clearanceNotes: data.clearanceNotes || '',
+              signedClearanceDoc: data.signedClearanceDoc || null,
+              terminatedAt: new Date().toISOString()
+            };
+          }
+          return b;
+        });
+
+        // اختيار الفرع الأساسي الجديد من بين الفروع النشطة فعلياً (غير المنتهية)
+        const activeRemainingBranches = updatedBranchesDetails.filter((b) => b.status !== 'cycle_terminated');
+        const newPrimaryBranchId = activeRemainingBranches[0]?.branchId || targetEmp?.branchId || 'main';
+        const newPrimaryRate = activeRemainingBranches[0]?.salary || targetEmp?.salary;
 
         const branchArchiveRecord = {
           branchId: data.targetBranchId,
@@ -290,7 +313,9 @@ export default function EmployeeCardsGrid({
           clearanceNotes: data.clearanceNotes,
           finalSettlement: data.settlement,
           signedClearanceDoc: data.signedClearanceDoc || null,
-          terminatedAt: new Date().toISOString()
+          terminatedAt: new Date().toISOString(),
+          terminatedCycleMonth: activeCycleMonth,
+          cycleEndDate: cycleRange.endDate
         };
 
         const updatedEmployees = employees.map((e) => {
@@ -303,9 +328,11 @@ export default function EmployeeCardsGrid({
               is_active: true,
               branchId: newPrimaryBranchId,
               salary: newPrimaryRate,
-              branchesDetails: remainingBranches,
+              branchesDetails: updatedBranchesDetails,
               archivedBranchesDetails: [
-                ...(e.archivedBranchesDetails || []),
+                ...(e.archivedBranchesDetails || []).filter(
+                  (ab) => !(String(ab.branchId) === String(data.targetBranchId) && ab.terminatedCycleMonth === activeCycleMonth)
+                ),
                 branchArchiveRecord
               ],
               updatedAt: new Date().toISOString()
@@ -367,7 +394,9 @@ export default function EmployeeCardsGrid({
 
         if (setState) setState(updatedState);
         if (saveState) await saveState(updatedState);
-        if (showToast) showToast(`✅ تم إنهاء خدمة الموظف (${targetEmp?.name}) من فرع (${data.targetBranchName}) وتصفية مستحقاته مع استمرار عمله بالفروع الأخرى`);
+        if (showToast) {
+          showToast(`✅ تم إنهاء خدمة الموظف (${targetEmp?.name}) من فرع (${data.targetBranchName}) وتصفية مستحقاته؛ وستظل بصماته وسجلاته محفوظة ومتاحة للمراجعة حتى نهاية دورة شهر (${activeCycleMonth})`);
+        }
 
         setTerminationModalEmp(null);
         return;

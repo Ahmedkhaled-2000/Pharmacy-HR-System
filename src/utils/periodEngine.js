@@ -491,4 +491,95 @@ export function validateDatesInActiveCycle(datesInput, orgSettings = {}, refDate
   };
 }
 
+/**
+ * فحص ما إذا كان الفرع منتهي الخدمة ومقيداً بدورة الشهر الحالية للمراجعة
+ * @param {object} branchDetail
+ * @returns {boolean}
+ */
+export function isBranchTerminatedInCycle(branchDetail) {
+  if (!branchDetail || typeof branchDetail !== 'object') return false;
+  return branchDetail.status === 'cycle_terminated' || Boolean(branchDetail.isTerminatedInCycle);
+}
+
+/**
+ * فحص وترحيل الفروع التي تم إنهاء خدمتها وانقضت دورتها الشهرية تلقائياً وبدون تدخل بشري
+ * عند انتقال النظام لدورة شهرية جديدة (activeCycleMonth > terminatedCycleMonth)،
+ * يتم نقل الفرع نهائياً من branchesDetails إلى archivedBranchesDetails.
+ *
+ * @param {Array} employees
+ * @param {object} orgSettings
+ * @param {string} [currentMonth]
+ * @returns {{ updatedEmployees: Array, hasChanges: boolean }}
+ */
+export function reconcileCycleTerminatedBranches(employees = [], orgSettings = {}, currentMonth = null) {
+  const activeCycleMonth = currentMonth || getActivePayrollMonth(orgSettings);
+  let hasChanges = false;
+
+  const updatedEmployees = (employees || []).map((emp) => {
+    if (!emp || !Array.isArray(emp.branchesDetails) || emp.branchesDetails.length === 0) {
+      return emp;
+    }
+
+    const expiredBranches = [];
+    const remainingBranches = [];
+
+    emp.branchesDetails.forEach((bd) => {
+      const isTerminated = isBranchTerminatedInCycle(bd);
+      if (isTerminated) {
+        const termMonth = bd.terminatedCycleMonth;
+        // إذا كان شهر الدورة النشطة أحدث من شهر دورة الإنهاء (مثال: الإنهاء في 2026-10 والدورة الحالية 2026-11):
+        if (termMonth && activeCycleMonth > termMonth) {
+          expiredBranches.push(bd);
+          hasChanges = true;
+          return;
+        }
+      }
+      remainingBranches.push(bd);
+    });
+
+    if (expiredBranches.length === 0) {
+      return emp;
+    }
+
+    // تحديث أرشيف الفروع المنتهية بحفظ السجلات الكاملة
+    const existingArchived = Array.isArray(emp.archivedBranchesDetails) ? emp.archivedBranchesDetails : [];
+    const newArchived = [...existingArchived];
+
+    expiredBranches.forEach((eb) => {
+      const alreadyInArchive = newArchived.some(
+        (a) => String(a.branchId) === String(eb.branchId) && a.terminatedCycleMonth === eb.terminatedCycleMonth
+      );
+      if (!alreadyInArchive) {
+        newArchived.push({
+          branchId: eb.branchId,
+          branchName: eb.branchName || `فرع ${eb.branchId}`,
+          terminationDate: eb.terminationDate,
+          terminationReason: eb.terminationReason || 'إنهاء خدمة من الفرع',
+          finalSettlement: eb.finalSettlement || null,
+          terminatedCycleMonth: eb.terminatedCycleMonth,
+          cycleEndDate: eb.cycleEndDate,
+          archivedAt: new Date().toISOString()
+        });
+      }
+    });
+
+    // تعيين فرع أساسي نشط إن كان الفرع الأساسي الحالي ضمن الفروع المنتهية
+    const activeBranches = remainingBranches.filter((b) => !isBranchTerminatedInCycle(b));
+    const newPrimaryBranchId = activeBranches[0]?.branchId || remainingBranches[0]?.branchId || emp.branchId || 'main';
+    const newPrimarySalary = activeBranches[0]?.salary || remainingBranches[0]?.salary || emp.salary;
+
+    return {
+      ...emp,
+      branchId: newPrimaryBranchId,
+      salary: newPrimarySalary,
+      branchesDetails: remainingBranches,
+      archivedBranchesDetails: newArchived,
+      updatedAt: new Date().toISOString()
+    };
+  });
+
+  return { updatedEmployees, hasChanges };
+}
+
+
 

@@ -4,7 +4,7 @@ import { fmt, arabicWeekday, AR_MONTHS, getEmployeeApprovedLeaves } from '../../
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics, isVariableScheduleEmployee } from '../../utils/latePenaltyEngine';
 import { triggerDirectPrint, generateOfficialPayslipHTML } from '../../utils/printHelper';
-import { getCycleDateRange } from '../../utils/periodEngine';
+import { getCycleDateRange, isBranchTerminatedInCycle } from '../../utils/periodEngine';
 import { computeEmployeeLoanDeductionsForPeriod } from '../../utils/loansEngine';
 
 export default function PayslipPrintModal({
@@ -1316,10 +1316,20 @@ export default function PayslipPrintModal({
                     const bTotalBreak = bShifts.reduce((acc, s) => acc + (parseFloat(s.breakHours) || 0), 0);
                     const bTotalEarn = bTotalHours * bRate;
 
+                    const bDetail = (emp.branchesDetails || []).find(b => String(b.branchId) === String(bId)) || (emp.archivedBranchesDetails || []).find(b => String(b.branchId) === String(bId));
+                    const isTerminatedBranch = isBranchTerminatedInCycle(bDetail);
+
                     return (
                       <div key={bId} style={{ marginBottom: "12px" }}>
-                        <div style={{ background: "#f1f5f9", padding: "4px 8px", borderRadius: "4px", fontWeight: "bold", fontSize: "11px", marginBottom: "4px", color: "#334155", display: "flex", justifyContent: "space-between" }}>
-                          <span>📍 {bName}</span>
+                        <div style={{ background: "#f1f5f9", padding: "4px 8px", borderRadius: "4px", fontWeight: "bold", fontSize: "11px", marginBottom: "4px", color: "#334155", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span>
+                            📍 {bName}
+                            {isTerminatedBranch && (
+                              <span style={{ marginRight: "8px", fontSize: "9px", background: "#fef3c7", color: "#92400e", border: "1px solid #f59e0b", padding: "1px 6px", borderRadius: "4px" }}>
+                                ⚠️ منتهي بتاريخ {bDetail?.terminationDate || ''} (مستحقات معتمدة لدورة هذا الشهر)
+                              </span>
+                            )}
+                          </span>
                           <span>سعر الساعة: {fmt(bRate)} ج.م</span>
                         </div>
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "9.5px", textAlign: "center", marginBottom: "4px" }}>
