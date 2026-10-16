@@ -10,6 +10,7 @@
  */
 
 import { findEmployeeRoster, getEmployeeDaySchedule } from './rosterEngine.js';
+import { isBranchMatch } from './branchMatcher.js';
 
 /**
  * فحص ما إذا كان للموظف جدول شهري معتمد رسمي
@@ -564,3 +565,119 @@ export function getAuthoritativeShiftHours(shift, state) {
   // حيث يُحسب الإضافي في عمود الإضافي المستقل لمنع الازدواج
   return Math.round((metrics.regularHours + metrics.permissionHours) * 100) / 100;
 }
+
+/**
+ * دالة فحص وتدقيق تعارضات الورديات لموظف:
+ * 1. تمنع تكرار الوردية في نفس اليوم لنفس الفرع.
+ * 2. تمنع التداخل الزمني التام بين أي ورديتين للموظف (سواء في نفس الفرع أو في فرعين مختلفين).
+ * 3. تسمح بتسجيل أكثر من وردية في نفس اليوم طالما كانت في فروع مختلفة وبمواعيد غير متداخلة.
+ */
+export function checkShiftConflicts({
+  employeeId,
+  employeeCode = '',
+  branchId = '',
+  branchName = '',
+  date,
+  timeIn,
+  timeOut,
+  excludeShiftId = null,
+  shifts = [],
+  branches = []
+}) {
+  if (!employeeId || !date || !timeIn || !timeOut) {
+    return { hasConflict: false };
+  }
+
+  const cleanTime = (t) => String(t || '').trim().slice(0, 5);
+  const tIn = cleanTime(timeIn);
+  const tOut = cleanTime(timeOut);
+  if (!tIn.includes(':') || !tOut.includes(':')) {
+    return { hasConflict: false };
+  }
+
+  const [candInH, candInM] = tIn.split(':').map(Number);
+  const [candOutH, candOutM] = tOut.split(':').map(Number);
+  let candInMins = candInH * 60 + (candInM || 0);
+  let candOutMins = candOutH * 60 + (candOutM || 0);
+  if (candOutMins <= candInMins) {
+    candOutMins += 24 * 60; // وردية ليلية عابرة لمنتصف الليل
+  }
+
+  const targetDateStr = String(date).slice(0, 10);
+  const targetDateEpoch = new Date(`${targetDateStr}T00:00:00Z`).getTime();
+  const candStartEpoch = targetDateEpoch + candInMins * 60 * 1000;
+  const candEndEpoch = targetDateEpoch + candOutMins * 60 * 1000;
+
+  const targetBranchObj = (branches || []).find(
+    (b) => isBranchMatch(branchId, b) || (branchName && isBranchMatch(branchName, b))
+  );
+  const effectiveBranchName = targetBranchObj?.name || branchName || branchId || 'الفرع المحدد';
+
+  const empIdStr = String(employeeId);
+  const empCodeStr = employeeCode ? String(employeeCode) : '';
+
+  const otherShifts = (shifts || []).filter((s) => {
+    if (!s) return false;
+    if (excludeShiftId && String(s.id) === String(excludeShiftId)) return false;
+    if (s.status === 'cancelled' || s.isCancelled) return false;
+
+    const sEmpId = String(s.employeeId || '');
+    const sEmpCode = s.employeeCode ? String(s.employeeCode) : '';
+    const isEmpMatch = sEmpId === empIdStr || (empCodeStr && (sEmpCode === empCodeStr || sEmpId === empCodeStr));
+    return isEmpMatch;
+  });
+
+  for (const s of otherShifts) {
+    const sDate = String(s.date || '').slice(0, 10);
+    if (!sDate) continue;
+
+    const sIn = cleanTime(s.timeIn);
+    const sOut = cleanTime(s.timeOut);
+    if (!sIn.includes(':') || !sOut.includes(':')) continue;
+
+    const [sInH, sInM] = sIn.split(':').map(Number);
+    const [sOutH, sOutM] = sOut.split(':').map(Number);
+    let sInMins = sInH * 60 + (sInM || 0);
+    let sOutMins = sOutH * 60 + (sOutM || 0);
+    if (sOutMins <= sInMins) {
+      sOutMins += 24 * 60;
+    }
+
+    const sDateEpoch = new Date(`${sDate}T00:00:00Z`).getTime();
+    const sStartEpoch = sDateEpoch + sInMins * 60 * 1000;
+    const sEndEpoch = sDateEpoch + sOutMins * 60 * 1000;
+
+    const sBranchObj = (branches || []).find(
+      (b) => isBranchMatch(s.branchId, b) || (s.branchName && isBranchMatch(s.branchName, b))
+    );
+    const sBranchName = sBranchObj?.name || s.branchName || s.branchId || 'فرع آخر';
+
+    const isSameBranch = targetBranchObj && sBranchObj
+      ? targetBranchObj.id === sBranchObj.id
+      : (isBranchMatch(s.branchId, targetBranchObj || { id: branchId }) || String(s.branchId) === String(branchId));
+
+    // ── 1. التحقق الحازم من عدم تكرار الوردية في نفس اليوم وفي نفس الفرع ──
+    if (isSameBranch && sDate === targetDateStr) {
+      return {
+        hasConflict: true,
+        conflictType: 'same_branch_duplicate',
+        conflictingShift: s,
+        message: `الموظف لديه بالفعل وردية مسجلة في هذا الفرع ("${effectiveBranchName}") في نفس اليوم (${targetDateStr}) من ${sIn} إلى ${sOut}. لتعديل مواعيدها يرجى استخدام زر التعديل المخصص ✏️.`
+      };
+    }
+
+    // ── 2. التحقق من منع التداخل الزمني التام بين الورديات ──
+    const hasTimeOverlap = candStartEpoch < sEndEpoch && sStartEpoch < candEndEpoch;
+    if (hasTimeOverlap) {
+      return {
+        hasConflict: true,
+        conflictType: 'time_overlap',
+        conflictingShift: s,
+        message: `تعذر التسجيل: يوجد تداخل زمني بين موعد هذه الوردية (${tIn} إلى ${tOut}) ووردية مسجلة للموظف في فرع "${sBranchName}" من (${sIn} إلى ${sOut}). لا يمكن حضور الموظف في نفس التوقيت.`
+      };
+    }
+  }
+
+  return { hasConflict: false };
+}
+

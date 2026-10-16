@@ -2,6 +2,8 @@ import React, { useState, useMemo } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
 import { recalculateEmployeeCycleLateness, getEffectiveShiftHours, reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
+import { checkShiftConflicts } from '../../utils/workHoursEngine';
+import { isBranchMatch } from '../../utils/branchMatcher';
 import { apiSaveSettingsSlice } from '../../utils/apiClient';
 import {
   getEmpDisplayName,
@@ -91,6 +93,25 @@ export default function AttendanceModule({
     }
 
     const empObj = employees.find((e) => e.id === manualEmpId);
+
+    // 🛡️ التحقق الاحترافي من عدم تكرار الوردية لنفس الفرع ومنع أي تداخل زمني
+    const conflictResult = checkShiftConflicts({
+      employeeId: manualEmpId,
+      employeeCode: empObj?.code,
+      branchId: manualBranchId || empObj?.branchId,
+      branchName: (state.branches || []).find(b => isBranchMatch(manualBranchId || empObj?.branchId, b))?.name,
+      date: manualDate,
+      timeIn: manualInTime,
+      timeOut: manualOutTime,
+      excludeShiftId: null,
+      shifts: state.shifts || [],
+      branches: state.branches || []
+    });
+
+    if (conflictResult.hasConflict) {
+      showToast?.(`⚠️ ${conflictResult.message}`);
+      return;
+    }
 
     const inParts = manualInTime.split(':').map(Number);
     const outParts = manualOutTime.split(':').map(Number);

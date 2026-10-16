@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics, recalculateEmployeeCycleLateness, reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
-import { calcRawDurationMinutes } from '../../utils/workHoursEngine';
+import { calcRawDurationMinutes, checkShiftConflicts } from '../../utils/workHoursEngine';
 import { getEmployeeDaySchedule, findEmployeeRoster } from '../../utils/rosterEngine';
 import {
   getEmployeeManualPunchesCount,
@@ -743,7 +743,26 @@ export default function AttendancePunchesModal({
     e.preventDefault();
     if (!editingPunch) return;
 
-    // 0ms إغلاق فوري وقفل كامل لنافذة تسجيل/تعديل البصمة فور الضغط على زر الحفظ
+    // 0ms التحقق الاحترافي الفوري من عدم تكرار الوردية لنفس الفرع ومنع التداخل الزمني مع أي وردية أخرى
+    const conflictResult = checkShiftConflicts({
+      employeeId: employee.id,
+      employeeCode: employee.code,
+      branchId: editBranchId || employee.branchId,
+      branchName: (state.branches || []).find(b => isBranchMatch(editBranchId, b))?.name,
+      date: editDate,
+      timeIn: editTimeIn,
+      timeOut: editTimeOut,
+      excludeShiftId: isAddingNewPunch ? null : editingPunch?.id,
+      shifts: state.shifts || [],
+      branches: state.branches || []
+    });
+
+    if (conflictResult.hasConflict) {
+      showToast?.(`⚠️ ${conflictResult.message}`);
+      return;
+    }
+
+    // إغلاق فوري وقفل لنافذة تسجيل/تعديل البصمة بعد التأكد من عدم وجود تعارض
     const snapIsAdding = Boolean(isAddingNewPunch);
     const snapEditingPunch = { ...editingPunch };
     const snapDate = editDate;
@@ -877,16 +896,8 @@ export default function AttendancePunchesModal({
       let updatedShifts;
       let finalSavedShiftId = '';
 
-      const duplicateShiftIdsToTombstone = [];
-
       if (snapIsAdding) {
-        const existingIdx = (state.shifts || []).findIndex(s =>
-          (String(s.employeeId) === String(employee.id) || (employee.code && String(s.employeeCode) === String(employee.code))) &&
-          s.date === snapDate &&
-          s.status !== 'cancelled' && !s.isCancelled
-        );
-
-        finalSavedShiftId = existingIdx >= 0 ? state.shifts[existingIdx].id : `punch_manual_${Date.now()}`;
+        finalSavedShiftId = `punch_manual_${Date.now()}`;
 
         const newShiftPayload = {
           id: finalSavedShiftId,
@@ -926,26 +937,11 @@ export default function AttendancePunchesModal({
           statusLabel: overtimeHours > 0 ? (isOtApproved ? 'تسجيل يدوي (مع إضافي معتمد)' : 'تسجيل يدوي (إضافي قيد المراجعة)') : 'تسجيل يدوي من الإدارة',
           note: combinedNote,
           notes: combinedNote,
-          createdAt: existingIdx >= 0 ? (state.shifts[existingIdx].createdAt || new Date().toISOString()) : new Date().toISOString(),
+          createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
 
-        if (existingIdx >= 0) {
-          updatedShifts = (state.shifts || []).map((s, idx) => idx === existingIdx ? { ...s, ...newShiftPayload } : s);
-        } else {
-          updatedShifts = [newShiftPayload, ...(state.shifts || [])];
-        }
-
-        // صمام الأمان لمنع تكرار أي وردية أخرى لنفس الموظف في نفس اليوم
-        updatedShifts = updatedShifts.filter(s => {
-          if (!s) return false;
-          if (s.id === finalSavedShiftId) return true;
-          const isSameDay = (String(s.employeeId) === String(employee.id) || (employee.code && String(s.employeeCode) === String(employee.code))) && s.date === snapDate;
-          if (isSameDay && s.id) {
-            duplicateShiftIdsToTombstone.push(String(s.id));
-          }
-          return !isSameDay;
-        });
+        updatedShifts = [newShiftPayload, ...(state.shifts || [])];
       } else {
         finalSavedShiftId = String(snapEditingPunch.id);
         updatedShifts = (state.shifts || []).map((s) => {
@@ -989,25 +985,10 @@ export default function AttendancePunchesModal({
           }
           return s;
         });
-
-        // صمام الأمان لمنع تكرار أي وردية أخرى لنفس الموظف في نفس اليوم
-        updatedShifts = updatedShifts.filter(s => {
-          if (!s) return false;
-          if (String(s.id) === finalSavedShiftId) return true;
-          const isSameDay = (String(s.employeeId) === String(employee.id) || (employee.code && String(s.employeeCode) === String(employee.code))) && s.date === snapDate;
-          if (isSameDay && s.id) {
-            duplicateShiftIdsToTombstone.push(String(s.id));
-          }
-          return !isSameDay;
-        });
       }
 
-      const existingDeletedSet = new Set(Array.isArray(state._deletedIds) ? state._deletedIds.map(String) : []);
-      duplicateShiftIdsToTombstone.forEach(id => {
-        existingDeletedSet.add(id);
-        existingDeletedSet.add(`shift_${id}`);
-      });
-      const updatedDeletedIds = Array.from(existingDeletedSet);
+      // 🛡️ الحفاظ على كافة الورديات الأخرى دون حذف
+      const updatedDeletedIds = state._deletedIds || [];
 
       // إذا كانت البصمة المعدلة هي الوردية الحية النشطة، نقوم بتحديث فرعها وتوقيتها في activeShifts أيضاً
       let updatedActiveShifts = { ...(state.activeShifts || {}) };

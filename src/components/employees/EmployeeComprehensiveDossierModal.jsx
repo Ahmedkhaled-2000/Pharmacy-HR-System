@@ -29,6 +29,8 @@ import { triggerDirectPrint, generateClearanceSlipHTML } from '../../utils/print
 import { compressImage } from '../../utils/imageCompressor';
 import { useUI } from '../../context/UIContext';
 import { apiSaveSettingsSlice } from '../../utils/apiClient';
+import { checkShiftConflicts } from '../../utils/workHoursEngine';
+import { isBranchMatch } from '../../utils/branchMatcher';
 
 export default function EmployeeComprehensiveDossierModal({
   emp,
@@ -586,6 +588,26 @@ export default function EmployeeComprehensiveDossierModal({
     if (!editingShiftModal) return;
 
     const { isNew, shift, date, timeIn, timeOut, breakHours, branchId, notes } = editingShiftModal;
+
+    // 🛡️ التحقق الاحترافي من عدم تكرار الوردية لنفس الفرع ومنع أي تداخل زمني
+    const conflictResult = checkShiftConflicts({
+      employeeId: emp.id,
+      employeeCode: emp.code,
+      branchId: branchId || emp.branchId || 'main',
+      branchName: (state.branches || []).find((b) => isBranchMatch(branchId || emp.branchId, b))?.name,
+      date,
+      timeIn,
+      timeOut,
+      excludeShiftId: isNew ? null : shift?.id,
+      shifts: state?.shifts || [],
+      branches: state?.branches || []
+    });
+
+    if (conflictResult.hasConflict) {
+      showToast?.(`⚠️ ${conflictResult.message}`);
+      return;
+    }
+
     setEditingShiftModal(null);
 
     // حساب الساعات
