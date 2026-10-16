@@ -295,21 +295,36 @@ export function calculateShiftMetrics(shift, state) {
 
   // 3. فحص ساعات الإذن المعتمد
   let permHours = 0;
-  try {
-    const perm = findApprovedPermission(shift.employeeId, shift.date, state);
-    if (perm) {
-      permHours = parseFloat(perm.hours) || 0;
-      if (!permHours && perm.durationMinutes) {
-        permHours = Math.round((perm.durationMinutes / 60) * 100) / 100;
+  // فحص ما إذا كانت الوردية يدوية معتمدة من الإدارة (تعتمد ساعات العمل من فرق البصمتين فقط دون دمج أذونات قديمة ما لم يُطلب صراحة)
+  const isManualAdminShift = Boolean(
+    shift.isManual ||
+    shift.manualPunch ||
+    shift.editedByAdmin ||
+    shift.isAdminCreated ||
+    shift.unlinkPriorRequests ||
+    shift.decoupledDay
+  );
+  const shouldDecouplePerm = isManualAdminShift && (shift.ignorePermissions !== false);
+
+  if (!shouldDecouplePerm) {
+    try {
+      const perm = findApprovedPermission(shift.employeeId, shift.date, state);
+      if (perm && !perm.decoupledFromPunch && !perm.voidedOnManualPunch) {
+        permHours = parseFloat(perm.hours) || 0;
+        if (!permHours && perm.durationMinutes) {
+          permHours = Math.round((perm.durationMinutes / 60) * 100) / 100;
+        }
+        if (!permHours && perm.startTime && perm.endTime) {
+          const pMins = calcRawDurationMinutes(perm.startTime, perm.endTime);
+          permHours = Math.round((pMins / 60) * 100) / 100;
+        }
+      } else if (shift.permissionHours) {
+        permHours = parseFloat(shift.permissionHours) || 0;
       }
-      if (!permHours && perm.startTime && perm.endTime) {
-        const pMins = calcRawDurationMinutes(perm.startTime, perm.endTime);
-        permHours = Math.round((pMins / 60) * 100) / 100;
-      }
-    } else if (shift.permissionHours) {
+    } catch {
       permHours = parseFloat(shift.permissionHours) || 0;
     }
-  } catch {
+  } else if (shift.includePermissionHours && shift.permissionHours) {
     permHours = parseFloat(shift.permissionHours) || 0;
   }
 
@@ -430,11 +445,26 @@ export function calculateShiftMetrics(shift, state) {
       return empMatch && dateMatch;
     });
 
-    // 🛡️ سيادة الرفض: إذا تم رفض الإضافي، يلغي أي اعتماد سابق
-    const isShiftRejected = shift.overtimeStatus === 'rejected' || shift.rejectedOvertime === true;
-    const isReqRejected = Boolean(linkedOtReq && (linkedOtReq.status === 'rejected' || linkedOtReq.adminRejected === true));
+    // 🛡️ السيادة المطلقة للتعديل اليدوي للإدارة: إذا كانت الوردية يدوية ومعتمدة من الإدارة
+    // يتم فك الارتباط التام بأي طلبات رفض سابقة في مصفوفة الطلبات وتغليب قرار الإدارة
+    const isManualAdminShift = Boolean(
+      shift.isManual ||
+      shift.manualPunch ||
+      shift.editedByAdmin ||
+      shift.isAdminCreated ||
+      shift.unlinkPriorRequests ||
+      shift.decoupledDay
+    );
 
-    const isShiftApproved = !isShiftRejected && !isReqRejected && (shift.overtimeStatus === 'approved' || shift.isOvertimeApproved === true);
+    // إذا كانت الوردية يدوية ولم ترفضها الإدارة صراحة على مستوى الوردية نفسها، نتجاهل أي رفض قديم خارجي في linkedOtReq
+    const isShiftRejected = shift.overtimeStatus === 'rejected' || shift.rejectedOvertime === true;
+    const isReqRejected = !isManualAdminShift && Boolean(linkedOtReq && (linkedOtReq.status === 'rejected' || linkedOtReq.adminRejected === true));
+
+    const isShiftApproved = !isShiftRejected && (
+      shift.overtimeStatus === 'approved' ||
+      shift.isOvertimeApproved === true ||
+      (isManualAdminShift && shift.adminApproved && !isShiftRejected)
+    );
     const isReqApproved = !isShiftRejected && !isReqRejected && Boolean(linkedOtReq && (linkedOtReq.status === 'approved' || linkedOtReq.adminApproved === true));
 
     if (isShiftRejected || isReqRejected) {
@@ -444,7 +474,7 @@ export function calculateShiftMetrics(shift, state) {
     } else if (shift.overtimeStatus === 'pending' || (linkedOtReq && (linkedOtReq.status === 'pending' || linkedOtReq.status === 'pending_admin'))) {
       overtimeStatus = 'pending';
     } else {
-      overtimeStatus = 'pending';
+      overtimeStatus = isManualAdminShift && shift.adminApproved ? 'approved' : 'pending';
     }
   }
 

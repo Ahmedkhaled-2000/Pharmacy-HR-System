@@ -534,7 +534,7 @@ function fetchCloudDataDirect() {
           'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
           'Pragma': 'no-cache',
           'Expires': '0',
-          'User-Agent': 'PharmaDesktopClient/1.2.63 (Windows NT 10.0; Win64; x64)',
+          'User-Agent': 'PharmaDesktopClient/1.2.64 (Windows NT 10.0; Win64; x64)',
           'Connection': 'close'
         },
         timeout: 15000

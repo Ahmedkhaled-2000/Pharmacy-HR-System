@@ -44,6 +44,8 @@ export default function AttendancePunchesModal({
   const [editBreakHours, setEditBreakHours] = useState('0');
   const [editBranchId, setEditBranchId] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [editApproveOvertime, setEditApproveOvertime] = useState(true);
+  const [editDecouplePriorDayRequests, setEditDecouplePriorDayRequests] = useState(true);
 
   // 🛡️ معالج زر Escape المخصص والآمن لنافذة سجل البصمات (يمنع أي تداخل أو ضغط بالخطأ على أزرار الحذف)
   useEffect(() => {
@@ -633,6 +635,8 @@ export default function AttendancePunchesModal({
     setEditBreakHours('0');
     setEditBranchId(employee.branchId || (employee.branchesDetails && employee.branchesDetails[0]?.branchId) || '');
     setEditNotes('');
+    setEditApproveOvertime(true);
+    setEditDecouplePriorDayRequests(true);
   };
 
   const handleOpenEdit = (punch) => {
@@ -649,7 +653,81 @@ export default function AttendancePunchesModal({
     const matchingDetail = (employee.branchesDetails || []).find(bd => isBranchMatch(currentBId, { id: bd.branchId, branchId: bd.branchId, name: bd.branchName }));
     setEditBranchId(matchingDetail ? matchingDetail.branchId : currentBId);
     setEditNotes(punch.note || punch.notes || '');
+    setEditApproveOvertime(punch.overtimeStatus !== 'rejected');
+    setEditDecouplePriorDayRequests(true);
   };
+
+  // ⚡ المحرك التفاعلي للمعاينة اللحظية لاحتساب ساعات العمل والإضافي في نافذة التعديل/التسجيل اليدوي
+  const editPreviewMetrics = useMemo(() => {
+    if (!editingPunch) return null;
+    const inParts = (editTimeIn || '09:00').split(':').map(Number);
+    const outParts = (editTimeOut || '17:00').split(':').map(Number);
+    const inH = inParts[0] || 0;
+    const inM = inParts[1] || 0;
+    const outH = outParts[0] || 0;
+    const outM = outParts[1] || 0;
+    let diff = 0;
+    if (inH === outH && inM === outM) {
+      diff = 0;
+    } else {
+      diff = (outH + outM / 60) - (inH + inM / 60);
+      if (diff < 0) diff += 24;
+    }
+    const bH = Math.max(0, parseFloat(editBreakHours) || 0);
+    const actualWorked = Math.max(0, Math.round((diff - bH) * 100) / 100);
+
+    const daySched = getEmployeeDaySchedule(employee.id, editDate, state);
+    const profileHours = parseFloat(employee.workHoursPerDay || employee.workHours) || 8;
+    let scheduledHours = profileHours;
+
+    const isFlexEmp = employee.noMonthlySchedule || employee.isVariableHours || employee.variableHours || employee.hasNoRoster || employee.scheduleType === 'flexible' || employee.scheduleType === 'variable';
+    const activeRoster = !isFlexEmp ? findEmployeeRoster(employee.id, editDate, state) : null;
+    const hasApprovedRoster = !isFlexEmp && Boolean(activeRoster && (activeRoster.status === 'approved' || activeRoster.adminApproved === true || activeRoster.isApproved === true));
+
+    let regular = actualWorked;
+    let overtime = 0;
+    const isOvernight = (outH < inH) || (outH === inH && outM < inM);
+
+    if (hasApprovedRoster && daySched && daySched.start && daySched.end && daySched.type !== 'off' && editTimeIn && editTimeOut) {
+      const [sH, sM] = daySched.start.split(':').map(Number);
+      let [eH, eM] = daySched.end.split(':').map(Number);
+      let schedStartMins = sH * 60 + (sM || 0);
+      let schedEndMins = eH * 60 + (eM || 0);
+      if (schedEndMins <= schedStartMins) schedEndMins += 24 * 60;
+      scheduledHours = Math.round(((schedEndMins - schedStartMins) / 60) * 100) / 100;
+
+      let actInMins = inH * 60 + (inM || 0);
+      let actOutMins = outH * 60 + (outM || 0);
+      if (actOutMins <= actInMins) actOutMins += 24 * 60;
+
+      const earlyArrivalMins = actInMins < schedStartMins ? (schedStartMins - actInMins) : 0;
+      const lateDepartureMins = actOutMins > schedEndMins ? (actOutMins - schedEndMins) : 0;
+
+      const earlyOtHours = Math.round((earlyArrivalMins / 60) * 100) / 100;
+      const lateOtHours = Math.round((lateDepartureMins / 60) * 100) / 100;
+      overtime = Math.round((earlyOtHours + lateOtHours) * 100) / 100;
+      regular = Math.max(0, Math.round((actualWorked - overtime) * 100) / 100);
+    } else {
+      if (actualWorked > profileHours) {
+        regular = profileHours;
+        overtime = Math.round((actualWorked - profileHours) * 100) / 100;
+      } else {
+        regular = actualWorked;
+        overtime = 0;
+      }
+    }
+
+    return {
+      totalElapsed: Math.round(diff * 100) / 100,
+      breakHours: bH,
+      actualWorkedHours: actualWorked,
+      scheduledHours: scheduledHours,
+      regularHours: regular,
+      overtimeHours: overtime,
+      isOvernight,
+      hasApprovedRoster
+    };
+  }, [editingPunch, editTimeIn, editTimeOut, editBreakHours, editDate, employee, state]);
 
   const handleSaveEdit = async (e) => {
     e.preventDefault();
@@ -664,6 +742,8 @@ export default function AttendancePunchesModal({
     const snapBreakHours = editBreakHours;
     const snapBranchId = editBranchId;
     const snapNotes = editNotes;
+    const snapApproveOt = Boolean(editApproveOvertime);
+    const snapDecouplePrior = Boolean(editDecouplePriorDayRequests);
 
     setEditingPunch(null);
     setIsAddingNewPunch(false);
@@ -685,31 +765,6 @@ export default function AttendancePunchesModal({
       const bH = parseFloat(snapBreakHours) || 0;
       const calculatedHours = Math.max(0, Math.round((diff - bH) * 100) / 100);
 
-      const empIdStr = String(employee.id);
-      const empCodeStr = employee.code ? String(employee.code) : '';
-      const allPerms = [
-        ...(state.requests || []),
-        ...(state.permissions || []),
-        ...(state.employeePermissions || [])
-      ];
-      const pastPerm = allPerms.find(p => {
-        if (!p) return false;
-        const pEmpId = String(p.employeeId || p.empId || '');
-        if (pEmpId !== empIdStr && (!empCodeStr || pEmpId !== empCodeStr)) return false;
-        const pDate = String(p.date || p.startDate || p.effectiveDate || (p.createdAt ? p.createdAt.slice(0, 10) : '')).slice(0, 10);
-        if (pDate !== snapDate) return false;
-        const t = String(p.type || p.requestType || p.subType || '').toLowerCase();
-        return t.includes('perm') || t.includes('إذن') || t.includes('اذن') || p.permType === 'late' || p.permType === 'early';
-      });
-
-      let permNoteFragment = '';
-      if (pastPerm) {
-        const pDur = pastPerm.originalHours || pastPerm.hours || (pastPerm.durationMinutes ? Math.round((pastPerm.durationMinutes / 60) * 100) / 100 : 0);
-        const pStart = pastPerm.originalStartTime || pastPerm.startTime || '—';
-        const pEnd = pastPerm.originalEndTime || pastPerm.endTime || '—';
-        permNoteFragment = `كان يوجد إذن في هذا اليوم مدته (${pDur} س) من ${pStart} إلى ${pEnd}`;
-      }
-
       const daySched = getEmployeeDaySchedule(employee.id, snapDate, state);
       const profileHours = parseFloat(employee.workHoursPerDay || employee.workHours) || 8;
       let scheduledShiftHours = profileHours;
@@ -730,10 +785,10 @@ export default function AttendancePunchesModal({
         if (schedEndMins <= schedStartMins) schedEndMins += 24 * 60;
         scheduledShiftHours = Math.round(((schedEndMins - schedStartMins) / 60) * 100) / 100;
 
-        const [inH, inM] = String(snapTimeIn).split(':').map(Number);
-        let [outH, outM] = String(snapTimeOut).split(':').map(Number);
-        let actInMins = inH * 60 + (inM || 0);
-        let actOutMins = outH * 60 + (outM || 0);
+        const [actInH, actInM] = String(snapTimeIn).split(':').map(Number);
+        let [actOutH, actOutM] = String(snapTimeOut).split(':').map(Number);
+        let actInMins = actInH * 60 + (actInM || 0);
+        let actOutMins = actOutH * 60 + (actOutM || 0);
         if (actOutMins <= actInMins) actOutMins += 24 * 60;
 
         const earlyArrivalMins = actInMins < schedStartMins ? (schedStartMins - actInMins) : 0;
@@ -755,7 +810,8 @@ export default function AttendancePunchesModal({
         }
       }
 
-      const otStatus = overtimeHours > 0 ? 'approved' : 'none';
+      const isOtApproved = Boolean(overtimeHours > 0 && snapApproveOt);
+      const otStatus = (overtimeHours > 0) ? (snapApproveOt ? 'approved' : 'pending') : 'none';
 
       const editedBObj = (state.branches || []).find(b => isBranchMatch(snapBranchId, b));
       const canonicalBranchId = editedBObj ? editedBObj.id : (snapBranchId || employee.branchId || '');
@@ -776,8 +832,7 @@ export default function AttendancePunchesModal({
         finalSavedShiftId = existingIdx >= 0 ? state.shifts[existingIdx].id : `punch_manual_${Date.now()}`;
         const noteParts = [];
         if (snapNotes.trim()) noteParts.push(snapNotes.trim());
-        noteParts.push('تسجيل بصمة يدوية بواسطة الإدارة العليا' + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ''));
-        if (permNoteFragment) noteParts.push(permNoteFragment);
+        noteParts.push('تسجيل بصمة يدوية بواسطة الإدارة العليا' + (overtimeHours > 0 ? (isOtApproved ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ` (أساسي: ${regularHours} س + إضافي معلق: ${overtimeHours} س)`) : ''));
         const combinedNote = noteParts.join(' | ');
 
         const newShiftPayload = {
@@ -791,21 +846,29 @@ export default function AttendancePunchesModal({
           timeIn: snapTimeIn,
           timeOut: snapTimeOut,
           breakHours: bH,
-          hours: regularHours,
-          workHours: regularHours,
+          hours: isOtApproved ? calculatedHours : regularHours,
+          workHours: isOtApproved ? calculatedHours : regularHours,
           regularHours: regularHours,
           scheduledHours: scheduledShiftHours,
           actualWorkedHours: calculatedHours,
           netHours: calculatedHours,
+          grossHours: Math.round(diff * 100) / 100,
           overtimeHours: overtimeHours,
           overtimeStatus: otStatus,
+          isOvertimeApproved: isOtApproved,
+          rejectedOvertime: false,
           isManual: true,
           manualPunch: true,
           createdBy: 'admin',
           creatorRole: 'admin',
           isAdminCreated: true,
           adminApproved: true,
-          statusLabel: overtimeHours > 0 ? 'تسجيل يدوي (مع إضافي معتمد)' : 'تسجيل يدوي من الإدارة',
+          unlinkPriorRequests: snapDecouplePrior,
+          decoupledDay: snapDecouplePrior,
+          ignorePermissions: snapDecouplePrior,
+          permissionHours: 0,
+          isOvernight: (outH < inH) || (outH === inH && outM < inM),
+          statusLabel: overtimeHours > 0 ? (isOtApproved ? 'تسجيل يدوي (مع إضافي معتمد)' : 'تسجيل يدوي (إضافي قيد المراجعة)') : 'تسجيل يدوي من الإدارة',
           note: combinedNote,
           notes: combinedNote,
           createdAt: existingIdx >= 0 ? (state.shifts[existingIdx].createdAt || new Date().toISOString()) : new Date().toISOString(),
@@ -838,20 +901,28 @@ export default function AttendancePunchesModal({
               timeIn: snapTimeIn,
               timeOut: snapTimeOut,
               breakHours: bH,
-              hours: regularHours,
-              workHours: regularHours,
+              hours: isOtApproved ? calculatedHours : regularHours,
+              workHours: isOtApproved ? calculatedHours : regularHours,
               regularHours: regularHours,
               scheduledHours: scheduledShiftHours,
               actualWorkedHours: calculatedHours,
               netHours: calculatedHours,
+              grossHours: Math.round(diff * 100) / 100,
               overtimeHours: overtimeHours,
               overtimeStatus: otStatus,
+              isOvertimeApproved: isOtApproved,
+              rejectedOvertime: false,
+              unlinkPriorRequests: snapDecouplePrior,
+              decoupledDay: snapDecouplePrior,
+              ignorePermissions: snapDecouplePrior,
+              permissionHours: 0,
+              isOvernight: (outH < inH) || (outH === inH && outM < inM),
               adminApproved: true,
               branchId: canonicalBranchId,
               branchName: canonicalBranchName,
-              note: (snapNotes.trim() ? snapNotes.trim() + ' | ' : '') + (s.note || 'تم تعديل البصمة بواسطة الإدارة العليا') + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : '') + (permNoteFragment && !String(s.note || '').includes('كان يوجد إذن') ? ` | ${permNoteFragment}` : ''),
-              notes: (snapNotes.trim() ? snapNotes.trim() + ' | ' : '') + (s.notes || 'تم تعديل البصمة بواسطة الإدارة العليا') + (overtimeHours > 0 ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : '') + (permNoteFragment && !String(s.notes || '').includes('كان يوجد إذن') ? ` | ${permNoteFragment}` : ''),
-              statusLabel: overtimeHours > 0 ? 'معدلة من الإدارة (مع إضافي معتمد)' : 'معدلة من الإدارة',
+              note: (snapNotes.trim() ? snapNotes.trim() + ' | ' : '') + 'تم تعديل البصمة بواسطة الإدارة العليا' + (overtimeHours > 0 ? (isOtApproved ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ` (أساسي: ${regularHours} س + إضافي معلق: ${overtimeHours} س)`) : ''),
+              notes: (snapNotes.trim() ? snapNotes.trim() + ' | ' : '') + 'تم تعديل البصمة بواسطة الإدارة العليا' + (overtimeHours > 0 ? (isOtApproved ? ` (أساسي: ${regularHours} س + إضافي معتمد: ${overtimeHours} س)` : ` (أساسي: ${regularHours} س + إضافي معلق: ${overtimeHours} س)`) : ''),
+              statusLabel: overtimeHours > 0 ? (isOtApproved ? 'معدلة من الإدارة (مع إضافي معتمد)' : 'معدلة من الإدارة (إضافي معلق)') : 'معدلة من الإدارة',
               isManual: true,
               manualPunch: true,
               editedByAdmin: true,
@@ -905,22 +976,67 @@ export default function AttendancePunchesModal({
         state: updatedState,
         options: { reason: 'تعديل بصمة يدوي بالإدارة' }
       });
+
+      // 🛡️ فك الارتباط وتطهير طلبات الإضافي والأذونات السابقة لهذا اليوم
       let finalRequests = (reconState.requests || state.requests || []).map(r => {
-        const isMatch = (
-          (String(r.employeeId) === String(employee.id) || (employee.code && String(r.employeeCode) === String(employee.code))) &&
-          (r.date === snapDate || r.targetDate === snapDate || r.details?.shiftDate === snapDate) &&
-          (r.type === 'overtime' || r.type === 'طلب اضافي' || r.type === 'إضافي')
-        );
-        if (isMatch) {
-          return {
-            ...r,
-            status: 'approved',
-            adminApproved: true,
-            branchApproved: true,
-            hours: overtimeHours > 0 ? overtimeHours : r.hours,
-            resolvedAt: new Date().toISOString(),
-            adminNote: 'تم اعتماد وتحديث الإضافي تلقائياً من تعديل البصمة بالإدارة'
-          };
+        if (!r) return r;
+        const isEmp = (String(r.employeeId) === String(employee.id) || (employee.code && String(r.employeeCode) === String(employee.code)));
+        const rDate = String(r.date || r.targetDate || r.details?.shiftDate || '').slice(0, 10);
+        const isDateMatch = rDate === snapDate;
+
+        if (isEmp && isDateMatch) {
+          const isOtType = r.type === 'overtime' || r.type === 'extra_hours' || r.type === 'طلب اضافي' || r.type === 'إضافي' || String(r.id || '').includes('ot');
+          const isPermType = r.type === 'permission' || r.type === 'late_permission' || r.type === 'early_leave' || r.type === 'إذن' || r.type === 'اذن' || r.permType === 'late' || r.permType === 'early';
+
+          if (snapDecouplePrior) {
+            // 1. فك ارتباط وتحديث أي طلب إضافي لهذا اليوم
+            if (isOtType) {
+              if (overtimeHours > 0 && snapApproveOt) {
+                return {
+                  ...r,
+                  status: 'approved',
+                  adminApproved: true,
+                  branchApproved: true,
+                  adminRejected: false,
+                  rejected: false,
+                  hours: overtimeHours,
+                  overtimeHours: overtimeHours,
+                  regularHours: regularHours,
+                  totalShiftHours: calculatedHours,
+                  resolvedAt: new Date().toISOString(),
+                  adminNote: 'تم اعتماد وتحديث الإضافي تلقائياً وفق التعديل اليدوي للإدارة'
+                };
+              } else if (overtimeHours > 0 && !snapApproveOt) {
+                return {
+                  ...r,
+                  status: 'pending',
+                  adminApproved: false,
+                  adminRejected: false,
+                  rejected: false,
+                  hours: overtimeHours,
+                  overtimeHours: overtimeHours
+                };
+              } else {
+                return {
+                  ...r,
+                  status: 'cancelled',
+                  isCancelled: true,
+                  adminRejected: false,
+                  adminNote: 'تم إلغاء الطلب بعد تعديل البصمة اليدوية لعدم وجود إضافي'
+                };
+              }
+            }
+
+            // 2. فك ارتباط أي إذن سابق لهذا اليوم حتى لا يشوه أو يضخم ساعات الوردية اليدوية
+            if (isPermType) {
+              return {
+                ...r,
+                decoupledFromPunch: true,
+                voidedOnManualPunch: true,
+                note: (r.note ? r.note + ' | ' : '') + 'تم فك الارتباط بالبصمة اليدوية المعتمدة من الإدارة'
+              };
+            }
+          }
         }
         return r;
       });
@@ -952,19 +1068,19 @@ export default function AttendancePunchesModal({
       }
 
       if (snapIsAdding) {
-        showToast?.(`✅ تم تسجيل البصمة اليدوية بنجاح: ${regularHours} س أساسي${overtimeHours > 0 ? ` + ${overtimeHours} س إضافي معتمد تلقائياً` : ''}`);
+        showToast?.(`✅ تم تسجيل البصمة اليدوية بنجاح: ${regularHours} س أساسي${overtimeHours > 0 ? (isOtApproved ? ` + ${overtimeHours} س إضافي معتمد تلقائياً` : ` + ${overtimeHours} س إضافي قيد المراجعة`) : ''}`);
         return;
       }
 
-      const lateInc = (recRes.incidents || []).find((inc) => (String(inc.shiftId) === String(finalSavedShiftId) || inc.date === snapDate) && inc.lateMinutes > 0);
+      const lateInc = (reconState.lateIncidents || []).find((inc) => (String(inc.shiftId) === String(finalSavedShiftId) || inc.date === snapDate) && inc.lateMinutes > 0);
       if (lateInc && lateInc.deductionMinutes > 0) {
         showToast?.(`✅ تم حفظ التعديل وتطبيق لائحة الجزاءات تلقائياً: تأخير (${lateInc.lateMinutes} دقيقة) - ${lateInc.tierName} (${lateInc.actionLabel} - خصم ${lateInc.penaltyAmount} ج.م)`);
       } else if (lateInc && lateInc.lateMinutes > 0) {
         showToast?.(`✅ تم حفظ التعديل: تأخير (${lateInc.lateMinutes} دقيقة) - ${lateInc.actionLabel || 'فترة سماح'}`);
       } else if (overtimeHours > 0) {
-        showToast?.(`✅ تم حفظ تعديل البصمة واحتساب الإضافي تلقائياً: ${regularHours} س أساسي + ${overtimeHours} س إضافي معتمد`);
+        showToast?.(`✅ تم حفظ تعديل البصمة واحتساب الإضافي تلقائياً: ${regularHours} س أساسي + ${overtimeHours} س إضافي ${isOtApproved ? 'معتمد ⭐' : 'معلق ⏳'}`);
       } else {
-        showToast?.('✅ تم حفظ وتعديل بيانات البصمة وإعادة احتساب الجزاءات بنجاح!');
+        showToast?.('✅ تم حفظ وتعديل بيانات البصمة واحتساب ساعات العمل بنجاح!');
       }
     };
 
@@ -3029,6 +3145,118 @@ export default function AttendancePunchesModal({
                     </div>
                   )}
                 </div>
+
+                {/* ── Live Reactive Calculation Card & Options ── */}
+                {editPreviewMetrics && (
+                  <div style={{
+                    background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+                    border: '1.5px solid #cbd5e1',
+                    borderRadius: '12px',
+                    padding: '14px 16px',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '13px', fontWeight: '800', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        ⚡ احتساب الساعات اللحظي
+                      </span>
+                      {editPreviewMetrics.isOvernight && (
+                        <span style={{ fontSize: '11px', fontWeight: '700', background: '#ede9fe', color: '#6d28d9', padding: '2px 8px', borderRadius: '6px', border: '1px solid #ddd6fe' }}>
+                          🌙 وردية ليلية (عابرة لمنتصف الليل)
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Metrics Grid */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', textAlign: 'center' }}>
+                      <div style={{ background: '#fff', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600' }}>إجمالي الفعلي</div>
+                        <div style={{ fontSize: '15px', fontWeight: '900', color: '#0f172a', marginTop: '2px' }}>
+                          {editPreviewMetrics.actualWorkedHours.toFixed(2)} س
+                        </div>
+                      </div>
+                      <div style={{ background: '#fff', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600' }}>الأساسي المقرر</div>
+                        <div style={{ fontSize: '15px', fontWeight: '900', color: '#0284c7', marginTop: '2px' }}>
+                          {editPreviewMetrics.regularHours.toFixed(2)} س
+                        </div>
+                      </div>
+                      <div style={{ background: editPreviewMetrics.overtimeHours > 0 ? '#ecfdf5' : '#fff', padding: '8px', borderRadius: '8px', border: editPreviewMetrics.overtimeHours > 0 ? '1px solid #a7f3d0' : '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '11px', color: editPreviewMetrics.overtimeHours > 0 ? '#047857' : '#64748b', fontWeight: '600' }}>الوقت الإضافي</div>
+                        <div style={{ fontSize: '15px', fontWeight: '900', color: editPreviewMetrics.overtimeHours > 0 ? '#059669' : '#94a3b8', marginTop: '2px' }}>
+                          {editPreviewMetrics.overtimeHours > 0 ? `+${editPreviewMetrics.overtimeHours.toFixed(2)} س` : '0.00 س'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Visual Timeline Bar */}
+                    {editPreviewMetrics.totalElapsed > 0 && (
+                      <div style={{ marginTop: '2px' }}>
+                        <div style={{ display: 'flex', height: '10px', borderRadius: '5px', overflow: 'hidden', background: '#e2e8f0' }}>
+                          <div
+                            style={{
+                              width: `${Math.min(100, (editPreviewMetrics.regularHours / (editPreviewMetrics.totalElapsed || 1)) * 100)}%`,
+                              background: '#0284c7'
+                            }}
+                            title={`أساسي: ${editPreviewMetrics.regularHours} س`}
+                          />
+                          {editPreviewMetrics.overtimeHours > 0 && (
+                            <div
+                              style={{
+                                width: `${Math.min(100, (editPreviewMetrics.overtimeHours / (editPreviewMetrics.totalElapsed || 1)) * 100)}%`,
+                                background: '#10b981'
+                              }}
+                              title={`إضافي: ${editPreviewMetrics.overtimeHours} س`}
+                            />
+                          )}
+                          {editPreviewMetrics.breakHours > 0 && (
+                            <div
+                              style={{
+                                width: `${Math.min(100, (editPreviewMetrics.breakHours / (editPreviewMetrics.totalElapsed || 1)) * 100)}%`,
+                                background: '#f59e0b'
+                              }}
+                              title={`بريك: ${editPreviewMetrics.breakHours} س`}
+                            />
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b', marginTop: '4px', fontWeight: '700' }}>
+                          <span style={{ color: '#0284c7' }}>■ أساسي ({editPreviewMetrics.regularHours.toFixed(2)} س)</span>
+                          {editPreviewMetrics.overtimeHours > 0 && (
+                            <span style={{ color: '#10b981' }}>■ إضافي (+{editPreviewMetrics.overtimeHours.toFixed(2)} س)</span>
+                          )}
+                          {editPreviewMetrics.breakHours > 0 && (
+                            <span style={{ color: '#f59e0b' }}>■ استراحة ({editPreviewMetrics.breakHours.toFixed(2)} س)</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Smart Decoupling & Approval Checkboxes */}
+                    <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '700', color: '#0f172a' }}>
+                        <input
+                          type="checkbox"
+                          checked={editApproveOvertime}
+                          onChange={(e) => setEditApproveOvertime(e.target.checked)}
+                          style={{ width: '16px', height: '16px', accentColor: '#10b981', cursor: 'pointer' }}
+                        />
+                        <span>اعتماد الساعات الإضافية فوراً في الرواتب {editPreviewMetrics.overtimeHours > 0 ? `(+${editPreviewMetrics.overtimeHours.toFixed(2)} س)` : ''}</span>
+                      </label>
+
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '700', color: '#0f172a' }}>
+                        <input
+                          type="checkbox"
+                          checked={editDecouplePriorDayRequests}
+                          onChange={(e) => setEditDecouplePriorDayRequests(e.target.checked)}
+                          style={{ width: '16px', height: '16px', accentColor: '#0284c7', cursor: 'pointer' }}
+                        />
+                        <span>فك ارتباط وتطهير أي طلبات أو أذونات سابقة لهذا اليوم (تصفير أي رفض سابق)</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
 
                 <div className="field">
                   <label>ملاحظات ومبرر التعديل</label>
