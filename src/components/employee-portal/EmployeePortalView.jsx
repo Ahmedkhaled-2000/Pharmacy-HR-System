@@ -26,6 +26,7 @@ import { uploadBiometricAttendancePhoto, getAuthoritativeDriveConfig } from '../
 import { sendBiometricRegistrationRequestEmail, sendBiometricResetRequestEmail } from '../../utils/gmailService';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics } from '../../utils/latePenaltyEngine';
 import { getEmployeeDaySchedule, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
+import { buildUnifiedAttendanceTimeline } from '../../utils/workHoursEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import { apiSubmitRequestAtomic } from '../../utils/apiClient';
@@ -35,6 +36,7 @@ import { triggerAndroidApkDownload } from '../../utils/nativeAppUpdater';
 import AndroidSettingsModal from '../modals/AndroidSettingsModal';
 import { getMobileConfig } from '../../utils/mobileConfigHelper';
 import { isUserEligibleForSwitcher } from '../../utils/permissionUtils';
+import { isBranchMatch, cleanBranchKey } from '../../utils/branchMatcher';
 import '../../portal.css';
 
 export function isAdministrativeRole(employee, state = null) {
@@ -332,23 +334,75 @@ export default function EmployeePortalView({
     return getCycleDateRange(selectedMonth, orgSettings || state?.orgSettings);
   }, [selectedMonth, orgSettings, state?.orgSettings]);
 
-  const activeWorkingBranches = useMemo(() => {
-    if (!Array.isArray(emp?.branchesDetails)) {
-      return emp?.branchId ? [{ branchId: emp.branchId }] : [];
+  const employeeActiveBranches = useMemo(() => {
+    let list = [];
+    if (Array.isArray(emp?.branchesDetails) && emp.branchesDetails.length > 0) {
+      // 🛡️ الاحتفاظ بكافة فروع الموظف المسجلة في دورة الرواتب حتى المنتهية خلال الدورة
+      // لتمكينه من استعراض ومراجعة سجلات وساعات ونسب الورديات الخاصة بها
+      list = [...emp.branchesDetails];
+    } else if (emp?.branchId) {
+      list = [{
+        branchId: emp.branchId,
+        salary: emp.salary || 0,
+        workHoursPerDay: emp.workHoursPerDay || emp.workHours || 8,
+        workDaysPerMonth: emp.workDaysPerMonth || emp.workDays || 26,
+        breakHours: emp.breakHours || emp.defaultBreakHours || 0
+      }];
     }
-    const filtered = emp.branchesDetails.filter((b) => !isBranchTerminatedInCycle(b));
-    return filtered.length > 0 ? filtered : emp.branchesDetails;
-  }, [emp?.branchesDetails, emp?.branchId]);
 
-  const primaryEmpBranchId = activeWorkingBranches[0]?.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId || '';
-  const [selectedBranchId, setSelectedBranchId] = useState(primaryEmpBranchId);
-  const [isBranchSelected, setIsBranchSelected] = useState(Boolean(primaryEmpBranchId));
+    const defaultDetail = list[0] || {};
+    const eId = String(emp?.id || '');
+    const eCode = String(emp?.code || '');
+
+    (state?.shifts || []).forEach((s) => {
+      if (!s || !s.branchId || !s.date) return;
+      if (s.status === 'cancelled' || s.isCancelled) return;
+      const sEmpId = String(s.employeeId || '');
+      const sEmpCode = String(s.employeeCode || '');
+      const isMatch = (eId && (sEmpId === eId || sEmpCode === eId)) || (eCode && (sEmpId === eCode || sEmpCode === eCode));
+      if (!isMatch) return;
+
+      const alreadyHas = list.some((b) => isBranchMatch(b.branchId, { id: s.branchId, name: s.branchName }) || cleanBranchKey(b.branchId) === cleanBranchKey(s.branchId));
+      if (!alreadyHas) {
+        const bObj = (state?.branches || []).find((br) => isBranchMatch(s.branchId, br));
+        const canonicalBId = bObj ? bObj.id : s.branchId;
+        if (!list.some((b) => String(b.branchId) === String(canonicalBId))) {
+          list.push({
+            branchId: canonicalBId,
+            salary: defaultDetail.salary || emp?.salary || 0,
+            workHoursPerDay: defaultDetail.workHoursPerDay || defaultDetail.workHours || 8,
+            workDaysPerMonth: defaultDetail.workDaysPerMonth || defaultDetail.workDays || 26,
+            breakHours: defaultDetail.breakHours || 0,
+            isRoaming: true
+          });
+        }
+      }
+    });
+
+    return list;
+  }, [emp?.branchesDetails, emp?.branchId, emp?.id, emp?.code, emp?.salary, emp?.workHoursPerDay, emp?.workHours, emp?.workDaysPerMonth, emp?.workDays, emp?.breakHours, emp?.defaultBreakHours, state?.shifts, state?.branches]);
+
+  const activeWorkingBranches = useMemo(() => {
+    const nonTerminated = (employeeActiveBranches || []).filter((b) => !isBranchTerminatedInCycle(b));
+    return nonTerminated.length > 0 ? nonTerminated : employeeActiveBranches;
+  }, [employeeActiveBranches]);
+
+  const primaryEmpBranchId = activeWorkingBranches[0]?.branchId || employeeActiveBranches[0]?.branchId || emp?.branchId || '';
+  const isInitialMulti = (employeeActiveBranches || []).length > 1;
+  const [selectedBranchId, setSelectedBranchId] = useState(isInitialMulti ? '' : primaryEmpBranchId);
+  const [isBranchSelected, setIsBranchSelected] = useState(true);
   const [punchTargetBranchId, setPunchTargetBranchId] = useState(primaryEmpBranchId);
 
   const selectedBranchDetails = useMemo(() => {
-    if (!selectedBranchId || !Array.isArray(emp?.branchesDetails)) return null;
-    return emp.branchesDetails.find((b) => String(b.branchId) === String(selectedBranchId)) || null;
-  }, [emp?.branchesDetails, selectedBranchId]);
+    if (!selectedBranchId || !Array.isArray(employeeActiveBranches)) return null;
+    const allBranches = state?.branches || [];
+    const targetBranch = allBranches.find((b) => isBranchMatch(selectedBranchId, b)) || { id: selectedBranchId };
+    return employeeActiveBranches.find((b) =>
+      String(b.branchId) === String(selectedBranchId) ||
+      isBranchMatch(b.branchId, targetBranch) ||
+      cleanBranchKey(b.branchId) === cleanBranchKey(selectedBranchId)
+    ) || null;
+  }, [employeeActiveBranches, selectedBranchId, state?.branches]);
 
   const isSelectedBranchTerminated = useMemo(() => {
     return isBranchTerminatedInCycle(selectedBranchDetails);
@@ -357,27 +411,56 @@ export default function EmployeePortalView({
   useEffect(() => {
     if (currentEmpUser) {
       const currentEmp = (state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser;
-      const activeBranches = Array.isArray(currentEmp?.branchesDetails)
-        ? currentEmp.branchesDetails.filter((b) => !isBranchTerminatedInCycle(b))
-        : [];
-      const primaryBId = activeBranches[0]?.branchId || currentEmp?.branchesDetails?.[0]?.branchId || currentEmp?.branchId || '';
+      const primaryBId = activeWorkingBranches[0]?.branchId || employeeActiveBranches[0]?.branchId || currentEmp?.branchId || '';
 
-      if (!currentEmp || !currentEmp.branchesDetails || currentEmp.branchesDetails.length <= 1) {
+      if (employeeActiveBranches.length <= 1) {
         setSelectedBranchId(primaryBId);
         setIsBranchSelected(true);
         setPunchTargetBranchId(primaryBId);
       } else {
         setPunchTargetBranchId(primaryBId);
-        if (!selectedBranchId && primaryBId) {
-          setSelectedBranchId(primaryBId);
-        }
+        // Multi-branch employees: keep current selectedBranchId if valid, otherwise keep '' (all branches)
+        setSelectedBranchId((prev) => {
+          if (!prev || prev === '') return '';
+          const stillExists = employeeActiveBranches.some((b) =>
+            String(b.branchId) === String(prev) ||
+            cleanBranchKey(b.branchId) === cleanBranchKey(prev) ||
+            isBranchMatch(b.branchId, { id: prev })
+          );
+          return stillExists ? prev : '';
+        });
       }
     }
-  }, [currentEmpUser?.id, emp?.branchesDetails, emp?.branchId]);
+  }, [currentEmpUser?.id, employeeActiveBranches, activeWorkingBranches]);
 
-  const isMultiBranchEmp = Array.isArray(emp?.branchesDetails) && emp.branchesDetails.length > 1;
+  const isMultiBranchEmp = employeeActiveBranches.length > 1;
   const isAllBranchesMode = isMultiBranchEmp && (!selectedBranchId || selectedBranchId === '');
   const [shiftBranchFilter, setShiftBranchFilter] = useState('all');
+
+  // Keep shiftBranchFilter strictly in sync with selectedBranchId
+  useEffect(() => {
+    setShiftBranchFilter(selectedBranchId || 'all');
+  }, [selectedBranchId]);
+
+  // Centralized robust branch matching helper
+  const checkShiftBranchMatch = (s, targetBId) => {
+    if (!targetBId || targetBId === 'all') return true;
+    const allBranches = state?.branches || [];
+    const targetBranchObj = allBranches.find((b) => isBranchMatch(targetBId, b)) || { id: targetBId };
+
+    const sBId = s?.branchId || employeeActiveBranches[0]?.branchId || emp?.branchId;
+    if (sBId) {
+      if (String(sBId) === String(targetBId)) return true;
+      if (cleanBranchKey(sBId) === cleanBranchKey(targetBId)) return true;
+      if (isBranchMatch(sBId, targetBranchObj)) return true;
+    }
+    if (s?.branchName) {
+      if (isBranchMatch(s.branchName, targetBranchObj)) return true;
+      const tName = targetBranchObj.name || targetBranchObj.branchName;
+      if (tName && String(s.branchName).trim().toLowerCase() === String(tName).trim().toLowerCase()) return true;
+    }
+    return false;
+  };
 
   // Blocked Request Tabs in All Branches Mode (Requests require directing to a specific branch/manager)
   const BLOCKED_ALL_BRANCH_REQUEST_TABS = useMemo(() => ['leaves', 'permissions', 'resignations', 'swaps', 'loans'], []);
@@ -445,13 +528,13 @@ export default function EmployeePortalView({
       wb.creator = (orgSettings && orgSettings.orgName) || 'نظام البصمات';
       wb.created = new Date();
 
-      const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
+      const isMultiBranch = isMultiBranchEmp;
 
       if (isMultiBranch) {
         // ── Multi-Branch Employee: Generate separate sheet for each branch + summary sheet ──
-        emp.branchesDetails.forEach((bd, bdIdx) => {
+        employeeActiveBranches.forEach((bd, bdIdx) => {
           const bId = bd.branchId;
-          const bObj = (state.branches || []).find((b) => b.id === bId);
+          const bObj = (state.branches || []).find((b) => isBranchMatch(b.id, { id: bId }));
           const bName = bObj ? bObj.name : `فرع ${bdIdx + 1}`;
           const cleanSheetName = `فرع ${bName}`.replace(/[\*\?\/\\\[\]]/g, '').slice(0, 30);
 
@@ -620,9 +703,9 @@ export default function EmployeePortalView({
         let grandTotalDeduction = 0;
         let grandTotalNet = 0;
 
-        emp.branchesDetails.forEach((bd) => {
+        employeeActiveBranches.forEach((bd) => {
           const bId = bd.branchId;
-          const bObj = (state.branches || []).find((b) => b.id === bId);
+          const bObj = (state.branches || []).find((b) => isBranchMatch(b.id, { id: bId }));
           const bName = bObj ? bObj.name : `فرع ${bId}`;
           const bSummary = computeEmpSummary(emp.id, filterFn, rangeMode === 'month' ? selectedMonth : null, bId);
 
@@ -990,7 +1073,7 @@ export default function EmployeePortalView({
     const totalHours = (end - start) / 60;
     const netHours = Math.round(Math.max(0, totalHours - parsedBreak) * 100) / 100;
 
-    const targetBranchId = empManualBranchId || selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId || null;
+    const targetBranchId = empManualBranchId || selectedBranchId || employeeActiveBranches[0]?.branchId || emp.branchId || null;
 
     const newShift = {
       id: 'shift_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -1032,7 +1115,7 @@ export default function EmployeePortalView({
     }
 
     const emp = (state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser;
-    const targetBranchId = empAdjBranchId || selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId || null;
+    const targetBranchId = empAdjBranchId || selectedBranchId || employeeActiveBranches[0]?.branchId || emp.branchId || null;
     const newAdj = {
       id: 'adj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       type: empAdjType,
@@ -1261,13 +1344,17 @@ export default function EmployeePortalView({
 
   const todayStrNow = typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
 
-  const empShifts = useMemo(() => {
+  const allMonthShifts = useMemo(() => {
     if (!emp) return [];
 
-    // 1. الورديات المسجلة من state.shifts
+    // 1. الورديات المسجلة من state.shifts مع مطابقة معايير الإدارة العليا واستبعاد المرفوض
     const rawShifts = (state.shifts || []).filter((s) => {
       if (!s) return false;
       if (s.status === 'cancelled' || s.isCancelled) return false;
+      const isRejectedPhoto = s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة'));
+      if (!isRejectedPhoto && (s.status === 'rejected' || s.rejected || (typeof s.statusLabel === 'string' && (s.statusLabel.includes('ملغي') || s.statusLabel.includes('مرفوض'))))) {
+        return false;
+      }
       const sEmpId = String(s.employeeId || '');
       const sEmpCode = String(s.employeeCode || '');
       const eId = String(emp.id || '');
@@ -1281,7 +1368,36 @@ export default function EmployeePortalView({
       return isMatch && filterFn(s.date);
     });
 
-    // 2. فحص البصمة الحية النشطة من state.activeShifts
+    // 2. إثراء الورديات المكتملة وحساب الساعات تماشياً مع صفحة الإدارة العليا AttendancePunchesModal
+    const enrichedShifts = rawShifts.map((p) => {
+      if (p.status === 'completed' || p.isCompleted) {
+        const schedH = parseFloat(p.scheduledHours || emp.workHoursPerDay || emp.workHours || 8);
+        let resolvedTimeOut = p.timeOut;
+        if (!resolvedTimeOut || resolvedTimeOut === '—' || resolvedTimeOut === '' || resolvedTimeOut === 'قيد العمل الآن') {
+          if (p.timeIn && p.timeIn !== '—') {
+            const [inH, inM] = String(p.timeIn).split(':').map(Number);
+            if (!isNaN(inH)) {
+              const outTotalMins = (inH * 60 + (inM || 0) + Math.round(schedH * 60)) % (24 * 60);
+              resolvedTimeOut = `${String(Math.floor(outTotalMins / 60)).padStart(2, '0')}:${String(outTotalMins % 60).padStart(2, '0')}`;
+            }
+          }
+        }
+        return {
+          ...p,
+          isLiveActive: false,
+          isStaleUnclosed: false,
+          timeOut: resolvedTimeOut || '—',
+          hours: (p.hours && p.hours > 0) ? p.hours : schedH,
+          netHours: (p.netHours && p.netHours > 0) ? p.netHours : schedH,
+          regularHours: (p.regularHours && p.regularHours > 0) ? p.regularHours : schedH,
+          actualWorkedHours: (p.actualWorkedHours && p.actualWorkedHours > 0) ? p.actualWorkedHours : schedH,
+          statusLabel: (p.statusLabel && !p.statusLabel.includes('قيد العمل')) ? p.statusLabel : 'حضور مكتمل'
+        };
+      }
+      return p;
+    });
+
+    // 3. فحص البصمة الحية النشطة من state.activeShifts
     const rawActiveShift = state?.activeShifts?.[emp.id] ||
       (emp.code && state?.activeShifts?.[emp.code]) ||
       Object.values(state?.activeShifts || {}).find(
@@ -1292,12 +1408,13 @@ export default function EmployeePortalView({
         )
       );
 
-    let combined = [...rawShifts];
+    let combined = [...enrichedShifts];
     if (rawActiveShift && rawActiveShift.date && filterFn(rawActiveShift.date)) {
       const alreadyHas = combined.some(s => s.isLiveActive || (s.date === rawActiveShift.date && s.timeIn === rawActiveShift.timeIn));
       if (!alreadyHas) {
         const actEpoch = getShiftStartEpoch(rawActiveShift);
-        const liveElapsed = actEpoch > 0
+        // صمام الأمان الموحد 20 ساعة
+        const liveElapsed = actEpoch > 0 && (Date.now() - actEpoch < 20 * 3600 * 1000)
           ? Math.max(0, Math.round(((Date.now() - actEpoch) / 3600000) * 10) / 10)
           : 0;
         const livePunch = {
@@ -1343,75 +1460,143 @@ export default function EmployeePortalView({
       return String(b?.createdAt || b?.id || '').localeCompare(String(a?.createdAt || a?.id || ''));
     });
 
-    // 🛡️ صمام إزالة التكرار الذكي للعرض في صفحة الموظف (Display Deduplication Guard for Employee Portal):
-    // منع تكرار نفس الوردية في نفس الفرع في نفس اليوم مع السماح بتعدد الفروع للموظف في نفس اليوم
-    const getCanonicalBranchKey = (shift) => {
-      if (!shift) return 'default';
-      const bObj = (state.branches || []).find((b) => (b.id && shift.branchId && String(b.id) === String(shift.branchId)) || (shift.branchName && b.name && shift.branchName.trim() === b.name.trim()));
-      if (bObj?.id) return String(bObj.id);
-      if (shift.branchId) return String(shift.branchId);
-      if (shift.branchName) return String(shift.branchName).trim();
-      return 'default';
+    // 🛡️ صمام إزالة التكرار الذكي للعرض في صفحة الموظف (Smart Time Clustering & Deduplication):
+    // يسمح بعدة ورديات في نفس اليوم للموظف (كوردية صباحية ومسائية، أو في فروع متعددة)
+    // ويدمج فقط التسجيلات المكررة لنفس الوردية بالفرع ذاته وبفارق توقيت <= 20 دقيقة
+    const getShiftMinutes = (t) => {
+      if (!t) return null;
+      const [h, m] = String(t).slice(0, 5).split(':').map(Number);
+      return isNaN(h) ? null : h * 60 + (m || 0);
     };
 
-    const seenByBranchAndDate = new Map();
-    sortedCombined.forEach(p => {
-      if (!p || !p.date) return;
-      const bKey = getCanonicalBranchKey(p);
-      const key = `${bKey}_${p.date}`;
-      if (!seenByBranchAndDate.has(key)) {
-        seenByBranchAndDate.set(key, p);
-      } else {
-        const existing = seenByBranchAndDate.get(key);
-        // الوردية الحية لليوم الحالي لها أولوية قصوى
-        if (p.isLiveActive && !existing.isLiveActive) {
-          seenByBranchAndDate.set(key, p);
-          return;
-        }
-        if (!p.isLiveActive && existing.isLiveActive) {
-          return;
-        }
+    const shiftClusters = [];
+    sortedCombined.forEach((s) => {
+      if (!s || !s.date) return;
+      const sInMins = getShiftMinutes(s.timeIn);
+      let foundCluster = false;
+      for (const cluster of shiftClusters) {
+        const rep = cluster[0];
+        if (rep.date === s.date) {
+          // تطابق الفرع
+          const isSameBranch = (s.branchId && rep.branchId)
+            ? (String(s.branchId) === String(rep.branchId) || cleanBranchKey(s.branchId) === cleanBranchKey(rep.branchId))
+            : (!s.branchId && !rep.branchId);
 
-        const pIsManual = Boolean(p.isManual || p.manualPunch || p.adminApproved || p.editedByAdmin);
-        const exIsManual = Boolean(existing.isManual || existing.manualPunch || existing.adminApproved || existing.editedByAdmin);
+          if (isSameBranch) {
+            const repInMins = getShiftMinutes(rep.timeIn);
+            const isSameTime = (sInMins !== null && repInMins !== null)
+              ? Math.abs(sInMins - repInMins) <= 20
+              : (!s.timeIn || !rep.timeIn || s.timeIn === rep.timeIn);
 
-        if (pIsManual && !exIsManual) {
-          seenByBranchAndDate.set(key, p);
-        } else if (!pIsManual && exIsManual) {
-          // keep existing manual
-        } else {
-          const pHasOut = Boolean(p.timeOut && p.timeOut !== '—' && p.timeOut !== '' && p.timeOut !== 'غير مسجل' && p.timeOut !== 'قيد العمل الآن');
-          const exHasOut = Boolean(existing.timeOut && existing.timeOut !== '—' && existing.timeOut !== '' && existing.timeOut !== 'غير مسجل' && existing.timeOut !== 'قيد العمل الآن');
-          const pHrs = parseFloat(p.actualWorkedHours || p.hours || 0);
-          const exHrs = parseFloat(existing.actualWorkedHours || existing.hours || 0);
-
-          if (pHasOut && !exHasOut) {
-            seenByBranchAndDate.set(key, p);
-          } else if (pHrs > 0 && exHrs === 0) {
-            seenByBranchAndDate.set(key, p);
-          } else if (pHrs > exHrs) {
-            seenByBranchAndDate.set(key, p);
+            if (isSameTime || (s.id && rep.id && String(s.id) === String(rep.id))) {
+              cluster.push(s);
+              foundCluster = true;
+              break;
+            }
           }
         }
       }
+      if (!foundCluster) {
+        shiftClusters.push([s]);
+      }
     });
 
-    return Array.from(seenByBranchAndDate.values()).sort((a, b) => {
+    const dedupedShifts = shiftClusters.map((cluster) => {
+      if (cluster.length === 1) return cluster[0];
+      return cluster.sort((a, b) => {
+        // الوردية الحية لليوم الحالي لها أولوية قصوى
+        if (a.isLiveActive && !b.isLiveActive) return -1;
+        if (!a.isLiveActive && b.isLiveActive) return 1;
+
+        const aIsManual = Boolean(a.isManual || a.manualPunch || a.adminApproved || a.editedByAdmin);
+        const bIsManual = Boolean(b.isManual || b.manualPunch || b.adminApproved || b.editedByAdmin);
+        if (aIsManual && !bIsManual) return -1;
+        if (!aIsManual && bIsManual) return 1;
+
+        const aHasOut = Boolean(a.timeOut && a.timeOut !== '—' && a.timeOut !== '' && a.timeOut !== 'غير مسجل' && a.timeOut !== 'قيد العمل الآن');
+        const bHasOut = Boolean(b.timeOut && b.timeOut !== '—' && b.timeOut !== '' && b.timeOut !== 'غير مسجل' && b.timeOut !== 'قيد العمل الآن');
+        if (aHasOut && !bHasOut) return -1;
+        if (!aHasOut && bHasOut) return 1;
+
+        const aHrs = parseFloat(a.actualWorkedHours || a.hours || 0);
+        const bHrs = parseFloat(b.actualWorkedHours || b.hours || 0);
+        return bHrs - aHrs;
+      })[0];
+    });
+
+    return dedupedShifts.sort((a, b) => {
       const dateA = String(a?.date || '').trim();
       const dateB = String(b?.date || '').trim();
       if (dateA !== dateB) return dateB.localeCompare(dateA);
       return String(b?.timeIn || '').localeCompare(String(a?.timeIn || ''));
     });
-  }, [emp, state.shifts, state.activeShifts, filterFn, selectedBranchId, isMultiBranchEmp, todayStrNow]);
+  }, [emp, state.shifts, state.activeShifts, filterFn, todayStrNow]);
+
+  const empShifts = useMemo(() => {
+    if (!selectedBranchId) return allMonthShifts;
+    return allMonthShifts.filter((s) => checkShiftBranchMatch(s, selectedBranchId));
+  }, [allMonthShifts, selectedBranchId, state.branches, employeeActiveBranches, emp]);
+
+  // ── بناء الخط الزمني الموحد لسجل بصمات الموظف (ورديات فعلية + إجازات معتمدة + أيام راحة مجدولة) ──
+  const [empTimelineFilter, setEmpTimelineFilter] = useState('all'); // 'all' | 'shifts' | 'leaves' | 'off_days'
+
+  const empTimeline = useMemo(() => {
+    if (!emp) return [];
+    const range = cutoffInfo || getCycleDateRange(selectedMonth, state?.orgSettings);
+    return buildUnifiedAttendanceTimeline(emp, allMonthShifts, state, {
+      cycleRange: range,
+      includeAbsences: false
+    });
+  }, [emp, allMonthShifts, state, selectedMonth, cutoffInfo]);
+
+  const empTimelineCounts = useMemo(() => {
+    let shifts = 0;
+    let leaves = 0;
+    let offDays = 0;
+    (empTimeline || []).forEach((item) => {
+      if (item.recordType === 'shift') shifts++;
+      else if (item.recordType === 'leave') leaves++;
+      else if (item.recordType === 'off_day') offDays++;
+    });
+    return {
+      all: empTimeline.length,
+      shifts,
+      leaves,
+      offDays
+    };
+  }, [empTimeline]);
+
+  const displayedEmpTimeline = useMemo(() => {
+    let list = empTimeline;
+    if (selectedBranchId) {
+      list = list.filter((item) => {
+        if (item.recordType === 'leave') return true;
+        if (item.recordType === 'off_day') {
+          if (item.isOtherBranchShift) return true;
+          if (item.branchId) return checkShiftBranchMatch(item, selectedBranchId);
+          return true;
+        }
+        return checkShiftBranchMatch(item, selectedBranchId);
+      });
+    }
+    if (empTimelineFilter === 'shifts') {
+      return list.filter((item) => item.recordType === 'shift');
+    }
+    if (empTimelineFilter === 'leaves') {
+      return list.filter((item) => item.recordType === 'leave');
+    }
+    if (empTimelineFilter === 'off_days') {
+      return list.filter((item) => item.recordType === 'off_day');
+    }
+    return list;
+  }, [empTimeline, selectedBranchId, empTimelineFilter]);
 
   const empAdjs = useMemo(() => {
     if (!emp) return [];
 
     const map = new Map();
 
-    const bDetail = selectedBranchId
-      ? emp.branchesDetails?.find((b) => String(b.branchId) === String(selectedBranchId))
-      : (emp?.branchesDetails && emp.branchesDetails.length === 1 ? emp.branchesDetails[0] : null);
+    const bDetail = selectedBranchDetails || (employeeActiveBranches.length === 1 ? employeeActiveBranches[0] : null);
     const hrRate = bDetail ? (parseFloat(bDetail.salary) || 0) : (parseFloat(emp?.salary) || 0);
     const wHours = bDetail ? (parseFloat(bDetail.workHoursPerDay) || 8) : (parseFloat(emp?.workHoursPerDay) || 8);
     const wDays = bDetail ? (parseFloat(bDetail.workDaysPerMonth) || 26) : (parseFloat(emp?.workDaysPerMonth) || 26);
@@ -1557,8 +1742,8 @@ export default function EmployeePortalView({
   const deductions = empAdjs.filter((a) => a.type === 'deduction' || a.type === 'penalty');
 
   const branchDetail = emp && selectedBranchId
-    ? emp.branchesDetails?.find((b) => String(b.branchId) === String(selectedBranchId))
-    : (emp?.branchesDetails && emp.branchesDetails.length === 1 ? emp.branchesDetails[0] : null);
+    ? employeeActiveBranches.find((b) => isBranchMatch(b.branchId, { id: selectedBranchId }))
+    : (employeeActiveBranches.length === 1 ? employeeActiveBranches[0] : null);
 
   const currentHourlyRate = branchDetail
     ? (parseFloat(branchDetail.salary) || 0)
@@ -1581,7 +1766,7 @@ export default function EmployeePortalView({
 
   const hasApprovedRosterForActiveMonth = useMemo(() => {
     if (!emp) return true;
-    const targetBId = selectedBranchId || (emp.branchesDetails?.[0]?.branchId) || emp.branchId;
+    const targetBId = selectedBranchId || (employeeActiveBranches[0]?.branchId) || emp.branchId;
     const empIdStr = String(emp.id || emp.code || '');
 
     // 1. Check resolved roster for active calendar month
@@ -1629,7 +1814,7 @@ export default function EmployeePortalView({
 
   // ── Compute automatic absence shifts for the selected month ──
   const approvedRoster = useMemo(() => {
-    const targetBId = selectedBranchId || (emp?.branchesDetails?.[0]?.branchId) || emp?.branchId;
+    const targetBId = selectedBranchId || (employeeActiveBranches[0]?.branchId) || emp?.branchId;
     return getResolvedEmployeeRoster(emp, targetBId, selectedMonth, state);
   }, [emp, selectedBranchId, selectedMonth, state.rosters, state.requests]);
 
@@ -2455,7 +2640,7 @@ export default function EmployeePortalView({
   }
 
   // ── Pre-entry Branch Selection Screen ──
-  if (emp.branchesDetails && emp.branchesDetails.length > 1 && !isBranchSelected) {
+  if (isMultiBranchEmp && !isBranchSelected) {
     return (
       <div className="ep-layout" style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '80vh',
@@ -2474,8 +2659,8 @@ export default function EmployeePortalView({
             >
               🌐 جميع الفروع (ملخص شامل)
             </button>
-            {emp.branchesDetails.map(bd => {
-              const b = state.branches?.find(br => br.id === bd.branchId);
+            {employeeActiveBranches.map(bd => {
+              const b = state.branches?.find(br => isBranchMatch(bd.branchId, br) || String(br.id) === String(bd.branchId));
               const isTerminated = isBranchTerminatedInCycle(bd);
               return (
                 <button
@@ -2971,7 +3156,7 @@ export default function EmployeePortalView({
             </div>
 
             {/* Multi Branch Selector if any */}
-            {emp.branchesDetails && emp.branchesDetails.length > 1 && (
+            {isMultiBranchEmp && (
               <select
                 value={selectedBranchId}
                 onChange={(e) => setSelectedBranchId(e.target.value)}
@@ -2986,8 +3171,8 @@ export default function EmployeePortalView({
                 }}
               >
                 <option value="">🌐 الكل</option>
-                {emp.branchesDetails.map((bd) => {
-                  const b = state.branches?.find((br) => br.id === bd.branchId);
+                {employeeActiveBranches.map((bd) => {
+                  const b = state.branches?.find((br) => isBranchMatch(bd.branchId, br) || String(br.id) === String(bd.branchId));
                   const isTerminated = isBranchTerminatedInCycle(bd);
                   return (
                     <option key={bd.branchId} value={bd.branchId}>
@@ -3051,7 +3236,7 @@ export default function EmployeePortalView({
 
 
               {/* Multi-Branch Selector if applicable */}
-              {emp.branchesDetails && emp.branchesDetails.length > 1 && (
+              {isMultiBranchEmp && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <select
                     value={selectedBranchId}
@@ -3068,8 +3253,8 @@ export default function EmployeePortalView({
                     }}
                   >
                     <option value="">🌐 جميع الفروع (ملخص شامل)</option>
-                    {emp.branchesDetails.map((bd) => {
-                      const b = state.branches?.find((br) => br.id === bd.branchId);
+                    {employeeActiveBranches.map((bd) => {
+                      const b = state.branches?.find((br) => isBranchMatch(bd.branchId, br) || String(br.id) === String(bd.branchId));
                       const isTerminated = isBranchTerminatedInCycle(bd);
                       return (
                         <option key={bd.branchId} value={bd.branchId}>
@@ -4579,10 +4764,10 @@ export default function EmployeePortalView({
               {/* Quick Branch Switcher Buttons */}
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '12px', color: '#0f766e', fontWeight: 700 }}>الانتقال لفرع لتقديم طلب:</span>
-                {emp.branchesDetails
+                {employeeActiveBranches
                   .filter((bd) => !isBranchTerminatedInCycle(bd))
                   .map((bd) => {
-                  const br = state.branches?.find(b => String(b.id) === String(bd.branchId));
+                  const br = state.branches?.find(b => isBranchMatch(bd.branchId, b) || String(b.id) === String(bd.branchId));
                   return (
                     <button
                       key={bd.branchId}
@@ -4712,8 +4897,8 @@ export default function EmployeePortalView({
               {/* ── Live Punch Clock Widget (always shown, button hidden if permission revoked) ── */}
               {(() => {
                 const activeShift = state.activeShifts[emp.id];
-                const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
-                const activeBranchObj = activeShift ? (state.branches || []).find((b) => String(b.id) === String(activeShift.branchId)) : null;
+                const isMultiBranch = isMultiBranchEmp;
+                const activeBranchObj = activeShift ? (state.branches || []).find((b) => isBranchMatch(b.id, { id: activeShift.branchId })) : null;
                 const activeBranchName = activeBranchObj ? activeBranchObj.name : (emp.branchName || 'الفرع الرئيسي');
 
                 return (
@@ -4777,10 +4962,10 @@ export default function EmployeePortalView({
                                     onChange={(e) => setPunchTargetBranchId(e.target.value)}
                                     style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '12.5px', fontWeight: 'bold' }}
                                   >
-                                    {emp.branchesDetails
+                                    {employeeActiveBranches
                                       .filter((bd) => !isBranchTerminatedInCycle(bd))
                                       .map((bd) => {
-                                        const b = (state.branches || []).find((br) => String(br.id) === String(bd.branchId));
+                                        const b = (state.branches || []).find((br) => isBranchMatch(br.id, { id: bd.branchId }));
                                         return <option key={bd.branchId} value={bd.branchId}>فرع {b?.name || bd.branchId}</option>;
                                       })}
                                   </select>
@@ -4940,7 +5125,7 @@ export default function EmployeePortalView({
                       <span>🏢</span> مقارنة متقابلة بين الفروع (Side-by-Side Branch Comparison)
                     </h4>
                     <span style={{ fontSize: '12px', background: 'var(--primary-tint)', color: 'var(--primary-dark)', padding: '4px 12px', borderRadius: '99px', fontWeight: 700 }}>
-                      عدد الفروع: {emp.branchesDetails.length} فروع
+                      عدد الفروع: {employeeActiveBranches.length} فروع
                     </span>
                   </div>
 
@@ -4951,9 +5136,9 @@ export default function EmployeePortalView({
                     gap: '20px',
                     marginBottom: '24px'
                   }}>
-                    {emp.branchesDetails.map((bd) => {
+                    {employeeActiveBranches.map((bd) => {
                       const bId = bd.branchId;
-                      const bObj = (state.branches || []).find((b) => String(b.id) === String(bId));
+                      const bObj = (state.branches || []).find((b) => isBranchMatch(b.id, { id: bId }));
                       const bName = bObj ? bObj.name : `فرع ${bId}`;
                       const bSummary = computeEmpSummary(emp.id, filterFn, filterMode === 'month' ? selectedMonth : null, bId);
                       const bSalary = parseFloat(bd.salary) || 0; // سعر الساعة الشهري بالفرع
@@ -5165,7 +5350,7 @@ export default function EmployeePortalView({
                         </div>
                       </div>
                       <div style={{ background: 'rgba(255,255,255,0.2)', padding: '6px 14px', borderRadius: '99px', fontSize: '12.5px', fontWeight: 800 }}>
-                        {emp.branchesDetails.length} فروع مدمجة
+                        {employeeActiveBranches.length} فروع مدمجة
                       </div>
                     </div>
 
@@ -5336,13 +5521,13 @@ export default function EmployeePortalView({
                       <div className="field" style={{ flex: '1 1 150px' }}>
                         <label>الفرع المعني بالوردية *</label>
                         <select
-                          value={empManualBranchId || emp.branchesDetails[0]?.branchId}
+                          value={empManualBranchId || employeeActiveBranches[0]?.branchId}
                           onChange={(e) => setEmpManualBranchId(e.target.value)}
                         >
-                          {emp.branchesDetails
+                          {employeeActiveBranches
                             .filter((bd) => !isBranchTerminatedInCycle(bd))
                             .map((bd) => {
-                            const b = (state.branches || []).find((br) => br.id === bd.branchId);
+                            const b = (state.branches || []).find((br) => isBranchMatch(br.id, { id: bd.branchId }));
                             return (
                               <option key={bd.branchId} value={bd.branchId}>
                                 {b ? b.name : `فرع ${bd.branchId}`}
@@ -5445,8 +5630,142 @@ export default function EmployeePortalView({
                 </div>
               )}
 
+              {/* Timeline Category Filters Toolbar */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                margin: '14px 0 16px 0',
+                flexWrap: 'wrap',
+                padding: '10px 14px',
+                background: 'var(--surface)',
+                borderRadius: '12px',
+                border: '1.5px solid var(--border)',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
+              }}>
+                <span style={{ fontSize: '12.5px', fontWeight: 800, color: 'var(--muted)', marginLeft: '4px' }}>
+                  🎯 نوع السجل:
+                </span>
+                <button
+                  type="button"
+                  className={`btn ${empTimelineFilter === 'all' ? 'btn-start' : 'btn-ghost'}`}
+                  onClick={() => setEmpTimelineFilter('all')}
+                  style={{ fontSize: '12px', padding: '6px 13px', borderRadius: '8px', fontWeight: 800 }}
+                >
+                  🌐 كافة الأيام ({empTimelineCounts.all})
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${empTimelineFilter === 'shifts' ? 'btn-start' : 'btn-ghost'}`}
+                  onClick={() => setEmpTimelineFilter('shifts')}
+                  style={{ fontSize: '12px', padding: '6px 13px', borderRadius: '8px', fontWeight: 800 }}
+                >
+                  ⏱️ الورديات الفعلية ({empTimelineCounts.shifts})
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${empTimelineFilter === 'leaves' ? 'btn-start' : 'btn-ghost'}`}
+                  onClick={() => setEmpTimelineFilter('leaves')}
+                  style={{ fontSize: '12px', padding: '6px 13px', borderRadius: '8px', fontWeight: 800 }}
+                >
+                  🏖️ الإجازات المعتمدة ({empTimelineCounts.leaves})
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${empTimelineFilter === 'off_days' ? 'btn-start' : 'btn-ghost'}`}
+                  onClick={() => setEmpTimelineFilter('off_days')}
+                  style={{ fontSize: '12px', padding: '6px 13px', borderRadius: '8px', fontWeight: 800 }}
+                >
+                  ☕ أيام الراحة المجدولة ({empTimelineCounts.offDays})
+                </button>
+              </div>
+
+              {/* Branch Filter Tabs Toolbar - Always visible for multi-branch employees */}
+              {isMultiBranchEmp && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  margin: '16px 0',
+                  flexWrap: 'wrap',
+                  padding: '10px 14px',
+                  background: 'var(--surface)',
+                  borderRadius: '12px',
+                  border: '1.5px solid var(--border)',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
+                }}>
+                  <span style={{ fontSize: '12.5px', fontWeight: 800, color: 'var(--muted)', marginLeft: '4px' }}>
+                    🔍 تصفية عرض الورديات:
+                  </span>
+                  <button
+                    type="button"
+                    className={`btn ${!selectedBranchId ? 'btn-start' : 'btn-ghost'}`}
+                    onClick={() => { setSelectedBranchId(''); setShiftBranchFilter('all'); }}
+                    style={{ fontSize: '12px', padding: '6px 14px', borderRadius: '8px', fontWeight: 800 }}
+                  >
+                    🌐 كافة الفروع ({allMonthShifts.length})
+                  </button>
+                  {employeeActiveBranches.map((bd) => {
+                    const bObj = (state.branches || []).find((b) => isBranchMatch(b.id, { id: bd.branchId }));
+                    const bName = bObj ? bObj.name : `فرع ${bd.branchId}`;
+                    const bShiftsCount = allMonthShifts.filter((s) => checkShiftBranchMatch(s, bd.branchId)).length;
+                    const isSelected = selectedBranchId && (selectedBranchId === bd.branchId || cleanBranchKey(selectedBranchId) === cleanBranchKey(bd.branchId) || isBranchMatch(selectedBranchId, { id: bd.branchId }));
+                    const isTerminated = isBranchTerminatedInCycle(bd);
+                    return (
+                      <button
+                        key={bd.branchId}
+                        type="button"
+                        className={`btn ${isSelected ? 'btn-start' : 'btn-ghost'}`}
+                        onClick={() => { setSelectedBranchId(bd.branchId); setShiftBranchFilter(bd.branchId); }}
+                        style={{ fontSize: '12px', padding: '6px 14px', borderRadius: '8px', fontWeight: 800 }}
+                      >
+                        📍 {bName} ({bShiftsCount}) {isTerminated ? '🔒' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Single Branch Selected Banner */}
+              {isMultiBranchEmp && selectedBranchId && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 16px',
+                  background: 'var(--primary-tint, rgba(13, 148, 136, 0.08))',
+                  border: '1.5px solid var(--primary)',
+                  borderRadius: '12px',
+                  marginBottom: '16px',
+                  flexWrap: 'wrap',
+                  gap: '10px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '20px' }}>📍</span>
+                    <div>
+                      <span style={{ fontWeight: 800, fontSize: '13.5px', color: 'var(--primary-dark)' }}>
+                        أنت تستعرض حالياً ورديات فرع: {state.branches?.find(b => isBranchMatch(selectedBranchId, b))?.name || `فرع ${selectedBranchId}`} ({empShifts.length} وردية)
+                      </span>
+                      {isSelectedBranchTerminated && (
+                        <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: 700, marginTop: '2px' }}>
+                          🔒 تم إنهاء الخدمة بهذا الفرع بتاريخ {selectedBranchDetails?.terminationDate || 'مسبقاً'}. (للاطلاع والمراجعة فقط)
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => { setSelectedBranchId(''); setShiftBranchFilter('all'); }}
+                    style={{ fontSize: '12px', padding: '5px 12px', borderRadius: '8px', fontWeight: 800, border: '1px solid var(--border)' }}
+                  >
+                    🌐 عرض كافة الفروع
+                  </button>
+                </div>
+              )}
+
               {/* Multi-Branch vs Single Branch Shifts */}
-              {emp.branchesDetails && emp.branchesDetails.length > 1 && !selectedBranchId ? (
+              {isMultiBranchEmp && !selectedBranchId ? (
                 <div style={{ marginTop: '16px' }}>
                   {/* Dual Branch Attendance Side-by-Side Comparison Cards */}
                   <div style={{
@@ -5455,14 +5774,15 @@ export default function EmployeePortalView({
                     gap: '14px',
                     marginBottom: '18px'
                   }}>
-                    {emp.branchesDetails.map((bd, idx) => {
+                    {employeeActiveBranches.map((bd, idx) => {
                       const bId = bd.branchId;
-                      const bObj = (state.branches || []).find((b) => b.id === bId);
+                      const bObj = (state.branches || []).find((b) => isBranchMatch(b.id, { id: bId }));
                       const bName = bObj ? bObj.name : `فرع ${bId}`;
-                      const bShifts = empShifts.filter((s) => s.branchId === bId || (!s.branchId && emp.branchesDetails[0].branchId === bId));
+                      const bShifts = allMonthShifts.filter((s) => checkShiftBranchMatch(s, bId));
                       const bHours = bShifts.reduce((acc, s) => acc + (getEffectiveShiftHours(s, state) || 0), 0);
                       const avgShift = bShifts.length > 0 ? (bHours / bShifts.length).toFixed(1) : 0;
                       const bManualCount = bShifts.filter(s => s.isManual || (s.note && s.note.includes('يدوي'))).length;
+                      const isTerminated = isBranchTerminatedInCycle(bd);
                       const colors = [
                         { border: '#99f6e4', bg: '#f0fdfa', title: '#0f766e', accent: '#0d9488' },
                         { border: '#bfdbfe', bg: '#eff6ff', title: '#1e40af', accent: '#2563eb' },
@@ -5473,19 +5793,23 @@ export default function EmployeePortalView({
                       return (
                         <div
                           key={bId}
+                          onClick={() => { setSelectedBranchId(bId); setShiftBranchFilter(bId); }}
                           style={{
                             background: theme.bg,
                             border: `1.5px solid ${theme.border}`,
                             borderRadius: '14px',
                             padding: '16px',
-                            boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+                            cursor: 'pointer',
+                            transition: 'transform 0.15s ease, box-shadow 0.15s ease'
                           }}
+                          title="انقر لاستعراض ورديات هذا الفرع فقط"
                         >
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <span style={{ fontSize: '20px' }}>🏢</span>
                               <h4 style={{ margin: 0, fontSize: '15.5px', fontWeight: 900, color: theme.title }}>
-                                {bName}
+                                {bName} {isTerminated ? '🔒(منتهي)' : ''}
                               </h4>
                             </div>
                             <span style={{
@@ -5521,76 +5845,93 @@ export default function EmployeePortalView({
                               </div>
                             </div>
                           </div>
+
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{
+                              marginTop: '10px',
+                              width: '100%',
+                              fontSize: '11.5px',
+                              padding: '4px 8px',
+                              borderRadius: '8px',
+                              background: 'rgba(255,255,255,0.7)',
+                              border: `1px solid ${theme.border}`,
+                              fontWeight: 700
+                            }}
+                          >
+                            🔍 عرض تفاصيل ورديات {bName} ←
+                          </button>
                         </div>
                       );
                     })}
                   </div>
 
-                  {/* Branch Filter Tabs Toolbar */}
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    marginBottom: '16px',
-                    flexWrap: 'wrap',
-                    padding: '8px 12px',
-                    background: 'var(--surface)',
-                    borderRadius: '12px',
-                    border: '1px solid var(--border)'
-                  }}>
-                    <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--muted)', marginLeft: '4px' }}>
-                      🔍 تصفية عرض الورديات:
-                    </span>
-                    <button
-                      type="button"
-                      className={`btn ${shiftBranchFilter === 'all' ? 'btn-start' : 'btn-ghost'}`}
-                      onClick={() => setShiftBranchFilter('all')}
-                      style={{ fontSize: '12px', padding: '5px 12px', borderRadius: '8px' }}
-                    >
-                      🌐 كافة الفروع ({empShifts.length})
-                    </button>
-                    {emp.branchesDetails.map((bd) => {
-                      const bObj = (state.branches || []).find((b) => b.id === bd.branchId);
-                      const bName = bObj ? bObj.name : `فرع ${bd.branchId}`;
-                      const bShiftsCount = empShifts.filter((s) => s.branchId === bd.branchId || (!s.branchId && emp.branchesDetails[0].branchId === bd.branchId)).length;
-                      const isSelected = shiftBranchFilter === bd.branchId;
-                      return (
-                        <button
-                          key={bd.branchId}
-                          type="button"
-                          className={`btn ${isSelected ? 'btn-start' : 'btn-ghost'}`}
-                          onClick={() => setShiftBranchFilter(bd.branchId)}
-                          style={{ fontSize: '12px', padding: '5px 12px', borderRadius: '8px' }}
-                        >
-                          📍 {bName} ({bShiftsCount})
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Branch Shift Tables / Cards (Filtered by shiftBranchFilter) */}
-                  {emp.branchesDetails
-                    .filter((bd) => shiftBranchFilter === 'all' || bd.branchId === shiftBranchFilter)
-                    .map((bd) => {
+                  {/* Branch Shift Tables for each branch */}
+                  {employeeActiveBranches.map((bd) => {
                     const bId = bd.branchId;
-                    const bObj = (state.branches || []).find((b) => b.id === bId);
+                    const bObj = (state.branches || []).find((b) => isBranchMatch(b.id, { id: bId }));
                     const bName = bObj ? bObj.name : `فرع ${bId}`;
-                    const bShifts = empShifts.filter((s) => s.branchId === bId || (!s.branchId && emp.branchesDetails[0].branchId === bId));
-                    const bRate = (summary.perBranch?.[bId]?.rate) || 0;
+                    const bShifts = allMonthShifts.filter((s) => checkShiftBranchMatch(s, bId));
+                    const bTimeline = displayedEmpTimeline.filter((item) => {
+                      if (item.recordType === 'leave') return true;
+                      if (item.recordType === 'off_day') {
+                        if (item.isOtherBranchShift) return isBranchMatch(item.branchId, { id: bId });
+                        if (item.branchId) return isBranchMatch(item.branchId, { id: bId });
+                        return true;
+                      }
+                      return checkShiftBranchMatch(item, bId);
+                    });
+                    const bRate = (bId && summary.perBranch?.[bId]?.rate) || (summary.perBranch && Object.entries(summary.perBranch).find(([bid]) => isBranchMatch(bId, { id: bid }))?.[1]?.rate) || summary.rate || 0;
 
                     return (
                       <div key={bId} style={{ marginTop: '18px', padding: '16px', background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '12px' }}>
                         <h4 style={{ margin: '0 0 10px 0', color: 'var(--primary-dark)', fontSize: '15px' }}>
-                          📋 بصمات فرع {bName} ({bShifts.length} وردية)
+                          📋 سجل فرع {bName} ({bShifts.length} وردية)
                         </h4>
                         {isMobileScreen ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {bShifts.length === 0 ? (
+                            {bTimeline.length === 0 ? (
                               <div style={{ padding: '20px 14px', textAlign: 'center', color: 'var(--muted)', fontSize: '12.5px', background: 'var(--surface)', borderRadius: '10px' }}>
-                                لا توجد ورديات مسجلة لهذا الفرع في هذا الشهر
+                                لا توجد سجلات مسجلة لهذا الفرع في هذا الشهر
                               </div>
                             ) : (
-                              bShifts.map((s, idx) => {
+                              bTimeline.map((s, idx) => {
+                                if (s.recordType === 'leave') {
+                                  return (
+                                    <div key={`leave_${s.id || s.date}`} style={{ background: 'rgba(238, 242, 255, 0.7)', border: '1.5px solid #c7d2fe', borderRadius: '12px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                          <span style={{ fontSize: '11px', background: '#e0e7ff', color: '#4338ca', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>#{idx + 1}</span>
+                                          <span style={{ fontWeight: 800, fontSize: '13px', color: '#312e81' }}>{s.date}</span>
+                                          <span style={{ fontSize: '11.5px', color: '#6366f1' }}>({arabicWeekday(s.date)})</span>
+                                        </div>
+                                        <span style={{ background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', padding: '1px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 800 }}>
+                                          {s.leaveTypeName || '🏖️ إجازة'}
+                                        </span>
+                                      </div>
+                                      <div style={{ fontSize: '11px', color: '#4338ca' }}>
+                                        {s.reason ? `📝 ${s.reason}` : (s.isPaidLeave ? 'إجازة مدفوعة الأجر' : 'إجازة بدون راتب')}
+                                      </div>
+                                    </div>
+                                  );
+                                }
+                                if (s.recordType === 'off_day') {
+                                  return (
+                                    <div key={`off_${s.date}`} style={{ background: 'rgba(248, 250, 252, 0.85)', border: '1.5px dashed #cbd5e1', borderRadius: '12px', padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <span style={{ fontSize: '11px', background: '#f1f5f9', color: '#64748b', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>#{idx + 1}</span>
+                                        <span style={{ fontWeight: 800, fontSize: '13px', color: '#475569' }}>{s.date}</span>
+                                        <span style={{ fontSize: '11.5px', color: '#94a3b8' }}>({arabicWeekday(s.date)})</span>
+                                        <span style={{ background: s.isOtherBranchShift ? '#fef3c7' : '#f1f5f9', color: s.isOtherBranchShift ? '#92400e' : '#64748b', border: `1px solid ${s.isOtherBranchShift ? '#fde68a' : '#cbd5e1'}`, padding: '1px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 800 }}>
+                                          {s.isOtherBranchShift ? `🏢 مجدول بفرع ${s.otherBranchName || ''}` : '☕ يوم راحة'}
+                                        </span>
+                                      </div>
+                                      <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 700 }}>0 س</span>
+                                    </div>
+                                  );
+                                }
+
                                 const perm = isApprovedPermissionForDate(emp.id, s.date, state);
                                 const hasPerm = s.hasApprovedPermission || !!perm;
                                 const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
@@ -5603,6 +5944,11 @@ export default function EmployeePortalView({
                                         <span style={{ fontSize: '11px', background: 'var(--surface-muted)', color: 'var(--muted)', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>#{idx + 1}</span>
                                         <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>{s.date}</span>
                                         <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>({arabicWeekday(s.date)})</span>
+                                        {(s.isScheduledOffDay || s.isWorkOnOffDay) && (
+                                          <span style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 800 }}>
+                                            ⚡ راحة
+                                          </span>
+                                        )}
                                       </div>
                                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                                         <span style={{ background: 'var(--primary-light, #ccfbf1)', color: 'var(--primary-dark, #0f766e)', fontWeight: 800, fontSize: '11.5px', padding: '2px 6px', borderRadius: '6px' }}>
@@ -5659,12 +6005,50 @@ export default function EmployeePortalView({
                                 </tr>
                               </thead>
                               <tbody>
-                                {bShifts.length === 0 ? (
+                                {bTimeline.length === 0 ? (
                                   <tr className="empty-row">
-                                    <td colSpan={canEditShift ? 10 : 9}>لا توجد ورديات مسجلة لهذا الفرع في هذا الشهر</td>
+                                    <td colSpan={canEditShift ? 10 : 9}>لا توجد سجلات مسجلة لهذا الفرع في هذا الشهر</td>
                                   </tr>
                                 ) : (
-                                  bShifts.map((s, idx) => {
+                                  bTimeline.map((s, idx) => {
+                                    if (s.recordType === 'leave') {
+                                      return (
+                                        <tr key={`leave_${s.id || s.date}`} style={{ background: 'rgba(238, 242, 255, 0.45)' }}>
+                                          <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
+                                          <td style={{ fontWeight: 700, color: '#312e81' }}>{s.date}</td>
+                                          <td style={{ fontWeight: 600, color: '#4338ca' }}>{arabicWeekday(s.date)}</td>
+                                          <td colSpan={4} style={{ textAlign: 'center' }}>
+                                            <span style={{ background: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe', padding: '2px 8px', borderRadius: '6px', fontWeight: 800, fontSize: '11px' }}>
+                                              {s.leaveTypeName || '🏖️ إجازة معتمدة'}
+                                            </span>
+                                            {s.reason && <span style={{ marginRight: '8px', color: '#6366f1', fontSize: '12px' }}>({s.reason})</span>}
+                                          </td>
+                                          <td style={{ color: s.isPaidLeave ? 'var(--success)' : 'var(--muted)', fontWeight: 600 }}>
+                                            {s.isPaidLeave ? 'رصيد إجازات' : 'بدون راتب'}
+                                          </td>
+                                          <td style={{ color: '#4338ca', fontSize: '11px' }}>{s.notes || '—'}</td>
+                                          {canEditShift && <td></td>}
+                                        </tr>
+                                      );
+                                    }
+                                    if (s.recordType === 'off_day') {
+                                      return (
+                                        <tr key={`off_${s.date}`} style={{ background: 'rgba(248, 250, 252, 0.65)' }}>
+                                          <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
+                                          <td style={{ fontWeight: 600, color: '#64748b' }}>{s.date}</td>
+                                          <td style={{ color: '#94a3b8' }}>{arabicWeekday(s.date)}</td>
+                                          <td colSpan={5} style={{ textAlign: 'center', color: '#94a3b8', fontSize: '11.5px' }}>
+                                            <span style={{ background: s.isOtherBranchShift ? '#fef3c7' : '#f1f5f9', color: s.isOtherBranchShift ? '#92400e' : '#64748b', border: `1px solid ${s.isOtherBranchShift ? '#fde68a' : '#cbd5e1'}`, padding: '2px 8px', borderRadius: '6px', fontWeight: 800, fontSize: '11px', marginLeft: '6px' }}>
+                                              {s.isOtherBranchShift ? `🏢 مجدول بفرع ${s.otherBranchName || ''}` : '☕ يوم راحة'}
+                                            </span>
+                                            {s.isOtherBranchShift ? `مجدول بالفرع الآخر` : 'راحة أسبوعية مجدولة'}
+                                          </td>
+                                          <td style={{ color: '#94a3b8', fontSize: '11px' }}>—</td>
+                                          {canEditShift && <td></td>}
+                                        </tr>
+                                      );
+                                    }
+
                                     const perm = isApprovedPermissionForDate(emp.id, s.date, state);
                                     const hasPerm = s.hasApprovedPermission || !!perm;
                                     const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
@@ -5802,12 +6186,111 @@ export default function EmployeePortalView({
               ) : isMobileScreen ? (
                 /* 📱 MOBILE SHIFT CARDS - ZERO HORIZONTAL SCROLLBAR, ZERO NESTED SCROLLBAR */
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '14px' }}>
-                  {empShifts.length === 0 ? (
+                  {displayedEmpTimeline.length === 0 ? (
                     <div style={{ padding: '30px 16px', textAlign: 'center', color: 'var(--muted)', background: 'var(--surface-muted)', borderRadius: '12px', fontSize: '13px' }}>
-                      🎉 لا توجد ورديات مسجلة لهذا الشهر
+                      🎉 لا توجد سجلات مطابقة لهذا الشهر
                     </div>
                   ) : (
-                    empShifts.map((s, idx) => {
+                    displayedEmpTimeline.map((s, idx) => {
+                      if (s.recordType === 'leave') {
+                        return (
+                          <div
+                            key={`leave_${s.id || s.date}`}
+                            style={{
+                              background: 'rgba(238, 242, 255, 0.7)',
+                              border: '1.5px solid #c7d2fe',
+                              borderRadius: '14px',
+                              padding: '12px 14px',
+                              boxShadow: '0 2px 6px rgba(0,0,0,0.03)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '8px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e0e7ff', paddingBottom: '8px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: '11px', background: '#e0e7ff', color: '#4338ca', padding: '2px 6px', borderRadius: '6px', fontWeight: 800 }}>
+                                  #{idx + 1}
+                                </span>
+                                <span style={{ fontWeight: 800, fontSize: '13.5px', color: '#312e81' }}>{s.date}</span>
+                                <span style={{ fontSize: '12px', color: '#6366f1', fontWeight: 600 }}>({arabicWeekday(s.date)})</span>
+                                <span style={{
+                                  fontSize: '11px',
+                                  background: '#e0e7ff',
+                                  color: '#3730a3',
+                                  border: '1px solid #c7d2fe',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontWeight: 800
+                                }}>
+                                  {s.leaveTypeName || '🏖️ إجازة معتمدة'}
+                                </span>
+                              </div>
+                              <span style={{
+                                background: s.isPaidLeave ? '#dcfce7' : '#f1f5f9',
+                                color: s.isPaidLeave ? '#15803d' : '#64748b',
+                                border: `1px solid ${s.isPaidLeave ? '#86efac' : '#cbd5e1'}`,
+                                fontWeight: 800,
+                                fontSize: '11.5px',
+                                padding: '3px 8px',
+                                borderRadius: '8px'
+                              }}>
+                                {s.isPaidLeave ? '✅ مدفوعة الأجر' : '⚪ بدون راتب'}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#4338ca' }}>
+                              {s.reason ? `📝 سبب الإجازة: ${s.reason}` : 'إجازة رسمية / معتمدة من الإدارة'}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      if (s.recordType === 'off_day') {
+                        return (
+                          <div
+                            key={`off_${s.date}`}
+                            style={{
+                              background: 'rgba(248, 250, 252, 0.85)',
+                              border: '1.5px dashed #cbd5e1',
+                              borderRadius: '14px',
+                              padding: '12px 14px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '6px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontSize: '11px', background: '#f1f5f9', color: '#64748b', padding: '2px 6px', borderRadius: '6px', fontWeight: 800 }}>
+                                  #{idx + 1}
+                                </span>
+                                <span style={{ fontWeight: 800, fontSize: '13.5px', color: '#475569' }}>{s.date}</span>
+                                <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>({arabicWeekday(s.date)})</span>
+                                <span style={{
+                                  fontSize: '11px',
+                                  background: s.isOtherBranchShift ? '#fef3c7' : '#f1f5f9',
+                                  color: s.isOtherBranchShift ? '#92400e' : '#64748b',
+                                  border: `1px solid ${s.isOtherBranchShift ? '#fde68a' : '#cbd5e1'}`,
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontWeight: 800
+                                }}>
+                                  {s.isOtherBranchShift ? `🏢 مجدول بفرع ${s.otherBranchName || ''}` : '☕ يوم راحة مجدول'}
+                                </span>
+                              </div>
+                              <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 700 }}>0 س</span>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      const sBranch = (state.branches || []).find((b) =>
+                        isBranchMatch(s.branchId, b) ||
+                        (s.branchName && (isBranchMatch(s.branchName, b) || cleanBranchKey(s.branchName) === cleanBranchKey(b.name))) ||
+                        (s.branchId && cleanBranchKey(s.branchId) === cleanBranchKey(b.id))
+                      );
+                      const sBranchId = sBranch?.id || s.branchId;
+                      const sBranchName = sBranch?.name || s.branchName || 'الفرع الرئيسي';
                       const perm = isApprovedPermissionForDate(emp.id, s.date, state);
                       const hasPerm = s.hasApprovedPermission || !!perm;
                       const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
@@ -5816,7 +6299,9 @@ export default function EmployeePortalView({
                       const isOtApproved = shiftMetrics.isOvertimeApproved || s.overtimeStatus === 'approved';
                       const otHours = (shiftMetrics.overtimeHours > 0 ? shiftMetrics.overtimeHours : parseFloat(s.overtimeHours)) || 0;
                       const payableHours = shiftMetrics.payableHours || (isOtApproved ? (effHours + otHours) : effHours);
-                      const branchRate = (summary.perBranch?.[s.branchId]?.rate || summary.rate) || 0;
+                      const branchRate = (sBranchId && summary.perBranch?.[sBranchId]?.rate) ||
+                        (summary.perBranch && Object.entries(summary.perBranch).find(([bid]) => isBranchMatch(s.branchId, { id: bid }))?.[1]?.rate) ||
+                        summary.rate || 0;
 
                       return (
                         <div
@@ -5832,9 +6317,9 @@ export default function EmployeePortalView({
                             gap: '8px'
                           }}
                         >
-                          {/* Top Row: Date, Day, Effective Hours & Gross Amount */}
+                          {/* Top Row: Date, Day, Branch Badge, Effective Hours & Gross Amount */}
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.05))', paddingBottom: '8px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                               <span style={{ fontSize: '11px', background: 'var(--surface-muted)', color: 'var(--muted)', padding: '2px 6px', borderRadius: '6px', fontWeight: 800 }}>
                                 #{idx + 1}
                               </span>
@@ -5843,6 +6328,17 @@ export default function EmployeePortalView({
                               </span>
                               <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 600 }}>
                                 ({arabicWeekday(s.date)})
+                              </span>
+                              <span style={{
+                                fontSize: '11px',
+                                background: '#f0fdfa',
+                                color: '#0f766e',
+                                border: '1px solid #99f6e4',
+                                padding: '1px 6px',
+                                borderRadius: '6px',
+                                fontWeight: 800
+                              }}>
+                                📍 {sBranchName}
                               </span>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -5858,8 +6354,13 @@ export default function EmployeePortalView({
                           </div>
 
                           {/* Badges Row (if any) */}
-                          {(hasPerm || isShiftManualPunch(s) || isOtApproved || s.overtimeStatus) && (
+                          {(hasPerm || isShiftManualPunch(s) || isOtApproved || s.overtimeStatus || s.isScheduledOffDay || s.isWorkOnOffDay) && (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              {(s.isScheduledOffDay || s.isWorkOnOffDay) && (
+                                <span style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', padding: '2px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 800 }}>
+                                  ⚡ عمل في يوم راحة مجدول
+                                </span>
+                              )}
                               {hasPerm && (
                                 <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '2px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 800 }}>
                                   ⏰ معدلة بإذن (+{permHours} س)
@@ -5962,6 +6463,7 @@ export default function EmployeePortalView({
                         <th>#</th>
                         <th>التاريخ</th>
                         <th>اليوم</th>
+                        <th>الفرع</th>
                         <th>وقت الدخول</th>
                         <th>وقت الخروج</th>
                         <th>ساعات البريك</th>
@@ -5972,12 +6474,83 @@ export default function EmployeePortalView({
                       </tr>
                     </thead>
                     <tbody>
-                      {empShifts.length === 0 ? (
+                      {displayedEmpTimeline.length === 0 ? (
                         <tr className="empty-row">
-                          <td colSpan={canEditShift ? 10 : 9}>لا توجد ورديات مسجلة لهذا الشهر</td>
+                          <td colSpan={canEditShift ? 11 : 10}>لا توجد سجلات مطابقة لهذا الشهر</td>
                         </tr>
                       ) : (
-                        empShifts.map((s, idx) => {
+                        displayedEmpTimeline.map((s, idx) => {
+                          if (s.recordType === 'leave') {
+                            return (
+                              <tr key={`leave_${s.id || s.date}`} style={{ background: 'rgba(238, 242, 255, 0.45)' }}>
+                                <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
+                                <td style={{ fontWeight: 700, color: '#312e81' }}>{s.date}</td>
+                                <td style={{ fontWeight: 600, color: '#4338ca' }}>{arabicWeekday(s.date)}</td>
+                                <td>
+                                  <span style={{
+                                    background: '#e0e7ff',
+                                    color: '#3730a3',
+                                    border: '1px solid #c7d2fe',
+                                    padding: '3px 8px',
+                                    borderRadius: '6px',
+                                    fontWeight: 800,
+                                    fontSize: '11px'
+                                  }}>
+                                    {s.leaveTypeName || '🏖️ إجازة معتمدة'}
+                                  </span>
+                                </td>
+                                <td colSpan={3} style={{ textAlign: 'center', color: '#6366f1', fontSize: '12px', fontWeight: 600 }}>
+                                  {s.reason ? `📝 ${s.reason}` : 'إجازة معتمدة من الإدارة'}
+                                </td>
+                                <td style={{ textAlign: 'center', color: s.isPaidLeave ? '#15803d' : '#64748b', fontWeight: 700 }}>
+                                  {s.isPaidLeave ? 'مدفوعة الأجر' : 'غير مدفوعة'}
+                                </td>
+                                <td style={{ color: s.isPaidLeave ? 'var(--success)' : 'var(--muted)', fontWeight: 600 }}>
+                                  {s.isPaidLeave ? 'رصيد إجازات' : '—'}
+                                </td>
+                                <td style={{ color: '#4338ca', fontSize: '11px' }}>
+                                  {s.notes || (s.isPaidLeave ? 'إجازة رسمية أو اعتيادية مدفوعة' : 'إجازة بدون راتب')}
+                                </td>
+                                {canEditShift && <td></td>}
+                              </tr>
+                            );
+                          }
+
+                          if (s.recordType === 'off_day') {
+                            return (
+                              <tr key={`off_${s.date}`} style={{ background: 'rgba(248, 250, 252, 0.65)' }}>
+                                <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
+                                <td style={{ fontWeight: 600, color: '#64748b' }}>{s.date}</td>
+                                <td style={{ color: '#94a3b8' }}>{arabicWeekday(s.date)}</td>
+                                <td>
+                                  <span style={{
+                                    background: s.isOtherBranchShift ? '#fef3c7' : '#f1f5f9',
+                                    color: s.isOtherBranchShift ? '#92400e' : '#64748b',
+                                    border: `1px solid ${s.isOtherBranchShift ? '#fde68a' : '#cbd5e1'}`,
+                                    padding: '3px 8px',
+                                    borderRadius: '6px',
+                                    fontWeight: 800,
+                                    fontSize: '11px'
+                                  }}>
+                                    {s.isOtherBranchShift ? `🏢 مجدول بفرع ${s.otherBranchName || ''}` : '☕ يوم راحة'}
+                                  </span>
+                                </td>
+                                <td colSpan={5} style={{ textAlign: 'center', color: '#94a3b8', fontSize: '11.5px' }}>
+                                  {s.isOtherBranchShift ? `مجدول بالفرع الآخر (${s.otherBranchName})` : 'راحة أسبوعية مجدولة وفق جدول العمل'}
+                                </td>
+                                <td style={{ color: '#94a3b8', fontSize: '11px' }}>—</td>
+                                {canEditShift && <td></td>}
+                              </tr>
+                            );
+                          }
+
+                          const sBranch = (state.branches || []).find((b) =>
+                            isBranchMatch(s.branchId, b) ||
+                            (s.branchName && (isBranchMatch(s.branchName, b) || cleanBranchKey(s.branchName) === cleanBranchKey(b.name))) ||
+                            (s.branchId && cleanBranchKey(s.branchId) === cleanBranchKey(b.id))
+                          );
+                          const sBranchId = sBranch?.id || s.branchId;
+                          const sBranchName = sBranch?.name || s.branchName || 'الفرع الرئيسي';
                           const perm = isApprovedPermissionForDate(emp.id, s.date, state);
                           const hasPerm = s.hasApprovedPermission || !!perm;
                           const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
@@ -5985,7 +6558,9 @@ export default function EmployeePortalView({
                           const shiftMetrics = getShiftHoursMetrics(s, state);
                           const regH = shiftMetrics.regularHours;
                           const totalH = shiftMetrics.displayNetHours;
-                          const effectiveRate = summary.perBranch?.[s.branchId]?.rate || summary.rate || 0;
+                          const effectiveRate = (sBranchId && summary.perBranch?.[sBranchId]?.rate) ||
+                            (summary.perBranch && Object.entries(summary.perBranch).find(([bid]) => isBranchMatch(s.branchId, { id: bid }))?.[1]?.rate) ||
+                            summary.rate || 0;
                           const shiftEarned = shiftMetrics.payableHours * effectiveRate;
                           const pendingOtEarned = (!shiftMetrics.isOvertimeApproved && shiftMetrics.overtimeStatus === 'pending' && shiftMetrics.overtimeHours > 0)
                             ? (shiftMetrics.overtimeHours * effectiveRate)
@@ -5996,6 +6571,11 @@ export default function EmployeePortalView({
                               <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
                               <td style={{ fontWeight: 600 }}>
                                 {s.date}
+                                {(s.isScheduledOffDay || s.isWorkOnOffDay) && (
+                                  <span style={{ display: 'block', marginTop: '2px', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                    ⚡ عمل في يوم راحة مجدول
+                                  </span>
+                                )}
                                 {hasPerm && (
                                   <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
                                     ⏰ معدلة بإذن (+{permHours} س)
@@ -6023,6 +6603,22 @@ export default function EmployeePortalView({
                                 )}
                               </td>
                               <td>{arabicWeekday(s.date)}</td>
+                              <td>
+                                <span style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  background: 'var(--surface-muted)',
+                                  color: 'var(--text)',
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '11.5px',
+                                  fontWeight: 700,
+                                  border: '1px solid var(--border)'
+                                }}>
+                                  📍 {sBranchName}
+                                </span>
+                              </td>
                               <td><span className="ep-time-badge ep-time-in">{s.timeIn}</span></td>
                               <td><span className="ep-time-badge ep-time-out">{s.timeOut || '—'}</span></td>
                               <td>
@@ -6083,7 +6679,7 @@ export default function EmployeePortalView({
                     {empShifts.length > 0 && (
                       <tfoot>
                         <tr style={{ fontWeight: 700 }}>
-                          <td colSpan="5" style={{ textAlign: 'right', paddingRight: '12px', color: 'var(--text-muted)' }}>
+                          <td colSpan="6" style={{ textAlign: 'right', paddingRight: '12px', color: 'var(--text-muted)' }}>
                             الإجمالي ({empShifts.length} وردية)
                           </td>
                           <td><span className="ep-break-badge">{fmt(empShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0))} س</span></td>

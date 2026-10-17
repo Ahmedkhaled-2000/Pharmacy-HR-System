@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics, recalculateEmployeeCycleLateness, reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
-import { calcRawDurationMinutes, checkShiftConflicts } from '../../utils/workHoursEngine';
+import { calcRawDurationMinutes, checkShiftConflicts, buildUnifiedAttendanceTimeline } from '../../utils/workHoursEngine';
+import { getCycleDateRange } from '../../utils/periodEngine';
 import { getEmployeeDaySchedule, findEmployeeRoster } from '../../utils/rosterEngine';
 import {
   getEmployeeManualPunchesCount,
@@ -196,9 +197,9 @@ export default function AttendancePunchesModal({
 
     const hasTimeOut = Boolean(p.timeOut && p.timeOut !== '—' && p.timeOut !== '' && p.timeOut !== 'قيد العمل الآن');
     const pEpoch = getShiftStartEpoch(p);
-    // صمام الأمان: الورديات المفتوحة لا تتجاوز 16 ساعة كحد أقصى تماشياً مع صمام أمان الـ 15 ساعة
-    const isWithinSafetyValve = pEpoch > 0 && (Date.now() - pEpoch < 16 * 3600 * 1000);
-    // الوردية تكون حية فقط إذا كانت غير مكتملة وضمن صمام الأمان (أقل من 16 ساعة)
+    // صمام الأمان: الورديات المفتوحة لا تتجاوز 20 ساعة كحد أقصى تماشياً مع صمام أمان الـ 20 ساعة الموحد
+    const isWithinSafetyValve = pEpoch > 0 && (Date.now() - pEpoch < 20 * 3600 * 1000);
+    // الوردية تكون حية فقط إذا كانت غير مكتملة وضمن صمام الأمان (أقل من 20 ساعة)
     const isLiveNow = !hasTimeOut && !isSuppressedByLeave && isWithinSafetyValve && (p.isLiveActive || p.date === todayStrNow);
     const isStaleUnclosed = !hasTimeOut && !isLiveNow;
 
@@ -272,7 +273,7 @@ export default function AttendancePunchesModal({
   // 🛡️ صمام إزالة التكرار الذكي للعرض (Display Deduplication Guard):
   // منع تكرار نفس الوردية في نفس الفرع في نفس اليوم مع السماح بتعدد الفروع للموظف في نفس اليوم (بدون تعارض زمني)
   const monthPunches = useMemo(() => {
-    const seenByBranchAndDate = new Map();
+    const seenByShiftKey = new Map();
 
     const getCanonicalBranchKey = (shift) => {
       if (!shift) return 'default';
@@ -286,14 +287,33 @@ export default function AttendancePunchesModal({
     rawSortedPunches.forEach(p => {
       if (!p || !p.date) return;
       const bKey = getCanonicalBranchKey(p);
-      const key = `${bKey}_${p.date}`;
-      if (!seenByBranchAndDate.has(key)) {
-        seenByBranchAndDate.set(key, p);
+      const pInPrefix = p.timeIn ? p.timeIn.slice(0, 5) : '';
+      const key = p.id ? `id_${p.id}` : `${bKey}_${p.date}_${pInPrefix || 'shift'}`;
+
+      // فحص ما إذا كان هناك سجل سابق لنفس الفرع واليوم يتطابق معه
+      let matchedKey = null;
+      for (const [k, existing] of seenByShiftKey.entries()) {
+        const exBKey = getCanonicalBranchKey(existing);
+        const isSameBranch = (bKey !== 'default' && exBKey !== 'default' && bKey === exBKey) ||
+          (p.branchId && existing.branchId && String(p.branchId) === String(existing.branchId)) ||
+          (p.branchName && existing.branchName && p.branchName.trim() === existing.branchName.trim());
+
+        if (isSameBranch && existing.date === p.date) {
+          // تطابق في نفس الفرع واليوم
+          if (!pInPrefix || !existing.timeIn || existing.timeIn.slice(0, 5) === pInPrefix || p.id === existing.id) {
+            matchedKey = k;
+            break;
+          }
+        }
+      }
+
+      if (!matchedKey) {
+        seenByShiftKey.set(key, p);
       } else {
-        const existing = seenByBranchAndDate.get(key);
+        const existing = seenByShiftKey.get(matchedKey);
         // الوردية الحية لليوم الحالي لها أولوية قصوى
         if (p.isLiveActive && !existing.isLiveActive) {
-          seenByBranchAndDate.set(key, p);
+          seenByShiftKey.set(matchedKey, p);
           return;
         }
         if (!p.isLiveActive && existing.isLiveActive) {
@@ -305,7 +325,7 @@ export default function AttendancePunchesModal({
 
         // إذا كان أحدهما يدوياً معتمداً من الإدارة: اليدوي المعتمد يفوز ويستبدل البيومتري القديم في نفس الفرع
         if (pIsManual && !exIsManual) {
-          seenByBranchAndDate.set(key, p);
+          seenByShiftKey.set(matchedKey, p);
         } else if (!pIsManual && exIsManual) {
           // keep existing manual
         } else {
@@ -316,22 +336,69 @@ export default function AttendancePunchesModal({
           const exHrs = parseFloat(existing.actualWorkedHours || existing.hours || 0);
 
           if (pHasOut && !exHasOut) {
-            seenByBranchAndDate.set(key, p);
+            seenByShiftKey.set(matchedKey, p);
           } else if (pHrs > 0 && exHrs === 0) {
-            seenByBranchAndDate.set(key, p);
+            seenByShiftKey.set(matchedKey, p);
           } else if (pHrs > exHrs) {
-            seenByBranchAndDate.set(key, p);
+            seenByShiftKey.set(matchedKey, p);
           }
         }
       }
     });
-    return Array.from(seenByBranchAndDate.values()).sort((a, b) => {
+    return Array.from(seenByShiftKey.values()).sort((a, b) => {
       const dateA = String(a?.date || '').trim();
       const dateB = String(b?.date || '').trim();
       if (dateA !== dateB) return dateB.localeCompare(dateA);
       return String(b?.timeIn || '').localeCompare(String(a?.timeIn || ''));
     });
   }, [rawSortedPunches, state.branches]);
+
+  // ── بناء الخط الزمني الموحد لسجل البصمات (ورديات فعلية + إجازات معتمدة + أيام راحة مجدولة) ──
+  const [timelineFilter, setTimelineFilter] = useState('all'); // 'all' | 'shifts' | 'leaves' | 'off_days'
+
+  const attendanceTimeline = useMemo(() => {
+    let range = null;
+    if ((filterMode === 'custom' || filterMode === 'range') && customFrom && customTo) {
+      range = { startDate: customFrom, endDate: customTo };
+    } else if (monthPicker) {
+      range = getCycleDateRange(monthPicker, state?.orgSettings);
+    }
+    return buildUnifiedAttendanceTimeline(employee, monthPunches, state, {
+      cycleRange: range,
+      activePeriodFilter,
+      includeAbsences: false
+    });
+  }, [employee, monthPunches, state, filterMode, customFrom, customTo, monthPicker]);
+
+  const timelineCounts = useMemo(() => {
+    let shifts = 0;
+    let leaves = 0;
+    let offDays = 0;
+    (attendanceTimeline || []).forEach((item) => {
+      if (item.recordType === 'shift') shifts++;
+      else if (item.recordType === 'leave') leaves++;
+      else if (item.recordType === 'off_day') offDays++;
+    });
+    return {
+      all: attendanceTimeline.length,
+      shifts,
+      leaves,
+      offDays
+    };
+  }, [attendanceTimeline]);
+
+  const displayedTimeline = useMemo(() => {
+    if (timelineFilter === 'shifts') {
+      return attendanceTimeline.filter((item) => item.recordType === 'shift');
+    }
+    if (timelineFilter === 'leaves') {
+      return attendanceTimeline.filter((item) => item.recordType === 'leave');
+    }
+    if (timelineFilter === 'off_days') {
+      return attendanceTimeline.filter((item) => item.recordType === 'off_day');
+    }
+    return attendanceTimeline;
+  }, [attendanceTimeline, timelineFilter]);
 
   // استخراج الورديات الحية وغير المكتملة
   const unclosedLiveShift = enrichedMonthPunches.find(p => p.isLiveActive);
@@ -585,9 +652,9 @@ export default function AttendancePunchesModal({
     }
     // 4. أي فروع سجل بها ورديات أو بصمات خلال الشهر
     (monthPunches || []).forEach(p => {
-      if (p.branchId) {
-        const bObj = (branches || []).find(b => isBranchMatch(p.branchId, b));
-        const resolvedId = bObj ? bObj.id : p.branchId;
+      if (p.branchId || p.branchName) {
+        const bObj = (branches || []).find(b => isBranchMatch(p.branchId, b) || (p.branchName && isBranchMatch(p.branchName, b)));
+        const resolvedId = bObj ? bObj.id : (p.branchId || p.branchName);
         const bName = bObj ? bObj.name : (p.branchName || `فرع ${resolvedId}`);
         if (resolvedId && !map.has(String(resolvedId))) {
           map.set(String(resolvedId), { branchId: resolvedId, branchName: bName });
@@ -750,6 +817,23 @@ export default function AttendancePunchesModal({
     };
   }, [editingPunch, editTimeIn, editTimeOut, editBreakHours, editDate, employee, state]);
 
+  // 🛡️ فحص التعارض والتنقل اللحظي بين الفروع (Live Conflict & Transit Buffer Guard)
+  const liveConflictResult = useMemo(() => {
+    if (!editingPunch || !editDate || !editTimeIn || !editTimeOut) return null;
+    return checkShiftConflicts({
+      employeeId: employee?.id,
+      employeeCode: employee?.code,
+      branchId: editBranchId || employee?.branchId,
+      branchName: (state.branches || []).find(b => isBranchMatch(editBranchId, b))?.name,
+      date: editDate,
+      timeIn: editTimeIn,
+      timeOut: editTimeOut,
+      excludeShiftId: isAddingNewPunch ? null : editingPunch?.id,
+      shifts: state.shifts || [],
+      branches: state.branches || []
+    });
+  }, [editingPunch, editDate, editTimeIn, editTimeOut, editBranchId, employee, state, isAddingNewPunch]);
+
   const handleSaveEdit = async (e) => {
     e.preventDefault();
     if (!editingPunch) return;
@@ -787,6 +871,9 @@ export default function AttendancePunchesModal({
 
     setEditingPunch(null);
     setIsAddingNewPunch(false);
+    if (snapIsAdding) {
+      setSelectedBranchFilter('all');
+    }
 
     const performSave = async () => {
       const inParts = (snapTimeIn || '09:00').split(':').map(Number);
@@ -943,6 +1030,7 @@ export default function AttendancePunchesModal({
           unlinkPriorRequests: snapDecouplePrior,
           decoupledDay: snapDecouplePrior,
           ignorePermissions: snapDecouplePrior,
+          hasApprovedPermission: snapDecouplePrior ? false : undefined,
           permissionHours: 0,
           isOvernight: (outH < inH) || (outH === inH && outM < inM),
           statusLabel: overtimeHours > 0 ? (isOtApproved ? 'تسجيل يدوي (مع إضافي معتمد)' : 'تسجيل يدوي (إضافي قيد المراجعة)') : 'تسجيل يدوي من الإدارة',
@@ -979,7 +1067,8 @@ export default function AttendancePunchesModal({
               unlinkPriorRequests: snapDecouplePrior,
               decoupledDay: snapDecouplePrior,
               ignorePermissions: snapDecouplePrior,
-              permissionHours: 0,
+              hasApprovedPermission: snapDecouplePrior ? false : s.hasApprovedPermission,
+              permissionHours: snapDecouplePrior ? 0 : s.permissionHours,
               isOvernight: (outH < inH) || (outH === inH && outM < inM),
               adminApproved: true,
               branchId: canonicalBranchId,
@@ -998,13 +1087,18 @@ export default function AttendancePunchesModal({
         });
       }
 
-      // 🛡️ الحفاظ على كافة الورديات الأخرى دون حذف
-      const updatedDeletedIds = state._deletedIds || [];
+      // 🛡️ الحفاظ على كافة الورديات الأخرى دون حذف مع تطهير معرّف الوردية المحدثة/المضافة
+      const cleanDeletedIds = (state._deletedIds || []).filter(d => {
+        if (!d) return false;
+        const dStr = String(d).toLowerCase();
+        const fId = finalSavedShiftId.toLowerCase();
+        return dStr !== fId && dStr !== `shift_${fId}` && dStr !== `punch_${fId}`;
+      });
 
       // إذا كانت البصمة المعدلة هي الوردية الحية النشطة، نقوم بتحديث فرعها وتوقيتها في activeShifts أيضاً
       let updatedActiveShifts = { ...(state.activeShifts || {}) };
       const curActive = updatedActiveShifts[employee.id] || updatedActiveShifts[String(employee.id)] || (employee.code && updatedActiveShifts[employee.code]);
-      if (curActive && (snapEditingPunch.isLiveActive || String(curActive.shiftId) === String(finalSavedShiftId) || curActive.date === snapDate)) {
+      if (curActive && (snapEditingPunch.isLiveActive || String(curActive.shiftId) === String(finalSavedShiftId))) {
         const updatedActiveItem = {
           ...curActive,
           branchId: canonicalBranchId,
@@ -1017,7 +1111,7 @@ export default function AttendancePunchesModal({
         if (employee.code) updatedActiveShifts[String(employee.code)] = updatedActiveItem;
       }
 
-      let updatedState = { ...state, shifts: updatedShifts, activeShifts: updatedActiveShifts, _deletedIds: updatedDeletedIds };
+      let updatedState = { ...state, shifts: updatedShifts, activeShifts: updatedActiveShifts, _deletedIds: cleanDeletedIds };
 
       // Auto recalculate late incidents and reconcile via unified engine
       const { updatedState: reconState } = reconcileEmployeeScheduleOrPunchChange({
@@ -2152,6 +2246,97 @@ export default function AttendancePunchesModal({
           </div>
         )}
 
+        {/* ── شريط فلاتر الخط الزمني لسجل البصمات (كافة الأيام / ورديات / إجازات / أيام راحة) ── */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '10px',
+          padding: '10px 16px',
+          background: 'var(--surface-muted, #f8fafc)',
+          borderRadius: '12px',
+          border: '1.5px solid var(--border)',
+          marginBottom: '16px',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text-secondary)' }}>
+              📋 عرض السجل:
+            </span>
+            <button
+              type="button"
+              onClick={() => setTimelineFilter('all')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                background: timelineFilter === 'all' ? 'linear-gradient(135deg, #0d9488, #0f766e)' : '#ffffff',
+                color: timelineFilter === 'all' ? '#ffffff' : '#475569',
+                border: timelineFilter === 'all' ? 'none' : '1px solid #cbd5e1'
+              }}
+            >
+              🌐 كافة أيام الفترة ({timelineCounts.all})
+            </button>
+            <button
+              type="button"
+              onClick={() => setTimelineFilter('shifts')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                background: timelineFilter === 'shifts' ? 'linear-gradient(135deg, #0284c7, #0369a1)' : '#ffffff',
+                color: timelineFilter === 'shifts' ? '#ffffff' : '#475569',
+                border: timelineFilter === 'shifts' ? 'none' : '1px solid #cbd5e1'
+              }}
+            >
+              ⏱️ الورديات الفعلية ({timelineCounts.shifts})
+            </button>
+            <button
+              type="button"
+              onClick={() => setTimelineFilter('leaves')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                background: timelineFilter === 'leaves' ? 'linear-gradient(135deg, #7c3aed, #6d28d9)' : '#ffffff',
+                color: timelineFilter === 'leaves' ? '#ffffff' : '#475569',
+                border: timelineFilter === 'leaves' ? 'none' : '1px solid #cbd5e1'
+              }}
+            >
+              🏖️ الإجازات المعتمدة ({timelineCounts.leaves})
+            </button>
+            <button
+              type="button"
+              onClick={() => setTimelineFilter('off_days')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                background: timelineFilter === 'off_days' ? 'linear-gradient(135deg, #b45309, #92400e)' : '#ffffff',
+                color: timelineFilter === 'off_days' ? '#ffffff' : '#475569',
+                border: timelineFilter === 'off_days' ? 'none' : '1px solid #cbd5e1'
+              }}
+            >
+              ☕ أيام الراحة المجدولة ({timelineCounts.offDays})
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 700 }}>
+              📅 {periodLabel}
+            </span>
+          </div>
+        </div>
+
         {isMultiBranch ? (
           <div>
             {/* شريط تصفية الفروع للموظف متعدد الفروع / حر */}
@@ -2218,6 +2403,23 @@ export default function AttendancePunchesModal({
                   return false;
                 });
 
+                const bTimeline = displayedTimeline.filter((p) => {
+                  if (p.recordType === 'off_day') {
+                    if (p.isOtherBranchShift) return true;
+                    if (p.branchId) {
+                      return isBranchMatch(p.branchId, targetB) || (p.branchName && bObj?.name && p.branchName.trim() === bObj.name.trim());
+                    }
+                    return true;
+                  }
+                  if (p.recordType === 'leave') return true;
+                  const isMatch = isBranchMatch(p.branchId, targetB) || (p.branchName && bObj?.name && p.branchName.trim() === bObj.name.trim());
+                  if (isMatch) return true;
+                  if (!p.branchId && !p.branchName) {
+                    return isBranchMatch(employeeBranchesList[0]?.branchId, targetB);
+                  }
+                  return false;
+                });
+
               const bShiftsCount = bPunches.length;
               const bTotalBreak = bPunches.reduce((acc, p) => acc + (parseFloat(p.breakHours) || 0), 0).toFixed(2);
               const bTotalWork = bPunches.reduce((acc, p) => acc + getShiftHoursMetrics(p, state).payableHours, 0).toFixed(2);
@@ -2235,7 +2437,7 @@ export default function AttendancePunchesModal({
                 <div key={bId} style={{ marginBottom: '24px', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
                   <div style={{ background: 'var(--surface-muted)', padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                     <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontSize: '15px' }}>
-                      🏢 بصمات فرع: {bName} ({bShiftsCount} وردية)
+                      🏢 سجل فرع: {bName} ({bShiftsCount} وردية فعلية)
                     </h4>
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                       <span className="badge info">إجمالي ساعات العمل: {bTotalWork} س</span>
@@ -2252,7 +2454,7 @@ export default function AttendancePunchesModal({
                           <th style={{ textAlign: 'center' }}>#</th>
                           <th>التاريخ</th>
                           <th>اليوم</th>
-                          <th style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>طريقة البصمة</th>
+                          <th style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>نوع السجل / طريقة البصمة</th>
                           <th style={{ textAlign: 'center' }}>وقت الدخول</th>
                           <th style={{ textAlign: 'center' }}>وقت الخروج</th>
                           <th style={{ textAlign: 'center' }}>ساعات البريك</th>
@@ -2262,14 +2464,106 @@ export default function AttendancePunchesModal({
                         </tr>
                       </thead>
                       <tbody>
-                        {bPunches.length === 0 ? (
+                        {bTimeline.length === 0 ? (
                           <tr>
                             <td colSpan="10" style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px' }}>
-                              لا توجد بصمات مسجلة بهذا الفرع في هذا الشهر.
+                              لا توجد سجلات مطابقة في هذا الفرع لهذه الفترة.
                             </td>
                           </tr>
                         ) : (
-                          bPunches.map((p, index) => {
+                          bTimeline.map((p, index) => {
+                            if (p.recordType === 'leave') {
+                              return (
+                                <tr key={p.id || `leave_${p.date}`} style={{ background: p.leaveBadge?.bg || '#f0f9ff', borderBottom: '1px solid ' + (p.leaveBadge?.border || '#bae6fd') }}>
+                                  <td style={{ textAlign: 'center', fontWeight: 800, color: p.leaveBadge?.color || '#0284c7' }}>#{index + 1}</td>
+                                  <td style={{ fontWeight: 800, color: p.leaveBadge?.color || '#0369a1' }}>{p.date}</td>
+                                  <td style={{ fontWeight: 800 }}>{arabicWeekday(p.date)}</td>
+                                  <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                    <span style={{
+                                      background: p.leaveBadge?.bg || '#e0f2fe',
+                                      color: p.leaveBadge?.color || '#0284c7',
+                                      border: '1px solid ' + (p.leaveBadge?.border || '#bae6fd'),
+                                      padding: '4px 10px',
+                                      borderRadius: '8px',
+                                      fontSize: '11.5px',
+                                      fontWeight: 800,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}>
+                                      <span>{p.leaveBadge?.icon || '🏖️'}</span>
+                                      <span>{p.leaveTypeName || 'إجازة معتمدة'}</span>
+                                    </span>
+                                  </td>
+                                  <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                                  <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                                  <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                                  <td style={{ textAlign: 'center', color: '#0284c7', fontWeight: 800, fontSize: '12.5px' }}>
+                                    {p.hours > 0 ? `${p.hours} س (مدفوعة)` : '0 س (بدون راتب)'}
+                                  </td>
+                                  <td style={{ textAlign: 'center', fontSize: '12px', color: '#0369a1', fontWeight: 700 }}>
+                                    {p.notes || `${p.leaveTypeName} معتمدة رسمياً`}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost"
+                                      onClick={() => setSelectedDayDetails({ date: p.date, employee, record: p })}
+                                      style={{ fontSize: '12px', padding: '3px 8px' }}
+                                      title="عرض تفاصيل يوم الإجازة"
+                                    >
+                                      👁️ التفاصيل
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            }
+
+                            if (p.recordType === 'off_day') {
+                              return (
+                                <tr key={p.id || `off_${p.date}`} style={{ background: p.isOtherBranchShift ? '#f8fafc' : '#fefce8', borderBottom: '1px solid ' + (p.isOtherBranchShift ? '#cbd5e1' : '#fde68a') }}>
+                                  <td style={{ textAlign: 'center', fontWeight: 800, color: '#b45309' }}>#{index + 1}</td>
+                                  <td style={{ fontWeight: 800, color: p.isOtherBranchShift ? '#1e40af' : '#b45309' }}>{p.date}</td>
+                                  <td style={{ fontWeight: 800, color: p.isOtherBranchShift ? '#1e40af' : '#b45309' }}>{arabicWeekday(p.date)}</td>
+                                  <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                    <span style={{
+                                      background: p.isOtherBranchShift ? '#eff6ff' : '#fefce8',
+                                      color: p.isOtherBranchShift ? '#1e40af' : '#92400e',
+                                      border: '1px solid ' + (p.isOtherBranchShift ? '#bfdbfe' : '#fde68a'),
+                                      padding: '4px 10px',
+                                      borderRadius: '8px',
+                                      fontSize: '11.5px',
+                                      fontWeight: 800,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}>
+                                      <span>{p.isOtherBranchShift ? '🏢' : '☕'}</span>
+                                      <span>{p.isOtherBranchShift ? `مجدول بفرع ${p.otherBranchName}` : 'راحة أسبوعية (Off)'}</span>
+                                    </span>
+                                  </td>
+                                  <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                                  <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                                  <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                                  <td style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 800, fontSize: '12px' }}>0 س</td>
+                                  <td style={{ textAlign: 'center', fontSize: '11.5px', color: '#78350f' }}>
+                                    {p.notes || (p.isOtherBranchShift ? `مجدول بفرع ${p.otherBranchName}` : 'راحة أسبوعية حسب جدول الروستر')}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost"
+                                      onClick={() => { setEditDate(p.date); setIsAddingNewPunch(true); }}
+                                      style={{ fontSize: '11px', padding: '3px 8px', color: '#0284c7', border: '1px solid #bae6fd', borderRadius: '6px' }}
+                                      title="تسجيل بصمة عمل يدوية في هذا اليوم"
+                                    >
+                                      ➕ إضافة بصمة
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            }
+
                             const pDate = new Date(p.date || p.timestamp || Date.now());
                             const dayName = pDate.toLocaleDateString('ar-EG', { weekday: 'long' });
                             const dateStr = p.date || pDate.toISOString().slice(0, 10);
@@ -2284,9 +2578,10 @@ export default function AttendancePunchesModal({
                               ? (shiftMetrics.overtimeHours * bRate).toFixed(2)
                               : null;
 
-                            const perm = isApprovedPermissionForDate(employee?.id, dateStr, state);
-                            const hasPerm = p.hasApprovedPermission || !!perm;
-                            const permHours = p.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+                            const isPermDecoupled = Boolean(p.unlinkPriorRequests || p.decoupledDay || p.ignorePermissions || p.hasApprovedPermission === false);
+                            const perm = isPermDecoupled ? null : isApprovedPermissionForDate(employee?.id, dateStr, state);
+                            const hasPerm = !isPermDecoupled && (Boolean(p.hasApprovedPermission) || !!perm);
+                            const permHours = isPermDecoupled ? 0 : (p.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0));
 
                             const linkedOtReq = (state?.requests || []).find(r => 
                               (r.id && (r.id === p.linkedRequestId || r.id === p.overtimeRequestId)) ||
@@ -2395,6 +2690,11 @@ export default function AttendancePunchesModal({
                                   {p.isEmergencyCover && (
                                     <span style={{ display: 'block', marginTop: '2px', background: '#ffe4e6', color: '#be123c', border: '1px solid #fecdd3', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
                                       🚨 تغطية طوارئ {p.surgeAllowance ? `(+${p.surgeAllowance} ج.م)` : ''}
+                                    </span>
+                                  )}
+                                  {(p.isScheduledOffDay || p.isWorkOnOffDay) && (
+                                    <span style={{ display: 'block', marginTop: '2px', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                      ⚡ عمل في يوم راحة مجدول
                                     </span>
                                   )}
                                 </td>
@@ -2678,7 +2978,7 @@ export default function AttendancePunchesModal({
                   <th style={{ textAlign: 'center' }}>#</th>
                   <th>التاريخ</th>
                   <th>اليوم</th>
-                  <th style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>طريقة البصمة</th>
+                  <th style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>نوع السجل / طريقة البصمة</th>
                   <th style={{ textAlign: 'center' }}>وقت الدخول</th>
                   <th style={{ textAlign: 'center' }}>وقت الخروج</th>
                   <th style={{ textAlign: 'center' }}>ساعات البريك</th>
@@ -2688,14 +2988,106 @@ export default function AttendancePunchesModal({
                 </tr>
               </thead>
               <tbody>
-                {monthPunches.length === 0 ? (
+                {displayedTimeline.length === 0 ? (
                   <tr>
                     <td colSpan="10" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>
-                      لا توجد بصمات مسجلة لهذا الموظف في هذا الشهر.
+                      لا توجد سجلات مطابقة لهذا الموظف في هذه الفترة.
                     </td>
                   </tr>
                 ) : (
-                  monthPunches.map((p, index) => {
+                  displayedTimeline.map((p, index) => {
+                    if (p.recordType === 'leave') {
+                      return (
+                        <tr key={p.id || `leave_${p.date}`} style={{ background: p.leaveBadge?.bg || '#f0f9ff', borderBottom: '1px solid ' + (p.leaveBadge?.border || '#bae6fd') }}>
+                          <td style={{ textAlign: 'center', fontWeight: 800, color: p.leaveBadge?.color || '#0284c7' }}>#{index + 1}</td>
+                          <td style={{ fontWeight: 800, color: p.leaveBadge?.color || '#0369a1' }}>{p.date}</td>
+                          <td style={{ fontWeight: 800 }}>{arabicWeekday(p.date)}</td>
+                          <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                            <span style={{
+                              background: p.leaveBadge?.bg || '#e0f2fe',
+                              color: p.leaveBadge?.color || '#0284c7',
+                              border: '1px solid ' + (p.leaveBadge?.border || '#bae6fd'),
+                              padding: '4px 10px',
+                              borderRadius: '8px',
+                              fontSize: '11.5px',
+                              fontWeight: 800,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}>
+                              <span>{p.leaveBadge?.icon || '🏖️'}</span>
+                              <span>{p.leaveTypeName || 'إجازة معتمدة'}</span>
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                          <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                          <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                          <td style={{ textAlign: 'center', color: '#0284c7', fontWeight: 800, fontSize: '12.5px' }}>
+                            {p.hours > 0 ? `${p.hours} س (مدفوعة)` : '0 س (بدون راتب)'}
+                          </td>
+                          <td style={{ textAlign: 'center', fontSize: '12px', color: '#0369a1', fontWeight: 700 }}>
+                            {p.notes || `${p.leaveTypeName} معتمدة رسمياً`}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => setSelectedDayDetails({ date: p.date, employee, record: p })}
+                              style={{ fontSize: '12px', padding: '3px 8px' }}
+                              title="عرض تفاصيل يوم الإجازة"
+                            >
+                              👁️ التفاصيل
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    if (p.recordType === 'off_day') {
+                      return (
+                        <tr key={p.id || `off_${p.date}`} style={{ background: p.isOtherBranchShift ? '#f8fafc' : '#fefce8', borderBottom: '1px solid ' + (p.isOtherBranchShift ? '#cbd5e1' : '#fde68a') }}>
+                          <td style={{ textAlign: 'center', fontWeight: 800, color: '#b45309' }}>#{index + 1}</td>
+                          <td style={{ fontWeight: 800, color: p.isOtherBranchShift ? '#1e40af' : '#b45309' }}>{p.date}</td>
+                          <td style={{ fontWeight: 800, color: p.isOtherBranchShift ? '#1e40af' : '#b45309' }}>{arabicWeekday(p.date)}</td>
+                          <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                            <span style={{
+                              background: p.isOtherBranchShift ? '#eff6ff' : '#fefce8',
+                              color: p.isOtherBranchShift ? '#1e40af' : '#92400e',
+                              border: '1px solid ' + (p.isOtherBranchShift ? '#bfdbfe' : '#fde68a'),
+                              padding: '4px 10px',
+                              borderRadius: '8px',
+                              fontSize: '11.5px',
+                              fontWeight: 800,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}>
+                              <span>{p.isOtherBranchShift ? '🏢' : '☕'}</span>
+                              <span>{p.isOtherBranchShift ? `مجدول بفرع ${p.otherBranchName}` : 'راحة أسبوعية (Off)'}</span>
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                          <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                          <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                          <td style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 800, fontSize: '12px' }}>0 س</td>
+                          <td style={{ textAlign: 'center', fontSize: '11.5px', color: '#78350f' }}>
+                            {p.notes || (p.isOtherBranchShift ? `مجدول بفرع ${p.otherBranchName}` : 'راحة أسبوعية حسب جدول الروستر')}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => { setEditDate(p.date); setIsAddingNewPunch(true); }}
+                              style={{ fontSize: '11px', padding: '3px 8px', color: '#0284c7', border: '1px solid #bae6fd', borderRadius: '6px' }}
+                              title="تسجيل بصمة عمل يدوية في هذا اليوم"
+                            >
+                              ➕ إضافة بصمة
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    }
+
                     const pDate = new Date(p.date || p.timestamp || Date.now());
                     const dayName = pDate.toLocaleDateString('ar-EG', { weekday: 'long' });
                     const dateStr = p.date || pDate.toISOString().slice(0, 10);
@@ -2711,9 +3103,10 @@ export default function AttendancePunchesModal({
                       ? (shiftMetrics.overtimeHours * shiftRate).toFixed(2)
                       : null;
 
-                    const perm = isApprovedPermissionForDate(employee?.id, dateStr, state);
-                    const hasPerm = p.hasApprovedPermission || !!perm;
-                    const permHours = p.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+                    const isPermDecoupled = Boolean(p.unlinkPriorRequests || p.decoupledDay || p.ignorePermissions || p.hasApprovedPermission === false);
+                    const perm = isPermDecoupled ? null : isApprovedPermissionForDate(employee?.id, dateStr, state);
+                    const hasPerm = !isPermDecoupled && (Boolean(p.hasApprovedPermission) || !!perm);
+                    const permHours = isPermDecoupled ? 0 : (p.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0));
 
                     const linkedOtReq = (state?.requests || []).find(r => r && (r.id === p.requestId || r.id === p.linkedRequestId || r.id === p.overtimeRequestId || r.shiftId === p.id || (String(r.employeeId) === String(employee.id) && r.date === dateStr && (r.type === 'overtime' || r.type === 'extra_hours' || r.type === 'طلب اضافي' || r.type === 'إضافي'))));
 
@@ -2809,6 +3202,11 @@ export default function AttendancePunchesModal({
                           {p.isEmergencyCover && (
                             <span style={{ display: 'block', marginTop: '2px', background: '#ffe4e6', color: '#be123c', border: '1px solid #fecdd3', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
                               🚨 تغطية طوارئ {p.surgeAllowance ? `(+${p.surgeAllowance} ج.م)` : ''}
+                            </span>
+                          )}
+                          {(p.isScheduledOffDay || p.isWorkOnOffDay) && (
+                            <span style={{ display: 'block', marginTop: '2px', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                              ⚡ عمل في يوم راحة مجدول
                             </span>
                           )}
                         </td>
@@ -3388,11 +3786,40 @@ export default function AttendancePunchesModal({
                   />
                 </div>
 
+                {/* ⚠️ تنبيه التعارض الزمني أو خرق مهلة التنقل بين الفروع */}
+                {liveConflictResult?.hasConflict && (
+                  <div style={{
+                    background: '#fef2f2',
+                    border: '1.5px solid #ef4444',
+                    borderRadius: '10px',
+                    padding: '12px 14px',
+                    fontSize: '12.5px',
+                    color: '#991b1b',
+                    fontWeight: '700',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '10px',
+                    boxShadow: '0 2px 6px rgba(239, 68, 68, 0.1)'
+                  }}>
+                    <span style={{ fontSize: '20px', lineHeight: 1 }}>⚠️</span>
+                    <div style={{ flex: 1, lineHeight: '1.5' }}>
+                      {liveConflictResult.message}
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '10px' }}>
                   <button type="button" className="btn btn-ghost" onClick={() => { setEditingPunch(null); setIsAddingNewPunch(false); }}>
                     إلغاء
                   </button>
-                  <button type="submit" className="btn btn-start">
+                  <button
+                    type="submit"
+                    className="btn btn-start"
+                    style={{
+                      opacity: liveConflictResult?.hasConflict ? 0.7 : 1,
+                      cursor: liveConflictResult?.hasConflict ? 'not-allowed' : 'pointer'
+                    }}
+                  >
                     {isAddingNewPunch ? '💾 تسجيل واحتساب البصمة' : '💾 حفظ التعديلات'}
                   </button>
                 </div>

@@ -45,11 +45,14 @@ function getDayShiftInfo(schedule, day, fallbackHours = 8) {
   }
 
   if (raw && typeof raw === 'object') {
+    const isOtherBranch = Boolean(raw.isOtherBranchShift);
+    const otherBranchName = raw.otherBranchName || '';
+    const otherLabel = raw.label || '';
     const isOff = raw.type === 'off' || raw.isOff === true;
     const checkIn = raw.start || raw.checkIn || (isOff ? '—' : '08:00');
     const checkOut = raw.end || raw.checkOut || (isOff ? '—' : '16:00');
     let hours = raw.hours !== undefined ? raw.hours : (isOff ? 0 : fallbackHours);
-    return { isOff, notScheduled: false, checkIn, checkOut, hours };
+    return { isOff, isOtherBranch, otherBranchName, otherLabel, notScheduled: false, checkIn, checkOut, hours };
   }
 
   return {
@@ -445,13 +448,17 @@ export default function RosterPreviewModal({
                         <tbody>
                           {daysOfWeek.map((day) => {
                             const shiftInfo = getDayShiftInfo(bSchedule, day, bd.workHoursPerDay || 8);
-                            const { isOff, notScheduled, checkIn, checkOut, hours } = shiftInfo;
+                            const { isOff, isOtherBranch, otherBranchName, otherLabel, notScheduled, checkIn, checkOut, hours } = shiftInfo;
 
                             return (
-                              <tr key={day.key} style={{ background: isOff ? '#fef2f2' : (notScheduled ? 'rgba(239, 68, 68, 0.03)' : 'transparent') }}>
+                              <tr key={day.key} style={{ background: isOtherBranch ? '#f0f9ff' : isOff ? '#fef2f2' : (notScheduled ? 'rgba(239, 68, 68, 0.03)' : 'transparent') }}>
                                 <td style={{ fontWeight: '800' }}>{day.label}</td>
                                 <td>
-                                  {notScheduled ? (
+                                  {isOtherBranch ? (
+                                    <span className="badge" style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', fontWeight: 800 }}>
+                                      🏢 مجدول بفرع {otherBranchName || 'آخر'}
+                                    </span>
+                                  ) : notScheduled ? (
                                     <span className="badge" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5' }}>
                                       ⚠️ غير محدد
                                     </span>
@@ -461,17 +468,21 @@ export default function RosterPreviewModal({
                                     <span className="badge badge-success">🟢 وردية عمل عادية</span>
                                   )}
                                 </td>
-                                <td style={{ fontWeight: '700', color: notScheduled ? 'var(--muted)' : (isOff ? 'var(--muted)' : '#15803d') }}>
-                                  {isOff || notScheduled ? '—' : checkIn}
+                                <td style={{ fontWeight: '700', color: isOtherBranch ? '#0369a1' : (isOff || notScheduled ? 'var(--muted)' : '#15803d') }}>
+                                  {isOtherBranch ? (checkIn !== '—' ? checkIn : 'مجدول') : (isOff || notScheduled ? '—' : checkIn)}
                                 </td>
-                                <td style={{ fontWeight: '700', color: notScheduled ? 'var(--muted)' : (isOff ? 'var(--muted)' : '#b91c1c') }}>
-                                  {isOff || notScheduled ? '—' : checkOut}
+                                <td style={{ fontWeight: '700', color: isOtherBranch ? '#0369a1' : (isOff || notScheduled ? 'var(--muted)' : '#b91c1c') }}>
+                                  {isOtherBranch ? (checkOut !== '—' ? checkOut : 'مجدول') : (isOff || notScheduled ? '—' : checkOut)}
                                 </td>
-                                <td style={{ fontWeight: '700' }}>
-                                  {notScheduled || isOff ? '0 ساعة' : `${hours} ساعات`}
+                                <td style={{ fontWeight: '700', color: isOtherBranch ? '#0369a1' : 'inherit' }}>
+                                  {isOtherBranch ? `0 س (بفرع آخر)` : (notScheduled || isOff ? '0 ساعة' : `${hours} ساعات`)}
                                 </td>
                                 <td>
-                                  {notScheduled ? (
+                                  {isOtherBranch ? (
+                                    <span style={{ color: '#0284c7', fontSize: '11.5px', fontWeight: 700 }}>
+                                      بفرع {otherBranchName}
+                                    </span>
+                                  ) : notScheduled ? (
                                     <span style={{ color: '#dc2626', fontSize: '12px', fontWeight: 700 }}>غير مجدول</span>
                                   ) : isOff ? (
                                     <span style={{ color: '#dc2626', fontSize: '12px' }}>راحة رسمية</span>
