@@ -1,11 +1,12 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { arabicWeekday, fmt, isEmployeeActive } from '../../utils/formatters';
 import { DAYS_OF_WEEK, formatTime12H, formatShiftRange12H } from './BranchMonthlyRosterModule';
 import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
-import { getEmployeeDaySchedule, getResolvedEmployeeRoster, projectRosterToMonth, splitUnifiedRosterForBranches, checkShiftsOverlap } from '../../utils/rosterEngine';
+import { getEmployeeDaySchedule, getResolvedEmployeeRoster, projectRosterToMonth, splitUnifiedRosterForBranches, checkShiftsOverlap, getDayShiftsList, checkAnyShiftsOverlap } from '../../utils/rosterEngine';
 import { reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
+import { apiSaveSettingsSlice } from '../../utils/apiClient';
 
 const DEFAULT_SCHEDULE = {
   'السبت': { type: 'shift', start: '08:00', end: '16:00', hours: 8 },
@@ -173,6 +174,26 @@ export default function EmployeeRosterEditModal({
   // جلب الجدول المعتمد الحالي للموظف المستهدف لهذا الشهر إن وجد
   const existingRoster = useMemo(() => {
     if (!targetEmp) return null;
+
+    // 🌟 للموظف متعدد الفروع: البحث عن الجدول الموحد الشامل أولاً لمنع تجزئة أو تفريغ فروع الموظف
+    if (isMultiBranchEmp) {
+      const unifiedApproved = (state?.rosters || []).find(
+        (r) =>
+          (String(r.employeeId) === String(targetEmp.id) || (targetEmp.code && String(r.employeeCode) === String(targetEmp.code))) &&
+          (r.month === selectedMonth || !r.month) &&
+          (r.isUnifiedMaster || r.id?.includes('unified')) &&
+          (r.status === 'approved' || r.adminApproved || !r.status) &&
+          r.schedule && Object.keys(r.schedule).length > 0
+      );
+      if (unifiedApproved) return unifiedApproved;
+
+      // استرجاع الجدول الموحد الكامل بدون تقييد بفرع محدد
+      const resolvedMaster = getResolvedEmployeeRoster(targetEmp, null, state, selectedMonth);
+      if (resolvedMaster && resolvedMaster.schedule && typeof resolvedMaster.schedule === 'object' && Object.keys(resolvedMaster.schedule).length > 0) {
+        return resolvedMaster;
+      }
+    }
+
     const resolved = getResolvedEmployeeRoster(targetEmp, targetEmp.branchId || branchId, state, selectedMonth);
     if (resolved && resolved.schedule && typeof resolved.schedule === 'object' && Object.keys(resolved.schedule).length > 0) {
       return resolved;
@@ -183,14 +204,23 @@ export default function EmployeeRosterEditModal({
         (r.month === selectedMonth || !r.month) &&
         (String(r.branchId || '') === String(targetEmp.branchId || branchId || '') || !r.branchId)
     );
-  }, [state, targetEmp, selectedMonth, branchId]);
+  }, [state, targetEmp, selectedMonth, branchId, isMultiBranchEmp]);
 
-  // حالة المدخلات للـ 7 أيام
+  // حالة المدخلات للـ 7 أيام مع ضمان تطبيع مصفوفة الورديات shifts
   const [scheduleInputs, setScheduleInputs] = useState(() => {
-    if (existingRoster?.schedule && typeof existingRoster.schedule === 'object') {
-      return { ...existingRoster.schedule };
-    }
-    return { ...DEFAULT_SCHEDULE };
+    const res = {};
+    const base = existingRoster?.schedule && typeof existingRoster.schedule === 'object'
+      ? existingRoster.schedule
+      : DEFAULT_SCHEDULE;
+    DAYS_OF_WEEK.forEach((d) => {
+      const item = base[d.label] || DEFAULT_SCHEDULE[d.label];
+      const sList = getDayShiftsList(item);
+      res[d.label] = {
+        ...item,
+        shifts: sList
+      };
+    });
+    return res;
   });
 
   const [notes, setNotes] = useState('');
@@ -198,110 +228,92 @@ export default function EmployeeRosterEditModal({
 
   // تحديث المدخلات عند تبديل الموظف المستهدف
   useEffect(() => {
-    if (existingRoster?.schedule && typeof existingRoster.schedule === 'object') {
-      setScheduleInputs({ ...existingRoster.schedule });
-      if (existingRoster.fromDate) setFromDate(existingRoster.fromDate);
-      if (existingRoster.toDate) setToDate(existingRoster.toDate);
-    } else {
-      setScheduleInputs({ ...DEFAULT_SCHEDULE });
-      if (cycleRange?.startDate) setFromDate(cycleRange.startDate);
-      if (cycleRange?.endDate) setToDate(cycleRange.endDate);
+    const res = {};
+    const base = existingRoster?.schedule && typeof existingRoster.schedule === 'object'
+      ? existingRoster.schedule
+      : DEFAULT_SCHEDULE;
+    DAYS_OF_WEEK.forEach((d) => {
+      const item = base[d.label] || DEFAULT_SCHEDULE[d.label];
+      const sList = getDayShiftsList(item);
+      res[d.label] = {
+        ...item,
+        shifts: sList
+      };
+    });
+    setScheduleInputs(res);
+    if (existingRoster?.fromDate) setFromDate(existingRoster.fromDate);
+    if (existingRoster?.toDate) setToDate(existingRoster.toDate);
+    else if (cycleRange?.startDate) {
+      setFromDate(cycleRange.startDate);
+      if (cycleRange.endDate) setToDate(cycleRange.endDate);
     }
   }, [targetEmp?.id, existingRoster, cycleRange]);
 
-  // تعديل يوم محدد في النمط الأسبوعي وتطبيقه تلقائياً على كافة أيام الشهر المطابقة
-  const handleDayChange = (dayLabel, field, value) => {
+  // ── دوال مساعدة لحساب الساعات واسترجاع الورديات ──
+  const calculateShiftHours = (start, end) => {
+    if (!start || !end) return 0;
+    const [sH, sM] = start.split(':').map(Number);
+    const [eH, eM] = end.split(':').map(Number);
+    let diff = (eH * 60 + eM) - (sH * 60 + sM);
+    if (diff <= 0) diff += 24 * 60;
+    return Math.round((diff / 60) * 10) / 10;
+  };
+
+  const getShiftsForDay = (item) => {
+    return getDayShiftsList(item);
+  };
+
+  // ── دوال إدارة الورديات المتعددة للنمط الأسبوعي (7 أيام) ──
+  const handleAddWeeklyShift = (dayLabel, preferredBranchId) => {
     let nextDayConfig = null;
     setScheduleInputs((prev) => {
-      const current = prev[dayLabel] || { type: 'shift', start: '08:00', end: '16:00', hours: 8, branchId: defaultBranchId };
-      let updated = { ...current };
+      const cur = prev[dayLabel] || { type: 'shift', isOff: false, branchId: defaultBranchId };
+      const curShifts = [...getDayShiftsList(cur)];
+      const usedBIds = new Set(curShifts.map(s => String(s.branchId)));
+      const unusedBranch = availableBranchesForEmp.find(b => !usedBIds.has(String(b.id)));
+      const targetB = preferredBranchId
+        ? (allBranches.find(b => String(b.id) === String(preferredBranchId)) || availableBranchesForEmp[0])
+        : (unusedBranch || availableBranchesForEmp[1] || availableBranchesForEmp[0] || { id: defaultBranchId, name: branchName });
 
-      if (field === 'type') {
-        const isOff = value === 'off';
-        updated = {
-          ...updated,
-          type: isOff ? 'off' : 'shift',
-          isOff,
-          start: isOff ? '' : (updated.start || '08:00'),
-          end: isOff ? '' : (updated.end || '16:00'),
-          hours: isOff ? 0 : (updated.hours || 8),
-          hasSecondShift: isOff ? false : updated.hasSecondShift
-        };
-      } else if (field === 'branchId') {
-        const bObj = allBranches.find(b => String(b.id) === String(value));
-        updated.branchId = value;
-        updated.branchName = bObj ? bObj.name : '';
-      } else if (field === 'start') {
-        updated.start = value;
-        if (updated.end) {
-          const [sH, sM] = value.split(':').map(Number);
-          const [eH, eM] = updated.end.split(':').map(Number);
-          let diff = (eH * 60 + eM) - (sH * 60 + sM);
-          if (diff <= 0) diff += 24 * 60;
-          updated.hours = Math.round((diff / 60) * 10) / 10;
+      let newStart = '16:00';
+      let newEnd = '22:00';
+      if (curShifts.length > 0) {
+        const lastShift = curShifts[curShifts.length - 1];
+        if (lastShift.end) {
+          newStart = lastShift.end;
+          const [eH, eM] = lastShift.end.split(':').map(Number);
+          const nextH = (eH + 6) % 24;
+          newEnd = `${String(nextH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`;
         }
-      } else if (field === 'end') {
-        updated.end = value;
-        if (updated.start) {
-          const [sH, sM] = updated.start.split(':').map(Number);
-          const [eH, eM] = value.split(':').map(Number);
-          let diff = (eH * 60 + eM) - (sH * 60 + sM);
-          if (diff <= 0) diff += 24 * 60;
-          updated.hours = Math.round((diff / 60) * 10) / 10;
-        }
-      } else if (field === 'toggleSecondShift') {
-        const nextHas = !updated.hasSecondShift;
-        const otherBranch = availableBranchesForEmp.find(b => String(b.id) !== String(updated.branchId || defaultBranchId)) || availableBranchesForEmp[1] || availableBranchesForEmp[0];
-        updated.hasSecondShift = nextHas;
-        if (nextHas && !updated.secondShift) {
-          updated.secondShift = {
-            type: 'shift',
-            isOff: false,
-            branchId: otherBranch?.id || defaultBranchId,
-            branchName: otherBranch?.name || '',
-            start: '16:00',
-            end: '22:00',
-            hours: 6
-          };
-        }
-      } else if (field === 'secondShiftBranchId') {
-        const bObj = allBranches.find(b => String(b.id) === String(value));
-        updated.secondShift = {
-          ...(updated.secondShift || {}),
-          branchId: value,
-          branchName: bObj ? bObj.name : ''
-        };
-      } else if (field === 'secondShiftStart') {
-        const curSec = updated.secondShift || { start: '16:00', end: '22:00', hours: 6 };
-        let hours = curSec.hours || 6;
-        if (curSec.end) {
-          const [sH, sM] = value.split(':').map(Number);
-          const [eH, eM] = curSec.end.split(':').map(Number);
-          let diff = (eH * 60 + eM) - (sH * 60 + sM);
-          if (diff <= 0) diff += 24 * 60;
-          hours = Math.round((diff / 60) * 10) / 10;
-        }
-        updated.secondShift = {
-          ...curSec,
-          start: value,
-          hours
-        };
-      } else if (field === 'secondShiftEnd') {
-        const curSec = updated.secondShift || { start: '16:00', end: '22:00', hours: 6 };
-        let hours = curSec.hours || 6;
-        if (curSec.start) {
-          const [sH, sM] = curSec.start.split(':').map(Number);
-          const [eH, eM] = value.split(':').map(Number);
-          let diff = (eH * 60 + eM) - (sH * 60 + sM);
-          if (diff <= 0) diff += 24 * 60;
-          hours = Math.round((diff / 60) * 10) / 10;
-        }
-        updated.secondShift = {
-          ...curSec,
-          end: value,
-          hours
-        };
       }
+      const newHours = calculateShiftHours(newStart, newEnd);
+
+      const newShift = {
+        id: `weekly_shift_${dayLabel}_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+        shiftIndex: curShifts.length + 1,
+        branchId: String(targetB?.id || defaultBranchId),
+        branchName: targetB?.name || '',
+        start: newStart,
+        end: newEnd,
+        hours: newHours
+      };
+
+      const nextShifts = [...curShifts, newShift];
+      const totalHours = nextShifts.reduce((acc, s) => acc + (Number(s.hours) || 0), 0);
+
+      const updated = {
+        ...cur,
+        type: 'shift',
+        isOff: false,
+        shifts: nextShifts,
+        start: nextShifts[0]?.start || '',
+        end: nextShifts[0]?.end || '',
+        hours: Math.round(totalHours * 10) / 10,
+        branchId: nextShifts[0]?.branchId || defaultBranchId,
+        branchName: nextShifts[0]?.branchName || '',
+        hasSecondShift: nextShifts.length > 1,
+        secondShift: nextShifts[1] ? { ...nextShifts[1] } : null
+      };
 
       nextDayConfig = updated;
       return {
@@ -310,25 +322,15 @@ export default function EmployeeRosterEditModal({
       };
     });
 
-    // تطبيق تلقائي وفوري على كافة تواريخ الشهر المطابقة لهذا اليوم (باستثناء أيام ما قبل التعيين)
     setMonthlyDaysSchedule((prevMonth) => {
-      if (!cycleDays || cycleDays.length === 0) return prevMonth;
+      if (!cycleDays || cycleDays.length === 0 || !nextDayConfig) return prevMonth;
       const updatedMonth = { ...prevMonth };
       cycleDays.forEach((day) => {
         if (day.isPreHire) return;
-        if (day.dayLabel === dayLabel && nextDayConfig) {
-          const curDay = updatedMonth[day.dateStr] || {};
+        if (day.dayLabel === dayLabel) {
           updatedMonth[day.dateStr] = {
-            ...curDay,
-            type: nextDayConfig.type,
-            isOff: nextDayConfig.isOff,
-            start: nextDayConfig.start,
-            end: nextDayConfig.end,
-            hours: nextDayConfig.hours,
-            branchId: nextDayConfig.branchId || curDay.branchId,
-            branchName: nextDayConfig.branchName || curDay.branchName,
-            hasSecondShift: Boolean(nextDayConfig.hasSecondShift),
-            secondShift: nextDayConfig.hasSecondShift && nextDayConfig.secondShift ? { ...nextDayConfig.secondShift } : null
+            ...(updatedMonth[day.dateStr] || {}),
+            ...nextDayConfig
           };
         }
       });
@@ -336,11 +338,222 @@ export default function EmployeeRosterEditModal({
     });
   };
 
+  const handleUpdateWeeklyShift = (dayLabel, shiftIdx, field, value) => {
+    let nextDayConfig = null;
+    setScheduleInputs((prev) => {
+      const cur = prev[dayLabel] || { type: 'shift', isOff: false, branchId: defaultBranchId };
+      const curShifts = [...getDayShiftsList(cur)];
+      if (!curShifts[shiftIdx]) return prev;
+
+      const targetShift = { ...curShifts[shiftIdx] };
+      if (field === 'branchId') {
+        const bObj = allBranches.find(b => String(b.id) === String(value));
+        targetShift.branchId = String(value);
+        targetShift.branchName = bObj ? bObj.name : '';
+      } else if (field === 'start') {
+        targetShift.start = value;
+        targetShift.hours = calculateShiftHours(value, targetShift.end);
+      } else if (field === 'end') {
+        targetShift.end = value;
+        targetShift.hours = calculateShiftHours(targetShift.start, value);
+      }
+
+      curShifts[shiftIdx] = targetShift;
+      const totalHours = curShifts.reduce((acc, s) => acc + (Number(s.hours) || 0), 0);
+
+      const updated = {
+        ...cur,
+        type: 'shift',
+        isOff: false,
+        shifts: curShifts,
+        start: curShifts[0]?.start || '',
+        end: curShifts[0]?.end || '',
+        hours: Math.round(totalHours * 10) / 10,
+        branchId: curShifts[0]?.branchId || defaultBranchId,
+        branchName: curShifts[0]?.branchName || '',
+        hasSecondShift: curShifts.length > 1,
+        secondShift: curShifts[1] ? { ...curShifts[1] } : null
+      };
+
+      nextDayConfig = updated;
+      return {
+        ...prev,
+        [dayLabel]: updated
+      };
+    });
+
+    setMonthlyDaysSchedule((prevMonth) => {
+      if (!cycleDays || cycleDays.length === 0 || !nextDayConfig) return prevMonth;
+      const updatedMonth = { ...prevMonth };
+      cycleDays.forEach((day) => {
+        if (day.isPreHire) return;
+        if (day.dayLabel === dayLabel) {
+          updatedMonth[day.dateStr] = {
+            ...(updatedMonth[day.dateStr] || {}),
+            ...nextDayConfig
+          };
+        }
+      });
+      return updatedMonth;
+    });
+  };
+
+  const handleRemoveWeeklyShift = (dayLabel, shiftIdx) => {
+    let nextDayConfig = null;
+    setScheduleInputs((prev) => {
+      const cur = prev[dayLabel] || { type: 'shift', isOff: false, branchId: defaultBranchId };
+      const curShifts = [...getDayShiftsList(cur)];
+      if (curShifts.length <= 1) {
+        const updated = {
+          ...cur,
+          type: 'off',
+          isOff: true,
+          hours: 0,
+          start: '',
+          end: '',
+          hasSecondShift: false,
+          secondShift: null,
+          shifts: []
+        };
+        nextDayConfig = updated;
+        return { ...prev, [dayLabel]: updated };
+      }
+
+      const nextShifts = curShifts.filter((_, idx) => idx !== shiftIdx);
+      const totalHours = nextShifts.reduce((acc, s) => acc + (Number(s.hours) || 0), 0);
+
+      const updated = {
+        ...cur,
+        type: 'shift',
+        isOff: false,
+        shifts: nextShifts,
+        start: nextShifts[0]?.start || '',
+        end: nextShifts[0]?.end || '',
+        hours: Math.round(totalHours * 10) / 10,
+        branchId: nextShifts[0]?.branchId || defaultBranchId,
+        branchName: nextShifts[0]?.branchName || '',
+        hasSecondShift: nextShifts.length > 1,
+        secondShift: nextShifts[1] ? { ...nextShifts[1] } : null
+      };
+
+      nextDayConfig = updated;
+      return { ...prev, [dayLabel]: updated };
+    });
+
+    setMonthlyDaysSchedule((prevMonth) => {
+      if (!cycleDays || cycleDays.length === 0 || !nextDayConfig) return prevMonth;
+      const updatedMonth = { ...prevMonth };
+      cycleDays.forEach((day) => {
+        if (day.isPreHire) return;
+        if (day.dayLabel === dayLabel) {
+          updatedMonth[day.dateStr] = {
+            ...(updatedMonth[day.dateStr] || {}),
+            ...nextDayConfig
+          };
+        }
+      });
+      return updatedMonth;
+    });
+  };
+
+  const handleToggleWeeklyDayType = (dayLabel, newType) => {
+    const isOff = newType === 'off';
+    let nextDayConfig = null;
+    setScheduleInputs((prev) => {
+      const cur = prev[dayLabel] || {};
+      let updated;
+      if (isOff) {
+        updated = {
+          ...cur,
+          type: 'off',
+          isOff: true,
+          hours: 0,
+          start: '',
+          end: '',
+          hasSecondShift: false,
+          secondShift: null
+        };
+      } else {
+        const existingShifts = getDayShiftsList(cur);
+        const defBId = defaultBranchId;
+        const bObj = allBranches.find(b => String(b.id) === String(defBId));
+        const initShifts = existingShifts.length > 0 ? existingShifts : [{
+          id: `weekly_shift_${dayLabel}_1`,
+          shiftIndex: 1,
+          branchId: String(defBId),
+          branchName: bObj?.name || branchName || '',
+          start: cur.start || '08:00',
+          end: cur.end || '16:00',
+          hours: calculateShiftHours(cur.start || '08:00', cur.end || '16:00')
+        }];
+        const totalHours = initShifts.reduce((acc, s) => acc + (Number(s.hours) || 0), 0);
+        updated = {
+          ...cur,
+          type: 'shift',
+          isOff: false,
+          shifts: initShifts,
+          start: initShifts[0]?.start || '08:00',
+          end: initShifts[0]?.end || '16:00',
+          hours: Math.round(totalHours * 10) / 10,
+          branchId: initShifts[0]?.branchId || defBId,
+          branchName: initShifts[0]?.branchName || (bObj ? bObj.name : ''),
+          hasSecondShift: initShifts.length > 1,
+          secondShift: initShifts[1] ? { ...initShifts[1] } : null
+        };
+      }
+      nextDayConfig = updated;
+      return { ...prev, [dayLabel]: updated };
+    });
+
+    setMonthlyDaysSchedule((prevMonth) => {
+      if (!cycleDays || cycleDays.length === 0 || !nextDayConfig) return prevMonth;
+      const updatedMonth = { ...prevMonth };
+      cycleDays.forEach((day) => {
+        if (day.isPreHire) return;
+        if (day.dayLabel === dayLabel) {
+          updatedMonth[day.dateStr] = {
+            ...(updatedMonth[day.dateStr] || {}),
+            ...nextDayConfig
+          };
+        }
+      });
+      return updatedMonth;
+    });
+  };
+
+  // تعديل يوم محدد في النمط الأسبوعي مع الحفاظ على التوافق الرجعي 100%
+  const handleDayChange = (dayLabel, field, value) => {
+    if (field === 'type') {
+      handleToggleWeeklyDayType(dayLabel, value);
+    } else if (field === 'start') {
+      handleUpdateWeeklyShift(dayLabel, 0, 'start', value);
+    } else if (field === 'end') {
+      handleUpdateWeeklyShift(dayLabel, 0, 'end', value);
+    } else if (field === 'branchId') {
+      handleUpdateWeeklyShift(dayLabel, 0, 'branchId', value);
+    } else if (field === 'toggleSecondShift') {
+      const curShifts = getDayShiftsList(scheduleInputs[dayLabel] || {});
+      if (curShifts.length > 1) {
+        handleRemoveWeeklyShift(dayLabel, 1);
+      } else {
+        handleAddWeeklyShift(dayLabel);
+      }
+    } else if (field === 'secondShiftBranchId') {
+      handleUpdateWeeklyShift(dayLabel, 1, 'branchId', value);
+    } else if (field === 'secondShiftStart') {
+      handleUpdateWeeklyShift(dayLabel, 1, 'start', value);
+    } else if (field === 'secondShiftEnd') {
+      handleUpdateWeeklyShift(dayLabel, 1, 'end', value);
+    }
+  };
+
   // ── نمط العرض النشط: التقويم الشهري التفاعلي الكامل vs النمط الأسبوعي ──
   const [activeTabMode, setActiveTabMode] = useState('monthly_calendar');
   const [activeBranchTab, setActiveBranchTab] = useState('all');
   const [defaultShiftStart, setDefaultShiftStart] = useState('08:00');
   const [defaultShiftEnd, setDefaultShiftEnd] = useState('16:00');
+  const [defaultApplyBranchId, setDefaultApplyBranchId] = useState('all');
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const targetEmpHireDate = targetEmp?.hireDate || targetEmp?.hiring_date || targetEmp?.contractStartDate;
 
@@ -375,22 +588,31 @@ export default function EmployeeRosterEditModal({
     return days;
   }, [cycleRange, targetEmpHireDate]);
 
-  // خريطة أيام الشهر التفاعلية المفصلة (YYYY-MM-DD -> { type, start, end, hours, isOff })
+  // خريطة أيام الشهر التفاعلية المفصلة (YYYY-MM-DD -> { type, start, end, hours, isOff, shifts: [] })
   const [monthlyDaysSchedule, setMonthlyDaysSchedule] = useState(() => {
     const map = {};
     if (existingRoster?.schedule && typeof existingRoster.schedule === 'object') {
       Object.keys(existingRoster.schedule).forEach((key) => {
         if (/^\d{4}-\d{2}-\d{2}$/.test(key)) {
-          map[key] = { ...existingRoster.schedule[key] };
+          const item = existingRoster.schedule[key];
+          map[key] = {
+            ...item,
+            shifts: getDayShiftsList(item)
+          };
         }
       });
     }
     return map;
   });
 
-  // مزامنة أيام الشهر عند تغيير الموظف أو دورة الشهر
+  const lastEmpIdRef = useRef(targetEmp?.id);
+
+  // مزامنة أيام الشهر عند تغيير الموظف أو دورة الشهر مع تحصين ضد تسرب بيانات موظف سابق
   useEffect(() => {
     if (!cycleDays || cycleDays.length === 0) return;
+    const isDifferentEmp = String(lastEmpIdRef.current) !== String(targetEmp?.id);
+    lastEmpIdRef.current = targetEmp?.id;
+
     setMonthlyDaysSchedule((prev) => {
       const updated = {};
       const defBId = defaultBranchId;
@@ -406,6 +628,7 @@ export default function EmployeeRosterEditModal({
             hours: 0,
             start: '',
             end: '',
+            shifts: [],
             label: `خارج نطاق التعاقد (تاريخ التعيين: ${day.hireDate})`
           };
           return;
@@ -413,27 +636,42 @@ export default function EmployeeRosterEditModal({
         if (existingRoster?.schedule && existingRoster.schedule[day.dateStr]) {
           const rawItem = existingRoster.schedule[day.dateStr];
           const bObj = allBranches.find(b => String(b.id) === String(rawItem.branchId));
+          const sList = getDayShiftsList(rawItem);
           updated[day.dateStr] = {
             branchId: rawItem.branchId || defBId,
             branchName: rawItem.branchName || (bObj ? bObj.name : defBName),
-            ...rawItem
+            ...rawItem,
+            shifts: sList
           };
-        } else if (prev[day.dateStr]) {
+        } else if (!isDifferentEmp && prev && prev[day.dateStr]) {
+          const sList = getDayShiftsList(prev[day.dateStr]);
           updated[day.dateStr] = {
             branchId: prev[day.dateStr].branchId || defBId,
             branchName: prev[day.dateStr].branchName || defBName,
-            ...prev[day.dateStr]
+            ...prev[day.dateStr],
+            shifts: sList
           };
         } else {
           const weeklyConf = (existingRoster?.schedule && existingRoster.schedule[day.dayLabel]) || scheduleInputs[day.dayLabel] || DEFAULT_SCHEDULE[day.dayLabel];
           if (weeklyConf) {
+            const sList = getDayShiftsList(weeklyConf);
             updated[day.dateStr] = {
               branchId: weeklyConf.branchId || defBId,
               branchName: weeklyConf.branchName || defBName,
-              ...weeklyConf
+              ...weeklyConf,
+              shifts: sList
             };
           } else {
             const isFri = day.dayLabel === 'الجمعة';
+            const initShifts = isFri ? [] : [{
+              id: `shift_${day.dateStr}_1`,
+              shiftIndex: 1,
+              branchId: String(defBId),
+              branchName: defBName,
+              start: '08:00',
+              end: '16:00',
+              hours: 8
+            }];
             updated[day.dateStr] = {
               type: isFri ? 'off' : 'shift',
               isOff: isFri,
@@ -441,7 +679,8 @@ export default function EmployeeRosterEditModal({
               end: isFri ? '' : '16:00',
               hours: isFri ? 0 : 8,
               branchId: defBId,
-              branchName: defBName
+              branchName: defBName,
+              shifts: initShifts
             };
           }
         }
@@ -450,108 +689,222 @@ export default function EmployeeRosterEditModal({
     });
   }, [cycleDays, existingRoster, targetEmp?.id, defaultBranchId, allBranches]);
 
-  // تعديل يوم محدد في التقويم الشهري
-  const handleMonthlyDayChange = (dateStr, field, value) => {
+  // ── دوال إدارة الورديات المتعددة لأيام الشهر التفاعلي (دعم N فروع وورديات متعددة باليوم) ──
+  const handleAddDayShift = (dateStr, preferredBranchId) => {
     setMonthlyDaysSchedule((prev) => {
-      const current = prev[dateStr] || { type: 'shift', start: '08:00', end: '16:00', hours: 8, branchId: defaultBranchId };
-      let updated = { ...current };
+      const cur = prev[dateStr] || { type: 'shift', isOff: false, branchId: defaultBranchId };
+      const curShifts = [...getDayShiftsList(cur)];
+      const usedBIds = new Set(curShifts.map(s => String(s.branchId)));
+      const unusedBranch = availableBranchesForEmp.find(b => !usedBIds.has(String(b.id)));
+      const targetB = preferredBranchId
+        ? (allBranches.find(b => String(b.id) === String(preferredBranchId)) || availableBranchesForEmp[0])
+        : (unusedBranch || availableBranchesForEmp[1] || availableBranchesForEmp[0] || { id: defaultBranchId, name: branchName });
 
-      if (field === 'type') {
-        const isOff = value === 'off';
-        const targetBId = (!isOff && activeBranchTab !== 'all') ? activeBranchTab : (updated.branchId || defaultBranchId);
-        const bObj = allBranches.find(b => String(b.id) === String(targetBId));
-        updated = {
-          ...updated,
-          type: isOff ? 'off' : 'shift',
-          isOff,
-          branchId: targetBId,
-          branchName: bObj ? bObj.name : (updated.branchName || ''),
-          start: isOff ? '' : (updated.start || '08:00'),
-          end: isOff ? '' : (updated.end || '16:00'),
-          hours: isOff ? 0 : (updated.hours || 8),
-          hasSecondShift: isOff ? false : updated.hasSecondShift
-        };
-      } else if (field === 'start') {
-        updated.start = value;
-        if (updated.end) {
-          const [sH, sM] = value.split(':').map(Number);
-          const [eH, eM] = updated.end.split(':').map(Number);
-          let diff = (eH * 60 + eM) - (sH * 60 + sM);
-          if (diff <= 0) diff += 24 * 60;
-          updated.hours = Math.round((diff / 60) * 10) / 10;
+      let newStart = '16:00';
+      let newEnd = '22:00';
+      if (curShifts.length > 0) {
+        const lastShift = curShifts[curShifts.length - 1];
+        if (lastShift.end) {
+          newStart = lastShift.end;
+          const [eH, eM] = lastShift.end.split(':').map(Number);
+          const nextH = (eH + 6) % 24;
+          newEnd = `${String(nextH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`;
         }
-      } else if (field === 'end') {
-        updated.end = value;
-        if (updated.start) {
-          const [sH, sM] = updated.start.split(':').map(Number);
-          const [eH, eM] = value.split(':').map(Number);
-          let diff = (eH * 60 + eM) - (sH * 60 + sM);
-          if (diff <= 0) diff += 24 * 60;
-          updated.hours = Math.round((diff / 60) * 10) / 10;
-        }
-      } else if (field === 'branchId') {
-        const bObj = allBranches.find(b => String(b.id) === String(value));
-        updated.branchId = value;
-        updated.branchName = bObj ? bObj.name : '';
-      } else if (field === 'toggleSecondShift') {
-        const nextHas = !updated.hasSecondShift;
-        const otherBranch = availableBranchesForEmp.find(b => String(b.id) !== String(updated.branchId || defaultBranchId)) || availableBranchesForEmp[1] || availableBranchesForEmp[0];
-        updated.hasSecondShift = nextHas;
-        if (nextHas && !updated.secondShift) {
-          updated.secondShift = {
-            type: 'shift',
-            isOff: false,
-            branchId: otherBranch?.id || defaultBranchId,
-            branchName: otherBranch?.name || '',
-            start: '16:00',
-            end: '22:00',
-            hours: 6
-          };
-        }
-      } else if (field === 'secondShiftBranchId') {
-        const bObj = allBranches.find(b => String(b.id) === String(value));
-        updated.secondShift = {
-          ...(updated.secondShift || {}),
-          branchId: value,
-          branchName: bObj ? bObj.name : ''
-        };
-      } else if (field === 'secondShiftStart') {
-        const curSec = updated.secondShift || { start: '16:00', end: '22:00', hours: 6 };
-        let hours = curSec.hours || 6;
-        if (curSec.end) {
-          const [sH, sM] = value.split(':').map(Number);
-          const [eH, eM] = curSec.end.split(':').map(Number);
-          let diff = (eH * 60 + eM) - (sH * 60 + sM);
-          if (diff <= 0) diff += 24 * 60;
-          hours = Math.round((diff / 60) * 10) / 10;
-        }
-        updated.secondShift = {
-          ...curSec,
-          start: value,
-          hours
-        };
-      } else if (field === 'secondShiftEnd') {
-        const curSec = updated.secondShift || { start: '16:00', end: '22:00', hours: 6 };
-        let hours = curSec.hours || 6;
-        if (curSec.start) {
-          const [sH, sM] = curSec.start.split(':').map(Number);
-          const [eH, eM] = value.split(':').map(Number);
-          let diff = (eH * 60 + eM) - (sH * 60 + sM);
-          if (diff <= 0) diff += 24 * 60;
-          hours = Math.round((diff / 60) * 10) / 10;
-        }
-        updated.secondShift = {
-          ...curSec,
-          end: value,
-          hours
-        };
       }
+      const newHours = calculateShiftHours(newStart, newEnd);
+
+      const newShift = {
+        id: `shift_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+        shiftIndex: curShifts.length + 1,
+        branchId: String(targetB?.id || defaultBranchId),
+        branchName: targetB?.name || '',
+        start: newStart,
+        end: newEnd,
+        hours: newHours
+      };
+
+      const nextShifts = [...curShifts, newShift];
+      const totalHours = nextShifts.reduce((acc, s) => acc + (Number(s.hours) || 0), 0);
 
       return {
         ...prev,
-        [dateStr]: updated
+        [dateStr]: {
+          ...cur,
+          type: 'shift',
+          isOff: false,
+          shifts: nextShifts,
+          start: nextShifts[0]?.start || '',
+          end: nextShifts[0]?.end || '',
+          hours: Math.round(totalHours * 10) / 10,
+          branchId: nextShifts[0]?.branchId || defaultBranchId,
+          branchName: nextShifts[0]?.branchName || '',
+          hasSecondShift: nextShifts.length > 1,
+          secondShift: nextShifts[1] ? { ...nextShifts[1] } : null
+        }
       };
     });
+  };
+
+  const handleUpdateDayShift = (dateStr, shiftIdx, field, value) => {
+    setMonthlyDaysSchedule((prev) => {
+      const cur = prev[dateStr] || { type: 'shift', isOff: false, branchId: defaultBranchId };
+      const curShifts = [...getDayShiftsList(cur)];
+      if (!curShifts[shiftIdx]) return prev;
+
+      const targetShift = { ...curShifts[shiftIdx] };
+      if (field === 'branchId') {
+        const bObj = allBranches.find(b => String(b.id) === String(value));
+        targetShift.branchId = String(value);
+        targetShift.branchName = bObj ? bObj.name : '';
+      } else if (field === 'start') {
+        targetShift.start = value;
+        targetShift.hours = calculateShiftHours(value, targetShift.end);
+      } else if (field === 'end') {
+        targetShift.end = value;
+        targetShift.hours = calculateShiftHours(targetShift.start, value);
+      }
+
+      curShifts[shiftIdx] = targetShift;
+      const totalHours = curShifts.reduce((acc, s) => acc + (Number(s.hours) || 0), 0);
+
+      return {
+        ...prev,
+        [dateStr]: {
+          ...cur,
+          type: 'shift',
+          isOff: false,
+          shifts: curShifts,
+          start: curShifts[0]?.start || '',
+          end: curShifts[0]?.end || '',
+          hours: Math.round(totalHours * 10) / 10,
+          branchId: curShifts[0]?.branchId || defaultBranchId,
+          branchName: curShifts[0]?.branchName || '',
+          hasSecondShift: curShifts.length > 1,
+          secondShift: curShifts[1] ? { ...nextShifts?.[1] || curShifts[1] } : null
+        }
+      };
+    });
+  };
+
+  const handleRemoveDayShift = (dateStr, shiftIdx) => {
+    setMonthlyDaysSchedule((prev) => {
+      const cur = prev[dateStr] || { type: 'shift', isOff: false, branchId: defaultBranchId };
+      const curShifts = [...getDayShiftsList(cur)];
+      if (curShifts.length <= 1) {
+        return {
+          ...prev,
+          [dateStr]: {
+            ...cur,
+            type: 'off',
+            isOff: true,
+            hours: 0,
+            start: '',
+            end: '',
+            hasSecondShift: false,
+            secondShift: null,
+            shifts: []
+          }
+        };
+      }
+
+      const nextShifts = curShifts.filter((_, idx) => idx !== shiftIdx);
+      const totalHours = nextShifts.reduce((acc, s) => acc + (Number(s.hours) || 0), 0);
+
+      return {
+        ...prev,
+        [dateStr]: {
+          ...cur,
+          type: 'shift',
+          isOff: false,
+          shifts: nextShifts,
+          start: nextShifts[0]?.start || '',
+          end: nextShifts[0]?.end || '',
+          hours: Math.round(totalHours * 10) / 10,
+          branchId: nextShifts[0]?.branchId || defaultBranchId,
+          branchName: nextShifts[0]?.branchName || '',
+          hasSecondShift: nextShifts.length > 1,
+          secondShift: nextShifts[1] ? { ...nextShifts[1] } : null
+        }
+      };
+    });
+  };
+
+  const handleToggleDayType = (dateStr, newType) => {
+    const isOff = newType === 'off';
+    setMonthlyDaysSchedule((prev) => {
+      const cur = prev[dateStr] || {};
+      if (isOff) {
+        return {
+          ...prev,
+          [dateStr]: {
+            ...cur,
+            type: 'off',
+            isOff: true,
+            hours: 0,
+            start: '',
+            end: '',
+            hasSecondShift: false,
+            secondShift: null
+          }
+        };
+      } else {
+        const existingShifts = getDayShiftsList(cur);
+        const defBId = activeBranchTab !== 'all' ? activeBranchTab : (cur.branchId || defaultBranchId);
+        const bObj = allBranches.find(b => String(b.id) === String(defBId));
+        const initShifts = existingShifts.length > 0 ? existingShifts : [{
+          id: `shift_${Date.now()}_1`,
+          shiftIndex: 1,
+          branchId: String(defBId),
+          branchName: bObj?.name || branchName || '',
+          start: cur.start || '08:00',
+          end: cur.end || '16:00',
+          hours: calculateShiftHours(cur.start || '08:00', cur.end || '16:00')
+        }];
+        const totalHours = initShifts.reduce((acc, s) => acc + (Number(s.hours) || 0), 0);
+        return {
+          ...prev,
+          [dateStr]: {
+            ...cur,
+            type: 'shift',
+            isOff: false,
+            shifts: initShifts,
+            start: initShifts[0]?.start || '08:00',
+            end: initShifts[0]?.end || '16:00',
+            hours: Math.round(totalHours * 10) / 10,
+            branchId: initShifts[0]?.branchId || defBId,
+            branchName: initShifts[0]?.branchName || (bObj ? bObj.name : ''),
+            hasSecondShift: initShifts.length > 1,
+            secondShift: initShifts[1] ? { ...initShifts[1] } : null
+          }
+        };
+      }
+    });
+  };
+
+  // تعديل يوم محدد في التقويم الشهري (توافق رجعي كامل)
+  const handleMonthlyDayChange = (dateStr, field, value) => {
+    if (field === 'type') {
+      handleToggleDayType(dateStr, value);
+    } else if (field === 'start') {
+      handleUpdateDayShift(dateStr, 0, 'start', value);
+    } else if (field === 'end') {
+      handleUpdateDayShift(dateStr, 0, 'end', value);
+    } else if (field === 'branchId') {
+      handleUpdateDayShift(dateStr, 0, 'branchId', value);
+    } else if (field === 'toggleSecondShift') {
+      const curShifts = getDayShiftsList(monthlyDaysSchedule[dateStr] || {});
+      if (curShifts.length > 1) {
+        handleRemoveDayShift(dateStr, 1);
+      } else {
+        handleAddDayShift(dateStr);
+      }
+    } else if (field === 'secondShiftBranchId') {
+      handleUpdateDayShift(dateStr, 1, 'branchId', value);
+    } else if (field === 'secondShiftStart') {
+      handleUpdateDayShift(dateStr, 1, 'start', value);
+    } else if (field === 'secondShiftEnd') {
+      handleUpdateDayShift(dateStr, 1, 'end', value);
+    }
   };
 
   // تطبيق النمط الأسبوعي على كامل أيام الشهر
@@ -575,8 +928,10 @@ export default function EmployeeRosterEditModal({
         return;
       }
       const pattern = scheduleInputs[day.dayLabel] || DEFAULT_SCHEDULE[day.dayLabel];
+      const sList = getDayShiftsList(pattern);
       updated[day.dateStr] = {
         ...pattern,
+        shifts: sList,
         branchId: pattern.branchId || defBId,
         branchName: pattern.branchName || defBName,
         hasSecondShift: Boolean(pattern.hasSecondShift),
@@ -592,24 +947,30 @@ export default function EmployeeRosterEditModal({
     const updated = {};
     const b1 = availableBranchesForEmp[0] || { id: defaultBranchId, name: branchName };
     const b2 = availableBranchesForEmp[1] || availableBranchesForEmp[0] || { id: defaultBranchId, name: branchName };
+    const b3 = availableBranchesForEmp[2] || availableBranchesForEmp[0] || { id: defaultBranchId, name: branchName };
 
     cycleDays.forEach((day, idx) => {
       const isFri = day.dayLabel === 'الجمعة';
       if (presetType === 'morning') {
+        const s1 = { id: `shift_${day.dateStr}_1`, shiftIndex: 1, branchId: b1.id, branchName: b1.name, start: '08:00', end: '16:00', hours: 8 };
         updated[day.dateStr] = isFri
-          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name }
-          : { type: 'shift', isOff: false, start: '08:00', end: '16:00', hours: 8, branchId: b1.id, branchName: b1.name };
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name, shifts: [] }
+          : { type: 'shift', isOff: false, start: '08:00', end: '16:00', hours: 8, branchId: b1.id, branchName: b1.name, shifts: [s1] };
       } else if (presetType === 'evening') {
+        const s1 = { id: `shift_${day.dateStr}_1`, shiftIndex: 1, branchId: b1.id, branchName: b1.name, start: '16:00', end: '00:00', hours: 8 };
         updated[day.dateStr] = isFri
-          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name }
-          : { type: 'shift', isOff: false, start: '16:00', end: '00:00', hours: 8, branchId: b1.id, branchName: b1.name };
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name, shifts: [] }
+          : { type: 'shift', isOff: false, start: '16:00', end: '00:00', hours: 8, branchId: b1.id, branchName: b1.name, shifts: [s1] };
       } else if (presetType === 'night') {
+        const s1 = { id: `shift_${day.dateStr}_1`, shiftIndex: 1, branchId: b1.id, branchName: b1.name, start: '00:00', end: '08:00', hours: 8 };
         updated[day.dateStr] = isFri
-          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name }
-          : { type: 'shift', isOff: false, start: '00:00', end: '08:00', hours: 8, branchId: b1.id, branchName: b1.name };
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name, shifts: [] }
+          : { type: 'shift', isOff: false, start: '00:00', end: '08:00', hours: 8, branchId: b1.id, branchName: b1.name, shifts: [s1] };
       } else if (presetType === 'dual_branch') {
+        const s1 = { id: `shift_${day.dateStr}_1`, shiftIndex: 1, branchId: b1.id, branchName: b1.name, start: '08:00', end: '14:00', hours: 6 };
+        const s2 = { id: `shift_${day.dateStr}_2`, shiftIndex: 2, branchId: b2.id, branchName: b2.name, start: '16:00', end: '22:00', hours: 6 };
         updated[day.dateStr] = isFri
-          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name }
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name, shifts: [] }
           : {
               type: 'shift',
               isOff: false,
@@ -617,7 +978,7 @@ export default function EmployeeRosterEditModal({
               branchName: b1.name,
               start: '08:00',
               end: '14:00',
-              hours: 6,
+              hours: 12,
               hasSecondShift: true,
               secondShift: {
                 type: 'shift',
@@ -627,15 +988,43 @@ export default function EmployeeRosterEditModal({
                 start: '16:00',
                 end: '22:00',
                 hours: 6
-              }
+              },
+              shifts: [s1, s2]
+            };
+      } else if (presetType === 'tri_branch') {
+        const s1 = { id: `shift_${day.dateStr}_1`, shiftIndex: 1, branchId: b1.id, branchName: b1.name, start: '08:00', end: '12:00', hours: 4 };
+        const s2 = { id: `shift_${day.dateStr}_2`, shiftIndex: 2, branchId: b2.id, branchName: b2.name, start: '13:00', end: '17:00', hours: 4 };
+        const s3 = { id: `shift_${day.dateStr}_3`, shiftIndex: 3, branchId: b3.id, branchName: b3.name, start: '18:00', end: '22:00', hours: 4 };
+        updated[day.dateStr] = isFri
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name, shifts: [] }
+          : {
+              type: 'shift',
+              isOff: false,
+              branchId: b1.id,
+              branchName: b1.name,
+              start: '08:00',
+              end: '12:00',
+              hours: 12,
+              hasSecondShift: true,
+              secondShift: {
+                type: 'shift',
+                isOff: false,
+                branchId: b2.id,
+                branchName: b2.name,
+                start: '13:00',
+                end: '17:00',
+                hours: 4
+              },
+              shifts: [s1, s2, s3]
             };
       } else if (presetType === 'alternate_branches') {
         const targetB = idx % 2 === 0 ? b1 : b2;
+        const s1 = { id: `shift_${day.dateStr}_1`, shiftIndex: 1, branchId: targetB.id, branchName: targetB.name, start: '08:00', end: '16:00', hours: 8 };
         updated[day.dateStr] = isFri
-          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: targetB.id, branchName: targetB.name }
-          : { type: 'shift', isOff: false, start: '08:00', end: '16:00', hours: 8, branchId: targetB.id, branchName: targetB.name };
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: targetB.id, branchName: targetB.name, shifts: [] }
+          : { type: 'shift', isOff: false, start: '08:00', end: '16:00', hours: 8, branchId: targetB.id, branchName: targetB.name, shifts: [s1] };
       } else if (presetType === 'all_off') {
-        updated[day.dateStr] = { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name };
+        updated[day.dateStr] = { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name, shifts: [] };
       }
     });
     setMonthlyDaysSchedule(updated);
@@ -646,24 +1035,30 @@ export default function EmployeeRosterEditModal({
     const newInputs = {};
     const b1 = availableBranchesForEmp[0] || { id: defaultBranchId, name: branchName };
     const b2 = availableBranchesForEmp[1] || availableBranchesForEmp[0] || { id: defaultBranchId, name: branchName };
+    const b3 = availableBranchesForEmp[2] || availableBranchesForEmp[0] || { id: defaultBranchId, name: branchName };
 
     DAYS_OF_WEEK.forEach((d, idx) => {
       const isFri = d.label === 'الجمعة';
       if (presetType === 'morning') {
+        const s1 = { id: `weekly_${d.key}_1`, shiftIndex: 1, branchId: b1.id, branchName: b1.name, start: '08:00', end: '16:00', hours: 8 };
         newInputs[d.label] = isFri
-          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name }
-          : { type: 'shift', isOff: false, start: '08:00', end: '16:00', hours: 8, branchId: b1.id, branchName: b1.name };
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name, shifts: [] }
+          : { type: 'shift', isOff: false, start: '08:00', end: '16:00', hours: 8, branchId: b1.id, branchName: b1.name, shifts: [s1] };
       } else if (presetType === 'evening') {
+        const s1 = { id: `weekly_${d.key}_1`, shiftIndex: 1, branchId: b1.id, branchName: b1.name, start: '16:00', end: '00:00', hours: 8 };
         newInputs[d.label] = isFri
-          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name }
-          : { type: 'shift', isOff: false, start: '16:00', end: '00:00', hours: 8, branchId: b1.id, branchName: b1.name };
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name, shifts: [] }
+          : { type: 'shift', isOff: false, start: '16:00', end: '00:00', hours: 8, branchId: b1.id, branchName: b1.name, shifts: [s1] };
       } else if (presetType === 'night') {
+        const s1 = { id: `weekly_${d.key}_1`, shiftIndex: 1, branchId: b1.id, branchName: b1.name, start: '00:00', end: '08:00', hours: 8 };
         newInputs[d.label] = isFri
-          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name }
-          : { type: 'shift', isOff: false, start: '00:00', end: '08:00', hours: 8, branchId: b1.id, branchName: b1.name };
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name, shifts: [] }
+          : { type: 'shift', isOff: false, start: '00:00', end: '08:00', hours: 8, branchId: b1.id, branchName: b1.name, shifts: [s1] };
       } else if (presetType === 'dual_branch') {
+        const s1 = { id: `weekly_${d.key}_1`, shiftIndex: 1, branchId: b1.id, branchName: b1.name, start: '08:00', end: '14:00', hours: 6 };
+        const s2 = { id: `weekly_${d.key}_2`, shiftIndex: 2, branchId: b2.id, branchName: b2.name, start: '16:00', end: '22:00', hours: 6 };
         newInputs[d.label] = isFri
-          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name }
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name, shifts: [] }
           : {
               type: 'shift',
               isOff: false,
@@ -671,7 +1066,7 @@ export default function EmployeeRosterEditModal({
               branchName: b1.name,
               start: '08:00',
               end: '14:00',
-              hours: 6,
+              hours: 12,
               hasSecondShift: true,
               secondShift: {
                 type: 'shift',
@@ -681,15 +1076,43 @@ export default function EmployeeRosterEditModal({
                 start: '16:00',
                 end: '22:00',
                 hours: 6
-              }
+              },
+              shifts: [s1, s2]
+            };
+      } else if (presetType === 'tri_branch') {
+        const s1 = { id: `weekly_${d.key}_1`, shiftIndex: 1, branchId: b1.id, branchName: b1.name, start: '08:00', end: '12:00', hours: 4 };
+        const s2 = { id: `weekly_${d.key}_2`, shiftIndex: 2, branchId: b2.id, branchName: b2.name, start: '13:00', end: '17:00', hours: 4 };
+        const s3 = { id: `weekly_${d.key}_3`, shiftIndex: 3, branchId: b3.id, branchName: b3.name, start: '18:00', end: '22:00', hours: 4 };
+        newInputs[d.label] = isFri
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name, shifts: [] }
+          : {
+              type: 'shift',
+              isOff: false,
+              branchId: b1.id,
+              branchName: b1.name,
+              start: '08:00',
+              end: '12:00',
+              hours: 12,
+              hasSecondShift: true,
+              secondShift: {
+                type: 'shift',
+                isOff: false,
+                branchId: b2.id,
+                branchName: b2.name,
+                start: '13:00',
+                end: '17:00',
+                hours: 4
+              },
+              shifts: [s1, s2, s3]
             };
       } else if (presetType === 'alternate_branches') {
         const targetB = idx % 2 === 0 ? b1 : b2;
+        const s1 = { id: `weekly_${d.key}_1`, shiftIndex: 1, branchId: targetB.id, branchName: targetB.name, start: '08:00', end: '16:00', hours: 8 };
         newInputs[d.label] = isFri
-          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: targetB.id, branchName: targetB.name }
-          : { type: 'shift', isOff: false, start: '08:00', end: '16:00', hours: 8, branchId: targetB.id, branchName: targetB.name };
+          ? { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: targetB.id, branchName: targetB.name, shifts: [] }
+          : { type: 'shift', isOff: false, start: '08:00', end: '16:00', hours: 8, branchId: targetB.id, branchName: targetB.name, shifts: [s1] };
       } else if (presetType === 'all_off') {
-        newInputs[d.label] = { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name };
+        newInputs[d.label] = { type: 'off', isOff: true, start: '', end: '', hours: 0, branchId: b1.id, branchName: b1.name, shifts: [] };
       }
     });
     setScheduleInputs(newInputs);
@@ -702,10 +1125,12 @@ export default function EmployeeRosterEditModal({
         const pattern = newInputs[day.dayLabel];
         if (pattern) {
           const cur = updatedMonth[day.dateStr] || {};
+          const sList = getDayShiftsList(pattern);
           updatedMonth[day.dateStr] = {
             ...cur,
             type: pattern.type,
             isOff: pattern.isOff,
+            shifts: sList,
             start: pattern.start,
             end: pattern.end,
             hours: pattern.hours,
@@ -720,7 +1145,7 @@ export default function EmployeeRosterEditModal({
     });
   };
 
-  // تطبيق مواعيد الوردية الافتراضية على جميع أيام العمل مع الحفاظ على الراحات
+  // تطبيق مواعيد الوردية الافتراضية على أيام العمل (سواء لكافة الفروع أو لفرع محدد) مع الحفاظ على الراحات
   const handleApplyDefaultShiftTimes = () => {
     if (!defaultShiftStart || !defaultShiftEnd) {
       showToast?.('⚠️ يرجى تحديد وقت البداية ووقت النهاية');
@@ -732,20 +1157,76 @@ export default function EmployeeRosterEditModal({
     if (diff <= 0) diff += 24 * 60;
     const hours = Math.round((diff / 60) * 10) / 10;
 
+    const isTargetAll = !defaultApplyBranchId || defaultApplyBranchId === 'all';
+    const targetBObj = allBranches.find(b => String(b.id) === String(defaultApplyBranchId));
+    const targetBName = targetBObj ? targetBObj.name : '';
+
     // تطبيق على الأيام في التقويم الشهري (مع استثناء أيام ما قبل التعيين)
     setMonthlyDaysSchedule((prev) => {
       const updated = { ...prev };
       cycleDays.forEach((day) => {
         if (day.isPreHire) return;
-        const cur = updated[day.dateStr] || { type: 'shift', isOff: false };
-        if (cur.type !== 'off' && !cur.isOff) {
-          updated[day.dateStr] = {
-            ...cur,
-            start: defaultShiftStart,
-            end: defaultShiftEnd,
-            hours
-          };
+        const cur = updated[day.dateStr] || { type: 'shift', isOff: false, branchId: defaultBranchId };
+        if (cur.type === 'off' || cur.isOff) return;
+
+        let curShifts = [...getShiftsForDay(cur)];
+        if (isTargetAll) {
+          if (curShifts.length === 0) {
+            curShifts.push({
+              id: `shift_${Date.now()}_1`,
+              shiftIndex: 1,
+              branchId: defaultBranchId,
+              branchName: branchName || '',
+              start: defaultShiftStart,
+              end: defaultShiftEnd,
+              hours
+            });
+          } else {
+            curShifts = curShifts.map((s) => ({
+              ...s,
+              start: defaultShiftStart,
+              end: defaultShiftEnd,
+              hours
+            }));
+          }
+        } else {
+          const matchIdx = curShifts.findIndex(s => String(s.branchId) === String(defaultApplyBranchId));
+          if (matchIdx >= 0) {
+            curShifts[matchIdx] = {
+              ...curShifts[matchIdx],
+              start: defaultShiftStart,
+              end: defaultShiftEnd,
+              hours
+            };
+          } else {
+            curShifts.push({
+              id: `shift_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+              shiftIndex: curShifts.length + 1,
+              branchId: String(defaultApplyBranchId),
+              branchName: targetBName,
+              start: defaultShiftStart,
+              end: defaultShiftEnd,
+              hours
+            });
+          }
         }
+
+        let totalDayHours = 0;
+        curShifts.forEach(s => { totalDayHours += Number(s.hours || 0); });
+
+        updated[day.dateStr] = {
+          ...cur,
+          type: 'shift',
+          isOff: false,
+          shifts: curShifts,
+          hours: Math.round(totalDayHours * 10) / 10,
+          branchId: curShifts[0]?.branchId,
+          branchName: curShifts[0]?.branchName,
+          start: curShifts[0]?.start,
+          end: curShifts[0]?.end,
+          hasSecondShift: curShifts.length > 1,
+          secondShift: curShifts[1] ? { ...curShifts[1] } : null
+        };
       });
       return updated;
     });
@@ -754,20 +1235,75 @@ export default function EmployeeRosterEditModal({
     setScheduleInputs((prev) => {
       const updated = { ...prev };
       DAYS_OF_WEEK.forEach((d) => {
-        const cur = updated[d.label] || { type: 'shift', isOff: false };
-        if (cur.type !== 'off' && !cur.isOff) {
-          updated[d.label] = {
-            ...cur,
-            start: defaultShiftStart,
-            end: defaultShiftEnd,
-            hours
-          };
+        const cur = updated[d.label] || { type: 'shift', isOff: false, branchId: defaultBranchId };
+        if (cur.type === 'off' || cur.isOff) return;
+
+        let curShifts = [...getShiftsForDay(cur)];
+        if (isTargetAll) {
+          if (curShifts.length === 0) {
+            curShifts.push({
+              id: `weekly_shift_${d.key}_1`,
+              shiftIndex: 1,
+              branchId: defaultBranchId,
+              branchName: branchName || '',
+              start: defaultShiftStart,
+              end: defaultShiftEnd,
+              hours
+            });
+          } else {
+            curShifts = curShifts.map((s) => ({
+              ...s,
+              start: defaultShiftStart,
+              end: defaultShiftEnd,
+              hours
+            }));
+          }
+        } else {
+          const matchIdx = curShifts.findIndex(s => String(s.branchId) === String(defaultApplyBranchId));
+          if (matchIdx >= 0) {
+            curShifts[matchIdx] = {
+              ...curShifts[matchIdx],
+              start: defaultShiftStart,
+              end: defaultShiftEnd,
+              hours
+            };
+          } else {
+            curShifts.push({
+              id: `weekly_shift_${d.key}_${Date.now()}`,
+              shiftIndex: curShifts.length + 1,
+              branchId: String(defaultApplyBranchId),
+              branchName: targetBName,
+              start: defaultShiftStart,
+              end: defaultShiftEnd,
+              hours
+            });
+          }
         }
+
+        let totalDayHours = 0;
+        curShifts.forEach(s => { totalDayHours += Number(s.hours || 0); });
+
+        updated[d.label] = {
+          ...cur,
+          type: 'shift',
+          isOff: false,
+          shifts: curShifts,
+          hours: Math.round(totalDayHours * 10) / 10,
+          branchId: curShifts[0]?.branchId,
+          branchName: curShifts[0]?.branchName,
+          start: curShifts[0]?.start,
+          end: curShifts[0]?.end,
+          hasSecondShift: curShifts.length > 1,
+          secondShift: curShifts[1] ? { ...curShifts[1] } : null
+        };
       });
       return updated;
     });
 
-    showToast?.('⚡ تم تطبيق مواعيد الوردية على جميع أيام العمل بنجاح');
+    const targetBranchName = isTargetAll
+      ? 'كافة الفروع'
+      : (targetBName || 'الفرع المحدد');
+    showToast?.(`⚡ تم تطبيق المواعيد (${defaultShiftStart} - ${defaultShiftEnd}) على أيام (${targetBranchName}) بنجاح`);
   };
 
   // نسخ جدول الشهر السابق للموظف وتطبيقه
@@ -834,7 +1370,7 @@ export default function EmployeeRosterEditModal({
     let totalMonthHours = 0;
     let workDaysCount = 0;
     let offDaysCount = 0;
-    let dualShiftsCount = 0;
+    let multiShiftsCount = 0;
 
     cycleDays.forEach((day) => {
       const conf = monthlyDaysSchedule[day.dateStr];
@@ -842,22 +1378,12 @@ export default function EmployeeRosterEditModal({
         offDaysCount++;
       } else {
         workDaysCount++;
+        const shifts = getDayShiftsList(conf);
+        if (shifts.length > 1) multiShiftsCount++;
         let dayHours = 0;
-        if (conf.start && conf.end) {
-          const [sH, sM] = conf.start.split(':').map(Number);
-          const [eH, eM] = conf.end.split(':').map(Number);
-          let diff = (eH * 60 + eM) - (sH * 60 + sM);
-          if (diff <= 0) diff += 24 * 60;
-          dayHours += Math.round((diff / 60) * 10) / 10;
-        }
-        if (conf.hasSecondShift && conf.secondShift?.start && conf.secondShift?.end) {
-          dualShiftsCount++;
-          const [sH, sM] = conf.secondShift.start.split(':').map(Number);
-          const [eH, eM] = conf.secondShift.end.split(':').map(Number);
-          let diff = (eH * 60 + eM) - (sH * 60 + sM);
-          if (diff <= 0) diff += 24 * 60;
-          dayHours += Math.round((diff / 60) * 10) / 10;
-        }
+        shifts.forEach((s) => {
+          dayHours += s.hours !== undefined ? Number(s.hours) : 8;
+        });
         totalMonthHours += dayHours;
       }
     });
@@ -866,7 +1392,7 @@ export default function EmployeeRosterEditModal({
       totalMonthHours: Math.round(totalMonthHours * 10) / 10,
       workDaysCount,
       offDaysCount,
-      dualShiftsCount,
+      dualShiftsCount: multiShiftsCount,
       totalDays: cycleDays.length
     };
   }, [cycleDays, monthlyDaysSchedule]);
@@ -888,41 +1414,23 @@ export default function EmployeeRosterEditModal({
     cycleDays.forEach((day) => {
       const conf = monthlyDaysSchedule[day.dateStr];
       if (conf && conf.type !== 'off' && !conf.isOff) {
-        // 1. الوردية الأولى
-        if (conf.start && conf.end) {
-          const bId = String(conf.branchId || defaultBranchId);
+        const shifts = getDayShiftsList(conf);
+        shifts.forEach((s) => {
+          const bId = String(s.branchId || defaultBranchId);
           if (!map[bId]) {
             const bObj = allBranches.find((b) => String(b.id) === bId);
             map[bId] = {
               id: bId,
-              name: bObj?.name || `فرع ${bId}`,
+              name: bObj?.name || s.branchName || `فرع ${bId}`,
               roleLabel: '',
               hours: 0,
               shiftsCount: 0
             };
           }
           map[bId].shiftsCount++;
-          const h1 = conf.hours !== undefined ? Number(conf.hours) : 8;
-          map[bId].hours = Math.round((map[bId].hours + h1) * 10) / 10;
-        }
-
-        // 2. الوردية الثانية
-        if (conf.hasSecondShift && conf.secondShift?.start && conf.secondShift?.end) {
-          const secBId = String(conf.secondShift.branchId || availableBranchesForEmp[1]?.id || defaultBranchId);
-          if (!map[secBId]) {
-            const bObj = allBranches.find((b) => String(b.id) === secBId);
-            map[secBId] = {
-              id: secBId,
-              name: bObj?.name || `فرع ${secBId}`,
-              roleLabel: '',
-              hours: 0,
-              shiftsCount: 0
-            };
-          }
-          map[secBId].shiftsCount++;
-          const secHours = conf.secondShift.hours !== undefined ? Number(conf.secondShift.hours) : 6;
-          map[secBId].hours = Math.round((map[secBId].hours + secHours) * 10) / 10;
-        }
+          const h = s.hours !== undefined ? Number(s.hours) : 8;
+          map[bId].hours = Math.round((map[bId].hours + h) * 10) / 10;
+        });
       }
     });
 
@@ -934,7 +1442,7 @@ export default function EmployeeRosterEditModal({
     let totalWeeklyHours = 0;
     let workDaysCount = 0;
     let offDaysCount = 0;
-    let dualShiftsCount = 0;
+    let multiShiftsCount = 0;
 
     DAYS_OF_WEEK.forEach((d) => {
       const conf = scheduleInputs[d.label];
@@ -942,27 +1450,17 @@ export default function EmployeeRosterEditModal({
         offDaysCount++;
       } else {
         workDaysCount++;
+        const shifts = getDayShiftsList(conf);
+        if (shifts.length > 1) multiShiftsCount++;
         let dayHours = 0;
-        if (conf.start && conf.end) {
-          const [sH, sM] = conf.start.split(':').map(Number);
-          const [eH, eM] = conf.end.split(':').map(Number);
-          let diff = (eH * 60 + eM) - (sH * 60 + sM);
-          if (diff <= 0) diff += 24 * 60;
-          dayHours += Math.round((diff / 60) * 10) / 10;
-        }
-        if (conf.hasSecondShift && conf.secondShift?.start && conf.secondShift?.end) {
-          dualShiftsCount++;
-          const [sH, sM] = conf.secondShift.start.split(':').map(Number);
-          const [eH, eM] = conf.secondShift.end.split(':').map(Number);
-          let diff = (eH * 60 + eM) - (sH * 60 + sM);
-          if (diff <= 0) diff += 24 * 60;
-          dayHours += Math.round((diff / 60) * 10) / 10;
-        }
+        shifts.forEach((s) => {
+          dayHours += s.hours !== undefined ? Number(s.hours) : 8;
+        });
         totalWeeklyHours += dayHours;
       }
     });
 
-    return { totalWeeklyHours: Math.round(totalWeeklyHours * 10) / 10, workDaysCount, offDaysCount, dualShiftsCount };
+    return { totalWeeklyHours: Math.round(totalWeeklyHours * 10) / 10, workDaysCount, offDaysCount, dualShiftsCount: multiShiftsCount };
   }, [scheduleInputs]);
 
   // ── 🌟 المعاينة الذكية اللحظية لأثر تعديل الجدول على الجزاءات والتأخيرات ──
@@ -1062,12 +1560,31 @@ export default function EmployeeRosterEditModal({
         orgSettings: state?.orgSettings
       }) || combinedInputs;
 
-      // ضمان حفظ وإدراج بيانات الفرع والوردية الثانية لكافة أيام الشهر بدقة
+      // ضمان حفظ وإدراج بيانات الفرع والورديات لكافة أيام الشهر بدقة
       Object.keys(monthlyDaysSchedule).forEach((k) => {
         if (monthlyDaysSchedule[k] && !safeInputs[k]?.isPreHire) {
           safeInputs[k] = {
             ...(safeInputs[k] || {}),
             ...monthlyDaysSchedule[k]
+          };
+        }
+      });
+
+      // ضمان تطبيع مصفوفة الورديات shifts والمرايا الرجعية لكافة أيام الشهر والنمط الأسبوعي
+      Object.keys(safeInputs).forEach((k) => {
+        const item = safeInputs[k];
+        if (item && !item.isPreHire && item.type !== 'off' && !item.isOff) {
+          const sList = getDayShiftsList(item);
+          safeInputs[k] = {
+            ...item,
+            shifts: sList,
+            start: sList[0]?.start || item.start || '',
+            end: sList[0]?.end || item.end || '',
+            hours: Math.round(sList.reduce((acc, s) => acc + (Number(s.hours) || 0), 0) * 10) / 10,
+            branchId: sList[0]?.branchId || item.branchId || defaultBranchId,
+            branchName: sList[0]?.branchName || item.branchName || '',
+            hasSecondShift: sList.length > 1,
+            secondShift: sList[1] ? { ...sList[1] } : null
           };
         }
       });
@@ -1159,15 +1676,15 @@ export default function EmployeeRosterEditModal({
           updatedRosters = [masterRosterObj, ...branchRosterObjs, ...otherEmpRosters];
         } else {
           // موظف عادي فرع واحد
-          updatedRosters = [...(state?.rosters || [])];
-          const existingIdx = updatedRosters.findIndex(
-            (r) =>
+          // حذف كافة الجداول السابقة لهذا الموظف لنفس الشهر لمنع التكرار والتضارب
+          const otherEmpRosters = (state?.rosters || []).filter((r) =>
+            !(
               (String(r.employeeId) === String(targetEmp.id) || (targetEmp.code && String(r.employeeCode) === String(targetEmp.code))) &&
-              (r.month === selectedMonth || !r.month) &&
-              (String(r.branchId || '') === String(effectiveBranchId) || (!r.branchId && !effectiveBranchId) || r.isFloatingStaff || targetEmp.isFloatingStaff)
+              (r.month === selectedMonth || !r.month)
+            )
           );
 
-          const rosterId = existingIdx >= 0 ? updatedRosters[existingIdx].id : `roster_${targetEmp.id}_${selectedMonth}_${Date.now()}`;
+          const rosterId = `roster_${targetEmp.id}_${selectedMonth}_${Date.now()}`;
           const newRosterObj = {
             id: rosterId,
             employeeId: targetEmp.id,
@@ -1189,11 +1706,7 @@ export default function EmployeeRosterEditModal({
             updatedAt: new Date().toISOString()
           };
 
-          if (existingIdx >= 0) {
-            updatedRosters[existingIdx] = newRosterObj;
-          } else {
-            updatedRosters.unshift(newRosterObj);
-          }
+          updatedRosters = [newRosterObj, ...otherEmpRosters];
         }
 
         // أيضاً اعتماد أي طلبات روستر معلقة لهذا الموظف لنفس الشهر لإبقاء النظام متسقاً
@@ -1247,6 +1760,16 @@ export default function EmployeeRosterEditModal({
             }
             return emp;
           });
+        } else if (targetEmp) {
+          updatedEmployees = (state?.employees || []).map((emp) => {
+            if (String(emp.id) === String(targetEmp.id)) {
+              return {
+                ...emp,
+                roster: { ...(emp.roster || {}), schedule: safeInputs }
+              };
+            }
+            return emp;
+          });
         }
 
         const updatedState = {
@@ -1265,6 +1788,15 @@ export default function EmployeeRosterEditModal({
         });
 
         setState?.(reconciledState);
+        try {
+          await apiSaveSettingsSlice('rosters', reconciledState.rosters);
+          await apiSaveSettingsSlice('employees', reconciledState.employees);
+          await apiSaveSettingsSlice('shifts', reconciledState.shifts);
+          await apiSaveSettingsSlice('lateIncidents', reconciledState.lateIncidents);
+          await apiSaveSettingsSlice('requests', reconciledState.requests);
+        } catch (sliceErr) {
+          console.warn('apiSaveSettingsSlice after roster save error:', sliceErr);
+        }
         if (saveState) await saveState(reconciledState);
 
         if (reconSummary?.waivedDeductionMinutes > 0) {
@@ -1376,25 +1908,26 @@ export default function EmployeeRosterEditModal({
         className="modal-content card fade-in"
         onClick={(e) => e.stopPropagation()}
         style={{
-          maxWidth: 'min(1360px, 98vw)',
-          width: '98vw',
-          height: 'calc(100dvh - 20px)',
-          maxHeight: 'calc(100dvh - 20px)',
+          maxWidth: isFullscreen ? '100vw' : 'min(1680px, 98vw)',
+          width: isFullscreen ? '100vw' : '98vw',
+          height: isFullscreen ? '100vh' : 'calc(100dvh - 20px)',
+          maxHeight: isFullscreen ? '100vh' : 'calc(100dvh - 20px)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
           padding: 0,
-          borderRadius: '16px',
+          borderRadius: isFullscreen ? '0' : '16px',
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
           fontFamily: "'Tajawal', sans-serif",
           margin: 'auto',
-          background: 'var(--surface, #ffffff)'
+          background: 'var(--surface, #ffffff)',
+          transition: 'all 0.2s ease-in-out'
         }}
       >
         {/* ── 1. ترويسة المودال المثبتة (Sticky Header) ── */}
         <div
           style={{
-            padding: '16px 22px',
+            padding: '14px 22px',
             borderBottom: '1.5px solid var(--border)',
             background: 'var(--surface, #ffffff)',
             flexShrink: 0,
@@ -1418,14 +1951,37 @@ export default function EmployeeRosterEditModal({
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={onClose}
-            style={{ fontSize: '18px', padding: '4px 10px', borderRadius: '8px' }}
-          >
-            ✕
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              title={isFullscreen ? 'تصغير النافذة' : 'توسيع للشاشة الكاملة'}
+              style={{
+                fontSize: '12.5px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: '1.5px solid var(--border)',
+                background: isFullscreen ? '#eff6ff' : '#ffffff',
+                color: isFullscreen ? '#0284c7' : 'var(--text)',
+                fontWeight: 800,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                cursor: 'pointer'
+              }}
+            >
+              <span>{isFullscreen ? '🗗 تصغير النافذة' : '⛶ ملء الشاشة'}</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={onClose}
+              style={{ fontSize: '18px', padding: '4px 10px', borderRadius: '8px', cursor: 'pointer' }}
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* ── 2. النموذج بكامل مكوناته مع شريط سفلي مثبت ── */}
@@ -1660,7 +2216,7 @@ export default function EmployeeRosterEditModal({
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 800, color: '#0369a1' }}>⏰ وقت البداية الافتراضي:</span>
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: '#0369a1' }}>⏰ وقت البداية:</span>
                   <input
                     type="time"
                     value={defaultShiftStart}
@@ -1676,7 +2232,7 @@ export default function EmployeeRosterEditModal({
                   />
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 800, color: '#0369a1' }}>⏰ وقت النهاية الافتراضي:</span>
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: '#0369a1' }}>⏰ وقت النهاية:</span>
                   <input
                     type="time"
                     value={defaultShiftEnd}
@@ -1691,6 +2247,33 @@ export default function EmployeeRosterEditModal({
                     }}
                   />
                 </div>
+
+                {isMultiBranchEmp && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 800, color: '#0369a1' }}>🏢 تطبيق على:</span>
+                    <select
+                      value={defaultApplyBranchId}
+                      onChange={(e) => setDefaultApplyBranchId(e.target.value)}
+                      style={{
+                        padding: '5px 8px',
+                        borderRadius: '6px',
+                        border: '1.5px solid #7dd3fc',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        background: '#fff',
+                        color: '#0369a1'
+                      }}
+                    >
+                      <option value="all">🌐 كافة الفروع</option>
+                      {availableBranchesForEmp.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          🏢 {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 <button
                   type="button"
                   className="btn"
@@ -1709,9 +2292,11 @@ export default function EmployeeRosterEditModal({
                     alignItems: 'center',
                     gap: '5px'
                   }}
-                  title="تطبيق موعد البداية والنهاية على كافة أيام العمل مع الحفاظ على أيام الراحة"
+                  title={defaultApplyBranchId === 'all' ? 'تطبيق موعد البداية والنهاية على كافة أيام العمل' : 'تطبيق موعد البداية والنهاية على أيام هذا الفرع فقط'}
                 >
-                  <span>⚡ تطبيق على جميع أيام العمل</span>
+                  <span>
+                    ⚡ {defaultApplyBranchId === 'all' ? 'تطبيق على جميع أيام العمل' : `تطبيق على أيام ${availableBranchesForEmp.find(b => String(b.id) === String(defaultApplyBranchId))?.name || 'الفرع المحدد'}`}
+                  </span>
                 </button>
               </div>
 
@@ -1758,36 +2343,45 @@ export default function EmployeeRosterEditModal({
                     </button>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      onClick={() => applyMonthlyPreset('morning')}
-                      style={{ fontSize: '11px', padding: '4px 8px', background: '#f0fdf4', color: '#166534', border: '1px solid #86efac', borderRadius: '6px', fontWeight: 700 }}
-                    >
-                      ☀️ صباحي كامل الشهر
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      onClick={() => applyMonthlyPreset('evening')}
-                      style={{ fontSize: '11px', padding: '4px 8px', background: '#eff6ff', color: '#1e40af', border: '1px solid #93c5fd', borderRadius: '6px', fontWeight: 700 }}
-                    >
-                      🌆 مسائي كامل الشهر
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      onClick={() => applyMonthlyPreset('night')}
-                      style={{ fontSize: '11px', padding: '4px 8px', background: '#faf5ff', color: '#6b21a8', border: '1px solid #d8b4fe', borderRadius: '6px', fontWeight: 700 }}
-                    >
-                      🌙 ليلي كامل الشهر
-                    </button>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {isMultiBranchEmp && (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={() => applyMonthlyPreset('dual_branch')}
+                          style={{ fontSize: '11px', padding: '4px 10px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #7dd3fc', borderRadius: '6px', fontWeight: 800 }}
+                          title="ورديتان يومياً: صباحي بفرع ومسائي بفرع آخر"
+                        >
+                          ☀️/🌆 ورديتان بالفرعين
+                        </button>
+                        {availableBranchesForEmp.length >= 3 && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => applyMonthlyPreset('tri_branch')}
+                            style={{ fontSize: '11px', padding: '4px 10px', background: '#faf5ff', color: '#7e22ce', border: '1px solid #d8b4fe', borderRadius: '6px', fontWeight: 800 }}
+                            title="3 ورديات يومياً مقسمة على ثلاثة فروع"
+                          >
+                            🏢 3 ورديات (بـ 3 فروع)
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={() => applyMonthlyPreset('alternate_branches')}
+                          style={{ fontSize: '11px', padding: '4px 10px', background: '#fdf4ff', color: '#86198f', border: '1px solid #f0abfc', borderRadius: '6px', fontWeight: 800 }}
+                          title="تبادل الفروع يوم ويوم"
+                        >
+                          🔄 تبادل الفروع (يوم ويوم)
+                        </button>
+                      </>
+                    )}
                     <button
                       type="button"
                       className="btn btn-ghost"
                       onClick={() => applyMonthlyPreset('all_off')}
-                      style={{ fontSize: '11px', padding: '4px 8px', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', borderRadius: '6px', fontWeight: 700 }}
+                      style={{ fontSize: '11px', padding: '4px 10px', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', borderRadius: '6px', fontWeight: 700 }}
                     >
                       🧹 راحة للكل
                     </button>
@@ -1874,7 +2468,10 @@ export default function EmployeeRosterEditModal({
                           <button
                             key={b.id}
                             type="button"
-                            onClick={() => setActiveBranchTab(String(b.id))}
+                            onClick={() => {
+                              setActiveBranchTab(String(b.id));
+                              setDefaultApplyBranchId(String(b.id));
+                            }}
                             style={{
                               padding: '6px 14px',
                               borderRadius: '8px',
@@ -1918,27 +2515,31 @@ export default function EmployeeRosterEditModal({
                   </div>
                 )}
 
-                {/* جدول أيام دورة الشهر التفاعلي الكامل مع تنسيق متوازن وتثبيت العرض */}
-                <div className="table-responsive" style={{ border: '1px solid var(--border)', borderRadius: '12px', maxHeight: '360px', overflowY: 'auto', marginBottom: '16px', WebkitOverflowScrolling: 'touch' }}>
-                  <table className="bylaws-table" style={{ margin: 0, fontSize: '12px', width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                {/* جدول أيام دورة الشهر التفاعلي الكامل مع دعم الورديات والفروع المتعددة */}
+                <div className="table-responsive" style={{ border: '1px solid var(--border)', borderRadius: '12px', maxHeight: isFullscreen ? 'calc(100vh - 350px)' : 'min(580px, 62vh)', overflowY: 'auto', marginBottom: '16px', WebkitOverflowScrolling: 'touch' }}>
+                  <table className="bylaws-table" style={{ margin: 0, fontSize: '12.5px', width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                     <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--surface-muted, #f1f5f9)', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
                       <tr>
-                        <th style={{ width: isMultiBranchEmp ? '11%' : '16%', padding: '9px 6px', textAlign: 'center', boxSizing: 'border-box' }}>التاريخ</th>
-                        <th style={{ width: isMultiBranchEmp ? '10%' : '14%', padding: '9px 6px', textAlign: 'center', boxSizing: 'border-box' }}>اليوم</th>
-                        {isMultiBranchEmp && (
-                          <th style={{ width: '16%', padding: '9px 6px', textAlign: 'center', boxSizing: 'border-box', color: '#0369a1' }}>
-                            🏢 الفرع (وردية 1)
-                          </th>
+                        {isMultiBranchEmp ? (
+                          <>
+                            <th style={{ width: '11%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>التاريخ</th>
+                            <th style={{ width: '9%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>اليوم</th>
+                            <th style={{ width: '11%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>نوع اليوم</th>
+                            <th style={{ width: '61%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box', color: '#0369a1' }}>
+                              🏢 الورديات المخصصة والفروع (دعم الورديات والفروع المتعددة في نفس اليوم)
+                            </th>
+                            <th style={{ width: '8%', textAlign: 'center', padding: '10px 4px', boxSizing: 'border-box' }}>الساعات</th>
+                          </>
+                        ) : (
+                          <>
+                            <th style={{ width: '14%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>التاريخ</th>
+                            <th style={{ width: '14%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>اليوم</th>
+                            <th style={{ width: '18%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>نوع اليوم</th>
+                            <th style={{ width: '23%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>موعد البداية (دخول)</th>
+                            <th style={{ width: '23%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>موعد النهاية (خروج)</th>
+                            <th style={{ width: '8%', textAlign: 'center', padding: '10px 4px', boxSizing: 'border-box' }}>الساعات</th>
+                          </>
                         )}
-                        <th style={{ width: isMultiBranchEmp ? '13%' : '22%', padding: '9px 6px', textAlign: 'center', boxSizing: 'border-box' }}>نوع اليوم</th>
-                        <th style={{ width: isMultiBranchEmp ? '13%' : '20%', padding: '9px 6px', textAlign: 'center', boxSizing: 'border-box' }}>موعد البداية (دخول)</th>
-                        <th style={{ width: isMultiBranchEmp ? '13%' : '20%', padding: '9px 6px', textAlign: 'center', boxSizing: 'border-box' }}>موعد النهاية (خروج)</th>
-                        {isMultiBranchEmp && (
-                          <th style={{ width: '18%', padding: '9px 6px', textAlign: 'center', boxSizing: 'border-box', color: '#0284c7' }}>
-                            🌆 وردية 2 (فرع آخر بنفس اليوم)
-                          </th>
-                        )}
-                        <th style={{ width: isMultiBranchEmp ? '6%' : '8%', textAlign: 'center', padding: '9px 4px', boxSizing: 'border-box' }}>الساعات</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1961,10 +2562,7 @@ export default function EmployeeRosterEditModal({
                               <td style={{ fontWeight: 700, padding: '7px 8px', textAlign: 'center', color: '#64748b', fontSize: '12.5px', boxSizing: 'border-box' }}>
                                 {day.dayLabel || arabicWeekday(day.dateStr)}
                               </td>
-                              {isMultiBranchEmp && (
-                                <td style={{ textAlign: 'center', color: '#94a3b8', fontSize: '11.5px', boxSizing: 'border-box' }}>—</td>
-                              )}
-                              <td colSpan={isMultiBranchEmp ? 5 : 4} style={{ padding: '6px 12px', textAlign: 'center', boxSizing: 'border-box' }}>
+                              <td colSpan={isMultiBranchEmp ? 3 : 4} style={{ padding: '6px 12px', textAlign: 'center', boxSizing: 'border-box' }}>
                                 <span style={{
                                   display: 'inline-flex',
                                   alignItems: 'center',
@@ -1987,16 +2585,17 @@ export default function EmployeeRosterEditModal({
                         const conf = monthlyDaysSchedule[day.dateStr] || { type: 'shift', start: '08:00', end: '16:00', hours: 8, branchId: defaultBranchId };
                         const isOff = conf.type === 'off' || conf.isOff === true;
                         const isFri = day.dayLabel === 'الجمعة';
-                        const currentDayBranchId = String(conf.branchId || defaultBranchId);
-                        const isAssignedToActiveTab = activeBranchTab === 'all' || currentDayBranchId === activeBranchTab;
+                        const dayShifts = getDayShiftsList(conf);
+                        const hasOverlap = checkAnyShiftsOverlap(dayShifts);
+                        const hasShiftInActiveBranch = activeBranchTab === 'all' || dayShifts.some(s => String(s.branchId) === activeBranchTab);
 
                         return (
                           <tr
                             key={day.dateStr}
                             style={{
-                              background: isOff ? (isFri ? '#fffbeb' : '#fefce8') : (!isAssignedToActiveTab ? '#f8fafc' : isFri ? '#fafafa' : 'transparent'),
+                              background: isOff ? (isFri ? '#fffbeb' : '#fefce8') : (!hasShiftInActiveBranch ? '#f8fafc' : isFri ? '#fafafa' : 'transparent'),
                               borderBottom: '1px solid var(--border)',
-                              opacity: (!isAssignedToActiveTab && activeBranchTab !== 'all') ? 0.75 : 1
+                              opacity: (!hasShiftInActiveBranch && activeBranchTab !== 'all') ? 0.75 : 1
                             }}
                           >
                             <td style={{ fontWeight: 800, padding: '7px 6px', direction: 'ltr', textAlign: 'center', boxSizing: 'border-box' }}>
@@ -2012,75 +2611,10 @@ export default function EmployeeRosterEditModal({
                               {isOff && <span style={{ marginRight: '3px', fontSize: '11px' }}>🏖️</span>}
                             </td>
 
-                            {isMultiBranchEmp && (
-                              <td style={{ padding: '6px 6px', textAlign: 'center', boxSizing: 'border-box' }}>
-                                {activeBranchTab !== 'all' && !isAssignedToActiveTab && !isOff ? (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
-                                    <span style={{
-                                      fontSize: '10.5px',
-                                      fontWeight: 800,
-                                      color: '#0369a1',
-                                      background: '#e0f2fe',
-                                      padding: '2px 6px',
-                                      borderRadius: '6px',
-                                      border: '1px solid #bae6fd',
-                                      whiteSpace: 'nowrap'
-                                    }}>
-                                      🏢 {conf.branchName || 'فرع آخر'}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        handleMonthlyDayChange(day.dateStr, 'branchId', activeBranchTab);
-                                        showToast?.(`✅ تم نقل وردية (${day.dateStr}) لهذا الفرع بنجاح`);
-                                      }}
-                                      style={{
-                                        fontSize: '10px',
-                                        padding: '2px 6px',
-                                        borderRadius: '4px',
-                                        background: '#0284c7',
-                                        color: '#ffffff',
-                                        border: 'none',
-                                        cursor: 'pointer',
-                                        fontWeight: 800
-                                      }}
-                                      title="نقل الوردية لتعمل بهذا الفرع"
-                                    >
-                                      🔄 نقل هنا
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <select
-                                    value={conf.branchId || defaultBranchId}
-                                    onChange={(e) => handleMonthlyDayChange(day.dateStr, 'branchId', e.target.value)}
-                                    disabled={isOff}
-                                    style={{
-                                      width: '100%',
-                                      boxSizing: 'border-box',
-                                      padding: '5px 6px',
-                                      borderRadius: '6px',
-                                      border: `1.5px solid ${isOff ? '#e2e8f0' : '#0284c7'}`,
-                                      background: isOff ? '#f8fafc' : '#f0f9ff',
-                                      fontWeight: 800,
-                                      fontSize: '11px',
-                                      color: isOff ? '#94a3b8' : '#0369a1'
-                                    }}
-                                    title={isOff ? 'اليوم محدد كراحة' : 'اختر الفرع الذي سيعمل به الموظف في هذا اليوم'}
-                                  >
-                                    {availableBranchesForEmp.map((b) => (
-                                      <option key={b.id} value={b.id}>
-                                        {b.name} {b.roleLabel ? `(${b.roleLabel})` : ''}
-                                      </option>
-                                    ))}
-                                  </select>
-                                )}
-                              </td>
-                            )}
-
                             <td style={{ padding: '6px 6px', textAlign: 'center', boxSizing: 'border-box' }}>
                               <select
                                 value={isOff ? 'off' : 'shift'}
-                                onChange={(e) => handleMonthlyDayChange(day.dateStr, 'type', e.target.value)}
+                                onChange={(e) => handleToggleDayType(day.dateStr, e.target.value)}
                                 style={{
                                   width: '100%',
                                   boxSizing: 'border-box',
@@ -2098,154 +2632,220 @@ export default function EmployeeRosterEditModal({
                               </select>
                             </td>
 
-                            <td style={{ padding: '6px 6px', textAlign: 'center', boxSizing: 'border-box' }}>
-                              {isOff ? (
-                                <span style={{ color: 'var(--muted)', fontSize: '11px' }}>— راحة</span>
-                              ) : (
-                                <input
-                                  type="time"
-                                  value={conf.start || '08:00'}
-                                  onChange={(e) => handleMonthlyDayChange(day.dateStr, 'start', e.target.value)}
-                                  required={!isOff}
-                                  style={{
-                                    padding: '5px 6px',
-                                    borderRadius: '6px',
-                                    border: '1px solid var(--border)',
-                                    fontSize: '11.5px',
-                                    fontWeight: 700,
-                                    width: '100%',
-                                    boxSizing: 'border-box',
-                                    textAlign: 'center'
-                                  }}
-                                />
-                              )}
-                            </td>
-
-                            <td style={{ padding: '6px 6px', textAlign: 'center', boxSizing: 'border-box' }}>
-                              {isOff ? (
-                                <span style={{ color: 'var(--muted)', fontSize: '11px' }}>— راحة</span>
-                              ) : (
-                                <input
-                                  type="time"
-                                  value={conf.end || '16:00'}
-                                  onChange={(e) => handleMonthlyDayChange(day.dateStr, 'end', e.target.value)}
-                                  required={!isOff}
-                                  style={{
-                                    padding: '5px 6px',
-                                    borderRadius: '6px',
-                                    border: '1px solid var(--border)',
-                                    fontSize: '11.5px',
-                                    fontWeight: 700,
-                                    width: '100%',
-                                    boxSizing: 'border-box',
-                                    textAlign: 'center'
-                                  }}
-                                />
-                              )}
-                            </td>
-
-                            {isMultiBranchEmp && (
-                              <td style={{ padding: '6px 6px', textAlign: 'center', boxSizing: 'border-box' }}>
+                            {isMultiBranchEmp ? (
+                              <td style={{ padding: '6px 8px', boxSizing: 'border-box' }}>
                                 {isOff ? (
-                                  <span style={{ color: 'var(--muted)', fontSize: '11px' }}>— راحة</span>
-                                ) : !conf.hasSecondShift ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleMonthlyDayChange(day.dateStr, 'toggleSecondShift')}
-                                    style={{
-                                      fontSize: '10.5px',
-                                      padding: '3px 6px',
-                                      borderRadius: '6px',
-                                      background: '#e0f2fe',
-                                      color: '#0369a1',
-                                      border: '1px dashed #7dd3fc',
-                                      cursor: 'pointer',
-                                      fontWeight: 800,
-                                      whiteSpace: 'nowrap'
-                                    }}
-                                    title="إضافة وردية ثانية لهذا اليوم لفرع آخر"
-                                  >
-                                    ➕ وردية 2 (فرع آخر)
-                                  </button>
+                                  <span style={{ color: '#b45309', fontSize: '11.5px', fontWeight: 700 }}>— يوم راحة أسبوعية (🏖️)</span>
                                 ) : (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', background: '#f0fdf4', padding: '4px 6px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                      <select
-                                        value={conf.secondShift?.branchId || availableBranchesForEmp[1]?.id || defaultBranchId}
-                                        onChange={(e) => handleMonthlyDayChange(day.dateStr, 'secondShiftBranchId', e.target.value)}
-                                        style={{
-                                          padding: '2px 4px',
-                                          fontSize: '10px',
-                                          fontWeight: 800,
-                                          borderRadius: '4px',
-                                          border: '1px solid #86efac',
-                                          color: '#166534',
-                                          background: '#ffffff',
-                                          flex: 1
-                                        }}
-                                      >
-                                        {availableBranchesForEmp.map(b => (
-                                          <option key={b.id} value={b.id}>{b.name}</option>
-                                        ))}
-                                      </select>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                    {dayShifts.map((shift, idx) => {
+                                      const isShiftActiveTab = activeBranchTab === 'all' || String(shift.branchId) === activeBranchTab;
+                                      return (
+                                        <div
+                                          key={shift.id || `shift_${idx}`}
+                                          style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '6px',
+                                            background: idx === 0 ? '#f0f9ff' : idx === 1 ? '#f0fdf4' : '#faf5ff',
+                                            border: `1.5px solid ${!isShiftActiveTab ? '#e2e8f0' : idx === 0 ? '#bae6fd' : idx === 1 ? '#bbf7d0' : '#e9d5ff'}`,
+                                            borderRadius: '6px',
+                                            padding: '4px 8px',
+                                            flexWrap: 'wrap',
+                                            opacity: (!isShiftActiveTab && activeBranchTab !== 'all') ? 0.6 : 1
+                                          }}
+                                        >
+                                          <span style={{
+                                            fontSize: '10px',
+                                            fontWeight: 900,
+                                            color: idx === 0 ? '#0369a1' : idx === 1 ? '#15803d' : '#7e22ce',
+                                            background: '#ffffff',
+                                            padding: '2px 5px',
+                                            borderRadius: '4px',
+                                            border: '1px solid rgba(0,0,0,0.08)',
+                                            whiteSpace: 'nowrap'
+                                          }}>
+                                            وردية {idx + 1}
+                                          </span>
+
+                                          <select
+                                            value={shift.branchId || defaultBranchId}
+                                            onChange={(e) => handleUpdateDayShift(day.dateStr, idx, 'branchId', e.target.value)}
+                                            style={{
+                                              padding: '3px 6px',
+                                              fontSize: '11px',
+                                              fontWeight: 800,
+                                              borderRadius: '5px',
+                                              border: '1px solid #cbd5e1',
+                                              color: '#1e293b',
+                                              background: '#ffffff',
+                                              minWidth: '130px',
+                                              flex: 1
+                                            }}
+                                          >
+                                            {availableBranchesForEmp.map((b) => (
+                                              <option key={b.id} value={b.id}>
+                                                {b.name} {b.roleLabel ? `(${b.roleLabel})` : ''}
+                                              </option>
+                                            ))}
+                                          </select>
+
+                                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                            <input
+                                              type="time"
+                                              value={shift.start || '08:00'}
+                                              onChange={(e) => handleUpdateDayShift(day.dateStr, idx, 'start', e.target.value)}
+                                              style={{
+                                                padding: '3px 4px',
+                                                fontSize: '11px',
+                                                fontWeight: 700,
+                                                borderRadius: '4px',
+                                                border: '1px solid #cbd5e1',
+                                                textAlign: 'center',
+                                                background: '#ffffff',
+                                                width: '72px'
+                                              }}
+                                            />
+                                            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 800 }}>-</span>
+                                            <input
+                                              type="time"
+                                              value={shift.end || '16:00'}
+                                              onChange={(e) => handleUpdateDayShift(day.dateStr, idx, 'end', e.target.value)}
+                                              style={{
+                                                padding: '3px 4px',
+                                                fontSize: '11px',
+                                                fontWeight: 700,
+                                                borderRadius: '4px',
+                                                border: '1px solid #cbd5e1',
+                                                textAlign: 'center',
+                                                background: '#ffffff',
+                                                width: '72px'
+                                              }}
+                                            />
+                                          </div>
+
+                                          <span style={{
+                                            fontSize: '11px',
+                                            fontWeight: 900,
+                                            color: '#0f766e',
+                                            background: '#ffffff',
+                                            padding: '2px 5px',
+                                            borderRadius: '4px',
+                                            border: '1px solid rgba(0,0,0,0.08)',
+                                            whiteSpace: 'nowrap'
+                                          }}>
+                                            {shift.hours || 0} س
+                                          </span>
+
+                                          {dayShifts.length > 1 && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleRemoveDayShift(day.dateStr, idx)}
+                                              style={{
+                                                background: '#fee2e2',
+                                                color: '#dc2626',
+                                                border: '1px solid #fecaca',
+                                                borderRadius: '4px',
+                                                cursor: 'pointer',
+                                                fontSize: '11px',
+                                                fontWeight: 800,
+                                                padding: '2px 6px'
+                                              }}
+                                              title="حذف هذه الوردية"
+                                            >
+                                              ✕
+                                            </button>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
                                       <button
                                         type="button"
-                                        onClick={() => handleMonthlyDayChange(day.dateStr, 'toggleSecondShift')}
+                                        onClick={() => handleAddDayShift(day.dateStr, activeBranchTab !== 'all' ? activeBranchTab : null)}
                                         style={{
-                                          background: 'transparent',
-                                          border: 'none',
-                                          color: '#dc2626',
+                                          fontSize: '10.5px',
+                                          padding: '3px 8px',
+                                          borderRadius: '6px',
+                                          background: '#eff6ff',
+                                          color: '#1d4ed8',
+                                          border: '1px dashed #93c5fd',
                                           cursor: 'pointer',
-                                          fontSize: '11px',
-                                          padding: '0 2px'
+                                          fontWeight: 800,
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px'
                                         }}
-                                        title="حذف الوردية الثانية"
+                                        title="إضافة وردية لفرع آخر في هذا اليوم"
                                       >
-                                        ❌
+                                        ➕ إضافة وردية فرع آخر لهذا اليوم
                                       </button>
+                                      {hasOverlap && (
+                                        <span style={{
+                                          fontSize: '10px',
+                                          fontWeight: 900,
+                                          color: '#dc2626',
+                                          background: '#fef2f2',
+                                          border: '1px solid #fca5a5',
+                                          padding: '2px 6px',
+                                          borderRadius: '4px'
+                                        }}>
+                                          ⚠️ تنبيه: تداخل زمني بين الورديات!
+                                        </span>
+                                      )}
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                                      <input
-                                        type="time"
-                                        value={conf.secondShift?.start || '16:00'}
-                                        onChange={(e) => handleMonthlyDayChange(day.dateStr, 'secondShiftStart', e.target.value)}
-                                        style={{
-                                          padding: '2px 3px',
-                                          fontSize: '10.5px',
-                                          fontWeight: 700,
-                                          borderRadius: '4px',
-                                          border: '1px solid #86efac',
-                                          textAlign: 'center',
-                                          width: '54px'
-                                        }}
-                                      />
-                                      <span style={{ fontSize: '9px', color: '#166534' }}>-</span>
-                                      <input
-                                        type="time"
-                                        value={conf.secondShift?.end || '22:00'}
-                                        onChange={(e) => handleMonthlyDayChange(day.dateStr, 'secondShiftEnd', e.target.value)}
-                                        style={{
-                                          padding: '2px 3px',
-                                          fontSize: '10.5px',
-                                          fontWeight: 700,
-                                          borderRadius: '4px',
-                                          border: '1px solid #86efac',
-                                          textAlign: 'center',
-                                          width: '54px'
-                                        }}
-                                      />
-                                      <span style={{ fontSize: '10px', fontWeight: 800, color: '#15803d' }}>
-                                        ({conf.secondShift?.hours || 6}س)
-                                      </span>
-                                    </div>
-                                    {checkShiftsOverlap(conf.start, conf.end, conf.secondShift?.start, conf.secondShift?.end) && (
-                                      <div style={{ fontSize: '9px', color: '#b91c1c', fontWeight: 900 }}>
-                                        ⚠️ تداخل زمني!
-                                      </div>
-                                    )}
                                   </div>
                                 )}
                               </td>
+                            ) : (
+                              <>
+                                <td style={{ padding: '6px 6px', textAlign: 'center', boxSizing: 'border-box' }}>
+                                  {isOff ? (
+                                    <span style={{ color: 'var(--muted)', fontSize: '11px' }}>— راحة</span>
+                                  ) : (
+                                    <input
+                                      type="time"
+                                      value={conf.start || '08:00'}
+                                      onChange={(e) => handleUpdateDayShift(day.dateStr, 0, 'start', e.target.value)}
+                                      required={!isOff}
+                                      style={{
+                                        padding: '5px 6px',
+                                        borderRadius: '6px',
+                                        border: '1px solid var(--border)',
+                                        fontSize: '11.5px',
+                                        fontWeight: 700,
+                                        width: '100%',
+                                        boxSizing: 'border-box',
+                                        textAlign: 'center'
+                                      }}
+                                    />
+                                  )}
+                                </td>
+
+                                <td style={{ padding: '6px 6px', textAlign: 'center', boxSizing: 'border-box' }}>
+                                  {isOff ? (
+                                    <span style={{ color: 'var(--muted)', fontSize: '11px' }}>— راحة</span>
+                                  ) : (
+                                    <input
+                                      type="time"
+                                      value={conf.end || '16:00'}
+                                      onChange={(e) => handleUpdateDayShift(day.dateStr, 0, 'end', e.target.value)}
+                                      required={!isOff}
+                                      style={{
+                                        padding: '5px 6px',
+                                        borderRadius: '6px',
+                                        border: '1px solid var(--border)',
+                                        fontSize: '11.5px',
+                                        fontWeight: 700,
+                                        width: '100%',
+                                        boxSizing: 'border-box',
+                                        textAlign: 'center'
+                                      }}
+                                    />
+                                  )}
+                                </td>
+                              </>
                             )}
 
                             <td style={{ textAlign: 'center', fontWeight: 800, padding: '6px 4px', boxSizing: 'border-box' }}>
@@ -2253,12 +2853,12 @@ export default function EmployeeRosterEditModal({
                                 <span style={{ color: '#b45309', fontSize: '11px' }}>0 س</span>
                               ) : (
                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                                  <span style={{ color: 'var(--primary, #0f766e)', fontSize: '12px', fontWeight: 900 }}>
-                                    {((conf.hours || 0) + (conf.hasSecondShift && conf.secondShift ? (conf.secondShift.hours || 0) : 0))} س
+                                  <span style={{ color: 'var(--primary, #0f766e)', fontSize: '12.5px', fontWeight: 900 }}>
+                                    {Math.round(dayShifts.reduce((acc, s) => acc + (Number(s.hours) || 0), 0) * 10) / 10} س
                                   </span>
-                                  {conf.hasSecondShift && (
+                                  {isMultiBranchEmp && dayShifts.length > 1 && (
                                     <span style={{ fontSize: '9px', color: '#0369a1', fontWeight: 800 }}>
-                                      (ورديتان)
+                                      ({dayShifts.length} ورديات)
                                     </span>
                                   )}
                                 </div>
@@ -2282,33 +2882,7 @@ export default function EmployeeRosterEditModal({
                     ⚡ قوالب ضبط سريعة:
                   </span>
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      onClick={() => applyPreset('morning')}
-                      style={{ fontSize: '11.5px', padding: '4px 10px', background: '#f0fdf4', color: '#166534', border: '1px solid #86efac', borderRadius: '6px' }}
-                      title="وردية صباحية 8 ص - 4 م (الجمعة راحة)"
-                    >
-                      ☀️ صباحي (08:00 - 16:00)
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      onClick={() => applyPreset('evening')}
-                      style={{ fontSize: '11.5px', padding: '4px 10px', background: '#eff6ff', color: '#1e40af', border: '1px solid #93c5fd', borderRadius: '6px' }}
-                      title="وردية مسائية 4 م - 12 ص (الجمعة راحة)"
-                    >
-                      🌆 مسائي (16:00 - 00:00)
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      onClick={() => applyPreset('night')}
-                      style={{ fontSize: '11.5px', padding: '4px 10px', background: '#faf5ff', color: '#6b21a8', border: '1px solid #d8b4fe', borderRadius: '6px' }}
-                      title="وردية ليلية 12 ص - 8 ص (الجمعة راحة)"
-                    >
-                      🌙 ليلي (00:00 - 08:00)
-                    </button>
+                    {/* إزالة القوالب الثابتة صباحي/مسائي/ليلي حسب الرغبة والاحتفاظ بأدوات التناوب والتفريغ */}
                     {isMultiBranchEmp && (
                       <>
                         <button
@@ -2320,6 +2894,17 @@ export default function EmployeeRosterEditModal({
                         >
                           ☀️/🌆 ورديتان بالفرعين
                         </button>
+                        {availableBranchesForEmp.length >= 3 && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => applyPreset('tri_branch')}
+                            style={{ fontSize: '11.5px', padding: '4px 10px', background: '#faf5ff', color: '#7e22ce', border: '1px solid #d8b4fe', borderRadius: '6px', fontWeight: 800 }}
+                            title="3 ورديات يومياً مقسمة على ثلاثة فروع"
+                          >
+                            🏢 3 ورديات (بـ 3 فروع)
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="btn btn-ghost"
@@ -2343,32 +2928,37 @@ export default function EmployeeRosterEditModal({
                   </div>
                 </div>
 
-                {/* جدول الأيام السبعة */}
+                {/* جدول الأيام السبعة مع دعم الورديات والفروع المتعددة */}
                 <div className="table-responsive" style={{ border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden', marginBottom: '16px' }}>
                   <table className="bylaws-table" style={{ margin: 0, fontSize: '12.5px', width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                     <thead>
                       <tr style={{ background: 'var(--surface-muted)' }}>
-                        <th style={{ width: isMultiBranchEmp ? '12%' : '18%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>اليوم</th>
-                        <th style={{ width: isMultiBranchEmp ? '13%' : '26%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>نوع اليوم</th>
-                        {isMultiBranchEmp && (
-                          <th style={{ width: '17%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box', color: '#0369a1' }}>
-                            🏢 الفرع (وردية 1)
-                          </th>
+                        {isMultiBranchEmp ? (
+                          <>
+                            <th style={{ width: '12%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>اليوم</th>
+                            <th style={{ width: '12%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>نوع اليوم</th>
+                            <th style={{ width: '66%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box', color: '#0369a1' }}>
+                              🏢 الورديات المخصصة والفروع (دعم الورديات والفروع المتعددة في نفس اليوم)
+                            </th>
+                            <th style={{ width: '10%', textAlign: 'center', padding: '10px 6px', boxSizing: 'border-box' }}>ساعات العمل</th>
+                          </>
+                        ) : (
+                          <>
+                            <th style={{ width: '18%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>اليوم</th>
+                            <th style={{ width: '26%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>نوع اليوم</th>
+                            <th style={{ width: '22%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>موعد البداية (دخول)</th>
+                            <th style={{ width: '22%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>موعد النهاية (خروج)</th>
+                            <th style={{ width: '12%', textAlign: 'center', padding: '10px 6px', boxSizing: 'border-box' }}>ساعات العمل</th>
+                          </>
                         )}
-                        <th style={{ width: isMultiBranchEmp ? '14%' : '22%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>موعد البداية (دخول)</th>
-                        <th style={{ width: isMultiBranchEmp ? '14%' : '22%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box' }}>موعد النهاية (خروج)</th>
-                        {isMultiBranchEmp && (
-                          <th style={{ width: '22%', padding: '10px 8px', textAlign: 'center', boxSizing: 'border-box', color: '#0284c7' }}>
-                            🌆 وردية 2 (فرع آخر بنفس اليوم)
-                          </th>
-                        )}
-                        <th style={{ width: isMultiBranchEmp ? '8%' : '12%', textAlign: 'center', padding: '10px 6px', boxSizing: 'border-box' }}>ساعات العمل</th>
                       </tr>
                     </thead>
                     <tbody>
                       {DAYS_OF_WEEK.map((d) => {
                         const conf = scheduleInputs[d.label] || { type: 'shift', start: '08:00', end: '16:00', hours: 8 };
                         const isOff = conf.type === 'off' || conf.isOff === true;
+                        const dayShifts = getDayShiftsList(conf);
+                        const hasOverlap = checkAnyShiftsOverlap(dayShifts);
 
                         return (
                           <tr
@@ -2386,7 +2976,7 @@ export default function EmployeeRosterEditModal({
                             <td style={{ padding: '8px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
                               <select
                                 value={isOff ? 'off' : 'shift'}
-                                onChange={(e) => handleDayChange(d.label, 'type', e.target.value)}
+                                onChange={(e) => handleToggleWeeklyDayType(d.label, e.target.value)}
                                 style={{
                                   width: '100%',
                                   boxSizing: 'border-box',
@@ -2403,181 +2993,216 @@ export default function EmployeeRosterEditModal({
                               </select>
                             </td>
 
-                            {isMultiBranchEmp && (
-                              <td style={{ padding: '8px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
-                                <select
-                                  value={conf.branchId || defaultBranchId}
-                                  onChange={(e) => handleDayChange(d.label, 'branchId', e.target.value)}
-                                  disabled={isOff}
-                                  style={{
-                                    width: '100%',
-                                    boxSizing: 'border-box',
-                                    padding: '6px 6px',
-                                    borderRadius: '8px',
-                                    border: `1.5px solid ${isOff ? '#e2e8f0' : '#0284c7'}`,
-                                    background: isOff ? '#f8fafc' : '#f0f9ff',
-                                    fontWeight: 800,
-                                    fontSize: '11.5px',
-                                    color: isOff ? '#94a3b8' : '#0369a1'
-                                  }}
-                                >
-                                  {availableBranchesForEmp.map((b) => (
-                                    <option key={b.id} value={b.id}>
-                                      {b.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </td>
-                            )}
-
-                            <td style={{ padding: '8px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
-                              {isOff ? (
-                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>— غير محدد</span>
-                              ) : (
-                                <input
-                                  type="time"
-                                  value={conf.start || '08:00'}
-                                  onChange={(e) => handleDayChange(d.label, 'start', e.target.value)}
-                                  required={!isOff}
-                                  style={{
-                                    padding: '6px 8px',
-                                    borderRadius: '8px',
-                                    border: '1px solid var(--border)',
-                                    fontSize: '12px',
-                                    fontWeight: 700,
-                                    width: '100%',
-                                    boxSizing: 'border-box',
-                                    textAlign: 'center'
-                                  }}
-                                />
-                              )}
-                            </td>
-
-                            <td style={{ padding: '8px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
-                              {isOff ? (
-                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>— غير محدد</span>
-                              ) : (
-                                <input
-                                  type="time"
-                                  value={conf.end || '16:00'}
-                                  onChange={(e) => handleDayChange(d.label, 'end', e.target.value)}
-                                  required={!isOff}
-                                  style={{
-                                    padding: '6px 8px',
-                                    borderRadius: '8px',
-                                    border: '1px solid var(--border)',
-                                    fontSize: '12px',
-                                    fontWeight: 700,
-                                    width: '100%',
-                                    boxSizing: 'border-box',
-                                    textAlign: 'center'
-                                  }}
-                                />
-                              )}
-                            </td>
-
-                            {isMultiBranchEmp && (
-                              <td style={{ padding: '6px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
+                            {isMultiBranchEmp ? (
+                              <td style={{ padding: '6px 8px', boxSizing: 'border-box' }}>
                                 {isOff ? (
-                                  <span style={{ color: 'var(--muted)', fontSize: '11px' }}>— راحة</span>
-                                ) : !conf.hasSecondShift ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDayChange(d.label, 'toggleSecondShift')}
-                                    style={{
-                                      fontSize: '11px',
-                                      padding: '4px 8px',
-                                      borderRadius: '6px',
-                                      background: '#e0f2fe',
-                                      color: '#0369a1',
-                                      border: '1px dashed #7dd3fc',
-                                      cursor: 'pointer',
-                                      fontWeight: 800,
-                                      whiteSpace: 'nowrap'
-                                    }}
-                                    title="إضافة وردية ثانية لفرع آخر بنفس اليوم"
-                                  >
-                                    ➕ وردية ثانية
-                                  </button>
+                                  <span style={{ color: '#b45309', fontSize: '11.5px', fontWeight: 700 }}>— يوم راحة أسبوعية (🏖️)</span>
                                 ) : (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', background: '#f0fdf4', padding: '4px 6px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                      <select
-                                        value={conf.secondShift?.branchId || availableBranchesForEmp[1]?.id || defaultBranchId}
-                                        onChange={(e) => handleDayChange(d.label, 'secondShiftBranchId', e.target.value)}
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                    {dayShifts.map((shift, idx) => (
+                                      <div
+                                        key={shift.id || `weekly_shift_${idx}`}
                                         style={{
-                                          padding: '2px 4px',
-                                          fontSize: '10.5px',
-                                          fontWeight: 800,
-                                          borderRadius: '4px',
-                                          border: '1px solid #86efac',
-                                          color: '#166534',
-                                          background: '#ffffff',
-                                          flex: 1
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '6px',
+                                          background: idx === 0 ? '#f0f9ff' : idx === 1 ? '#f0fdf4' : '#faf5ff',
+                                          border: `1.5px solid ${idx === 0 ? '#bae6fd' : idx === 1 ? '#bbf7d0' : '#e9d5ff'}`,
+                                          borderRadius: '6px',
+                                          padding: '4px 8px',
+                                          flexWrap: 'wrap'
                                         }}
                                       >
-                                        {availableBranchesForEmp.map(b => (
-                                          <option key={b.id} value={b.id}>{b.name}</option>
-                                        ))}
-                                      </select>
+                                        <span style={{
+                                          fontSize: '10px',
+                                          fontWeight: 900,
+                                          color: idx === 0 ? '#0369a1' : idx === 1 ? '#15803d' : '#7e22ce',
+                                          background: '#ffffff',
+                                          padding: '2px 5px',
+                                          borderRadius: '4px',
+                                          border: '1px solid rgba(0,0,0,0.08)',
+                                          whiteSpace: 'nowrap'
+                                        }}>
+                                          وردية {idx + 1}
+                                        </span>
+
+                                        <select
+                                          value={shift.branchId || defaultBranchId}
+                                          onChange={(e) => handleUpdateWeeklyShift(d.label, idx, 'branchId', e.target.value)}
+                                          style={{
+                                            padding: '3px 6px',
+                                            fontSize: '11px',
+                                            fontWeight: 800,
+                                            borderRadius: '5px',
+                                            border: '1px solid #cbd5e1',
+                                            color: '#1e293b',
+                                            background: '#ffffff',
+                                            minWidth: '130px',
+                                            flex: 1
+                                          }}
+                                        >
+                                          {availableBranchesForEmp.map((b) => (
+                                            <option key={b.id} value={b.id}>
+                                              {b.name} {b.roleLabel ? `(${b.roleLabel})` : ''}
+                                            </option>
+                                          ))}
+                                        </select>
+
+                                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                          <input
+                                            type="time"
+                                            value={shift.start || '08:00'}
+                                            onChange={(e) => handleUpdateWeeklyShift(d.label, idx, 'start', e.target.value)}
+                                            style={{
+                                              padding: '3px 4px',
+                                              fontSize: '11px',
+                                              fontWeight: 700,
+                                              borderRadius: '4px',
+                                              border: '1px solid #cbd5e1',
+                                              textAlign: 'center',
+                                              background: '#ffffff',
+                                              width: '72px'
+                                            }}
+                                          />
+                                          <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 800 }}>-</span>
+                                          <input
+                                            type="time"
+                                            value={shift.end || '16:00'}
+                                            onChange={(e) => handleUpdateWeeklyShift(d.label, idx, 'end', e.target.value)}
+                                            style={{
+                                              padding: '3px 4px',
+                                              fontSize: '11px',
+                                              fontWeight: 700,
+                                              borderRadius: '4px',
+                                              border: '1px solid #cbd5e1',
+                                              textAlign: 'center',
+                                              background: '#ffffff',
+                                              width: '72px'
+                                            }}
+                                          />
+                                        </div>
+
+                                        <span style={{
+                                          fontSize: '11px',
+                                          fontWeight: 900,
+                                          color: '#0f766e',
+                                          background: '#ffffff',
+                                          padding: '2px 5px',
+                                          borderRadius: '4px',
+                                          border: '1px solid rgba(0,0,0,0.08)',
+                                          whiteSpace: 'nowrap'
+                                        }}>
+                                          {shift.hours || 0} س
+                                        </span>
+
+                                        {dayShifts.length > 1 && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRemoveWeeklyShift(d.label, idx)}
+                                            style={{
+                                              background: '#fee2e2',
+                                              color: '#dc2626',
+                                              border: '1px solid #fecaca',
+                                              borderRadius: '4px',
+                                              cursor: 'pointer',
+                                              fontSize: '11px',
+                                              fontWeight: 800,
+                                              padding: '2px 6px'
+                                            }}
+                                            title="حذف هذه الوردية"
+                                          >
+                                            ✕
+                                          </button>
+                                        )}
+                                      </div>
+                                    ))}
+
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
                                       <button
                                         type="button"
-                                        onClick={() => handleDayChange(d.label, 'toggleSecondShift')}
+                                        onClick={() => handleAddWeeklyShift(d.label)}
                                         style={{
-                                          background: 'transparent',
-                                          border: 'none',
-                                          color: '#dc2626',
+                                          fontSize: '10.5px',
+                                          padding: '3px 8px',
+                                          borderRadius: '6px',
+                                          background: '#eff6ff',
+                                          color: '#1d4ed8',
+                                          border: '1px dashed #93c5fd',
                                           cursor: 'pointer',
-                                          fontSize: '12px',
-                                          padding: '0 2px'
+                                          fontWeight: 800,
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px'
                                         }}
-                                        title="حذف الوردية الثانية"
+                                        title="إضافة وردية لفرع آخر في هذا اليوم"
                                       >
-                                        ❌
+                                        ➕ إضافة وردية فرع آخر لهذا اليوم
                                       </button>
+                                      {hasOverlap && (
+                                        <span style={{
+                                          fontSize: '10px',
+                                          fontWeight: 900,
+                                          color: '#dc2626',
+                                          background: '#fef2f2',
+                                          border: '1px solid #fca5a5',
+                                          padding: '2px 6px',
+                                          borderRadius: '4px'
+                                        }}>
+                                          ⚠️ تنبيه: تداخل زمني بين الورديات!
+                                        </span>
+                                      )}
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                      <input
-                                        type="time"
-                                        value={conf.secondShift?.start || '16:00'}
-                                        onChange={(e) => handleDayChange(d.label, 'secondShiftStart', e.target.value)}
-                                        style={{
-                                          padding: '2px 4px',
-                                          fontSize: '11px',
-                                          fontWeight: 700,
-                                          borderRadius: '4px',
-                                          border: '1px solid #86efac',
-                                          textAlign: 'center',
-                                          width: '56px'
-                                        }}
-                                      />
-                                      <span style={{ fontSize: '10px', color: '#166534' }}>-</span>
-                                      <input
-                                        type="time"
-                                        value={conf.secondShift?.end || '22:00'}
-                                        onChange={(e) => handleDayChange(d.label, 'secondShiftEnd', e.target.value)}
-                                        style={{
-                                          padding: '2px 4px',
-                                          fontSize: '11px',
-                                          fontWeight: 700,
-                                          borderRadius: '4px',
-                                          border: '1px solid #86efac',
-                                          textAlign: 'center',
-                                          width: '56px'
-                                        }}
-                                      />
-                                      <span style={{ fontSize: '10.5px', fontWeight: 800, color: '#15803d' }}>
-                                        ({conf.secondShift?.hours || 6} س)
-                                      </span>
-                                    </div>
-                                    {checkShiftsOverlap(conf.start, conf.end, conf.secondShift?.start, conf.secondShift?.end) && (
-                                      <div style={{ fontSize: '9.5px', color: '#b91c1c', fontWeight: 900 }}>
-                                        ⚠️ تداخل زمني!
-                                      </div>
-                                    )}
                                   </div>
                                 )}
                               </td>
+                            ) : (
+                              <>
+                                <td style={{ padding: '8px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
+                                  {isOff ? (
+                                    <span style={{ color: 'var(--muted)', fontSize: '12px' }}>— غير محدد</span>
+                                  ) : (
+                                    <input
+                                      type="time"
+                                      value={conf.start || '08:00'}
+                                      onChange={(e) => handleDayChange(d.label, 'start', e.target.value)}
+                                      required={!isOff}
+                                      style={{
+                                        padding: '6px 8px',
+                                        borderRadius: '8px',
+                                        border: '1px solid var(--border)',
+                                        fontSize: '12px',
+                                        fontWeight: 700,
+                                        width: '100%',
+                                        boxSizing: 'border-box',
+                                        textAlign: 'center'
+                                      }}
+                                    />
+                                  )}
+                                </td>
+
+                                <td style={{ padding: '8px 8px', textAlign: 'center', boxSizing: 'border-box' }}>
+                                  {isOff ? (
+                                    <span style={{ color: 'var(--muted)', fontSize: '12px' }}>— غير محدد</span>
+                                  ) : (
+                                    <input
+                                      type="time"
+                                      value={conf.end || '16:00'}
+                                      onChange={(e) => handleDayChange(d.label, 'end', e.target.value)}
+                                      required={!isOff}
+                                      style={{
+                                        padding: '6px 8px',
+                                        borderRadius: '8px',
+                                        border: '1px solid var(--border)',
+                                        fontSize: '12px',
+                                        fontWeight: 700,
+                                        width: '100%',
+                                        boxSizing: 'border-box',
+                                        textAlign: 'center'
+                                      }}
+                                    />
+                                  )}
+                                </td>
+                              </>
                             )}
 
                             <td style={{ textAlign: 'center', fontWeight: 800, padding: '8px 6px', boxSizing: 'border-box' }}>
@@ -2586,11 +3211,11 @@ export default function EmployeeRosterEditModal({
                               ) : (
                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                                   <span style={{ color: 'var(--primary)', fontSize: '13px' }}>
-                                    {((conf.hours || 0) + (conf.hasSecondShift && conf.secondShift ? (conf.secondShift.hours || 0) : 0))} س
+                                    {Math.round(dayShifts.reduce((acc, s) => acc + (Number(s.hours) || 0), 0) * 10) / 10} س
                                   </span>
-                                  {conf.hasSecondShift && (
+                                  {isMultiBranchEmp && dayShifts.length > 1 && (
                                     <span style={{ fontSize: '9.5px', color: '#0369a1', fontWeight: 800 }}>
-                                      (ورديتان)
+                                      ({dayShifts.length} ورديات)
                                     </span>
                                   )}
                                 </div>

@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { getResolvedEmployeeRoster } from './RosterModule';
 import { getEmpDisplayName, arabicWeekday, getRealTodayStr } from '../../utils/formatters';
 import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
-import { getEmployeeDaySchedule, getDayScheduleFromMap } from '../../utils/rosterEngine';
+import { getEmployeeDaySchedule, getDayScheduleFromMap, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
+import { reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
+import { apiSaveSettingsSlice } from '../../utils/apiClient';
 
 function getDayShiftInfo(schedule, day, fallbackHours = 8) {
   // If no schedule was provided or empty, do NOT invent fake shifts
@@ -212,7 +213,8 @@ export default function RosterPreviewModal({
   };
 
   // ── حفظ وتثبيت تعديل شفت يوم معين في الروستر المعتمد ──
-  const handleSaveDayEdit = () => {
+  // ── حفظ وتثبيت تعديل شفت يوم معين في الروستر المعتمد مع إعادة احتساب ساعات العمل والبصمات ──
+  const handleSaveDayEdit = async () => {
     if (!editingDay) return;
     const isOff = editType === 'off';
     const shiftPayload = {
@@ -229,57 +231,81 @@ export default function RosterPreviewModal({
     const existingRosters = state?.rosters || [];
     const targetMonthKey = activeMonth || cycleRange.month || editingDay.dateStr.slice(0, 7);
 
-    const rIdx = existingRosters.findIndex(r =>
+    // تصفية أي جداول متضاربة لهذا الموظف ونفس الشهر
+    const matchingRoster = existingRosters.find(r =>
       (String(r.employeeId) === String(employee.id) || (employee.code && String(r.employeeCode) === String(employee.code))) &&
       (!r.month || r.month === targetMonthKey)
     );
+    const otherRosters = existingRosters.filter(r =>
+      !(
+        (String(r.employeeId) === String(employee.id) || (employee.code && String(r.employeeCode) === String(employee.code))) &&
+        (!r.month || r.month === targetMonthKey)
+      )
+    );
 
-    let updatedRosters;
-    if (rIdx >= 0) {
-      const oldRoster = existingRosters[rIdx];
-      const updatedSchedule = {
-        ...(oldRoster.schedule || {}),
-        [editingDay.dateStr]: shiftPayload
-      };
-      updatedRosters = existingRosters.map((r, i) =>
-        i === rIdx
-          ? {
-              ...r,
-              schedule: updatedSchedule,
-              status: 'approved',
-              adminApproved: true,
-              updatedAt: new Date().toISOString()
-            }
-          : r
-      );
-    } else {
-      const newRoster = {
-        id: `roster_${employee.id}_${targetMonthKey}_${Date.now()}`,
-        employeeId: employee.id,
-        employeeCode: employee.code || '',
-        employeeName: employee.name || '',
-        month: targetMonthKey,
-        status: 'approved',
-        adminApproved: true,
-        branchId: employee.branchId || null,
-        schedule: {
-          ...(singleSchedule || {}),
-          [editingDay.dateStr]: shiftPayload
-        },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      updatedRosters = [...existingRosters, newRoster];
-    }
-
-    const newState = {
-      ...state,
-      rosters: updatedRosters
+    const baseSchedule = matchingRoster?.schedule || singleSchedule || {};
+    const updatedSchedule = {
+      ...baseSchedule,
+      [editingDay.dateStr]: shiftPayload
     };
 
-    setState?.(newState);
-    saveState?.(newState);
-    showToast?.(`تم حفظ وتثبيت شفت يوم ${editingDay.dayName} (${editingDay.dateStr}) بنجاح`, 'success');
+    const updatedRosterObj = {
+      ...(matchingRoster || {}),
+      id: matchingRoster?.id || `roster_${employee.id}_${targetMonthKey}_${Date.now()}`,
+      employeeId: employee.id,
+      employeeCode: employee.code || '',
+      employeeName: employee.name || '',
+      month: targetMonthKey,
+      status: 'approved',
+      adminApproved: true,
+      branchId: employee.branchId || null,
+      schedule: updatedSchedule,
+      updatedAt: new Date().toISOString()
+    };
+
+    const updatedRosters = [updatedRosterObj, ...otherRosters];
+
+    const updatedEmployees = (state?.employees || []).map((emp) => {
+      if (String(emp.id) === String(employee.id) || (employee.code && String(emp.code) === String(employee.code))) {
+        return {
+          ...emp,
+          roster: { ...(emp.roster || {}), schedule: updatedSchedule }
+        };
+      }
+      return emp;
+    });
+
+    const interimState = {
+      ...state,
+      rosters: updatedRosters,
+      employees: updatedEmployees
+    };
+
+    // 🌟 إعادة احتساب ساعات العمل ومقارنة البصمات واحتساب الإضافي وإلغاء جزاءات التأخير تلقائياً
+    const { updatedState: reconciledState, summary: reconSummary } = reconcileEmployeeScheduleOrPunchChange({
+      employeeId: employee.id,
+      changedDates: [editingDay.dateStr],
+      state: interimState,
+      options: { reason: `تعديل شفت يوم ${editingDay.dayName} (${editingDay.dateStr})` }
+    });
+
+    setState?.(reconciledState);
+    try {
+      await apiSaveSettingsSlice('rosters', reconciledState.rosters);
+      await apiSaveSettingsSlice('employees', reconciledState.employees);
+      await apiSaveSettingsSlice('shifts', reconciledState.shifts);
+      await apiSaveSettingsSlice('lateIncidents', reconciledState.lateIncidents);
+      await apiSaveSettingsSlice('requests', reconciledState.requests);
+    } catch (sliceErr) {
+      console.warn('apiSaveSettingsSlice in RosterPreviewModal error:', sliceErr);
+    }
+    if (saveState) await saveState(reconciledState);
+
+    if (reconSummary?.waivedDeductionMinutes > 0) {
+      showToast?.(`✅ تم حفظ شفت يوم ${editingDay.dayName} وإسقاط ${reconSummary.waivedDeductionMinutes} دقيقة تأخير (${reconSummary.waivedAmount} ج.م) تلقائياً!`, 'success');
+    } else {
+      showToast?.(`✅ تم حفظ وتثبيت شفت يوم ${editingDay.dayName} (${editingDay.dateStr}) وتحديث ساعات العمل بنجاح`, 'success');
+    }
     setEditingDay(null);
   };
 

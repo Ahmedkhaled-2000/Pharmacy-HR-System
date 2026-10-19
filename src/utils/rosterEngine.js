@@ -86,13 +86,72 @@ export function getDayScheduleFromMap(schedule, jsDayIndex, dateStr = null) {
   return null;
 }
 
+export function getDayShiftsList(item) {
+  if (!item || typeof item !== 'object') return [];
+  if (item.type === 'off' || item.isOff) return [];
+
+  if (Array.isArray(item.shifts) && item.shifts.length > 0) {
+    return item.shifts
+      .filter(s => s && typeof s === 'object' && !s.isOff && s.type !== 'off' && s.start && s.end)
+      .map((s, idx) => ({
+        id: s.id || `shift_${idx + 1}`,
+        shiftIndex: idx + 1,
+        branchId: String(s.branchId || item.branchId || '').trim(),
+        branchName: s.branchName || item.branchName || '',
+        start: s.start || '08:00',
+        end: s.end || '16:00',
+        hours: s.hours !== undefined ? Number(s.hours) : 8,
+        type: s.type || 'shift',
+        isOff: false
+      }));
+  }
+
+  const shifts = [];
+  if (item.start && item.end && !item.isOff && item.type !== 'off') {
+    shifts.push({
+      id: 'shift_1',
+      shiftIndex: 1,
+      branchId: String(item.branchId || '').trim(),
+      branchName: item.branchName || '',
+      start: item.start,
+      end: item.end,
+      hours: item.hours !== undefined ? Number(item.hours) : 8,
+      type: item.type || 'shift',
+      isOff: false
+    });
+  }
+
+  if (item.hasSecondShift && item.secondShift && item.secondShift.start && item.secondShift.end && !item.secondShift.isOff && item.secondShift.type !== 'off') {
+    shifts.push({
+      id: 'shift_2',
+      shiftIndex: 2,
+      branchId: String(item.secondShift.branchId || '').trim(),
+      branchName: item.secondShift.branchName || '',
+      start: item.secondShift.start,
+      end: item.secondShift.end,
+      hours: item.secondShift.hours !== undefined ? Number(item.secondShift.hours) : 6,
+      type: item.secondShift.type || 'shift',
+      isOff: false
+    });
+  }
+
+  return shifts;
+}
+
 function normalizeScheduleItem(item, jsDayIndex) {
   if (!item) {
     return null;
   }
   const isOff = item.type === 'off' || item.isOff === true;
-  const hasSecondShift = Boolean(item.hasSecondShift && item.secondShift);
-  const secondShift = hasSecondShift ? {
+  const shifts = isOff ? [] : getDayShiftsList(item);
+  const hasSecondShift = Boolean(shifts.length > 1 || (item.hasSecondShift && item.secondShift));
+  const secondShift = shifts.length > 1 ? {
+    ...shifts[1],
+    type: shifts[1].type || 'shift',
+    isOff: false,
+    branchId: shifts[1].branchId || null,
+    branchName: shifts[1].branchName || null
+  } : (hasSecondShift && item.secondShift ? {
     ...item.secondShift,
     type: item.secondShift.type || 'shift',
     isOff: item.secondShift.isOff || false,
@@ -101,19 +160,22 @@ function normalizeScheduleItem(item, jsDayIndex) {
     hours: item.secondShift.hours !== undefined ? item.secondShift.hours : (item.secondShift.start && item.secondShift.end ? 8 : 0),
     branchId: item.secondShift.branchId || null,
     branchName: item.secondShift.branchName || null
-  } : null;
+  } : null);
+
+  const primaryShift = shifts[0] || null;
 
   return {
     ...item,
     type: isOff ? 'off' : (item.type || 'shift'),
     isOff,
-    start: isOff ? '' : (item.start || ''),
-    end: isOff ? '' : (item.end || ''),
+    start: isOff ? '' : (primaryShift ? primaryShift.start : (item.start || '')),
+    end: isOff ? '' : (primaryShift ? primaryShift.end : (item.end || '')),
     hours: item.hours !== undefined ? item.hours : (isOff ? 0 : (item.start && item.end ? 8 : 0)),
-    branchId: item.branchId || null,
-    branchName: item.branchName || null,
+    branchId: primaryShift ? primaryShift.branchId : (item.branchId || null),
+    branchName: primaryShift ? primaryShift.branchName : (item.branchName || null),
     hasSecondShift,
-    secondShift
+    secondShift,
+    shifts
   };
 }
 
@@ -122,115 +184,20 @@ function normalizeScheduleItem(item, jsDayIndex) {
  */
 export function findEmployeeRoster(empId, monthOrDate, state, targetBranchId = null) {
   if (!empId || !state) return null;
-  const empIdStr = String(empId);
-  const emp = (state.employees || []).find(e => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
-  if (emp && (emp.noMonthlySchedule || emp.isVariableHours || emp.variableHours || emp.hasNoRoster)) {
-    return null;
-  }
-  const empCodeStr = emp?.code ? String(emp.code) : '';
-  const dateStr = monthOrDate && monthOrDate.length >= 10 ? String(monthOrDate).slice(0, 10) : null;
-  const monthStr = monthOrDate ? (monthOrDate.length === 7 ? monthOrDate : monthOrDate.slice(0, 7)) : null;
+  const safeStr = (typeof monthOrDate === 'string' || typeof monthOrDate === 'number') ? String(monthOrDate).trim() : '';
+  const dateStr = safeStr.length >= 10 ? safeStr.slice(0, 10) : null;
+  let cycleMonth = safeStr.length >= 7 ? safeStr.slice(0, 7) : null;
 
-  let cycleMonth = monthStr;
   if (dateStr) {
     try {
       cycleMonth = getActivePayrollMonth(state.orgSettings || {}, new Date(dateStr + 'T00:00:00'));
     } catch {
-      cycleMonth = monthStr;
+      cycleMonth = safeStr.slice(0, 7);
     }
   }
 
-  const matchesEmployee = (item) => {
-    if (!item) return false;
-    const itemEmpId = String(item.employeeId || '');
-    const itemEmpCode = String(item.employeeCode || '');
-    return (
-      (empIdStr && itemEmpId === empIdStr) ||
-      (empCodeStr && itemEmpCode === empCodeStr) ||
-      (empCodeStr && itemEmpId === empCodeStr) ||
-      (empIdStr && itemEmpCode === empIdStr)
-    );
-  };
-
-  const matchesBranch = (item) => {
-    if (!targetBranchId) return true;
-    const bStr = String(item.branchId || '').trim();
-    if (!bStr || bStr === 'all' || bStr === 'floating' || item.isFloatingStaff) return true;
-    if (bStr === String(targetBranchId).trim()) return true;
-    // التحقق من تعيين الفرع في تاريخ محدد داخل جدول الموظف متعدد الفروع
-    if (dateStr && item.schedule && item.schedule[dateStr]) {
-      const dayBId = String(item.schedule[dateStr].branchId || '').trim();
-      if (dayBId && dayBId === String(targetBranchId).trim()) return true;
-    }
-    return false;
-  };
-
-  const matchesDateOrMonth = (item) => {
-    if (dateStr && item.fromDate && item.toDate) {
-      if (dateStr >= item.fromDate && dateStr <= item.toDate) return true;
-    }
-    if (item.month) {
-      if (cycleMonth && item.month === cycleMonth) return true;
-      if (monthStr && item.month === monthStr) return true;
-    }
-    if (!item.month && !item.fromDate) return true;
-    return false;
-  };
-
-  // 1. البحث في state.rosters
-  const approvedRosters = (state.rosters || []).filter(r =>
-    matchesEmployee(r) &&
-    matchesBranch(r) &&
-    (r.status === 'approved' || r.adminApproved || !r.status) &&
-    matchesDateOrMonth(r)
-  );
-
-  if (approvedRosters.length > 0) {
-    // فرز الجداول بالأحدث أولاً لضمان سيادة آخر جدول معتمد
-    approvedRosters.sort((a, b) => {
-      const tA = new Date(a.updatedAt || a.approvedAt || a.createdAt || 0).getTime() || 0;
-      const tB = new Date(b.updatedAt || b.approvedAt || b.createdAt || 0).getTime() || 0;
-      return tB - tA;
-    });
-    const exactDateMatch = dateStr ? approvedRosters.find(r => r.fromDate && r.toDate && dateStr >= r.fromDate && dateStr <= r.toDate) : null;
-    if (exactDateMatch) return exactDateMatch;
-    return approvedRosters[0];
-  }
-
-  // 2. البحث في طلبات تعديل الجداول والشيفتات المعتمدة
-  const approvedReqs = (state.requests || []).filter(req =>
-    matchesEmployee(req) &&
-    matchesBranch(req) &&
-    (req.type === 'roster_update' || req.type === 'roster_edit' || req.type === 'roster_edit_request' || req.type === 'shift_adjustment') &&
-    (req.status === 'approved' || req.adminApproved) &&
-    (req.schedule || req.newSchedule) &&
-    matchesDateOrMonth(req)
-  );
-
-  if (approvedReqs.length > 0) {
-    const exactDateMatch = dateStr ? approvedReqs.find(r => r.fromDate && r.toDate && dateStr >= r.fromDate && dateStr <= r.toDate) : null;
-    if (exactDateMatch) return { ...exactDateMatch, schedule: exactDateMatch.schedule || exactDateMatch.newSchedule };
-    return { ...approvedReqs[0], schedule: approvedReqs[0].schedule || approvedReqs[0].newSchedule };
-  }
-
-  // 3. الجدول الافتراضي المرفق ببيانات الموظف إن وجد
-  if (emp?.roster && emp.roster.schedule) {
-    return emp.roster;
-  }
-
-  // 4. البحث عن أي جدول معتمد سابق للموظف لنفس الفرع (مثلاً من شهر سابق كسبتمبر) لترحيله وتطبيقه
-  const anyPriorApprovedRoster = (state.rosters || []).find(r =>
-    matchesEmployee(r) &&
-    matchesBranch(r) &&
-    (r.status === 'approved' || r.adminApproved || !r.status) &&
-    r.schedule && Object.keys(r.schedule).length > 0
-  );
-  if (anyPriorApprovedRoster) {
-    return anyPriorApprovedRoster;
-  }
-
-  // 5. استدعاء getResolvedEmployeeRoster للحصول على الجدول المعتمد أو المستنتج من تفاصيل فروع الموظف وملفه
-  const resolved = getResolvedEmployeeRoster(emp, targetBranchId, cycleMonth, state);
+  // 🌟 توحيد المصدر: استخدام getResolvedEmployeeRoster كمرجع أعلى وأوحد في كافة الشاشات
+  const resolved = getResolvedEmployeeRoster(empId, targetBranchId, cycleMonth || dateStr, state);
   if (resolved && resolved.schedule) {
     return resolved;
   }
@@ -281,23 +248,22 @@ export function getEmployeeBaseDaySchedule(empId, dateStr, state, targetBranchId
   const sched = getDayScheduleFromMap(roster.schedule, jsDay, dateStr) || getDayScheduleFromMap(roster.schedule, jsDay, null);
   if (!sched) return null;
 
-  // إذا تم طلب جدول لفرع محدد وكان في هذا اليوم وردية ثانية لهذا الفرع
-  if (targetBranchId && sched.hasSecondShift && sched.secondShift) {
-    const secBId = String(sched.secondShift.branchId || '').trim();
-    const primBId = String(sched.branchId || '').trim();
+  // إذا تم طلب جدول لفرع محدد وكان في هذا اليوم ورديات متعددة عبر الفروع
+  if (targetBranchId) {
+    const allShifts = getDayShiftsList(sched);
     const tgtBId = String(targetBranchId).trim();
-    if (secBId === tgtBId && primBId !== tgtBId) {
+    const branchShifts = allShifts.filter(s => String(s.branchId || '').trim() === tgtBId);
+    if (branchShifts.length > 0) {
+      const prim = branchShifts[0];
+      const otherShifts = allShifts.filter(s => !branchShifts.includes(s));
       return {
-        ...sched.secondShift,
-        branchId: sched.secondShift.branchId || targetBranchId,
-        branchName: sched.secondShift.branchName || null,
-        isSecondShiftOfSplit: true,
-        primaryShift: {
-          branchId: primBId,
-          start: sched.start,
-          end: sched.end,
-          hours: sched.hours
-        }
+        ...sched,
+        ...prim,
+        branchId: targetBranchId,
+        branchName: prim.branchName || sched.branchName || null,
+        isBranchSpecificShift: true,
+        shifts: branchShifts,
+        otherBranchShifts: otherShifts
       };
     }
   }
@@ -1034,31 +1000,81 @@ export function projectRosterToMonth(rawSchedule, cycleRangeOrMonth, options = {
 export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 = null) {
   if (!employee) return null;
 
-  // 1. Flexible Argument Normalization (handles both (emp, bId, state, month) and (emp, bId, month, state))
+  // 1. Flexible Argument Normalization (handles any parameter order)
   let state = null;
   let selectedMonth = null;
+  let explicitBranchId = targetBranchId;
 
-  if (arg3 && typeof arg3 === 'object' && (arg3.rosters || arg3.requests || arg3.employees || arg3.branches || arg3.orgSettings !== undefined)) {
+  const isState = (val) => val && typeof val === 'object' && (val.rosters || val.requests || val.employees || val.branches || val.orgSettings !== undefined);
+  const isMonth = (val) => typeof val === 'string' && /^\d{4}-\d{1,2}$/.test(val.trim());
+
+  if (isState(arg3)) {
     state = arg3;
-    selectedMonth = typeof arg4 === 'string' ? arg4 : null;
-  } else if (arg4 && typeof arg4 === 'object' && (arg4.rosters || arg4.requests || arg4.employees || arg4.branches || arg4.orgSettings !== undefined)) {
+    if (typeof arg4 === 'string') selectedMonth = arg4;
+  } else if (isState(arg4)) {
     state = arg4;
-    selectedMonth = typeof arg3 === 'string' ? arg3 : null;
-  } else if (typeof arg3 === 'object' && arg3 !== null) {
+    if (typeof arg3 === 'string') selectedMonth = arg3;
+  } else if (isState(explicitBranchId)) {
+    state = explicitBranchId;
+    explicitBranchId = null;
+    if (typeof arg3 === 'string') selectedMonth = arg3;
+  } else if (arg3 && typeof arg3 === 'object') {
     state = arg3;
-    selectedMonth = typeof arg4 === 'string' ? arg4 : null;
-  } else {
-    selectedMonth = typeof arg3 === 'string' ? arg3 : null;
-    state = typeof arg4 === 'object' ? arg4 : null;
+    if (typeof arg4 === 'string') selectedMonth = arg4;
+  }
+
+  // If explicitBranchId is a month string (e.g., '2026-10'):
+  if (isMonth(explicitBranchId)) {
+    if (!selectedMonth) selectedMonth = explicitBranchId.trim();
+    explicitBranchId = null;
+  }
+  if (!selectedMonth && isMonth(arg3)) {
+    selectedMonth = arg3.trim();
+  }
+  if (!selectedMonth && isMonth(arg4)) {
+    selectedMonth = arg4.trim();
   }
 
   if (!state) return null;
 
+  // 2. Resolve Employee Record and Identifiers
+  let empObj = null;
+  let empIdStr = '';
+  let empCodeStr = '';
+
+  if (typeof employee === 'object' && employee !== null) {
+    empObj = employee;
+    empIdStr = String(employee.id || employee.employeeId || employee.empId || '').trim();
+    empCodeStr = String(employee.code || employee.employeeCode || employee.empCode || '').trim();
+  } else if (typeof employee === 'string' || typeof employee === 'number') {
+    empIdStr = String(employee).trim();
+  }
+
+  // Look up in state.employees if empObj is missing or has missing branches
+  if (!empObj || !empObj.branchesDetails) {
+    const found = (state.employees || []).find(e => e && (
+      (empIdStr && String(e.id).trim() === empIdStr) ||
+      (empIdStr && e.code && String(e.code).trim() === empIdStr) ||
+      (empCodeStr && String(e.code).trim() === empCodeStr) ||
+      (empCodeStr && String(e.id).trim() === empCodeStr)
+    ));
+    if (found) {
+      empObj = { ...found, ...(typeof employee === 'object' ? employee : {}) };
+      empIdStr = String(found.id).trim();
+      if (found.code) empCodeStr = String(found.code).trim();
+    }
+  }
+
+  const effectiveEmp = empObj || (typeof employee === 'object' ? employee : { id: empIdStr, code: empCodeStr });
+
+  // إذا كان الموظف بدون جدول شهري (دوام حر / مرن بالساعات)
+  if (effectiveEmp && (effectiveEmp.noMonthlySchedule || effectiveEmp.isVariableHours || effectiveEmp.variableHours || effectiveEmp.hasNoRoster || effectiveEmp.scheduleType === 'flexible')) {
+    return null;
+  }
+
   const rosters = state.rosters || [];
   const requests = state.requests || [];
-  const empIdStr = String(employee.id || '').trim();
-  const empCodeStr = String(employee.code || '').trim();
-  const targetBIdStr = targetBranchId ? String(targetBranchId).trim() : null;
+  const targetBIdStr = explicitBranchId ? String(explicitBranchId).trim() : null;
 
   // Find target branch object in state.branches if available
   const targetBObj = targetBIdStr ? (state.branches || []).find(b => 
@@ -1069,7 +1085,7 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
     )
   ) : null;
 
-  const isMultiBranch = Array.isArray(employee.branchesDetails) && employee.branchesDetails.length > 1;
+  const isMultiBranch = Array.isArray(effectiveEmp?.branchesDetails) && effectiveEmp.branchesDetails.length > 1;
 
   // Month Normalizer (e.g. '2026-9' -> '2026-09')
   const normalizeMonth = (m) => {
@@ -1235,6 +1251,11 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
       }
     }
 
+    // إذا لم يحدد فرع مستهدف وطلبنا جدولاً شاملاً، نمنح الأولوية للجدول الموحد الرئيسي (+250 نقطة)
+    if (!targetBIdStr && (item.isUnifiedMaster || item.id?.includes('unified') || (item.isMultiBranch && !String(item.id || '').includes('_b_')))) {
+      score += 250;
+    }
+
     return score;
   };
 
@@ -1381,9 +1402,9 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
     };
 
     return {
-      id: `default_roster_${employee.id}_${selectedMonth || 'active'}`,
-      employeeId: employee.id,
-      branchId: targetBranchId || employee.branchId || null,
+      id: `default_roster_${effectiveEmp?.id || empIdStr}_${selectedMonth || 'active'}`,
+      employeeId: effectiveEmp?.id || empIdStr,
+      branchId: targetBIdStr || effectiveEmp?.branchId || null,
       month: selectedMonth || null,
       schedule: defaultTemplate,
       status: 'approved',
@@ -1397,17 +1418,17 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
     if (b.score !== a.score) {
       return b.score - a.score;
     }
-    const timeA = new Date(a.approvedAt || 0).getTime() || 0;
-    const timeB = new Date(b.approvedAt || 0).getTime() || 0;
+    const timeA = new Date(a.approvedAt || a.updatedAt || a.createdAt || 0).getTime() || 0;
+    const timeB = new Date(b.approvedAt || b.updatedAt || b.createdAt || 0).getTime() || 0;
     return timeB - timeA;
   });
 
   const winner = candidates[0];
-  let resolvedSchedule = normalizeSchedule(winner.schedule);
+  let resolvedSchedule = normalizeSchedule(winner.schedule, normSelectedMonth);
 
   // 🌟 حماية وتخصيص الموظف متعدد الفروع:
   // إذا تم طلب جدول لفرع محدد وكان الجدول يحتوي على ورديات مخصصة لفرع آخر،
-  // يتم تمييز أيام الفرع الآخر كراحة في هذا الفرع مع إيضاح أين يعمل الموظف لمنع أي تضارب
+  // يتم استخراج الوردية الخاصة بهذا الفرع فقط، مع تمييز الفترات الأخرى لمنع أي تضارب
   if (isMultiBranch && targetBIdStr && resolvedSchedule && typeof resolvedSchedule === 'object') {
     const customizedSchedule = {};
     Object.entries(resolvedSchedule).forEach(([key, dayItem]) => {
@@ -1415,30 +1436,53 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
         customizedSchedule[key] = dayItem;
         return;
       }
+      if (dayItem.isPreHire) {
+        customizedSchedule[key] = dayItem;
+        return;
+      }
 
-      const itemDayBId = dayItem.branchId ? extractBranchStr(dayItem.branchId) : null;
-      // إذا كان اليوم مخصصاً صراحة لفرع آخر غير الفرع المستهدف:
-      const isOtherBranch = Boolean(
-        itemDayBId &&
-        itemDayBId.toLowerCase() !== targetBIdStr.toLowerCase() &&
-        (!targetBObj || itemDayBId !== String(targetBObj.id))
+      const allShifts = getDayShiftsList(dayItem);
+      if (allShifts.length === 0) {
+        customizedSchedule[key] = dayItem;
+        return;
+      }
+
+      // هل يوجد أي وردية لهذا الفرع المستهدف في هذا اليوم؟
+      const branchShifts = allShifts.filter(s => 
+        !s.branchId || 
+        s.branchId === targetBIdStr || 
+        (targetBObj && (s.branchId === String(targetBObj.id) || s.branchId === String(targetBObj.branchCode)))
       );
+      const otherShifts = allShifts.filter(s => !branchShifts.includes(s));
 
-      if (isOtherBranch) {
-        const otherBObj = (state?.branches || []).find(b => String(b.id) === String(itemDayBId));
-        const otherBName = otherBObj ? otherBObj.name : (dayItem.branchName || `فرع ${itemDayBId}`);
+      if (branchShifts.length > 0) {
+        const prim = branchShifts[0];
+        const sec = branchShifts[1] || null;
+        customizedSchedule[key] = {
+          ...dayItem,
+          branchId: targetBIdStr,
+          branchName: targetBObj ? targetBObj.name : (prim.branchName || dayItem.branchName || ''),
+          type: 'shift',
+          isOff: false,
+          start: prim.start,
+          end: prim.end,
+          hours: prim.hours,
+          shifts: branchShifts,
+          hasSecondShift: Boolean(sec),
+          secondShift: sec ? { ...sec } : null,
+          otherBranchShifts: otherShifts
+        };
+      } else {
+        const otherNames = otherShifts.map(s => s.branchName || `فرع ${s.branchId}`).filter(Boolean).join(' و ');
         customizedSchedule[key] = {
           ...dayItem,
           isOtherBranchShift: true,
-          otherBranchId: itemDayBId,
-          otherBranchName: otherBName,
+          otherBranchShifts: otherShifts,
           type: 'off',
           isOff: true,
           hours: 0,
-          label: `مجدول بفرع ${otherBName} (${dayItem.start || '—'} إلى ${dayItem.end || '—'})`
+          label: `مجدول بـ ${otherNames || 'فرع آخر'} (${otherShifts.map(s => `${s.start || '—'} إلى ${s.end || '—'}`).join('، ')})`
         };
-      } else {
-        customizedSchedule[key] = dayItem;
       }
     });
     resolvedSchedule = customizedSchedule;
@@ -1453,7 +1497,7 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
 
 /**
  * 🌟 محرك تقسيم الجدول الموحد متعدد الفروع إلى جداول فرعية متوافقة لكل فرع على حدة
- * يضمن حفظ جدول مستقل لكل فرع في state.rosters مع ربطهما بنفس الجدول الموحد
+ * يدعم أي عدد من الفروع (فرعين، 3 فروع، 4 فروع أو أكثر) وورديات متعددة في اليوم الواحد
  */
 export function splitUnifiedRosterForBranches(unifiedSchedule, employee, allBranches = [], options = {}) {
   if (!unifiedSchedule || typeof unifiedSchedule !== 'object' || !employee) return [];
@@ -1472,8 +1516,8 @@ export function splitUnifiedRosterForBranches(unifiedSchedule, employee, allBran
   }
 
   return branchesDetails.map((bd) => {
-    const bId = String(bd.branchId);
-    const bObj = allBranches.find(b => String(b.id) === bId);
+    const bId = String(bd.branchId).trim();
+    const bObj = allBranches.find(b => String(b.id) === bId || (b.branchCode && String(b.branchCode) === bId));
     const bName = bObj ? bObj.name : (bd.branchName || `فرع ${bId}`);
     const branchSchedule = {};
 
@@ -1482,74 +1526,89 @@ export function splitUnifiedRosterForBranches(unifiedSchedule, employee, allBran
         branchSchedule[key] = dayItem;
         return;
       }
-
-      const itemBId = dayItem.branchId ? String(dayItem.branchId).trim() : null;
-      const secBId = dayItem.hasSecondShift && dayItem.secondShift?.branchId 
-        ? String(dayItem.secondShift.branchId).trim() 
-        : null;
-
-      const isFirstBranchMatch = !itemBId || itemBId === bId || (bObj && (itemBId === String(bObj.id) || itemBId === String(bObj.branchCode)));
-      const isSecondBranchMatch = secBId && (secBId === bId || (bObj && (secBId === String(bObj.id) || secBId === String(bObj.branchCode))));
-
-      if (isFirstBranchMatch && isSecondBranchMatch) {
-        // كلا الورديتين مخصصتين لنفس هذا الفرع (دوام مقسم صباحي ومسائي بنفس الصيدلية)
-        branchSchedule[key] = {
-          ...dayItem,
-          branchId: bId,
-          branchName: bName
-        };
-      } else if (isFirstBranchMatch) {
-        // الوردية الأولى تخص هذا الفرع
-        const otherBObj = allBranches.find(b => String(b.id) === secBId);
-        const otherBName = otherBObj ? otherBObj.name : (dayItem.secondShift?.branchName || `فرع ${secBId}`);
+      if (dayItem.isPreHire) {
+        branchSchedule[key] = dayItem;
+        return;
+      }
+      if (dayItem.type === 'off' || dayItem.isOff) {
         branchSchedule[key] = {
           ...dayItem,
           branchId: bId,
           branchName: bName,
-          hasSecondShift: false,
-          otherBranchSecondShift: dayItem.hasSecondShift ? {
-            ...dayItem.secondShift,
-            otherBranchName: otherBName
-          } : null
-        };
-      } else if (isSecondBranchMatch) {
-        // الوردية الثانية تخص هذا الفرع (صباح بفرع ومساء بهذا الفرع)
-        const sec = dayItem.secondShift;
-        const otherBObj = allBranches.find(b => String(b.id) === itemBId);
-        const otherBName = otherBObj ? otherBObj.name : (dayItem.branchName || `فرع ${itemBId}`);
-        branchSchedule[key] = {
-          type: sec.type || 'shift',
-          isOff: sec.isOff || false,
-          start: sec.start || '16:00',
-          end: sec.end || '00:00',
-          hours: sec.hours !== undefined ? sec.hours : 8,
-          branchId: bId,
-          branchName: bName,
-          hasSecondShift: false,
-          isSecondShiftOfSplit: true,
-          otherBranchFirstShift: {
-            branchId: itemBId,
-            branchName: otherBName,
-            start: dayItem.start,
-            end: dayItem.end,
-            hours: dayItem.hours
-          }
-        };
-      } else {
-        // مخصص لفرع آخر: يكون في هذا الفرع راحة (Off) لتجنب التضارب وتحديد موقع عمل الموظف
-        const otherBObj = allBranches.find(b => String(b.id) === itemBId);
-        const otherBName = otherBObj ? otherBObj.name : (dayItem.branchName || `فرع ${itemBId}`);
-        branchSchedule[key] = {
-          ...dayItem,
-          isOtherBranchShift: true,
-          otherBranchId: itemBId,
-          otherBranchName: otherBName,
           type: 'off',
           isOff: true,
           hours: 0,
-          start: '',
-          end: '',
-          label: `مجدول بفرع ${otherBName} (${dayItem.start || '—'} إلى ${dayItem.end || '—'})`
+          shifts: []
+        };
+        return;
+      }
+
+      // استخراج كافة الورديات المجدولة في هذا اليوم عبر كافة الفروع
+      const allShifts = getDayShiftsList(dayItem);
+      if (allShifts.length === 0) {
+        branchSchedule[key] = {
+          ...dayItem,
+          branchId: bId,
+          branchName: bName,
+          type: 'off',
+          isOff: true,
+          hours: 0,
+          shifts: []
+        };
+        return;
+      }
+
+      // الورديات التابعة لهذا الفرع تحديداً
+      const branchShifts = allShifts.filter((s) => {
+        const sBId = String(s.branchId || '').trim();
+        return !sBId || sBId === bId || (bObj && (sBId === String(bObj.id) || sBId === String(bObj.branchCode)));
+      });
+
+      // الورديات التابعة لفروع أخرى في نفس اليوم
+      const otherShifts = allShifts.filter((s) => !branchShifts.includes(s));
+
+      if (branchShifts.length > 0) {
+        // الموظف لديه وردية أو أكثر في هذا الفرع اليوم
+        const prim = branchShifts[0];
+        const sec = branchShifts[1] || null;
+        let branchHoursSum = 0;
+        branchShifts.forEach((s) => {
+          branchHoursSum += s.hours !== undefined ? Number(s.hours) : 8;
+        });
+        branchHoursSum = Math.round(branchHoursSum * 10) / 10;
+
+        branchSchedule[key] = {
+          ...dayItem,
+          branchId: bId,
+          branchName: bName,
+          type: 'shift',
+          isOff: false,
+          start: prim.start,
+          end: prim.end,
+          hours: prim.hours,
+          totalBranchHours: branchHoursSum,
+          shifts: branchShifts,
+          hasSecondShift: Boolean(sec),
+          secondShift: sec ? { ...sec } : null,
+          otherBranchShifts: otherShifts,
+          isMultiShiftDay: allShifts.length > 1
+        };
+      } else {
+        // الموظف مجدول في فرع آخر في هذا اليوم -> راحة في هذا الفرع مع إيضاح موقعه
+        const otherNames = otherShifts.map((s) => s.branchName || `فرع ${s.branchId}`).filter(Boolean).join(' و ');
+        branchSchedule[key] = {
+          ...dayItem,
+          branchId: bId,
+          branchName: bName,
+          isOtherBranchShift: true,
+          otherBranchShifts: otherShifts,
+          type: 'off',
+          isOff: true,
+          hours: 0,
+          shifts: [],
+          hasSecondShift: false,
+          secondShift: null,
+          label: `مجدول بـ ${otherNames || 'فرع آخر'} (${otherShifts.map((s) => `${s.start || '—'} إلى ${s.end || '—'}`).join('، ')})`
         };
       }
     });
@@ -1560,6 +1619,21 @@ export function splitUnifiedRosterForBranches(unifiedSchedule, employee, allBran
       schedule: branchSchedule
     };
   });
+}
+
+/**
+ * دالة ذكية لفحص التداخل الزمني بين أي ورديات متعددة في نفس اليوم
+ */
+export function checkAnyShiftsOverlap(shifts = []) {
+  if (!Array.isArray(shifts) || shifts.length < 2) return false;
+  for (let i = 0; i < shifts.length; i++) {
+    for (let j = i + 1; j < shifts.length; j++) {
+      if (checkShiftsOverlap(shifts[i]?.start, shifts[i]?.end, shifts[j]?.start, shifts[j]?.end)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**

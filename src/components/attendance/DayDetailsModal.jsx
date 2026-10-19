@@ -37,12 +37,24 @@ export default function DayDetailsModal({ details, onClose }) {
   const resolvedDayName = dayName || (dateStr ? arabicWeekday(dateStr) : '');
   const rateVal = parseFloat(hourlyRate) || 0;
 
-  // Calculations for financial breakdown
-  const earnedBase = parseFloat(shiftEarned) || (parseFloat(regH || totalH || 0) * rateVal);
-  const otHoursVal = parseFloat(effectiveOtHours || otH || 0);
-  const earnedOt = effectiveOtStatus === 'approved' ? (otHoursVal * rateVal) : 0;
+  // 🛡️ كشف وتحديد ما إذا كان اليوم يوم راحة مجدول
+  const isRestDayShift = Boolean(
+    punch?.isScheduledOffDay ||
+    punch?.isWorkOnOffDay ||
+    punch?.isOff ||
+    details?.isOffDay ||
+    details?.isScheduledOffDay ||
+    (regH !== undefined && parseFloat(regH) === 0 && parseFloat(otH || effectiveOtHours || 0) > 0)
+  );
+
+  // الساعات الأساسية والإضافية دون أي تكرار أو ازدواج مالي
+  const otHoursVal = parseFloat(effectiveOtHours !== undefined && effectiveOtHours !== null ? effectiveOtHours : (otH || 0));
+  const regHoursVal = isRestDayShift ? 0 : ((regH !== undefined && regH !== null) ? parseFloat(regH) : Math.max(0, parseFloat(totalH || 0) - otHoursVal));
+
+  const earnedBase = Math.round(regHoursVal * rateVal * 100) / 100;
+  const earnedOt = effectiveOtStatus === 'approved' ? Math.round(otHoursVal * rateVal * 100) / 100 : 0;
   const penaltyAmount = linkedPenaltyReq ? parseFloat(linkedPenaltyReq.amount || linkedPenaltyReq.details?.penaltyAmount || 0) : 0;
-  const netEarnedDay = Math.max(0, earnedBase + earnedOt - penaltyAmount);
+  const netEarnedDay = Math.max(0, Math.round((earnedBase + earnedOt - penaltyAmount) * 100) / 100);
 
   const modalJSX = (
     <div
@@ -144,6 +156,24 @@ export default function DayDetailsModal({ details, onClose }) {
               <span>ساعات العمل والحضور الفعلي</span>
             </div>
             <div style={{ padding: '8px 14px' }}>
+              {isRestDayShift && (
+                <div style={{
+                  background: '#fef2f2',
+                  border: '1px solid #fca5a5',
+                  color: '#991b1b',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  margin: '6px 0 10px',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  <span>⚡</span>
+                  <span>عمل في يوم راحة مجدول — يُحتسب أجر الساعات الإضافية المعتمدة فقط دون تكرار الأساسي</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px dashed #e2e8f0', fontSize: '13px' }}>
                 <span style={{ color: '#64748b' }}>وقت الحضور المسجل:</span>
                 <span style={{ fontWeight: 700, color: '#15803d' }}>🟢 {punch?.timeIn || punch?.checkIn || '—'}</span>
@@ -214,8 +244,8 @@ export default function DayDetailsModal({ details, onClose }) {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px dashed #e2e8f0', fontSize: '13px' }}>
                 <span style={{ color: '#64748b' }}>مستحق ساعات العمل الأساسية:</span>
-                <span style={{ fontWeight: 700, color: isRejectedPhoto ? '#dc2626' : '#16a34a' }}>
-                  {isRejectedPhoto ? '0.00 ج.م (صورة مرفوضة)' : `${earnedBase.toFixed(2)} ج.م`}
+                <span style={{ fontWeight: 700, color: (isRejectedPhoto || isRestDayShift) ? '#dc2626' : '#16a34a' }}>
+                  {isRejectedPhoto ? '0.00 ج.م (صورة مرفوضة)' : isRestDayShift ? '0.00 ج.م (يوم راحة مجدول)' : `${earnedBase.toFixed(2)} ج.م`}
                 </span>
               </div>
               {otHoursVal > 0 && (

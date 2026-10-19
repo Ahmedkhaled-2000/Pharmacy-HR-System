@@ -12,12 +12,14 @@ import {
   getEffectiveShiftHours,
   getShiftHoursMetrics,
   isApprovedPermissionForDate,
-  recalculateEmployeeCycleLateness
+  recalculateEmployeeCycleLateness,
+  reconcileEmployeeScheduleOrPunchChange
 } from '../../utils/latePenaltyEngine';
 import {
   getResolvedEmployeeRoster,
   getEmployeeDaySchedule,
   normalizeSchedule,
+  projectRosterToMonth,
   DEFAULT_WEEKLY_SCHEDULE
 } from '../../utils/rosterEngine';
 import {
@@ -172,8 +174,8 @@ export default function EmployeeComprehensiveDossierModal({
 
   // 2. الجدول الشهري المعتمد (Rosters)
   const resolvedRoster = useMemo(() => {
-    return getResolvedEmployeeRoster(emp.id, selectedMonth, state);
-  }, [emp.id, selectedMonth, state?.rosters]);
+    return getResolvedEmployeeRoster(emp, emp?.branchId || null, selectedMonth, state);
+  }, [emp, selectedMonth, state?.rosters, state?.requests]);
 
   const scheduleMap = resolvedRoster?.schedule || DEFAULT_WEEKLY_SCHEDULE;
 
@@ -538,22 +540,30 @@ export default function EmployeeComprehensiveDossierModal({
 
   // ── 5. دوال الإجراءات والعمليات الهندسية ──
 
-  // حفظ وتحديث الحالة مع المزامنة
-  const commitStateChange = async (nextState, successMsg, sliceKey = null, sliceValue = null) => {
+  // حفظ وتحديث الحالة مع المزامنة الذرية لكافة الجداول والشرائح
+  const commitStateChange = async (nextState, successMsg, sliceKeyOrPairs = null, sliceValue = null) => {
     if (typeof setState === 'function') {
       setState(nextState);
     }
-    if (sliceKey && sliceValue) {
+    if (Array.isArray(sliceKeyOrPairs)) {
+      for (const [k, v] of sliceKeyOrPairs) {
+        try {
+          await apiSaveSettingsSlice(k, v);
+        } catch (err) {
+          console.warn(`[Dossier API Slice Warn] ${k}:`, err);
+        }
+      }
+    } else if (sliceKeyOrPairs && sliceValue) {
       try {
-        await apiSaveSettingsSlice(sliceKey, sliceValue);
+        await apiSaveSettingsSlice(sliceKeyOrPairs, sliceValue);
       } catch (err) {
-        console.warn(`[Dossier API Slice Warn] ${sliceKey}:`, err);
+        console.warn(`[Dossier API Slice Warn] ${sliceKeyOrPairs}:`, err);
       }
     }
     if (typeof saveState === 'function') {
       await saveState(nextState);
     }
-    showToast?.(successMsg);
+    if (successMsg) showToast?.(successMsg);
   };
 
   // ── أ. دوال البصمات (Shifts CRUD) ──
@@ -732,73 +742,159 @@ export default function EmployeeComprehensiveDossierModal({
       hours: isOff ? 0 : (parseFloat(hours) || empWorkHours)
     };
 
-    // جلب أو إنشاء سجل الرستر للموظف والشهر
-    const currentRosterList = [...(state?.rosters || [])];
-    const rosterIdx = currentRosterList.findIndex(
-      (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) && r.month === selectedMonth
+    // 🛡️ استبعاد كافة السجلات القديمة المتنافسة لهذا الموظف لنفس الشهر لمنع أي ارتداد
+    const otherRosters = (state?.rosters || []).filter(
+      (r) => !((String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) && (r.month === selectedMonth || !r.month))
     );
 
-    let updatedRoster;
-    if (rosterIdx >= 0) {
-      const existing = currentRosterList[rosterIdx];
-      const updatedSchedule = { ...(existing.schedule || {}) };
-      // حفظ بالتاريخ الدقيق وأيضاً باسم اليوم
-      if (dateStr) updatedSchedule[dateStr] = dayEntry;
-      if (dayName) updatedSchedule[dayName] = dayEntry;
-      updatedRoster = {
-        ...existing,
-        schedule: updatedSchedule,
-        updatedAt: new Date().toISOString()
-      };
-      currentRosterList[rosterIdx] = updatedRoster;
-    } else {
-      updatedRoster = {
-        id: `roster_${emp.id}_${selectedMonth}`,
-        employeeId: emp.id,
-        employeeCode: emp.code || '',
-        month: selectedMonth,
-        status: 'approved',
-        adminApproved: true,
-        schedule: {
-          ...DEFAULT_WEEKLY_SCHEDULE,
-          ...(dateStr ? { [dateStr]: dayEntry } : {}),
-          ...(dayName ? { [dayName]: dayEntry } : {})
-        },
-        createdAt: new Date().toISOString()
-      };
-      currentRosterList.push(updatedRoster);
-    }
+    const existingRosterObj = resolvedRoster || (state?.rosters || []).find(
+      (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) && (r.month === selectedMonth || !r.month)
+    );
 
-    const nextState = { ...state, rosters: currentRosterList };
-    await commitStateChange(nextState, `✅ تم تحديث جدول يوم (${dayName} ${dateStr}) بنجاح`, 'rosters', currentRosterList);
+    const baseSchedule = existingRosterObj?.schedule ? { ...existingRosterObj.schedule } : { ...DEFAULT_WEEKLY_SCHEDULE };
+    if (dateStr) baseSchedule[dateStr] = dayEntry;
+    if (dayName) baseSchedule[dayName] = dayEntry;
+
+    // إسقاط كامل للجدول المحدث على أيام الشهر
+    const fullSchedule = projectRosterToMonth(baseSchedule, cycleRange || selectedMonth, {
+      branchId: emp.branchId || 'main',
+      branchName: emp.branchName || '',
+      orgSettings: state?.orgSettings
+    }) || baseSchedule;
+
+    const newRosterObj = {
+      id: `roster_${emp.id}_${selectedMonth}_unified`,
+      employeeId: emp.id,
+      employeeCode: emp.code || '',
+      employeeName: emp.name || '',
+      branchId: emp.branchId || 'main',
+      branchName: emp.branchName || '',
+      isUnifiedMaster: true,
+      month: selectedMonth,
+      fromDate: cycleRange?.startDate,
+      toDate: cycleRange?.endDate,
+      schedule: fullSchedule,
+      status: 'approved',
+      adminApproved: true,
+      branchApproved: true,
+      approvedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const currentRosterList = [newRosterObj, ...otherRosters];
+
+    // تحديث كائن الموظف نفسه في state.employees
+    const updatedEmployees = (state?.employees || []).map((e) => {
+      if (String(e.id) === empIdStr || (empCodeStr && String(e.code) === empCodeStr)) {
+        return {
+          ...e,
+          roster: { ...(e.roster || {}), schedule: fullSchedule }
+        };
+      }
+      return e;
+    });
+
+    const candidateState = {
+      ...state,
+      rosters: currentRosterList,
+      employees: updatedEmployees
+    };
+
+    // 🌟 إعادة احتساب ساعات العمل والبصمات ومقارنتها بالجدول الجديد وإلغاء جزاءات التأخير
+    const { updatedState: reconciledState, summary: reconSummary } = reconcileEmployeeScheduleOrPunchChange({
+      employeeId: emp.id,
+      state: candidateState,
+      options: { reason: `تعديل جدول يوم (${dayName} ${dateStr})` }
+    });
+
+    const slicePairs = [
+      ['rosters', reconciledState.rosters],
+      ['employees', reconciledState.employees],
+      ['shifts', reconciledState.shifts],
+      ['lateIncidents', reconciledState.lateIncidents],
+      ['requests', reconciledState.requests]
+    ];
+
+    const toastMsg = reconSummary?.waivedDeductionMinutes > 0
+      ? `✅ تم تحديث جدول يوم (${dayName}) وإسقاط ${reconSummary.waivedDeductionMinutes} دقيقة خصم (${reconSummary.waivedAmount} ج.م) لتطابق الحضور مع المواعيد الجديدة!`
+      : `✅ تم تحديث واعتماد جدول يوم (${dayName} ${dateStr}) بنجاح`;
+
+    await commitStateChange(reconciledState, toastMsg, slicePairs);
   };
 
   const handleApplyBatchWeeklyRoster = async () => {
     setShowRosterBatchModal(false);
-    const currentRosterList = [...(state?.rosters || [])];
-    const rosterIdx = currentRosterList.findIndex(
-      (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) && r.month === selectedMonth
+
+    // 🛡️ استبعاد كافة السجلات القديمة المتنافسة لهذا الموظف لنفس الشهر لمنع أي ارتداد
+    const otherRosters = (state?.rosters || []).filter(
+      (r) => !((String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) && (r.month === selectedMonth || !r.month))
     );
 
+    // إسقاط كامل للنمط الأسبوعي على كامل أيام الدورة الشهرية
+    const fullSchedule = projectRosterToMonth(batchWeeklyRoster, cycleRange || selectedMonth, {
+      branchId: emp.branchId || 'main',
+      branchName: emp.branchName || '',
+      orgSettings: state?.orgSettings
+    }) || { ...batchWeeklyRoster };
+
     const newRosterObj = {
-      id: `roster_${emp.id}_${selectedMonth}`,
+      id: `roster_${emp.id}_${selectedMonth}_unified`,
       employeeId: emp.id,
       employeeCode: emp.code || '',
+      employeeName: emp.name || '',
+      branchId: emp.branchId || 'main',
+      branchName: emp.branchName || '',
+      isUnifiedMaster: true,
       month: selectedMonth,
+      fromDate: cycleRange?.startDate,
+      toDate: cycleRange?.endDate,
+      schedule: fullSchedule,
       status: 'approved',
       adminApproved: true,
-      schedule: { ...batchWeeklyRoster },
+      branchApproved: true,
+      approvedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
-    if (rosterIdx >= 0) {
-      currentRosterList[rosterIdx] = { ...currentRosterList[rosterIdx], schedule: { ...batchWeeklyRoster } };
-    } else {
-      currentRosterList.push(newRosterObj);
-    }
+    const currentRosterList = [newRosterObj, ...otherRosters];
 
-    const nextState = { ...state, rosters: currentRosterList };
-    await commitStateChange(nextState, '✅ تم تعميم وتطبيق الجدول الأسبوعي على كامل دورة الشهر بنجاح', 'rosters', currentRosterList);
+    // تحديث كائن الموظف نفسه في state.employees
+    const updatedEmployees = (state?.employees || []).map((e) => {
+      if (String(e.id) === empIdStr || (empCodeStr && String(e.code) === empCodeStr)) {
+        return {
+          ...e,
+          roster: { ...(e.roster || {}), schedule: fullSchedule }
+        };
+      }
+      return e;
+    });
+
+    const candidateState = {
+      ...state,
+      rosters: currentRosterList,
+      employees: updatedEmployees
+    };
+
+    // 🌟 إعادة احتساب ساعات العمل والبصمات ومقارنتها بالجدول وإلغاء جزاءات التأخير
+    const { updatedState: reconciledState, summary: reconSummary } = reconcileEmployeeScheduleOrPunchChange({
+      employeeId: emp.id,
+      state: candidateState,
+      options: { reason: `تعميم جدول أسبوعي لشهر (${selectedMonth})` }
+    });
+
+    const slicePairs = [
+      ['rosters', reconciledState.rosters],
+      ['employees', reconciledState.employees],
+      ['shifts', reconciledState.shifts],
+      ['lateIncidents', reconciledState.lateIncidents],
+      ['requests', reconciledState.requests]
+    ];
+
+    const toastMsg = reconSummary?.waivedDeductionMinutes > 0
+      ? `✅ تم تعميم الجدول وإعادة احتساب الساعات وإسقاط ${reconSummary.waivedDeductionMinutes} دقيقة تأخير (${reconSummary.waivedAmount} ج.م) لتطابق البصمات!`
+      : '✅ تم تعميم وتطبيق الجدول الأسبوعي على كامل دورة الشهر وإعادة احتساب البصمات بنجاح';
+
+    await commitStateChange(reconciledState, toastMsg, slicePairs);
   };
 
   // ── ج. دوال المكافآت والخصومات (Adjustments CRUD) ──

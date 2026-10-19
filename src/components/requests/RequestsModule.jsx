@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, normalizeState, fmt } from '../../utils/formatters';
-import { normalizeSchedule, getEmployeeDaySchedule } from '../../utils/rosterEngine';
+import { normalizeSchedule, getEmployeeDaySchedule, projectRosterToMonth } from '../../utils/rosterEngine';
 import { notifyEmployeeEarlyExitWarning, notifyOnPenaltyApplied } from '../../utils/gmailService';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
 import { shouldRouteDirectToAdmin, isBranchWithoutManager, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from '../../utils/jobsHelper';
@@ -1232,6 +1232,7 @@ export default function RequestsModule({
       let updatedShifts = [...(state.shifts || [])];
       let updatedEmployees = [...(state.employees || [])];
       let updatedActiveShifts = { ...(state.activeShifts || {}) };
+      let updatedLateIncidents = [...(state.lateIncidents || [])];
 
       // 0. Overtime Request Approval
       if (approvedTargetReq.type === 'overtime' || approvedTargetReq.type === 'extra_hours' || approvedTargetReq.type === 'طلب اضافي' || approvedTargetReq.type === 'إضافي') {
@@ -2157,10 +2158,16 @@ export default function RequestsModule({
           }
         }
 
-        const normalizedSch = normalizeSchedule(bestSchedule);
+        const targetMonthNorm = (approvedTargetReq.month || approvedTargetReq.cycleMonth || (approvedTargetReq.fromDate ? String(approvedTargetReq.fromDate).slice(0, 7) : new Date().toISOString().slice(0, 7))).slice(0, 7);
+        const rawHireDate = targetEmp?.hireDate || targetEmp?.hiring_date || targetEmp?.contractStartDate;
+        const normalizedSch = projectRosterToMonth(bestSchedule, targetMonthNorm || approvedTargetReq.fromDate, {
+          branchId: targetBStr || null,
+          branchName: targetBName,
+          hireDate: rawHireDate,
+          orgSettings: state.orgSettings
+        }) || normalizeSchedule(bestSchedule);
 
         if (normalizedSch && Object.keys(normalizedSch).length > 0) {
-          const targetMonthNorm = (approvedTargetReq.month || approvedTargetReq.cycleMonth || new Date().toISOString().slice(0, 7)).slice(0, 7);
           const rosterDocId = approvedTargetReq.id ? (String(approvedTargetReq.id).startsWith('roster_') ? String(approvedTargetReq.id) : `roster_${approvedTargetReq.id}`) : `roster_${Date.now()}`;
           const activeRosterObj = {
             id: rosterDocId,
@@ -2197,6 +2204,31 @@ export default function RequestsModule({
           });
 
           updatedRosters = [activeRosterObj, ...updatedRosters];
+
+          // 🌟 إعادة احتساب الورديات وتسوية الخصومات والجزاءات تلقائياً عند اعتماد الجدول
+          try {
+            const empIdToReconcile = approvedTargetReq.employeeId || targetEmp?.id;
+            if (empIdToReconcile) {
+              const reconRes = reconcileEmployeeScheduleOrPunchChange({
+                employeeId: empIdToReconcile,
+                state: {
+                  ...state,
+                  rosters: updatedRosters,
+                  requests: updatedRequests,
+                  shifts: updatedShifts,
+                  lateIncidents: updatedLateIncidents
+                },
+                options: { reason: 'اعتماد وتعديل الجدول الشهري' }
+              });
+              if (reconRes?.updatedState) {
+                if (reconRes.updatedState.shifts) updatedShifts = reconRes.updatedState.shifts;
+                if (reconRes.updatedState.lateIncidents) updatedLateIncidents = reconRes.updatedState.lateIncidents;
+                if (reconRes.updatedState.requests) updatedRequests = reconRes.updatedState.requests;
+              }
+            }
+          } catch (reconErr) {
+            console.warn('Reconcile after roster approval error in RequestsModule:', reconErr);
+          }
         }
       }
 
@@ -2556,8 +2588,6 @@ export default function RequestsModule({
         }
       }
 
-      let updatedLateIncidents = [...(state.lateIncidents || [])];
-
       // Penalty Objection Approval: Cancel violation penalty and remove financial deduction
       if (approvedTargetReq.type === 'penalty_objection' || approvedTargetReq.penaltyId || approvedTargetReq.sourceType === 'late_incident') {
         const targetPenId = approvedTargetReq.penaltyId || String(approvedTargetReq.id).replace(/^obj_(inc|adj|req)_/, '');
@@ -2656,6 +2686,9 @@ export default function RequestsModule({
             },
             options: { reason: `اعتماد طلب ${approvedTargetReq.title || approvedTargetReq.type}` }
           });
+          if (reconState?.shifts) {
+            updatedShifts = reconState.shifts;
+          }
           if (reconState?.lateIncidents) {
             updatedLateIncidents = reconState.lateIncidents;
           }
