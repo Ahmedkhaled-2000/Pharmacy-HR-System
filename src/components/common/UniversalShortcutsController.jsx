@@ -578,6 +578,15 @@ export default function UniversalShortcutsController() {
       // ── 14. Quick Navigation (Alt+1 .. Alt+9, Alt+0) ───────────────────────────
       // STRICTLY PREVENTS BROWSER TAB SWITCHING
       if (isAlt && !isCtrl && !isShift && /^[0-9]$/.test(normKey)) {
+        // إذا كان المستخدم داخل نظام النواقص والمشتريات (OutStock)، نترك الاختصارات لنظام النواقص لتبديل تبويباته
+        const isOutstockActive = Boolean(
+          (window.location?.pathname && window.location.pathname.includes('/outstock')) ||
+          document.querySelector('.outstock-system-view')
+        );
+        if (isOutstockActive) {
+          return;
+        }
+
         consumeEvent();
         const navMap = {
           '1': { targetTab: 'dashboard', tabIndex: 0 },

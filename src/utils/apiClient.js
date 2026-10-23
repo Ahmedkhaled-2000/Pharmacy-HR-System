@@ -505,6 +505,33 @@ export async function apiSaveSettingsSlice(sliceKey, sliceValue, options = {}) {
   });
 }
 
+// ── اعتماد / رفض الطلبات ذرية وفورية فائقة السرعة (< 50ms) وحفظها المباشر في السيرفر ──
+export async function apiSubmitRequestDecision(payload, options = {}) {
+  resetBackendCircuitBreaker();
+  return await request('requests/decide', {
+    method: 'POST',
+    body: JSON.stringify({ key: STORAGE_KEY, ...payload }),
+    timeout: options.timeout || 15000,
+    retries: options.retries !== undefined ? options.retries : 2,
+    noCache: true,
+    isBackground: options.isBackground || false
+  });
+}
+
+// ── حفظ واعتماد الجدول الشهري ذرياً وبسرعة فائقة (< 50ms) مع إعادة مطابقة البصمات والجزاءات ──
+export async function apiSaveRosterAtomic(payload, options = {}) {
+  resetBackendCircuitBreaker();
+  return await request('rosters/save', {
+    method: 'POST',
+    body: JSON.stringify({ key: STORAGE_KEY, ...payload }),
+    timeout: options.timeout || 25000,
+    retries: options.retries !== undefined ? options.retries : 2,
+    noCache: true,
+    isBackground: options.isBackground || false
+  });
+}
+
+
 // ══════════════════════════════════════════════════════════════════════════════
 // 🚀 apiRecordPunch - نقطة الاتصال الذرية الفائقة الخفة للبصمات
 // < 1KB طلب - < 20ms استجابة - 3 إعادة محاولة تلقائية مع تأخر تصاعدي

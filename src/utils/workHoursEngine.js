@@ -11,8 +11,10 @@
 
 import { findEmployeeRoster, getEmployeeDaySchedule } from './rosterEngine.js';
 import { isBranchMatch } from './branchMatcher.js';
-import { getCycleDateRange } from './periodEngine.js';
+import { getCycleDateRange, buildCycleAttendanceTimeline } from './periodEngine.js';
 import { getEmployeeCurrentApprovedLeave, getRealTodayStr } from './formatters.js';
+
+export { buildCycleAttendanceTimeline };
 
 /**
  * فحص ما إذا كان للموظف جدول شهري معتمد رسمي
@@ -298,6 +300,7 @@ export function calculateShiftMetrics(shift, state) {
 
   // 3. فحص ساعات الإذن المعتمد
   let permHours = 0;
+  let isUnpaidPerm = Boolean(shift.isUnpaidPermission || shift.compensationType === 'unpaid');
   // فحص ما إذا كانت الوردية يدوية معتمدة من الإدارة (تعتمد ساعات العمل من فرق البصمتين فقط دون دمج أذونات قديمة ما لم يُطلب صراحة)
   const isManualAdminShift = Boolean(
     shift.isManual ||
@@ -312,22 +315,27 @@ export function calculateShiftMetrics(shift, state) {
   if (!shouldDecouplePerm) {
     try {
       const perm = findApprovedPermission(shift.employeeId, shift.date, state);
+      if (perm && (perm.compensationType === 'unpaid' || perm.isUnpaid === true || perm.isUnpaidPermission === true)) {
+        isUnpaidPerm = true;
+      }
       if (perm && !perm.decoupledFromPunch && !perm.voidedOnManualPunch) {
-        permHours = parseFloat(perm.hours) || 0;
-        if (!permHours && perm.durationMinutes) {
-          permHours = Math.round((perm.durationMinutes / 60) * 100) / 100;
+        if (!isUnpaidPerm) {
+          permHours = parseFloat(perm.hours) || 0;
+          if (!permHours && perm.durationMinutes) {
+            permHours = Math.round((perm.durationMinutes / 60) * 100) / 100;
+          }
+          if (!permHours && perm.startTime && perm.endTime) {
+            const pMins = calcRawDurationMinutes(perm.startTime, perm.endTime);
+            permHours = Math.round((pMins / 60) * 100) / 100;
+          }
         }
-        if (!permHours && perm.startTime && perm.endTime) {
-          const pMins = calcRawDurationMinutes(perm.startTime, perm.endTime);
-          permHours = Math.round((pMins / 60) * 100) / 100;
-        }
-      } else if (shift.permissionHours) {
+      } else if (shift.permissionHours && !isUnpaidPerm) {
         permHours = parseFloat(shift.permissionHours) || 0;
       }
     } catch {
-      permHours = parseFloat(shift.permissionHours) || 0;
+      permHours = (!isUnpaidPerm && shift.permissionHours) ? parseFloat(shift.permissionHours) || 0 : 0;
     }
-  } else if (shift.includePermissionHours && shift.permissionHours) {
+  } else if (shift.includePermissionHours && shift.permissionHours && !isUnpaidPerm) {
     permHours = parseFloat(shift.permissionHours) || 0;
   }
 
@@ -359,8 +367,9 @@ export function calculateShiftMetrics(shift, state) {
   const isScheduledOffDay = Boolean(hasApprovedRoster && daySchedule && (daySchedule.type === 'off' || daySchedule.isOff === true));
   const hasScheduledShiftWindow = Boolean(hasApprovedRoster && !isScheduledOffDay && daySchedule && daySchedule.start && daySchedule.end);
 
-  const schedStartStr = (hasApprovedRoster && !isScheduledOffDay && (shift.scheduledStart || daySchedule?.start)) || '';
-  const schedEndStr = (hasApprovedRoster && !isScheduledOffDay && (shift.scheduledEnd || daySchedule?.end)) || '';
+  // عندما يكون للموظف جدول شهري معتمد، تُستمد مواعيد الشفت الرسمية مباشرة من الجدول المعتمد لضمان التحديث التلقائي اللحظي
+  const schedStartStr = (hasApprovedRoster && !isScheduledOffDay && (daySchedule?.start || shift.scheduledStart)) || '';
+  const schedEndStr = (hasApprovedRoster && !isScheduledOffDay && (daySchedule?.end || shift.scheduledEnd)) || '';
 
   let scheduledHours = profileHours;
   if (isScheduledOffDay) {
@@ -393,41 +402,30 @@ export function calculateShiftMetrics(shift, state) {
     // أ) إذا حضر في يوم راحته الأسبوعية المقررة بالجدول الشهري: كافة الساعات تحتسب إضافي
     if (hasApprovedRoster && isScheduledOffDay) {
       regularHours = 0;
-      let calculatedOt = actualWorkedHours;
-      if (rawOtHours > 0) {
-        calculatedOt = Math.max(rawOtHours, calculatedOt);
-      }
-      overtimeHours = calculatedOt;
+      overtimeHours = actualWorkedHours;
     }
-    // ب) إذا حضر في يوم عمل مجدول: يتم احتساب الساعات الإضافية حصراً خارج مواعيد الوردية المجدولة (قبل البداية وبعد النهاية)
+    // ب) إذا حضر في يوم عمل مجدول:
+    // يتم احتساب الساعات الأساسية لتغطية ساعات الوردية المقررة أولاً (مثل 8 ساعات)
+    // وأي ساعات عمل فعلية إضافية تزيد عن ساعات الوردية المقررة تُحتسب كساعات إضافية
     else if (hasApprovedRoster && hasScheduledShiftWindow && schedStartStr && schedEndStr && timeIn && hasRealTimeOut) {
       const [sH, sM] = schedStartStr.split(':').map(Number);
       let [eH, eM] = schedEndStr.split(':').map(Number);
       let schedStartMins = sH * 60 + (sM || 0);
       let schedEndMins = eH * 60 + (eM || 0);
       if (schedEndMins <= schedStartMins) schedEndMins += 24 * 60;
+      const schedShiftHours = Math.round(((schedEndMins - schedStartMins) / 60) * 100) / 100;
+      const targetHours = schedShiftHours > 0 ? schedShiftHours : profileHours;
 
-      const [inH, inM] = String(timeIn).trim().slice(0, 5).split(':').map(Number);
-      let [outH, outM] = String(timeOut).trim().slice(0, 5).split(':').map(Number);
-      let actInMins = inH * 60 + (inM || 0);
-      let actOutMins = outH * 60 + (outM || 0);
-      if (actOutMins <= actInMins) actOutMins += 24 * 60;
-
-      // الساعات الإضافية خارج ساعات عمل الجدول: قبل الموعد + بعد الموعد
-      const earlyArrivalMins = actInMins < schedStartMins ? (schedStartMins - actInMins) : 0;
-      const lateDepartureMins = actOutMins > schedEndMins ? (actOutMins - schedEndMins) : 0;
-
-      const earlyOtHours = Math.round((earlyArrivalMins / 60) * 100) / 100;
-      const lateOtHours = Math.round((lateDepartureMins / 60) * 100) / 100;
-      let calculatedOt = Math.round((earlyOtHours + lateOtHours) * 100) / 100;
-
-      if (rawOtHours > 0) {
-        calculatedOt = Math.max(rawOtHours, calculatedOt);
+      if (actualWorkedHours > targetHours) {
+        regularHours = targetHours;
+        overtimeHours = Math.round((actualWorkedHours - targetHours) * 100) / 100;
+        if (rawOtHours > 0) {
+          overtimeHours = Math.max(rawOtHours, overtimeHours);
+        }
+      } else {
+        regularHours = actualWorkedHours;
+        overtimeHours = (shift.isManual && rawOtHours > 0) ? rawOtHours : 0;
       }
-      overtimeHours = calculatedOt;
-
-      // الساعات الأساسية: ساعات العمل المنفذة داخل نافذة الوردية المجدولة
-      regularHours = Math.max(0, Math.round((actualWorkedHours - overtimeHours) * 100) / 100);
     }
     // ── الحالة الثانية: موظفون ليس لديهم جدول شهري معتمد / دوام حر (No Monthly Schedule) ──
     // يتم احتساب الساعات الإضافية عندما تكون ساعات العمل الفعلية أكبر من ساعات ملف الموظف
@@ -695,11 +693,17 @@ export function checkShiftConflicts({
     // ── 2. التحقق من منع التداخل الزمني التام بين الورديات في أي فرع ──
     const hasTimeOverlap = candStartEpoch < sEndEpoch && sStartEpoch < candEndEpoch;
     if (hasTimeOverlap) {
+      const isSameBranchOverlap = isSameBranch || (effectiveBranchName && sBranchName && effectiveBranchName.trim() === sBranchName.trim());
+      const branchMsg = isSameBranchOverlap
+        ? `في نفس الفرع ("${effectiveBranchName}")`
+        : `بين فرع "${effectiveBranchName}" وفرع "${sBranchName}". لا يمكن تواجد الموظف في فرعين في نفس التوقيت`;
+
       return {
         hasConflict: true,
         conflictType: 'time_overlap',
+        isSameBranch: isSameBranchOverlap,
         conflictingShift: s,
-        message: `تعذر التسجيل: يوجد تداخل زمني بين موعد هذه الوردية (${tIn} إلى ${tOut}) في فرع "${effectiveBranchName}" ووردية مسجلة للموظف في فرع "${sBranchName}" من (${sIn} إلى ${sOut}). لا يمكن تواجد الموظف في فرعين في نفس التوقيت.`
+        message: `تعذر التسجيل: يوجد تداخل زمني بين موعد هذه الوردية (${tIn} إلى ${tOut}) ${branchMsg} ووردية مسجلة للموظف في تاريخ (${sDate}) من (${sIn} إلى ${sOut}).`
       };
     }
 
@@ -743,255 +747,10 @@ export function checkShiftConflicts({
 /**
  * 🌟 المحرك المركزي الموحد لبناء السجل الزمني التراكمي الشامل للحضور والانصراف
  * يدمج بصمات الورديات الفعلية مع أيام الإجازات بجميع أنواعها وأيام الراحة الأسبوعية
- * لضمان ظهور الشهر كاملاً متصلاً في شاشات الإدارة وشاشات الموظف دون أي فراغات
+ * يعتمد مركزياً على buildCycleAttendanceTimeline في periodEngine.js لضمان توحيد الحسابات
  */
 export function buildUnifiedAttendanceTimeline(employee, shifts = [], state = {}, options = {}) {
-  if (!employee) return [];
-  const {
-    filterFn = null,
-    monthPicker = null,
-    selectedMonth = null,
-    filterMode = 'month',
-    customFrom = '',
-    customTo = '',
-    includeAbsences = false
-  } = options;
-
-  const targetMonth = selectedMonth || monthPicker || (getRealTodayStr ? getRealTodayStr().slice(0, 7) : new Date().toISOString().slice(0, 7));
-  const orgSettings = state?.orgSettings || {};
-
-  // 1. تحديد نطاق الدورة وتواريخها
-  let startDate = '';
-  let endDate = '';
-
-  const isCustom = (filterMode === 'custom' || filterMode === 'range') && customFrom && customTo;
-  if (isCustom) {
-    startDate = customFrom <= customTo ? customFrom : customTo;
-    endDate = customFrom <= customTo ? customTo : customFrom;
-  } else {
-    try {
-      const rng = getCycleDateRange(targetMonth, orgSettings);
-      if (rng?.startDate && rng?.endDate) {
-        startDate = rng.startDate;
-        endDate = rng.endDate;
-      }
-    } catch {
-      const parts = targetMonth.split('-').map(Number);
-      if (parts.length >= 2) {
-        const lastDay = new Date(parts[0], parts[1], 0).getDate();
-        startDate = `${targetMonth}-01`;
-        endDate = `${targetMonth}-${String(lastDay).padStart(2, '0')}`;
-      }
-    }
-  }
-
-  const activePeriodFilter = (d) => {
-    if (!d) return false;
-    const dateStr = String(d).slice(0, 10);
-    if (typeof filterFn === 'function') return filterFn(dateStr);
-    if (startDate && endDate) return dateStr >= startDate && dateStr <= endDate;
-    return true;
-  };
-
-  const datesList = [];
-  if (startDate && endDate) {
-    let curr = new Date(startDate + 'T00:00:00');
-    const end = new Date(endDate + 'T00:00:00');
-    while (curr <= end) {
-      const y = curr.getFullYear();
-      const m = String(curr.getMonth() + 1).padStart(2, '0');
-      const d = String(curr.getDate()).padStart(2, '0');
-      const dateStr = `${y}-${m}-${d}`;
-      if (activePeriodFilter(dateStr)) {
-        datesList.push(dateStr);
-      }
-      curr.setDate(curr.getDate() + 1);
-    }
-  }
-
-  // 2. تجميع الورديات الفعلية المفلترة
-  const shiftsByDate = new Map();
-  (shifts || []).forEach(s => {
-    if (!s || !s.date || !activePeriodFilter(s.date)) return;
-    if (s.status === 'cancelled' || s.isCancelled) return;
-    const d = s.date;
-    if (!shiftsByDate.has(d)) shiftsByDate.set(d, []);
-    shiftsByDate.get(d).push(s);
-  });
-
-  const timeline = [];
-  const rawHireDate = employee.hireDate || employee.hiring_date || employee.contractStartDate;
-  const hireDate = rawHireDate ? String(rawHireDate).slice(0, 10) : '';
-  const resignationDate = employee.resignationDate || employee.terminationDate ? String(employee.resignationDate || employee.terminationDate).slice(0, 10) : '';
-
-  // فحص كل تاريخ في الدورة
-  datesList.forEach((dateStr) => {
-    // حصانة ما قبل التعيين وما بعد انتهاء الخدمة
-    if (hireDate && dateStr < hireDate) return;
-    if (resignationDate && dateStr > resignationDate) return;
-
-    const dayShifts = shiftsByDate.get(dateStr);
-    const daySchedule = getEmployeeDaySchedule(employee.id, dateStr, state);
-    const isScheduledOff = Boolean(daySchedule?.isOff === true || daySchedule?.type === 'off');
-    const approvedLeave = getEmployeeCurrentApprovedLeave(employee, dateStr, state);
-
-    if (dayShifts && dayShifts.length > 0) {
-      // يوجد وردية أو أكثر في هذا اليوم
-      dayShifts.forEach(s => {
-        timeline.push({
-          ...s,
-          recordType: 'shift',
-          isScheduledOffDay: isScheduledOff,
-          isWorkOnOffDay: isScheduledOff,
-          isOnApprovedLeave: Boolean(approvedLeave),
-          approvedLeaveObj: approvedLeave,
-          daySchedule
-        });
-      });
-    } else {
-      // لا توجد بصمات في هذا اليوم
-      if (approvedLeave) {
-        // إجازة معتمدة
-        const lType = approvedLeave.leaveType || 'annual';
-        let typeName = 'إجازة سنوية';
-        let badgeColor = '#0284c7';
-        let badgeBg = '#e0f2fe';
-        let badgeBorder = '#bae6fd';
-        let icon = '🏖️';
-
-        if (lType === 'sick' || approvedLeave.type === 'sick_leave') {
-          typeName = 'إجازة مرضية';
-          icon = '🩺';
-          badgeColor = '#7c3aed';
-          badgeBg = '#f5f3ff';
-          badgeBorder = '#ddd6fe';
-        } else if (lType === 'casual' || approvedLeave.type === 'casual_leave') {
-          typeName = 'إجازة عارضة';
-          icon = '📋';
-          badgeColor = '#b45309';
-          badgeBg = '#fef3c7';
-          badgeBorder = '#fde68a';
-        } else if (lType === 'mission' || approvedLeave.type === 'mission') {
-          typeName = 'مأمورية عمل';
-          icon = '🚗';
-          badgeColor = '#0369a1';
-          badgeBg = '#f0f9ff';
-          badgeBorder = '#bae6fd';
-        } else if (lType === 'unpaid' || approvedLeave.type === 'unpaid_leave') {
-          typeName = 'إجازة بدون راتب';
-          icon = '⏸️';
-          badgeColor = '#475569';
-          badgeBg = '#f1f5f9';
-          badgeBorder = '#cbd5e1';
-        } else if (lType === 'holiday' || approvedLeave.type === 'official_holiday') {
-          typeName = 'إجازة رسمية / أعياد';
-          icon = '🎈';
-          badgeColor = '#059669';
-          badgeBg = '#ecfdf5';
-          badgeBorder = '#a7f3d0';
-        }
-
-        const isUnpaid = lType === 'unpaid' || approvedLeave.type === 'unpaid_leave';
-        const paidHrs = isUnpaid ? 0 : parseFloat(employee.workHoursPerDay || employee.workHours || 8);
-
-        timeline.push({
-          id: `leave_${employee.id}_${dateStr}_${approvedLeave.id || 'leave'}`,
-          date: dateStr,
-          recordType: 'leave',
-          isApprovedLeaveDay: true,
-          leaveType: lType,
-          leaveTypeName: typeName,
-          leaveBadge: { color: badgeColor, bg: badgeBg, border: badgeBorder, icon },
-          leaveObj: approvedLeave,
-          employeeId: employee.id,
-          employeeCode: employee.code || '',
-          employeeName: employee.name || '',
-          branchId: approvedLeave.branchId || employee.branchId || '',
-          branchName: approvedLeave.branchName || employee.branchName || '',
-          timeIn: '—',
-          timeOut: '—',
-          hours: paidHrs,
-          regularHours: paidHrs,
-          payableHours: paidHrs,
-          netHours: paidHrs,
-          breakHours: 0,
-          overtimeHours: 0,
-          status: 'approved_leave',
-          statusLabel: `${icon} ${typeName} معتمدة`,
-          note: approvedLeave.reason || approvedLeave.notes || `${typeName} معتمدة رسمياً`,
-          notes: approvedLeave.reason || approvedLeave.notes || `${typeName} معتمدة رسمياً`,
-          source: 'leave_system'
-        });
-      } else if (isScheduledOff) {
-        // راحة أسبوعية مجدولة
-        const bId = daySchedule?.branchId || employee.branchId || '';
-        const bObj = (state?.branches || []).find(b => String(b.id) === String(bId));
-        const bName = bObj ? bObj.name : (daySchedule?.branchName || employee.branchName || '');
-
-        timeline.push({
-          id: `off_${employee.id}_${dateStr}`,
-          date: dateStr,
-          recordType: 'off_day',
-          isScheduledOffDay: true,
-          isOtherBranchShift: Boolean(daySchedule?.isOtherBranchShift),
-          otherBranchName: daySchedule?.otherBranchName || '',
-          employeeId: employee.id,
-          employeeCode: employee.code || '',
-          employeeName: employee.name || '',
-          branchId: bId,
-          branchName: bName,
-          timeIn: '—',
-          timeOut: '—',
-          hours: 0,
-          regularHours: 0,
-          payableHours: 0,
-          netHours: 0,
-          breakHours: 0,
-          overtimeHours: 0,
-          status: 'scheduled_off',
-          statusLabel: daySchedule?.isOtherBranchShift
-            ? `🏢 مجدول بفرع ${daySchedule.otherBranchName}`
-            : '☕ راحة أسبوعية (Off)',
-          note: daySchedule?.label || daySchedule?.note || (daySchedule?.isOtherBranchShift ? `مجدول بفرع ${daySchedule.otherBranchName}` : 'راحة أسبوعية حسب جدول الروستر'),
-          notes: daySchedule?.label || daySchedule?.note || (daySchedule?.isOtherBranchShift ? `مجدول بفرع ${daySchedule.otherBranchName}` : 'راحة أسبوعية حسب جدول الروستر'),
-          source: 'roster_schedule',
-          daySchedule
-        });
-      } else if (includeAbsences) {
-        // غياب غير مسجل
-        timeline.push({
-          id: `abs_${employee.id}_${dateStr}`,
-          date: dateStr,
-          recordType: 'absence',
-          isAbsenceDay: true,
-          employeeId: employee.id,
-          employeeCode: employee.code || '',
-          employeeName: employee.name || '',
-          branchId: employee.branchId || '',
-          branchName: employee.branchName || '',
-          timeIn: '—',
-          timeOut: '—',
-          hours: 0,
-          payableHours: 0,
-          status: 'absence',
-          statusLabel: '🚫 غياب غير مسجل',
-          notes: 'غياب بدون إذن عن وردية العمل المقررة',
-          source: 'absence_calculator',
-          daySchedule
-        });
-      }
-    }
-  });
-
-  // ترتيب السجلات من الأحدث إلى الأقدم تنازلياً
-  return timeline.sort((a, b) => {
-    const dA = String(a.date || '');
-    const dB = String(b.date || '');
-    if (dA !== dB) return dB.localeCompare(dA);
-    if (a.isLiveActive && !b.isLiveActive) return -1;
-    if (!a.isLiveActive && b.isLiveActive) return 1;
-    return 0;
-  });
+  return buildCycleAttendanceTimeline(employee, shifts, state, options);
 }
 
 

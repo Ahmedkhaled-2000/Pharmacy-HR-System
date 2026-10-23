@@ -144,7 +144,8 @@ export default function DisciplinaryPenaltiesTab({
     const deletedIdsSet = new Set((state._deletedIds || []).map(String));
     const penaltiesClearedAt = state._penaltiesClearedAt ? new Date(state._penaltiesClearedAt).getTime() : 0;
 
-    const isIdDeleted = (id) => {
+    const isIdDeleted = (id, isExplicitApproved = false) => {
+      if (isExplicitApproved) return false;
       if (!id) return false;
       const sId = String(id);
       if (deletedIdsSet.has(sId)) return true;
@@ -158,7 +159,9 @@ export default function DisciplinaryPenaltiesTab({
     // 1. Requests (Disciplinary Penalties, Direct Penalties, Violations, Deductions)
     (state.requests || []).forEach((r) => {
       if (!r) return;
-      if (isIdDeleted(r.id)) return;
+      const idStr = String(r.id);
+      const isExplicitApproved = (r.adminApproved === true || r.status === 'approved') && !r.isCancelled && (parseFloat(r.amount) > 0 || parseFloat(r.penaltyAmount) > 0);
+      if (isIdDeleted(r.id, isExplicitApproved)) return;
       if (penaltiesClearedAt && r.createdAt && new Date(r.createdAt).getTime() <= penaltiesClearedAt) return;
       if (
         r.type === 'disciplinary_penalty' ||
@@ -173,7 +176,6 @@ export default function DisciplinaryPenaltiesTab({
         if (isEmployee && currentEmpId && String(r.employeeId) !== String(currentEmpId)) return;
         if (isBranch && currentBranchId && String(r.branchId) !== String(currentBranchId) && !scopedEmpIds.has(String(r.employeeId))) return;
 
-        const idStr = String(r.id);
         const cleanId = idStr.replace(/^req_/, '');
         seenIds.add(idStr);
         seenIds.add(cleanId);
@@ -182,11 +184,12 @@ export default function DisciplinaryPenaltiesTab({
         seenIds.add(`req_late_inc_${cleanId.replace(/^late_inc_/, '')}`);
 
         const isLateReq = r.subType === 'lateness' || r.type === 'late_penalty' || idStr.startsWith('req_late_inc_');
-        if (isLateReq && (isApprovedPermissionForDate(r.employeeId, r.date, state) || r.status === 'approved_permission_exempt')) {
+        if (isLateReq && !isExplicitApproved && (isApprovedPermissionForDate(r.employeeId, r.date, state) || r.status === 'approved_permission_exempt')) {
           return;
         }
         if (isLateReq && r.employeeId && r.date) {
-          seenLateKeys.add(`${r.employeeId}_${r.date}`);
+          const reqBranchKey = r.branchId ? `_${r.branchId}` : '';
+          seenLateKeys.add(`${r.employeeId}_${r.date}${reqBranchKey}`);
         }
 
         const emp = allEmployeesList.find((e) => e && String(e.id) === String(r.employeeId));
@@ -260,32 +263,37 @@ export default function DisciplinaryPenaltiesTab({
     // 2. Late Incidents (وقائع التأخير اللائحي التلقائية)
     (state.lateIncidents || []).forEach((inc) => {
       if (!inc) return;
-      if (isIdDeleted(inc.id)) return;
+      const isExplicitApprovedInc = (inc.adminApproved === true || inc.status === 'approved') && !inc.isCancelled && (parseFloat(inc.penaltyAmount) > 0 || (inc.deductionMinutes || 0) > 0);
+      if (isIdDeleted(inc.id, isExplicitApprovedInc)) return;
       if (penaltiesClearedAt && (inc.createdAt || inc.date) && new Date(inc.createdAt || inc.date).getTime() <= penaltiesClearedAt) return;
       if (
-        inc.status === 'cancelled' ||
-        inc.isCancelled ||
-        inc.status === 'approved_permission_exempt' ||
-        inc.actionType === 'grace' ||
-        isApprovedPermissionForDate(inc.employeeId, inc.date, state)
+        !isExplicitApprovedInc && (
+          inc.status === 'cancelled' ||
+          inc.isCancelled ||
+          inc.objection?.status === 'approved' ||
+          inc.status === 'approved_permission_exempt' ||
+          inc.actionType === 'grace' ||
+          isApprovedPermissionForDate(inc.employeeId, inc.date, state)
+        )
       ) return;
       if (isEmployee && currentEmpId && String(inc.employeeId) !== String(currentEmpId)) return;
       if (isBranch && currentBranchId && String(inc.branchId) !== String(currentBranchId) && !scopedEmpIds.has(String(inc.employeeId))) return;
 
       const incIdStr = String(inc.id);
       const cleanIncId = incIdStr.replace(/^late_inc_/, '');
+      const lateBranchKey = inc.branchId ? `_${inc.branchId}` : '';
       if (
         seenIds.has(incIdStr) ||
         seenIds.has(cleanIncId) ||
         seenIds.has(`req_${incIdStr}`) ||
         seenIds.has(`req_late_inc_${cleanIncId}`) ||
-        (inc.employeeId && inc.date && seenLateKeys.has(`${inc.employeeId}_${inc.date}`))
+        (inc.employeeId && inc.date && seenLateKeys.has(`${inc.employeeId}_${inc.date}${lateBranchKey}`))
       ) {
         return;
       }
       seenIds.add(incIdStr);
       seenIds.add(`req_${incIdStr}`);
-      if (inc.employeeId && inc.date) seenLateKeys.add(`${inc.employeeId}_${inc.date}`);
+      if (inc.employeeId && inc.date) seenLateKeys.add(`${inc.employeeId}_${inc.date}${lateBranchKey}`);
 
       const emp = allEmployeesList.find((e) => e && String(e.id) === String(inc.employeeId));
       const bObj = (state.branches || []).find((b) => b && String(b.id) === String(inc.branchId || emp?.branchId));

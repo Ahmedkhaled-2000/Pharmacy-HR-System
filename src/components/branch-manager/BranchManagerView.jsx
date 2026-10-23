@@ -5,7 +5,7 @@ import EmployeePermissionsModule from '../employee-portal/EmployeePermissionsMod
 import EmployeeLoansModule from '../employee-portal/EmployeeLoansModule';
 import EmployeeEvaluationsModule from '../employee-portal/EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
-import { printEmployeePayslipDirect } from '../../utils/printHelper';
+import { printEmployeePayslipDirect, triggerDirectPrint } from '../../utils/printHelper';
 import BylawsModule from '../bylaws/BylawsModule';
 import IncomeExpensesModule from '../finance/IncomeExpensesModule';
 import { getFormattedRequestBadge } from '../requests/RequestsModule';
@@ -22,7 +22,7 @@ import BranchEmergencyCoverModal from './BranchEmergencyCoverModal';
 import BranchWhatsAppModule from './BranchWhatsAppModule';
 import DayDetailsModal from '../attendance/DayDetailsModal';
 import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, isShiftManualPunch, calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, fmt, getRealTodayStr, getRealDate, getRealNowTimeStr } from '../../utils/formatters';
-import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics } from '../../utils/latePenaltyEngine';
+import { recalculateEmployeeCycleLateness, reconcileEmployeeScheduleOrPunchChange, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics } from '../../utils/latePenaltyEngine';
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
 import { getCycleDateRange, createDatePredicate, getActivePayrollMonth, isPayrollPeriodFrozenForDate, isPayrollMonthFrozen } from '../../utils/periodEngine';
 import { getEmployeeDaySchedule, findEmployeeRoster } from '../../utils/rosterEngine';
@@ -186,9 +186,9 @@ export function getEmployeeLiveActiveShift(emp, state) {
     if (!isEmpMatch) return false;
     if (!s.timeOut || s.timeOut === '—') return false;
     if (s.timeIn && candidate.timeIn) {
-      const sInPrefix = s.timeIn.slice(0, 5);
-      const cInPrefix = candidate.timeIn.slice(0, 5);
-      if (sInPrefix === cInPrefix) return true;
+      const sInPrefix = String(s.timeIn || '').slice(0, 5);
+      const cInPrefix = String(candidate.timeIn || '').slice(0, 5);
+      if (sInPrefix && cInPrefix && sInPrefix === cInPrefix) return true;
     }
     return Boolean(s.timeOut && s.hours > 0);
   });
@@ -426,6 +426,7 @@ export default function BranchManagerView({
   state,
   setState,
   saveState,
+  computeEmpSummary,
   currentBranch,
   activeTab = 'dashboard',
   setActiveTab,
@@ -446,6 +447,11 @@ export default function BranchManagerView({
   filterFn: propFilterFn,
   getEmpPermission
 }) {
+  const effectiveComputeEmpSummary = computeEmpSummary || state?.computeEmpSummary;
+  if (state && !state.computeEmpSummary && effectiveComputeEmpSummary) {
+    state.computeEmpSummary = effectiveComputeEmpSummary;
+  }
+
   const [selectedPunchEmpId, setSelectedPunchEmpId] = useState('');
   const [showPrintModal, setShowPrintModal] = useState(false);
 
@@ -888,9 +894,24 @@ export default function BranchManagerView({
       if (isBranchManagerEmp(e)) return false;
 
       // Strictly check that employee belongs to this branch (ID, Code, Name, or branchesDetails)
-      return isEmployeeInBranch(e, branchIds);
+      const belongs = isEmployeeInBranch(e, branchIds);
+      if (belongs) return true;
+
+      // Include employee if currently actively seconded to this branch
+      const sec = (state.secondments || []).find(
+        (s) => s && s.status === 'ACTIVE' && (String(s.employeeId) === String(e.id) || (e.code && String(s.employeeCode) === String(e.code))) && branchIds.ids.has(String(s.targetBranchId))
+      );
+      return Boolean(sec);
+    }).map((e) => {
+      const sec = (state.secondments || []).find(
+        (s) => s && s.status === 'ACTIVE' && (String(s.employeeId) === String(e.id) || (e.code && String(s.employeeCode) === String(e.code))) && branchIds.ids.has(String(s.targetBranchId))
+      );
+      if (sec) {
+        return { ...e, isSeconded: true, secondmentInfo: sec };
+      }
+      return e;
     });
-  }, [state.employees, state.branches, liveBranch, currentBranch, state.currentUserId, managerEmp]);
+  }, [state.employees, state.branches, state.secondments, liveBranch, currentBranch, state.currentUserId, managerEmp]);
 
   const deletedIdsSet = useMemo(() => {
     return new Set((state._deletedIds || []).map(String));
@@ -1459,7 +1480,9 @@ export default function BranchManagerView({
           updatedAt: new Date().toISOString()
         };
 
-        // إزالة أي وثائق روستر سابقة لهذا الموظف لنفس الشهر أو نفس المعرف لمنع التضارب وتكرار الجداول القديمة
+        // إزالة أي وثائق روستر سابقة لهذا الموظف لنفس الشهر ونفس الفرع لمنع التضارب، مع الحفاظ التام على فروع الموظف المتعدد الفروع
+        const isMultiBranchEmp = Array.isArray(targetEmp?.branchesDetails) && targetEmp.branchesDetails.length > 1;
+        const targetBIdToMatch = targetBStr || currentBranch?.id || null;
         updatedRosters = updatedRosters.filter((ros) => {
           if (!ros) return false;
           const isSameId = String(ros.id) === String(updatedTargetReq.id) || String(ros.id) === String(rosterDocId);
@@ -1472,6 +1495,12 @@ export default function BranchManagerView({
           if (!empMatch && !isSameId) return true;
           const rMonthNorm = ros.month ? String(ros.month).slice(0, 7) : null;
           const isSameMonth = !rMonthNorm || !targetMonthNorm || rMonthNorm === targetMonthNorm;
+
+          if (isMultiBranchEmp && targetBIdToMatch && ros.branchId && String(ros.branchId) !== String(targetBIdToMatch)) {
+            // الحفاظ على جداول الفروع الأخرى للموظف متعدد الفروع
+            return true;
+          }
+
           return !(isSameMonth || isSameId);
         });
 
@@ -1686,20 +1715,23 @@ export default function BranchManagerView({
     let updatedLateIncidents = [...(state.lateIncidents || [])];
     if (updatedTargetReq && updatedTargetReq.employeeId) {
       try {
-        const { incidents, updatedRequests: recalcedRequests } = recalculateEmployeeCycleLateness({
+        const punchDatesList = [updatedTargetReq.date, updatedTargetReq.startDate, updatedTargetReq.punchDate].filter(Boolean);
+        const { updatedState: reconciledState } = reconcileEmployeeScheduleOrPunchChange({
           employeeId: updatedTargetReq.employeeId,
-          cycleFilterFn: null,
-          state: { ...state, requests: updatedRequests, shifts: updatedShifts },
-          payrollCycleId: (updatedTargetReq.date || new Date().toISOString()).slice(0, 7)
+          changedDates: punchDatesList.length > 0 ? punchDatesList : null,
+          clearPenaltiesOnChangedDates: true,
+          state: {
+            ...state,
+            requests: updatedRequests,
+            shifts: updatedShifts,
+            rosters: updatedRosters,
+            lateIncidents: updatedLateIncidents
+          }
         });
-        if (recalcedRequests) {
-          updatedRequests = recalcedRequests;
+        if (reconciledState) {
+          updatedRequests = reconciledState.requests || updatedRequests;
+          updatedLateIncidents = reconciledState.lateIncidents || updatedLateIncidents;
         }
-        const incidentIds = new Set(incidents.map((i) => i.id));
-        updatedLateIncidents = [
-          ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(updatedTargetReq.employeeId)),
-          ...incidents
-        ];
       } catch (e) {
         console.error('Error auto-syncing late incidents upon manager request approval:', e);
       }
@@ -2473,7 +2505,7 @@ export default function BranchManagerView({
       regularHours: regularHours,
       scheduledHours: schedHours,
       overtimeHours: overtimeHours,
-      overtimeStatus: overtimeHours > 0 ? 'approved' : 'none',
+      overtimeStatus: overtimeHours > 0 ? 'pending' : 'none',
       grossHours: calcGrossHours,
       breakHours: bH,
       reason: manualPunchData.reason.trim(),

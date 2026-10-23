@@ -369,7 +369,7 @@ export default function LoginPage({ onLogin, onOpenRegister, onOpenDeveloper, st
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck="false"
-              placeholder="owner (المالك) / admin (الإدارة) / out (نظام النواقص) / كود الموظف"
+              placeholder="owner (المالك) / admin (الإدارة) / محطة الكاشير (pos_branch) / كود الموظف"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               onFocus={() => setFocusedField('username')}

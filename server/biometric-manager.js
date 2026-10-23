@@ -238,6 +238,37 @@ export async function initBiometricTables(db) {
           CONSTRAINT uq_emp_branch_pin UNIQUE (employee_id, branch_id)
       );
       CREATE INDEX IF NOT EXISTS idx_emp_branch_pin_lookup ON public.employee_branch_pins (device_user_pin, branch_id);
+
+      -- 9. جدول قرارات وانتدابات ونقل الموظفين بين الفروع (Employee Secondments & Branch Transfers)
+      CREATE TABLE IF NOT EXISTS public.employee_secondments (
+          id VARCHAR(100) PRIMARY KEY,
+          employee_id VARCHAR(100) NOT NULL,
+          employee_code VARCHAR(50),
+          employee_name VARCHAR(150),
+          home_branch_id VARCHAR(100) NOT NULL,
+          home_branch_name VARCHAR(150),
+          target_branch_id VARCHAR(100) NOT NULL,
+          target_branch_name VARCHAR(150),
+          assignment_type VARCHAR(50) NOT NULL DEFAULT 'temporary',
+          start_date DATE NOT NULL,
+          end_date DATE NULL,
+          schedule_type VARCHAR(50) DEFAULT 'variable',
+          schedule JSONB NULL,
+          hourly_rate NUMERIC(10, 2) DEFAULT 0.00,
+          secondment_allowance NUMERIC(10, 2) DEFAULT 0.00,
+          allowance_type VARCHAR(20) DEFAULT 'monthly',
+          reason TEXT,
+          notes TEXT,
+          status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
+          biometric_synced BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          recalled_at TIMESTAMPTZ NULL,
+          recall_reason TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_secondment_emp ON public.employee_secondments (employee_id, status);
+      CREATE INDEX IF NOT EXISTS idx_secondment_target ON public.employee_secondments (target_branch_id, status);
+      CREATE INDEX IF NOT EXISTS idx_secondment_dates ON public.employee_secondments (start_date, end_date);
     `;
 
     await db.query(ddl);
@@ -481,6 +512,16 @@ export const DEFAULT_ATTENDANCE_TEMPLATES = {
 {employees_summary}
 ━━━━━━━━━━━━━━━━━━━━━━
 ✅ تمت معالجة وتسوية كافة الورديات بنجاح بالترتيب الزمني الدقيق وحساب ساعات العمل تلقائياً دون أي تضارب.
+🏛️ _{company_name}_`,
+
+  open_shift_15h_warning: `⏰ *تنبيه أمان: وردية عمل مفتوحة تجاوزت 15 ساعة دون انصراف* ⚠️
+━━━━━━━━━━━━━━━━━━━━━━
+👤 *الموظف:* {employee_name}
+🏢 *الفرع:* {branch_name}
+🕒 *وقت وتاريخ الدخول:* {start_time} | {start_date}
+⏳ *ساعات العمل المنقضية:* {elapsed_hours}
+━━━━━━━━━━━━━━━━━━━━━━
+⚠️ نرجو التكرم بالتأكد من تسجيل بصمة الانصراف أو إغلاق الوردية يدوياً منعاً للإغلاق التلقائي بصمام الأمان بعد 20 ساعة.
 🏛️ _{company_name}_`
 };
 
@@ -900,10 +941,11 @@ export function getPreviousDateStr(dateStr) {
 }
 
 // 🗓️ دالة استخراج تفاصيل اليوم المقررة للموظف لمعرفة هل هو راحة أسبوعية أو إجازة أو وردية
-export function getEmployeeScheduledDayDetails(empObj, dateStr, stateData) {
+export function getEmployeeScheduledDayDetails(empObj, dateStr, stateData, targetBranchId = null) {
   if (!empObj || !dateStr) return { isOff: false, hours: 8, start: '09:00', end: '17:00' };
   const empId = String(empObj.id || '');
   const empCode = String(empObj.code || '');
+  const targetBIdStr = targetBranchId ? String(targetBranchId).trim() : null;
 
   let arDay = '';
   try {
@@ -979,7 +1021,7 @@ export function getEmployeeScheduledDayDetails(empObj, dateStr, stateData) {
     }
   }
 
-  // 3. فحص جداول العمل المعتمدة في state.rosters
+  // 3. فحص جداول العمل المعتمدة في state.rosters مع مطابقة الفرع المستهدف
   const approvedRosters = (stateData?.rosters || []).filter(r => {
     if (!r) return false;
     const isApproved = r.status === 'approved' || r.adminApproved === true || !r.status;
@@ -991,22 +1033,48 @@ export function getEmployeeScheduledDayDetails(empObj, dateStr, stateData) {
     return false;
   });
 
+  if (approvedRosters.length > 0) {
+    approvedRosters.sort((a, b) => {
+      if (targetBIdStr) {
+        const matchA = String(a.branchId || '').trim() === targetBIdStr ? 1 : 0;
+        const matchB = String(b.branchId || '').trim() === targetBIdStr ? 1 : 0;
+        if (matchA !== matchB) return matchB - matchA;
+      }
+      const timeA = new Date(a.approvedAt || a.updatedAt || a.createdAt || 0).getTime();
+      const timeB = new Date(b.approvedAt || b.updatedAt || b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+  }
+
   for (const r of approvedRosters) {
     if (r.schedule) {
-      if (r.schedule[dateStr]) {
-        const item = r.schedule[dateStr];
-        const isOff = item.isOff || item.type === 'off';
-        return {
-          isOff,
-          type: isOff ? 'off' : 'shift',
-          start: isOff ? '' : (item.start?.slice(0, 5) || '08:00'),
-          end: isOff ? '' : (item.end?.slice(0, 5) || '16:00'),
-          hours: isOff ? 0 : parseFloat(item.hours || 8),
-          label: isOff ? 'راحة أسبوعية' : 'وردية مجدولة'
-        };
-      }
-      if (arDay && r.schedule[arDay]) {
-        const item = r.schedule[arDay];
+      const item = r.schedule[dateStr] || (arDay ? r.schedule[arDay] : null);
+      if (item) {
+        if (targetBIdStr && (item.otherBranchSecondShift || item.secondShift || item.otherBranchFirstShift)) {
+          if (item.otherBranchSecondShift && String(item.otherBranchSecondShift.branchId || '').trim() === targetBIdStr) {
+            const sItem = item.otherBranchSecondShift;
+            return {
+              isOff: false,
+              type: 'shift',
+              start: sItem.start?.slice(0, 5) || '08:00',
+              end: sItem.end?.slice(0, 5) || '16:00',
+              hours: parseFloat(sItem.hours || 6),
+              label: 'وردية مجدولة (الفرع الثاني)'
+            };
+          }
+          if (item.otherBranchFirstShift && String(item.otherBranchFirstShift.branchId || '').trim() === targetBIdStr) {
+            const fItem = item.otherBranchFirstShift;
+            return {
+              isOff: false,
+              type: 'shift',
+              start: fItem.start?.slice(0, 5) || '08:00',
+              end: fItem.end?.slice(0, 5) || '16:00',
+              hours: parseFloat(fItem.hours || 6),
+              label: 'وردية مجدولة (الفرع الأول)'
+            };
+          }
+        }
+
         const isOff = item.isOff || item.type === 'off';
         return {
           isOff,
@@ -1208,6 +1276,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
   const STORAGE_KEY = 'pharmacy-tracker-data';
 
   const alertedOfflineDevices = new Set();
+  const alerted15hShifts = new Set(); // empKey_date_time -> true
   let cdataProcessingQueue = Promise.resolve();
   // 🛰️ ذاكرة التتبع الجغرافي للموظفين بين الأجهزة لكشف التنقل المستحيل
   const employeeLastDevicePunch = new Map(); // empId -> { serial, branchId, branchName, epoch, timeStr }
@@ -1374,8 +1443,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       const now = Date.now();
 
       // 🧹 1. فحص سلامة الورديات المفتوحة (Shift Safety Sweeper)
-      // إغلاق أي وردية نشطة تجاوزت صمام الأمان الموحد (24 ساعة كاملة) بدون انصراف
-      const maxSafetyHours = Math.max(24, parseFloat(alertConfig.shiftMaxHoursSafetyValve) || 24);
+      // إغلاق أي وردية نشطة تجاوزت صمام الأمان الموحد (20 ساعة كاملة) بدون انصراف
+      const maxSafetyHours = Math.max(20, parseFloat(alertConfig.shiftMaxHoursSafetyValve) || 20);
       const activeShiftsMap = { ...(state?.activeShifts || {}) };
       const activeKeys = Object.keys(activeShiftsMap);
       let sweptCount = 0;
@@ -1396,7 +1465,42 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           const elapsedMins = calculatePunchMinutesDiff(sDate, sTime, todayStr, nowTimeStr);
           const elapsedHours = elapsedMins / 60;
 
-          // 🛡️ صمام الأمان الذكي الموحد: إغلاق تلقائي موحد لأي وردية بعد 24 ساعة كاملة
+          // ⚠️ تنبيه واتساب الذكي التلقائي للورديات المفتوحة التي تجاوزت 15 ساعة مع ذكر عدد ساعات العمل بدقة
+          if (elapsedHours >= 15 && elapsedHours < maxSafetyHours) {
+            const shiftAlertKey = `${empKey}_${sDate}_${sTime}`;
+            if (!alerted15hShifts.has(shiftAlertKey)) {
+              alerted15hShifts.add(shiftAlertKey);
+              const empObj = employeesList.find(e => String(e.id) === String(empKey) || String(e.code) === String(empKey));
+              const empName = empObj?.name || aShift.employeeName || `موظف #${empKey}`;
+              const branchName = aShift.branchName || (state?.branches || []).find(b => isBranchMatch(aShift.branchId, b))?.name || 'الفرع';
+              const exactHours = Math.floor(elapsedHours);
+              const exactMins = Math.round(elapsedMins % 60);
+              const elapsedDurationStr = `${exactHours} ساعة و ${exactMins} دقيقة (${elapsedHours.toFixed(1)} س)`;
+
+              console.log(`[Watchdog 15h Alert] ⏰ تنبيه: وردية الموظف ${empName} في ${branchName} مفتوحة منذ ${elapsedDurationStr}`);
+
+              await dispatchWatchdogWhatsAppAlert('open_shift_15h_warning', {
+                employee_name: empName,
+                branch_name: branchName,
+                start_time: sTime,
+                start_date: sDate,
+                elapsed_hours: elapsedDurationStr,
+                company_name: org.companyName || org.orgName || 'مجموعة الصيدليات'
+              }, state).catch(err => console.warn('[15h WhatsApp Alert Error]:', err.message));
+
+              io.emit('attendance:open_shift_15h_warning', {
+                employeeId: empKey,
+                employeeName: empName,
+                branchName,
+                startTime: sTime,
+                startDate: sDate,
+                elapsedHours,
+                elapsedDurationStr
+              });
+            }
+          }
+
+          // 🛡️ صمام الأمان الذكي الموحد: إغلاق تلقائي موحد لأي وردية بعد 20 ساعة كاملة
           const shouldSweep = elapsedHours >= maxSafetyHours;
           if (shouldSweep) {
             const empObj = employeesList.find(e => String(e.id) === String(empKey) || String(e.code) === String(empKey));
@@ -1451,12 +1555,13 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
                 regularHours: (shiftsList[shiftIdx].regularHours && shiftsList[shiftIdx].regularHours > 0) ? shiftsList[shiftIdx].regularHours : finalHours,
                 isLiveActive: false,
                 status: 'completed',
-                statusLabel: 'حضور مكتمل (صمام الأمان - 24 ساعة)',
+                statusLabel: 'حضور مكتمل (صمام الأمان - 20 ساعة)',
                 notes: ((shiftsList[shiftIdx].notes || '') + ` [أغلقت بواسطة صمام الأمان لتجاوز ${maxSafetyHours} ساعة بدون انصراف - نهاية الجدول: ${finalOutTime}]`).trim()
               };
             }
 
             delete activeShiftsMap[empKey];
+            alerted15hShifts.delete(`${empKey}_${sDate}_${sTime}`);
             sweptEmpIds.add(String(empKey));
             if (empObj?.id) sweptEmpIds.add(String(empObj.id));
             if (empObj?.code) sweptEmpIds.add(String(empObj.code));
@@ -2819,11 +2924,11 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           // 🛡️ الحد الأدنى لمنع البصمة المزدوجة السريعة العرضية (Anti-Bounce: دقيقتين)
           const minCheckoutMins = parseFloat(alertConfig.minCheckoutMinutes) || 2;
 
-          // 🛡️ صمام الأمان للورديات المتروكة التي لم يغلقها الموظف إطلاقاً (24 ساعة كاملة)
-          // لا يتم إنهاء الوردية حتى بعد منتصف الليل إلا ببصمة الخروج الخاصة به؛ فقط إذا مرت 24 ساعة كاملة
-          const maxShiftHours = Math.max(24, parseFloat(alertConfig.shiftMaxHoursSafetyValve) || 24);
+          // 🛡️ صمام الأمان للورديات المتروكة التي لم يغلقها الموظف إطلاقاً (20 ساعة كاملة)
+          // لا يتم إنهاء الوردية حتى بعد منتصف الليل إلا ببصمة الخروج الخاصة به؛ فقط إذا مرت 20 ساعة كاملة
+          const maxShiftHours = Math.max(20, parseFloat(alertConfig.shiftMaxHoursSafetyValve) || 20);
 
-          // 1. إذا تجاوزت الوردية 24 ساعة كاملة دون أي انصراف: تغلق الوردية السابقة وتبدأ وردية حضور جديدة
+          // 1. إذا تجاوزت الوردية 20 ساعة كاملة دون أي انصراف: تغلق الوردية السابقة وتبدأ وردية حضور جديدة
           if (shiftDurationHours >= maxShiftHours) {
             console.log(`[Biometric Resolver] ⏱️ صمام الأمان للورديات المتروكة: وردية الموظف ${matchedEmpName} تجاوزت ${maxShiftHours} ساعة (${shiftDurationHours.toFixed(1)} س) - تغلق للمراجعة ويبدأ حضور جديد.`);
             if (openShiftIdx >= 0) {
@@ -2917,14 +3022,31 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
 
           console.log(`[Biometric Resolver] 🕒 تعيين اليوم التشغيلي للموظف ${matchedEmpName}: تاريخ البصمة=${datePart} ${timePart} ➔ تاريخ الوردية=${operationalShiftDate} [${overnightRes.reason}]`);
 
-          // 🛡️ درع فحص ومنع تكرار الورديات في نفس اليوم التشغيلي (Deduplication Shield)
+          // 🛡️ درع فحص ومنع تكرار الورديات في نفس اليوم التشغيلي لنفس الفرع (Deduplication Shield)
           const existingSameDayIdx = currentShifts.findIndex(s =>
             possibleEmpKeys.some(k => String(s.employeeId) === String(k) || (s.employeeCode && String(s.employeeCode) === String(k))) &&
-            s.date === operationalShiftDate
+            s.date === operationalShiftDate &&
+            (
+              !effectiveShiftBranchId || !s.branchId ||
+              String(s.branchId).trim() === String(effectiveShiftBranchId).trim() ||
+              (s.branchName && effectiveBranchName && s.branchName.trim() === effectiveBranchName.trim())
+            )
           );
 
           // 🛡️ توليد معرف جديد فريد دائماً لعدم مسح أو استبدال أي وردية سابقة
           const newShiftId = `shift_${matchedEmpId}_${punchEpoch}`;
+          const inSchedDetails = getEmployeeScheduledDayDetails(matchedEmpObj, operationalShiftDate, state, effectiveShiftBranchId);
+          const inSchedStart = (!inSchedDetails?.isOff && inSchedDetails?.start) ? inSchedDetails.start : undefined;
+          const inSchedEnd = (!inSchedDetails?.isOff && inSchedDetails?.end) ? inSchedDetails.end : undefined;
+          let inLateMinutes = 0;
+          if (inSchedStart && timePart) {
+            const [sH, sM] = inSchedStart.split(':').map(Number);
+            const [tH, tM] = timePart.split(':').map(Number);
+            if (!isNaN(sH) && !isNaN(tH)) {
+              inLateMinutes = Math.max(0, (tH * 60 + (tM || 0)) - (sH * 60 + (sM || 0)));
+            }
+          }
+
           shiftRecord = {
             id: newShiftId,
             employeeId: matchedEmpId,
@@ -2937,6 +3059,10 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             isOvernight,
             timeIn: timePart,
             timeOut: '',
+            scheduledStart: inSchedStart,
+            scheduledEnd: inSchedEnd,
+            scheduledHours: inSchedDetails?.hours || parseFloat(matchedEmpObj?.workHoursPerDay || 8),
+            lateMinutes: inLateMinutes > 0 ? inLateMinutes : undefined,
             branchId: effectiveShiftBranchId,
             branchName: effectiveBranchName,
             actualBranchId: physicalBranchId || effectiveShiftBranchId,
@@ -2999,7 +3125,8 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             } else if (existingSameDay.timeOut && existingSameDay.timeOut !== '—' && existingSameDay.timeOut !== 'قيد العمل الآن') {
               // 2. إذا كانت الوردية السابقة مغلقة بالفعل والبصمة قريبة جداً (أقل من 60 دقيقة من الخروج):
               const diffFromPrevOutMins = calculatePunchMinutesDiff(operationalShiftDate, existingSameDay.timeOut, datePart, timePart);
-              if (diffFromPrevOutMins >= 0 && diffFromPrevOutMins <= 60) {
+              const isSameBranchAsPrev = (!existingSameDay.branchId || !effectiveShiftBranchId || String(existingSameDay.branchId).trim() === String(effectiveShiftBranchId).trim());
+              if (isSameBranchAsPrev && !isCrossBranch && diffFromPrevOutMins >= 0 && diffFromPrevOutMins <= 60) {
                 console.log(`[Biometric Deduplication] 🛡️ امتصاص بصمة انصراف متأخر وتحديث الوردية القائمة (${existingSameDay.timeOut} ➔ ${timePart}) بدلاً من تكرار ورديات اليوم.`);
                 existingSameDay.timeOut = timePart;
                 existingSameDay.timeOutDate = datePart;
@@ -3207,8 +3334,60 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             calcHours = Math.max(0, Math.round((rawElapsed - bHours) * 100) / 100);
           }
 
-          const schedH = parseFloat(origShift?.scheduledHours || matchedEmpObj?.workHoursPerDay || matchedEmpObj?.workHours || 8);
-          const regHours = Math.min(calcHours, schedH);
+          // 🌟 حساب الساعات المجدولة والوقت الإضافي وفق القواعد الدقيقة:
+          // 1) إذا كان الموظف مسجلاً في ملفه كـ "مواعيد متغيرة / ليس له جدول شهري" (noMonthlySchedule):
+          //    يتم احتساب الساعات المجدولة والإضافي حصراً من ساعات عمل الملف الشخصي (workHoursPerDay).
+          // 2) إذا كان للموظف جدول شهري معتمد:
+          //    يتم فحص موعد الوردية في الجدول لهذا اليوم (وإذا كان راحة أسبوعية مجدولة يعتبر العمل كله إضافياً 100%).
+          const isFlexibleSchedule = Boolean(
+            matchedEmpObj?.noMonthlySchedule ||
+            matchedEmpObj?.hasVariableSchedule ||
+            matchedEmpObj?.isFlexibleSchedule ||
+            matchedEmpObj?.scheduleType === 'flexible'
+          );
+
+          let schedH = parseFloat(origShift?.scheduledHours);
+          let isScheduledOff = false;
+
+          if (isFlexibleSchedule) {
+            // الموظفون ذوو المواعيد المتغيرة: لا يعتمد على الروستر بل على ساعات الملف الشخصي
+            schedH = parseFloat(matchedEmpObj?.workHoursPerDay || matchedEmpObj?.workHours || 8);
+          } else {
+            if (isNaN(schedH) || schedH === undefined || schedH === null) {
+              const targetMonth = (effectiveDate || datePart).slice(0, 7);
+              const empRoster = (state?.rosters || []).find(r =>
+                r && (String(r.employeeId) === String(matchedEmpId) || (matchedEmpObj?.code && String(r.employeeCode) === String(matchedEmpObj.code))) &&
+                (r.month === targetMonth || (!r.month && (!r.fromDate || r.fromDate.slice(0, 7) === targetMonth))) &&
+                r.status !== 'rejected' && r.status !== 'cancelled'
+              );
+
+              if (empRoster?.schedule) {
+                const dayEntry = empRoster.schedule[effectiveDate];
+                if (dayEntry) {
+                  if (dayEntry.isOff || dayEntry.type === 'off') {
+                    isScheduledOff = true;
+                    schedH = 0;
+                  } else if (dayEntry.start && dayEntry.end) {
+                    const [sH, sM] = String(dayEntry.start).split(':').map(Number);
+                    const [eH, eM] = String(dayEntry.end).split(':').map(Number);
+                    if (!isNaN(sH) && !isNaN(eH)) {
+                      let diffM = (eH * 60 + (eM || 0)) - (sH * 60 + (sM || 0));
+                      if (diffM < 0) diffM += 24 * 60;
+                      schedH = Math.round((diffM / 60) * 100) / 100;
+                    }
+                  } else if (dayEntry.hours) {
+                    schedH = parseFloat(dayEntry.hours) || 8;
+                  }
+                }
+              }
+            }
+          }
+
+          if (isNaN(schedH) || schedH === undefined || schedH === null) {
+            schedH = parseFloat(matchedEmpObj?.workHoursPerDay || matchedEmpObj?.workHours || 8);
+          }
+
+          const regHours = isScheduledOff ? 0 : Math.min(calcHours, schedH);
           const otHours = Math.max(0, Math.round((calcHours - regHours) * 100) / 100);
           const isOtApproved = Boolean(origShift?.overtimeStatus === 'approved' || origShift?.adminApproved || origShift?.isAdminCreated);
           const otStatus = isOtApproved ? 'approved' : (otHours > 0 ? 'pending' : 'none');
@@ -3217,6 +3396,19 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             ? (origShift?.notes ? `${origShift.notes} | ${forgottenBreakNote}` : forgottenBreakNote)
             : (origShift?.notes || '')
           ).trim();
+
+          const outSchedDetails = getEmployeeScheduledDayDetails(matchedEmpObj, effectiveDate, state, origShift?.branchId || effectiveShiftBranchId);
+          const outSchedStart = origShift?.scheduledStart || ((!outSchedDetails?.isOff && outSchedDetails?.start) ? outSchedDetails.start : undefined);
+          const outSchedEnd = origShift?.scheduledEnd || ((!outSchedDetails?.isOff && outSchedDetails?.end) ? outSchedDetails.end : undefined);
+          let shiftLateMins = origShift?.lateMinutes;
+          if ((shiftLateMins === undefined || shiftLateMins === null) && outSchedStart && inTime) {
+            const [sH, sM] = outSchedStart.split(':').map(Number);
+            const [tH, tM] = inTime.split(':').map(Number);
+            if (!isNaN(sH) && !isNaN(tH)) {
+              const diff = (tH * 60 + (tM || 0)) - (sH * 60 + (sM || 0));
+              if (diff > 0) shiftLateMins = diff;
+            }
+          }
 
           let closedRecord = {
             ...(origShift || {}),
@@ -3237,6 +3429,9 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             timeIn: inTime,
             timeOut: outTime,
             timeOutDate: datePart,
+            scheduledStart: outSchedStart,
+            scheduledEnd: outSchedEnd,
+            lateMinutes: shiftLateMins,
             punchOutBranchId: physicalBranchId || effectiveShiftBranchId,
             punchOutBranchName: physicalBranchName,
             hours: calcHours,
@@ -5485,10 +5680,12 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
   // 13.1 تنزيل ملفات وحزمة تهيئة الفلاشة السريعة للماكينة (USB Quick Config) مع التسجيل التلقائي في النظام
   app.get('/api/biometrics/devices/:serialNumber/usb-config', async (req, res) => {
     try {
-      const { serialNumber } = req.params;
-      const hostUrl = 'http://63-183-147-199.sslip.io';
-      const serverIp = '63.183.147.199';
-      const port = 80;
+      const reqHost = req.headers['x-forwarded-host'] || req.headers.host || '';
+      const serverIp = (reqHost.includes('169.58.214.20') || reqHost.includes('169-58-214-20'))
+        ? '169.58.214.20'
+        : (process.env.PUBLIC_IP || '169.58.214.20');
+      const hostUrl = `http://${serverIp}:5000`;
+      const port = 5000;
 
       // تسجيل الماكينة تلقائياً في قاعدة بيانات النظام والسحابة إذا لم تكن مسجلة مسبقاً
       try {
@@ -5520,6 +5717,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         serverIp,
         serverPort: port,
         serverUrl: hostUrl,
+        backupServerIp: '63.183.147.199',
         files: {
           'zkhost.cfg': zkhostContent,
           'sys.cfg': sysContent,
@@ -5532,7 +5730,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
           'انسخ الملفات الناتجة (zkhost.cfg و sys.cfg و options.cfg) إلى فلاشة USB مفورمتة بنظام FAT32.',
           'قم بتوصيل الفلاشة بمنفذ USB الخاص بماكينة البصمة (ZKTeco MB20).',
           'على شاشة الماكينة: اضغط M/OK للدخول للقائمة > إدارة USB (USB Mgt) > قراءة/استيراد التهيئة.',
-          'أو يدوياً في 30 ثانية: ادخل القائمة > الاتصال (Comm.) > خادم السحابة (Cloud Server / ADMS) واكتب عنوان الخادم: 63.183.147.199 والمنفذ: 80 وسيتصل فوراً!'
+          'أو يدوياً في 30 ثانية: ادخل القائمة > الاتصال (Comm.) > خادم السحابة (Cloud Server / ADMS) واكتب عنوان الخادم: 169.58.214.20 والمنفذ: 5000 (أو 80) وسيتصل فوراً!'
         ]
       });
     } catch (err) {
@@ -5773,6 +5971,437 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
       res.status(500).json({ success: false, error: err.message });
     }
   });
+
+  // ── 17. مسارات وحركات الانتداب والنقل التلقائي بين الفروع (Employee Secondments & Branch IoT Automation) ───
+
+  // دالة مساعدة لدفع البصمات لماكينة الفرع المنتدب إليه
+  async function dispatchSecondmentToDevices({ employeeId, targetBranchId, secondmentId }) {
+    try {
+      const devQ = await db.query('SELECT serial_number FROM public.biometric_devices WHERE branch_id = $1 AND is_active = TRUE', [String(targetBranchId)]);
+      const devices = devQ.rows || [];
+      if (devices.length === 0) return { dispatched: 0 };
+
+      const state = await getSettingsFromStorage(STORAGE_KEY).catch(() => ({}));
+      const employees = Array.isArray(state?.employees) ? state.employees : [];
+      const emp = employees.find(e => String(e.id) === String(employeeId) || (e.code && String(e.code) === String(employeeId)));
+      const pin = emp?.code || emp?.deviceUserPin || employeeId;
+      const cleanName = (emp?.name || `Emp ${pin}`).slice(0, 24);
+
+      let dispatchedCount = 0;
+      for (const dev of devices) {
+        const sn = dev.serial_number;
+        const now = Date.now();
+        // 1. أمر إنشاء المستخدم وتفعيله
+        const cmdUser = `C:${now}:DATA UPDATE USERINFO PIN=${pin}\tName=${cleanName}\tPri=0\tPasswd=\tCard=\tGrp=1\tTZ=0000000100000000\tDisable=0\tVerify=0`;
+        queueDeviceCommand(sn, cmdUser, 'SECONDMENT_USER_ENABLE');
+
+        // 2. سحب قوالب البصمة ودفعها
+        const tplsQ = await db.query(
+          'SELECT * FROM public.biometric_templates WHERE employee_id = $1 OR device_user_pin = $2 LIMIT 10',
+          [String(employeeId), String(pin)]
+        );
+
+        (tplsQ.rows || []).forEach((t, i) => {
+          if (t.template_type === 'FINGERPRINT') {
+            queueDeviceCommand(sn, `C:${now + 10 + i}:DATA UPDATE BIODATA Pin=${pin}\tNo=0\tIndex=${t.finger_id}\tValid=1\tDuress=0\tType=1\tMajorVer=${t.major_ver || '10'}\tMinorVer=0\tFormat=0\tTmp=${t.template_data}`, 'SECONDMENT_FP_BIO');
+            queueDeviceCommand(sn, `C:${now + 50 + i}:DATA UPDATE FINGERTMP PIN=${pin}\tFID=${t.finger_id}\tSize=${t.size || t.template_data.length}\tValid=1\tTMP=${t.template_data}`, 'SECONDMENT_FP_TMP');
+          } else if (t.template_type === 'FACE') {
+            queueDeviceCommand(sn, `C:${now + 100 + i}:DATA UPDATE BIODATA Pin=${pin}\tNo=0\tIndex=0\tValid=1\tDuress=0\tType=9\tMajorVer=7\tMinorVer=0\tFormat=0\tTmp=${t.template_data}`, 'SECONDMENT_FACE_BIO');
+          }
+        });
+
+        // 3. توثيق في biometric_device_users
+        await db.query(
+          `INSERT INTO public.biometric_device_users 
+           (device_serial, employee_id, device_user_pin, display_name, privilege, verify_mode, is_active, sync_status, updated_at)
+           VALUES ($1, $2, $3, $4, 0, 0, TRUE, 'SECONDED', CURRENT_TIMESTAMP)
+           ON CONFLICT (device_serial, device_user_pin) DO UPDATE SET
+             employee_id = EXCLUDED.employee_id,
+             display_name = EXCLUDED.display_name,
+             is_active = TRUE,
+             sync_status = 'SECONDED',
+             updated_at = CURRENT_TIMESTAMP`,
+          [sn, String(employeeId), String(pin), cleanName]
+        );
+
+        dispatchedCount++;
+      }
+
+      if (io) {
+        devices.forEach(d => io.emit('biometric:device_users_updated', { serialNumber: d.serial_number }));
+      }
+      return { dispatched: dispatchedCount };
+    } catch (e) {
+      console.error('Error dispatching secondment biometrics:', e);
+      return { dispatched: 0, error: e.message };
+    }
+  }
+
+  // دالة مساعدة لتعطيل الموظف في أجهزة الفرع بعد انتهاء الانتداب
+  async function revokeSecondmentFromDevices({ employeeId, targetBranchId }) {
+    try {
+      const devQ = await db.query('SELECT serial_number FROM public.biometric_devices WHERE branch_id = $1', [String(targetBranchId)]);
+      const devices = devQ.rows || [];
+      if (devices.length === 0) return { revoked: 0 };
+
+      const state = await getSettingsFromStorage(STORAGE_KEY).catch(() => ({}));
+      const employees = Array.isArray(state?.employees) ? state.employees : [];
+      const emp = employees.find(e => String(e.id) === String(employeeId) || (e.code && String(e.code) === String(employeeId)));
+      const pin = emp?.code || emp?.deviceUserPin || employeeId;
+      const blockedScreenName = `OFF_${pin}`.slice(0, 24);
+
+      let revokedCount = 0;
+      for (const dev of devices) {
+        const sn = dev.serial_number;
+        const now = Date.now();
+        // أمر إيقاف الوصول للجهاز
+        const cmdDisable = `C:${now}:DATA UPDATE USERINFO PIN=${pin}\tName=${blockedScreenName}\tPri=0\tPasswd=LOCK_9999\tCard=99999999\tGrp=0\tTZ=0000000000000000\tDisable=1\tVerify=4`;
+        queueDeviceCommand(sn, cmdDisable, 'USER_DISABLE');
+
+        await db.query(
+          `UPDATE public.biometric_device_users 
+           SET is_active = FALSE, sync_status = 'REVOKED', verify_mode = 4, updated_at = CURRENT_TIMESTAMP
+           WHERE device_serial = $1 AND device_user_pin = $2`,
+          [sn, String(pin)]
+        );
+        revokedCount++;
+      }
+
+      if (io) {
+        devices.forEach(d => io.emit('biometric:device_users_updated', { serialNumber: d.serial_number }));
+      }
+      return { revoked: revokedCount };
+    } catch (e) {
+      console.error('Error revoking secondment biometrics:', e);
+      return { revoked: 0, error: e.message };
+    }
+  }
+
+  // 17.1 جلب قائمة الانتدابات
+  app.get('/api/secondments', async (req, res) => {
+    try {
+      const q = await db.query('SELECT * FROM public.employee_secondments ORDER BY created_at DESC');
+      res.json({ success: true, secondments: q.rows || [] });
+    } catch (err) {
+      try {
+        const state = await getSettingsFromStorage(STORAGE_KEY);
+        res.json({ success: true, secondments: state?.secondments || [] });
+      } catch (stateErr) {
+        res.status(500).json({ success: false, error: err.message });
+      }
+    }
+  });
+
+  // 17.2 إنشاء انتداب أو نقل موظف جديد
+  app.post('/api/secondments', async (req, res) => {
+    try {
+      const body = req.body || {};
+      const {
+        employeeId,
+        homeBranchId,
+        targetBranchId,
+        assignmentType = 'temporary',
+        startDate,
+        endDate = null,
+        scheduleType = 'variable',
+        schedule = null,
+        hourlyRate = 0,
+        secondmentAllowance = 0,
+        allowanceType = 'monthly',
+        reason = '',
+        notes = '',
+        autoDispatchBiometrics = true
+      } = body;
+
+      if (!employeeId || !targetBranchId || !startDate) {
+        return res.status(400).json({ success: false, error: 'البيانات غير مكتملة (الموظف، الفرع المستهدف، وتاريخ البدء إلزامية)' });
+      }
+
+      const state = await getSettingsFromStorage(STORAGE_KEY);
+      const employees = state.employees || [];
+      const branches = state.branches || [];
+
+      const emp = employees.find(e => String(e.id) === String(employeeId) || (e.code && String(e.code) === String(employeeId)));
+      if (!emp) {
+        return res.status(404).json({ success: false, error: 'الموظف غير موجود بالنظام' });
+      }
+
+      const hBranch = branches.find(b => String(b.id) === String(homeBranchId || emp.branchId));
+      const tBranch = branches.find(b => String(b.id) === String(targetBranchId));
+      const targetBName = tBranch?.name || 'الفرع المستهدف';
+      const homeBName = hBranch?.name || emp.branchName || 'الفرع الأساسي';
+
+      const secId = `sec_${Date.now()}_${emp.id}`;
+
+      // إذا كان نقل نهائي (Permanent Transfer)
+      if (assignmentType === 'permanent_transfer') {
+        const updatedEmployees = employees.map(e => {
+          if (String(e.id) === String(emp.id)) {
+            return {
+              ...e,
+              branchId: targetBranchId,
+              branchName: targetBName,
+              previousBranchId: e.branchId,
+              previousBranchName: e.branchName,
+              transferredAt: new Date().toISOString()
+            };
+          }
+          return e;
+        });
+
+        const newSecDoc = {
+          id: secId,
+          employeeId: emp.id,
+          employeeCode: emp.code,
+          employeeName: emp.name,
+          homeBranchId: hBranch?.id || emp.branchId,
+          homeBranchName: homeBName,
+          targetBranchId,
+          targetBranchName: targetBName,
+          assignmentType: 'permanent_transfer',
+          startDate,
+          endDate: null,
+          scheduleType: 'fixed',
+          reason: reason || 'نقل نهائي إلى الفرع',
+          notes,
+          status: 'TRANSFERRED',
+          createdAt: new Date().toISOString()
+        };
+
+        const updatedSecondments = [newSecDoc, ...(state.secondments || [])];
+        state.employees = updatedEmployees;
+        state.secondments = updatedSecondments;
+        await saveSettingsToStorage(STORAGE_KEY, state, 'permanent-transfer');
+
+        try {
+          await db.query(
+            `INSERT INTO public.employee_secondments
+             (id, employee_id, employee_code, employee_name, home_branch_id, home_branch_name, target_branch_id, target_branch_name, assignment_type, start_date, end_date, schedule_type, reason, notes, status, biometric_synced)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+            [secId, String(emp.id), emp.code, emp.name, String(hBranch?.id || emp.branchId), homeBName, String(targetBranchId), targetBName, 'permanent_transfer', startDate, null, 'fixed', reason, notes, 'TRANSFERRED', autoDispatchBiometrics]
+          );
+        } catch (_) {}
+
+        if (autoDispatchBiometrics) {
+          dispatchSecondmentToDevices({ employeeId: emp.id, targetBranchId, secondmentId: secId });
+        }
+
+        if (io) io.emit('entity:changed', { entityType: 'secondments', action: 'transferred', secondment: newSecDoc });
+        return res.json({ success: true, secondment: newSecDoc, message: `تم نقل الموظف نهائياً إلى ${targetBName} بنجاح` });
+      }
+
+      // إذا كان انتداباً مؤقتاً أو مفتوحاً
+      const newSecDoc = {
+        id: secId,
+        employeeId: emp.id,
+        employeeCode: emp.code,
+        employeeName: emp.name,
+        homeBranchId: hBranch?.id || emp.branchId,
+        homeBranchName: homeBName,
+        targetBranchId,
+        targetBranchName: targetBName,
+        assignmentType,
+        startDate,
+        endDate: assignmentType === 'open_ended' ? null : endDate,
+        scheduleType,
+        schedule: scheduleType === 'fixed' ? schedule : null,
+        hourlyRate: parseFloat(hourlyRate) || 0,
+        secondmentAllowance: parseFloat(secondmentAllowance) || 0,
+        allowanceType,
+        reason,
+        notes,
+        status: 'ACTIVE',
+        biometricSynced: autoDispatchBiometrics,
+        createdAt: new Date().toISOString()
+      };
+
+      let updatedRosters = [...(state.rosters || [])];
+      if (scheduleType === 'fixed' && schedule && Object.keys(schedule).length > 0) {
+        const monthKey = startDate.slice(0, 7);
+        const rosterId = `roster_sec_${emp.id}_${targetBranchId}_${monthKey}`;
+        const secRoster = {
+          id: rosterId,
+          employeeId: emp.id,
+          employeeCode: emp.code,
+          employeeName: emp.name,
+          branchId: targetBranchId,
+          branchName: targetBName,
+          month: monthKey,
+          isSecondmentRoster: true,
+          secondmentId: secId,
+          schedule,
+          status: 'approved',
+          adminApproved: true,
+          updatedAt: new Date().toISOString()
+        };
+        updatedRosters = [secRoster, ...updatedRosters.filter(r => r.id !== rosterId)];
+      }
+
+      const updatedSecondments = [newSecDoc, ...(state.secondments || []).filter(s => s.id !== secId)];
+      state.secondments = updatedSecondments;
+      state.rosters = updatedRosters;
+      await saveSettingsToStorage(STORAGE_KEY, state, 'secondment-create');
+
+      try {
+        await db.query(
+          `INSERT INTO public.employee_secondments
+           (id, employee_id, employee_code, employee_name, home_branch_id, home_branch_name, target_branch_id, target_branch_name, assignment_type, start_date, end_date, schedule_type, schedule, hourly_rate, secondment_allowance, allowance_type, reason, notes, status, biometric_synced)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+          [secId, String(emp.id), emp.code, emp.name, String(hBranch?.id || emp.branchId), homeBName, String(targetBranchId), targetBName, assignmentType, startDate, endDate, scheduleType, schedule ? JSON.stringify(schedule) : null, parseFloat(hourlyRate) || 0, parseFloat(secondmentAllowance) || 0, allowanceType, reason, notes, 'ACTIVE', autoDispatchBiometrics]
+        );
+      } catch (_) {}
+
+      if (autoDispatchBiometrics) {
+        dispatchSecondmentToDevices({ employeeId: emp.id, targetBranchId, secondmentId: secId });
+      }
+
+      if (io) io.emit('entity:changed', { entityType: 'secondments', action: 'created', secondment: newSecDoc });
+      res.json({ success: true, secondment: newSecDoc, message: `تم تسجيل انتداب الموظف إلى ${targetBName} بنجاح` });
+    } catch (err) {
+      console.error('Error creating secondment:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 17.3 إنهاء الانتداب واستدعاء الموظف لفرعه الأصلي
+  app.post('/api/secondments/recall', async (req, res) => {
+    try {
+      const { secondmentId, recallReason = '' } = req.body;
+      if (!secondmentId) {
+        return res.status(400).json({ success: false, error: 'رقم الانتداب مطلوب' });
+      }
+
+      const state = await getSettingsFromStorage(STORAGE_KEY);
+      const secondments = state.secondments || [];
+      const targetSec = secondments.find(s => String(s.id) === String(secondmentId));
+
+      if (!targetSec) {
+        return res.status(404).json({ success: false, error: 'لم يتم العثور على سجل الانتداب' });
+      }
+
+      const updatedSecondments = secondments.map(s => {
+        if (String(s.id) === String(secondmentId)) {
+          return {
+            ...s,
+            status: 'RECALLED',
+            recalledAt: new Date().toISOString(),
+            recallReason: recallReason || 'استدعاء إداري مبكر للفرع الأساسي'
+          };
+        }
+        return s;
+      });
+
+      state.secondments = updatedSecondments;
+      await saveSettingsToStorage(STORAGE_KEY, state, 'secondment-recall');
+
+      try {
+        await db.query(
+          `UPDATE public.employee_secondments
+           SET status = 'RECALLED', recalled_at = CURRENT_TIMESTAMP, recall_reason = $1, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2`,
+          [recallReason || 'استدعاء إداري مبكر', secondmentId]
+        );
+      } catch (_) {}
+
+      await revokeSecondmentFromDevices({
+        employeeId: targetSec.employeeId,
+        targetBranchId: targetSec.targetBranchId
+      });
+
+      if (io) io.emit('entity:changed', { entityType: 'secondments', action: 'recalled', secondmentId });
+      res.json({ success: true, message: 'تم استدعاء الموظف بنجاح وإيقاف صلاحية البصمة بالفرع المستضيف' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 17.4 تمديد فترة الانتداب
+  app.post('/api/secondments/extend', async (req, res) => {
+    try {
+      const { secondmentId, newEndDate, extendReason = '' } = req.body;
+      if (!secondmentId || !newEndDate) {
+        return res.status(400).json({ success: false, error: 'رقم الانتداب وتاريخ الانتهاء الجديد مطلوبان' });
+      }
+
+      const state = await getSettingsFromStorage(STORAGE_KEY);
+      const secondments = state.secondments || [];
+      const updatedSecondments = secondments.map(s => {
+        if (String(s.id) === String(secondmentId)) {
+          return {
+            ...s,
+            endDate: newEndDate,
+            assignmentType: 'temporary',
+            status: 'ACTIVE',
+            notes: (s.notes ? s.notes + ' | ' : '') + `تم التمديد حتى ${newEndDate} (${extendReason || 'قرار إداري'})`,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return s;
+      });
+
+      state.secondments = updatedSecondments;
+      await saveSettingsToStorage(STORAGE_KEY, state, 'secondment-extend');
+
+      try {
+        await db.query(
+          `UPDATE public.employee_secondments
+           SET end_date = $1, status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2`,
+          [newEndDate, secondmentId]
+        );
+      } catch (_) {}
+
+      if (io) io.emit('entity:changed', { entityType: 'secondments', action: 'extended', secondmentId, newEndDate });
+      res.json({ success: true, message: `تم تمديد الانتداب بنجاح حتى ${newEndDate}` });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 17.5 الفاحص الآلي لانتهاء فترات الانتداب (Automated Expiry Watchdog)
+  async function runSecondmentExpiryCheck() {
+    try {
+      const todayStr = getEgyptDate();
+      const q = await db.query(
+        `SELECT * FROM public.employee_secondments 
+         WHERE status = 'ACTIVE' AND assignment_type = 'temporary' AND end_date < $1`,
+        [todayStr]
+      );
+      const expiredList = q.rows || [];
+      if (expiredList.length === 0) return;
+
+      console.log(`⏱️ [Secondment Watchdog] عثر على (${expiredList.length}) انتداب منتهي الصلاحية، جاري إيقاف البصمات وإغلاق الانتداب...`);
+      for (const sec of expiredList) {
+        await revokeSecondmentFromDevices({
+          employeeId: sec.employee_id,
+          targetBranchId: sec.target_branch_id
+        });
+        await db.query(
+          `UPDATE public.employee_secondments SET status = 'EXPIRED', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          [sec.id]
+        );
+      }
+
+      const state = await getSettingsFromStorage(STORAGE_KEY).catch(() => null);
+      if (state && Array.isArray(state.secondments)) {
+        const expiredIds = new Set(expiredList.map(s => s.id));
+        state.secondments = state.secondments.map(s => {
+          if (expiredIds.has(s.id)) {
+            return { ...s, status: 'EXPIRED', updatedAt: new Date().toISOString() };
+          }
+          return s;
+        });
+        await saveSettingsToStorage(STORAGE_KEY, state, 'secondment-watchdog-expiry');
+      }
+
+      if (io) io.emit('entity:changed', { entityType: 'secondments', action: 'expired_auto', count: expiredList.length });
+    } catch (e) {
+      console.error('Error in secondment expiry check:', e.message);
+    }
+  }
+
+  setInterval(runSecondmentExpiryCheck, 30 * 60 * 1000);
+  setTimeout(runSecondmentExpiryCheck, 10000);
 
   // 17. استعلام إعدادات إشعارات واتساب للإدارة العليا والموظفين
   app.get('/api/biometrics/whatsapp-config', async (req, res) => {

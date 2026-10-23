@@ -465,7 +465,18 @@ export function initSyncEngine(getBranchIdFn = null) {
     window.addEventListener('focus', () => {
       const bId = getBranchIdFn ? getBranchIdFn() : null;
       pullDeltaSync(bId);
+      processOutbox();
     });
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          const bId = getBranchIdFn ? getBranchIdFn() : null;
+          pullDeltaSync(bId);
+          processOutbox();
+        }
+      });
+    }
   }
 
   // 2. الاستماع لإشارات WebSockets اللحظية فائقة الخفة (< 50 bytes)

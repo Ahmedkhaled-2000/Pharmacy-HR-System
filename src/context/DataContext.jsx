@@ -2,7 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import {
   STORAGE_KEY,
   WORK_DAYS_PER_MONTH,
-  WORK_HOURS_PER_DAY
+  WORK_HOURS_PER_DAY,
+  apiSaveSettingsSlice
 } from '../utils/apiClient';
 import {
   fmt,
@@ -20,14 +21,16 @@ import {
 import {
   getActivePayrollMonth,
   getCycleDateRange,
-  createDatePredicate
+  createDatePredicate,
+  reconcileCycleTerminatedBranches
 } from '../utils/periodEngine';
 import {
   smartSaveState,
   smartLoadState,
   loadLocalStateFast,
   saveStateLocally,
-  clearLocalDatabase
+  clearLocalDatabase,
+  syncNow
 } from '../utils/offlineSync';
 import {
   smartMergeStates
@@ -68,7 +71,18 @@ import {
 } from '../utils/localDatabase';
 import { emitEntityChange, subscribeToPunchRecorded, subscribeToBatchPunches, joinSyncRoom } from '../utils/socketClient';
 import { listenToLocalKioskPunches } from '../utils/kioskOutbox';
-import { computeEmployeeLoanDeductionsForPeriod } from '../utils/loansEngine';
+import { computeEmployeeLoanDeductionsForPeriod, checkAndAutoSettleExpiredPayrollLoans } from '../utils/loansEngine';
+import {
+  getAuthoritativeEmployeeRates,
+  getAuthoritativeScheduledShift,
+  getAuthoritativeShiftMetrics,
+  calculateAuthoritativeCycleSummary,
+  generateAuthoritativeAuditDossier
+} from '../utils/unifiedPayrollEngine';
+import {
+  runPayrollHealthAudit,
+  formatPayrollHealthAlertsForWhatsApp
+} from '../utils/payrollWatchdog';
 
 /**
  * كاشف التغييرات الذرية فائق السرعة
@@ -727,13 +741,31 @@ export function DataProvider({ children, showToast = () => {} }) {
       }
 
       const synced = syncAllEmployeesPermissionsAndLateness(normalized);
+
+      // 💳 صمام الخصم التلقائي لسلف وأقساط أي دورة رواتب منتهية (Auto Loan Settlement)
+      const loanAutoRes = checkAndAutoSettleExpiredPayrollLoans(synced);
+      const effectiveData = loanAutoRes.shouldUpdate ? loanAutoRes.nextState : synced;
+
+      if (loanAutoRes.shouldUpdate) {
+        apiSaveSettingsSlice('loans', effectiveData.loans).catch(() => {});
+        apiSaveSettingsSlice('requests', effectiveData.requests).catch(() => {});
+        apiSaveSettingsSlice('orgSettings', effectiveData.orgSettings).catch(() => {});
+      }
+
+      // 🔄 فحص وترحيل الفروع المنتهية وتثبيتها فور انقضاء دورتها الشهرية
+      const { updatedEmployees: rolledOverEmployees, hasChanges: branchesRolledOver } = reconcileCycleTerminatedBranches(effectiveData.employees || [], effectiveData.orgSettings || {});
+      if (branchesRolledOver) {
+        effectiveData.employees = rolledOverEmployees;
+        apiSaveSettingsSlice('employees', rolledOverEmployees).catch(() => {});
+      }
+
       setState((prev) => {
-        const mergedFinal = normalizeState(smartMergeStates(prev, synced));
+        const mergedFinal = normalizeState(smartMergeStates(prev, effectiveData));
         saveStateLocally(mergedFinal).catch(() => {});
         return mergedFinal;
       });
       setLastSyncTime(nowTimeStr());
-      syncSessionWithFreshData(synced);
+      syncSessionWithFreshData(effectiveData);
 
       // ترقية وتغذية متجر IndexedDB بالطلبات السابقة تلقائياً لدعم العمل دون اتصال
       if (Array.isArray(normalized.requests) && normalized.requests.length > 0) {
@@ -1389,7 +1421,7 @@ export function DataProvider({ children, showToast = () => {} }) {
       // 🛡️ الحصانة المطلقة لما قبل تاريخ التعيين: لا غياب إطلاقاً قبل مباشرة العمل التعاقدية
       if (hireDate && dateStr < hireDate) continue;
       const daySchedule = getEmployeeDaySchedule(empIdStr, dateStr, state);
-      if (!daySchedule || daySchedule.type === 'off' || daySchedule.isOff) continue;
+      if (!daySchedule || daySchedule.type === 'off' || daySchedule.isOff || daySchedule.variable || daySchedule.isVariable) continue;
       const hasShift = (state.shifts || []).some(s => {
         if (!s || s.date !== dateStr) return false;
         if (s.isCancelled || s.status === 'cancelled' || s.isRejectedPhoto || s.status === 'rejected_photo') return false;
@@ -1449,7 +1481,7 @@ export function DataProvider({ children, showToast = () => {} }) {
 
     let branches = [];
     if (emp.branchesDetails && emp.branchesDetails.length > 0) {
-      branches = emp.branchesDetails;
+      branches = [...emp.branchesDetails];
     } else {
       branches = [{
         branchId: emp.branchId || 'main',
@@ -1459,6 +1491,17 @@ export function DataProvider({ children, showToast = () => {} }) {
         breakHours: emp.breakHours || emp.defaultBreakHours || 0
       }];
     }
+
+    const isEmpMatchGlobal = (targetId, targetCode) => {
+      const tId = String(targetId || '');
+      const tCode = String(targetCode || '');
+      const eId = String(emp.id || empId || '');
+      const eCode = String(emp.code || '');
+      return (
+        (eId && (tId === eId || tCode === eId)) ||
+        (eCode && (tId === eCode || tCode === eCode))
+      );
+    };
 
     const isTargetFilterActive = Boolean(targetBranchId);
     if (isTargetFilterActive) {
@@ -1490,6 +1533,98 @@ export function DataProvider({ children, showToast = () => {} }) {
           }];
         }
       }
+
+      // 🔀 فحص ما إذا كان الموظف منتدباً لهذا الفرع المستهدف
+      const matchingSec = (state.secondments || []).find(sec =>
+        sec && sec.status === 'ACTIVE' &&
+        isEmpMatchGlobal(sec.employeeId, sec.employeeCode) &&
+        isBranchMatch(sec.targetBranchId, targetBranchObj)
+      );
+      if (matchingSec) {
+        const defaultDetail = branches[0] || {};
+        const hourlyRateOverride = parseFloat(matchingSec.hourlyRate) || null;
+        const secSalary = hourlyRateOverride
+          ? hourlyRateOverride * (defaultDetail.workHoursPerDay || WORK_HOURS_PER_DAY) * (defaultDetail.workDaysPerMonth || WORK_DAYS_PER_MONTH)
+          : (defaultDetail.salary || emp.salary || 0);
+        branches = [{
+          branchId: targetBranchId,
+          salary: secSalary,
+          hourlyRateOverride,
+          secondmentAllowance: parseFloat(matchingSec.allowance) || 0,
+          workHoursPerDay: defaultDetail.workHoursPerDay || defaultDetail.workHours || WORK_HOURS_PER_DAY,
+          workDaysPerMonth: defaultDetail.workDaysPerMonth || defaultDetail.workDays || WORK_DAYS_PER_MONTH,
+          breakHours: defaultDetail.breakHours || 0,
+          isSecondment: true,
+          secondmentId: matchingSec.id,
+          secondmentScheduleType: matchingSec.scheduleType || 'variable'
+        }];
+      }
+    } else {
+      // 🏢 عند عدم تحديد فرع معين (الحساب الشامل للدورة / كشف الراتب العام):
+      // حصر ديناميكي شامل لكافة الفروع التي عمل بها الموظف (سواء فروع معينة رسمياً أو فروع غطاها الموظف بورديات فعلية)
+      const defaultDetail = branches[0] || {};
+      const empShiftsInPeriod = (state.shifts || []).filter(s => {
+        if (!s || !s.date || !effectiveFilterFn(s.date)) return false;
+        if (s.status === 'cancelled' || s.status === 'rejected' || s.isCancelled) return false;
+        return isEmpMatchGlobal(s.employeeId, s.employeeCode);
+      });
+
+      empShiftsInPeriod.forEach(s => {
+        if (!s.branchId) return;
+        const alreadyInBranches = branches.some(b => isBranchMatch(b.branchId, { id: s.branchId, name: s.branchName }));
+        if (!alreadyInBranches) {
+          const matchingBranchObj = allBranchesList.find(br => isBranchMatch(s.branchId, br));
+          const canonicalBId = matchingBranchObj ? matchingBranchObj.id : s.branchId;
+          if (!branches.some(b => String(b.branchId) === String(canonicalBId))) {
+            branches.push({
+              branchId: canonicalBId,
+              salary: defaultDetail.salary || emp.salary || 0,
+              workHoursPerDay: defaultDetail.workHoursPerDay || defaultDetail.workHours || WORK_HOURS_PER_DAY,
+              workDaysPerMonth: defaultDetail.workDaysPerMonth || defaultDetail.workDays || WORK_DAYS_PER_MONTH,
+              breakHours: defaultDetail.breakHours || 0,
+              isRoaming: true
+            });
+          }
+        }
+      });
+
+      // 🔀 حصر أي فروع منتدب إليها الموظف خلال الدورة
+      (state.secondments || []).forEach(sec => {
+        if (!sec || sec.status !== 'ACTIVE') return;
+        if (!isEmpMatchGlobal(sec.employeeId, sec.employeeCode)) return;
+        const secBId = sec.targetBranchId;
+        if (!secBId) return;
+        const matchingBranchObj = allBranchesList.find(br => isBranchMatch(secBId, br));
+        const canonicalBId = matchingBranchObj ? matchingBranchObj.id : secBId;
+        const hourlyRateOverride = parseFloat(sec.hourlyRate) || null;
+        const existingIndex = branches.findIndex(b => isBranchMatch(b.branchId, { id: canonicalBId }));
+        if (existingIndex >= 0) {
+          branches[existingIndex] = {
+            ...branches[existingIndex],
+            isSecondment: true,
+            secondmentId: sec.id,
+            secondmentScheduleType: sec.scheduleType || 'variable',
+            hourlyRateOverride: hourlyRateOverride || branches[existingIndex].hourlyRateOverride,
+            secondmentAllowance: (parseFloat(sec.allowance) || 0) + (branches[existingIndex].secondmentAllowance || 0)
+          };
+        } else {
+          const secSalary = hourlyRateOverride
+            ? hourlyRateOverride * (defaultDetail.workHoursPerDay || WORK_HOURS_PER_DAY) * (defaultDetail.workDaysPerMonth || WORK_DAYS_PER_MONTH)
+            : (defaultDetail.salary || emp.salary || 0);
+          branches.push({
+            branchId: canonicalBId,
+            salary: secSalary,
+            hourlyRateOverride,
+            secondmentAllowance: parseFloat(sec.allowance) || 0,
+            workHoursPerDay: defaultDetail.workHoursPerDay || defaultDetail.workHours || WORK_HOURS_PER_DAY,
+            workDaysPerMonth: defaultDetail.workDaysPerMonth || defaultDetail.workDays || WORK_DAYS_PER_MONTH,
+            breakHours: defaultDetail.breakHours || 0,
+            isSecondment: true,
+            secondmentId: sec.id,
+            secondmentScheduleType: sec.scheduleType || 'variable'
+          });
+        }
+      });
     }
 
     let totalHours = 0;
@@ -1512,7 +1647,12 @@ export function DataProvider({ children, showToast = () => {} }) {
         breakHours: b.breakHours || 0
       });
 
-      const { dailyRate, hourlyRate: rate, monthlySalary } = rates;
+      let { dailyRate, hourlyRate: rate, monthlySalary } = rates;
+      if (b.hourlyRateOverride) {
+        rate = b.hourlyRateOverride;
+        dailyRate = rate * (parseFloat(b.workHoursPerDay || b.workHours) || 8);
+        monthlySalary = dailyRate * (parseFloat(b.workDaysPerMonth || b.workDays) || 26);
+      }
 
       const isEmpMatch = (targetId, targetCode) => {
         const tId = String(targetId || '');
@@ -1540,39 +1680,56 @@ export function DataProvider({ children, showToast = () => {} }) {
         return isBranchMatch(primaryBId, bObj);
       });
 
-      // 🛡️ صمام الأمان المالي لمنع ازدواج صرف الراتب لنفس اليوم نهائياً (Daily Shift Deduplication Guard for Payroll):
-      const canonicalShiftByDate = new Map();
+      // 🛡️ صمام الأمان المالي لمنع ازدواج صرف الراتب مع دعم كامل للورديات المنفصلة (Smart Shift Deduplication for Payroll):
+      // يسمح بعدة ورديات في نفس اليوم للموظف (كوردية صباحية ومسائية) ويدمج فقط السجلات المكررة لنفس الوردية
+      const getShiftMinutes = (t) => {
+        if (!t) return null;
+        const [h, m] = String(t).slice(0, 5).split(':').map(Number);
+        return isNaN(h) ? null : h * 60 + (m || 0);
+      };
+
+      const shiftClusters = [];
       bShiftsRaw.forEach(s => {
         if (!s || !s.date) return;
-        const dKey = s.date;
-        if (!canonicalShiftByDate.has(dKey)) {
-          canonicalShiftByDate.set(dKey, s);
-        } else {
-          const existing = canonicalShiftByDate.get(dKey);
-          const sIsManual = Boolean(s.isManual || s.manualPunch || s.adminApproved || s.editedByAdmin);
-          const exIsManual = Boolean(existing.isManual || existing.manualPunch || existing.adminApproved || existing.editedByAdmin);
-
-          if (sIsManual && !exIsManual) {
-            canonicalShiftByDate.set(dKey, s);
-          } else if (!sIsManual && exIsManual) {
-            // keep existing manual
-          } else {
-            const sHasOut = Boolean(s.timeOut && s.timeOut !== '—' && s.timeOut !== '' && s.timeOut !== 'غير مسجل');
-            const exHasOut = Boolean(existing.timeOut && existing.timeOut !== '—' && existing.timeOut !== '' && existing.timeOut !== 'غير مسجل');
-            const sHrs = parseFloat(s.actualWorkedHours || s.hours || 0);
-            const exHrs = parseFloat(existing.actualWorkedHours || existing.hours || 0);
-
-            if (sHasOut && !exHasOut) {
-              canonicalShiftByDate.set(dKey, s);
-            } else if (sHrs > 0 && exHrs === 0) {
-              canonicalShiftByDate.set(dKey, s);
-            } else if (sHrs > exHrs) {
-              canonicalShiftByDate.set(dKey, s);
+        const sInMins = getShiftMinutes(s.timeIn);
+        let foundCluster = false;
+        for (const cluster of shiftClusters) {
+          const rep = cluster[0];
+          if (rep.date === s.date) {
+            const repInMins = getShiftMinutes(rep.timeIn);
+            const isSameTime = (sInMins !== null && repInMins !== null)
+              ? Math.abs(sInMins - repInMins) <= 20
+              : (!s.timeIn || !rep.timeIn || s.timeIn === rep.timeIn);
+            if (isSameTime || (s.id && rep.id && s.id === rep.id)) {
+              cluster.push(s);
+              foundCluster = true;
+              break;
             }
           }
         }
+        if (!foundCluster) {
+          shiftClusters.push([s]);
+        }
       });
-      const bShifts = Array.from(canonicalShiftByDate.values());
+
+      const bShifts = shiftClusters.map(cluster => {
+        if (cluster.length === 1) return cluster[0];
+        return cluster.sort((a, b) => {
+          const aIsManual = Boolean(a.isManual || a.manualPunch || a.adminApproved || a.editedByAdmin);
+          const bIsManual = Boolean(b.isManual || b.manualPunch || b.adminApproved || b.editedByAdmin);
+          if (aIsManual && !bIsManual) return -1;
+          if (!aIsManual && bIsManual) return 1;
+
+          const aHasOut = Boolean(a.timeOut && a.timeOut !== '—' && a.timeOut !== '' && a.timeOut !== 'غير مسجل');
+          const bHasOut = Boolean(b.timeOut && b.timeOut !== '—' && b.timeOut !== '' && b.timeOut !== 'غير مسجل');
+          if (aHasOut && !bHasOut) return -1;
+          if (!aHasOut && bHasOut) return 1;
+
+          const aHrs = parseFloat(a.actualWorkedHours || a.hours || 0);
+          const bHrs = parseFloat(b.actualWorkedHours || b.hours || 0);
+          return bHrs - aHrs;
+        })[0];
+      });
 
       const hours = bShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
       const baseEarnings = hours * rate;
@@ -1659,17 +1816,6 @@ export function DataProvider({ children, showToast = () => {} }) {
 
     const isPrimaryForAdjustments = !isTargetFilterActive || isBranchMatch(emp.branchId || (emp.branchesDetails && emp.branchesDetails[0]?.branchId), targetBranchObj);
 
-    const isEmpMatchGlobal = (targetId, targetCode) => {
-      const tId = String(targetId || '');
-      const tCode = String(targetCode || '');
-      const eId = String(emp.id || empId || '');
-      const eCode = String(emp.code || '');
-      return (
-        (eId && (tId === eId || tCode === eId)) ||
-        (eCode && (tId === eCode || tCode === eCode))
-      );
-    };
-
     // المكافآت والخصومات
     const empAdjs = (state.adjustments || []).filter(a => {
       if (!isEmpMatchGlobal(a.employeeId, a.employeeCode)) return false;
@@ -1692,11 +1838,32 @@ export function DataProvider({ children, showToast = () => {} }) {
       const isApproved = (r.status === 'approved' || r.adminApproved === true) && !r.isCancelled && r.status !== 'cancelled' && r.status !== 'rejected';
       if (!isApproved) return false;
       if (r.objection?.status === 'approved') return false;
-      const isPen = r.type === 'penalty' || r.type === 'disciplinary_penalty' || r.subType === 'disciplinary_penalty' || r.type === 'violation' || r.type === 'deduction' || String(r.id || '').startsWith('disc_');
+
+      // 🛡️ صمام أمان صارم: استبعاد أي طلبات أو جزاءات مرتبطة بالحضور أو التأخير اللائحي أو الانصراف المبكر
+      // (حيث تُحسب وتُخصم بالكامل عبر لائحة التأخيرات state.lateIncidents لمنع الازدواج المالي والخلط الإداري)
+      const idStr = String(r.id || '');
+      const isAttendanceOrLate = (
+        idStr.startsWith('req_late_inc_') ||
+        idStr.startsWith('req_late_') ||
+        idStr.startsWith('late_inc_') ||
+        idStr.startsWith('req_early_') ||
+        r.type === 'lateness' ||
+        r.type === 'late_penalty' ||
+        r.type === 'early_exit' ||
+        r.subType === 'lateness' ||
+        r.subType === 'early_exit' ||
+        r.source === 'late_penalty_engine' ||
+        r.source === 'system_lateness' ||
+        (typeof r.ruleTitle === 'string' && r.ruleTitle.includes('تأخير')) ||
+        (typeof r.reason === 'string' && (r.reason.includes('تأخر الموظف') || r.reason.includes('جزاء تأخير')))
+      );
+      if (isAttendanceOrLate) return false;
+
+      const isPen = r.type === 'penalty' || r.type === 'disciplinary_penalty' || r.subType === 'disciplinary_penalty' || r.type === 'violation' || r.type === 'deduction' || idStr.startsWith('disc_');
       if (!isPen) return false;
       // حظر أي جزاءات تأخير أو انصراف مبكر عن الموظف ذي المواعيد المتغيرة
       if (isVariableScheduleEmployee(emp)) {
-        const isEarlyOrLate = r.type === 'early_exit' || r.subType === 'early_exit' || r.type === 'lateness' || r.subType === 'lateness' || String(r.id || '').startsWith('req_early_') || String(r.id || '').startsWith('req_late_');
+        const isEarlyOrLate = r.type === 'early_exit' || r.subType === 'early_exit' || r.type === 'lateness' || r.subType === 'lateness' || idStr.startsWith('req_early_') || idStr.startsWith('req_late_');
         if (isEarlyOrLate) return false;
       }
       if (existingAdjReqIds.has(r.id) || existingAdjReqIds.has(`adj_pen_${r.id}`) || existingAdjReqIds.has(`adj_disc_${r.id}`)) return false;
@@ -1721,6 +1888,43 @@ export function DataProvider({ children, showToast = () => {} }) {
       return acc + amt;
     }, 0);
 
+    const manualDeductionsList = [
+      ...empAdjs
+        .filter(a => {
+          if (!a) return false;
+          const aId = String(a.id || '');
+          if (aId.startsWith('adj_late_') || aId.startsWith('late_inc_') || a.source === 'late_penalty_engine') return false;
+          if (a.reason && (a.reason.includes('تأخير') || a.reason.includes('تأخر'))) return false;
+          return a.type === 'deduction' || a.type === 'penalty' || a.type === 'خصم' || a.type === 'shortage';
+        })
+        .map(a => ({
+          id: a.id,
+          date: a.date,
+          type: a.type,
+          typeLabel: (a.type === 'shortage' || (a.reason && (a.reason.includes('عجز') || a.reason.includes('جرد')))) ? '📦 عجز جرد / بضاعة' : '⚖️ جزاء إداري معتمد',
+          amount: parseFloat(a.amount) || 0,
+          reason: a.reason || a.notes || a.description || 'خصم إداري'
+        })),
+      ...unmappedPenaltyRequests.map(r => {
+        let amt = parseFloat(r.amount || r.penaltyAmount || r.deductionFixedAmount) || 0;
+        if (!amt && (r.deductionDays || r.penaltyDays || r.impactType === 'deduction_days')) {
+          const days = parseFloat(r.deductionDays || r.penaltyDays || r.impactVal || 1);
+          const workDays = parseFloat(emp.workDaysPerMonth || emp.workDays) || 26;
+          const salary = parseFloat(emp.salary) || 0;
+          const dRate = r.dailyRate ? parseFloat(r.dailyRate) : (workDays > 0 ? salary / workDays : salary / 30);
+          amt = Math.round(dRate * days * 100) / 100;
+        }
+        return {
+          id: r.id,
+          date: r.date || r.startDate || (r.createdAt ? r.createdAt.slice(0, 10) : ''),
+          type: r.type,
+          typeLabel: (r.type === 'shortage' || (r.reason && (r.reason.includes('عجز') || r.reason.includes('جرد')))) ? '📦 عجز جرد / بضاعة' : '⚖️ جزاء تأديبي إداري',
+          amount: amt,
+          reason: r.reason || r.ruleTitle || r.details || 'جزاء إداري'
+        };
+      })
+    ];
+
     const unmappedBonusRequests = (state.requests || []).filter(r => {
       if (!r) return false;
       if (!isEmpMatchGlobal(r.employeeId, r.employeeCode)) return false;
@@ -1739,15 +1943,50 @@ export function DataProvider({ children, showToast = () => {} }) {
     const unmappedBonusTotal = unmappedBonusRequests.reduce((acc, r) => acc + (parseFloat(r.amount) || 0), 0);
 
     const totalBonus = empAdjs.filter(a => a.type === 'bonus' || a.type === 'مكافأة').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0) + unmappedBonusTotal;
-    const manualDeduction = empAdjs.filter(a => a.type === 'deduction' || a.type === 'penalty' || a.type === 'خصم').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0) + unmappedPenaltyTotal;
+    const manualDeduction = empAdjs.filter(a => {
+      if (!a) return false;
+      const aId = String(a.id || '');
+      if (aId.startsWith('adj_late_') || aId.startsWith('late_inc_') || a.source === 'late_penalty_engine') return false;
+      if (a.reason && (a.reason.includes('تأخير') || a.reason.includes('تأخر'))) return false;
+      return a.type === 'deduction' || a.type === 'penalty' || a.type === 'خصم';
+    }).reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0) + unmappedPenaltyTotal;
 
     // الجزاءات والتأخيرات (لا تطبق على موظف الساعات المتغيرة بدون جدول)
     const isFlexibleSchedule = isVariableScheduleEmployee(emp);
     const isFlexibleScheduleEmp = isFlexibleSchedule;
+
+    // جلب طلبات التأخير المعتمدة في requests لهذا الموظف
+    const empApprovedLateRequests = isFlexibleScheduleEmp ? [] : (state.requests || []).filter(r => {
+      if (!r) return false;
+      if (!isEmpMatchGlobal(r.employeeId, r.employeeCode)) return false;
+      const isLateType = (
+        String(r.id || '').startsWith('req_late_inc_') ||
+        String(r.id || '').startsWith('req_late_') ||
+        r.type === 'lateness' ||
+        r.type === 'late_penalty' ||
+        r.subType === 'lateness' ||
+        r.source === 'late_penalty_engine'
+      );
+      if (!isLateType) return false;
+      const isApp = (r.status === 'approved' || r.adminApproved === true) && !r.isCancelled && r.status !== 'cancelled' && r.status !== 'rejected';
+      if (!isApp) return false;
+      if (r.objection?.status === 'approved') return false;
+      const rDate = r.date || r.startDate || (r.createdAt ? r.createdAt.slice(0, 10) : '');
+      if (!rDate || !effectiveFilterFn(rDate)) return false;
+      if (isTargetFilterActive) {
+        if (r.branchId) return isBranchMatch(r.branchId, targetBranchObj);
+        return isPrimaryForAdjustments;
+      }
+      return true;
+    });
+
+    // جلب وقائع التأخير في lateIncidents
     const empLateIncidents = isFlexibleScheduleEmp ? [] : (state.lateIncidents || []).filter(i => {
+      if (!i) return false;
       if (!isEmpMatchGlobal(i.employeeId, i.employeeCode)) return false;
       if (!effectiveFilterFn(i.date)) return false;
-      if (i.status === 'cancelled') return false;
+      if (i.status === 'cancelled' || i.isCancelled) return false;
+      if (i.objection?.status === 'approved') return false;
       if (isTargetFilterActive) {
         if (i.branchId) return isBranchMatch(i.branchId, targetBranchObj);
         return isPrimaryForAdjustments;
@@ -1755,8 +1994,80 @@ export function DataProvider({ children, showToast = () => {} }) {
       return true;
     });
 
-    const lateDeduction = isFlexibleScheduleEmp ? 0 : empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.penaltyAmount) || 0), 0);
-    const lateDeductionMinutes = isFlexibleScheduleEmp ? 0 : empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.deductionMinutes) || 0), 0);
+    // دمج وتوحيد الخصم اللائحي بين الوقائع والطلبات المعتمدة بدقة متناهية تمنع أي سقوط مالي أو ازدواج
+    const matchedDatesOrReqIds = new Set();
+    let totalLateDedAmt = 0;
+    let totalLateDedMins = 0;
+    const lateIncidentsList = [];
+
+    empLateIncidents.forEach(inc => {
+      const incIdStr = String(inc.id || '');
+      const cleanId = incIdStr.replace(/^late_inc_/, '');
+      const matchingReq = empApprovedLateRequests.find(r => 
+        String(r.id) === `req_${incIdStr}` || 
+        String(r.id) === `req_late_inc_${cleanId}` ||
+        String(r.penaltyId) === incIdStr ||
+        (r.date && r.date === inc.date && (!r.branchId || String(r.branchId) === String(inc.branchId)))
+      );
+
+      if (matchingReq) {
+        matchedDatesOrReqIds.add(matchingReq.id);
+        matchedDatesOrReqIds.add(`${matchingReq.date}_${matchingReq.branchId || ''}`);
+      }
+
+      const incAmt = parseFloat(inc.penaltyAmount) || 0;
+      const reqAmt = matchingReq ? (parseFloat(matchingReq.amount) || 0) : 0;
+      const effAmt = Math.max(incAmt, reqAmt);
+
+      const incMins = parseFloat(inc.deductionMinutes) || 0;
+      const reqMins = matchingReq ? (parseFloat(matchingReq.deductionMinutes || matchingReq.impactVal) || 0) : 0;
+      const effMins = Math.max(incMins, reqMins);
+
+      totalLateDedAmt += effAmt;
+      totalLateDedMins += effMins;
+
+      if (effMins > 0 || effAmt > 0) {
+        lateIncidentsList.push({
+          ...inc,
+          deductionMinutes: effMins,
+          penaltyAmount: effAmt
+        });
+      }
+    });
+
+    // إضافة أي طلبات جزاء تأخير معتمدة لم يتم تسجيل واقعة لها في lateIncidents
+    empApprovedLateRequests.forEach(req => {
+      const reqKey = `${req.date}_${req.branchId || ''}`;
+      if (!matchedDatesOrReqIds.has(req.id) && !matchedDatesOrReqIds.has(reqKey)) {
+        const reqAmt = parseFloat(req.amount) || 0;
+        const reqMins = parseFloat(req.deductionMinutes || req.impactVal) || 0;
+        totalLateDedAmt += reqAmt;
+        totalLateDedMins += reqMins;
+
+        if (reqMins > 0 || reqAmt > 0) {
+          lateIncidentsList.push({
+            id: req.id,
+            date: req.date,
+            branchId: req.branchId || emp.branchId,
+            branchName: req.branchName || 'الفرع الرئيسي',
+            scheduledStartTime: req.scheduledTime || req.scheduledStartTime || '—',
+            actualPunchInTime: req.actualTime || req.actualPunchInTime || '—',
+            lateMinutes: req.lateMinutes || reqMins,
+            tierName: req.tierName || 'جزاء تأخير معتمد',
+            occurrenceNumber: req.occurrence || 1,
+            actionLabel: req.actionLabel || `خصم ${reqMins} دقيقة`,
+            deductionMinutes: reqMins,
+            penaltyAmount: reqAmt,
+            status: 'approved'
+          });
+        }
+      }
+    });
+
+    lateIncidentsList.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+    const lateDeduction = isFlexibleScheduleEmp ? 0 : Math.round(totalLateDedAmt * 100) / 100;
+    const lateDeductionMinutes = isFlexibleScheduleEmp ? 0 : totalLateDedMins;
 
     // السلف والأقساط الشهرية (محسوبة بدقة عبر محرك السلف الموحد loansEngine)
     const activeTargetMonth = (monthStr && typeof monthStr === 'string' && monthStr.length >= 7)
@@ -1791,10 +2102,11 @@ export function DataProvider({ children, showToast = () => {} }) {
     const primaryBranchId = branches[0]?.branchId;
     const branchRateInfo = perBranch[primaryBranchId] || Object.values(perBranch)[0] || { rate: 0, dailyRate: 0 };
     let rate = branches.length === 1 ? branchRateInfo.rate : (totalHours > 0 ? totalBaseEarnings / totalHours : branchRateInfo.rate);
-    let dailyRate = branches.length === 1 ? branchRateInfo.dailyRate : (rate * (parseFloat(branches[0]?.workHoursPerDay) || WORK_HOURS_PER_DAY));
-    const unpaidLeaveDeduction = Math.round(unpaidLeaveDaysCount * dailyRate * 100) / 100;
+    const dailyRate = branchRateInfo.dailyRate || (branches.length === 1 ? (branchRateInfo.rate * (parseFloat(branches[0]?.workHoursPerDay) || 8)) : (rate * 8));
+    // 🛡️ الإجازات بدون أجر: عدم خصم أي مبالغ نقدية من الراتب، وإنما عدم احتساب ساعات وأجر تلك الأيام فقط
+    const unpaidLeaveDeduction = 0;
 
-    const totalDeduction = manualDeduction + loanDeduction + totalAbsenceDeduction + lateDeduction + unpaidLeaveDeduction;
+    const totalDeduction = manualDeduction + loanDeduction + totalAbsenceDeduction + lateDeduction;
 
     const isMgmt = isManagementJob(emp.jobTitle, getJobsList(state)) || Boolean(emp.isManagement) || (parseFloat(emp.managementAllowance) || 0) > 0;
     let managementAllowance = parseFloat(emp.managementAllowance) || 0;
@@ -1887,7 +2199,8 @@ export function DataProvider({ children, showToast = () => {} }) {
       totalAmount: attendedDaysCount * (parseFloat(item.amount) || 0)
     }));
 
-    const totalAllowances = managementAllowance + transportAllowance + extraAllowance + dailyAllowanceTotal;
+    const totalSecondmentAllowance = branches.reduce((acc, b) => acc + (parseFloat(b.secondmentAllowance) || 0), 0);
+    const totalAllowances = managementAllowance + transportAllowance + extraAllowance + dailyAllowanceTotal + totalSecondmentAllowance;
     const totalEarnings = totalBaseEarnings + totalOvertimeEarnings;
     const netSalary = totalBaseEarnings + totalOvertimeEarnings + totalBonus + totalAllowances - totalDeduction;
 
@@ -1911,6 +2224,8 @@ export function DataProvider({ children, showToast = () => {} }) {
       totalEarnings,
       totalBonus,
       totalAllowances,
+      secondmentAllowance: totalSecondmentAllowance,
+      isSecondment: branches.some(b => b.isSecondment),
       managementAllowance,
       transportAllowance,
       extraAllowance,
@@ -1929,7 +2244,10 @@ export function DataProvider({ children, showToast = () => {} }) {
       totalDeduction,
       lateDeduction,
       lateDeductionMinutes,
+      lateIncidentsCount: lateIncidentsList.length,
+      lateIncidentsList,
       manualDeduction,
+      manualDeductionsList,
       loanDeduction,
       loansDeduction: loanDeduction,
       loansBreakdown,
@@ -1992,6 +2310,13 @@ export function DataProvider({ children, showToast = () => {} }) {
     getPayrollCutoffRange,
     computeEmpSummary,
     computeGrandPayroll,
+    getAuthoritativeEmployeeRates: (emp, bId) => getAuthoritativeEmployeeRates(emp, bId, state),
+    getAuthoritativeScheduledShift: (empId, dateStr, bId) => getAuthoritativeScheduledShift(empId, dateStr, state, bId),
+    getAuthoritativeShiftMetrics: (shift, bId) => getAuthoritativeShiftMetrics(shift, state, bId),
+    calculateAuthoritativeCycleSummary: (args) => calculateAuthoritativeCycleSummary({ ...args, state }),
+    generateAuthoritativeAuditDossier: (empId, monthStr) => generateAuthoritativeAuditDossier(empId, monthStr, state),
+    runPayrollHealthAudit: (targetMonth) => runPayrollHealthAudit(state, targetMonth),
+    formatPayrollHealthAlertsForWhatsApp,
     enqueueNewRequest,
     enqueueRequestDecision,
     pullDeltaSync,

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import AddMedicationModal from './AddMedicationModal';
 import { outstockConvertMedicationType } from '../../../utils/outstockApiClient';
+import { renderActiveIngredientBadges } from '../../../utils/activeIngredientsHelper';
 
 /**
  * MedicationMasterCardModal.jsx
@@ -469,18 +470,8 @@ export default function MedicationMasterCardModal({
                       <Pill size={14} color="#0284c7" />
                       <span>المادة الفعالة (Generic Name):</span>
                     </div>
-                    <div
-                      style={{
-                        fontSize: '13px',
-                        fontWeight: '800',
-                        color: '#0284c7',
-                        wordBreak: 'break-word',
-                        direction: 'ltr',
-                        textAlign: 'right',
-                        lineHeight: 1.4
-                      }}
-                    >
-                      {med.generic_name || 'غير محددة'}
+                    <div style={{ marginTop: '2px' }}>
+                      {renderActiveIngredientBadges(med.generic_name, med.active_ingredients_list)}
                     </div>
                   </div>
 

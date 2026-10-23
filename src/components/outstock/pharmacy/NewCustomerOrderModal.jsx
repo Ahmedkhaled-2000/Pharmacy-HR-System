@@ -33,7 +33,9 @@ import {
   Tag,
   Link as LinkIcon,
   Zap,
-  Smartphone
+  Smartphone,
+  Clipboard,
+  Upload
 } from 'lucide-react';
 import {
   outstockGetCustomers,
@@ -157,6 +159,9 @@ export default function NewCustomerOrderModal({
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [showImageUrlInput, setShowImageUrlInput] = useState(false);
   const [directImageUrl, setDirectImageUrl] = useState('');
+  const [activeImageTargetIndex, setActiveImageTargetIndex] = useState(0);
+  const [pasteSuccessAlert, setPasteSuccessAlert] = useState('');
+  const [isDraggingPrescription, setIsDraggingPrescription] = useState(false);
   const fileInputRef = useRef(null);
 
   // ── 4. بنود الأدوية (العلبة كاملة فقط 📦 - مع تصنيف لكل صنف وإرفاق صورة ورابط لكل صنف) ──
@@ -852,8 +857,8 @@ export default function NewCustomerOrderModal({
     });
   };
 
-  // معالجة ملف الصورة (من الرفع أو الإفلات أو اللصق)
-  const handleProcessImageFile = (file) => {
+  // معالجة ملف الصورة (من الرفع أو الإفلات أو اللصق) مع ربطه بالروشتة والصنف المحدد
+  const handleProcessImageFile = (file, targetIndex = null) => {
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
       setErrorMsg('حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 5 ميجابايت');
@@ -861,9 +866,35 @@ export default function NewCustomerOrderModal({
     }
     const reader = new FileReader();
     reader.onload = (event) => {
-      setMedicationImageUrl(event.target.result);
-      setMedicationImageName(file.name || 'prescription_image.png');
+      const dataUrl = event.target.result;
+      const fileName = file.name || `image_${Date.now()}.png`;
+
+      // 1. تعيين صورة الروشتة/الدواء الرئيسية
+      setMedicationImageUrl(dataUrl);
+      setMedicationImageName(fileName);
       setErrorMsg('');
+
+      // 2. تعيين الصورة للصنف المستهدف (الصنف النشط أو المحدد أو أول صنف بدون صورة)
+      setItems((prevItems) => {
+        let tIdx = targetIndex;
+        if (tIdx === null || tIdx === undefined || tIdx < 0 || tIdx >= prevItems.length) {
+          const emptyIdx = prevItems.findIndex(it => !it.imageUrl);
+          tIdx = emptyIdx !== -1 ? emptyIdx : (activeImageTargetIndex >= 0 && activeImageTargetIndex < prevItems.length ? activeImageTargetIndex : 0);
+        }
+        if (prevItems[tIdx]) {
+          const updated = [...prevItems];
+          updated[tIdx] = {
+            ...updated[tIdx],
+            imageUrl: dataUrl
+          };
+          return updated;
+        }
+        return prevItems;
+      });
+
+      // 3. إشعار تأكيد اللصق الناجح
+      setPasteSuccessAlert('تم لصق وإرفاق الصورة بنجاح من الحافظة 📋✅');
+      setTimeout(() => setPasteSuccessAlert(''), 4500);
     };
     reader.onerror = () => {
       setErrorMsg('تعذر قراءة ملف الصورة');
@@ -871,23 +902,58 @@ export default function NewCustomerOrderModal({
     reader.readAsDataURL(file);
   };
 
+  // لصق الصورة مباشرة من الحافظة عبر زر اللصق (Clipboard API)
+  const handlePasteFromClipboard = async (targetIndex = null) => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.read) {
+        const clipboardItems = await navigator.clipboard.read();
+        let found = false;
+        for (const cItem of clipboardItems) {
+          const imgType = cItem.types.find(t => t.startsWith('image/'));
+          if (imgType) {
+            const blob = await cItem.getType(imgType);
+            handleProcessImageFile(blob, targetIndex);
+            found = true;
+            break;
+          }
+        }
+        if (found) return;
+      }
+      setPasteSuccessAlert('📋 يرجى الضغط على زر (Ctrl + V) في لوحة المفاتيح للصق الصورة مباشرة');
+      setTimeout(() => setPasteSuccessAlert(''), 5000);
+    } catch (err) {
+      setPasteSuccessAlert('📋 اضغط الآن على (Ctrl + V) في لوحة المفاتيح للصق الصورة من الحافظة');
+      setTimeout(() => setPasteSuccessAlert(''), 5000);
+    }
+  };
+
   // رفع صورة الدواء / الروشتة عبر مربع الاختيار
-  const handleImageChange = (e) => {
+  const handleImageChange = (e, targetIndex = null) => {
     const file = e.target.files?.[0];
-    if (file) handleProcessImageFile(file);
+    if (file) handleProcessImageFile(file, targetIndex);
   };
 
   // تطبيق رابط صورة مباشر
   const handleApplyDirectImageUrl = () => {
     if (!directImageUrl || !directImageUrl.trim()) return;
-    setMedicationImageUrl(directImageUrl.trim());
+    const url = directImageUrl.trim();
+    setMedicationImageUrl(url);
     setMedicationImageName('رابط صورة مباشر');
     setShowImageUrlInput(false);
     setDirectImageUrl('');
     setErrorMsg('');
+    setItems((prevItems) => {
+      const tIdx = activeImageTargetIndex >= 0 && activeImageTargetIndex < prevItems.length ? activeImageTargetIndex : 0;
+      if (prevItems[tIdx]) {
+        const updated = [...prevItems];
+        updated[tIdx] = { ...updated[tIdx], imageUrl: url };
+        return updated;
+      }
+      return prevItems;
+    });
   };
 
-  // دعم لصق الصورة مباشرة من الحافظة (Ctrl+V)
+  // دعم لصق الصورة مباشرة من الحافظة في أي مكان بالنافذة (Ctrl+V)
   useEffect(() => {
     const handlePaste = (e) => {
       const clipboardItems = e.clipboardData?.items;
@@ -896,8 +962,8 @@ export default function NewCustomerOrderModal({
         if (clipboardItems[i].type.indexOf('image') !== -1) {
           const file = clipboardItems[i].getAsFile();
           if (file) {
-            handleProcessImageFile(file);
             e.preventDefault();
+            handleProcessImageFile(file, activeImageTargetIndex);
             break;
           }
         }
@@ -905,7 +971,7 @@ export default function NewCustomerOrderModal({
     };
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, []);
+  }, [activeImageTargetIndex]);
 
   const handleRemoveImage = () => {
     setMedicationImageUrl('');
@@ -1363,6 +1429,179 @@ export default function NewCustomerOrderModal({
                   </div>
                 </div>
               ) : null}
+            </div>
+
+            {/* إشعار عائم فوري عند لصق الصورة بنجاح */}
+            {pasteSuccessAlert && (
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                  color: '#ffffff',
+                  padding: '8px 16px',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  fontWeight: '800',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.35)'
+                }}
+              >
+                <Clipboard size={16} />
+                <span>{pasteSuccessAlert}</span>
+              </div>
+            )}
+
+            {/* منطقة إرفاق ولصق صورة الروشتة أو الدواء (تدعم اللصق المباشر من الحافظة Ctrl+V) */}
+            <div
+              className="prescription-dropzone"
+              tabIndex={0}
+              onMouseEnter={() => setActiveImageTargetIndex(0)}
+              onFocus={() => setActiveImageTargetIndex(0)}
+              onDragOver={(e) => { e.preventDefault(); setIsDraggingPrescription(true); }}
+              onDragLeave={() => setIsDraggingPrescription(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDraggingPrescription(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) handleProcessImageFile(file, 0);
+              }}
+              onPaste={(e) => {
+                const clipboardItems = e.clipboardData?.items;
+                if (!clipboardItems) return;
+                for (let i = 0; i < clipboardItems.length; i++) {
+                  if (clipboardItems[i].type.indexOf('image') !== -1) {
+                    const file = clipboardItems[i].getAsFile();
+                    if (file) {
+                      e.preventDefault();
+                      handleProcessImageFile(file, 0);
+                      break;
+                    }
+                  }
+                }
+              }}
+              style={{
+                background: isDraggingPrescription ? '#f0fdf4' : (medicationImageUrl ? '#f0fdf4' : '#ffffff'),
+                border: isDraggingPrescription ? '2px dashed #10b981' : (medicationImageUrl ? '1.5px solid #86efac' : '1.5px dashed #cbd5e1'),
+                borderRadius: '12px',
+                padding: '10px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
+                transition: 'all 0.2s ease',
+                outline: 'none'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '10px',
+                    background: medicationImageUrl ? '#dcfce7' : '#f1f5f9',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: medicationImageUrl ? '#16a34a' : '#64748b'
+                  }}
+                >
+                  <Camera size={18} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>صورة الروشتة / طلب العميل 📷</span>
+                    {medicationImageUrl && <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 'bold' }}>(تم الإرفاق بنجاح ✅)</span>}
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
+                    يمكنك لصق الصورة مباشرة بالضغط على <kbd style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '1px 5px', fontSize: '11px', fontWeight: 'bold' }}>Ctrl + V</kbd>، أو الضغط على زر اللصق، أو سحب وإفلات الصورة هنا.
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                {medicationImageUrl ? (
+                  <>
+                    <div
+                      onClick={() => {
+                        setPreviewModalImageUrl(medicationImageUrl);
+                        setIsPreviewImageOpen(true);
+                      }}
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '8px',
+                        overflow: 'hidden',
+                        border: '2px solid #10b981',
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                      }}
+                      title="اضغط لمعاينة الصورة بالحجم الكامل"
+                    >
+                      <img src={medicationImageUrl} alt="روشتة" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRemoveImage}
+                      className="outstock-btn"
+                      style={{ padding: '5px 9px', fontSize: '11.5px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca', cursor: 'pointer' }}
+                    >
+                      <Trash2 size={12} />
+                      <span>حذف الصورة</span>
+                    </button>
+                  </>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={() => handlePasteFromClipboard(0)}
+                  className="outstock-btn"
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    background: '#f0fdfa',
+                    color: '#0d9488',
+                    border: '1.5px solid #99f6e4',
+                    borderRadius: '8px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    cursor: 'pointer'
+                  }}
+                  title="لصق الصورة المنسوخة بالحافظة مباشرة"
+                >
+                  <Clipboard size={14} />
+                  <span>📋 لصق الصورة من الحافظة (Ctrl+V)</span>
+                </button>
+
+                <label
+                  className="outstock-btn"
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    background: '#f8fafc',
+                    color: '#334155',
+                    border: '1.5px solid #cbd5e1',
+                    borderRadius: '8px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <Upload size={14} />
+                  <span>اختيار ملف</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => handleImageChange(e, 0)}
+                  />
+                </label>
+              </div>
             </div>
           </div>
 
@@ -2286,8 +2525,27 @@ export default function NewCustomerOrderModal({
                         gap: '12px'
                       }}
                     >
-                      {/* إرفاق صورة للصنف */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      {/* إرفاق صورة للصنف مع دعم اللصق المباشر من الحافظة Ctrl+V */}
+                      <div
+                        onMouseEnter={() => setActiveImageTargetIndex(idx)}
+                        onFocus={() => setActiveImageTargetIndex(idx)}
+                        onPaste={(e) => {
+                          const clipboardItems = e.clipboardData?.items;
+                          if (!clipboardItems) return;
+                          for (let i = 0; i < clipboardItems.length; i++) {
+                            if (clipboardItems[i].type.indexOf('image') !== -1) {
+                              const file = clipboardItems[i].getAsFile();
+                              if (file) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleProcessImageFile(file, idx);
+                                break;
+                              }
+                            }
+                          }
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}
+                      >
                         <label
                           style={{
                             display: 'inline-flex',
@@ -2327,6 +2585,33 @@ export default function NewCustomerOrderModal({
                             }}
                           />
                         </label>
+
+                        {!it.isLocked && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveImageTargetIndex(idx);
+                              handlePasteFromClipboard(idx);
+                            }}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              padding: '5px 11px',
+                              background: '#f0fdfa',
+                              border: '1.5px solid #99f6e4',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              fontSize: '12px',
+                              fontWeight: '700',
+                              color: '#0d9488'
+                            }}
+                            title="لصق صورة الصنف من الحافظة (Ctrl+V)"
+                          >
+                            <Clipboard size={13} color="#0d9488" />
+                            <span>📋 لصق صورة (Ctrl+V)</span>
+                          </button>
+                        )}
 
                         {it.imageUrl && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

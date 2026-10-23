@@ -5,6 +5,7 @@ import { getEmployeeDaySchedule } from './rosterEngine';
 import { getEffectiveShiftHours, isApprovedPermissionForDate, getShiftHoursMetrics } from './latePenaltyEngine';
 import { getCycleDateRange } from './periodEngine';
 import { computeEmployeeLoanDeductionsForPeriod } from './loansEngine';
+import { buildEmployeeMonthTimeline } from './payrollTimelineHelper';
 
 export const NativePrint = registerPlugin('NativePrint');
 
@@ -873,7 +874,7 @@ export function generateOfficialPayslipHTML({
     const isSick = !isWeeklyRest && (l.leaveType === 'sick' || l.type === 'sick_leave');
     const isAnnual = !isWeeklyRest && !isUnpaid && !isSick;
     const days = parseFloat(l.daysCount || l.days || 1) || 1;
-    const deductionAmt = isUnpaid ? Math.round(days * dailyRate * 100) / 100 : 0;
+    const deductionAmt = 0; // إجازة بدون أجر: لا يُخصم لها مبلغ نقدي بل لا يُحتسب أجر وساعات اليوم فقط
 
     let category = 'annual';
     let categoryBadge = '<span style="background: #dcfce7; color: #15803d; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9px;">🌴 إجازة سنوية</span>';
@@ -893,9 +894,9 @@ export function generateOfficialPayslipHTML({
       category = 'unpaid';
       categoryBadge = '<span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9px;">💸 إجازة بدون أجر</span>';
       typeLabel = 'إجازة بدون أجر';
-      effectLabel = `🔴 مخصوم (-${fmt(deductionAmt)} ج.م)`;
-      effectColor = '#dc2626';
-      financialStatus = `مخصومة (-${fmt(deductionAmt)} ج.م)`;
+      effectLabel = '⚪ غير مدفوعة (لا يُحتسب أجر اليوم)';
+      effectColor = '#64748b';
+      financialStatus = 'غير مدفوعة (لا يُحتسب أجر اليوم)';
     } else if (isSick) {
       category = 'sick';
       categoryBadge = '<span style="background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9px;">🤒 إجازة مرضية</span>';
@@ -927,209 +928,69 @@ export function generateOfficialPayslipHTML({
     });
   });
 
-  // 1. Build unified chronological rows for Table 1 (shifts, rest days, leaves, swaps)
-  const unifiedTableRows = [];
+  // 1. Build unified chronological rows for Table 1 (shifts, rest days, leaves, swaps, pre-hire, absences, pending)
+  const timelineResult = buildEmployeeMonthTimeline({
+    emp,
+    month,
+    state,
+    startCutoff,
+    endCutoff,
+    selectedBranchId: (selectedBranchId === 'all' || !selectedBranchId) ? null : selectedBranchId,
+    hourlyRate,
+    dailyRate
+  });
 
-  // Shifts
-  (shifts || []).forEach((s) => {
-    const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
-    const isRejectedPhoto = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
-    const hasPerm = s.hasPermission || false;
-    const daySched = getEmployeeDaySchedule(emp.id, s.date, state);
-    const isSwapped = daySched && daySched.isSwapped;
+  const unifiedTableRows = timelineResult.rows.map((row) => {
+    let otBadgeHtml = '';
+    if (row.isOtApproved && row.otHours > 0) {
+      otBadgeHtml = `<span style="background: #f0fdf4; color: #16a34a; border: 1px solid #86efac; padding: 1px 5px; border-radius: 4px; font-weight: bold; font-size: 8px; display: inline-block; margin-top: 2px;">✅ إضافي معتمد (+${row.otHours.toFixed(2)} س)</span>`;
+    } else if (row.otStatus === 'rejected') {
+      otBadgeHtml = `<span style="background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; padding: 1px 5px; border-radius: 4px; font-weight: bold; font-size: 8px; display: inline-block; margin-top: 2px;">❌ إضافي مرفوض ${row.rejectedOtHours > 0 ? `(${row.rejectedOtHours.toFixed(2)} س)` : ''}</span>`;
+    } else if (row.otStatus === 'pending' && row.otHours > 0) {
+      otBadgeHtml = `<span style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; padding: 1px 5px; border-radius: 4px; font-weight: bold; font-size: 8px; display: inline-block; margin-top: 2px;">⏳ إضافي قيد الاعتماد (+${row.otHours.toFixed(2)} س)</span>`;
+    }
+
+    let restWorkBadgeHtml = '';
+    if (row.isRestDayWork) {
+      restWorkBadgeHtml = `<span style="background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; padding: 1px 5px; border-radius: 4px; font-weight: bold; font-size: 8px; display: inline-block; margin-top: 2px;">🛋️ عمل في يوم راحة أسبوعية</span>`;
+    }
 
     let badge = '';
-    if (isRejectedPhoto) {
-      badge = '<span style="background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px; display: inline-block;">❌ تم رفض بصمة هذا اليوم بسبب رفض الصورة</span>';
-    } else if (isSwapped) {
-      badge = `<span style="background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px; display: inline-block;">🔄 وردية متبدلة ${daySched.swappedWithName ? `(بديل عن ${daySched.swappedWithName})` : ''}</span>`;
-    }
-
-    const shiftMetrics = getShiftHoursMetrics(s, state);
-    const effHours = isRejectedPhoto ? 0 : shiftMetrics.regularHours;
-    const otHours = shiftMetrics.overtimeHours;
-    const isOtApproved = shiftMetrics.isOvertimeApproved;
-    const otStatus = shiftMetrics.overtimeStatus;
-    const rejOtHours = parseFloat(s.rejectedOvertimeHours || 0) || 0;
-
-    let otBadgeHtml = '';
-    if (isOtApproved && otHours > 0) {
-      otBadgeHtml = `<span style="background: #f0fdf4; color: #16a34a; border: 1px solid #86efac; padding: 1px 5px; border-radius: 4px; font-weight: bold; font-size: 8px; display: inline-block; margin-top: 2px;">✅ إضافي معتمد (+${otHours.toFixed(2)} س)</span>`;
-    } else if (otStatus === 'rejected') {
-      otBadgeHtml = `<span style="background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; padding: 1px 5px; border-radius: 4px; font-weight: bold; font-size: 8px; display: inline-block; margin-top: 2px;">❌ إضافي مرفوض ${rejOtHours > 0 ? `(${rejOtHours.toFixed(2)} س)` : ''}</span>`;
-    } else if (otStatus === 'pending' && otHours > 0) {
-      otBadgeHtml = `<span style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; padding: 1px 5px; border-radius: 4px; font-weight: bold; font-size: 8px; display: inline-block; margin-top: 2px;">⏳ إضافي قيد الاعتماد (+${otHours.toFixed(2)} س)</span>`;
-    }
-
-    if (otBadgeHtml) {
-      badge = badge ? `${badge}<br/>${otBadgeHtml}` : otBadgeHtml;
-    }
-
-    const totalShiftHours = isRejectedPhoto ? 0 : shiftMetrics.payableHours;
-    const shiftEarnings = totalShiftHours * shiftRate;
-
-    unifiedTableRows.push({
-      id: `shift_${s.id || s.date}`,
-      date: s.date,
-      type: 'shift',
-      dayName: s.dayName || arabicWeekday(s.date),
-      hasPerm,
-      isRejectedPhoto,
-      timeIn: s.timeIn || '—',
-      timeOut: s.timeOut || '—',
-      breakHours: parseFloat(s.breakHours) || 0,
-      effHours: effHours,
-      totalShiftHours: totalShiftHours,
-      otHours: otHours,
-      isOtApproved: isOtApproved,
-      earnings: isRejectedPhoto ? 0 : shiftEarnings,
-      isSwapped,
-      badge
-    });
-  });
-
-  // Rest days (weekly rest & swapped rest)
-  restDayItems.forEach((r) => {
-    unifiedTableRows.push({
-      id: r.id,
-      date: r.date,
-      type: 'rest',
-      dayName: r.dayName || arabicWeekday(r.date),
-      timeIn: '—',
-      timeOut: '—',
-      breakHours: 0,
-      effHours: 0,
-      earnings: 0,
-      badge: r.categoryBadge,
-      statusLabel: r.typeLabel,
-      effectLabel: r.financialStatus || 'مدفوعة (ضمن الراتب)',
-      effectColor: r.effectColor || '#0284c7',
-      reason: r.reason
-    });
-  });
-
-  // Pre-hire days (خارج العمل قبل تاريخ التعيين - لا يحتسب لها راتب وليست راحة أسبوعية)
-  preHireDayItems.forEach((r) => {
-    unifiedTableRows.push({
-      id: r.id,
-      date: r.date,
-      type: 'pre_hire',
-      dayName: r.dayName || arabicWeekday(r.date),
-      timeIn: '—',
-      timeOut: '—',
-      breakHours: 0,
-      effHours: 0,
-      earnings: 0,
-      badge: r.categoryBadge,
-      statusLabel: r.typeLabel,
-      effectLabel: r.financialStatus || 'غير مدفوعة (قبل تاريخ التعيين)',
-      effectColor: r.effectColor || '#64748b',
-      reason: r.reason
-    });
-  });
-
-  // Approved leaves (annual, unpaid, sick, weekly_rest)
-  empApprovedLeaves.forEach((l) => {
-    const isWeeklyRest = l.leaveType === 'weekly_rest' || l.type === 'weekly_rest';
-    const isUnpaid = !isWeeklyRest && (l.leaveType === 'unpaid' || l.type === 'unpaid_leave' || l.isUnpaid === true);
-    const isSick = !isWeeklyRest && (l.leaveType === 'sick' || l.type === 'sick_leave');
-    const isAnnual = !isWeeklyRest && !isUnpaid && !isSick;
-
-    const lStart = l.startDate || l.date;
-    const lEnd = l.endDate || l.date || lStart;
-    let cur = new Date(lStart);
-    const endD = new Date(lEnd);
-
-    let categoryBadge = '<span style="background: #dcfce7; color: #15803d; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🌴 إجازة سنوية</span>';
-    let typeLabel = 'إجازة سنوية / اعتيادية';
-    let effectColor = '#15803d';
-
-    if (isWeeklyRest) {
-      categoryBadge = '<span style="background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🛋️ راحة أسبوعية</span>';
-      typeLabel = 'راحة أسبوعية مدفوعة (طلب معتمد)';
-      effectColor = '#0284c7';
-    } else if (isUnpaid) {
-      categoryBadge = '<span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">💸 إجازة بدون أجر</span>';
-      typeLabel = 'إجازة بدون أجر';
-      effectColor = '#dc2626';
-    } else if (isSick) {
-      categoryBadge = '<span style="background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🤒 إجازة مرضية</span>';
-      typeLabel = 'إجازة مرضية معتمدة';
-      effectColor = '#b45309';
-    }
-
-    if (!lStart || !lEnd || isNaN(cur) || isNaN(endD)) {
-      const dateStr = lStart || l.date || cycleRange.startDate;
-      const singleDayDeduction = isUnpaid ? Math.round(dailyRate * 100) / 100 : 0;
-      unifiedTableRows.push({
-        id: `leave_${l.id}_${dateStr}`,
-        date: dateStr,
-        type: 'leave',
-        dayName: arabicWeekday(dateStr),
-        timeIn: '—',
-        timeOut: '—',
-        breakHours: 0,
-        effHours: 0,
-        earnings: isUnpaid ? -singleDayDeduction : 0,
-        badge: categoryBadge,
-        statusLabel: typeLabel,
-        effectLabel: isUnpaid ? `مخصوم (-${fmt(singleDayDeduction)} ج.م)` : 'مدفوعة الأجر',
-        effectColor,
-        reason: l.reason || l.details || l.notes || (isWeeklyRest ? 'راحة أسبوعية مدفوعة معتمدة' : (isAnnual ? 'إجازة سنوية اعتيادية معتمدة' : (isUnpaid ? 'إجازة بدون أجر معتمدة' : 'إجازة مرضية معتمدة')))
-      });
-    } else {
-      while (cur <= endD) {
-        const cy = cur.getFullYear();
-        const cm = cur.getMonth() + 1;
-        const cd = cur.getDate();
-        const curDateStr = `${cy}-${String(cm).padStart(2, '0')}-${String(cd).padStart(2, '0')}`;
-        if (cycleFilterFn(curDateStr)) {
-          const singleDayDeduction = isUnpaid ? Math.round(dailyRate * 100) / 100 : 0;
-          unifiedTableRows.push({
-            id: `leave_${l.id}_${curDateStr}`,
-            date: curDateStr,
-            type: 'leave',
-            dayName: arabicWeekday(curDateStr),
-            timeIn: '—',
-            timeOut: '—',
-            breakHours: 0,
-            effHours: 0,
-            earnings: isUnpaid ? -singleDayDeduction : 0,
-            badge: categoryBadge,
-            statusLabel: typeLabel,
-            effectLabel: isUnpaid ? `مخصوم (-${fmt(singleDayDeduction)} ج.م)` : 'مدفوعة الأجر',
-            effectColor,
-            reason: l.reason || l.details || l.notes || (isWeeklyRest ? 'راحة أسبوعية مدفوعة معتمدة' : (isAnnual ? 'إجازة سنوية اعتيادية معتمدة' : (isUnpaid ? 'إجازة بدون أجر معتمدة' : 'إجازة مرضية معتمدة')))
-          });
-        }
-        cur.setDate(cur.getDate() + 1);
+    if (row.type === 'shift') {
+      if (row.isRejectedPhoto) {
+        badge = '<span style="background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px; display: inline-block;">❌ تم رفض بصمة هذا اليوم بسبب رفض الصورة</span>';
+      } else if (row.isSwapped) {
+        badge = `<span style="background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px; display: inline-block;">🔄 وردية متبدلة ${row.swappedWithName ? `(بديل عن ${row.swappedWithName})` : ''}</span>`;
       }
+      if (restWorkBadgeHtml) {
+        badge = badge ? `${badge}<br/>${restWorkBadgeHtml}` : restWorkBadgeHtml;
+      }
+      if (otBadgeHtml) {
+        badge = badge ? `${badge}<br/>${otBadgeHtml}` : otBadgeHtml;
+      }
+    } else if (row.type === 'rest') {
+      badge = row.isSwapped
+        ? `<span style="background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🔄 راحة متبدلة مع ${row.swappedWithName || 'الزميل'}</span>`
+        : `<span style="background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🛋️ راحة أسبوعية</span>`;
+    } else if (row.type === 'leave') {
+      badge = row.isUnpaid
+        ? '<span style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">⚪ إجازة بدون أجر</span>'
+        : (row.leaveType === 'sick'
+          ? `<span style="background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🤒 إجازة مرضية</span>`
+          : `<span style="background: #dcfce7; color: #15803d; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🌴 إجازة سنوية</span>`);
+    } else if (row.type === 'pre_hire') {
+      badge = `<span style="background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🔒 خارج العمل</span>`;
+    } else if (row.type === 'absence') {
+      badge = `<span style="background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 8.5px;">🚫 غياب بدون إذن</span>`;
+    } else {
+      badge = `<span style="background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 8.5px;">⏳ يوم متبقي بالدورة</span>`;
     }
-  });
 
-  // Sort unified table chronologically and enforce STRICT deduplication per date (عدم تكرار الأيام في كشف الرواتب المطبوع نهائياً):
-  unifiedTableRows.sort((a, b) => {
-    const dComp = (a.date || '').localeCompare(b.date || '');
-    if (dComp !== 0) return dComp;
-    // إذا تطابق التاريخ: الوردية (shift) أولاً ثم الإجازة (leave) ثم الراحة (rest) ثم خارج العمل (pre_hire)
-    const priority = { shift: 1, leave: 2, rest: 3, pre_hire: 4 };
-    const pA = priority[a.type] || 5;
-    const pB = priority[b.type] || 5;
-    if (pA !== pB) return pA - pB;
-    return (b.effHours || 0) - (a.effHours || 0);
+    return {
+      ...row,
+      badge
+    };
   });
-
-  const seenPrintDates = new Set();
-  const cleanPrintUnifiedTableRows = [];
-  unifiedTableRows.forEach(item => {
-    if (!item || !item.date) return;
-    if (!seenPrintDates.has(item.date)) {
-      seenPrintDates.add(item.date);
-      cleanPrintUnifiedTableRows.push(item);
-    }
-  });
-  unifiedTableRows.length = 0;
-  unifiedTableRows.push(...cleanPrintUnifiedTableRows);
 
   // 3. Absence days (أيام الغياب غير المبرر عن الورديات المجدولة - للأيام المنقضية فقط)
   // لا تنطبق على الموظفين ذوي طبيعة العمل المتغيرة بدون جدول شهري ثابت
@@ -1376,6 +1237,7 @@ export function generateOfficialPayslipHTML({
               if (!bShifts || bShifts.length === 0) return '';
               const bName = getBranchName(bId);
               const bSum = summary.perBranch?.[bId] || {};
+              const bRate = bSum.rate || bSum.hourlyRate || hourlyRate || 0;
               const bTotalHours = bShifts.reduce((acc, s) => {
                 const isRej = Boolean(s.isRejectedPhoto || s.status === 'rejected_photo' || (typeof s.statusLabel === 'string' && s.statusLabel.includes('رفض الصورة')));
                 if (isRej) return acc;
@@ -1522,12 +1384,13 @@ export function generateOfficialPayslipHTML({
                       <td style="padding: 2px; border: 1px solid #cbd5e1; color: #94a3b8;">${idx + 1}</td>
                       <td style="padding: 2px; border: 1px solid #cbd5e1; font-weight: bold; color: #64748b;">
                         ${item.dayName} ${item.date}
+                        ${item.reason ? `<div style="font-size: 8px; color: #64748b; font-weight: normal; margin-top: 1px;">${item.reason}</div>` : ''}
                       </td>
                       <td style="padding: 2px; border: 1px solid #cbd5e1; color: #94a3b8;">—</td>
                       <td style="padding: 2px; border: 1px solid #cbd5e1; color: #94a3b8;">—</td>
                       <td style="padding: 2px; border: 1px solid #cbd5e1; color: #94a3b8;">—</td>
                       <td style="padding: 2px; border: 1px solid #cbd5e1;">${item.badge || item.statusLabel}</td>
-                      <td style="padding: 2px; border: 1px solid #cbd5e1; font-weight: bold; color: ${item.effectColor};">
+                      <td style="padding: 2px; border: 1px solid #cbd5e1; font-weight: bold; color: ${item.effectColor || '#64748b'};">
                         ${item.effectLabel}
                       </td>
                     </tr>
@@ -1538,28 +1401,64 @@ export function generateOfficialPayslipHTML({
                       <td style="padding: 2px; border: 1px solid #bae6fd;">${idx + 1}</td>
                       <td style="padding: 2px; border: 1px solid #bae6fd; font-weight: bold; color: #0369a1;">
                         ${item.dayName} ${item.date}
+                        ${item.reason ? `<div style="font-size: 8px; color: #0284c7; font-weight: normal; margin-top: 1px;">${item.reason}</div>` : ''}
                       </td>
                       <td style="padding: 2px; border: 1px solid #bae6fd; color: #64748b;">—</td>
                       <td style="padding: 2px; border: 1px solid #bae6fd; color: #64748b;">—</td>
                       <td style="padding: 2px; border: 1px solid #bae6fd; color: #64748b;">—</td>
                       <td style="padding: 2px; border: 1px solid #bae6fd;">${item.badge || item.statusLabel}</td>
-                      <td style="padding: 2px; border: 1px solid #bae6fd; font-weight: bold; color: ${item.effectColor};">
+                      <td style="padding: 2px; border: 1px solid #bae6fd; font-weight: bold; color: ${item.effectColor || '#0284c7'};">
+                        ${item.effectLabel}
+                      </td>
+                    </tr>
+                  `;
+                } else if (item.type === 'leave') {
+                  return `
+                    <tr style="background: ${item.isUnpaid ? '#f8fafc' : (item.earnings < 0 ? '#fef2f2' : '#f0fdf4')};">
+                      <td style="padding: 2px; border: 1px solid #cbd5e1;">${idx + 1}</td>
+                      <td style="padding: 2px; border: 1px solid #cbd5e1; font-weight: bold;">
+                        ${item.dayName} ${item.date}
+                        ${item.reason ? `<div style="font-size: 8px; color: ${item.isUnpaid ? '#64748b' : '#166534'}; font-weight: normal; margin-top: 1px;">السبب: ${item.reason}</div>` : ''}
+                      </td>
+                      <td style="padding: 2px; border: 1px solid #cbd5e1; color: #64748b;">—</td>
+                      <td style="padding: 2px; border: 1px solid #cbd5e1; color: #64748b;">—</td>
+                      <td style="padding: 2px; border: 1px solid #cbd5e1; color: #64748b;">—</td>
+                      <td style="padding: 2px; border: 1px solid #cbd5e1;">${item.badge || item.statusLabel}</td>
+                      <td style="padding: 2px; border: 1px solid #cbd5e1; font-weight: bold; color: ${item.effectColor || '#15803d'};">
+                        ${item.effectLabel}
+                      </td>
+                    </tr>
+                  `;
+                } else if (item.type === 'absence') {
+                  return `
+                    <tr style="background: #fff1f2;">
+                      <td style="padding: 2px; border: 1px solid #fecdd3; color: #991b1b;">${idx + 1}</td>
+                      <td style="padding: 2px; border: 1px solid #fecdd3; font-weight: bold; color: #991b1b;">
+                        ${item.dayName} ${item.date}
+                        ${item.reason ? `<div style="font-size: 8px; color: #b91c1c; font-weight: normal; margin-top: 1px;">${item.reason}</div>` : ''}
+                      </td>
+                      <td style="padding: 2px; border: 1px solid #fecdd3; color: #991b1b;">—</td>
+                      <td style="padding: 2px; border: 1px solid #fecdd3; color: #991b1b;">—</td>
+                      <td style="padding: 2px; border: 1px solid #fecdd3; color: #991b1b;">—</td>
+                      <td style="padding: 2px; border: 1px solid #fecdd3;">${item.badge || item.statusLabel}</td>
+                      <td style="padding: 2px; border: 1px solid #fecdd3; font-weight: bold; color: ${item.effectColor || '#dc2626'};">
                         ${item.effectLabel}
                       </td>
                     </tr>
                   `;
                 } else {
                   return `
-                    <tr style="background: ${item.earnings < 0 ? '#fef2f2' : '#f0fdf4'};">
-                      <td style="padding: 2px; border: 1px solid #cbd5e1;">${idx + 1}</td>
-                      <td style="padding: 2px; border: 1px solid #cbd5e1; font-weight: bold;">
+                    <tr style="background: #f8fafc;">
+                      <td style="padding: 2px; border: 1px solid #e2e8f0; color: #94a3b8;">${idx + 1}</td>
+                      <td style="padding: 2px; border: 1px solid #e2e8f0; font-weight: bold; color: #64748b;">
                         ${item.dayName} ${item.date}
+                        ${item.reason ? `<div style="font-size: 8px; color: #64748b; font-weight: normal; margin-top: 1px;">${item.reason}</div>` : ''}
                       </td>
-                      <td style="padding: 2px; border: 1px solid #cbd5e1; color: #64748b;">—</td>
-                      <td style="padding: 2px; border: 1px solid #cbd5e1; color: #64748b;">—</td>
-                      <td style="padding: 2px; border: 1px solid #cbd5e1; color: #64748b;">—</td>
-                      <td style="padding: 2px; border: 1px solid #cbd5e1;">${item.badge || item.statusLabel}</td>
-                      <td style="padding: 2px; border: 1px solid #cbd5e1; font-weight: bold; color: ${item.effectColor};">
+                      <td style="padding: 2px; border: 1px solid #e2e8f0; color: #94a3b8;">—</td>
+                      <td style="padding: 2px; border: 1px solid #e2e8f0; color: #94a3b8;">—</td>
+                      <td style="padding: 2px; border: 1px solid #e2e8f0; color: #94a3b8;">—</td>
+                      <td style="padding: 2px; border: 1px solid #e2e8f0;">${item.badge || item.statusLabel}</td>
+                      <td style="padding: 2px; border: 1px solid #e2e8f0; font-weight: bold; color: ${item.effectColor || '#64748b'};">
                         ${item.effectLabel}
                       </td>
                     </tr>

@@ -65,8 +65,12 @@ export default function OwnerMedicationsPricingTab({
       window.dispatchEvent(new CustomEvent('outstock:notify', { detail }));
     }
   },
-  categoryScope = null
+  categoryScope = null,
+  currentUser = null
 }) {
+  // التحقق من صلاحية تعديل بيانات وأسعار الأصناف
+  const canEditItems = currentUser ? (currentUser.role === 'procurement_manager' || currentUser.isProcurementManager || currentUser.role === 'owner' || (currentUser.permissions?.can_edit_items !== false && currentUser.can_edit_items !== false)) : true;
+
   // ── 1. الحالات العامة ──
   const [stats, setStats] = useState({
     total_medications: 26633,
@@ -133,6 +137,10 @@ export default function OwnerMedicationsPricingTab({
 
   const handleConfirmDeleteMedication = async () => {
     if (!medToDelete) return;
+    if (!canEditItems) {
+      showToast?.('⛔ ليس لديك صلاحية حذف الأصناف من الكتالوج');
+      return;
+    }
     try {
       setIsDeletingMed(true);
       const res = await outstockDeleteMedication(medToDelete.id);
@@ -538,6 +546,10 @@ export default function OwnerMedicationsPricingTab({
   // حفظ وتعميم السعر الجديد
   const handleSavePrice = async (e) => {
     e.preventDefault();
+    if (!canEditItems) {
+      showToast('⛔ ليس لديك صلاحية تعديل أسعار أو بيانات الأصناف');
+      return;
+    }
     if (!selectedMedToEdit || !editPrice) return;
     const numPrice = parseFloat(editPrice);
     if (isNaN(numPrice) || numPrice < 0) {
@@ -599,6 +611,10 @@ export default function OwnerMedicationsPricingTab({
   // حفظ صنف جديد بالكتالوج
   const handleSaveNewMedication = async (e) => {
     e.preventDefault();
+    if (!canEditItems) {
+      showToast('⛔ ليس لديك صلاحية إضافة أصناف جديدة للكتالوج');
+      return;
+    }
     if (!newMedForm.trade_name_ar.trim() || !newMedForm.public_price) {
       showToast('يرجى ملء الحقول الإلزامية (اسم الصنف بالعربي والسعر الرسمي)');
       return;

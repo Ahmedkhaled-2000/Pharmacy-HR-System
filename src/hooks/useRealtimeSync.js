@@ -28,7 +28,8 @@ import {
   listenToLiveBroadcasts,
   listenToConnectionChanges,
   saveStateLocally,
-  syncNow
+  syncNow,
+  clearLocalDatabase
 } from '../utils/offlineSync';
 import {
   syncAllEmployeesPermissionsAndLateness
@@ -343,13 +344,15 @@ export function useRealtimeSync(props = {}) {
           if (!itemId || allDeletedIds.has(itemId) || item._isDeleted || item.isDeleted || item.status === 'deleted') {
             return false;
           }
-          const t = new Date(item.updatedAt || item.createdAt || item.editedAt || 0).getTime();
-          return (now - t) < 120000;
+          const t = new Date(item.updatedAt || item.approvedAt || item.rejectedAt || item.decided_at || item.createdAt || item.editedAt || 0).getTime();
+          return (now - t) < 180000; // نافذة أمان 3 دقائق للتحديثات المحلية
         });
         if (recents.length === 0) return remoteList || [];
 
         const remoteMap = new Map((remoteList || []).map(r => [String(r?.[idField] || ''), r]));
         const res = [...(remoteList || [])];
+
+        const TERMINAL_STATUSES = new Set(['approved', 'rejected', 'paid', 'partial', 'cancelled', 'completed', 'waived']);
 
         for (const loc of recents) {
           const locId = String(loc?.[idField] || '');
@@ -358,9 +361,16 @@ export function useRealtimeSync(props = {}) {
             res.unshift(loc);
           } else {
             const rem = remoteMap.get(locId);
-            const remTime = new Date(rem?.updatedAt || rem?.createdAt || rem?.editedAt || 0).getTime();
-            const locTime = new Date(loc?.updatedAt || loc?.createdAt || loc?.editedAt || 0).getTime();
-            if (locTime > remTime) {
+            const remTime = new Date(rem?.updatedAt || rem?.approvedAt || rem?.rejectedAt || rem?.decided_at || rem?.createdAt || rem?.editedAt || 0).getTime();
+            const locTime = new Date(loc?.updatedAt || loc?.approvedAt || loc?.rejectedAt || loc?.decided_at || loc?.createdAt || loc?.editedAt || 0).getTime();
+
+            // 🛡️ حصانة القرارات الباتة (Terminal Status Immunity):
+            // القرار المحلي المعتمد أو المرفوض يحظى بحصانة قطعية من الارتداد لحالة معلقة بسبب كاش سحابي متأخر
+            const isLocTerminal = TERMINAL_STATUSES.has(String(loc.status || '').toLowerCase()) || loc.adminApproved === true;
+            const isRemTerminal = TERMINAL_STATUSES.has(String(rem.status || '').toLowerCase()) || rem.adminApproved === true;
+
+            const shouldLocalWin = (isLocTerminal && !isRemTerminal) || (locTime > remTime);
+            if (shouldLocalWin) {
               const idx = res.findIndex(r => String(r?.[idField] || '') === locId);
               if (idx >= 0) res[idx] = loc;
             }
@@ -372,6 +382,13 @@ export function useRealtimeSync(props = {}) {
       merged.shifts = preserveRecentEntities(prev.shifts, merged.shifts, 'id');
       merged.rosters = preserveRecentEntities(prev.rosters, merged.rosters, 'id');
       merged.requests = preserveRecentEntities(prev.requests, merged.requests, 'id');
+      merged.leaveRequests = preserveRecentEntities(prev.leaveRequests, merged.leaveRequests, 'id');
+      merged.loans = preserveRecentEntities(prev.loans, merged.loans, 'id');
+      merged.shiftSwaps = preserveRecentEntities(prev.shiftSwaps, merged.shiftSwaps, 'id');
+      merged.resignationRequests = preserveRecentEntities(prev.resignationRequests, merged.resignationRequests, 'id');
+      if (Array.isArray(prev.permissionRequests) || Array.isArray(merged.permissionRequests)) {
+        merged.permissionRequests = preserveRecentEntities(prev.permissionRequests, merged.permissionRequests, 'id');
+      }
       merged.adjustments = preserveRecentEntities(prev.adjustments, merged.adjustments, 'id');
 
       // 🛡️ الحفاظ على شواهد القبور _deletedIds من المسح العرضي

@@ -5,6 +5,7 @@ import EmployeeRosterEditModal from '../branches/EmployeeRosterEditModal';
 import { getEmpDisplayName, isEmployeeActive, getRealTodayStr } from '../../utils/formatters';
 import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
 import { getResolvedEmployeeRoster, normalizeSchedule as engineNormalizeSchedule } from '../../utils/rosterEngine';
+import { getActiveSecondment, isEmployeeInBranchWithSecondment } from '../../utils/secondmentEngine';
 
 export const DEFAULT_ROSTER_SCHEDULE = {
   'السبت': { type: 'shift', start: '08:00', end: '16:00' },
@@ -301,6 +302,36 @@ export default function RosterModule({
 
   // Helper to determine exact roster status for an employee
   const getEmployeeRosterStatusInfo = (emp, targetBranch) => {
+    const sec = getActiveSecondment(emp.id, selectedMonth ? `${selectedMonth}-15` : null, state);
+    if (sec) {
+      if (targetBranch && String(sec.targetBranchId) !== String(targetBranch)) {
+        return {
+          key: 'seconded_away',
+          badge: (
+            <span className="badge" style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #f59e0b', fontWeight: 'bold' }}>
+              🔀 منتدب حالياً إلى: {sec.targetBranchName || 'فرع آخر'}
+            </span>
+          ),
+          empRoster: null,
+          pendingReq: null
+        };
+      }
+      if (sec.scheduleType === 'variable') {
+        return {
+          key: 'no_schedule_variable',
+          badge: (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+              <span className="badge" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #10b981', fontWeight: 'bold' }}>
+                🔀 منتدب: مواعيد متغيرة (حساب بالساعات)
+              </span>
+            </div>
+          ),
+          empRoster: null,
+          pendingReq: null
+        };
+      }
+    }
+
     if (emp?.noMonthlySchedule) {
       const restDaysList = Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.length > 0
         ? emp.weeklyRestDays.join('، ')
@@ -408,7 +439,12 @@ export default function RosterModule({
 
   const filteredEmployees = employees.filter((emp) => {
     if (!isEmployeeActive(emp)) return false;
-    if (selectedBranch && emp.branchId !== selectedBranch && (!emp.branchesDetails || !emp.branchesDetails.some(bd => String(bd.branchId) === String(selectedBranch)))) return false;
+    if (selectedBranch) {
+      const matchPrimary = emp.branchId === selectedBranch;
+      const matchDetails = emp.branchesDetails && emp.branchesDetails.some(bd => String(bd.branchId) === String(selectedBranch));
+      const matchSecondment = isEmployeeInBranchWithSecondment(emp, selectedBranch, selectedMonth ? `${selectedMonth}-15` : null, state);
+      if (!matchPrimary && !matchDetails && !matchSecondment) return false;
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const matchName = emp.name?.toLowerCase().includes(q);

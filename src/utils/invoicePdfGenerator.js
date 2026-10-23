@@ -138,7 +138,7 @@ export function buildInvoicePdfHtml(order, branch, barcodeValue, formattedDate, 
     } catch {}
   }
 
-  const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill);
+  const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill && !['unavailable', 'unavailable_in_market', 'cancelled_by_customer', 'cancelled', 'returned'].includes(String(i.itemStatus || i.item_status || '').toLowerCase()));
 
   const finalBarcode = barcodeValue || order.barcode_data || order.barcodeData || orderNo;
   const barcodeSvg = generateBarcodeSvgString(finalBarcode, { moduleWidth: 1.65, height: 48 });
@@ -601,7 +601,7 @@ export async function sendInvoicePdfViaWhatsApp({ order, branch, waServerUrl, cu
   const cName = order.customer_name || order.customerName || 'عميلنا العزيز';
   const bName = branch?.name || order.branch_name || 'الصيدلية';
 
-  const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill);
+  const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill && !['unavailable', 'unavailable_in_market', 'cancelled_by_customer', 'cancelled', 'returned'].includes(String(i.itemStatus || i.item_status || '').toLowerCase()));
   let totalMin = 0, totalMax = 0, totalAvg = 0, hasEstimated = false;
   activeItems.forEach(it => {
     const qty = parseInt(it.quantity || 1, 10);

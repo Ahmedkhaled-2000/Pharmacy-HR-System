@@ -40,6 +40,7 @@ const ElectronicKioskView = lazy(() => import('../components/kiosk/ElectronicKio
 const DeveloperPortalView = lazy(() => import('../components/developer/DeveloperPortalView'));
 const CompanyRegisterPage = lazy(() => import('../components/auth/CompanyRegisterPage'));
 const OutstockSystemView = lazy(() => import('../components/outstock/OutstockSystemView'));
+const PosSystemView = lazy(() => import('../components/pos/PosSystemView'));
 const OwnerAccessAndIdentityModule = lazy(() => import('../components/permissions/OwnerAccessAndIdentityModule'));
 import OwnerCommandLaunchpadModal from '../components/auth/OwnerCommandLaunchpadModal';
 import UnifiedWorkspaceSwitcherModal from '../components/auth/UnifiedWorkspaceSwitcherModal';
@@ -66,6 +67,17 @@ import { fetchRemoteState, saveStateLocally } from '../utils/offlineSync';
 import { smartMergeStates } from '../utils/stateMerger';
 import { apiLogin } from '../utils/apiClient';
 import { outstockLogin, outstockGetBranches } from '../utils/outstockApiClient';
+import {
+  getAuthoritativeEmployeeRates,
+  getAuthoritativeScheduledShift,
+  getAuthoritativeShiftMetrics,
+  calculateAuthoritativeCycleSummary,
+  generateAuthoritativeAuditDossier
+} from '../utils/unifiedPayrollEngine';
+import {
+  runPayrollHealthAudit,
+  formatPayrollHealthAlertsForWhatsApp
+} from '../utils/payrollWatchdog';
 
 export default function AppRoutes() {
   const location = useLocation();
@@ -575,7 +587,8 @@ export default function AppRoutes() {
     whatsapp_center: 'مركز مراسلات الواتساب التلقائي',
     outstock: 'نظام متابعة نواقص وطلبات أدوية العملاء والفروع (OutStock Handling)',
     'branch-whatsapp': '💬 مركز مراسلات وتوجيهات واتساب الفرع',
-    'owner-permissions': '👑 صلاحيات الموظفين وهوية المنظومة السيادية'
+    'owner-permissions': '👑 صلاحيات الموظفين وهوية المنظومة السيادية',
+    pos: '💊 نظام نقاط البيع وإدارة الصيدليات (PharmaOS POS)'
   }), []);
 
   const isScreenInMaintenance = useCallback((tabKey, subTabKey = '') => {
@@ -604,7 +617,8 @@ export default function AppRoutes() {
       archive: ['pharmacy_archive'],
       careers: ['recruitment'],
       recruitment: ['recruitment'],
-      whatsapp_center: ['whatsapp_center']
+      whatsapp_center: ['whatsapp_center'],
+      pos: ['pos']
     };
 
     const targetModules = keyMap[tabKey] || [tabKey];
@@ -787,11 +801,19 @@ export default function AppRoutes() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Guarantee null-safe arrays for all child components and modules
+  // Guarantee null-safe arrays for all child components and modules + Central SSOT Engines
   const sanitizedState = useMemo(() => {
     if (!state) return state;
     return {
       ...state,
+      computeEmpSummary,
+      getAuthoritativeEmployeeRates: (emp, bId) => getAuthoritativeEmployeeRates(emp, bId, state),
+      getAuthoritativeScheduledShift: (empId, dateStr, bId) => getAuthoritativeScheduledShift(empId, dateStr, state, bId),
+      getAuthoritativeShiftMetrics: (shift, bId) => getAuthoritativeShiftMetrics(shift, state, bId),
+      calculateAuthoritativeCycleSummary: (args) => calculateAuthoritativeCycleSummary({ ...args, state }),
+      generateAuthoritativeAuditDossier: (empId, monthStr) => generateAuthoritativeAuditDossier(empId, monthStr, state),
+      runPayrollHealthAudit: (targetMonth) => runPayrollHealthAudit(state, targetMonth),
+      formatPayrollHealthAlertsForWhatsApp,
       employees: (state.employees || []).filter((e) => e && typeof e === 'object' && (e.id || e.code)),
       branches: (state.branches || []).filter((b) => b && typeof b === 'object' && b.id),
       shifts: (state.shifts || []).filter((s) => s && typeof s === 'object' && (s.id || s.date || s.timestamp)),
@@ -803,7 +825,7 @@ export default function AppRoutes() {
       evaluations: (state.evaluations || []).filter((e) => e && typeof e === 'object' && e.id),
       rosters: (state.rosters || []).filter((r) => r && typeof r === 'object' && r.id)
     };
-  }, [state]);
+  }, [state, computeEmpSummary]);
 
   // Navigation mode via URL
   const viewMode = location.pathname.startsWith('/developer')
@@ -822,6 +844,8 @@ export default function AppRoutes() {
     ? 'kiosk'
     : location.pathname.startsWith('/outstock')
     ? 'outstock'
+    : location.pathname.startsWith('/pos')
+    ? 'pos'
     : location.pathname === '/employee'
     ? 'employee'
     : 'admin';
@@ -840,6 +864,68 @@ export default function AppRoutes() {
   })();
 
   const [outstockUnlockedEpoch, setOutstockUnlockedEpoch] = useState(0);
+
+  // تجهيز بيانات وصلاحيات المستخدم لمنظومة النواقص والمشتريات بدقة تامة
+  const getOutstockCurrentUser = useCallback((empUser, isOwnerSim = false) => {
+    if (authRole === 'owner') {
+      return {
+        ...(empUser || {}),
+        role: 'owner',
+        allBranchesAccess: true,
+        isOwnerSimulating: false,
+        permissions: {
+          can_edit_items: true,
+          can_view_orders: true,
+          can_change_status: true,
+          can_access_suppliers: true,
+          can_access_supplier_accounts: true,
+          can_access_order_receiving: true,
+          can_access_supplier_invoices: true,
+          can_access_branch_withdrawals: true,
+          can_access_discounts_comparison: true,
+          can_access_pharmafly: true,
+          can_manage_team: true,
+          can_access_order_returns: true,
+          can_delivery_tracking: true,
+          can_unavailable_items: true,
+          can_access_procurement_whatsapp: true,
+          can_access_medications_catalog: true,
+          can_access_complaints: true,
+          can_access_cosmetics_customers: true
+        }
+      };
+    }
+    if (!empUser && !isOwnerSim) return null;
+
+    const uAccess = resolveEmployeeUnifiedAccess(empUser, state?.orgSettings);
+    const outHandling = uAccess?.permissions?.outstockHandling || {};
+    const outPerms = outHandling.permissions || outHandling.customPermissions || {};
+    const outRole = outHandling.role || empUser?.role;
+    const isProcMgr = authRole === 'outstock_procurement_manager' || authRole === 'procurement_manager' || empUser?.role === 'procurement_manager' || outRole === 'procurement_manager';
+    const isCosmetics = authRole === 'outstock_cosmetics_officer' || empUser?.role === 'cosmetics_officer' || outRole === 'cosmetics_officer';
+    const isProcTeam = authRole === 'outstock_procurement_officer' || empUser?.role === 'procurement_officer' || outRole === 'procurement_team';
+
+    const assignedBranchIds = outHandling.assignedBranchIds || (outHandling.assignedBranchId && outHandling.assignedBranchId !== 'ALL' ? [outHandling.assignedBranchId] : []);
+    const allBranchesAccess = isProcMgr || outHandling.assignedBranchId === 'ALL' || (Array.isArray(assignedBranchIds) && assignedBranchIds.includes('ALL'));
+
+    const effectiveRole = isProcMgr ? 'procurement_manager' : (isCosmetics ? 'cosmetics_officer' : (isProcTeam ? 'procurement_officer' : (empUser?.role || 'outstock_pharmacy')));
+
+    return {
+      ...empUser,
+      unifiedAccess: uAccess,
+      role: effectiveRole,
+      category_scope: isCosmetics ? 'cosmetics' : (outPerms.category_scope || empUser?.category_scope || 'all'),
+      allBranchesAccess,
+      allowedBranches: assignedBranchIds,
+      assignedBranches: assignedBranchIds,
+      isOwnerSimulating: isOwnerSim,
+      permissions: {
+        ...(empUser?.permissions || {}),
+        ...outPerms
+      },
+      ...outPerms
+    };
+  }, [authRole, state?.orgSettings]);
 
   // Domain Handlers
   const handleSaveBranch = async (branchData) => {
@@ -1274,6 +1360,32 @@ export default function AppRoutes() {
         return { role: 'employee', matched: true, user: empUser };
       }
 
+      // 5. Check POS Terminals (محطات نقاط البيع المستقلة للفروع)
+      const posTerminals = Array.isArray(currentState?.orgSettings?.posTerminals)
+        ? currentState.orgSettings.posTerminals
+        : [];
+      const matchedTerminal = posTerminals.find((term) => {
+        if (!term || term.isActive === false) return false;
+        const tUser = cleanStr(term.username || '').toLowerCase();
+        const tPass = cleanStr(term.password || '');
+        const isUserMatch = cleanUser === tUser || (stdUser && stdUser === toStdDigits(tUser));
+        return isUserMatch && isPasswordMatch(tPass, cleanPass);
+      });
+
+      if (matchedTerminal) {
+        const branches = currentState?.branches || [];
+        const termBranch = branches.find(b => String(b.id) === String(matchedTerminal.branchId)) || {
+          id: matchedTerminal.branchId,
+          name: matchedTerminal.name || 'فرع الصيدلية'
+        };
+        return {
+          role: 'pos',
+          matched: true,
+          terminal: matchedTerminal,
+          branch: termBranch
+        };
+      }
+
       return { matched: false };
     };
 
@@ -1579,6 +1691,26 @@ export default function AppRoutes() {
           localStorage.setItem('app_branch_session_version', String(branch?.sessionVersion || 1));
         } catch {}
         return { success: true, role: 'branch' };
+      }
+
+      if (role === 'pos') {
+        const terminal = authResult.terminal;
+        const termBranch = authResult.branch;
+        try {
+          localStorage.setItem('app_auth_role', 'pos');
+          localStorage.setItem('app_pos_authenticated', 'true');
+          localStorage.setItem('app_pos_terminal', terminal.terminalCode || terminal.id);
+          localStorage.setItem('app_pos_terminal_data', JSON.stringify(terminal));
+          localStorage.setItem('app_pos_branch_id', termBranch?.id || terminal.branchId);
+          localStorage.setItem('app_pos_branch_name', termBranch?.name || terminal.name || 'الفرع');
+          localStorage.setItem('app_active_branch_id', termBranch?.id || terminal.branchId);
+        } catch {}
+
+        setCurrentBranch(termBranch);
+        setAuthRole('pos');
+        setIsAdminLoggedIn(false);
+        window.history.pushState({}, '', '/pos');
+        return { success: true, role: 'pos' };
       }
 
       if (role === 'employee') {
@@ -1929,6 +2061,39 @@ export default function AppRoutes() {
         )
       )}
 
+      {viewMode === 'pos' && (
+        (authRole === 'pos' || authRole === 'admin' || authRole === 'owner' || localStorage.getItem('app_pos_authenticated') === 'true') ? (
+          <ErrorBoundary fallbackTitle="حدث خطأ في نظام نقاط البيع (POS)">
+            <Suspense fallback={<div className="loading-fallback">جاري تحميل نظام نقاط البيع (PharmaOS POS)...</div>}>
+              <PosSystemView
+                isStandalone={true}
+                themeMode={themeMode}
+                toggleTheme={toggleTheme}
+                state={sanitizedState}
+                setState={setState}
+                saveState={saveState}
+                showToast={showToast}
+                currentBranch={currentBranch}
+                authRole={authRole}
+                currentEmpUser={currentEmpUser}
+                onLogout={handleLogout}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        ) : (
+          <ErrorBoundary fallbackTitle="تسجيل الدخول لمحطة نقطة البيع">
+            <LoginPage
+              onLogin={handleLogin}
+              onOpenRegister={() => { window.location.href = '/register'; }}
+              onOpenDeveloper={() => { window.location.href = '/developer'; }}
+              state={state}
+              themeMode={themeMode}
+              toggleTheme={toggleTheme}
+            />
+          </ErrorBoundary>
+        )
+      )}
+
       {viewMode === 'careers' && (
         isScreenInMaintenance('recruitment') ? (
           <ScreenMaintenanceView
@@ -2009,15 +2174,14 @@ export default function AppRoutes() {
             <OutstockSystemView
               initialRole={authRole}
               currentBranch={
-                (authRole === 'outstock_procurement_manager' || currentEmpUser?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager')
-                  ? { id: 'all', name: 'كافة الفروع' }
-                  : currentBranch
+                (() => {
+                  const outUser = getOutstockCurrentUser(currentEmpUser, isOwnerSimulating);
+                  return (outUser?.allBranchesAccess || outUser?.role === 'procurement_manager')
+                    ? { id: 'all', name: 'كافة الفروع' }
+                    : currentBranch;
+                })()
               }
-              currentUser={
-                (authRole === 'outstock_procurement_manager' || currentEmpUser?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager')
-                  ? { ...currentEmpUser, role: 'procurement_manager', allBranchesAccess: true, isOwnerSimulating }
-                  : { ...currentEmpUser, isOwnerSimulating }
-              }
+              currentUser={getOutstockCurrentUser(currentEmpUser, isOwnerSimulating)}
               isOwnerSimulating={isOwnerSimulating}
               onLogout={handleLogout}
               themeMode={themeMode}
@@ -2029,7 +2193,7 @@ export default function AppRoutes() {
       )}
 
       {/* ── 2. Authenticated / Unauthenticated App Views ── */}
-      {viewMode !== 'kiosk' && viewMode !== 'archive' && viewMode !== 'accounts' && viewMode !== 'careers' && viewMode !== 'interview' && viewMode !== 'developer' && viewMode !== 'register' && viewMode !== 'outstock' && authRole !== 'developer' && !(typeof authRole === 'string' && authRole.startsWith('outstock_')) && (
+      {viewMode !== 'kiosk' && viewMode !== 'archive' && viewMode !== 'accounts' && viewMode !== 'careers' && viewMode !== 'interview' && viewMode !== 'developer' && viewMode !== 'register' && viewMode !== 'outstock' && viewMode !== 'pos' && authRole !== 'developer' && !(typeof authRole === 'string' && authRole.startsWith('outstock_')) && (
         (!isAdminLoggedIn && !currentEmpUser && !currentBranch) || authRole === 'none' ? (
           <ErrorBoundary fallbackTitle="حدث خطأ في شاشة تسجيل الدخول">
             <LoginPage
@@ -2069,7 +2233,7 @@ export default function AppRoutes() {
                 currentEmpUser={currentEmpUser}
                 setCurrentEmpUser={setCurrentEmpUser}
                 handleEmpLogin={handleEmpLogin}
-                state={state}
+                state={sanitizedState}
                 setState={setState}
                 saveState={saveState}
                 computeEmpSummary={computeEmpSummary}
@@ -2174,6 +2338,7 @@ export default function AppRoutes() {
                     state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
+                    computeEmpSummary={computeEmpSummary}
                     currentBranch={currentBranch}
                     activeTab={activeNavTab}
                     setActiveTab={setActiveNavTab}
@@ -2832,19 +2997,14 @@ export default function AppRoutes() {
                             (typeof authRole === 'string' && authRole.startsWith('outstock_')) ? authRole : 'outstock_owner'
                           }
                           currentBranch={
-                            (authRole === 'outstock_procurement_manager' || authRole === 'procurement_manager' || currentEmpUser?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_team' || (currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'cosmetics_officer' && (currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.assignedBranchId === 'ALL' || !currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.assignedBranchId)))
-                              ? { id: 'all', name: 'كافة الفروع' }
-                              : currentBranch
+                            (() => {
+                              const outUser = getOutstockCurrentUser(currentEmpUser, isOwnerSimulating);
+                              return (outUser?.allBranchesAccess || outUser?.role === 'procurement_manager')
+                                ? { id: 'all', name: 'كافة الفروع' }
+                                : currentBranch;
+                            })()
                           }
-                          currentUser={
-                            (authRole === 'outstock_procurement_manager' || authRole === 'procurement_manager' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_manager')
-                              ? { ...currentEmpUser, role: 'procurement_manager', allBranchesAccess: true, isOwnerSimulating }
-                              : (authRole === 'outstock_cosmetics_officer' || currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'cosmetics_officer')
-                              ? { ...currentEmpUser, role: 'cosmetics_officer', category_scope: 'cosmetics', allBranchesAccess: currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.assignedBranchId === 'ALL' || !currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.assignedBranchId, isOwnerSimulating }
-                              : (currentEmpUser?.unifiedAccess?.permissions?.outstockHandling?.role === 'procurement_team')
-                              ? { ...currentEmpUser, role: 'procurement_officer', allBranchesAccess: true, isOwnerSimulating }
-                              : { ...currentEmpUser, isOwnerSimulating }
-                          }
+                          currentUser={getOutstockCurrentUser(currentEmpUser, isOwnerSimulating)}
                           isOwnerSimulating={isOwnerSimulating}
                           onLogout={handleLogout}
                           themeMode={themeMode}

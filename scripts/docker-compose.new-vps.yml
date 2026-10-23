@@ -1,0 +1,111 @@
+name: hr-system-stack
+
+services:
+  postgres:
+    container_name: hr-postgres
+    image: postgres:16-alpine
+    restart: unless-stopped
+    command: >
+      postgres -c shared_buffers=2048MB
+               -c effective_cache_size=5120MB
+               -c work_mem=16MB
+               -c maintenance_work_mem=256MB
+               -c max_connections=150
+               -c checkpoint_completion_target=0.9
+               -c wal_buffers=16MB
+               -c default_statistics_target=100
+               -c random_page_cost=1.1
+               -c effective_io_concurrency=200
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_hr_2026_super_secure
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 3500M
+
+  redis:
+    container_name: hr-redis
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 120 1 --loglevel warning --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 600M
+
+  hr-backend:
+    container_name: hr-backend-server
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_hr_2026_super_secure
+      DB_SSL: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: "pharmacy_jwt_secret_key_2026_pharmacore_site_secure"
+      AUTH_SECRET: "pharmacy_auth_secret_key_2026_pharmacore_site_secure"
+      NODE_OPTIONS: "--max-old-space-size=2048"
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2500M
+
+  hr-whatsapp:
+    container_name: hr-whatsapp-server
+    build:
+      context: .
+      dockerfile: server/Dockerfile.whatsapp
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+      WA_AUTH_PATH: /app/server/whatsapp-auth
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - whatsapp-auth-data:/app/server/whatsapp-auth
+      - ./server/whatsapp-server.js:/app/server/whatsapp-server.js:ro
+    deploy:
+      resources:
+        limits:
+          memory: 500M
+
+volumes:
+  postgres-data:
+  redis-data:
+  whatsapp-auth-data:

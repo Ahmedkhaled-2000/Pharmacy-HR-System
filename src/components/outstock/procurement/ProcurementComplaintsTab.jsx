@@ -8,7 +8,7 @@ import { getSocket } from '../../../utils/socketClient';
  * تبويبة "شكاوى الفروع" في بوابة إدارة المشتريات
  * تم تصحيح الفلاتر لمنع التذبذب والتحميل المتكرر مع الفلترة الفورية في الواجهة
  */
-export default function ProcurementComplaintsTab({ currentUser, showToast }) {
+export default function ProcurementComplaintsTab({ currentUser, showToast, categoryScope = null }) {
   const [allComplaints, setAllComplaints] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('pending_procurement'); // default: 'pending_procurement'
@@ -21,7 +21,9 @@ export default function ProcurementComplaintsTab({ currentUser, showToast }) {
   const fetchComplaints = useCallback(async (showSpinner = false) => {
     if (showSpinner) setIsLoading(true);
     try {
-      const res = await outstockGetOwnerComplaints({ status: 'all' });
+      const params = { status: 'all' };
+      if (categoryScope) params.category_scope = categoryScope;
+      const res = await outstockGetOwnerComplaints(params);
       if (res?.success && Array.isArray(res.complaints)) {
         setAllComplaints(res.complaints);
       } else {
@@ -32,7 +34,7 @@ export default function ProcurementComplaintsTab({ currentUser, showToast }) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [categoryScope]);
 
   useEffect(() => {
     fetchComplaints(true);
@@ -94,34 +96,50 @@ export default function ProcurementComplaintsTab({ currentUser, showToast }) {
     }
   };
 
+  // عزل الشكاوى لمسؤول التجميل لاستبعاد أي شكوى تخص صنف دوائي
+  const scopedComplaints = useMemo(() => {
+    if (categoryScope !== 'cosmetics') return allComplaints;
+    return allComplaints.filter((c) => {
+      if (c.item_type === 'cosmetics') return true;
+      if (Array.isArray(c.order_items) && c.order_items.length > 0) {
+        if (c.item_id) {
+          const matchedItem = c.order_items.find(it => String(it.id) === String(c.item_id));
+          if (matchedItem) return matchedItem.item_type === 'cosmetics';
+        }
+        return c.order_items.some(it => it.item_type === 'cosmetics');
+      }
+      return false;
+    });
+  }, [allComplaints, categoryScope]);
+
   // إحصائيات ثابتة ومستقرة تماماً لا تتذبذب باختيار الفلتر
   const pendingProcurementCount = useMemo(() => {
-    return allComplaints.filter(c => !c.procurement_reply && c.status !== 'resolved').length;
-  }, [allComplaints]);
+    return scopedComplaints.filter(c => !c.procurement_reply && c.status !== 'resolved').length;
+  }, [scopedComplaints]);
 
   const pendingOwnerCount = useMemo(() => {
-    return allComplaints.filter(c => c.procurement_reply && c.status !== 'resolved').length;
-  }, [allComplaints]);
+    return scopedComplaints.filter(c => c.procurement_reply && c.status !== 'resolved').length;
+  }, [scopedComplaints]);
 
   const resolvedCount = useMemo(() => {
-    return allComplaints.filter(c => c.status === 'resolved').length;
-  }, [allComplaints]);
+    return scopedComplaints.filter(c => c.status === 'resolved').length;
+  }, [scopedComplaints]);
 
-  const totalCount = allComplaints.length;
+  const totalCount = scopedComplaints.length;
 
   // فلترة الشكاوى المعروضة لحظياً على الواجهة دون إعادة تحميل الصفحة
   const displayedComplaints = useMemo(() => {
     if (filterStatus === 'pending_procurement') {
-      return allComplaints.filter(c => !c.procurement_reply && c.status !== 'resolved');
+      return scopedComplaints.filter(c => !c.procurement_reply && c.status !== 'resolved');
     }
     if (filterStatus === 'pending_owner') {
-      return allComplaints.filter(c => c.procurement_reply && c.status !== 'resolved');
+      return scopedComplaints.filter(c => c.procurement_reply && c.status !== 'resolved');
     }
     if (filterStatus === 'resolved') {
-      return allComplaints.filter(c => c.status === 'resolved');
+      return scopedComplaints.filter(c => c.status === 'resolved');
     }
-    return allComplaints;
-  }, [allComplaints, filterStatus]);
+    return scopedComplaints;
+  }, [scopedComplaints, filterStatus]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', direction: 'rtl' }}>

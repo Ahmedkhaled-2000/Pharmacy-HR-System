@@ -6,7 +6,7 @@ import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngi
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { getEmployeeDaySchedule, getResolvedEmployeeRoster, projectRosterToMonth, splitUnifiedRosterForBranches, checkShiftsOverlap, getDayShiftsList, checkAnyShiftsOverlap } from '../../utils/rosterEngine';
 import { reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
-import { apiSaveSettingsSlice } from '../../utils/apiClient';
+import { apiSaveSettingsSlice, apiSaveRosterAtomic } from '../../utils/apiClient';
 
 const DEFAULT_SCHEDULE = {
   'السبت': { type: 'shift', start: '08:00', end: '16:00', hours: 8 },
@@ -780,7 +780,7 @@ export default function EmployeeRosterEditModal({
           branchId: curShifts[0]?.branchId || defaultBranchId,
           branchName: curShifts[0]?.branchName || '',
           hasSecondShift: curShifts.length > 1,
-          secondShift: curShifts[1] ? { ...nextShifts?.[1] || curShifts[1] } : null
+          secondShift: curShifts[1] ? { ...curShifts[1] } : null
         }
       };
     });
@@ -1615,6 +1615,12 @@ export default function EmployeeRosterEditModal({
         // ─────────────────────────────────────────────────────────────
         // الحالة الأولى: الإدارة العليا (Admin) ➔ اعتماد وحفظ فوري مباشر
         // ─────────────────────────────────────────────────────────────
+        // 🌟 حصر معرفات الروستر القديمة لتسجيلها في شواهد القبور ومنع ارتدادها من الكاش
+        const replacedRosterIds = (state?.rosters || [])
+          .filter(r => (String(r.employeeId) === String(targetEmp.id) || (targetEmp.code && String(r.employeeCode) === String(targetEmp.code))) && (r.month === selectedMonth || !r.month))
+          .map(r => r.id)
+          .filter(Boolean);
+
         let updatedRosters;
         if (isMultiBranchEmp) {
           // 🌟 تقسيم ذكي وتلقائي لكل فرع على حدة مع جدول موحد رئيسي متكامل
@@ -1684,7 +1690,7 @@ export default function EmployeeRosterEditModal({
             )
           );
 
-          const rosterId = `roster_${targetEmp.id}_${selectedMonth}_${Date.now()}`;
+          const rosterId = `roster_${targetEmp.id}_${selectedMonth}`;
           const newRosterObj = {
             id: rosterId,
             employeeId: targetEmp.id,
@@ -1780,23 +1786,48 @@ export default function EmployeeRosterEditModal({
           notifications: [newNotification, ...(state?.notifications || [])]
         };
 
+        // 🌟 رصد التواريخ التي تم تعديلها أو تعيينها في الجدول لإسقاط أي جزاءات سابقة عليها
+        const cycleDateKeys = Object.keys(safeInputs).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k));
+        const prevSchedule = existingRoster?.schedule || {};
+        const changedDatesList = cycleDateKeys.filter(d => {
+          const prev = prevSchedule[d] || {};
+          const cur = safeInputs[d] || {};
+          return prev.type !== cur.type || prev.start !== cur.start || prev.end !== cur.end || prev.isOff !== cur.isOff;
+        });
+        const effectiveChangedDates = changedDatesList.length > 0 ? changedDatesList : cycleDateKeys;
+
         // 🌟 التسوية الذكية التلقائية اللحظية بين المواعيد الجديدة وبصمات الحضور السابقة
         const { updatedState: reconciledState, summary: reconSummary } = reconcileEmployeeScheduleOrPunchChange({
           employeeId: targetEmp.id,
+          changedDates: effectiveChangedDates,
           state: updatedState,
-          options: { reason: 'تعديل واعتماد الجدول الشهري' }
+          options: { reason: 'تعديل واعتماد الجدول الشهري', clearPenaltiesOnChangedDates: true }
         });
 
         setState?.(reconciledState);
+
+        // 🌟 حفظ ذري موحد فائق السرعة عبر نقطة الاتصال المركزية الجديدة للسيرفر (< 20ms)
         try {
-          await apiSaveSettingsSlice('rosters', reconciledState.rosters);
-          await apiSaveSettingsSlice('employees', reconciledState.employees);
-          await apiSaveSettingsSlice('shifts', reconciledState.shifts);
-          await apiSaveSettingsSlice('lateIncidents', reconciledState.lateIncidents);
-          await apiSaveSettingsSlice('requests', reconciledState.requests);
-        } catch (sliceErr) {
-          console.warn('apiSaveSettingsSlice after roster save error:', sliceErr);
+          await apiSaveRosterAtomic({
+            employeeId: targetEmp.id,
+            employeeCode: targetEmp.code || '',
+            employeeName: targetEmp.name,
+            month: selectedMonth,
+            branchId: effectiveBranchId,
+            branchName: effectiveBranchName,
+            roster: isMultiBranchEmp ? masterRosterObj : newRosterObj,
+            rosters: isMultiBranchEmp ? [masterRosterObj, ...branchRosterObjs] : [newRosterObj],
+            employees: reconciledState.employees,
+            shifts: reconciledState.shifts,
+            lateIncidents: reconciledState.lateIncidents,
+            requests: reconciledState.requests,
+            notifications: reconciledState.notifications,
+            deletedRosterIds: replacedRosterIds
+          });
+        } catch (atomicErr) {
+          console.warn('[RosterAtomicSave] Fallback to standard saveState:', atomicErr);
         }
+
         if (saveState) await saveState(reconciledState);
 
         if (reconSummary?.waivedDeductionMinutes > 0) {

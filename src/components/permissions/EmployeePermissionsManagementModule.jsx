@@ -61,6 +61,7 @@ export default function EmployeePermissionsManagementModule({
   const [excStartTime, setExcStartTime] = useState('08:00');
   const [excEndTime, setExcEndTime] = useState('10:00');
   const [excReason, setExcReason] = useState('');
+  const [excCompensationType, setExcCompensationType] = useState('paid'); // 'paid' | 'unpaid'
   const [excSubmitting, setExcSubmitting] = useState(false);
 
   const branches = state.branches || [];
@@ -249,7 +250,7 @@ export default function EmployeePermissionsManagementModule({
   }, [allPermissions, selectedMonth]);
 
   // ── اعتماد إذن ──
-  const handleApprovePermission = async (permId) => {
+  const handleApprovePermission = async (permId, compensationType = 'paid') => {
     const targetPerm = allPermissions.find((p) => p.id === permId);
     if (!targetPerm) return;
 
@@ -261,6 +262,9 @@ export default function EmployeePermissionsManagementModule({
             status: 'approved',
             adminApproved: true,
             branchApproved: true,
+            compensationType: compensationType || r.compensationType || 'paid',
+            isUnpaid: compensationType === 'unpaid',
+            isPaid: compensationType === 'paid',
             approvedAt: new Date().toISOString()
           };
         }
@@ -302,9 +306,9 @@ export default function EmployeePermissionsManagementModule({
 
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
-      showToast?.('✅ تم اعتماد الإذن، وتعديل البصمة، وإلغاء الخصم بنجاح');
+      showToast?.(`✅ تم اعتماد الإذن (${compensationType === 'unpaid' ? 'غير مدفوع الأجر / إعفاء فقط' : 'مدفوع الأجر / احتساب ساعات'}) وتعديل البصمة بنجاح`);
       if (previewReq?.id === permId) {
-        setPreviewReq({ ...previewReq, status: 'approved', adminApproved: true, branchApproved: true });
+        setPreviewReq({ ...previewReq, status: 'approved', adminApproved: true, branchApproved: true, compensationType, isUnpaid: compensationType === 'unpaid' });
       }
     };
 
@@ -393,6 +397,9 @@ export default function EmployeePermissionsManagementModule({
         branchId: emp.branchId || currentBranch?.id,
         type: 'permission',
         permType: excPermType,
+        compensationType: excCompensationType,
+        isUnpaid: excCompensationType === 'unpaid',
+        isPaid: excCompensationType === 'paid',
         date: excDate,
         startTime: excStartTime,
         endTime: excEndTime,
@@ -821,9 +828,20 @@ export default function EmployeePermissionsManagementModule({
                       </td>
                       <td style={{ padding: '12px 14px' }}>
                         {isApproved && (
-                          <span style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#047857', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700 }}>
-                            ✅ معتمد ومعدل بالبصمة
-                          </span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+                            <span style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#047857', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700 }}>
+                              ✅ معتمد ومعدل بالبصمة
+                            </span>
+                            {(perm.compensationType === 'unpaid' || perm.isUnpaid) ? (
+                              <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800 }}>
+                                🚫 إعفاء فقط (غير مدفوع)
+                              </span>
+                            ) : (
+                              <span style={{ background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800 }}>
+                                💵 مدفوع الأجر
+                              </span>
+                            )}
+                          </div>
                         )}
                         {isPending && (
                           <span style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#b45309', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700 }}>
@@ -837,13 +855,13 @@ export default function EmployeePermissionsManagementModule({
                         )}
                       </td>
                       <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
                           <button
                             type="button"
                             className="btn btn-ghost"
                             onClick={() => setPreviewReq(perm)}
                             title="معاينة تفاصيل الإذن في نافذة منبثقة"
-                            style={{ padding: '4px 8px', fontSize: '13px', background: 'var(--background)', border: '1px solid var(--border)' }}
+                            style={{ padding: '4px 8px', fontSize: '12px', background: 'var(--background)', border: '1px solid var(--border)' }}
                           >
                             👁️ معاينة
                           </button>
@@ -852,11 +870,20 @@ export default function EmployeePermissionsManagementModule({
                               <button
                                 type="button"
                                 className="btn btn-start"
-                                onClick={() => handleApprovePermission(perm.id)}
-                                title="اعتماد الإذن وتعديل البصمة"
-                                style={{ padding: '4px 8px', fontSize: '12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px' }}
+                                onClick={() => handleApprovePermission(perm.id, 'paid')}
+                                title="اعتماد كإذن مدفوع (يُحتسب ضمن ساعات العمل)"
+                                style={{ padding: '4px 8px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}
                               >
-                                ✅
+                                ✅ مدفوع
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-start"
+                                onClick={() => handleApprovePermission(perm.id, 'unpaid')}
+                                title="اعتماد كإذن غير مدفوع (إعفاء من الجزاء فقط دون زيادة ساعات العمل)"
+                                style={{ padding: '4px 8px', fontSize: '11px', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}
+                              >
+                                ⚠️ إعفاء فقط
                               </button>
                               <button
                                 type="button"
@@ -986,7 +1013,7 @@ export default function EmployeePermissionsManagementModule({
             </div>
 
             {/* Actions */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className="btn btn-ghost"
@@ -1008,10 +1035,20 @@ export default function EmployeePermissionsManagementModule({
                   <button
                     type="button"
                     className="btn btn-start"
-                    onClick={() => handleApprovePermission(previewReq.id)}
-                    style={{ background: '#10b981', color: '#fff', border: 'none', fontWeight: 800, padding: '8px 20px' }}
+                    onClick={() => handleApprovePermission(previewReq.id, 'unpaid')}
+                    style={{ background: '#f59e0b', color: '#fff', border: 'none', fontWeight: 800, padding: '8px 16px' }}
+                    title="إعفاء من وقوعات وجزاء التأخير فقط دون احتساب ساعات عمل إضافية"
                   >
-                    ✅ اعتماد وتعديل البصمة
+                    ⚠️ اعتماد بدون أجر (إعفاء فقط)
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-start"
+                    onClick={() => handleApprovePermission(previewReq.id, 'paid')}
+                    style={{ background: '#10b981', color: '#fff', border: 'none', fontWeight: 800, padding: '8px 20px' }}
+                    title="احتساب ساعات الإذن ضمن ساعات العمل وصرف أجرها بالمرتب"
+                  >
+                    ✅ اعتماد مدفوع الأجر
                   </button>
                 </>
               )}
@@ -1089,7 +1126,7 @@ export default function EmployeePermissionsManagementModule({
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>
                   ⏰ نوع الإذن:
                 </label>
-                <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13.5px', fontWeight: 700, cursor: 'pointer' }}>
                     <input
                       type="radio"
@@ -1107,6 +1144,57 @@ export default function EmployeePermissionsManagementModule({
                       onChange={() => setExcPermType('early')}
                     />
                     🏃 إذن انصراف مبكر قبل نهاية الوردية
+                  </label>
+                </div>
+              </div>
+
+              {/* Compensation Type: Paid vs Unpaid */}
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>
+                  💰 طريقة احتساب الإذن والأثر المالي:
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: excCompensationType === 'paid' ? '2px solid #10b981' : '1px solid var(--border)',
+                    background: excCompensationType === 'paid' ? 'rgba(16, 185, 129, 0.08)' : 'var(--background)',
+                    cursor: 'pointer'
+                  }}>
+                    <input
+                      type="radio"
+                      name="excCompensation"
+                      checked={excCompensationType === 'paid'}
+                      onChange={() => setExcCompensationType('paid')}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 800, color: '#047857', fontSize: '13px' }}>💵 مدفوع الأجر</div>
+                      <small style={{ color: 'var(--muted)', fontSize: '11px', display: 'block' }}>تُضاف ساعات الإذن لساعات العمل ويُصرف أجرها بالمرتب</small>
+                    </div>
+                  </label>
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: excCompensationType === 'unpaid' ? '2px solid #f59e0b' : '1px solid var(--border)',
+                    background: excCompensationType === 'unpaid' ? 'rgba(245, 158, 11, 0.08)' : 'var(--background)',
+                    cursor: 'pointer'
+                  }}>
+                    <input
+                      type="radio"
+                      name="excCompensation"
+                      checked={excCompensationType === 'unpaid'}
+                      onChange={() => setExcCompensationType('unpaid')}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 800, color: '#b45309', fontSize: '13px' }}>🚫 إعفاء بدون أجر</div>
+                      <small style={{ color: 'var(--muted)', fontSize: '11px', display: 'block' }}>إسقاط الجزاء فقط دون احتساب ساعات عمل إضافية للراتب</small>
+                    </div>
                   </label>
                 </div>
               </div>

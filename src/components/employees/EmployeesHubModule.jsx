@@ -6,6 +6,7 @@ import RosterModule from '../roster/RosterModule';
 import JobsDepartmentsModule from './JobsDepartmentsModule';
 import EmploymentContractModule from './EmploymentContractModule';
 import RecruitmentHubModule from '../recruitment/RecruitmentHubModule';
+import SecondmentsModule from './SecondmentsModule';
 
 export default function EmployeesHubModule({
   subTab = 'cards',
@@ -109,9 +110,13 @@ export default function EmployeesHubModule({
           showToast={showToast}
           filterFn={filterFn}
           monthPicker={monthPicker}
+          setMonthPicker={setMonthPicker}
           filterMode={filterMode}
+          setFilterMode={setFilterMode}
           customFrom={customFrom}
+          setCustomFrom={setCustomFrom}
           customTo={customTo}
+          setCustomTo={setCustomTo}
           executeWithOwnerGuard={executeWithOwnerGuard}
           stopShift={stopShift}
         />
@@ -175,6 +180,17 @@ export default function EmployeesHubModule({
               setIsEmpFileModalOpen(true);
             }
           }}
+        />
+      )}
+
+      {/* ── Sub-tab 8: Secondments & Branch Transfers (الانتدابات والنقل بين الفروع) ── */}
+      {currentSubTab === 'secondments' && (
+        <SecondmentsModule
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          executeWithOwnerGuard={executeWithOwnerGuard}
         />
       )}
     </div>

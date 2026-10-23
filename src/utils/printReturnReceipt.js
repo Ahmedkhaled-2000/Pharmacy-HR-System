@@ -34,17 +34,24 @@ export function printReturnReceipt({
     hour12: true
   });
 
-  const destLabel = refundDestination === 'wallet' 
-    ? 'إضافة لرصيد محفظة العميل الإلكترونية' 
-    : refundDestination === 'cash' 
-      ? 'استرداد نقدي فوري من الخزينة' 
-      : 'تسوية حساب العميل';
+  const effectiveDeposit = Number(downPaymentRefund || 0);
+  const hasDeposit = effectiveDeposit > 0;
+  const effectiveRefundAmount = hasDeposit ? effectiveDeposit : 0;
+  const refundTitle = hasDeposit ? 'قيمة العربون المسترد للعميل' : 'إيصال مرتجع بدون مسترد مالي';
+
+  const destLabel = !hasDeposit 
+    ? 'لا يوجد مسترد مالي (العربون صفر)' 
+    : (refundDestination === 'wallet' 
+      ? 'إضافة لرصيد محفظة العميل الإلكترونية' 
+      : refundDestination === 'cash' 
+        ? 'استرداد نقدي فوري من الخزينة' 
+        : 'تسوية حساب العميل');
 
   const itemsRows = (items || []).map((it, idx) => `
     <tr>
       <td style="padding: 3px 2px; border-bottom: 1.5px dashed #000; text-align: right; word-break: break-word; font-weight: 900; color: #000;">${idx + 1}. ${it.medicationName || it.name}</td>
       <td style="padding: 3px 1px; border-bottom: 1.5px dashed #000; text-align: center; font-weight: 900; color: #000;">${it.quantity}</td>
-      <td style="padding: 3px 1px; border-bottom: 1.5px dashed #000; text-align: left; direction: ltr; unicode-bidi: isolate; white-space: nowrap; font-weight: 900; color: #000; -webkit-text-stroke: 0.35px #000;">${Number(it.totalPrice || it.unitPrice * it.quantity).toFixed(2)}</td>
+      <td style="padding: 3px 1px; border-bottom: 1.5px dashed #000; text-align: left; font-weight: 900; color: #000;">${hasDeposit ? `عربون: ${effectiveDeposit.toFixed(2)}` : 'عربون: 0'}</td>
     </tr>
     ${it.returnReason ? `
       <tr>
@@ -54,9 +61,6 @@ export function printReturnReceipt({
       </tr>
     ` : ''}
   `).join('');
-
-  const effectiveRefundAmount = Number(downPaymentRefund > 0 ? downPaymentRefund : totalRefundAmount);
-  const refundTitle = downPaymentRefund > 0 ? 'مبلغ العربون المدفوع المسترد' : 'إجمالي القيمة المستردة';
 
   const receiptHtml = `
 <!DOCTYPE html>
@@ -229,7 +233,7 @@ export function printReturnReceipt({
       <tr>
         <th style="text-align: right;">الصنف المرتجع</th>
         <th style="text-align: center;">الكمية</th>
-        <th style="text-align: left;">القيمة</th>
+        <th style="text-align: left;">العربون</th>
       </tr>
     </thead>
     <tbody>
@@ -237,13 +241,19 @@ export function printReturnReceipt({
     </tbody>
   </table>
 
-  <div class="total-box">
-    <div style="font-size: 11px; font-weight: 900;">${refundTitle}</div>
-    <div class="val" style="font-size: 16px; font-weight: 900;">${effectiveRefundAmount.toFixed(2)} ج.م</div>
-    ${downPaymentRefund > 0 ? `
-      <div style="font-size: 9.5px; margin-top: 3px; font-weight: bold; color: #333;">(استرداد نقدي / محفظة لمبلغ عربون الطلب فقط)</div>
-    ` : ''}
-  </div>
+  ${hasDeposit ? `
+    <div class="total-box">
+      <div style="font-size: 11.5px; font-weight: 900;">${refundTitle}</div>
+      <div class="val" style="font-size: 16px; font-weight: 900;">${effectiveRefundAmount.toFixed(2)} ج.م</div>
+      <div style="font-size: 9.5px; margin-top: 3px; font-weight: 900; color: #000;">(المبلغ المسترد هو قيمة العربون المدفوع فقط وليس ثمن الصنف)</div>
+    </div>
+  ` : `
+    <div class="total-box" style="background: #ffffff; border: 2px dashed #000;">
+      <div style="font-size: 11.5px; font-weight: 900; color: #000;">إيصال مرتجع (بدون مسترد مالي)</div>
+      <div class="val" style="font-size: 14px; font-weight: 900; margin-top: 2px; color: #000;">ثمن العربون: 0.00 ج.م</div>
+      <div style="font-size: 9.5px; margin-top: 3px; font-weight: 900; color: #000;">(لم يسدد العميل أي عربون مسبق على هذا الطلب، لا توجد مبالغ مستحقة للصرف)</div>
+    </div>
+  `}
 
   ${generalReturnReason ? `
     <div style="font-size: 10px; padding: 4px; background: #fafafa; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 6px;">

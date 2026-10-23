@@ -789,13 +789,28 @@ export default function PharmacyCustomersTab({ branchId, showToast }) {
                         </div>
                       </div>
 
-                      <div style={{ fontSize: '13px', color: '#475569' }}>
-                        الأصناف:{' '}
-                        {(order.items || []).map((it, i) => (
-                          <span key={i} style={{ marginLeft: '8px' }}>
-                            • {it.medicationName} ({it.quantity} {it.unitType === 'strip' ? 'شريط' : 'علبة'})
-                          </span>
-                        ))}
+                      <div style={{ fontSize: '13px', color: '#475569', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                        <span>الأصناف:</span>
+                        {(order.items || []).map((it, i) => {
+                          const isUnavail = Boolean(it.prunedFromBill || it.pruned_from_bill || it.itemStatus === 'unavailable_in_market' || it.item_status === 'unavailable_in_market');
+                          return (
+                            <span
+                              key={i}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                textDecoration: isUnavail ? 'line-through' : 'none',
+                                textDecorationColor: isUnavail ? '#dc2626' : undefined,
+                                color: isUnavail ? '#dc2626' : '#1e293b',
+                                fontWeight: isUnavail ? '800' : 'normal'
+                              }}
+                            >
+                              • {it.medicationName || it.medication_name} ({it.quantity} {it.unitType === 'strip' ? 'شريط' : 'علبة'})
+                              {isUnavail && <span style={{ fontSize: '10.5px', color: '#b91c1c' }}>(غير متوفر بالسوق)</span>}
+                            </span>
+                          );
+                        })}
                       </div>
 
                       <div style={{ marginTop: '6px', fontSize: '12px', color: '#64748b' }}>

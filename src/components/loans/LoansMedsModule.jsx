@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fmt, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { getActivePayrollMonth, getCycleDateRange } from '../../utils/periodEngine';
+import { checkAndAutoSettleExpiredPayrollLoans } from '../../utils/loansEngine';
 import { useUI } from '../../context/UIContext';
 
 export default function LoansMedsModule({
@@ -21,7 +22,23 @@ export default function LoansMedsModule({
   const [loanRepayPlan, setLoanRepayPlan] = useState('single'); // 'single' | 'installment'
   const [loanMonthsCount, setLoanMonthsCount] = useState('2');
   const [amount, setAmount] = useState('');
+  const [firstInstallmentMonth, setFirstInstallmentMonth] = useState(() => getActivePayrollMonth(state.orgSettings || {}) || new Date().toISOString().slice(0, 7));
   const [notes, setNotes] = useState('');
+
+  // Edit Loan Modal State
+  const [editingLoan, setEditingLoan] = useState(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [editLoanType, setEditLoanType] = useState('monthly');
+  const [editMonthsCount, setEditMonthsCount] = useState('2');
+  const [editMonthlyDeduction, setEditMonthlyDeduction] = useState('');
+  const [editFirstMonth, setEditFirstMonth] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+
+  // Convert to Installments Modal State
+  const [convertingLoan, setConvertingLoan] = useState(null);
+  const [convertMonthsCount, setConvertMonthsCount] = useState('3');
+  const [convertFirstMonth, setConvertFirstMonth] = useState(() => getActivePayrollMonth(state.orgSettings || {}) || new Date().toISOString().slice(0, 7));
+  const [convertMonthlyDeduction, setConvertMonthlyDeduction] = useState('');
 
   // Loan Rules & Thresholds State
   const orgSettings = state.orgSettings || {};
@@ -238,6 +255,8 @@ export default function LoansMedsModule({
         installmentsCount: months,
         monthlyDeduction: monthlyDeduction,
         installmentAmount: monthlyDeduction,
+        firstInstallmentMonth: isInst ? (firstInstallmentMonth || new Date().toISOString().slice(0, 7)) : null,
+        startMonth: isInst ? (firstInstallmentMonth || new Date().toISOString().slice(0, 7)) : new Date().toISOString().slice(0, 7),
         status: 'approved',
         adminApproved: true,
         branchApproved: true,
@@ -278,7 +297,7 @@ export default function LoansMedsModule({
   const [payInputNotes, setPayInputNotes] = useState('');
   const [expandedPaymentsLoanId, setExpandedPaymentsLoanId] = useState(null);
 
-  const handleRecordPayment = async (targetLoanId, payAmountStr, noteStr = '') => {
+  const handleRecordPayment = async (targetLoanId, payAmountStr, noteStr = '', payType = 'manual_settlement') => {
     const parsedPay = parseFloat(payAmountStr);
     if (!targetLoanId || !parsedPay || parsedPay <= 0) {
       showToast?.('يرجى إدخال مبلغ دفع صحيح أكبر من صفر');
@@ -286,12 +305,13 @@ export default function LoansMedsModule({
     }
 
     const performRecordPayment = async () => {
+      const isFullPayoff = payType === 'manual_settlement';
       const payRecord = {
         id: 'pay_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
         date: new Date().toISOString().slice(0, 10),
         amount: parsedPay,
-        note: noteStr.trim() || 'سداد دفعة سلفة مالية/آجل',
-        type: 'manual',
+        note: noteStr.trim() || (isFullPayoff ? 'سداد وتسوية مبكرة خارج مسير الرواتب' : 'سداد دفعة سلفة مالية/آجل'),
+        type: payType || 'manual_settlement',
         createdAt: new Date().toISOString()
       };
 
@@ -299,17 +319,20 @@ export default function LoansMedsModule({
       let loansArr = [...(state.loans || [])];
       let foundInLoans = false;
       loansArr = loansArr.map((l) => {
-        if (String(l.id) === String(targetLoanId)) {
+        if (String(l.id) === String(targetLoanId) || (l.requestId && String(l.requestId) === String(targetLoanId))) {
           foundInLoans = true;
           const total = parseFloat(l.amount) || 0;
           const history = [...(l.paymentsHistory || []), payRecord];
           const histSum = history.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
           const newPaid = Math.min(total, histSum > 0 ? histSum : ((parseFloat(l.paidAmount) || 0) + parsedPay));
+          const isPaid = newPaid >= total;
           return {
             ...l,
             paidAmount: newPaid,
             paymentsHistory: history,
-            status: newPaid >= total ? 'paid' : 'partial',
+            status: isPaid ? 'paid' : 'partial',
+            isPaid: isPaid,
+            settledAt: isPaid ? new Date().toISOString() : l.settledAt,
             updatedAt: new Date().toISOString()
           };
         }
@@ -326,11 +349,14 @@ export default function LoansMedsModule({
           const history = [...(r.paymentsHistory || []), payRecord];
           const histSum = history.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
           const newPaid = Math.min(total, histSum > 0 ? histSum : ((parseFloat(r.paidAmount) || 0) + parsedPay));
+          const isPaid = newPaid >= total;
           return {
             ...r,
             paidAmount: newPaid,
             paymentsHistory: history,
-            status: newPaid >= total ? 'paid' : 'partial',
+            status: isPaid ? 'paid' : 'partial',
+            isPaid: isPaid,
+            settledAt: isPaid ? new Date().toISOString() : r.settledAt,
             updatedAt: new Date().toISOString()
           };
         }
@@ -343,6 +369,7 @@ export default function LoansMedsModule({
         if (targetReq) {
           const reqTotal = parseFloat(targetReq.amount) || 0;
           const reqPaid = parseFloat(targetReq.paidAmount) || 0;
+          const isPaid = reqPaid >= reqTotal;
           loansArr.unshift({
             ...targetReq,
             id: targetReq.id,
@@ -350,13 +377,26 @@ export default function LoansMedsModule({
             amount: reqTotal,
             paidAmount: Math.min(reqTotal, reqPaid),
             paymentsHistory: targetReq.paymentsHistory || [payRecord],
-            status: reqPaid >= reqTotal && reqTotal > 0 ? 'paid' : 'partial',
+            status: isPaid && reqTotal > 0 ? 'paid' : 'partial',
+            isPaid: isPaid,
+            settledAt: isPaid ? new Date().toISOString() : undefined,
             updatedAt: new Date().toISOString()
           });
         }
       }
 
-      const updatedState = { ...state, loans: loansArr, requests: reqsArr };
+      // If fully paid, clear any active deductions from state.adjustments
+      let adjsArr = [...(state.adjustments || [])];
+      const checkPaidLoan = loansArr.find((l) => String(l.id) === String(targetLoanId));
+      if (checkPaidLoan && checkPaidLoan.status === 'paid') {
+        adjsArr = adjsArr.filter((a) => {
+          if (!a) return false;
+          const aId = String(a.loanId || a.requestId || a.id || '');
+          return aId !== String(targetLoanId) && a.id !== `adj_loan_${targetLoanId}`;
+        });
+      }
+
+      const updatedState = { ...state, loans: loansArr, requests: reqsArr, adjustments: adjsArr };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
 
@@ -378,15 +418,257 @@ export default function LoansMedsModule({
     }
   };
 
+  // ── Handle Delete Loan ──
+  const handleDeleteLoan = async (loanId) => {
+    if (!loanId) return;
+    const loan = loansList.find((l) => String(l.id) === String(loanId));
+    const isConfirmed = await showConfirm({
+      title: 'حذف السلفة نهائياً',
+      message: `هل أنت متأكد من حذف هذه السلفة نهائياً للموظف (${loan?.employeeName || 'الموظف'})؟\nسيتم إلغاء السلفة وكافة استقطاعاتها المستقبلية فوراً.`,
+      confirmText: 'نعم، احذف السلفة',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
+
+    const performDelete = async () => {
+      const idStr = String(loanId);
+      const reqId = loan?.requestId ? String(loan.requestId) : idStr;
+
+      const updatedLoans = (state.loans || []).filter((l) => String(l.id) !== idStr && String(l.requestId) !== idStr && String(l.id) !== reqId);
+
+      const updatedRequests = (state.requests || []).map((r) => {
+        if (String(r.id) === idStr || String(r.id) === reqId) {
+          return {
+            ...r,
+            status: 'cancelled',
+            isCancelled: true,
+            cancelledAt: new Date().toISOString(),
+            cancellationReason: 'تم حذف السلفة يدوياً بواسطة الإدارة العليا'
+          };
+        }
+        return r;
+      });
+
+      const updatedAdjustments = (state.adjustments || []).filter((a) => {
+        if (!a) return false;
+        const aLoanId = String(a.loanId || a.requestId || a.id || '');
+        if (aLoanId === idStr || aLoanId === reqId || a.id === `adj_loan_${idStr}`) return false;
+        return true;
+      });
+
+      const updatedDeletedIds = Array.from(new Set([...(state._deletedIds || []), idStr, reqId, `adj_loan_${idStr}`]));
+
+      const updatedState = {
+        ...state,
+        loans: updatedLoans,
+        requests: updatedRequests,
+        adjustments: updatedAdjustments,
+        _deletedIds: updatedDeletedIds
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('✅ تم حذف السلفة بنجاح وإلغاء كافة استقطاعاتها');
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockApproveLoans',
+        actionTitle: `حذف سلفة الموظف (${loan?.employeeName || loanId})`,
+        actionDetails: `المبلغ: ${loan?.amount} ج.م`,
+        onExecute: performDelete
+      });
+    } else {
+      await performDelete();
+    }
+  };
+
+  // ── Handle Open Edit Loan ──
+  const handleOpenEditLoan = (loan) => {
+    setEditingLoan(loan);
+    setEditAmount(String(loan.amount || loan.totalAmount || ''));
+    setEditLoanType(loan.loanType || (loan.monthsCount > 1 ? 'installment' : 'monthly'));
+    setEditMonthsCount(String(loan.monthsCount || 2));
+    setEditMonthlyDeduction(String(loan.monthlyDeduction || loan.installmentAmount || ''));
+    setEditFirstMonth(loan.firstInstallmentMonth || loan.startMonth || new Date().toISOString().slice(0, 7));
+    setEditNotes(loan.notes || loan.reason || '');
+  };
+
+  // ── Handle Save Edited Loan ──
+  const handleSaveEditedLoan = async () => {
+    if (!editingLoan) return;
+    const newAmt = parseFloat(editAmount);
+    if (!newAmt || newAmt <= 0) {
+      showToast?.('يرجى إدخال مبلغ صحيح أكبر من صفر');
+      return;
+    }
+    const isInst = editLoanType === 'installment';
+    const mCount = isInst ? Math.max(1, parseInt(editMonthsCount, 10) || 1) : 1;
+    const mDed = isInst ? (parseFloat(editMonthlyDeduction) || Math.ceil(newAmt / mCount)) : newAmt;
+
+    const performSave = async () => {
+      const idStr = String(editingLoan.id);
+      const reqId = editingLoan.requestId ? String(editingLoan.requestId) : idStr;
+
+      const updateObj = {
+        amount: newAmt,
+        totalAmount: newAmt,
+        loanType: editLoanType,
+        isInstallment: isInst,
+        monthsCount: mCount,
+        installmentsCount: mCount,
+        monthlyDeduction: mDed,
+        installmentAmount: mDed,
+        firstInstallmentMonth: isInst ? editFirstMonth : null,
+        startMonth: isInst ? editFirstMonth : (editingLoan.startMonth || new Date().toISOString().slice(0, 7)),
+        notes: editNotes.trim(),
+        reason: editNotes.trim(),
+        updatedAt: new Date().toISOString()
+      };
+
+      const updatedLoans = (state.loans || []).map((l) => {
+        if (String(l.id) === idStr || String(l.requestId) === idStr || String(l.id) === reqId) {
+          return { ...l, ...updateObj };
+        }
+        return l;
+      });
+
+      const updatedRequests = (state.requests || []).map((r) => {
+        if (String(r.id) === idStr || String(r.id) === reqId) {
+          return { ...r, ...updateObj };
+        }
+        return r;
+      });
+
+      const updatedState = {
+        ...state,
+        loans: updatedLoans,
+        requests: updatedRequests
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('✅ تم تحديث بيانات السلفة بنجاح');
+      setEditingLoan(null);
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockApproveLoans',
+        actionTitle: `تعديل سلفة الموظف (${editingLoan.employeeName || editingLoan.id})`,
+        actionDetails: `المبلغ المعدل: ${newAmt} ج.م`,
+        onExecute: performSave
+      });
+    } else {
+      await performSave();
+    }
+  };
+
+  // ── Handle Open Convert Loan ──
+  const handleOpenConvertLoan = (loan) => {
+    setConvertingLoan(loan);
+    const rem = Math.max(0, (parseFloat(loan.amount) || 0) - (parseFloat(loan.paidAmount) || 0));
+    setConvertMonthsCount('3');
+    setConvertFirstMonth(getActivePayrollMonth(state.orgSettings || {}) || new Date().toISOString().slice(0, 7));
+    setConvertMonthlyDeduction(String(Math.ceil(rem / 3)));
+  };
+
+  // ── Handle Save Convert to Installments ──
+  const handleSaveConvertToInstallments = async () => {
+    if (!convertingLoan) return;
+    const mCount = Math.max(2, parseInt(convertMonthsCount, 10) || 2);
+    const rem = Math.max(0, (parseFloat(convertingLoan.amount) || 0) - (parseFloat(convertingLoan.paidAmount) || 0));
+    const mDed = parseFloat(convertMonthlyDeduction) || Math.ceil(rem / mCount);
+
+    const performConvert = async () => {
+      const idStr = String(convertingLoan.id);
+      const reqId = convertingLoan.requestId ? String(convertingLoan.requestId) : idStr;
+
+      const updateObj = {
+        loanType: 'installment',
+        isInstallment: true,
+        monthsCount: mCount,
+        installmentsCount: mCount,
+        monthlyDeduction: mDed,
+        installmentAmount: mDed,
+        firstInstallmentMonth: convertFirstMonth,
+        startMonth: convertFirstMonth,
+        typeLabel: convertingLoan.type === 'meds' ? `أدوية ومشتريات آجل مقسطة (${mCount} شهور)` : `سلفة مقسطة معتمدة (${mCount} شهور)`,
+        convertedToInstallmentAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      const updatedLoans = (state.loans || []).map((l) => {
+        if (String(l.id) === idStr || String(l.requestId) === idStr || String(l.id) === reqId) {
+          return { ...l, ...updateObj };
+        }
+        return l;
+      });
+
+      const updatedRequests = (state.requests || []).map((r) => {
+        if (String(r.id) === idStr || String(r.id) === reqId) {
+          return { ...r, ...updateObj };
+        }
+        return r;
+      });
+
+      const updatedState = {
+        ...state,
+        loans: updatedLoans,
+        requests: updatedRequests
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.(`✅ تم تحويل السلفة إلى مقسطة على ${mCount} شهور تبدأ من شهر ${convertFirstMonth}`);
+      setConvertingLoan(null);
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockApproveLoans',
+        actionTitle: `تحويل سلفة الموظف (${convertingLoan.employeeName || convertingLoan.id}) إلى مقسطة`,
+        actionDetails: `عدد الشهور: ${mCount} - القسط: ${mDed} ج.م`,
+        onExecute: performConvert
+      });
+    } else {
+      await performConvert();
+    }
+  };
+
+  // فحص وتسوية أي دورة منتهية تلقائياً عند فتح شاشة السلف
+  useEffect(() => {
+    if (!state) return;
+    const res = checkAndAutoSettleExpiredPayrollLoans(state);
+    if (res.shouldUpdate && setState) {
+      setState(res.nextState);
+      if (saveState) saveState(res.nextState);
+    }
+  }, []);
+
   const handleAutoCloseMonthlyInstallments = async () => {
     const activeMonth = getActivePayrollMonth(state.orgSettings);
-    const cycleRange = getCycleDateRange(activeMonth, state.orgSettings);
+    // استخراج الشهر المالي السابق المنتهي
+    const [yStr, mStr] = activeMonth.split('-');
+    let prevY = parseInt(yStr, 10);
+    let prevM = parseInt(mStr, 10) - 1;
+    if (prevM < 1) {
+      prevM = 12;
+      prevY -= 1;
+    }
+    const prevMonth = `${prevY}-${String(prevM).padStart(2, '0')}`;
+    const isPrevSettled = Boolean(state.orgSettings?.payrollLoanSettlements?.[prevMonth]?.settled);
+    const targetMonth = !isPrevSettled ? prevMonth : activeMonth;
+
+    const cycleRange = getCycleDateRange(targetMonth, state.orgSettings);
     const { startDate, endDate } = cycleRange;
-    const currentMonth = activeMonth;
+    const currentMonth = targetMonth;
 
     const isConfirmed = await showConfirm({
       title: 'تطبيق الخصم التلقائي لأقساط السلف',
-      message: `هل ترغب في تطبيق الخصم التلقائي لأقساط السلف في نهاية فترة الرواتب المحددة (${startDate} إلى ${endDate})؟`,
+      message: `هل ترغب في تطبيق الخصم التلقائي لأقساط السلف لدورة شهر (${currentMonth}) المحددة (${startDate} إلى ${endDate})؟`,
       confirmText: 'تطبيق الخصم التلقائي',
       cancelText: 'إلغاء وتراجع',
       type: 'info',
@@ -704,23 +986,36 @@ export default function LoansMedsModule({
           </div>
 
           {loanRepayPlan === 'installment' && (
-            <div className="field">
-              <label>عدد شهور التقسيط</label>
-              <input
-                type="number"
-                min="2"
-                max="36"
-                placeholder="أدخل عدد الشهور (مثال: 3)..."
-                value={loanMonthsCount}
-                onChange={(e) => setLoanMonthsCount(e.target.value)}
-                required
-              />
-              {parseFloat(amount) > 0 && parseInt(loanMonthsCount, 10) > 1 && (
-                <small style={{ color: 'var(--primary)', fontWeight: 'bold', display: 'block', marginTop: '4px' }}>
-                  💡 القسط: {fmt(Math.round((parseFloat(amount) / parseInt(loanMonthsCount, 10)) * 100) / 100)} ج.م / شهر
-                </small>
-              )}
-            </div>
+            <>
+              <div className="field">
+                <label>عدد شهور التقسيط</label>
+                <input
+                  type="number"
+                  min="2"
+                  max="36"
+                  placeholder="أدخل عدد الشهور (مثال: 3)..."
+                  value={loanMonthsCount}
+                  onChange={(e) => setLoanMonthsCount(e.target.value)}
+                  required
+                />
+                {parseFloat(amount) > 0 && parseInt(loanMonthsCount, 10) > 1 && (
+                  <small style={{ color: 'var(--primary)', fontWeight: 'bold', display: 'block', marginTop: '4px' }}>
+                    💡 القسط: {fmt(Math.round((parseFloat(amount) / parseInt(loanMonthsCount, 10)) * 100) / 100)} ج.م / شهر
+                  </small>
+                )}
+              </div>
+
+              <div className="field">
+                <label>📅 موعد أول قسط (شهر بدء الخصم)</label>
+                <input
+                  type="month"
+                  value={firstInstallmentMonth}
+                  onChange={(e) => setFirstInstallmentMonth(e.target.value)}
+                  required
+                />
+                <small style={{ color: 'var(--muted)', fontSize: '11px' }}>الشهر المالي لبدء استقطاع الأقساط من الراتب</small>
+              </div>
+            </>
           )}
 
           <div className="field">
@@ -894,25 +1189,58 @@ export default function LoansMedsModule({
                                 )}
                               </td>
                               <td>
-                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' }}>
                                   {rem > 0 && (
                                     <button
+                                      type="button"
                                       className="btn btn-start"
-                                      style={{ padding: '3px 8px', fontSize: '11.5px' }}
+                                      style={{ padding: '3px 8px', fontSize: '11px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '5px', fontWeight: 'bold' }}
                                       onClick={() => {
                                         setPayingLoanId(payingLoanId === l.id ? null : l.id);
                                         setPayInputAmount(rem.toString());
                                       }}
+                                      title="سداد دفعة نقدية أو تسوية مبكرة للرصيد بالكامل"
                                     >
-                                      💵 سداد مبلغ
+                                      💵 سداد / تصفية
+                                    </button>
+                                  )}
+                                  {rem > 0 && l.loanType !== 'installment' && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost"
+                                      style={{ padding: '3px 8px', fontSize: '11px', color: '#0284c7', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '5px', fontWeight: 'bold' }}
+                                      onClick={() => handleOpenConvertLoan(l)}
+                                      title="تحويل هذه السلفة الشهرية إلى سلفة مقسطة على عدة شهور"
+                                    >
+                                      🔄 تحويل لمقسطة
                                     </button>
                                   )}
                                   <button
+                                    type="button"
                                     className="btn btn-ghost"
-                                    style={{ padding: '3px 8px', fontSize: '11.5px', color: 'var(--primary)', fontWeight: 'bold' }}
-                                    onClick={() => setExpandedPaymentsLoanId(expandedPaymentsLoanId === l.id ? null : l.id)}
+                                    style={{ padding: '3px 8px', fontSize: '11px', color: '#4b5563', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '5px' }}
+                                    onClick={() => handleOpenEditLoan(l)}
+                                    title="تعديل بيانات السلفة أو الأقساط"
                                   >
-                                    📜 الدفعات ({history.length})
+                                    ✏️ تعديل
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost"
+                                    style={{ padding: '3px 8px', fontSize: '11px', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '5px' }}
+                                    onClick={() => handleDeleteLoan(l.id)}
+                                    title="حذف هذه السلفة نهائياً وإلغاء استقطاعاتها"
+                                  >
+                                    🗑️ حذف
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost"
+                                    style={{ padding: '3px 8px', fontSize: '11px', color: 'var(--primary)', fontWeight: 'bold', border: '1px solid var(--border)', borderRadius: '5px' }}
+                                    onClick={() => setExpandedPaymentsLoanId(expandedPaymentsLoanId === l.id ? null : l.id)}
+                                    title="عرض سجل الدفعات المسددة"
+                                  >
+                                    📜 ({history.length})
                                   </button>
                                 </div>
                               </td>
@@ -921,9 +1249,19 @@ export default function LoansMedsModule({
                             {/* Inline Payment Form */}
                             {payingLoanId === l.id && (
                               <tr>
-                                <td colSpan="7" style={{ background: 'var(--surface-muted)', padding: '12px 16px', border: '1px solid var(--success)', borderRadius: '8px' }}>
-                                  <div style={{ fontWeight: 'bold', color: 'var(--success)', marginBottom: '8px', fontSize: '13px' }}>
-                                    💵 إدخال دفعة جديدة لسداد السلفة (الرصيد المتبقي: {rem} ج.م)
+                                <td colSpan="7" style={{ background: 'var(--surface-muted)', padding: '14px 16px', border: '2px solid #10b981', borderRadius: '8px' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                                    <div style={{ fontWeight: 'bold', color: '#047857', fontSize: '13px' }}>
+                                      💵 سداد جزء أو كامل مبلغ السلفة بخلاف ميعاد الاستحقاق (الرصيد المتبقي: <strong>{fmt(rem)} ج.م</strong>)
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="btn btn-start"
+                                      style={{ padding: '4px 12px', fontSize: '11.5px', background: '#047857', color: '#fff', border: 'none', borderRadius: '6px' }}
+                                      onClick={() => setPayInputAmount(rem.toString())}
+                                    >
+                                      ⚡ سداد كامل المتبقي ({fmt(rem)} ج.م)
+                                    </button>
                                   </div>
                                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                                     <input
@@ -933,23 +1271,25 @@ export default function LoansMedsModule({
                                       placeholder="مبلغ السداد (ج.م)"
                                       value={payInputAmount}
                                       onChange={(e) => setPayInputAmount(e.target.value)}
-                                      style={{ width: '140px', padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+                                      style={{ width: '140px', padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontWeight: 'bold' }}
                                     />
                                     <input
                                       type="text"
-                                      placeholder="ملاحظات البيان..."
+                                      placeholder="ملاحظات البيان (مثال: سداد نقدي مبكر للخزينة)..."
                                       value={payInputNotes}
                                       onChange={(e) => setPayInputNotes(e.target.value)}
                                       style={{ flex: 1, minWidth: '160px', padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
                                     />
                                     <button
+                                      type="button"
                                       className="btn btn-start"
-                                      style={{ padding: '6px 14px', fontSize: '12.5px' }}
-                                      onClick={() => handleRecordPayment(l.id, payInputAmount, payInputNotes)}
+                                      style={{ padding: '6px 16px', fontSize: '12.5px', background: '#10b981', border: 'none' }}
+                                      onClick={() => handleRecordPayment(l.id, payInputAmount, payInputNotes, 'manual_settlement')}
                                     >
-                                      💾 تأكيد الحفظ والسداد
+                                      💾 تأكيد السداد وإسقاط المديونية
                                     </button>
                                     <button
+                                      type="button"
                                       className="btn btn-ghost"
                                       style={{ padding: '6px 10px', fontSize: '12px' }}
                                       onClick={() => setPayingLoanId(null)}
@@ -1002,6 +1342,172 @@ export default function LoansMedsModule({
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Loan Modal ── */}
+      {editingLoan && (
+        <div className="modal-backdrop">
+          <div className="modal-content card" style={{ maxWidth: '580px', width: '92%', padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, color: 'var(--primary)', fontSize: '17px' }}>
+                ✏️ تعديل بيانات السلفة للموظف: {editingLoan.employeeName}
+              </h3>
+              <button className="btn btn-ghost" onClick={() => setEditingLoan(null)}>✕</button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>المبلغ الإجمالي (ج.م):</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={editAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>نظام السداد:</label>
+                <select
+                  value={editLoanType}
+                  onChange={(e) => setEditLoanType(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                >
+                  <option value="monthly">💵 دفعة واحدة (شهرية)</option>
+                  <option value="installment">📅 مقسطة على عدة شهور</option>
+                </select>
+              </div>
+
+              {editLoanType === 'installment' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>عدد شهور التقسيط:</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="36"
+                      value={editMonthsCount}
+                      onChange={(e) => {
+                        setEditMonthsCount(e.target.value);
+                        const c = parseInt(e.target.value, 10);
+                        const a = parseFloat(editAmount);
+                        if (c > 0 && a > 0) {
+                          setEditMonthlyDeduction(String(Math.ceil(a / c)));
+                        }
+                      }}
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>القسط الشهري (ج.م):</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={editMonthlyDeduction}
+                      onChange={(e) => setEditMonthlyDeduction(e.target.value)}
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                    />
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>📅 موعد أول قسط (شهر بدء الخصم):</label>
+                    <input
+                      type="month"
+                      value={editFirstMonth}
+                      onChange={(e) => setEditFirstMonth(e.target.value)}
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>البيان والملاحظات:</label>
+                <input
+                  type="text"
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
+                <button className="btn btn-ghost" onClick={() => setEditingLoan(null)}>إلغاء</button>
+                <button className="btn btn-start" onClick={handleSaveEditedLoan}>💾 حفظ التعديلات</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Convert to Installments Modal ── */}
+      {convertingLoan && (
+        <div className="modal-backdrop">
+          <div className="modal-content card" style={{ maxWidth: '540px', width: '92%', padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, color: '#0284c7', fontSize: '17px' }}>
+                🔄 تحويل السلفة الشهرية إلى سلفة مقسطة
+              </h3>
+              <button className="btn btn-ghost" onClick={() => setConvertingLoan(null)}>✕</button>
+            </div>
+
+            <div style={{ background: '#f0f9ff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #bae6fd', marginBottom: '14px', fontSize: '13px' }}>
+              <div>الموظف: <strong>{convertingLoan.employeeName}</strong></div>
+              <div>المبلغ المتبقي للتقسيط: <strong style={{ color: '#0369a1' }}>{fmt(Math.max(0, (parseFloat(convertingLoan.amount) || 0) - (parseFloat(convertingLoan.paidAmount) || 0)))} ج.م</strong></div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>عدد شهور التقسيط:</label>
+                  <input
+                    type="number"
+                    min="2"
+                    max="36"
+                    value={convertMonthsCount}
+                    onChange={(e) => {
+                      setConvertMonthsCount(e.target.value);
+                      const c = parseInt(e.target.value, 10);
+                      const rem = Math.max(0, (parseFloat(convertingLoan.amount) || 0) - (parseFloat(convertingLoan.paidAmount) || 0));
+                      if (c > 0 && rem > 0) {
+                        setConvertMonthlyDeduction(String(Math.ceil(rem / c)));
+                      }
+                    }}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>القسط الشهري (ج.م):</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={convertMonthlyDeduction}
+                    onChange={(e) => setConvertMonthlyDeduction(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>📅 موعد أول قسط (شهر بدء الخصم من الراتب):</label>
+                <input
+                  type="month"
+                  value={convertFirstMonth}
+                  onChange={(e) => setConvertFirstMonth(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                />
+                <small style={{ color: 'var(--muted)', fontSize: '11px' }}>يمكنك تحديد شهر تالٍ لمنح الموظف فترة سماح قبل بدء استقطاع الأقساط</small>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
+                <button className="btn btn-ghost" onClick={() => setConvertingLoan(null)}>إلغاء</button>
+                <button className="btn btn-start" style={{ background: '#0284c7', border: 'none' }} onClick={handleSaveConvertToInstallments}>
+                  🔄 تأكيد التحويل لمقسطة
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo, useEffect } from 'react';
+import React, { createContext, useContext, useMemo, useEffect, useRef } from 'react';
 import {
   shouldShowRequestToBranch
 } from '../utils/formatters';
@@ -377,16 +377,28 @@ export function NotificationProvider({ children }) {
   }, [state, authRole, currentBranch, currentFilterFn]);
 
   // 3. فلترة الإشعارات بحسب الدور الحالي
+  // 3. فلترة الإشعارات بحسب الدور الحالي مع عزل حازم يمنع تسريب إشعارات الإدارة للموظفين والفروع
   const roleNotifications = useMemo(() => {
     if (!state) return [];
 
-    if (authRole === 'branch') {
+    // فحص المسار الفعلي في المتصفح / التطبيق كطبقة حماية ثانوية لمنع أي تسريب عارض
+    const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+    const isEmpRoute = currentPath.includes('/employee-portal') || currentPath.includes('/employee');
+    const isBranchRoute = currentPath.includes('/branch-manager') || currentPath.includes('/branch');
+
+    if (authRole === 'employee' || isEmpRoute) {
+      if (!currentEmpUser) return [];
+      return filterEmployeeNotifications(state.notifications || [], currentEmpUser, state);
+    } else if (authRole === 'branch' || isBranchRoute) {
+      if (!currentBranch) return [];
       const managerId = (state.employees || []).find((e) => e.id === currentBranch?.managerId)?.id;
       return filterBranchManagerNotifications(state.notifications || [], currentBranch, managerId, state);
-    } else if (authRole === 'employee') {
-      return filterEmployeeNotifications(state.notifications || [], currentEmpUser, state);
+    } else if (authRole === 'admin' || authRole === 'owner') {
+      return filterAdminNotifications(state.notifications || [], state);
     }
-    return filterAdminNotifications(state.notifications || [], state);
+
+    // إذا كان المستخدم غير مسجل ('none') أو زائراً، لا تظهر أي إشعارات إدارية أو خاصة إطلاقاً
+    return [];
   }, [state, authRole, currentBranch, currentEmpUser]);
 
   // ⚡ فصل إشعارات النظام عن إشعارات الطلبات تماماً
@@ -414,27 +426,44 @@ export function NotificationProvider({ children }) {
     }).length;
   }, [requestNotifications, authRole, currentBranch]);
 
-  // ── Dispatch Native System Notifications to Android Phone Status Bar / Notification Center ──
+  // ── Dispatch Native System Notifications to Android Phone Status Bar (حظر الإشعارات التاريخية وإرسال الأحداث الحية فقط) ──
+  const knownNotifIdsRef = useRef(null);
+  const isInitialPassRef = useRef(true);
+
   useEffect(() => {
     if (!authRole || authRole === 'none') return;
 
     // 1. طلب الصلاحية بهدوء في الخلفية
     requestSystemNotificationPermission().catch(() => {});
 
-    // 2. فحص الإشعارات غير المقروءة لهذا المستخدم وإرسالها لشريط إشعارات الهاتف
-    if (Array.isArray(roleNotifications) && roleNotifications.length > 0) {
+    if (!Array.isArray(roleNotifications)) return;
+
+    // 2. عند الإقلاع البارد (Cold Boot): نقوم فقط بحفظ المعرفات السابقة حتى لا نغرق شريط الهاتف بإشعارات قديمة
+    if (isInitialPassRef.current) {
+      knownNotifIdsRef.current = new Set(roleNotifications.map((n) => String(n.id)));
+      isInitialPassRef.current = false;
+      return;
+    }
+
+    // 3. إرسال الإشعارات الجديدة اللحظية فقط التي تصل بعد فتح التطبيق وتخص دور المستخدم الحالي
+    if (knownNotifIdsRef.current) {
       roleNotifications.forEach((n) => {
         if (!n || !n.id) return;
-        const isRead = (authRole === 'admin' || authRole === 'owner')
-          ? isNotificationReadForAdmin(n)
-          : (authRole === 'branch' && currentBranch)
-          ? isNotificationReadForBranch(n, currentBranch)
-          : Boolean(n.read);
+        const idStr = String(n.id);
+        if (!knownNotifIdsRef.current.has(idStr)) {
+          knownNotifIdsRef.current.add(idStr);
 
-        if (!isRead) {
-          const title = n.title || 'إشعار من الإدارة';
-          const body = n.message || n.text || n.body || n.title || 'لديك إشعار جديد في منظومة الموارد البشرية.';
-          showSystemNotification({ id: n.id, title, body }).catch(() => {});
+          const isRead = (authRole === 'admin' || authRole === 'owner')
+            ? isNotificationReadForAdmin(n)
+            : (authRole === 'branch' && currentBranch)
+            ? isNotificationReadForBranch(n, currentBranch)
+            : Boolean(n.read);
+
+          if (!isRead) {
+            const title = n.title || 'إشعار جديد';
+            const body = n.message || n.text || n.body || n.title || 'لديك إشعار جديد في المنظومة.';
+            showSystemNotification({ id: n.id, title, body }).catch(() => {});
+          }
         }
       });
     }

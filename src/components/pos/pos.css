@@ -1,0 +1,706 @@
+/**
+ * pos.css
+ * نظام المظهر والتصميم المكتبي لشاشات نقاط البيع الصيدلانية (PharmaOS POS Desktop UI)
+ * متناسق كلياً مع Fluent Design & Acrylic UI الخاص بالمشروع
+ */
+
+/* ── 1. الحاوية الكبرى لشاشات الـ POS ولوحة التحكم ── */
+.pos-system-root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: calc(100vh - 75px);
+  background: var(--bg, #f1f5f9);
+  color: var(--text, #0b132b);
+  position: relative;
+  overflow-x: hidden;
+  user-select: none;
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', 'Cairo', Tahoma, sans-serif;
+}
+
+/* ── 2. لوحة التحكم المركزية الرئيسية (Master Dashboard) ── */
+.pos-dashboard-container {
+  padding: 18px 24px 60px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1600px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* كارت الساعة الرقمية الكبيرة والهوية */
+.pos-hero-clock-card {
+  background: linear-gradient(135deg, rgba(13, 148, 136, 0.12) 0%, rgba(15, 118, 110, 0.05) 100%), var(--surface, #ffffff);
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: var(--radius-lg, 20px);
+  padding: 22px 28px;
+  box-shadow: 0 10px 30px -5px rgba(13, 148, 136, 0.08), 0 4px 12px rgba(15, 23, 42, 0.03);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  backdrop-filter: blur(12px);
+  position: relative;
+  overflow: hidden;
+}
+
+.pos-hero-clock-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  background: var(--primary, #0d9488);
+}
+
+.pos-hero-clock-display {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.pos-digital-clock-time {
+  font-family: 'Segoe UI', 'Consolas', monospace;
+  font-size: 42px;
+  font-weight: 900;
+  color: var(--primary, #0d9488);
+  letter-spacing: 1.5px;
+  line-height: 1;
+}
+
+.pos-digital-clock-seconds {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent, #d97706);
+  opacity: 0.9;
+}
+
+.pos-digital-clock-date {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted, #475569);
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* بطاقة المستخدم والفرع في الهيرو */
+.pos-hero-user-info {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  text-align: right;
+}
+
+.pos-branch-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--primary-light, #f0fdfa);
+  color: var(--primary-dark, #0f766e);
+  border: 1px solid rgba(13, 148, 136, 0.3);
+  border-radius: 99px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+/* ── 3. مؤشرات الإحصائيات اللحظية (POS KPI Grid) ── */
+.pos-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.pos-kpi-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 16px;
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.pos-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(13, 148, 136, 0.12);
+  border-color: var(--primary, #0d9488);
+}
+
+.pos-kpi-icon-bubble {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  background: var(--primary-light, #f0fdfa);
+  color: var(--primary, #0d9488);
+  flex-shrink: 0;
+}
+
+.pos-kpi-val {
+  font-size: 26px;
+  font-weight: 900;
+  color: var(--text, #0b132b);
+  line-height: 1.1;
+}
+
+.pos-kpi-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted, #475569);
+  margin-top: 3px;
+}
+
+/* ── 4. لوحة الاختصارات السريعة (Interactive Shortcuts Palette) ── */
+.pos-shortcuts-palette-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: var(--shadow, 0 4px 18px rgba(0, 0, 0, 0.05));
+}
+
+.pos-shortcuts-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+}
+
+.pos-shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.pos-shortcut-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface-hover, #f8fafc);
+  border: 1.5px solid var(--border, #cbd5e1);
+  border-radius: 14px;
+  cursor: pointer;
+  text-align: right;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  color: var(--text, #0b132b);
+  position: relative;
+  outline: none;
+}
+
+.pos-shortcut-btn:hover {
+  background: var(--primary-light, #f0fdfa);
+  border-color: var(--primary, #0d9488);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(13, 148, 136, 0.15);
+}
+
+.pos-shortcut-key-badge {
+  padding: 3px 8px;
+  background: #1e293b;
+  color: #ffffff;
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 800;
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
+}
+
+/* ── 5. محرك النوافذ المنبثقة العائمة (Floating Multi-Window Canvas) ── */
+.pos-floating-windows-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none; /* يسمح بالنقر على الخلفية ما لم تكن فوق نافذة */
+  z-index: 1050;
+}
+
+.pos-floating-window-frame {
+  position: absolute;
+  pointer-events: auto;
+  background: var(--surface, #ffffff);
+  border: 1.5px solid var(--border, #cbd5e1);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25), 0 8px 24px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: box-shadow 0.2s ease;
+  backdrop-filter: blur(20px);
+}
+
+.pos-floating-window-frame.is-focused {
+  border-color: var(--primary, #0d9488);
+  box-shadow: 0 24px 70px rgba(13, 148, 136, 0.28), 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+
+.pos-floating-window-frame.is-maximized {
+  top: 36px !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: calc(100vh - 36px - 48px) !important;
+  border-radius: 0 !important;
+}
+
+/* شريط عنوان النافذة العائمة القابل للسحب */
+.pos-window-titlebar {
+  height: 44px;
+  background: linear-gradient(90deg, var(--surface, #ffffff) 0%, var(--surface-hover, #f8fafc) 100%);
+  border-bottom: 1px solid var(--border, #cbd5e1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  cursor: grab;
+  user-select: none;
+}
+
+.pos-window-titlebar:active {
+  cursor: grabbing;
+}
+
+.pos-window-title-text {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--text, #0b132b);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pos-window-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pos-win-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text, #0b132b);
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.pos-win-btn:hover {
+  background: var(--hover, rgba(0, 0, 0, 0.08));
+}
+
+.pos-win-btn.close:hover {
+  background: #dc2626 !important;
+  color: #ffffff !important;
+}
+
+/* جسم النافذة العائمة ومحتوى البيع */
+.pos-window-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  background: var(--surface, #ffffff);
+}
+
+/* مقبض تغيير حجم النافذة (Resize Handle) */
+.pos-window-resizer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  cursor: sw-resize;
+  z-index: 20;
+}
+
+/* ── 6. شريط النوافذ السفلية الراسية (Bottom POS Docking Bar) ── */
+.pos-docking-taskbar {
+  position: fixed;
+  bottom: 6px;
+  right: 50%;
+  transform: translateX(50%);
+  height: 44px;
+  background: var(--surface-glass, rgba(255, 255, 255, 0.95));
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 99px;
+  padding: 4px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(16px);
+  z-index: 1060;
+  max-width: 90vw;
+  overflow-x: auto;
+}
+
+.pos-dock-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 99px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #cbd5e1);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text, #0b132b);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.pos-dock-item:hover,
+.pos-dock-item.is-active {
+  background: var(--primary, #0d9488);
+  color: #ffffff;
+  border-color: var(--primary, #0d9488);
+}
+
+.pos-dock-new-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border-radius: 99px;
+  background: var(--accent, #d97706);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+/* ── 7. عناصر شاشة البيع السريعة (POS Sales Window View) ── */
+.pos-sales-layout {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+  direction: rtl;
+}
+
+.pos-cart-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border, #cbd5e1);
+  padding: 12px 16px;
+  overflow: hidden;
+  background: var(--surface, #ffffff);
+}
+
+.pos-checkout-sidebar {
+  width: 340px;
+  background: var(--surface-hover, #f8fafc);
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+/* شريط إدخال الباركود والبحث الفوري */
+.pos-search-bar-wrap {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+  position: relative;
+}
+
+.pos-barcode-input {
+  flex: 1;
+  height: 48px;
+  padding: 0 16px 0 44px;
+  font-size: 16px;
+  font-weight: 700;
+  border: 2px solid var(--primary, #0d9488);
+  border-radius: 12px;
+  background: var(--surface, #ffffff);
+  color: var(--text, #0b132b);
+  box-shadow: 0 4px 12px rgba(13, 148, 136, 0.12);
+  outline: none;
+}
+
+.pos-barcode-input:focus {
+  border-color: var(--primary-dark, #0f766e);
+  box-shadow: 0 0 0 4px rgba(13, 148, 136, 0.2);
+}
+
+/* جدول سلة الفاتورة */
+.pos-cart-table-wrap {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 12px;
+  background: var(--surface, #ffffff);
+}
+
+.pos-cart-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: right;
+}
+
+.pos-cart-table th {
+  background: var(--surface-hover, #f8fafc);
+  padding: 10px 12px;
+  font-weight: 800;
+  color: var(--muted, #475569);
+  border-bottom: 2px solid var(--border, #cbd5e1);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.pos-cart-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+  vertical-align: middle;
+}
+
+.pos-cart-table tr:hover {
+  background: var(--hover, rgba(13, 148, 136, 0.04));
+}
+
+/* زر محدد الوحدة (علبة / شريط / قرص) */
+.pos-unit-toggle-btn {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #cbd5e1);
+  background: var(--surface, #ffffff);
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--primary, #0d9488);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pos-unit-toggle-btn:hover {
+  background: var(--primary-light, #f0fdfa);
+}
+
+/* كمية الصنف */
+.pos-qty-control {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.pos-qty-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: var(--surface-hover, #f8fafc);
+  cursor: pointer;
+  font-weight: 900;
+  color: var(--text, #0b132b);
+}
+
+.pos-qty-val {
+  width: 36px;
+  text-align: center;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+/* ── 8. رادار التفاعلات الدوائية والتنبيهات ── */
+.pos-interaction-alert-banner {
+  background: #fef2f2;
+  border: 1.5px solid #ef4444;
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  color: #991b1b;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  animation: pulse-border 2s infinite;
+}
+
+@keyframes pulse-border {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+/* شريط التوصية الربحية والأقرب للصلاحية */
+.pos-profit-recommendation-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--accent-tint, #fef3c7);
+  border: 1px solid rgba(217, 119, 6, 0.3);
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #92400e;
+  margin-bottom: 8px;
+}
+
+/* ── 9. صندوق الإجماليات وأزرار الدفع ── */
+.pos-totals-box {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pos-total-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pos-grand-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--primary, #0d9488);
+  border-top: 2px dashed var(--border, #cbd5e1);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+.pos-pay-fast-btn {
+  height: 52px;
+  background: linear-gradient(135deg, #0d9488 0%, #059669 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 14px;
+  font-size: 18px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(13, 148, 136, 0.35);
+  transition: all 0.2s ease;
+}
+
+.pos-pay-fast-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 26px rgba(13, 148, 136, 0.45);
+}
+
+.pos-secondary-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pos-secondary-btn {
+  height: 38px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text, #0b132b);
+}
+
+.pos-secondary-btn:hover {
+  background: var(--surface-hover, #f8fafc);
+  border-color: var(--primary, #0d9488);
+}
+
+/* عمولة الصيدلي اللحظية (Spiff Badge) */
+.pos-spiff-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #ecfdf5;
+  border: 1px solid #10b981;
+  border-radius: 99px;
+  color: #065f46;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+/* ── 10. شاشات الوضع الليلي (Dark Mode Support) ── */
+[data-theme='dark'] .pos-system-root {
+  background: var(--bg, #090e17);
+  color: var(--text, #ffffff);
+}
+
+[data-theme='dark'] .pos-hero-clock-card,
+[data-theme='dark'] .pos-kpi-card,
+[data-theme='dark'] .pos-shortcuts-palette-card,
+[data-theme='dark'] .pos-floating-window-frame,
+[data-theme='dark'] .pos-window-body,
+[data-theme='dark'] .pos-totals-box,
+[data-theme='dark'] .pos-cart-section {
+  background: var(--surface, #111a28);
+  border-color: var(--border, #223249);
+  color: #ffffff;
+}
+
+[data-theme='dark'] .pos-window-titlebar,
+[data-theme='dark'] .pos-checkout-sidebar,
+[data-theme='dark'] .pos-shortcut-btn,
+[data-theme='dark'] .pos-cart-table th {
+  background: var(--surface-hover, #182538);
+  border-color: var(--border, #223249);
+  color: #ffffff;
+}
+
+[data-theme='dark'] .pos-cart-table-wrap {
+  background: var(--surface, #111a28);
+  border-color: var(--border, #223249);
+}
+
+[data-theme='dark'] .pos-cart-table td {
+  border-color: var(--border-subtle, #19263a);
+  color: #ffffff;
+}
+
+[data-theme='dark'] .pos-docking-taskbar {
+  background: var(--surface-glass, rgba(17, 26, 40, 0.95));
+  border-color: var(--border, #223249);
+}
+
+[data-theme='dark'] .pos-dock-item {
+  background: #111a28;
+  border-color: #223249;
+  color: #ffffff;
+}

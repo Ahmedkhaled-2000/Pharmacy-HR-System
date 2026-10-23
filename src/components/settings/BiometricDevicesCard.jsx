@@ -2069,7 +2069,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
                             <ol style={{ margin: '0 0 10px 0', paddingRight: '18px', display: 'flex', flexDirection: 'column', gap: '5px', fontSize: '0.78rem' }}>
                               <li><strong>شاشة الماكينة:</strong> تأكد من أيقونة الشبكة بأعلى الشاشة (يجب ظهور شاشة كمبيوتر متصلة بدون علامة X). إذا وُجدت X فالكابل غير متصل بالراوتر.</li>
                               <li><strong>قائمة الإيثرنت (Comm. ➔ Ethernet):</strong> فعّل DHCP أو اكتب البوابة (Gateway: 192.168.1.1) و DNS: 8.8.8.8.</li>
-                              <li><strong>خادم السحابة (Cloud Server):</strong> اكتب IP: <strong style={{ color: '#0369a1' }}>63.183.147.199</strong> والمنفذ: <strong style={{ color: '#0369a1' }}>80</strong> (أو جرب <strong style={{ color: '#0369a1' }}>5000</strong>) مع إغلاق تام لـ <strong>(Domain: OFF)</strong> و <strong>(Proxy: OFF)</strong>.</li>
+                              <li><strong>خادم السحابة (Cloud Server):</strong> اكتب IP السيرفر الأساسي: <strong style={{ color: '#0369a1' }}>169.58.214.20</strong> والمنفذ: <strong style={{ color: '#0369a1' }}>5000</strong> (أو السيرفر الاحتياطي: <strong>63.183.147.199</strong> منفذ <strong>80</strong>) مع إغلاق تام لـ <strong>(Domain: OFF)</strong> و <strong>(Proxy: OFF)</strong>.</li>
                               <li><strong>إعادة التشغيل (Reboot):</strong> اطفئ الماكينة وشغّلها من زر الباور لتطبيق الإعدادات في الذاكرة.</li>
                             </ol>
                             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -4901,7 +4901,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
                     تهيئة ماكينة البصمة بملف الفلاشة USB أو الضبط السريع
                   </h3>
                   <p style={{ margin: '3px 0 0', fontSize: '0.82rem', color: '#64748b' }}>
-                    الماكينة: <strong>{selectedDeviceSnForUsers}</strong> | خادم السحابة: <strong>63.183.147.199:80</strong>
+                    الماكينة: <strong>{selectedDeviceSnForUsers}</strong> | خادم السحابة: <strong>169.58.214.20:5000</strong> (الاحتياطي: <strong>63.183.147.199:80</strong>)
                   </p>
                 </div>
               </div>
@@ -4955,7 +4955,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
 
                 <button
                   type="button"
-                  onClick={() => handleDownloadUsbFile('zkhost.cfg', usbConfigData?.files?.['zkhost.cfg'] || `[ADMS_SERVER]\r\nServerURL=http://63-183-147-199.sslip.io\r\nServerIP=63.183.147.199\r\nServerPort=80\r\nServerPath=/iclock/cdata\r\nPushEnabled=1\r\nDeviceSerial=${selectedDeviceSnForUsers}\r\nHeartbeatInterval=5\r\n`)}
+                  onClick={() => handleDownloadUsbFile('zkhost.cfg', usbConfigData?.files?.['zkhost.cfg'] || `[ADMS_SERVER]\r\nServerURL=http://169-58-214-20.sslip.io:5000\r\nServerIP=169.58.214.20\r\nServerPort=5000\r\nServerPath=/iclock/cdata\r\nPushEnabled=1\r\nDeviceSerial=${selectedDeviceSnForUsers}\r\nHeartbeatInterval=5\r\n`)}
                   style={{
                     padding: '8px 12px',
                     borderRadius: '8px',
@@ -4973,7 +4973,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
 
                 <button
                   type="button"
-                  onClick={() => handleDownloadUsbFile('sys.cfg', usbConfigData?.files?.['sys.cfg'] || `ServerIP=63.183.147.199\r\nServerPort=80\r\nDeviceSerial=${selectedDeviceSnForUsers}\r\nPushProtocol=ADMS\r\n`)}
+                  onClick={() => handleDownloadUsbFile('sys.cfg', usbConfigData?.files?.['sys.cfg'] || `ServerIP=169.58.214.20\r\nServerPort=5000\r\nDeviceSerial=${selectedDeviceSnForUsers}\r\nPushProtocol=ADMS\r\n`)}
                   style={{
                     padding: '8px 12px',
                     borderRadius: '8px',
@@ -4991,7 +4991,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
 
                 <button
                   type="button"
-                  onClick={() => handleDownloadUsbFile('options.cfg', usbConfigData?.files?.['options.cfg'] || `~DeviceLogo=1\r\nDisplayLogo=1\r\nServerIP=63.183.147.199\r\nServerPort=80\r\nPushServerIP=63.183.147.199\r\nPushServerPort=80\r\nPushServerPath=/iclock/cdata\r\nPushProtocol=ADMS\r\n`)}
+                  onClick={() => handleDownloadUsbFile('options.cfg', usbConfigData?.files?.['options.cfg'] || `~DeviceLogo=1\r\nDisplayLogo=1\r\nServerIP=169.58.214.20\r\nServerPort=5000\r\nPushServerIP=169.58.214.20\r\nPushServerPort=5000\r\nPushServerPath=/iclock/cdata\r\nPushProtocol=ADMS\r\n`)}
                   style={{
                     padding: '8px 12px',
                     borderRadius: '8px',
@@ -5009,7 +5009,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
 
                 <button
                   type="button"
-                  onClick={() => handleDownloadUsbFile('adms_config.ini', usbConfigData?.files?.['adms_config.ini'] || `[ADMS_SERVER]\r\nServerURL=http://63-183-147-199.sslip.io\r\nServerIP=63.183.147.199\r\nServerPort=80\r\nServerPath=/iclock/cdata\r\nPushEnabled=1\r\nDeviceSerial=${selectedDeviceSnForUsers}\r\nHeartbeatInterval=5\r\n`)}
+                  onClick={() => handleDownloadUsbFile('adms_config.ini', usbConfigData?.files?.['adms_config.ini'] || `[ADMS_SERVER]\r\nServerURL=http://169-58-214-20.sslip.io:5000\r\nServerIP=169.58.214.20\r\nServerPort=5000\r\nServerPath=/iclock/cdata\r\nPushEnabled=1\r\nDeviceSerial=${selectedDeviceSnForUsers}\r\nHeartbeatInterval=5\r\n`)}
                   style={{
                     padding: '8px 12px',
                     borderRadius: '8px',
@@ -5027,7 +5027,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
 
                 <button
                   type="button"
-                  onClick={() => handleDownloadUsbFile('COMM.CFG', usbConfigData?.files?.['COMM.CFG'] || `[COMM]\r\nIPAddress=192.168.1.201\r\nNetMask=255.255.255.0\r\nGATEIPAddress=192.168.1.1\r\nServerIP=63.183.147.199\r\nServerPort=80\r\n`)}
+                  onClick={() => handleDownloadUsbFile('COMM.CFG', usbConfigData?.files?.['COMM.CFG'] || `[COMM]\r\nIPAddress=192.168.1.201\r\nNetMask=255.255.255.0\r\nGATEIPAddress=192.168.1.1\r\nServerIP=169.58.214.20\r\nServerPort=5000\r\n`)}
                   style={{
                     padding: '8px 12px',
                     borderRadius: '8px',
@@ -5067,11 +5067,11 @@ export default function BiometricDevicesCard({ state, showToast }) {
                 <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
                   <div style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 700 }}>عنوان الخادم (Server IP / Domain)</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                    <code style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>63.183.147.199</code>
+                    <code style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>169.58.214.20</code>
                     <button
                       type="button"
                       onClick={() => {
-                        navigator.clipboard.writeText('63.183.147.199');
+                        navigator.clipboard.writeText('169.58.214.20');
                         showToast?.('📋 تم نسخ عنوان السيرفر');
                       }}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem' }}
@@ -5085,11 +5085,11 @@ export default function BiometricDevicesCard({ state, showToast }) {
                 <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
                   <div style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 700 }}>المنفذ (Server Port)</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                    <code style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>80</code>
+                    <code style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>5000</code>
                     <button
                       type="button"
                       onClick={() => {
-                        navigator.clipboard.writeText('80');
+                        navigator.clipboard.writeText('5000');
                         showToast?.('📋 تم نسخ المنفذ');
                       }}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem' }}
@@ -5105,7 +5105,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
                 <strong>الخطوات من أزرار الماكينة:</strong><br />
                 1. اضغط <strong>M/OK</strong> ➔ ادخل على <strong>الاتصال (Comm.)</strong> ➔ <strong>خادم السحابة (Cloud Server / ADMS)</strong>.<br />
                 2. فعّل خيار <strong>Enable Cloud Server = ON</strong>.<br />
-                3. اكتب عنوان الخادم: <strong>63.183.147.199</strong> والمنفذ: <strong>80</strong>.<br />
+                3. اكتب عنوان الخادم: <strong>169.58.214.20</strong> والمنفذ: <strong>5000</strong> (أو المنفذ <strong>80</strong>، أو السيرفر الاحتياطي <strong>63.183.147.199:80</strong>).<br />
                 4. ارجع للشاشة الرئيسية، ستظهر علامة الكرة الأرضية أو السحابة خضراء 🌐 وتتصل الماكينة فوراً بالنظام!
               </div>
             </div>

@@ -56,6 +56,14 @@ export default function AccountsLoginScreen({
     const expectedAccountsUser = cleanStr(orgSettings.accountsUsername || 'accounts').toLowerCase();
     const expectedAccountsPass = cleanStr(orgSettings.accountsPassword || '123456');
 
+    const cleanInputUser = toStdDigits(trimmedUser).toLowerCase();
+    const cleanInputPass = toStdDigits(trimmedPass);
+
+    const isUserMatch = (expected, actual) => toStdDigits(expected).toLowerCase() === actual;
+    const isPassMatch = (expected, actual) => toStdDigits(expected) === actual;
+
+    const isAccountsMatch = isUserMatch(expectedAccountsUser, cleanInputUser) && isPassMatch(expectedAccountsPass, cleanInputPass);
+
     // بيانات المالك (Master Credentials & Multi-Owners)
     let savedOwnerPass = '';
     try { savedOwnerPass = localStorage.getItem('pharmacy_owner_password') || ''; } catch {}

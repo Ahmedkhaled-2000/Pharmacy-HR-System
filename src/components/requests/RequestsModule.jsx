@@ -2187,7 +2187,8 @@ export default function RequestsModule({
             updatedAt: new Date().toISOString()
           };
 
-          // إزالة أي وثائق روستر سابقة لنفس الموظف لنفس الشهر أو نفس المعرف لمنع التضارب وتكرار الجداول القديمة
+          // إزالة أي وثائق روستر سابقة لنفس الموظف لنفس الشهر ونفس الفرع لمنع التضارب، مع الحفاظ التام على فروع الموظف المتعدد الفروع
+          const isMultiBranchEmp = Array.isArray(targetEmp?.branchesDetails) && targetEmp.branchesDetails.length > 1;
           updatedRosters = updatedRosters.filter((ros) => {
             if (!ros) return false;
             const isSameId = String(ros.id) === String(approvedTargetReq.id) || String(ros.id) === String(rosterDocId);
@@ -2200,6 +2201,12 @@ export default function RequestsModule({
             if (!empMatch && !isSameId) return true;
             const rMonthNorm = ros.month ? String(ros.month).slice(0, 7) : null;
             const isSameMonth = !rMonthNorm || !targetMonthNorm || rMonthNorm === targetMonthNorm;
+
+            if (isMultiBranchEmp && targetBStr && ros.branchId && String(ros.branchId) !== String(targetBStr)) {
+              // الحفاظ على جداول الفروع الأخرى للموظف متعدد الفروع
+              return true;
+            }
+
             return !(isSameMonth || isSameId);
           });
 

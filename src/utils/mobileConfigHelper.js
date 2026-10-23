@@ -66,19 +66,26 @@ export function applyMobileScale(scale) {
   if (typeof document === 'undefined') return;
 
   const num = Number(scale) || 1.0;
-  const clamped = Math.min(Math.max(num, 0.80), 1.30);
+  const clamped = Math.min(Math.max(num, 0.75), 1.25);
 
   try {
-    // 1. تعيين متغير CSS عام لتعديل حجم الخطوط والأيقونات
-    document.documentElement.style.setProperty('--app-font-scale', `${clamped}`);
+    // 1. تطبيق خاصية zoom الحقيقية على الـ html (مدعومة أصلياً وسريعاً في WebView وأندرويد)
+    // هذا يضمن تصغير أو تكبير الجداول، البطاقات، العروض والأزرار بشكل متناسق ومثالي بدون تداخل
+    document.documentElement.style.zoom = `${clamped}`;
 
-    // 2. ضبط حجم خط الجذر الرئيسي
+    // 2. تعيين متغيرات CSS للتحكم في كثافة الواجهة والخطوط
+    document.documentElement.style.setProperty('--app-font-scale', `${clamped}`);
+    document.documentElement.style.setProperty('--app-ui-zoom', `${clamped}`);
+
+    // 3. ضبط حجم خط الجذر الرئيسي
     const baseFontSize = 14 * clamped;
     document.documentElement.style.fontSize = `${baseFontSize}px`;
 
-    // 3. إضافة فئة لمعايرة التكبير
-    document.body.classList.remove('scale-compact', 'scale-normal', 'scale-large', 'scale-xlarge');
-    if (clamped < 0.92) {
+    // 4. إضافة فئات المعايرة
+    document.body.classList.remove('scale-compact', 'scale-normal', 'scale-large', 'scale-xlarge', 'scale-ultracompact');
+    if (clamped <= 0.82) {
+      document.body.classList.add('scale-ultracompact');
+    } else if (clamped < 0.92) {
       document.body.classList.add('scale-compact');
     } else if (clamped <= 1.05) {
       document.body.classList.add('scale-normal');

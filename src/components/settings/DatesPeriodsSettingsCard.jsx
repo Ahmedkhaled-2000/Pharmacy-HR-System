@@ -117,8 +117,8 @@ export default function DatesPeriodsSettingsCard({
         payrollPayoutStartDay: sDayNum,
         payrollPayoutEndDay: eDayNum,
         payrollPayoutDay: eDayNum,
-        payrollPayoutStartTime: startTime,
-        payrollPayoutEndTime: endTime,
+        payrollPayoutStartTime: startTime || '00:00',
+        payrollPayoutEndTime: (!endTime || endTime === '00:00') ? '23:59' : endTime,
         payrollCustomFrom: periodType === 'custom' ? customFrom : '',
         payrollCustomTo: periodType === 'custom' ? customTo : '',
         _payrollCutoffUpdatedAt: new Date().toISOString()
@@ -128,8 +128,8 @@ export default function DatesPeriodsSettingsCard({
         localStorage.setItem('payroll_period_type', periodType);
         localStorage.setItem('payroll_payout_start_day', String(sDayNum));
         localStorage.setItem('payroll_payout_end_day', String(eDayNum));
-        localStorage.setItem('payroll_payout_start_time', startTime);
-        localStorage.setItem('payroll_payout_end_time', endTime);
+        localStorage.setItem('payroll_payout_start_time', startTime || '00:00');
+        localStorage.setItem('payroll_payout_end_time', (!endTime || endTime === '00:00') ? '23:59' : endTime);
         if (periodType === 'custom') {
           localStorage.setItem('payroll_custom_from', customFrom);
           localStorage.setItem('payroll_custom_to', customTo);
@@ -348,8 +348,8 @@ export default function DatesPeriodsSettingsCard({
                       </option>
                     ))}
                   </select>
-                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
-                    {startDay > endDay ? '👈 يبدأ من الشهر السابق' : '👈 يبدأ من نفس الشهر'}
+                  <span style={{ fontSize: '11px', color: (startDay > endDay || (startDay > 1 && (endDay - startDay) < 20)) ? '#0284c7' : 'var(--muted)', fontWeight: (startDay > endDay || (startDay > 1 && (endDay - startDay) < 20)) ? 'bold' : 'normal' }}>
+                    {(startDay > endDay || (startDay > 1 && (endDay - startDay) < 20)) ? '👈 دورة عبر شهرين (تبدأ من الشهر السابق)' : '👈 دورة في نفس الشهر الميلادي'}
                   </span>
                 </div>
 
@@ -377,7 +377,7 @@ export default function DatesPeriodsSettingsCard({
                     ))}
                   </select>
                   <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
-                    👈 ينتهي بنهاية هذا اليوم
+                    👈 ينتهي بنهاية هذا اليوم (الساعة 23:59)
                   </span>
                 </div>
               </div>

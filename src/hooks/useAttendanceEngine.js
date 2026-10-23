@@ -219,9 +219,13 @@ export function useAttendanceEngine() {
       }).catch((e) => console.warn('Late penalty email error:', e));
     }
 
+    const otherEmpIncidents = (currentState.lateIncidents || []).filter(
+      (inc) => String(inc.employeeId) !== String(empId) && (emp?.code ? String(inc.employeeCode) !== String(emp.code) : true)
+    );
+
     return {
       ...currentState,
-      lateIncidents: incidents,
+      lateIncidents: [...otherEmpIncidents, ...incidents],
       requests: updatedRequests,
       notifications: updatedNotifs
     };
@@ -1082,33 +1086,12 @@ export function useAttendanceEngine() {
         earlyDepartureMinutes = schedEndMins - actOutMins;
       }
 
-      // 1. عدم الالتزام بالجدول (حضور متأخر وانصراف متأخر)
-      if (lateArrivalMinutes > 0 && lateDepartureMinutes > 0) {
-        isScheduleDeviation = true;
-        deviationType = 'late_in_late_out';
-        deviationStatus = 'pending';
-        const windowEndMins = Math.min(actOutMins, schedEndMins);
-        const windowHours = Math.max(0, Math.round(((windowEndMins - actInMins) / 60 - breakHours) * 100) / 100);
-        regularHours = windowHours;
-        overtimeHours = 0;
+      const targetHours = scheduledHours > 0 ? scheduledHours : profileHours;
+
+      if (netHours > targetHours) {
+        regularHours = targetHours;
+        overtimeHours = Math.round((netHours - targetHours) * 100) / 100;
         overtimeStatus = 'pending';
-      }
-      // 2. حضور مبكر وانصراف مبكر عن موعد الوردية
-      else if (earlyArrivalMinutes > 0 && earlyDepartureMinutes > 0) {
-        isScheduleDeviation = true;
-        deviationType = 'early_in_early_out';
-        deviationStatus = 'pending';
-        regularHours = Math.min(netHours, scheduledHours);
-        overtimeHours = Math.max(0, Math.round((netHours - scheduledHours) * 100) / 100);
-        overtimeStatus = overtimeHours > 0 ? 'pending' : 'none';
-      }
-      // 3. ساعات إضافية خارج ساعات عمل الجدول (قبل بداية الوردية و/أو بعد نهايتها)
-      else if (earlyArrivalMinutes > 0 || lateDepartureMinutes > 0) {
-        earlyOtHours = Math.round((earlyArrivalMinutes / 60) * 100) / 100;
-        lateOtHours = Math.round((lateDepartureMinutes / 60) * 100) / 100;
-        overtimeHours = Math.round((earlyOtHours + lateOtHours) * 100) / 100;
-        regularHours = Math.max(0, Math.round((netHours - overtimeHours) * 100) / 100);
-        overtimeStatus = overtimeHours > 0 ? 'pending' : 'none';
       } else {
         regularHours = netHours;
         overtimeHours = 0;
@@ -1503,7 +1486,7 @@ export function useAttendanceEngine() {
   };
 
   // 9. إضافة وردية يدوية (Add Manual Shift)
-  const addManualShift = async ({ mEmpId, mDate, mIn, mOut, mBreak = '0', mNote = '' }) => {
+  const addManualShift = async ({ mEmpId, mDate, mIn, mOut, mBreak = '0', mNote = '', mBranchId = '' }) => {
     if (!mEmpId || !mDate || !mIn || !mOut) {
       showToast('يرجى اختيار الموظف والتاريخ ووقتي الدخول والخروج');
       return;
@@ -1522,17 +1505,26 @@ export function useAttendanceEngine() {
     const totalHours = (end - start) / 60;
     const hours = Math.max(0, Math.round((totalHours - parsedBreak) * 100) / 100);
     const emp = getEmp(mEmpId);
+    const bId = mBranchId || emp?.branchId || '';
+    const bObj = (state?.branches || []).find(b => isBranchMatch(bId, b));
 
     const performAddManual = async () => {
       const newShift = {
         id: uid(),
         employeeId: mEmpId,
+        employeeCode: emp?.code || '',
+        employeeName: emp?.name || '',
+        branchId: bObj ? bObj.id : bId,
+        branchName: bObj ? bObj.name : '',
         date: mDate,
         timeIn: mIn,
         timeOut: mOut,
         hours,
         breakHours: Math.round(parsedBreak * 100) / 100,
-        note: mNote.trim()
+        note: mNote.trim(),
+        isManual: true,
+        manualPunch: true,
+        adminApproved: true
       };
       const updatedShifts = [...(state.shifts || []), newShift];
       let updatedState = { ...state, shifts: updatedShifts };
@@ -1542,9 +1534,12 @@ export function useAttendanceEngine() {
         state: updatedState,
         payrollCycleId: mDate.slice(0, 7)
       });
+      const otherEmpIncsManual = (updatedState.lateIncidents || []).filter(
+        (i) => String(i.employeeId) !== String(mEmpId) && (emp?.code ? String(i.employeeCode) !== String(emp.code) : true)
+      );
       updatedState = {
         ...updatedState,
-        lateIncidents: recRes.incidents,
+        lateIncidents: [...otherEmpIncsManual, ...recRes.incidents],
         requests: recRes.updatedRequests
       };
       setState(updatedState);
@@ -1603,9 +1598,12 @@ export function useAttendanceEngine() {
         state: updatedState,
         payrollCycleId: date.slice(0, 7)
       });
+      const otherEmpIncsEdit = (updatedState.lateIncidents || []).filter(
+        (i) => String(i.employeeId) !== String(employeeId)
+      );
       updatedState = {
         ...updatedState,
-        lateIncidents: recRes.incidents,
+        lateIncidents: [...otherEmpIncsEdit, ...recRes.incidents],
         requests: recRes.updatedRequests
       };
       setState(updatedState);
@@ -1703,9 +1701,12 @@ export function useAttendanceEngine() {
           state: updatedState,
           payrollCycleId: shift.date?.slice(0, 7)
         });
+        const otherEmpIncsDel = (updatedState.lateIncidents || []).filter(
+          (i) => String(i.employeeId) !== String(shift.employeeId)
+        );
         updatedState = {
           ...updatedState,
-          lateIncidents: recRes.incidents,
+          lateIncidents: [...otherEmpIncsDel, ...recRes.incidents],
           requests: recRes.updatedRequests
         };
       }

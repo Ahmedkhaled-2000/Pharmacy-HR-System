@@ -32,6 +32,7 @@ import MedicationMasterCardModal from '../common/MedicationMasterCardModal';
 import AddMedicationModal from '../common/AddMedicationModal';
 import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
 import CosmeticsProductModal from '../common/CosmeticsProductModal';
+import { renderActiveIngredientBadges } from '../../../utils/activeIngredientsHelper';
 
 /**
  * PharmacyMedicationSearchTab.jsx
@@ -86,9 +87,24 @@ export default function PharmacyMedicationSearchTab({
 
   const canEditPrices = useMemo(() => {
     if (!branchPermissions) return true;
-    if (branchPermissions.globalPriceEditEnabled === false) return false;
-    if (branchId && branchPermissions.branches && branchPermissions.branches[branchId]) {
-      return branchPermissions.branches[branchId].can_edit_prices !== false;
+
+    // فحص التعطيل العام لتعديل الأسعار
+    const isGlobalDisabled =
+      branchPermissions.global_price_edit_disabled === true ||
+      branchPermissions.allow_global_price_edit === false ||
+      branchPermissions.globalPriceEditEnabled === false;
+
+    if (isGlobalDisabled) return false;
+
+    // فحص صلاحية الفرع المحدد
+    const rules = branchPermissions.branch_rules || branchPermissions.branch_overrides || branchPermissions.branches || {};
+    const effectiveBranchKey = branchId || 'main';
+    const bRule = rules[effectiveBranchKey] || rules[String(effectiveBranchKey)];
+
+    if (bRule) {
+      if (bRule.can_edit_price !== undefined) return Boolean(bRule.can_edit_price);
+      if (bRule.can_edit_prices !== undefined) return Boolean(bRule.can_edit_prices);
+      if (bRule.canEditPrices !== undefined) return Boolean(bRule.canEditPrices);
     }
     return true;
   }, [branchPermissions, branchId]);
@@ -543,9 +559,9 @@ export default function PharmacyMedicationSearchTab({
                       {med.trade_name_en}
                     </div>
 
-                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <span style={{ fontWeight: '600' }}>المادة الفعالة:</span>
-                      <span style={{ color: '#0284c7', fontWeight: '700' }}>{med.generic_name || 'غير محددة'}</span>
+                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '6px' }}>
+                      <span style={{ fontWeight: '700', display: 'block', marginBottom: '3px' }}>المادة الفعالة:</span>
+                      {renderActiveIngredientBadges(med.generic_name, med.active_ingredients_list)}
                     </div>
 
                     {med.manufacturer && (
@@ -805,9 +821,9 @@ export default function PharmacyMedicationSearchTab({
                         paddingTop: '12px'
                       }}
                     >
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block' }}>المادة الفعالة:</span>
-                        <strong style={{ color: '#0f172a' }}>{masterCardData.medication.generic_name || 'غير محدد'}</strong>
+                      <div style={{ gridColumn: '1 / -1' }}>
+                        <span style={{ color: '#64748b', display: 'block', marginBottom: '3px' }}>المادة الفعالة (Active Ingredients):</span>
+                        {renderActiveIngredientBadges(masterCardData.medication.generic_name, masterCardData.medication.active_ingredients_list)}
                       </div>
                       <div>
                         <span style={{ color: '#64748b', display: 'block' }}>الشكل والتركيز:</span>

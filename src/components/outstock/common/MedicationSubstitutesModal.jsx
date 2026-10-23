@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { renderActiveIngredientBadges } from '../../../utils/activeIngredientsHelper';
 
 /**
  * MedicationSubstitutesModal.jsx
@@ -282,11 +283,9 @@ export default function MedicationSubstitutesModal({
                 </div>
               </div>
               {data.genericName && (
-                <div style={{ textAlign: 'left', direction: 'ltr' }}>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>Active Ingredient:</span>
-                  <div style={{ fontWeight: '700', color: '#be185d', fontSize: '13px' }}>
-                    🧬 {data.genericName}
-                  </div>
+                <div style={{ textAlign: 'right', marginTop: '4px' }}>
+                  <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginBottom: '2px' }}>المادة الفعالة (Active Ingredients):</span>
+                  {renderActiveIngredientBadges(data.genericName, data.medication?.active_ingredients_list)}
                 </div>
               )}
             </div>

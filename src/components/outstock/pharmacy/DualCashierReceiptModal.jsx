@@ -592,7 +592,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {(order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill).map((item, idx) => {
+                  {(order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill && !['unavailable', 'unavailable_in_market', 'cancelled_by_customer', 'cancelled', 'returned'].includes(String(i.itemStatus || i.item_status || '').toLowerCase())).map((item, idx) => {
                     const qty = parseInt(item.quantity || 1, 10);
                     const isEstimated = item.is_price_estimated || item.isPriceEstimated;
                     const priceMin = parseFloat(item.price_min || item.priceMin || 0);
@@ -635,7 +635,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
               {/* مربعات الإجماليات الآمنة ضد القص الميكانيكي */}
               <div className="receipt-totals" style={{ borderTop: '1.5px dashed #000', paddingTop: '6px', marginBottom: '8px', paddingLeft: '4px', paddingRight: '4px' }}>
                 {(() => {
-                  const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill);
+                  const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill && !['unavailable', 'unavailable_in_market', 'cancelled_by_customer', 'cancelled', 'returned'].includes(String(i.itemStatus || i.item_status || '').toLowerCase()));
                   let totalMin = 0;
                   let totalMax = 0;
                   let totalAvg = 0;
@@ -861,7 +861,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                   </strong>
                 </div>
                 {(() => {
-                  const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill);
+                  const activeItems = (order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill && !['unavailable', 'unavailable_in_market', 'cancelled_by_customer', 'cancelled', 'returned'].includes(String(i.itemStatus || i.item_status || '').toLowerCase()));
                   let tMin = 0, tMax = 0, tAvg = 0, hasEst = false;
                   activeItems.forEach(it => {
                     const qty = parseInt(it.quantity || 1, 10);
@@ -940,7 +940,7 @@ export default function DualCashierReceiptModal({ order, branch, onClose }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {(order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill).map((item, idx) => {
+                  {(order.items || []).filter(i => !i.prunedFromBill && !i.pruned_from_bill && !['unavailable', 'unavailable_in_market', 'cancelled_by_customer', 'cancelled', 'returned'].includes(String(i.itemStatus || i.item_status || '').toLowerCase())).map((item, idx) => {
                     const isEstimated = item.is_price_estimated || item.isPriceEstimated;
                     const priceMin = parseFloat(item.price_min || item.priceMin || 0);
                     const priceMax = parseFloat(item.price_max || item.priceMax || priceMin || 0);

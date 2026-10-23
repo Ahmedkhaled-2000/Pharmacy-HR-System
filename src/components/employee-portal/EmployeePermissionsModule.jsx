@@ -167,7 +167,7 @@ export default function EmployeePermissionsModule({
     if (remainingPermCount <= 0) {
       const isConfirmed = await showConfirm({
         title: 'إرسال طلب إذن استثنائي',
-        message: `⚠️ تنبيه: لقد استنفذت الحد الشهري للأذونات المتاحة (${maxMonthlyCount} أذونات لشهر ${currentMonthKey}).\nهل ترغب في إرسال الطلب كطلب استثنائي يحتاج موافقة الإدارة العليا؟`,
+        message: `⚠️ تنبيه: لقد استنفذت الحد الشهري للأذونات المتاحة (${maxMonthlyCount} أذونات لشهر ${cycleRange?.label || cycleRange?.monthStr || new Date().toISOString().slice(0, 7)}).\nهل ترغب في إرسال الطلب كطلب استثنائي يحتاج موافقة الإدارة العليا؟`,
         confirmText: 'إرسال كطلب استثنائي',
         cancelText: 'إلغاء وتراجع',
         type: 'warning',

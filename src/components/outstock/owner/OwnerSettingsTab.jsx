@@ -66,6 +66,7 @@ import { DEFAULT_DELIVERY_ZONES } from '../../../utils/deliveryZonesService';
 const SETTINGS_SECTIONS = [
   { id: 'pharmacy_identity', title: 'هوية وشعار الصيدلية بالفاتورة', iconText: '🖼️' },
   { id: 'delivery_zones', title: 'إدارة مناطق وأحياء التوصيل', iconText: '📍' },
+  { id: 'return_policy', title: 'سياسات وإعدادات مهلة المرتجعات', iconText: '↩️' },
   { id: 'branches', title: 'إدارة وتفعيل الفروع والصيدليات', iconText: '🏢' },
   { id: 'procurement_users', title: 'يوزرات إدارة المشتريات والصلاحيات', iconText: '👥' },
   { id: 'security', title: 'تأمين حساب المالك وكلمة المرور', iconText: '🔑' },
@@ -119,6 +120,14 @@ export default function OwnerSettingsTab({
   const [pharmacyMainAddress, setPharmacyMainAddress] = useState('');
   const [pharmacyInvoiceFooter, setPharmacyInvoiceFooter] = useState('نسعد دائماً بخدمتكم وتوفير كافة احتياجاتكم الدوائية والطبية بأعلى معايير الجودة والسرعة ✨');
   const [isSavingIdentity, setIsSavingIdentity] = useState(false);
+
+  // إعدادات وسياسات مهلة المرتجعات للفروع
+  const [returnsAllowedDays, setReturnsAllowedDays] = useState(14);
+  const [returnsRequireManagerApproval, setReturnsRequireManagerApproval] = useState(true);
+  const [returnsAllowWalletRefund, setReturnsAllowWalletRefund] = useState(true);
+  const [returnsAllowCashRefund, setReturnsAllowCashRefund] = useState(true);
+  const [returnsPolicyNotes, setReturnsPolicyNotes] = useState('يشترط للمرتجع سلامة العبوة الخارجية والباركود وعدم فتح الأشرطة أو المستحضرات الطبية.');
+  const [isSavingReturnPolicy, setIsSavingReturnPolicy] = useState(false);
 
   // فورم إضافة / تعديل فرع
   const [editingBranch, setEditingBranch] = useState(null);
@@ -337,6 +346,21 @@ export default function OwnerSettingsTab({
             localStorage.setItem('outstock_delivery_zones', JSON.stringify(s.deliveryZones));
           } catch {}
         }
+        if (s.returns_allowed_days || s.returnsAllowedDays) {
+          setReturnsAllowedDays(parseInt(s.returns_allowed_days || s.returnsAllowedDays, 10));
+        }
+        if (typeof s.returns_require_manager_approval !== 'undefined' || typeof s.returnsRequireManagerApproval !== 'undefined') {
+          setReturnsRequireManagerApproval(Boolean(s.returns_require_manager_approval ?? s.returnsRequireManagerApproval));
+        }
+        if (typeof s.returns_allow_wallet_refund !== 'undefined' || typeof s.returnsAllowWalletRefund !== 'undefined') {
+          setReturnsAllowWalletRefund(Boolean(s.returns_allow_wallet_refund ?? s.returnsAllowWalletRefund));
+        }
+        if (typeof s.returns_allow_cash_refund !== 'undefined' || typeof s.returnsAllowCashRefund !== 'undefined') {
+          setReturnsAllowCashRefund(Boolean(s.returns_allow_cash_refund ?? s.returnsAllowCashRefund));
+        }
+        if (s.returns_policy_notes || s.returnsPolicyNotes) {
+          setReturnsPolicyNotes(s.returns_policy_notes || s.returnsPolicyNotes);
+        }
       }
     } catch (e) {
       console.warn('Fetch settings data error:', e);
@@ -390,6 +414,40 @@ export default function OwnerSettingsTab({
   const handleResetDeliveryZones = () => {
     if (!window.confirm('هل تريد استعادة قائمة المناطق والأحياء الافتراضية؟')) return;
     persistDeliveryZones(DEFAULT_DELIVERY_ZONES);
+  };
+
+  // حفظ سياسات وإعدادات مهلة المرتجعات للفروع
+  const handleSaveReturnPolicy = async (e) => {
+    if (e) e.preventDefault();
+    const days = parseInt(returnsAllowedDays, 10);
+    if (isNaN(days) || days < 1) {
+      showToast?.('⚠️ يرجى إدخال مهلة مرتجع صحيحة (يوم واحد على الأقل)');
+      return;
+    }
+    setIsSavingReturnPolicy(true);
+    try {
+      const res = await outstockSaveSettings({
+        returns_allowed_days: days,
+        returnsAllowedDays: days,
+        returns_require_manager_approval: returnsRequireManagerApproval,
+        returnsRequireManagerApproval,
+        returns_allow_wallet_refund: returnsAllowWalletRefund,
+        returnsAllowWalletRefund,
+        returns_allow_cash_refund: returnsAllowCashRefund,
+        returnsAllowCashRefund,
+        returns_policy_notes: returnsPolicyNotes,
+        returnsPolicyNotes
+      });
+      if (res?.success) {
+        showToast?.(`✅ تم حفظ وتحديث سياسات المرتجعات بنجاح (المهلة: ${days} يوم)`);
+      } else {
+        showToast?.(res?.error || 'تعذر حفظ إعدادات المرتجعات');
+      }
+    } catch (err) {
+      showToast?.('حدث خطأ أثناء حفظ إعدادات المرتجعات');
+    } finally {
+      setIsSavingReturnPolicy(false);
+    }
   };
 
   // معالجة واختيار ملف الشعار وضغطه تلقائياً ليبقى فائق الجودة وخفيفاً
@@ -1166,6 +1224,143 @@ export default function OwnerSettingsTab({
               <span>استعادة القائمة الافتراضية للمناطق</span>
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ── 0.6 قسم سياسات وإعدادات مهلة المرتجعات للفروع ── */}
+      {activeSubSection === 'return_policy' && (
+        <div className="outstock-card" style={{ maxWidth: '850px', margin: '0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px', borderBottom: '1px solid #e2e8f0', paddingBottom: '14px' }}>
+            <div>
+              <h3 className="outstock-card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                <RotateCcw size={20} color="#0d9488" />
+                <span>سياسات وإعدادات مهلة مرتجعات الفروع (Branch Return Policies)</span>
+              </h3>
+              <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#64748b' }}>
+                تحديد أقصى مهلة زمنية مسموحة لاسترجاع الأدوية والطلبات بعد استلامها، والشروط الرقابية لاعتماد أو رفض المرتجعات.
+              </p>
+            </div>
+            <span style={{ background: '#f0fdfa', color: '#0d9488', border: '1px solid #ccfbf1', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '800' }}>
+              المهلة المعتمدة: {returnsAllowedDays} يوم
+            </span>
+          </div>
+
+          <form onSubmit={handleSaveReturnPolicy} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* بطاقة مهلة الأيام */}
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13.5px', fontWeight: '800', color: '#0f172a', marginBottom: '8px' }}>
+                ⏳ المهلة الزمنية المسموحة لمرتجع الطلب (بالأيام):
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', width: '160px' }}>
+                  <input
+                    type="number"
+                    min="1"
+                    max="180"
+                    required
+                    value={returnsAllowedDays}
+                    onChange={(e) => setReturnsAllowedDays(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="outstock-form-input"
+                    style={{ fontSize: '16px', fontWeight: '900', textAlign: 'center', borderColor: '#0d9488', paddingRight: '12px' }}
+                  />
+                  <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', fontSize: '13px', color: '#64748b', fontWeight: '700' }}>
+                    يوم
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {[7, 14, 21, 30, 45].map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setReturnsAllowedDays(d)}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        border: returnsAllowedDays === d ? '1.5px solid #0d9488' : '1px solid #cbd5e1',
+                        background: returnsAllowedDays === d ? '#ccfbf1' : '#ffffff',
+                        color: returnsAllowedDays === d ? '#0f766e' : '#334155',
+                        fontWeight: returnsAllowedDays === d ? '900' : '600',
+                        fontSize: '12.5px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {d} يوم
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#64748b' }}>
+                * بعد انقضاء هذه المهلة من تاريخ تسليم الطلب للعميل، يقفل النظام إمكانية طلب المرتجع تلقائياً لحماية الأدوية الحساسة.
+              </p>
+            </div>
+
+            {/* الضوابط الرقابية وطرق الاسترداد */}
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#0f172a' }}>
+                🛡️ الضوابط الإدارية وخيارات الاسترداد المالي:
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px', fontWeight: '700', color: '#1e293b' }}>
+                <input
+                  type="checkbox"
+                  checked={returnsRequireManagerApproval}
+                  onChange={(e) => setReturnsRequireManagerApproval(e.target.checked)}
+                  style={{ width: '18px', height: '18px', accentColor: '#0d9488', cursor: 'pointer' }}
+                />
+                <span>اشتراط موافقة المالك / إدارة المشتريات مسبقاً قبل اعتماد وقيد أي مرتجع</span>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px', fontWeight: '700', color: '#1e293b' }}>
+                <input
+                  type="checkbox"
+                  checked={returnsAllowWalletRefund}
+                  onChange={(e) => setReturnsAllowWalletRefund(e.target.checked)}
+                  style={{ width: '18px', height: '18px', accentColor: '#0d9488', cursor: 'pointer' }}
+                />
+                <span>إتاحة إضافة قيمة المرتجع كرصيد في محفظة العميل الإلكترونية 💳</span>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px', fontWeight: '700', color: '#1e293b' }}>
+                <input
+                  type="checkbox"
+                  checked={returnsAllowCashRefund}
+                  onChange={(e) => setReturnsAllowCashRefund(e.target.checked)}
+                  style={{ width: '18px', height: '18px', accentColor: '#0d9488', cursor: 'pointer' }}
+                />
+                <span>إتاحة استرداد قيمة المرتجع نقداً من درج الكاشير بالصيدلية 💵</span>
+              </label>
+            </div>
+
+            {/* نصوص وشروط سياسة الاسترجاع */}
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13.5px', fontWeight: '800', color: '#0f172a', marginBottom: '8px' }}>
+                📋 بنود وشروط المرتجعات المعتمدة (تظهر لمسؤولي الصيدلية والعميل):
+              </label>
+              <textarea
+                rows={3}
+                value={returnsPolicyNotes}
+                onChange={(e) => setReturnsPolicyNotes(e.target.value)}
+                placeholder="اكتب هنا شروط قبول المرتجع (مثل: سلامة العبوة الخارجية، عدم فتح العلب، حفظ الأدوية الثلاجة)..."
+                className="outstock-form-input"
+                style={{ width: '100%', resize: 'vertical', fontSize: '13px', lineHeight: '1.6' }}
+              />
+            </div>
+
+            {/* زر الحفظ */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="submit"
+                disabled={isSavingReturnPolicy}
+                className="outstock-btn outstock-btn-primary"
+                style={{ padding: '10px 24px', fontSize: '14px', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+              >
+                <Save size={16} />
+                <span>{isSavingReturnPolicy ? 'جاري الحفظ...' : 'حفظ وتطبيق سياسة المرتجعات'}</span>
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

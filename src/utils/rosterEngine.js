@@ -1,6 +1,7 @@
 import { arabicWeekday } from './formatters.js';
 import { getRealTodayStr } from './timeEngine.js';
 import { getActivePayrollMonth, getCycleDateRange, extractPayrollSettings } from './periodEngine.js';
+import { getActiveSecondment } from './secondmentEngine.js';
 
 export const AR_WEEKDAYS_MAP = {
   0: ['sunday', ' الأحد', 'الأحد', 'الاحد'],
@@ -86,17 +87,40 @@ export function getDayScheduleFromMap(schedule, jsDayIndex, dateStr = null) {
   return null;
 }
 
-export function getDayShiftsList(item) {
+export function getDayShiftsList(item, defaultBranchId = null) {
   if (!item || typeof item !== 'object') return [];
-  if (item.type === 'off' || item.isOff) return [];
 
+  const fallbackBId = String(item.branchId || defaultBranchId || '').trim();
+
+  // إذا كان اليوم راحة أسبوعية أو مؤشراً كراحة بسبب جدولته في فرع آخر
+  if (item.type === 'off' || item.isOff) {
+    if (Array.isArray(item.otherBranchShifts) && item.otherBranchShifts.length > 0) {
+      return item.otherBranchShifts
+        .filter(s => s && typeof s === 'object' && !s.isOff && s.type !== 'off' && s.start && s.end)
+        .map((s, idx) => ({
+          id: s.id || `shift_other_${idx + 1}`,
+          shiftIndex: idx + 1,
+          branchId: String(s.branchId || fallbackBId).trim(),
+          branchName: s.branchName || item.branchName || '',
+          start: s.start || '08:00',
+          end: s.end || '16:00',
+          hours: s.hours !== undefined ? Number(s.hours) : 8,
+          type: s.type || 'shift',
+          isOff: false,
+          isOtherBranchShift: true
+        }));
+    }
+    return [];
+  }
+
+  let rawShifts = [];
   if (Array.isArray(item.shifts) && item.shifts.length > 0) {
-    return item.shifts
+    rawShifts = item.shifts
       .filter(s => s && typeof s === 'object' && !s.isOff && s.type !== 'off' && s.start && s.end)
       .map((s, idx) => ({
         id: s.id || `shift_${idx + 1}`,
         shiftIndex: idx + 1,
-        branchId: String(s.branchId || item.branchId || '').trim(),
+        branchId: String(s.branchId || fallbackBId).trim(),
         branchName: s.branchName || item.branchName || '',
         start: s.start || '08:00',
         end: s.end || '16:00',
@@ -104,38 +128,112 @@ export function getDayShiftsList(item) {
         type: s.type || 'shift',
         isOff: false
       }));
+  } else {
+    if (item.start && item.end && !item.isOff && item.type !== 'off') {
+      rawShifts.push({
+        id: 'shift_1',
+        shiftIndex: 1,
+        branchId: fallbackBId,
+        branchName: item.branchName || '',
+        start: item.start,
+        end: item.end,
+        hours: item.hours !== undefined ? Number(item.hours) : 8,
+        type: item.type || 'shift',
+        isOff: false
+      });
+    }
+
+    if (item.hasSecondShift && item.secondShift && item.secondShift.start && item.secondShift.end && !item.secondShift.isOff && item.secondShift.type !== 'off') {
+      rawShifts.push({
+        id: 'shift_2',
+        shiftIndex: 2,
+        branchId: String(item.secondShift.branchId || fallbackBId).trim(),
+        branchName: item.secondShift.branchName || item.branchName || '',
+        start: item.secondShift.start,
+        end: item.secondShift.end,
+        hours: item.secondShift.hours !== undefined ? Number(item.secondShift.hours) : 6,
+        type: item.secondShift.type || 'shift',
+        isOff: false
+      });
+    }
   }
 
-  const shifts = [];
-  if (item.start && item.end && !item.isOff && item.type !== 'off') {
-    shifts.push({
-      id: 'shift_1',
-      shiftIndex: 1,
-      branchId: String(item.branchId || '').trim(),
-      branchName: item.branchName || '',
-      start: item.start,
-      end: item.end,
-      hours: item.hours !== undefined ? Number(item.hours) : 8,
-      type: item.type || 'shift',
-      isOff: false
+  // تضمين أي ورديات لفروع أخرى إن وجدت لضمان اكتمال جدول اليوم الشامل
+  if (Array.isArray(item.otherBranchShifts) && item.otherBranchShifts.length > 0) {
+    item.otherBranchShifts.forEach((obs) => {
+      if (obs && typeof obs === 'object' && !obs.isOff && obs.type !== 'off' && obs.start && obs.end) {
+        const exists = rawShifts.some(rs =>
+          rs.start === obs.start &&
+          rs.end === obs.end &&
+          String(rs.branchId || '').trim() === String(obs.branchId || '').trim()
+        );
+        if (!exists) {
+          rawShifts.push({
+            id: obs.id || `shift_${rawShifts.length + 1}`,
+            shiftIndex: rawShifts.length + 1,
+            branchId: String(obs.branchId || '').trim(),
+            branchName: obs.branchName || '',
+            start: obs.start,
+            end: obs.end,
+            hours: obs.hours !== undefined ? Number(obs.hours) : 8,
+            type: obs.type || 'shift',
+            isOff: false,
+            isOtherBranchShift: true
+          });
+        }
+      }
     });
   }
 
-  if (item.hasSecondShift && item.secondShift && item.secondShift.start && item.secondShift.end && !item.secondShift.isOff && item.secondShift.type !== 'off') {
-    shifts.push({
-      id: 'shift_2',
-      shiftIndex: 2,
-      branchId: String(item.secondShift.branchId || '').trim(),
-      branchName: item.secondShift.branchName || '',
-      start: item.secondShift.start,
-      end: item.secondShift.end,
-      hours: item.secondShift.hours !== undefined ? Number(item.secondShift.hours) : 6,
-      type: item.secondShift.type || 'shift',
-      isOff: false
-    });
+  // دعم الوردية الثانية للفرع الآخر (الموظف متعدد الفروع)
+  if (item.otherBranchSecondShift && typeof item.otherBranchSecondShift === 'object' && !item.otherBranchSecondShift.isOff && item.otherBranchSecondShift.type !== 'off' && item.otherBranchSecondShift.start && item.otherBranchSecondShift.end) {
+    const obs = item.otherBranchSecondShift;
+    const exists = rawShifts.some(rs =>
+      rs.start === obs.start &&
+      rs.end === obs.end &&
+      String(rs.branchId || '').trim() === String(obs.branchId || '').trim()
+    );
+    if (!exists) {
+      rawShifts.push({
+        id: obs.id || `shift_${rawShifts.length + 1}`,
+        shiftIndex: rawShifts.length + 1,
+        branchId: String(obs.branchId || '').trim(),
+        branchName: obs.branchName || obs.otherBranchName || '',
+        start: obs.start,
+        end: obs.end,
+        hours: obs.hours !== undefined ? Number(obs.hours) : 6,
+        type: obs.type || 'shift',
+        isOff: false,
+        isOtherBranchShift: true
+      });
+    }
   }
 
-  return shifts;
+  // دعم الوردية الأولى للفرع الآخر (الموظف متعدد الفروع)
+  if (item.otherBranchFirstShift && typeof item.otherBranchFirstShift === 'object' && !item.otherBranchFirstShift.isOff && item.otherBranchFirstShift.type !== 'off' && item.otherBranchFirstShift.start && item.otherBranchFirstShift.end) {
+    const obs = item.otherBranchFirstShift;
+    const exists = rawShifts.some(rs =>
+      rs.start === obs.start &&
+      rs.end === obs.end &&
+      String(rs.branchId || '').trim() === String(obs.branchId || '').trim()
+    );
+    if (!exists) {
+      rawShifts.push({
+        id: obs.id || `shift_${rawShifts.length + 1}`,
+        shiftIndex: rawShifts.length + 1,
+        branchId: String(obs.branchId || '').trim(),
+        branchName: obs.branchName || obs.otherBranchName || '',
+        start: obs.start,
+        end: obs.end,
+        hours: obs.hours !== undefined ? Number(obs.hours) : 6,
+        type: obs.type || 'shift',
+        isOff: false,
+        isOtherBranchShift: true
+      });
+    }
+  }
+
+  return rawShifts;
 }
 
 function normalizeScheduleItem(item, jsDayIndex) {
@@ -229,6 +327,65 @@ export function getEmployeeBaseDaySchedule(empId, dateStr, state, targetBranchId
     };
   }
 
+  // 🔀 فحص الانتداب النشط للموظف في هذا التاريخ
+  const activeSecBase = (state && state.secondments) ? getActiveSecondment(empId, dateStr, state) : null;
+  if (activeSecBase) {
+    const secTargetBId = String(activeSecBase.targetBranchId || '').trim();
+    const queryBId = targetBranchId ? String(targetBranchId).trim() : null;
+
+    if (queryBId && queryBId !== secTargetBId) {
+      return {
+        type: 'off',
+        isOff: true,
+        hours: 0,
+        start: '',
+        end: '',
+        branchId: targetBranchId,
+        isSecondedAway: true,
+        label: `منتدب إلى ${activeSecBase.targetBranchName || 'فرع آخر'}`,
+        secondmentId: activeSecBase.id
+      };
+    }
+
+    if (activeSecBase.scheduleType === 'variable') {
+      return {
+        type: 'shift',
+        isOff: false,
+        hours: parseFloat(activeSecBase.dailyHours || 8),
+        start: '',
+        end: '',
+        variable: true,
+        isVariable: true,
+        branchId: activeSecBase.targetBranchId,
+        branchName: activeSecBase.targetBranchName,
+        label: `دوام حر بالساعات (انتداب ${activeSecBase.targetBranchName || ''})`,
+        isSecondment: true,
+        secondmentId: activeSecBase.id
+      };
+    }
+
+    if (activeSecBase.scheduleType === 'fixed' && activeSecBase.schedule) {
+      const jsDay = new Date(dateStr + 'T00:00:00').getDay();
+      const secItem = activeSecBase.schedule[dateStr] || getDayScheduleFromMap(activeSecBase.schedule, jsDay, dateStr) || getDayScheduleFromMap(activeSecBase.schedule, jsDay, null);
+      if (secItem) {
+        const isOff = secItem.type === 'off' || secItem.isOff === true;
+        return {
+          ...secItem,
+          type: isOff ? 'off' : 'shift',
+          isOff,
+          start: isOff ? '' : (secItem.start || '08:00'),
+          end: isOff ? '' : (secItem.end || '16:00'),
+          hours: isOff ? 0 : (secItem.hours !== undefined ? secItem.hours : 8),
+          branchId: activeSecBase.targetBranchId,
+          branchName: activeSecBase.targetBranchName,
+          isSecondment: true,
+          secondmentId: activeSecBase.id,
+          label: isOff ? 'راحة أسبوعية (انتداب)' : (secItem.label || 'وردية عمل (انتداب)')
+        };
+      }
+    }
+  }
+
   if (emp?.noMonthlySchedule || emp?.isVariableHours || emp?.variableHours || emp?.hasNoRoster) {
     const arDay = arabicWeekday(dateStr);
     const restDays = Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.length > 0 ? emp.weeklyRestDays : ['الجمعة'];
@@ -244,15 +401,20 @@ export function getEmployeeBaseDaySchedule(empId, dateStr, state, targetBranchId
     return null;
   }
   const jsDay = new Date(dateStr + 'T00:00:00').getDay();
-  // الاستعلام بالتاريخ أولاً لجلب تعيينات الفروع والورديات المحددة ليوم بعينه، ثم التراجع للجدول الأسبوعي
+  const defaultBranch = roster.branchId || emp?.branchId || null;
+  const defaultBranchIdStr = String(defaultBranch || '').trim();
   const sched = getDayScheduleFromMap(roster.schedule, jsDay, dateStr) || getDayScheduleFromMap(roster.schedule, jsDay, null);
   if (!sched) return null;
 
   // إذا تم طلب جدول لفرع محدد وكان في هذا اليوم ورديات متعددة عبر الفروع
   if (targetBranchId) {
-    const allShifts = getDayShiftsList(sched);
     const tgtBId = String(targetBranchId).trim();
-    const branchShifts = allShifts.filter(s => String(s.branchId || '').trim() === tgtBId);
+    const allShifts = getDayShiftsList(sched, defaultBranch);
+    const branchShifts = allShifts.filter(s => {
+      const sBId = String(s.branchId || defaultBranchIdStr).trim();
+      return sBId === tgtBId || (!sBId && (!defaultBranchIdStr || defaultBranchIdStr === tgtBId));
+    });
+
     if (branchShifts.length > 0) {
       const prim = branchShifts[0];
       const otherShifts = allShifts.filter(s => !branchShifts.includes(s));
@@ -265,12 +427,28 @@ export function getEmployeeBaseDaySchedule(empId, dateStr, state, targetBranchId
         shifts: branchShifts,
         otherBranchShifts: otherShifts
       };
+    } else if (allShifts.length > 0 && allShifts.some(s => s.branchId && String(s.branchId).trim() !== tgtBId)) {
+      // 🌟 حماية حاسمة: الموظف لديه وردية في هذا اليوم ولكن في فرع آخر صريح!
+      // إذن في الفرع المستهدف targetBranchId هذا اليوم هو راحة (غير مجدول به اليوم)
+      const otherNames = allShifts.map(s => s.branchName || `فرع ${s.branchId}`).filter(Boolean).join(' و ');
+      return {
+        ...sched,
+        type: 'off',
+        isOff: true,
+        hours: 0,
+        start: '',
+        end: '',
+        branchId: targetBranchId,
+        isOtherBranchShift: true,
+        otherBranchShifts: allShifts,
+        label: `مجدول بـ ${otherNames || 'فرع آخر'} (${allShifts.map(s => `${s.start || '—'} إلى ${s.end || '—'}`).join('، ')})`
+      };
     }
   }
 
   return {
     ...sched,
-    branchId: sched.branchId || roster.branchId || emp?.branchId || null,
+    branchId: sched.branchId || defaultBranch,
     branchName: sched.branchName || roster.branchName || null
   };
 }
@@ -305,6 +483,65 @@ export function getEmployeeDaySchedule(empId, dateStr, state, targetBranchId = n
       label: `خارج العمل (تاريخ التعيين: ${hireDate})`,
       disabled: true
     };
+  }
+
+  // 🔀 فحص الانتداب النشط للموظف في هذا التاريخ
+  const activeSecDay = (state && state.secondments) ? getActiveSecondment(empId, dateStr, state) : null;
+  if (activeSecDay) {
+    const secTargetBId = String(activeSecDay.targetBranchId || '').trim();
+    const queryBId = targetBranchId ? String(targetBranchId).trim() : null;
+
+    if (queryBId && queryBId !== secTargetBId) {
+      return {
+        type: 'off',
+        isOff: true,
+        hours: 0,
+        start: '',
+        end: '',
+        branchId: targetBranchId,
+        isSecondedAway: true,
+        label: `منتدب إلى ${activeSecDay.targetBranchName || 'فرع آخر'}`,
+        secondmentId: activeSecDay.id
+      };
+    }
+
+    if (activeSecDay.scheduleType === 'variable') {
+      return {
+        type: 'shift',
+        isOff: false,
+        hours: parseFloat(activeSecDay.dailyHours || 8),
+        start: '',
+        end: '',
+        variable: true,
+        isVariable: true,
+        branchId: activeSecDay.targetBranchId,
+        branchName: activeSecDay.targetBranchName,
+        label: `دوام حر بالساعات (انتداب ${activeSecDay.targetBranchName || ''})`,
+        isSecondment: true,
+        secondmentId: activeSecDay.id
+      };
+    }
+
+    if (activeSecDay.scheduleType === 'fixed' && activeSecDay.schedule) {
+      const jsDay = new Date(dateStr + 'T00:00:00').getDay();
+      const secItem = activeSecDay.schedule[dateStr] || getDayScheduleFromMap(activeSecDay.schedule, jsDay, dateStr) || getDayScheduleFromMap(activeSecDay.schedule, jsDay, null);
+      if (secItem) {
+        const isOff = secItem.type === 'off' || secItem.isOff === true;
+        return {
+          ...secItem,
+          type: isOff ? 'off' : 'shift',
+          isOff,
+          start: isOff ? '' : (secItem.start || '08:00'),
+          end: isOff ? '' : (secItem.end || '16:00'),
+          hours: isOff ? 0 : (secItem.hours !== undefined ? secItem.hours : 8),
+          branchId: activeSecDay.targetBranchId,
+          branchName: activeSecDay.targetBranchName,
+          isSecondment: true,
+          secondmentId: activeSecDay.id,
+          label: isOff ? 'راحة أسبوعية (انتداب)' : (secItem.label || 'وردية عمل (انتداب)')
+        };
+      }
+    }
   }
 
   // الموظف الذي ليس له جدول شهري (مواعيد متغيرة): يعتمد على أيام الراحة المحددة له
@@ -411,7 +648,7 @@ export function getEmployeeDaySchedule(empId, dateStr, state, targetBranchId = n
 
   if (approvedSwap) {
     const swapTime = new Date(approvedSwap.approvedAt || approvedSwap.createdAt || 0).getTime();
-    const activeRoster = findEmployeeRoster(empId, dateStr, state);
+    const activeRoster = findEmployeeRoster(empId, dateStr, state, targetBranchId);
     const rosterTime = activeRoster ? new Date(activeRoster.approvedAt || activeRoster.updatedAt || activeRoster.createdAt || 0).getTime() : 0;
     const hasExplicitDateInRoster = Boolean(activeRoster && activeRoster.schedule && activeRoster.schedule[dateStr]);
 
@@ -429,8 +666,8 @@ export function getEmployeeDaySchedule(empId, dateStr, state, targetBranchId = n
     const otherEmp = (state?.employees || []).find(e => e && (String(e.id) === String(otherEmpId) || (e.code && String(e.code) === String(otherEmpId))));
     const otherEmpName = otherEmp?.name || (isRequester ? approvedSwap.targetEmpName : approvedSwap.requesterEmpName) || 'الزميل';
 
-    // استخراج جدول كل طرف الأصلي في هذا التاريخ dateStr
-    const myBaseSched = getEmployeeBaseDaySchedule(empIdStr, dateStr, state);
+    // استخراج جدول كل طرف الأصلي في هذا التاريخ dateStr مع مراعاة الفرع المستهدف
+    const myBaseSched = getEmployeeBaseDaySchedule(empIdStr, dateStr, state, targetBranchId);
     const otherBaseSched = getEmployeeBaseDaySchedule(otherEmpId, dateStr, state);
 
     const isOtherOff = !otherBaseSched || otherBaseSched.type === 'off' || otherBaseSched.isOff === true;
@@ -1006,33 +1243,35 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
   let explicitBranchId = targetBranchId;
 
   const isState = (val) => val && typeof val === 'object' && (val.rosters || val.requests || val.employees || val.branches || val.orgSettings !== undefined);
-  const isMonth = (val) => typeof val === 'string' && /^\d{4}-\d{1,2}$/.test(val.trim());
+  const isMonth = (val) => typeof val === 'string' && /^\d{4}-\d{1,2}/.test(val.trim());
 
   if (isState(arg3)) {
     state = arg3;
-    if (typeof arg4 === 'string') selectedMonth = arg4;
+    if (typeof arg4 === 'string') selectedMonth = arg4.match(/^\d{4}-\d{1,2}/)?.[0] || arg4;
   } else if (isState(arg4)) {
     state = arg4;
-    if (typeof arg3 === 'string') selectedMonth = arg3;
+    if (typeof arg3 === 'string') selectedMonth = arg3.match(/^\d{4}-\d{1,2}/)?.[0] || arg3;
   } else if (isState(explicitBranchId)) {
     state = explicitBranchId;
     explicitBranchId = null;
-    if (typeof arg3 === 'string') selectedMonth = arg3;
+    if (typeof arg3 === 'string') selectedMonth = arg3.match(/^\d{4}-\d{1,2}/)?.[0] || arg3;
   } else if (arg3 && typeof arg3 === 'object') {
     state = arg3;
-    if (typeof arg4 === 'string') selectedMonth = arg4;
+    if (typeof arg4 === 'string') selectedMonth = arg4.match(/^\d{4}-\d{1,2}/)?.[0] || arg4;
   }
 
   // If explicitBranchId is a month string (e.g., '2026-10'):
   if (isMonth(explicitBranchId)) {
-    if (!selectedMonth) selectedMonth = explicitBranchId.trim();
+    if (!selectedMonth) selectedMonth = explicitBranchId.trim().match(/^\d{4}-\d{1,2}/)?.[0] || explicitBranchId.trim();
     explicitBranchId = null;
   }
-  if (!selectedMonth && isMonth(arg3)) {
-    selectedMonth = arg3.trim();
+  if (!selectedMonth && typeof arg3 === 'string') {
+    const m = arg3.trim().match(/^(\d{4}-\d{1,2})/);
+    if (m) selectedMonth = m[1];
   }
-  if (!selectedMonth && isMonth(arg4)) {
-    selectedMonth = arg4.trim();
+  if (!selectedMonth && typeof arg4 === 'string') {
+    const m = arg4.trim().match(/^(\d{4}-\d{1,2})/);
+    if (m) selectedMonth = m[1];
   }
 
   if (!state) return null;
@@ -1315,9 +1554,7 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
       req.status === 'active' || 
       req.status === 'معتمد' || 
       req.adminApproved === true || 
-      req.branchApproved === true || 
-      req.isApproved === true || 
-      (req.branchApproved && req.status === 'pending_admin');
+      req.isApproved === true;
 
     if (!isApproved) return;
     if (!branchMatches(req.branchId)) return;
@@ -1391,15 +1628,28 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
     const startTimeStr = `${String(startHour).padStart(2, '0')}:00`;
     const endTimeStr = `${String(endTotal).padStart(2, '0')}:00`;
     
-    const defaultTemplate = {
-      'السبت': { type: 'shift', start: startTimeStr, end: endTimeStr, hours },
-      'الأحد': { type: 'shift', start: startTimeStr, end: endTimeStr, hours },
-      'الاثنين': { type: 'shift', start: startTimeStr, end: endTimeStr, hours },
-      'الثلاثاء': { type: 'shift', start: startTimeStr, end: endTimeStr, hours },
-      'الأربعاء': { type: 'shift', start: startTimeStr, end: endTimeStr, hours },
-      'الخميس': { type: 'shift', start: startTimeStr, end: endTimeStr, hours },
-      'الجمعة': { type: 'off', isOff: true, start: '', end: '', hours: 0 }
-    };
+    const dayNames = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
+    const dayNamesEn = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+    const empOffs = Array.isArray(effectiveEmp?.weekly_off_days) ? effectiveEmp.weekly_off_days
+      : Array.isArray(effectiveEmp?.weeklyRestDays) ? effectiveEmp.weeklyRestDays
+      : Array.isArray(effectiveEmp?.offDays) ? effectiveEmp.offDays
+      : ['الجمعة'];
+
+    const defaultTemplate = {};
+    dayNames.forEach((arName, idx) => {
+      const enName = dayNamesEn[idx].toLowerCase();
+      const arClean = arName.replace(/[إأآ]/g, 'ا');
+      const isOff = empOffs.some(d => {
+        const str = String(d || '').trim().toLowerCase();
+        const strClean = str.replace(/[إأآ]/g, 'ا');
+        return str === enName || str === arName.toLowerCase() || strClean === arClean;
+      });
+      if (isOff) {
+        defaultTemplate[arName] = { type: 'off', isOff: true, start: '', end: '', hours: 0 };
+      } else {
+        defaultTemplate[arName] = { type: 'shift', start: startTimeStr, end: endTimeStr, hours, isOff: false };
+      }
+    });
 
     return {
       id: `default_roster_${effectiveEmp?.id || empIdStr}_${selectedMonth || 'active'}`,
@@ -1448,11 +1698,14 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
       }
 
       // هل يوجد أي وردية لهذا الفرع المستهدف في هذا اليوم؟
-      const branchShifts = allShifts.filter(s => 
-        !s.branchId || 
-        s.branchId === targetBIdStr || 
-        (targetBObj && (s.branchId === String(targetBObj.id) || s.branchId === String(targetBObj.branchCode)))
-      );
+      const primaryBId = String(effectiveEmp?.branchesDetails?.[0]?.branchId || effectiveEmp?.branchId || '').trim();
+      const branchShifts = allShifts.filter(s => {
+        const sBId = String(s.branchId || '').trim();
+        if (!sBId) {
+          return targetBIdStr === primaryBId;
+        }
+        return sBId === targetBIdStr || (targetBObj && (sBId === String(targetBObj.id) || sBId === String(targetBObj.branchCode)));
+      });
       const otherShifts = allShifts.filter(s => !branchShifts.includes(s));
 
       if (branchShifts.length > 0) {
@@ -1559,9 +1812,14 @@ export function splitUnifiedRosterForBranches(unifiedSchedule, employee, allBran
       }
 
       // الورديات التابعة لهذا الفرع تحديداً
+      const primaryBId = String(branchesDetails[0]?.branchId || '').trim();
       const branchShifts = allShifts.filter((s) => {
         const sBId = String(s.branchId || '').trim();
-        return !sBId || sBId === bId || (bObj && (sBId === String(bObj.id) || sBId === String(bObj.branchCode)));
+        if (!sBId) {
+          // إذا لم يحدد فرع للوردية لموظف متعدد الفروع، تُنسب للفرع الرئيسي فقط وليس لكافة الفروع
+          return bId === primaryBId;
+        }
+        return sBId === bId || (bObj && (sBId === String(bObj.id) || sBId === String(bObj.branchCode)));
       });
 
       // الورديات التابعة لفروع أخرى في نفس اليوم

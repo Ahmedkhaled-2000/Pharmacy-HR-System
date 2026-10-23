@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { getResolvedEmployeeRoster, getDayScheduleFromMap } from '../../utils/rosterEngine';
+import { getResolvedEmployeeRoster, getDayScheduleFromMap, getDayShiftsList } from '../../utils/rosterEngine';
 import { getEmpDisplayName, isEmployeeActive, getRealTodayStr, arabicMonthLabel } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
 import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
@@ -83,13 +83,34 @@ function generateOfficialWeeklyShiftsHTML({
       }
       const dayConf = getRosterDaySchedule(schedule, d) || { type: 'off' };
       const isShift = dayConf && dayConf.type === 'shift' && dayConf.start && dayConf.end;
+      const isOtherBranch = Boolean(dayConf?.isOtherBranch || dayConf?.label?.includes('دوام بفرع'));
       if (isShift) {
+        const shiftsList = Array.isArray(dayConf.shifts) && dayConf.shifts.length > 0
+          ? dayConf.shifts
+          : [
+              { start: dayConf.start, end: dayConf.end },
+              ...(dayConf.hasSecondShift && dayConf.secondShift ? [dayConf.secondShift] : [])
+            ];
+        const shiftsHTML = shiftsList.map(s => `
+          <div style="font-weight:900; color:#15803d; font-size:9.5px; line-height:1.15; direction:rtl;">
+            <div>${formatTime12H(s.start)}</div>
+            <div style="font-size:7px; color:#64748b; margin:1px 0; font-weight:700;">إلى</div>
+            <div>${formatTime12H(s.end)}</div>
+          </div>
+        `).join('<div style="border-top:1px dashed #86efac; margin:2px 0;"></div>');
+
         return `
           <td style="border:1.5px solid #cbd5e1; padding:3px 2px; text-align:center; background:#f0fdf4; vertical-align:middle;">
-            <div style="font-weight:900; color:#15803d; font-size:9.5px; line-height:1.15; direction:rtl;">
-              <div>${formatTime12H(dayConf.start)}</div>
-              <div style="font-size:7px; color:#64748b; margin:1px 0; font-weight:700;">إلى</div>
-              <div>${formatTime12H(dayConf.end)}</div>
+            ${shiftsHTML}
+            ${dayConf.otherBranchSummary ? `<div style="font-size:7px; color:#0284c7; margin-top:2px; font-weight:700;">+ فرع آخر</div>` : ''}
+          </td>
+        `;
+      } else if (isOtherBranch) {
+        const branchLabel = dayConf.label?.replace('دوام بفرع آخر', '').replace(/[()]/g, '').trim() || 'فرع آخر';
+        return `
+          <td style="border:1.5px solid #cbd5e1; padding:3px 2px; text-align:center; background:#eff6ff; vertical-align:middle;">
+            <div style="color:#1d4ed8; font-weight:900; font-size:8.5px; line-height:1.2;">
+              دوام بفرع<br><span style="font-size:7.5px; font-weight:700; color:#2563eb;">${branchLabel}</span>
             </div>
           </td>
         `;
@@ -489,22 +510,47 @@ function generateOfficialMatrixHTML({
       }
       const dInfo = getRosterDaySchedule(schedule, d);
       const isShift = dInfo && dInfo.type === 'shift' && dInfo.start && dInfo.end;
-      return `
-        <td style="border:1.5px solid #cbd5e1; padding:4px 3px; text-align:center; background:${isShift ? '#f0fdf4' : '#fffbeb'}; vertical-align:middle;">
-          ${isShift ? `
-            <div style="font-weight:900; color:#15803d; font-size:10px; line-height:1.2; direction:rtl;">
-              <div>${formatTime12H(dInfo.start)}</div>
-              <div style="font-size:7.5px; color:#64748b; margin:1px 0; font-weight:700;">إلى</div>
-              <div>${formatTime12H(dInfo.end)}</div>
-            </div>
+      const isOtherBranch = Boolean(dInfo?.isOtherBranch || dInfo?.label?.includes('دوام بفرع'));
+      if (isShift) {
+        const shiftsList = Array.isArray(dInfo.shifts) && dInfo.shifts.length > 0
+          ? dInfo.shifts
+          : [
+              { start: dInfo.start, end: dInfo.end },
+              ...(dInfo.hasSecondShift && dInfo.secondShift ? [dInfo.secondShift] : [])
+            ];
+        const shiftsHTML = shiftsList.map(s => `
+          <div style="font-weight:900; color:#15803d; font-size:10px; line-height:1.2; direction:rtl;">
+            <div>${formatTime12H(s.start)}</div>
+            <div style="font-size:7.5px; color:#64748b; margin:1px 0; font-weight:700;">إلى</div>
+            <div>${formatTime12H(s.end)}</div>
+          </div>
+        `).join('<div style="border-top:1px dashed #86efac; margin:2px 0;"></div>');
+
+        return `
+          <td style="border:1.5px solid #cbd5e1; padding:4px 3px; text-align:center; background:#f0fdf4; vertical-align:middle;">
+            ${shiftsHTML}
             <div style="font-size:8px; color:#166534; margin-top:2px; font-weight:700;">وردية عمل</div>
-          ` : `
+            ${dInfo.otherBranchSummary ? `<div style="font-size:7.5px; color:#0284c7; font-weight:700;">+ فرع آخر</div>` : ''}
+          </td>
+        `;
+      } else if (isOtherBranch) {
+        const branchLabel = dInfo.label?.replace('دوام بفرع آخر', '').replace(/[()]/g, '').trim() || 'فرع آخر';
+        return `
+          <td style="border:1.5px solid #cbd5e1; padding:4px 3px; text-align:center; background:#eff6ff; vertical-align:middle;">
+            <div style="font-weight:900; color:#1d4ed8; font-size:9.5px; line-height:1.2;">
+              دوام بفرع<br><span style="font-size:8px; font-weight:700; color:#2563eb;">${branchLabel}</span>
+            </div>
+          </td>
+        `;
+      } else {
+        return `
+          <td style="border:1.5px solid #cbd5e1; padding:4px 3px; text-align:center; background:#fffbeb; vertical-align:middle;">
             <div style="font-weight:900; color:#92400e; font-size:10px; line-height:1.2;">
               راحة<br><span style="font-size:8px; font-weight:700;">أسبوعية</span>
             </div>
-          `}
-        </td>
-      `;
+          </td>
+        `;
+      }
     }).join('');
 
     return `
@@ -967,13 +1013,27 @@ export default function BranchMonthlyRosterModule({
       if (schedule) {
         DAYS_OF_WEEK.forEach(d => {
           const dayInfo = getRosterDaySchedule(schedule, d) || { type: 'off' };
-          if (dayInfo.type === 'shift' && dayInfo.start && dayInfo.end) {
-            workDaysCount++;
-            const [sh, sm] = dayInfo.start.split(':').map(Number);
-            const [eh, em] = dayInfo.end.split(':').map(Number);
-            let h = eh - sh + (em - sm) / 60;
-            if (h <= 0) h += 24;
-            totalWeeklyHours += h;
+          if (dayInfo.type === 'shift') {
+            if (Array.isArray(dayInfo.shifts) && dayInfo.shifts.length > 0) {
+              workDaysCount++;
+              dayInfo.shifts.forEach(s => {
+                totalWeeklyHours += Number(s.hours) || 0;
+              });
+            } else if (dayInfo.start && dayInfo.end) {
+              workDaysCount++;
+              const [sh, sm] = dayInfo.start.split(':').map(Number);
+              const [eh, em] = dayInfo.end.split(':').map(Number);
+              let h = eh - sh + (em - sm) / 60;
+              if (h <= 0) h += 24;
+              if (dayInfo.hasSecondShift && dayInfo.secondShift?.start && dayInfo.secondShift?.end) {
+                const [s2h, s2m] = dayInfo.secondShift.start.split(':').map(Number);
+                const [e2h, e2m] = dayInfo.secondShift.end.split(':').map(Number);
+                let h2 = e2h - s2h + (e2m - s2m) / 60;
+                if (h2 <= 0) h2 += 24;
+                h += h2;
+              }
+              totalWeeklyHours += h;
+            }
           }
         });
       }
@@ -1000,25 +1060,41 @@ export default function BranchMonthlyRosterModule({
         if (!isApproved || !schedule) return;
 
         const dayInfo = getRosterDaySchedule(schedule, day) || { type: 'off', start: '', end: '' };
-        if (dayInfo.type === 'shift' && dayInfo.start && dayInfo.end) {
-          const shiftKey = `${dayInfo.start} - ${dayInfo.end}`;
-          const [sh, sm] = dayInfo.start.split(':').map(Number);
-          const [eh, em] = dayInfo.end.split(':').map(Number);
-          let h = eh - sh + (em - sm) / 60;
-          if (h <= 0) h += 24;
+        if (dayInfo.type === 'shift') {
+          const sList = Array.isArray(dayInfo.shifts) && dayInfo.shifts.length > 0
+            ? dayInfo.shifts
+            : (dayInfo.start && dayInfo.end ? [
+                { start: dayInfo.start, end: dayInfo.end, hours: dayInfo.hours },
+                ...(dayInfo.hasSecondShift && dayInfo.secondShift ? [dayInfo.secondShift] : [])
+              ] : []);
 
-          workingStaff.push({
-            employee,
-            shiftKey,
-            start: dayInfo.start,
-            end: dayInfo.end,
-            hours: Math.round(h * 10) / 10,
-            isPharmacist: (employee.jobTitle || '').includes('صيدل')
-          });
+          if (sList.length > 0) {
+            sList.forEach(s => {
+              if (s.start && s.end) {
+                const shiftKey = `${s.start} - ${s.end}`;
+                workingStaff.push({
+                  employee,
+                  shiftKey,
+                  start: s.start,
+                  end: s.end,
+                  hours: s.hours || 0,
+                  isPharmacist: (employee.jobTitle || '').includes('صيدل')
+                });
+              }
+            });
+          } else {
+            offStaff.push({
+              employee,
+              isOff: true,
+              isOtherBranch: Boolean(dayInfo.isOtherBranch),
+              isPharmacist: (employee.jobTitle || '').includes('صيدل')
+            });
+          }
         } else {
           offStaff.push({
             employee,
             isOff: true,
+            isOtherBranch: Boolean(dayInfo.isOtherBranch),
             isPharmacist: (employee.jobTitle || '').includes('صيدل')
           });
         }
@@ -2069,6 +2145,15 @@ export default function BranchMonthlyRosterModule({
 
                           const dInfo = getRosterDaySchedule(schedule, d);
                           const isShift = dInfo && dInfo.type === 'shift' && dInfo.start && dInfo.end;
+                          const isOtherBranch = Boolean(dInfo?.isOtherBranch || dInfo?.label?.includes('دوام بفرع'));
+                          const localShifts = isShift
+                            ? (Array.isArray(dInfo.shifts) && dInfo.shifts.length > 0
+                                ? dInfo.shifts
+                                : [
+                                    { start: dInfo.start, end: dInfo.end, hours: dInfo.hours },
+                                    ...(dInfo.hasSecondShift && dInfo.secondShift ? [dInfo.secondShift] : [])
+                                  ])
+                            : [];
 
                           return (
                             <td key={d.key} style={{ textAlign: 'center', verticalAlign: 'middle', padding: '8px 6px' }}>
@@ -2082,14 +2167,72 @@ export default function BranchMonthlyRosterModule({
                                     display: 'flex',
                                     flexDirection: 'column',
                                     alignItems: 'center',
-                                    gap: '2px'
+                                    gap: '3px'
                                   }}
                                 >
-                                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#166534', direction: 'ltr' }}>
-                                    {formatShiftRange12H(dInfo.start, dInfo.end)}
+                                  {localShifts.map((s, sIdx) => (
+                                    <div key={s.id || sIdx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#166534', direction: 'ltr' }}>
+                                        {formatShiftRange12H(s.start, s.end)}
+                                      </span>
+                                      {localShifts.length > 1 && (
+                                        <span style={{ fontSize: '9px', color: '#15803d', fontWeight: 700 }}>
+                                          وردية {sIdx + 1}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ))}
+                                  {localShifts.length === 1 && (
+                                    <span style={{ fontSize: '10px', color: '#15803d', fontWeight: 600 }}>
+                                      🟢 وردية عمل
+                                    </span>
+                                  )}
+                                  {dInfo.otherBranchSummary && (
+                                    <span
+                                      style={{
+                                        fontSize: '9px',
+                                        color: '#0284c7',
+                                        background: '#e0f2fe',
+                                        padding: '1px 5px',
+                                        borderRadius: '4px',
+                                        fontWeight: 700,
+                                        marginTop: '2px'
+                                      }}
+                                      title={dInfo.otherBranchSummary}
+                                    >
+                                      📍 + فرع آخر
+                                    </span>
+                                  )}
+                                </div>
+                              ) : isOtherBranch ? (
+                                <div
+                                  style={{
+                                    background: '#eff6ff',
+                                    border: '1px solid #93c5fd',
+                                    borderRadius: '8px',
+                                    padding: '6px 4px',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    gap: '2px'
+                                  }}
+                                  title={dInfo?.label || 'دوام بفرع آخر'}
+                                >
+                                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#1d4ed8' }}>
+                                    🏢 بفرع آخر
                                   </span>
-                                  <span style={{ fontSize: '10px', color: '#15803d', fontWeight: 600 }}>
-                                    🟢 وردية عمل
+                                  <span
+                                    style={{
+                                      fontSize: '9.5px',
+                                      color: '#2563eb',
+                                      fontWeight: 600,
+                                      maxWidth: '90px',
+                                      whiteSpace: 'nowrap',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis'
+                                    }}
+                                  >
+                                    {dInfo?.label?.replace('دوام بفرع آخر', '').replace(/[()]/g, '').trim() || 'فرع آخر'}
                                   </span>
                                 </div>
                               ) : (
@@ -2420,11 +2563,21 @@ export default function BranchMonthlyRosterModule({
                             }
                             const dInfo = getRosterDaySchedule(schedule, d);
                             const isShift = dInfo && dInfo.type === 'shift' && dInfo.start && dInfo.end;
+                            const isOtherBranch = Boolean(dInfo?.isOtherBranch || dInfo?.label?.includes('دوام بفرع'));
                             return (
-                              <td key={d.key} style={{ border: '1px solid #cbd5e1', padding: '4px', background: isShift ? '#f0fdf4' : '#fffbeb' }}>
+                              <td key={d.key} style={{ border: '1px solid #cbd5e1', padding: '4px', background: isShift ? '#f0fdf4' : (isOtherBranch ? '#eff6ff' : '#fffbeb') }}>
                                 {isShift ? (
                                   <div style={{ fontWeight: 'bold', color: '#166534', direction: 'ltr', fontSize: '10px' }}>
                                     {formatShiftRange12H(dInfo.start, dInfo.end)}
+                                    {dInfo.hasSecondShift && dInfo.secondShift?.start && (
+                                      <div style={{ fontSize: '8.5px', color: '#15803d' }}>
+                                        + {formatShiftRange12H(dInfo.secondShift.start, dInfo.secondShift.end)}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : isOtherBranch ? (
+                                  <div style={{ color: '#1d4ed8', fontWeight: 'bold', fontSize: '9px' }}>
+                                    🏢 {dInfo?.label?.replace('دوام بفرع آخر', '').replace(/[()]/g, '').trim() || 'بفرع آخر'}
                                   </div>
                                 ) : (
                                   <div style={{ color: '#92400e', fontWeight: 'bold', fontSize: '10px' }}>راحة</div>

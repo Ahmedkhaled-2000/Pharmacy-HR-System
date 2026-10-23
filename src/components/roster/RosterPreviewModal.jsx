@@ -4,7 +4,7 @@ import { getEmpDisplayName, arabicWeekday, getRealTodayStr } from '../../utils/f
 import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
 import { getEmployeeDaySchedule, getDayScheduleFromMap, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
 import { reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
-import { apiSaveSettingsSlice } from '../../utils/apiClient';
+import { apiSaveSettingsSlice, apiSaveRosterAtomic } from '../../utils/apiClient';
 
 function getDayShiftInfo(schedule, day, fallbackHours = 8) {
   // If no schedule was provided or empty, do NOT invent fake shifts
@@ -249,9 +249,10 @@ export default function RosterPreviewModal({
       [editingDay.dateStr]: shiftPayload
     };
 
+    const rosterId = matchingRoster?.id || `roster_${employee.id}_${targetMonthKey}`;
     const updatedRosterObj = {
       ...(matchingRoster || {}),
-      id: matchingRoster?.id || `roster_${employee.id}_${targetMonthKey}_${Date.now()}`,
+      id: rosterId,
       employeeId: employee.id,
       employeeCode: employee.code || '',
       employeeName: employee.name || '',
@@ -290,15 +291,27 @@ export default function RosterPreviewModal({
     });
 
     setState?.(reconciledState);
+
+    // 🌟 حفظ ذري موحد فائق السرعة عبر نقطة الاتصال المركزية الجديدة للسيرفر (< 20ms)
     try {
-      await apiSaveSettingsSlice('rosters', reconciledState.rosters);
-      await apiSaveSettingsSlice('employees', reconciledState.employees);
-      await apiSaveSettingsSlice('shifts', reconciledState.shifts);
-      await apiSaveSettingsSlice('lateIncidents', reconciledState.lateIncidents);
-      await apiSaveSettingsSlice('requests', reconciledState.requests);
-    } catch (sliceErr) {
-      console.warn('apiSaveSettingsSlice in RosterPreviewModal error:', sliceErr);
+      await apiSaveRosterAtomic({
+        employeeId: employee.id,
+        employeeCode: employee.code || '',
+        employeeName: employee.name || '',
+        month: targetMonthKey,
+        branchId: employee.branchId || null,
+        roster: updatedRosterObj,
+        rosters: reconciledState.rosters,
+        employees: reconciledState.employees,
+        shifts: reconciledState.shifts,
+        lateIncidents: reconciledState.lateIncidents,
+        requests: reconciledState.requests,
+        notifications: reconciledState.notifications
+      });
+    } catch (atomicErr) {
+      console.warn('[RosterAtomicSave] Fallback in RosterPreviewModal:', atomicErr);
     }
+
     if (saveState) await saveState(reconciledState);
 
     if (reconSummary?.waivedDeductionMinutes > 0) {

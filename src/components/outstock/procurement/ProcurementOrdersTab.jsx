@@ -17,40 +17,64 @@ import {
   X,
   Pill,
   Filter,
-  Edit3
+  Edit3,
+  Clock,
+  Settings,
+  Sun,
+  Moon,
+  Truck,
+  Calendar,
+  LayoutList,
+  Layers,
+  User,
+  SlidersHorizontal
 } from 'lucide-react';
 import {
   outstockGetProcurementAggregated,
   outstockProcurementItemAction,
   outstockProcurementBatchItemActions,
   outstockConvertItemType,
+  outstockGetCyclesConfig,
   listenToOutstockLocalMessages
 } from '../../../utils/outstockApiClient';
 import { exportProcurementOrdersExcel } from '../../../utils/outstockExcelExporter';
 import OutstockConfirmModal from '../common/OutstockConfirmModal';
 import CosmeticsProductModal from '../common/CosmeticsProductModal';
 import ItemUnavailabilityModal from './ItemUnavailabilityModal';
+import ProcurementCyclesModal from './ProcurementCyclesModal';
 import { getSocket } from '../../../utils/socketClient';
 
 /**
  * ProcurementOrdersTab.jsx
  * شاشة طلبات الفروع المجمعة لإدارة المشتريات
- * - استلام أصناف مجمعة لكل فرع على حدة (Aggregated Item Model)
- * - فلتر الصنف: أدوية (افتراضي) / مستحضرات / الكل مع تصدير إكسل مخصص
- * - دعم صلاحية مسؤول مستحضرات التجميل
- * - تحديد ما تم توفيره بالفرع وما هو غير متوفر بالسوق
- * - شحن الأصناف المتوفرة لرصيد الفرع، أو شطب غير المتوفر وتحويله لنواقص الصيدلية
- * - تصدير شيت إكسل فاخر بتصميم احترافي (Dual-Sheet Executive Excel)
- * - نافذة تأكيد منبثقة احترافية بدلاً من window.confirm
- * - مزامنة لحظية فورية عبر WebSockets عند تسجيل أي طلب بالفرع
+ * - عرض كل طلب فرع في سطر مستقل يوضح:
+ *   التاريخ والوقت الدقيق، اسم الفرع والصيدلي، نوع الطلب (بدون كشف رقم العميل للخصوصية)، اسم المستحضر والكمية، الملاحظات والاستعجال، وأزرار القرار السريع (متوفر / قيد التجهيز / غير متوفر)
+ * - تبويبة عرض مجمعة لاحتياجات الأصناف عبر الفروع
+ * - فلتر دورات التوريد وتثبيت المواعيد الافتراضية (دورة الصباح / دورة المساء / وقت محدد)
+ * - تصدير شيت إكسل فاخر: شيت 1 تنفيذي موحد للموزعين + شيت 2 تفصيلي بالطلبات الفردية
+ * - زر "قيد التجهيز 🚚" وقفل التسليم على فرع الصيدلية لحين التوفير
  */
 export default function ProcurementOrdersTab({ showToast, categoryScope = null, currentUser = null }) {
+  // نمط العرض: 'individual' (عرض كل طلب فرع في سطر مستقل - افتراضي) | 'aggregated' (عرض كميات الأصناف المجمعة)
+  const [viewMode, setViewMode] = useState('individual');
+
   const [aggregatedData, setAggregatedData] = useState([]);
+  const [individualOrders, setIndividualOrders] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [selectedBranchId, setSelectedBranchId] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState(() => categoryScope || 'medication'); // 'medication' | 'cosmetics' | 'all'
+
+  // فلتر حالة البند: 'all_active' (النشط) | 'pending' (بانتظار القرار) | 'in_preparation' (قيد التجهيز)
+  const [statusFilter, setStatusFilter] = useState('all_active');
+
+  // فلتر دورات الشراء والوقت المحدد
+  const [cutoffTimeFilter, setCutoffTimeFilter] = useState('');
+  const [activeCycle, setActiveCycle] = useState(null); // 'morning' | 'evening' | null
+  const [cyclesConfig, setCyclesConfig] = useState({ morningCutoff: '14:00', eveningCutoff: '22:00' });
+  const [isCyclesModalOpen, setIsCyclesModalOpen] = useState(false);
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [previewOrderImageUrl, setPreviewOrderImageUrl] = useState(null);
   const [previewOrderImageTitle, setPreviewOrderImageTitle] = useState('');
@@ -59,11 +83,10 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
   // حالة نافذة شطب الصنف وسبب عدم التوفر والبدائل الذكية
   const [unavailabilityModalItem, setUnavailabilityModalItem] = useState(null);
 
-  // حالة نافذة تعديل كمية الصنف وملاحظات المشتريات (المتطلب 20)
+  // حالة نافذة تعديل كمية الصنف وملاحظات المشتريات
   const [adjustingItemModalData, setAdjustingItemModalData] = useState(null);
 
   // قرارات الشراء المعلقة قبل الإرسال (Staged Decisions)
-  // Map of `${branchId}_${medicationName}_${unitType}` -> 'available' | 'unavailable'
   const [decisions, setDecisions] = useState({});
 
   // حالة نافذة التأكيد المنبثقة الاحترافية
@@ -90,13 +113,31 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
     return `${h}:${m}:${s}`;
   }, [lastSyncTime]);
 
+  // جلب إعدادات الدورات المثبتة
+  useEffect(() => {
+    const loadCycles = async () => {
+      try {
+        const res = await outstockGetCyclesConfig();
+        if (res?.success && res.config) {
+          setCyclesConfig(res.config);
+        }
+      } catch (_) {}
+    };
+    loadCycles();
+  }, []);
+
   const fetchAggregatedOrders = useCallback(async (isSilent = false) => {
     if (!isSilent) setIsLoading(true);
     try {
       const activeCat = categoryScope || categoryFilter;
-      const res = await outstockGetProcurementAggregated({ category: activeCat });
-      if (res?.success && Array.isArray(res.aggregated)) {
-        setAggregatedData(res.aggregated);
+      const res = await outstockGetProcurementAggregated({
+        category: activeCat,
+        status: statusFilter,
+        cutoffTime: cutoffTimeFilter || undefined
+      });
+      if (res?.success) {
+        setAggregatedData(Array.isArray(res.aggregated) ? res.aggregated : []);
+        setIndividualOrders(Array.isArray(res.individualOrders) ? res.individualOrders : []);
       }
       setLastSyncTime(new Date());
     } catch (e) {
@@ -104,7 +145,7 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
     } finally {
       if (!isSilent) setIsLoading(false);
     }
-  }, [categoryFilter, categoryScope]);
+  }, [categoryFilter, categoryScope, statusFilter, cutoffTimeFilter]);
 
   useEffect(() => {
     fetchAggregatedOrders();
@@ -114,12 +155,18 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
     const handleLiveOrder = () => {
       fetchAggregatedOrders(true);
     };
+    const handleCyclesUpdated = (payload) => {
+      if (payload?.config) {
+        setCyclesConfig(payload.config);
+      }
+    };
 
     if (socket) {
       socket.on('outstock:order_created', handleLiveOrder);
       socket.on('outstock:items_status_updated', handleLiveOrder);
       socket.on('outstock:item_restocked', handleLiveOrder);
       socket.on('outstock:item_type_converted', handleLiveOrder);
+      socket.on('outstock:cycles_config_updated', handleCyclesUpdated);
     }
 
     // 2. الاستماع اللحظي عبر قناة المزامنة المحلية المشتركة بين التبويبات (BroadcastChannel)
@@ -161,6 +208,15 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
     };
   }, [fetchAggregatedOrders]);
 
+  // التحقق من صلاحية تغيير حالة الطلبات واتخاذ قرارات التوريد
+  const canChangeStatus = useMemo(() => {
+    if (!currentUser) return true;
+    if (currentUser.role === 'procurement_manager' || currentUser.isProcurementManager || currentUser.role === 'owner') return true;
+    if (currentUser.permissions?.can_change_status !== undefined) return Boolean(currentUser.permissions.can_change_status);
+    if (currentUser.can_change_status !== undefined) return Boolean(currentUser.can_change_status);
+    return true;
+  }, [currentUser]);
+
   // استخراج قائمة الفروع الفريدة مع عزل الفروع لمسؤولي المشتريات المحددين
   const branchesList = useMemo(() => {
     const map = new Map();
@@ -170,7 +226,7 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
       }
     });
     let list = Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-    if (Array.isArray(currentUser?.allowedBranches) && currentUser.allowedBranches.length > 0) {
+    if (Array.isArray(currentUser?.allowedBranches) && currentUser.allowedBranches.length > 0 && !currentUser.allBranchesAccess) {
       list = list.filter(b => currentUser.allowedBranches.includes(b.id));
     }
     return list;
@@ -178,6 +234,10 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
 
   // تعيين قرار لصنف معين
   const handleSetDecision = (key, action, item) => {
+    if (!canChangeStatus) {
+      showToast?.('⛔ ليس لديك صلاحية تغيير أو اتخاذ قرارات بشأن حالة الطلبات');
+      return;
+    }
     if (action === 'unavailable') {
       setUnavailabilityModalItem(item);
       return;
@@ -190,6 +250,10 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
 
   // تأكيد شطب الصنف غير المتوفر مع حفظ السبب واقتراح البدائل الذكية
   const handleConfirmUnavailability = async ({ reason, substitutes }) => {
+    if (!canChangeStatus) {
+      showToast?.('⛔ ليس لديك صلاحية شطب الأصناف أو تغيير حالتها');
+      return;
+    }
     if (!unavailabilityModalItem) return;
     setIsProcessing(true);
     try {
@@ -219,23 +283,32 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
 
   // إرسال قرار فردي فوري بنافذة تأكيد منبثقة
   const handleQuickAction = (item, action) => {
+    if (!canChangeStatus) {
+      showToast?.('⛔ ليس لديك صلاحية تغيير أو اتخاذ قرارات بشأن حالة الطلبات');
+      return;
+    }
     if (action === 'unavailable') {
       setUnavailabilityModalItem(item);
       return;
     }
 
     const isAvailable = action === 'available';
-    const actionLabel = 'توفير الصنف وشحنه لرصيد الفرع';
+    const isInPrep = action === 'in_preparation';
+    const actionLabel = isInPrep
+      ? 'وضع الصنف قيد التجهيز والشحن للفرع 🚚'
+      : 'توفير الصنف وشحنه لرصيد الفرع';
     const unitLabel = item.unit_type === 'strip' ? 'شريط' : 'علبة';
 
     setConfirmConfig({
       isOpen: true,
-      title: 'تأكيد توفير الصنف بالفرع',
-      message: `هل أنت متأكد من ${actionLabel}؟ سيتم تحديث رصيد الفرع وفواتير العملاء ومزامنتها لحظياً.`,
-      iconType: 'success',
-      confirmText: 'نعم، تم التوفير والشحن',
+      title: isInPrep ? 'تأكيد وضع الصنف قيد التجهيز 🚚' : 'تأكيد توفير الصنف بالفرع',
+      message: isInPrep
+        ? `هل أنت متأكد من وضع هذا الصنف قيد التجهيز؟ سيتم إشعار صيدلي الفرع مع قفل تسليم الطلب لحين اكتمال التوريد.`
+        : `هل أنت متأكد من ${actionLabel}؟ سيتم تحديث رصيد الفرع وفواتير العملاء ومزامنتها لحظياً.`,
+      iconType: isInPrep ? 'info' : 'success',
+      confirmText: isInPrep ? 'نعم، قيد التجهيز 🚚' : 'نعم، تم التوفير والشحن',
       cancelText: 'تراجع',
-      confirmBtnStyle: 'success',
+      confirmBtnStyle: isInPrep ? 'primary' : 'success',
       badge: `${item.total_requested_qty} ${unitLabel}`,
       details: [
         { label: 'الصنف', value: item.medication_name },
@@ -269,8 +342,122 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
     });
   };
 
+  // اتخاذ قرار سريع لطلب فرع فردي (سطر مستقل)
+  const handleQuickOrderAction = (order, action) => {
+    if (!canChangeStatus) {
+      showToast?.('⛔ ليس لديك صلاحية تغيير أو اتخاذ قرارات بشأن حالة الطلبات');
+      return;
+    }
+    if (action === 'unavailable') {
+      setUnavailabilityModalItem({
+        branch_id: order.branchId,
+        branch_name: order.branchName,
+        medication_name: order.medicationName,
+        unit_type: order.unitType,
+        item_details: [{ itemId: order.itemId }]
+      });
+      return;
+    }
+
+    const isAvailable = action === 'available';
+    const isInPrep = action === 'in_preparation';
+    const unitLabel = order.unitType === 'strip' ? 'شريط' : 'علبة';
+
+    const actionTitle = isAvailable
+      ? 'تأكيد توفير وشحن الطلب'
+      : 'تأكيد وضع الطلب قيد التجهيز 🚚';
+
+    const actionMsg = isAvailable
+      ? `هل أنت متأكد من توفير وشحن الصنف للفرع؟ سيتم تحديث حالة الطلب وإتاحة تسليمه للعميل ومزامنة الفرع فورياً.`
+      : `هل أنت متأكد من بدء تجهيز الطلب؟ سيتم إشعار صيدلي الفرع بأن الطلب قيد التجهيز والشحن مع قفل التسليم لحين وصول الشحنة.`;
+
+    setConfirmConfig({
+      isOpen: true,
+      title: actionTitle,
+      message: actionMsg,
+      iconType: isAvailable ? 'success' : 'info',
+      confirmText: isAvailable ? 'نعم، تم التوفير والشحن' : 'نعم، الطلب قيد التجهيز 🚚',
+      cancelText: 'تراجع',
+      confirmBtnStyle: isAvailable ? 'success' : 'primary',
+      badge: `${order.quantity} ${unitLabel}`,
+      details: [
+        { label: 'الصنف', value: order.medicationName },
+        { label: 'الفرع المستلم', value: order.branchName || order.branchId },
+        { label: 'رقم الطلب', value: `#${order.orderNumber}` },
+        { label: 'الصيدلي الطالب', value: order.responsiblePharmacist || 'صيدلي الفرع' }
+      ],
+      onConfirmAction: async () => {
+        setIsProcessing(true);
+        try {
+          const res = await outstockProcurementItemAction({
+            branchId: order.branchId,
+            medicationName: order.medicationName,
+            unitType: order.unitType,
+            action,
+            itemIds: [order.itemId]
+          });
+
+          if (res?.success) {
+            showToast?.(`✅ ${res.message || 'تم تحديث حالة الطلب بنجاح'}`);
+            fetchAggregatedOrders();
+          } else {
+            showToast?.(`⚠️ ${res?.error || 'تعذر تطبيق القرار'}`);
+          }
+        } catch (err) {
+          showToast?.('حدث خطأ أثناء إرسال التحديث');
+        } finally {
+          setIsProcessing(false);
+          setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
+  };
+
+  // فتح نافذة تعديل كمية طلب فردي
+  const handleOpenAdjustOrderModal = (order) => {
+    if (!canChangeStatus) {
+      showToast?.('⛔ ليس لديك صلاحية تعديل كميات طلبات الفروع');
+      return;
+    }
+    setAdjustingItemModalData({
+      item: {
+        branch_id: order.branchId,
+        branch_name: order.branchName,
+        medication_name: order.medicationName,
+        unit_type: order.unitType,
+        total_requested_qty: order.quantity,
+        item_details: [{
+          itemId: order.itemId,
+          orderNumber: order.orderNumber,
+          customerName: order.customerName,
+          quantity: order.quantity
+        }]
+      },
+      approvedQty: order.quantity,
+      notes: '',
+      perOrderAdjustments: { [order.itemId]: order.quantity }
+    });
+  };
+
+  // تحويل نوع طلب فردي (دوائي <-> تجميل)
+  const handleConvertOrderTypePrompt = (order) => {
+    handleConvertItemTypePrompt({
+      medication_name: order.medicationName,
+      item_type: order.itemType,
+      branch_id: order.branchId,
+      branch_name: order.branchName,
+      total_requested_qty: order.quantity,
+      unit_type: order.unitType,
+      item_details: [{ itemId: order.itemId }]
+    });
+  };
+
   // فتح نافذة تعديل الكمية المعتمدة وتدوين الملاحظات (المتطلب 20)
   const handleOpenAdjustModal = (item) => {
+    if (!canChangeStatus) {
+      showToast?.('⛔ ليس لديك صلاحية تعديل كميات طلبات الفروع');
+      return;
+    }
     const perOrder = {};
     (item.item_details || []).forEach(d => {
       perOrder[d.itemId] = d.quantity;
@@ -343,6 +530,10 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
 
   // تحويل وتصحيح نوع الصنف (دوائي <-> تجميل) ونقله فوراً للمسؤول المختص وتحديث الكتالوج
   const handleConvertItemTypePrompt = (item, explicitTargetType = null) => {
+    if (!canChangeStatus) {
+      showToast?.('⛔ ليس لديك صلاحية تحويل تصنيف الأصناف');
+      return;
+    }
     const isCurrentlyCosmetics = item.item_type === 'cosmetics';
     const targetType = explicitTargetType || (isCurrentlyCosmetics ? 'medication' : 'cosmetics');
     const isTargetingCosmetics = targetType === 'cosmetics';
@@ -404,6 +595,10 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
 
   // إرسال دفعة القرارات المحددة معاً للفروع بنافذة تأكيد منبثقة
   const handleBatchSubmit = () => {
+    if (!canChangeStatus) {
+      showToast?.('⛔ ليس لديك صلاحية اعتماد أو إرسال قرارات المشتريات');
+      return;
+    }
     const keys = Object.keys(decisions).filter(k => decisions[k]);
     if (keys.length === 0) {
       showToast?.('يرجى تحديد قرار (متوفر أو غير متوفر) لصنف واحد على الأقل أولاً');
@@ -459,9 +654,58 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
     });
   };
 
-  // تصدير شيت إكسل فاخر لطلبات الفروع
+  // تنسيق التاريخ والوقت بتنسيق عربي دقيق (22/10/2026 - 03:45 م)
+  const formatDateTime = useCallback((dateStr) => {
+    if (!dateStr) return '-';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '-';
+      const datePart = d.toLocaleDateString('ar-EG', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+      const timePart = d.toLocaleTimeString('ar-EG', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+      return `${datePart} - ${timePart}`;
+    } catch (_) {
+      return String(dateStr);
+    }
+  }, []);
+
+  // تصفية وترتيب طلبات الفروع الفردية (سطر لكل طلب فرع)
+  const filteredIndividualOrders = useMemo(() => {
+    const list = individualOrders.filter(order => {
+      if (Array.isArray(currentUser?.allowedBranches) && currentUser.allowedBranches.length > 0 && !currentUser.allBranchesAccess) {
+        if (!currentUser.allowedBranches.includes(order.branchId)) return false;
+      }
+      if (selectedBranchId !== 'all' && order.branchId !== selectedBranchId) {
+        return false;
+      }
+      if (searchQuery && String(searchQuery).trim()) {
+        const q = String(searchQuery).trim().toLowerCase();
+        const med = String(order.medicationName || '').toLowerCase();
+        const bName = String(order.branchName || '').toLowerCase();
+        const pharm = String(order.responsiblePharmacist || '').toLowerCase();
+        const orderNum = String(order.orderNumber || '').toLowerCase();
+        return med.includes(q) || bName.includes(q) || pharm.includes(q) || orderNum.includes(q);
+      }
+      return true;
+    });
+
+    return list.sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+  }, [individualOrders, selectedBranchId, searchQuery, currentUser]);
+
+  // تصدير شيت إكسل فاخر لطلبات الفروع (شيت 1 تنفيذي موحد للموزعين + شيت 2 تفصيلي بالطلبات بدون أرقام العملاء)
   const handleExportExcel = async () => {
-    if (filteredItems.length === 0) {
+    if (filteredItems.length === 0 && filteredIndividualOrders.length === 0) {
       showToast?.('لا توجد بيانات متاحة للتصدير حالياً');
       return;
     }
@@ -473,9 +717,10 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
 
       await exportProcurementOrdersExcel(filteredItems, {
         selectedBranchName: branchNameStr,
-        category: categoryScope || categoryFilter
+        category: categoryScope || categoryFilter,
+        individualOrders: filteredIndividualOrders
       });
-      showToast?.('📊 تم استخراج وتنزيل شيت إكسل طلبات المشتريات بنجاح بتصميم احترافي');
+      showToast?.('📊 تم استخراج وتنزيل شيت إكسل طلبات المشتريات بنجاح بتصميم احترافي وشيت مجمع للموزعين');
     } catch (err) {
       console.error('[Export Excel Error]:', err);
       showToast?.('حدث خطأ أثناء إنشاء شيت الإكسل');
@@ -487,6 +732,10 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
   // تطبيق الفلاتر وترتيب الطلبات من الأحدث إلى الأقدم
   const filteredItems = useMemo(() => {
     const items = aggregatedData.filter(item => {
+      // عزل الفروع وفق الصلاحيات الممنوحة لمسؤول المشتريات
+      if (Array.isArray(currentUser?.allowedBranches) && currentUser.allowedBranches.length > 0 && !currentUser.allBranchesAccess) {
+        if (!currentUser.allowedBranches.includes(item.branch_id)) return false;
+      }
       if (selectedBranchId !== 'all' && item.branch_id !== selectedBranchId) {
         return false;
       }
@@ -509,7 +758,7 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
       };
       return getLatest(b) - getLatest(a);
     });
-  }, [aggregatedData, selectedBranchId, searchQuery]);
+  }, [aggregatedData, selectedBranchId, searchQuery, currentUser]);
 
   return (
     <div>
@@ -529,15 +778,360 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
         onClose={() => setConfirmConfig(prev => ({ ...prev, isOpen: false }))}
       />
 
-      {/* ── شريط الفلاتر واختيار الفرع ── */}
-      <div className="outstock-card" style={{ padding: '16px', marginBottom: '16px' }}>
+      {/* ── شريط الفلاتر واختيار الفرع ونمط العرض والدورات ── */}
+      <div className="outstock-card" style={{ padding: '18px', marginBottom: '18px' }}>
+        {/* 1. السطر العلوي: اختيار نمط العرض + فلاتر دورات التوريد */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '12px' }}>
+          {/* تبديل نمط العرض: طلبات فردية vs أصناف مجمعة */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', padding: '4px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
+            <button
+              type="button"
+              onClick={() => setViewMode('individual')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 14px',
+                borderRadius: '9px',
+                fontSize: '12.5px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                border: 'none',
+                background: viewMode === 'individual' ? '#0f766e' : 'transparent',
+                color: viewMode === 'individual' ? '#ffffff' : '#475569',
+                boxShadow: viewMode === 'individual' ? '0 2px 4px rgba(15, 118, 110, 0.25)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <LayoutList size={15} />
+              <span>📋 عرض كل طلب في سطر مستقل (افتراضي)</span>
+              <span style={{
+                background: viewMode === 'individual' ? 'rgba(255,255,255,0.25)' : '#e2e8f0',
+                color: viewMode === 'individual' ? '#ffffff' : '#334155',
+                fontSize: '11px',
+                padding: '1px 7px',
+                borderRadius: '10px',
+                fontWeight: '900'
+              }}>
+                {filteredIndividualOrders.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setViewMode('aggregated')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 14px',
+                borderRadius: '9px',
+                fontSize: '12.5px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                border: 'none',
+                background: viewMode === 'aggregated' ? '#0f766e' : 'transparent',
+                color: viewMode === 'aggregated' ? '#ffffff' : '#475569',
+                boxShadow: viewMode === 'aggregated' ? '0 2px 4px rgba(15, 118, 110, 0.25)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <Layers size={15} />
+              <span>📦 عرض الأصناف المجمعة</span>
+              <span style={{
+                background: viewMode === 'aggregated' ? 'rgba(255,255,255,0.25)' : '#e2e8f0',
+                color: viewMode === 'aggregated' ? '#ffffff' : '#334155',
+                fontSize: '11px',
+                padding: '1px 7px',
+                borderRadius: '10px',
+                fontWeight: '900'
+              }}>
+                {filteredItems.length}
+              </span>
+            </button>
+          </div>
+
+          {/* فلاتر الدورات وتثبيت المواعيد الافتراضية */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => {
+                if (activeCycle === 'morning') {
+                  setActiveCycle(null);
+                  setCutoffTimeFilter('');
+                } else {
+                  setActiveCycle('morning');
+                  setCutoffTimeFilter(cyclesConfig.morningCutoff || '14:00');
+                }
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                border: '1px solid #fde68a',
+                background: activeCycle === 'morning' ? '#d97706' : '#fffbeb',
+                color: activeCycle === 'morning' ? '#ffffff' : '#92400e',
+                boxShadow: activeCycle === 'morning' ? '0 2px 4px rgba(217, 119, 6, 0.25)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+              title={`تصفية طلبات الدورة الصباحية الواردة حتى ${cyclesConfig.morningCutoff || '14:00'}`}
+            >
+              <Sun size={14} />
+              <span>🌅 دورة الصباح (حتى {cyclesConfig.morningCutoff || '14:00'})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (activeCycle === 'evening') {
+                  setActiveCycle(null);
+                  setCutoffTimeFilter('');
+                } else {
+                  setActiveCycle('evening');
+                  setCutoffTimeFilter(cyclesConfig.eveningCutoff || '22:00');
+                }
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                border: '1px solid #c7d2fe',
+                background: activeCycle === 'evening' ? '#4f46e5' : '#eef2ff',
+                color: activeCycle === 'evening' ? '#ffffff' : '#3730a3',
+                boxShadow: activeCycle === 'evening' ? '0 2px 4px rgba(79, 70, 229, 0.25)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+              title={`تصفية طلبات الدورة المسائية الواردة حتى ${cyclesConfig.eveningCutoff || '22:00'}`}
+            >
+              <Moon size={14} />
+              <span>🌇 دورة المساء (حتى {cyclesConfig.eveningCutoff || '22:00'})</span>
+            </button>
+
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#f8fafc', padding: '4px 8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+              <Clock size={13} color="#64748b" />
+              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>حتى وقت:</span>
+              <input
+                type="time"
+                value={cutoffTimeFilter}
+                onChange={(e) => {
+                  setActiveCycle(null);
+                  setCutoffTimeFilter(e.target.value);
+                }}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  color: '#0f172a',
+                  outline: 'none',
+                  cursor: 'pointer'
+                }}
+              />
+              {cutoffTimeFilter && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveCycle(null);
+                    setCutoffTimeFilter('');
+                  }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: '1px' }}
+                  title="إلغاء فلتر التوقيت"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            {/* زر تثبيت مواعيد الدورات الافتراضية */}
+            <button
+              type="button"
+              onClick={() => setIsCyclesModalOpen(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '6px 10px',
+                borderRadius: '8px',
+                fontSize: '11.5px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                border: '1px solid #cbd5e1',
+                background: '#ffffff',
+                color: '#334155'
+              }}
+              title="تحديد وتثبيت مواعيد الإغلاق للدورة الصباحية والمسائية"
+            >
+              <Settings size={13} color="#64748b" />
+              <span>تثبيت مواعيد الدورات</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 2. السطر الأوسط: فلاتر حالة الطلب والتصنيف */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+          {/* أزرار فلتر حالة الطلب */}
+          <div style={{ display: 'flex', gap: '4px', background: '#f8fafc', padding: '3px', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('all_active')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                border: 'none',
+                background: statusFilter === 'all_active' ? '#1e293b' : 'transparent',
+                color: statusFilter === 'all_active' ? '#ffffff' : '#475569',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span>🌐 الكل النشط</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('pending')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                border: 'none',
+                background: statusFilter === 'pending' ? '#d97706' : 'transparent',
+                color: statusFilter === 'pending' ? '#ffffff' : '#475569',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span>⏳ بانتظار القرار</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('in_preparation')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                border: 'none',
+                background: statusFilter === 'in_preparation' ? '#0284c7' : 'transparent',
+                color: statusFilter === 'in_preparation' ? '#ffffff' : '#475569',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span>🚚 قيد التجهيز</span>
+            </button>
+          </div>
+
+          {/* أزرار فلتر تصنيف الصنف (أصناف دوائية افتراضياً / مستحضرات / الكل) */}
+          {!categoryScope ? (
+            <div style={{ display: 'flex', gap: '4px', background: '#f1f5f9', padding: '3px', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
+              <button
+                type="button"
+                onClick={() => setCategoryFilter('medication')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  border: 'none',
+                  background: categoryFilter === 'medication' ? '#059669' : 'transparent',
+                  color: categoryFilter === 'medication' ? '#ffffff' : '#475569',
+                  boxShadow: categoryFilter === 'medication' ? '0 2px 4px rgba(5, 150, 105, 0.25)' : 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Pill size={14} />
+                <span>أصناف دوائية 💊 (افتراضي)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCategoryFilter('cosmetics')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  border: 'none',
+                  background: categoryFilter === 'cosmetics' ? '#db2777' : 'transparent',
+                  color: categoryFilter === 'cosmetics' ? '#ffffff' : '#475569',
+                  boxShadow: categoryFilter === 'cosmetics' ? '0 2px 4px rgba(219, 39, 119, 0.25)' : 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Sparkles size={14} />
+                <span>مستحضرات تجميل 💄</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCategoryFilter('all')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  border: 'none',
+                  background: categoryFilter === 'all' ? '#1e293b' : 'transparent',
+                  color: categoryFilter === 'all' ? '#ffffff' : '#475569',
+                  boxShadow: categoryFilter === 'all' ? '0 2px 4px rgba(30, 41, 59, 0.25)' : 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <span>🌐 كافة الأصناف</span>
+              </button>
+            </div>
+          ) : (
+            <div
+              style={{
+                background: '#fdf2f8',
+                border: '1px solid #fbcfe8',
+                color: '#be185d',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '800',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <Sparkles size={14} />
+              <span>نطاق الصلاحية: مستحضرات تجميل وعناية فقط 💄</span>
+            </div>
+          )}
+        </div>
+
+        {/* 3. السطر السفلي: البحث واختيار الفرع وتصدير الإكسل والتحديث والمزامنة */}
         <div className="outstock-filters-bar">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, flexWrap: 'wrap', minWidth: '240px' }}>
             <div className="outstock-search-bar" style={{ flex: 1, minWidth: '180px' }}>
               <Search size={18} className="outstock-search-icon" />
               <input
                 type="text"
-                placeholder="🔍 ابحث باسم الدواء أو الفرع..."
+                placeholder="🔍 ابحث باسم الدواء، الفرع، الصيدلي، أو رقم الطلب..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="outstock-search-input"
@@ -558,95 +1152,6 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
                 ))}
               </select>
             </div>
-
-            {/* أزرار فلتر تصنيف الصنف (أصناف دوائية افتراضياً / مستحضرات / الكل) */}
-            {!categoryScope ? (
-              <div style={{ display: 'flex', gap: '4px', background: '#f1f5f9', padding: '3px', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
-                <button
-                  type="button"
-                  onClick={() => setCategoryFilter('medication')}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                    fontWeight: '800',
-                    cursor: 'pointer',
-                    border: 'none',
-                    background: categoryFilter === 'medication' ? '#059669' : 'transparent',
-                    color: categoryFilter === 'medication' ? '#ffffff' : '#475569',
-                    boxShadow: categoryFilter === 'medication' ? '0 2px 4px rgba(5, 150, 105, 0.25)' : 'none',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <Pill size={14} />
-                  <span>أصناف دوائية 💊 (افتراضي)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCategoryFilter('cosmetics')}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                    fontWeight: '800',
-                    cursor: 'pointer',
-                    border: 'none',
-                    background: categoryFilter === 'cosmetics' ? '#db2777' : 'transparent',
-                    color: categoryFilter === 'cosmetics' ? '#ffffff' : '#475569',
-                    boxShadow: categoryFilter === 'cosmetics' ? '0 2px 4px rgba(219, 39, 119, 0.25)' : 'none',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <Sparkles size={14} />
-                  <span>مستحضرات تجميل 💄</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCategoryFilter('all')}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                    fontWeight: '800',
-                    cursor: 'pointer',
-                    border: 'none',
-                    background: categoryFilter === 'all' ? '#1e293b' : 'transparent',
-                    color: categoryFilter === 'all' ? '#ffffff' : '#475569',
-                    boxShadow: categoryFilter === 'all' ? '0 2px 4px rgba(30, 41, 59, 0.25)' : 'none',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <span>🌐 كافة الأصناف</span>
-                </button>
-              </div>
-            ) : (
-              <div
-                style={{
-                  background: '#fdf2f8',
-                  border: '1px solid #fbcfe8',
-                  color: '#be185d',
-                  padding: '6px 12px',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                  fontWeight: '800',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <Sparkles size={14} />
-                <span>نطاق الصلاحية: مستحضرات تجميل وعناية فقط 💄</span>
-              </div>
-            )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -655,14 +1160,14 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
               type="button"
               className="outstock-btn outstock-btn-secondary"
               onClick={handleExportExcel}
-              disabled={isExporting || filteredItems.length === 0}
+              disabled={isExporting || (filteredItems.length === 0 && filteredIndividualOrders.length === 0)}
               style={{
                 background: '#f0fdf4',
                 borderColor: '#86efac',
                 color: '#15803d',
                 fontWeight: '800'
               }}
-              title="تصدير شيت إكسل رسمي وشامل لكافة الأصناف والكميات وتفاصيل العملاء"
+              title="تصدير شيت إكسل رسمي وشامل: شيت 1 تنفيذي موحد للموزعين + شيت 2 تفصيلي بالطلبات الفردية مع حجب أرقام العملاء للخصوصية"
             >
               {isExporting ? (
                 <>
@@ -672,7 +1177,7 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
               ) : (
                 <>
                   <FileSpreadsheet size={16} style={{ color: '#16a34a' }} />
-                  <span>تصدير شيت إكسل (Excel)</span>
+                  <span>تصدير إكسل (أمر شراء موحد للموزعين)</span>
                 </>
               )}
             </button>
@@ -735,352 +1240,796 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
         </div>
       </div>
 
-      {/* ── جدول الطلبات المجمعة لكل فرع ── */}
-      <div className="outstock-card">
-        <div className="outstock-card-header">
-          <h3 className="outstock-card-title">
-            <span>📦 طلبات الأدوية المجمعة حسب الفرع</span>
-            <span style={{ fontSize: '13px', color: '#0d9488', fontWeight: '800' }}>
-              ({filteredItems.length} صنف مطلوب للشراء)
-            </span>
-          </h3>
-          {filteredItems.length > 0 && (
+      {/* ── نمط العرض الأول (الافتراضي): كارت جدول طلبات الفروع الفردية (سطر لكل طلب فرع) ── */}
+      {viewMode === 'individual' ? (
+        <div className="outstock-card">
+          <div className="outstock-card-header">
+            <h3 className="outstock-card-title">
+              <LayoutList size={20} color="#0d9488" />
+              <span>📋 طلبات الفروع الفردية المفصلة (سطر مستقل لكل طلب)</span>
+              <span style={{ fontSize: '13px', color: '#0d9488', fontWeight: '800' }}>
+                ({filteredIndividualOrders.length} طلب)
+              </span>
+            </h3>
             <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '700' }}>
-              ⚡ المزامنة اللحظية نشطة
+              ⚡ عرض تفصيلي لحظي
+            </div>
+          </div>
+
+          {isLoading ? (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+              <Loader2 size={32} className="spinner" style={{ margin: '0 auto 10px', color: '#0d9488' }} />
+              <div>جاري تحميل طلبات الفروع الفردية...</div>
+            </div>
+          ) : filteredIndividualOrders.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '48px 20px', color: '#64748b' }}>
+              <div style={{ fontSize: '42px', marginBottom: '10px' }}>✨</div>
+              <h4 style={{ margin: '0 0 6px', color: '#1e293b', fontSize: '16px', fontWeight: '800' }}>
+                لا توجد طلبات فرعية معلقة حالياً
+              </h4>
+              <p style={{ margin: 0, fontSize: '13px' }}>
+                كافة طلبات الأدوية والمستحضرات تم البت فيها بنجاح.
+              </p>
+            </div>
+          ) : (
+            <div className="outstock-table-wrap">
+              <table className="outstock-table">
+                <thead>
+                  <tr>
+                    <th>الفرع الطالب والصيدلي 🏢</th>
+                    <th>اسم المستحضر / الصنف 💊</th>
+                    <th>الوحدة</th>
+                    <th>الكمية المطلوبة 🔢</th>
+                    <th>ملاحظات واستعجال 📝</th>
+                    <th>الحالة الحالية 📊</th>
+                    <th>القرار السريع لإدارة المشتريات ⚡</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredIndividualOrders.map((order, idx) => {
+                    const isStock = order.isBranchStock || order.orderType === 'branch';
+                    return (
+                      <tr key={order.itemId || idx} style={{ transition: 'background 0.15s' }}>
+                        {/* 1. الفرع الطالب والصيدلي + نوع الطلب وتاريخ ووقت الإرسال مدمجين بالأسفل */}
+                        <td style={{ minWidth: '190px', verticalAlign: 'top' }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '8px',
+                              background: '#f0fdfa',
+                              border: '1px solid #ccfbf1',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#0d9488',
+                              flexShrink: 0,
+                              marginTop: '2px'
+                            }}>
+                              <Building2 size={16} />
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              {/* اسم الفرع */}
+                              <div style={{ fontWeight: '800', color: '#0f172a', fontSize: '13.5px', lineHeight: 1.3 }}>
+                                {order.branchName || order.branchId}
+                              </div>
+                              {/* الصيدلي المسؤول */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#64748b', fontSize: '11px' }}>
+                                <User size={12} />
+                                <span>الصيدلي: {order.responsiblePharmacist || 'صيدلي الفرع'}</span>
+                              </div>
+                              {/* نوع الطلب */}
+                              <div style={{ marginTop: '2px' }}>
+                                {isStock ? (
+                                  <span style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '2px 7px',
+                                    borderRadius: '5px',
+                                    fontSize: '11px',
+                                    fontWeight: '800',
+                                    background: '#fef3c7',
+                                    color: '#92400e',
+                                    border: '1px solid #fde68a'
+                                  }}>
+                                    🏢 عجز رفوف للفرع
+                                  </span>
+                                ) : (
+                                  <span style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '2px 7px',
+                                    borderRadius: '5px',
+                                    fontSize: '11px',
+                                    fontWeight: '800',
+                                    background: '#e0f2fe',
+                                    color: '#0369a1',
+                                    border: '1px solid #bae6fd'
+                                  }}>
+                                    👤 طلب عميل نقدي (طلب #{order.orderNumber})
+                                  </span>
+                                )}
+                              </div>
+                              {/* تاريخ ووقت الإرسال */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#64748b', fontWeight: '700', fontSize: '11px', marginTop: '1px' }}>
+                                <Clock size={12} color="#0d9488" />
+                                <span>{formatDateTime(order.createdAt)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* 2. اسم المستحضر وتصنيفه وصورته - التفاف سطر ذكي لمنع التمدد الأفقي */}
+                        <td style={{ minWidth: '160px', maxWidth: '280px', verticalAlign: 'top' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '5px' }}>
+                            <div style={{
+                              fontWeight: '900',
+                              fontSize: '14px',
+                              color: '#0f172a',
+                              wordBreak: 'break-word',
+                              overflowWrap: 'anywhere',
+                              whiteSpace: 'normal',
+                              lineHeight: 1.4
+                            }}>
+                              {order.medicationName}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                              {order.itemType === 'cosmetics' ? (
+                                <span style={{ fontSize: '10.5px', background: '#fce7f3', color: '#be185d', padding: '2px 6px', borderRadius: '5px', fontWeight: '800', whiteSpace: 'nowrap' }}>
+                                  💄 تجميل
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: '10.5px', background: '#ecfdf5', color: '#047857', padding: '2px 6px', borderRadius: '5px', fontWeight: '800', whiteSpace: 'nowrap' }}>
+                                  💊 دوائي
+                                </span>
+                              )}
+                              {order.medicationImageUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPreviewOrderImageUrl(order.medicationImageUrl);
+                                    setPreviewOrderImageTitle(`${order.medicationName} - فرع ${order.branchName || ''}`);
+                                  }}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                    padding: '2px 6px',
+                                    borderRadius: '5px',
+                                    background: '#ecfeff',
+                                    color: '#0891b2',
+                                    border: '1px solid #a5f3fc',
+                                    fontSize: '10.5px',
+                                    fontWeight: '700',
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                  title="عرض صورة الدواء أو الروشتة المرفقة"
+                                >
+                                  <Camera size={12} color="#0891b2" />
+                                  <span>📷 صورة</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* 3. الوحدة */}
+                        <td>
+                          <span className="outstock-badge" style={{ background: '#f1f5f9', color: '#334155' }}>
+                            {order.unitType === 'strip' ? 'شريط' : 'علبة'}
+                          </span>
+                        </td>
+
+                        {/* 6. الكمية المطلوبة */}
+                        <td>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '4px 10px',
+                            borderRadius: '8px',
+                            background: '#ecfeff',
+                            color: '#0e7490',
+                            fontWeight: '900',
+                            fontSize: '14px',
+                            border: '1px solid #cffafe'
+                          }}>
+                            <Package size={14} />
+                            {order.quantity}
+                          </span>
+                        </td>
+
+                        {/* 7. ملاحظات الصيدلي ومستوى الاستعجال */}
+                        <td>
+                          <div style={{ maxWidth: '240px' }}>
+                            {order.urgencyLevel === 'urgent' && (
+                              <span style={{
+                                display: 'inline-block',
+                                background: '#fee2e2',
+                                color: '#b91c1c',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: '800',
+                                marginBottom: '3px'
+                              }}>
+                                🔥 عاجل جداً
+                              </span>
+                            )}
+                            <div style={{ fontSize: '12px', color: '#475569', wordBreak: 'break-word' }}>
+                              {order.pharmacistNotes || '-'}
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* 8. الحالة الحالية */}
+                        <td>
+                          {order.itemStatus === 'in_preparation' ? (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: '#e0f2fe',
+                              color: '#0284c7',
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              fontWeight: '800',
+                              fontSize: '11.5px',
+                              border: '1px solid #bae6fd'
+                            }}>
+                              <Truck size={13} />
+                              <span>قيد التجهيز والشحن 🚚</span>
+                            </span>
+                          ) : order.itemStatus === 'available' ? (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: '#dcfce7',
+                              color: '#15803d',
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              fontWeight: '800',
+                              fontSize: '11.5px',
+                              border: '1px solid #bbf7d0'
+                            }}>
+                              <CheckCircle2 size={13} />
+                              <span>متوفر بالفرع ✅</span>
+                            </span>
+                          ) : order.itemStatus === 'unavailable' ? (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: '#fee2e2',
+                              color: '#b91c1c',
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              fontWeight: '800',
+                              fontSize: '11.5px',
+                              border: '1px solid #fecaca'
+                            }}>
+                              <XCircle size={13} />
+                              <span>غير متوفر ❌</span>
+                            </span>
+                          ) : (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: '#fef3c7',
+                              color: '#92400e',
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              fontWeight: '800',
+                              fontSize: '11.5px',
+                              border: '1px solid #fde68a'
+                            }}>
+                              <Clock size={13} />
+                              <span>بانتظار القرار ⏳</span>
+                            </span>
+                          )}
+                        </td>
+
+                        {/* 9. القرار السريع الفردي لكل بند */}
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            {/* زر متوفر */}
+                            <button
+                              type="button"
+                              className="outstock-btn outstock-btn-secondary"
+                              onClick={() => handleQuickOrderAction(order, 'available')}
+                              disabled={!canChangeStatus || isProcessing}
+                              style={{
+                                padding: '5px 9px',
+                                fontSize: '11.5px',
+                                fontWeight: '800',
+                                borderColor: '#86efac',
+                                color: '#15803d',
+                                background: '#f0fdf4'
+                              }}
+                              title="توفير الصنف وشحنه فورياً لرصيد الفرع"
+                            >
+                              <CheckCircle2 size={13} />
+                              <span>متوفر</span>
+                            </button>
+
+                            {/* زر قيد التجهيز */}
+                            <button
+                              type="button"
+                              className="outstock-btn outstock-btn-secondary"
+                              onClick={() => handleQuickOrderAction(order, 'in_preparation')}
+                              disabled={!canChangeStatus || isProcessing}
+                              style={{
+                                padding: '5px 9px',
+                                fontSize: '11.5px',
+                                fontWeight: '800',
+                                borderColor: '#7dd3fc',
+                                color: '#0369a1',
+                                background: '#f0f9ff'
+                              }}
+                              title="وضع الطلب قيد التجهيز والشحن مع قفل التسليم على الفرع"
+                            >
+                              <Truck size={13} />
+                              <span>قيد التجهيز 🚚</span>
+                            </button>
+
+                            {/* زر غير متوفر */}
+                            <button
+                              type="button"
+                              className="outstock-btn outstock-btn-secondary"
+                              onClick={() => handleQuickOrderAction(order, 'unavailable')}
+                              disabled={!canChangeStatus || isProcessing}
+                              style={{
+                                padding: '5px 9px',
+                                fontSize: '11.5px',
+                                fontWeight: '800',
+                                borderColor: '#fca5a5',
+                                color: '#b91c1c',
+                                background: '#fef2f2'
+                              }}
+                              title="شطب الصنف وتحديد السبب واقتراح البدائل الذكية"
+                            >
+                              <XCircle size={13} />
+                              <span>غير متوفر</span>
+                            </button>
+
+                            {/* زر تعديل الكمية */}
+                            <button
+                              type="button"
+                              className="outstock-btn outstock-btn-secondary"
+                              onClick={() => handleOpenAdjustOrderModal(order)}
+                              disabled={!canChangeStatus || isProcessing}
+                              style={{
+                                padding: '5px 8px',
+                                fontSize: '11.5px',
+                                borderColor: '#fde68a',
+                                color: '#b45309',
+                                background: '#fffbeb'
+                              }}
+                              title="تعديل الكمية المعتمدة وتدوين الملاحظات"
+                            >
+                              <Edit3 size={13} />
+                            </button>
+
+                            {/* زر تحويل الصنف */}
+                            <button
+                              type="button"
+                              className="outstock-btn outstock-btn-secondary"
+                              onClick={() => handleConvertOrderTypePrompt(order)}
+                              disabled={!canChangeStatus || isProcessing}
+                              style={{
+                                padding: '5px 8px',
+                                fontSize: '11.5px',
+                                borderColor: order.itemType === 'cosmetics' ? '#bae6fd' : '#fbcfe8',
+                                color: order.itemType === 'cosmetics' ? '#0284c7' : '#db2777',
+                                background: order.itemType === 'cosmetics' ? '#f0f9ff' : '#fdf2f8'
+                              }}
+                              title={order.itemType === 'cosmetics' ? 'تحويل لدوائي' : 'تحويل لتجميل'}
+                            >
+                              {order.itemType === 'cosmetics' ? <Pill size={13} /> : <Sparkles size={13} />}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
-
-        {isLoading ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
-            <Loader2 size={32} className="spinner" style={{ margin: '0 auto 10px', color: '#0d9488' }} />
-            <div>جاري تجميع طلبات الفروع...</div>
+      ) : (
+        /* ── نمط العرض الثاني: جدول الطلبات المجمعة لكل فرع ── */
+        <div className="outstock-card">
+          <div className="outstock-card-header">
+            <h3 className="outstock-card-title">
+              <span>📦 طلبات الأدوية المجمعة حسب الفرع</span>
+              <span style={{ fontSize: '13px', color: '#0d9488', fontWeight: '800' }}>
+                ({filteredItems.length} صنف مطلوب للشراء)
+              </span>
+            </h3>
+            {filteredItems.length > 0 && (
+              <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '700' }}>
+                ⚡ المزامنة اللحظية نشطة
+              </div>
+            )}
           </div>
-        ) : filteredItems.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '48px 20px', color: '#64748b' }}>
-            <div style={{ fontSize: '42px', marginBottom: '10px' }}>✨</div>
-            <h4 style={{ margin: '0 0 6px', color: '#1e293b', fontSize: '16px', fontWeight: '800' }}>
-              لا توجد طلبات أدوية جديدة معلقة من الفروع
-            </h4>
-            <p style={{ margin: 0, fontSize: '13px' }}>
-              تم الرد على وتوريد كافة طلبات الأدوية الواردة من الصيدليات بنجاح.
-            </p>
-          </div>
-        ) : (
-          <div className="outstock-table-wrap">
-            <table className="outstock-table">
-              <thead>
-                <tr>
-                  <th>الفرع الطالب</th>
-                  <th>صنف الدواء</th>
-                  <th>الوحدة المطلوبة</th>
-                  <th>إجمالي الكمية</th>
-                  <th>عدد طلبات العملاء</th>
-                  <th>القرار السريع لإدارة المشتريات</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredItems.map((item, idx) => {
-                  const key = `${item.branch_id}_${item.medication_name}_${item.unit_type}`;
-                  const decision = decisions[key];
 
-                  return (
-                    <tr
-                      key={idx}
-                      className={
-                        decision === 'available'
-                          ? 'table-row-selected'
-                          : decision === 'unavailable'
-                          ? 'table-row-danger'
-                          : ''
-                      }
-                    >
-                      {/* الفرع */}
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <div style={{
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '8px',
-                            background: '#f0fdfa',
-                            border: '1px solid #ccfbf1',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: '#0d9488'
-                          }}>
-                            <Building2 size={16} />
-                          </div>
-                          <div>
-                            <div style={{ fontWeight: '800', color: 'var(--text, #0f172a)' }}>
-                              {item.branch_name || item.branch_id}
+          {isLoading ? (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+              <Loader2 size={32} className="spinner" style={{ margin: '0 auto 10px', color: '#0d9488' }} />
+              <div>جاري تجميع طلبات الفروع...</div>
+            </div>
+          ) : filteredItems.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '48px 20px', color: '#64748b' }}>
+              <div style={{ fontSize: '42px', marginBottom: '10px' }}>✨</div>
+              <h4 style={{ margin: '0 0 6px', color: '#1e293b', fontSize: '16px', fontWeight: '800' }}>
+                لا توجد طلبات أدوية جديدة معلقة من الفروع
+              </h4>
+              <p style={{ margin: 0, fontSize: '13px' }}>
+                تم الرد على وتوريد كافة طلبات الأدوية الواردة من الصيدليات بنجاح.
+              </p>
+            </div>
+          ) : (
+            <div className="outstock-table-wrap">
+              <table className="outstock-table">
+                <thead>
+                  <tr>
+                    <th>الفرع الطالب</th>
+                    <th>صنف الدواء</th>
+                    <th>الوحدة المطلوبة</th>
+                    <th>إجمالي الكمية</th>
+                    <th>عدد طلبات العملاء</th>
+                    <th>القرار السريع لإدارة المشتريات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredItems.map((item, idx) => {
+                    const key = `${item.branch_id}_${item.medication_name}_${item.unit_type}`;
+                    const decision = decisions[key];
+
+                    return (
+                      <tr
+                        key={idx}
+                        className={
+                          decision === 'available'
+                            ? 'table-row-selected'
+                            : decision === 'unavailable'
+                            ? 'table-row-danger'
+                            : ''
+                        }
+                      >
+                        {/* الفرع */}
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '8px',
+                              background: '#f0fdfa',
+                              border: '1px solid #ccfbf1',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#0d9488'
+                            }}>
+                              <Building2 size={16} />
                             </div>
-                            {(item.item_details || []).some(d => d.isTransferred) ? (
-                              <small style={{ color: '#7c3aed', fontSize: '11px', fontWeight: '800' }}>
-                                فرع الاستلام (محول إليه) 🔄
-                              </small>
-                            ) : (
-                              <small style={{ color: 'var(--muted, #64748b)', fontSize: '11px' }}>
-                                فرع صيدلية معتمد
-                              </small>
-                            )}
+                            <div>
+                              <div style={{ fontWeight: '800', color: 'var(--text, #0f172a)' }}>
+                                {item.branch_name || item.branch_id}
+                              </div>
+                              {(item.item_details || []).some(d => d.isTransferred) ? (
+                                <small style={{ color: '#7c3aed', fontSize: '11px', fontWeight: '800' }}>
+                                  فرع الاستلام (محول إليه) 🔄
+                                </small>
+                              ) : (
+                                <small style={{ color: 'var(--muted, #64748b)', fontSize: '11px' }}>
+                                  فرع صيدلية معتمد
+                                </small>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* صنف الدواء */}
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          <div style={{ fontWeight: '900', fontSize: '14.5px', color: '#0d9488' }}>
-                            {item.medication_name}
+                        {/* صنف الدواء */}
+                        <td style={{ minWidth: '160px', maxWidth: '300px', verticalAlign: 'top' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '5px' }}>
+                            <div style={{
+                              fontWeight: '900',
+                              fontSize: '14px',
+                              color: '#0d9488',
+                              wordBreak: 'break-word',
+                              overflowWrap: 'anywhere',
+                              whiteSpace: 'normal',
+                              lineHeight: 1.4
+                            }}>
+                              {item.medication_name}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              {item.item_type === 'cosmetics' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedCosmeticsItem(item)}
+                                  style={{
+                                    fontSize: '11px',
+                                    background: '#fce7f3',
+                                    color: '#be185d',
+                                    padding: '2px 8px',
+                                    borderRadius: '6px',
+                                    fontWeight: '800',
+                                    border: '1px solid #fbcfe8',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                  }}
+                                  title="عرض وتعديل مواصفات مستحضر التجميل، الماركة، وطريقة الاستخدام 💄"
+                                >
+                                  <span>💄 بطاقة المستحضر</span>
+                                </button>
+                            ) : (
+                              <span style={{ fontSize: '11px', background: '#e0f2fe', color: '#0369a1', padding: '2px 7px', borderRadius: '6px', fontWeight: '800' }}>
+                                💊 دواء
+                              </span>
+                            )}
+                            {Boolean(item.order_type === 'branch' || (item.item_details || []).some(d => d.orderType === 'branch')) && (
+                              <span style={{ fontSize: '11px', background: '#fef3c7', color: '#92400e', padding: '2px 7px', borderRadius: '6px', fontWeight: '800' }}>
+                                🏢 طلب فرع
+                              </span>
+                            )}
+                            {Boolean((item.item_details || []).some(d => d.isTransferred)) && (
+                              <span
+                                style={{
+                                  fontSize: '11px',
+                                  background: '#f5f3ff',
+                                  color: '#6d28d9',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontWeight: '800',
+                                  border: '1px solid #ddd6fe'
+                                }}
+                                title={(item.item_details || [])
+                                  .filter(d => d.isTransferred)
+                                  .map(d => `طلب #${d.orderNumber}: محرر بفرع [${d.sourceBranchName || 'آخر'}] ومحول للاستلام بهذا الفرع`)
+                                  .join(' | ')}
+                              >
+                                🔄 محول للاستلام بهذا الفرع
+                              </span>
+                            )}
+                            {(() => {
+                              const attachedImg = item.medication_image_url || (item.item_details || []).find(d => d.medicationImageUrl)?.medicationImageUrl;
+                              if (!attachedImg) return null;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPreviewOrderImageUrl(attachedImg);
+                                    setPreviewOrderImageTitle(`${item.medication_name} - ${item.branch_name || ''}`);
+                                  }}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '3px 8px',
+                                    borderRadius: '6px',
+                                    background: '#ecfeff',
+                                    color: '#0891b2',
+                                    border: '1px solid #a5f3fc',
+                                    fontSize: '11px',
+                                    fontWeight: '700',
+                                    cursor: 'pointer'
+                                  }}
+                                  title="عرض صورة الدواء أو الروشتة المرفقة بطلب العميل"
+                                >
+                                  <Camera size={13} color="#0891b2" />
+                                  <span>📷 روشتة / صورة مرفقة</span>
+                                </button>
+                              );
+                            })()}
                           </div>
-                          {item.item_type === 'cosmetics' ? (
+                            <small style={{ color: 'var(--muted, #64748b)', fontSize: '11px' }}>
+                              {(item.order_type === 'branch' || (item.item_details || []).some(d => d.orderType === 'branch'))
+                                ? 'نواقص مخزن الفرع الداخلي'
+                                : 'مسجل كحجز مسبق للعملاء'}
+                            </small>
+                          </div>
+                        </td>
+
+                        {/* الوحدة */}
+                        <td>
+                          <span className="outstock-badge" style={{ background: '#f1f5f9', color: '#334155' }}>
+                            {item.unit_type === 'strip' ? 'شريط' : 'علبة'}
+                          </span>
+                        </td>
+
+                        {/* إجمالي الكمية المطلوبة */}
+                        <td>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '4px 10px',
+                            borderRadius: '8px',
+                            background: '#ecfeff',
+                            color: '#0e7490',
+                            fontWeight: '900',
+                            fontSize: '14.5px',
+                            border: '1px solid #cffafe'
+                          }}>
+                            <Package size={14} />
+                            {item.total_requested_qty}
+                          </span>
+                        </td>
+
+                        {/* عدد طلبات العملاء */}
+                        <td>
+                          <span className="outstock-badge partial">
+                            {item.orders_count} عميل بانتظار التوفير
+                          </span>
+                        </td>
+
+                        {/* أزرار اتخاذ القرار المباشرة */}
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            {/* 1. متوفر بالفرع */}
                             <button
                               type="button"
-                              onClick={() => setSelectedCosmeticsItem(item)}
+                              className={`outstock-btn ${decision === 'available' ? 'outstock-btn-success' : 'outstock-btn-secondary'}`}
+                              onClick={() => canChangeStatus ? handleSetDecision(key, 'available') : showToast?.('⛔ ليس لديك صلاحية تغيير أو اتخاذ قرارات بشأن حالة الطلبات')}
+                              disabled={!canChangeStatus}
                               style={{
-                                fontSize: '11px',
-                                background: '#fce7f3',
-                                color: '#be185d',
-                                padding: '2px 8px',
-                                borderRadius: '6px',
-                                fontWeight: '800',
-                                border: '1px solid #fbcfe8',
-                                cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px'
+                                padding: '6px 10px',
+                                fontSize: '12px',
+                                borderColor: decision === 'available' ? '#059669' : '#a7f3d0',
+                                color: decision === 'available' ? '#ffffff' : '#047857',
+                                background: decision === 'available' ? '#059669' : '#f0fdf4',
+                                opacity: !canChangeStatus ? 0.45 : 1,
+                                cursor: !canChangeStatus ? 'not-allowed' : 'pointer'
                               }}
-                              title="عرض وتعديل مواصفات مستحضر التجميل، الماركة، وطريقة الاستخدام 💄"
+                              title={!canChangeStatus ? 'ليس لديك صلاحية اتخاذ قرارات التوفير' : 'تحديد الصنف كمتوفر وإضافته لدفعة الإرسال'}
                             >
-                              <span>💄 بطاقة المستحضر</span>
+                              <CheckCircle2 size={14} />
+                              <span>متوفر</span>
                             </button>
-                          ) : (
-                            <span style={{ fontSize: '11px', background: '#e0f2fe', color: '#0369a1', padding: '2px 7px', borderRadius: '6px', fontWeight: '800' }}>
-                              💊 دواء
-                            </span>
-                          )}
-                          {Boolean(item.order_type === 'branch' || (item.item_details || []).some(d => d.orderType === 'branch')) && (
-                            <span style={{ fontSize: '11px', background: '#fef3c7', color: '#92400e', padding: '2px 7px', borderRadius: '6px', fontWeight: '800' }}>
-                              🏢 طلب فرع
-                            </span>
-                          )}
-                          {Boolean((item.item_details || []).some(d => d.isTransferred)) && (
-                            <span
+
+                            {/* 2. قيد التجهيز 🚚 */}
+                            <button
+                              type="button"
+                              className={`outstock-btn ${decision === 'in_preparation' ? 'outstock-btn-primary' : 'outstock-btn-secondary'}`}
+                              onClick={() => canChangeStatus ? handleSetDecision(key, 'in_preparation', item) : showToast?.('⛔ ليس لديك صلاحية')}
+                              disabled={!canChangeStatus}
                               style={{
-                                fontSize: '11px',
-                                background: '#f5f3ff',
-                                color: '#6d28d9',
-                                padding: '2px 8px',
-                                borderRadius: '6px',
-                                fontWeight: '800',
-                                border: '1px solid #ddd6fe'
+                                padding: '6px 10px',
+                                fontSize: '12px',
+                                borderColor: decision === 'in_preparation' ? '#0284c7' : '#7dd3fc',
+                                color: decision === 'in_preparation' ? '#ffffff' : '#0369a1',
+                                background: decision === 'in_preparation' ? '#0284c7' : '#f0f9ff',
+                                opacity: !canChangeStatus ? 0.45 : 1,
+                                cursor: !canChangeStatus ? 'not-allowed' : 'pointer'
                               }}
-                              title={(item.item_details || [])
-                                .filter(d => d.isTransferred)
-                                .map(d => `طلب #${d.orderNumber}: محرر بفرع [${d.sourceBranchName || 'آخر'}] ومحول للاستلام بهذا الفرع`)
-                                .join(' | ')}
+                              title={!canChangeStatus ? 'ليس لديك صلاحية' : 'تحديد الصنف كقيد التجهيز والشحن للفرع'}
                             >
-                              🔄 محول للاستلام بهذا الفرع
-                            </span>
-                          )}
-                          {(() => {
-                            const attachedImg = item.medication_image_url || (item.item_details || []).find(d => d.medicationImageUrl)?.medicationImageUrl;
-                            if (!attachedImg) return null;
-                            return (
+                              <Truck size={14} />
+                              <span>قيد التجهيز 🚚</span>
+                            </button>
+
+                            {/* 3. غير متوفر بالسوق */}
+                            <button
+                              type="button"
+                              className={`outstock-btn ${decision === 'unavailable' ? 'outstock-btn-danger' : 'outstock-btn-secondary'}`}
+                              onClick={() => canChangeStatus ? handleSetDecision(key, 'unavailable', item) : showToast?.('⛔ ليس لديك صلاحية شطب الأصناف أو تغيير حالتها')}
+                              disabled={!canChangeStatus}
+                              style={{
+                                padding: '6px 10px',
+                                fontSize: '12px',
+                                borderColor: decision === 'unavailable' ? '#dc2626' : '#fecdd3',
+                                color: decision === 'unavailable' ? '#ffffff' : '#be123c',
+                                background: decision === 'unavailable' ? '#dc2626' : '#fff1f2',
+                                opacity: !canChangeStatus ? 0.45 : 1,
+                                cursor: !canChangeStatus ? 'not-allowed' : 'pointer'
+                              }}
+                              title={!canChangeStatus ? 'ليس لديك صلاحية شطب الأصناف' : 'تحديد الصنف كغير متوفر بالسوق وشطبه'}
+                            >
+                              <XCircle size={14} />
+                              <span>غير متوفر</span>
+                            </button>
+
+                            {/* 4. تعديل الكمية وإضافة ملاحظات المشتريات */}
+                            <button
+                              type="button"
+                              className="outstock-btn outstock-btn-secondary"
+                              onClick={() => canChangeStatus ? handleOpenAdjustModal(item) : showToast?.('⛔ ليس لديك صلاحية تعديل كميات طلبات الفروع')}
+                              disabled={!canChangeStatus}
+                              style={{
+                                padding: '6px 10px',
+                                fontSize: '12px',
+                                borderColor: '#fde68a',
+                                color: '#b45309',
+                                background: '#fffbeb',
+                                opacity: !canChangeStatus ? 0.45 : 1,
+                                cursor: !canChangeStatus ? 'not-allowed' : 'pointer'
+                              }}
+                              title={!canChangeStatus ? 'ليس لديك صلاحية تعديل الكميات' : 'تعديل الكمية المعتمدة وتدوين ملاحظات مدير المشتريات / مسؤول المستحضرات وإشعار الصيدلية'}
+                            >
+                              <Edit3 size={14} />
+                              <span>تعديل</span>
+                            </button>
+
+                            {/* 5. زر تحويل وتصحيح نوع الصنف (دوائي <-> تجميل) لنقله للمسؤول المختص فوراً وتصحيح خطأ الصيدلي */}
+                            {item.item_type === 'cosmetics' ? (
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setPreviewOrderImageUrl(attachedImg);
-                                  setPreviewOrderImageTitle(`${item.medication_name} - ${item.branch_name || ''}`);
-                                }}
+                                className="outstock-btn outstock-btn-secondary"
+                                onClick={() => handleConvertItemTypePrompt(item, 'medication')}
+                                disabled={isProcessing}
                                 style={{
+                                  padding: '6px 9px',
+                                  fontSize: '12px',
+                                  borderColor: '#bae6fd',
+                                  color: '#0369a1',
+                                  background: '#f0f9ff',
                                   display: 'inline-flex',
                                   alignItems: 'center',
-                                  gap: '4px',
-                                  padding: '3px 8px',
-                                  borderRadius: '6px',
-                                  background: '#ecfeff',
-                                  color: '#0891b2',
-                                  border: '1px solid #a5f3fc',
-                                  fontSize: '11px',
-                                  fontWeight: '700',
-                                  cursor: 'pointer'
+                                  gap: '4px'
                                 }}
-                                title="عرض صورة الدواء أو الروشتة المرفقة بطلب العميل"
+                                title="تصحيح تصنيف الصنف من تجميل إلى (صنف دوائي) ونقله فوراً لشاشة مدير المشتريات"
                               >
-                                <Camera size={13} color="#0891b2" />
-                                <span>📷 روشتة / صورة مرفقة</span>
+                                <Pill size={14} color="#0284c7" />
+                                <span>دوائي</span>
                               </button>
-                            );
-                          })()}
-                        </div>
-                        <small style={{ color: 'var(--muted, #64748b)', fontSize: '11px' }}>
-                          {(item.order_type === 'branch' || (item.item_details || []).some(d => d.orderType === 'branch'))
-                            ? 'نواقص مخزن الفرع الداخلي'
-                            : 'مسجل كحجز مسبق للعملاء'}
-                        </small>
-                      </td>
+                            ) : (
+                              <button
+                                type="button"
+                                className="outstock-btn outstock-btn-secondary"
+                                onClick={() => handleConvertItemTypePrompt(item, 'cosmetics')}
+                                disabled={isProcessing}
+                                style={{
+                                  padding: '6px 9px',
+                                  fontSize: '12px',
+                                  borderColor: '#fbcfe8',
+                                  color: '#db2777',
+                                  background: '#fdf2f8',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                                title="تصحيح تصنيف الصنف من دواء إلى (مستحضرات تجميل) ونقله فوراً لشاشة مسؤول التجميل"
+                              >
+                                <Sparkles size={14} color="#db2777" />
+                                <span>تجميل</span>
+                              </button>
+                            )}
 
-                      {/* الوحدة */}
-                      <td>
-                        <span className="outstock-badge" style={{ background: '#f1f5f9', color: '#334155' }}>
-                          {item.unit_type === 'strip' ? 'شريط' : 'علبة'}
-                        </span>
-                      </td>
-
-                      {/* إجمالي الكمية المطلوبة */}
-                      <td>
-                        <span style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          padding: '4px 10px',
-                          borderRadius: '8px',
-                          background: '#ecfeff',
-                          color: '#0e7490',
-                          fontWeight: '900',
-                          fontSize: '14.5px',
-                          border: '1px solid #cffafe'
-                        }}>
-                          <Package size={14} />
-                          {item.total_requested_qty}
-                        </span>
-                      </td>
-
-                      {/* عدد طلبات العملاء */}
-                      <td>
-                        <span className="outstock-badge partial">
-                          {item.orders_count} عميل بانتظار التوفير
-                        </span>
-                      </td>
-
-                      {/* أزرار اتخاذ القرار المباشرة */}
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          {/* 1. متوفر بالفرع */}
-                          <button
-                            type="button"
-                            className={`outstock-btn ${decision === 'available' ? 'outstock-btn-success' : 'outstock-btn-secondary'}`}
-                            onClick={() => handleSetDecision(key, 'available')}
-                            style={{
-                              padding: '6px 12px',
-                              fontSize: '12px',
-                              borderColor: decision === 'available' ? '#059669' : '#a7f3d0',
-                              color: decision === 'available' ? '#ffffff' : '#047857',
-                              background: decision === 'available' ? '#059669' : '#f0fdf4'
-                            }}
-                            title="تحديد الصنف كمتوفر وإضافته لدفعة الإرسال"
-                          >
-                            <CheckCircle2 size={14} />
-                            <span>متوفر</span>
-                          </button>
-
-                          {/* 2. غير متوفر بالسوق */}
-                          <button
-                            type="button"
-                            className={`outstock-btn ${decision === 'unavailable' ? 'outstock-btn-danger' : 'outstock-btn-secondary'}`}
-                            onClick={() => handleSetDecision(key, 'unavailable', item)}
-                            style={{
-                              padding: '6px 12px',
-                              fontSize: '12px',
-                              borderColor: decision === 'unavailable' ? '#dc2626' : '#fecdd3',
-                              color: decision === 'unavailable' ? '#ffffff' : '#be123c',
-                              background: decision === 'unavailable' ? '#dc2626' : '#fff1f2'
-                            }}
-                            title="تحديد الصنف كغير متوفر بالسوق وشطبه"
-                          >
-                            <XCircle size={14} />
-                            <span>غير متوفر</span>
-                          </button>
-
-                          {/* 3. تعديل الكمية وإضافة ملاحظات المشتريات */}
-                          <button
-                            type="button"
-                            className="outstock-btn outstock-btn-secondary"
-                            onClick={() => handleOpenAdjustModal(item)}
-                            style={{
-                              padding: '6px 12px',
-                              fontSize: '12px',
-                              borderColor: '#fde68a',
-                              color: '#b45309',
-                              background: '#fffbeb'
-                            }}
-                            title="تعديل الكمية المعتمدة وتدوين ملاحظات مدير المشتريات / مسؤول المستحضرات وإشعار الصيدلية"
-                          >
-                            <Edit3 size={14} />
-                            <span>تعديل الكمية</span>
-                          </button>
-
-                          {/* 4. زر تحويل وتصحيح نوع الصنف (دوائي <-> تجميل) لنقله للمسؤول المختص فوراً وتصحيح خطأ الصيدلي */}
-                          {item.item_type === 'cosmetics' ? (
-                            <button
-                              type="button"
-                              className="outstock-btn outstock-btn-secondary"
-                              onClick={() => handleConvertItemTypePrompt(item, 'medication')}
-                              disabled={isProcessing}
-                              style={{
-                                padding: '6px 11px',
-                                fontSize: '12px',
-                                borderColor: '#bae6fd',
-                                color: '#0369a1',
-                                background: '#f0f9ff',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px'
-                              }}
-                              title="تصحيح تصنيف الصنف من تجميل إلى (صنف دوائي) ونقله فوراً لشاشة مدير المشتريات"
-                            >
-                              <Pill size={14} color="#0284c7" />
-                              <span>تحويل لدوائي</span>
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="outstock-btn outstock-btn-secondary"
-                              onClick={() => handleConvertItemTypePrompt(item, 'cosmetics')}
-                              disabled={isProcessing}
-                              style={{
-                                padding: '6px 11px',
-                                fontSize: '12px',
-                                borderColor: '#fbcfe8',
-                                color: '#be185d',
-                                background: '#fdf2f8',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px'
-                              }}
-                              title="تصحيح تصنيف الصنف من دواء إلى (مستحضرات تجميل) ونقله فوراً لشاشة مسؤول التجميل"
-                            >
-                              <Sparkles size={14} color="#db2777" />
-                              <span>تحويل لتجميل</span>
-                            </button>
-                          )}
-
-                          {/* زر الإرسال السريع الفردي في حال رغبة الصيدلي في إنهاء بند واحد فوراً */}
-                          {decision && (
-                            <button
-                              type="button"
-                              className="outstock-btn outstock-btn-primary"
-                              onClick={() => handleQuickAction(item, decision)}
-                              disabled={isProcessing}
-                              style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: '800' }}
-                              title="إرسال القرار لهذا الصنف فوراً ومزامنة الفرع"
-                            >
-                              <Send size={12} />
-                              <span>إرسال الآن</span>
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                            {/* زر الإرسال السريع الفردي في حال رغبة الصيدلي في إنهاء بند واحد فوراً */}
+                            {decision && (
+                              <button
+                                type="button"
+                                className="outstock-btn outstock-btn-primary"
+                                onClick={() => handleQuickAction(item, decision)}
+                                disabled={isProcessing}
+                                style={{ padding: '6px 10px', fontSize: '11.5px', fontWeight: '800' }}
+                                title="إرسال القرار لهذا الصنف فوراً ومزامنة الفرع"
+                              >
+                                <Send size={12} />
+                                <span>إرسال</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── نافذة معاينة صورة الروشتة / الدواء المرفقة بطلب العميل (Lightbox) ── */}
       {previewOrderImageUrl && (
@@ -1468,6 +2417,18 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
         onClose={() => setUnavailabilityModalItem(null)}
         onConfirm={handleConfirmUnavailability}
         isProcessing={isProcessing}
+      />
+
+      {/* ── نافذة تثبيت وتحديد مواعيد الدورات الافتراضية (دورة الصباح ودورة المساء) ── */}
+      <ProcurementCyclesModal
+        isOpen={isCyclesModalOpen}
+        onClose={() => setIsCyclesModalOpen(false)}
+        currentConfig={cyclesConfig}
+        onSaved={(newCfg) => {
+          setCyclesConfig(newCfg);
+          fetchAggregatedOrders();
+        }}
+        showToast={showToast}
       />
     </div>
   );

@@ -180,6 +180,11 @@ export default function EmployeePortalView({
   const [isAndroidSettingsOpen, setIsAndroidSettingsOpen] = useState(false);
   const [mobileConfig, setMobileConfig] = useState(() => getMobileConfig());
 
+  const effectiveComputeEmpSummary = computeEmpSummary || state?.computeEmpSummary;
+  if (state && !state.computeEmpSummary && effectiveComputeEmpSummary) {
+    state.computeEmpSummary = effectiveComputeEmpSummary;
+  }
+
   const emp = useMemo(() => {
     if (!currentEmpUser) return null;
     const found = (state?.employees || []).find((e) =>
@@ -1545,6 +1550,7 @@ export default function EmployeePortalView({
     const range = cutoffInfo || getCycleDateRange(selectedMonth, state?.orgSettings);
     return buildUnifiedAttendanceTimeline(emp, allMonthShifts, state, {
       cycleRange: range,
+      selectedMonth,
       includeAbsences: false
     });
   }, [emp, allMonthShifts, state, selectedMonth, cutoffInfo]);
@@ -1609,9 +1615,32 @@ export default function EmployeePortalView({
     directAdjs.forEach((a) => map.set(String(a.id), a));
 
     // 2. Penalty & Adjustment Requests (state.requests)
+    const seenReqIds = new Set();
+    const seenLateKeys = new Set();
+
     const penaltyReqs = (state.requests || [])
-      .filter((r) => String(r.employeeId) === String(emp.id) && (r.type === 'penalty' || r.type === 'adjustment') && r.status !== 'cancelled' && r.status !== 'rejected' && r.objection?.status !== 'approved' && !r.isCancelled && !String(r.id).startsWith('req_late_inc_') && !String(r.id).startsWith('req_late_') && r.subType !== 'lateness' && r.type !== 'late_penalty' && filterFn(r.date || r.createdAt?.slice(0, 10)))
+      .filter((r) => {
+        if (String(r.employeeId) !== String(emp.id)) return false;
+        if (r.type !== 'penalty' && r.type !== 'adjustment' && r.type !== 'disciplinary_penalty' && r.subType !== 'disciplinary_penalty') return false;
+        if (r.status === 'cancelled' || r.status === 'rejected' || r.objection?.status === 'approved' || r.isCancelled) return false;
+        if (selectedBranchId && r.branchId && String(r.branchId) !== String(selectedBranchId)) return false;
+        return filterFn(r.date || r.createdAt?.slice(0, 10));
+      })
       .map((r) => {
+        const idStr = String(r.id);
+        const cleanId = idStr.replace(/^req_/, '');
+        seenReqIds.add(idStr);
+        seenReqIds.add(cleanId);
+        seenReqIds.add(`req_${cleanId}`);
+        seenReqIds.add(`late_inc_${cleanId.replace(/^late_inc_/, '')}`);
+        seenReqIds.add(`req_late_inc_${cleanId.replace(/^late_inc_/, '')}`);
+
+        const dateStr = r.date || r.createdAt?.slice(0, 10);
+        if (dateStr) {
+          const reqBranchKey = r.branchId ? `_${r.branchId}` : '';
+          seenLateKeys.add(`${emp.id}_${dateStr}${reqBranchKey}`);
+        }
+
         let amt = parseFloat(r.amount) || 0;
         if (!amt && (r.impactType || r.impactVal)) {
           if (r.impactType === 'fixed_amount') {
@@ -1625,7 +1654,7 @@ export default function EmployeePortalView({
           employeeId: r.employeeId,
           type: r.subType === 'bonus' ? 'bonus' : 'deduction',
           amount: amt,
-          date: r.date || r.createdAt?.slice(0, 10),
+          date: dateStr,
           reason: r.reason || r.ruleTitle || r.details || r.notes || 'جزاء إداري',
           details: r.reason || r.ruleTitle || r.details || r.notes || 'جزاء إداري',
           createdAt: r.createdAt
@@ -1635,68 +1664,42 @@ export default function EmployeePortalView({
       if (!map.has(String(p.id))) map.set(String(p.id), p);
     });
 
-    // 3. Approved Unpaid Leaves (Strictly deduplicated)
-    const approvedUnpaidLeaves = getEmployeeApprovedLeaves(emp, state, filterFn).filter(
-      (r) => r.leaveType === 'unpaid'
-    );
-    approvedUnpaidLeaves.forEach((l) => {
-      let daysInPeriod = 0;
-      if (l.startDate && l.endDate) {
-        let cur = new Date(l.startDate);
-        const end = new Date(l.endDate);
-        if (!isNaN(cur) && !isNaN(end) && cur <= end) {
-          while (cur <= end) {
-            const cy = cur.getFullYear();
-            const cm = cur.getMonth() + 1;
-            const cd = cur.getDate();
-            const dStr = `${cy}-${String(cm).padStart(2, '0')}-${String(cd).padStart(2, '0')}`;
-            if (filterFn(dStr)) {
-              daysInPeriod++;
-            }
-            cur.setDate(cur.getDate() + 1);
-          }
-        }
-      } else if (filterFn(l.date || l.createdAt?.slice(0, 10))) {
-        daysInPeriod = parseFloat(l.daysCount || l.days || 1) || 1;
-      }
-
-      if (daysInPeriod > 0) {
-        const amt = Math.round(daysInPeriod * calcDailyRate * 100) / 100;
-        const leaveId = `unpaid_leave_${l.id}`;
-        if (!map.has(leaveId)) {
-          map.set(leaveId, {
-            id: leaveId,
-            employeeId: emp.id,
-            type: 'deduction',
-            amount: amt,
-            date: l.startDate || l.date || l.createdAt?.slice(0, 10),
-            reason: `💸 إجازة غير مدفوعة (${daysInPeriod} يوم)`,
-            details: `خصم عدد (${daysInPeriod}) يوم إجازة غير مدفوعة الأجر بسعر اليوم (${fmt(calcDailyRate)} ج.م)`,
-            createdAt: l.createdAt
-          });
-        }
-      }
-    });
+    // 3. Approved Unpaid Leaves are non-paid calendar days (not monetary deductions from earned pay)
 
     // 4. Late Incidents & Bylaws Penalties (وقائع وتأخيرات البصمة والجزاءات اللائحية)
     const empLateIncidents = (state.lateIncidents || []).filter(
-      (inc) =>
-        String(inc.employeeId) === String(emp.id) &&
-        inc.status !== 'cancelled' &&
-        !inc.isCancelled &&
-        inc.objection?.status !== 'approved' &&
-        inc.status !== 'approved_permission_exempt' &&
-        inc.actionType !== 'grace' &&
-        !isApprovedPermissionForDate(emp.id, inc.date, state) &&
-        !(state.requests || []).some(
+      (inc) => {
+        if (String(inc.employeeId) !== String(emp.id)) return false;
+        if (
+          inc.status === 'cancelled' ||
+          inc.isCancelled ||
+          inc.objection?.status === 'approved' ||
+          inc.status === 'approved_permission_exempt' ||
+          inc.actionType === 'grace' ||
+          isApprovedPermissionForDate(emp.id, inc.date, state)
+        ) return false;
+        if ((inc.deductionMinutes || 0) <= 0 && (parseFloat(inc.penaltyAmount) || 0) <= 0) return false;
+        if ((state.requests || []).some(
           (r) =>
             (r.type === 'penalty_objection' || r.type === 'objection') &&
             (r.status === 'approved' || r.adminApproved) &&
             (r.penaltyId === inc.id || r.id === `obj_inc_${inc.id}` || (String(r.employeeId) === String(emp.id) && r.date === inc.date))
-        ) &&
-        (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
-        (!selectedBranchId || String(inc.branchId) === String(selectedBranchId)) &&
-        filterFn(inc.date)
+        )) return false;
+
+        const incIdStr = String(inc.id);
+        const cleanIncId = incIdStr.replace(/^late_inc_/, '');
+        const lateBranchKey = inc.branchId ? `_${inc.branchId}` : '';
+        if (
+          seenReqIds.has(incIdStr) ||
+          seenReqIds.has(cleanIncId) ||
+          seenReqIds.has(`req_${incIdStr}`) ||
+          seenReqIds.has(`req_late_inc_${cleanIncId}`) ||
+          (inc.date && seenLateKeys.has(`${emp.id}_${inc.date}${lateBranchKey}`))
+        ) return false;
+
+        if (selectedBranchId && inc.branchId && String(inc.branchId) !== String(selectedBranchId) && (!isBranchMatch || !isBranchMatch(inc.branchId, { id: selectedBranchId }))) return false;
+        return filterFn(inc.date);
+      }
     );
     empLateIncidents.forEach((inc) => {
       const dynamicAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId || selectedBranchId);
@@ -1704,14 +1707,16 @@ export default function EmployeePortalView({
       if (amt > 0) {
         const lateId = `late_inc_${inc.id}`;
         if (!map.has(lateId)) {
+          const bObj = (state.branches || []).find((b) => String(b.id) === String(inc.branchId));
+          const branchLabel = bObj?.name ? ` — ${bObj.name}` : '';
           map.set(lateId, {
             id: lateId,
             employeeId: emp.id,
             type: 'deduction',
             amount: amt,
             date: inc.date,
-            reason: `⏱️ تأخير بصمة (${inc.deductionMinutes || inc.delayMinutes || 0} دقيقة) - ${inc.tierName || inc.penaltyDescription || 'لائحة الجزاءات'}`,
-            details: `خصم تأخير طبقاً للائحة الجزاءات المعتمدة`,
+            reason: `⏱️ تأخير بصمة (${inc.deductionMinutes || inc.delayMinutes || 0} دقيقة)${branchLabel} - ${inc.tierName || inc.penaltyDescription || 'لائحة الجزاءات'}`,
+            details: `خصم تأخير طبقاً للائحة الجزاءات المعتمدة${branchLabel}`,
             createdAt: inc.date
           });
         }
@@ -5440,9 +5445,9 @@ export default function EmployeePortalView({
                     <SummaryCard
                       icon="💸"
                       label={`إجازة غير مدفوعة (${summary.unpaidLeaveDaysCount} يوم)`}
-                      value={canViewSalary ? `-${fmt(summary.unpaidLeaveDeduction)} ج.م` : '🔒 مقيد'}
-                      colorVar="--danger"
-                      sub={canViewSalary ? `مخصومة بسعر اليوم (${fmt(summary.dailyRate)} ج.م)` : '🔒 مقيد'}
+                      value="0.00 ج.م"
+                      colorVar="--muted"
+                      sub="غير مدفوعة (لا يُحتسب أجر أو ساعات هذه الأيام)"
                       isPrivacy={isPrivacyMode}
                     />
                   )}
@@ -6284,6 +6289,69 @@ export default function EmployeePortalView({
                         );
                       }
 
+                      if (s.recordType === 'past_absence' || s.recordType === 'missing_shift') {
+                        return (
+                          <div
+                            key={`absence_${s.id || s.date}`}
+                            style={{
+                              background: '#fffbeb',
+                              border: '1.5px dashed #fcd34d',
+                              borderRadius: '14px',
+                              padding: '12px 14px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '6px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontSize: '11px', background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '6px', fontWeight: 800 }}>
+                                  #{idx + 1}
+                                </span>
+                                <span style={{ fontWeight: 800, fontSize: '13.5px', color: '#b45309' }}>{s.date}</span>
+                                <span style={{ fontSize: '12px', color: '#92400e', fontWeight: 600 }}>({arabicWeekday(s.date)})</span>
+                                <span style={{ fontSize: '11px', background: '#fee2e2', color: '#991b1b', border: '1px solid #f87171', padding: '2px 8px', borderRadius: '6px', fontWeight: 800 }}>
+                                  ⚠️ غياب سابق غير مسجل
+                                </span>
+                              </div>
+                              <span style={{ fontSize: '11.5px', color: '#991b1b', fontWeight: 700 }}>0 س</span>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      if (s.recordType === 'future_scheduled') {
+                        return (
+                          <div
+                            key={`future_${s.id || s.date}`}
+                            style={{
+                              background: 'rgba(248, 250, 252, 0.7)',
+                              border: '1.5px dashed #cbd5e1',
+                              borderRadius: '14px',
+                              padding: '12px 14px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '6px',
+                              opacity: 0.85
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontSize: '11px', background: '#f1f5f9', color: '#64748b', padding: '2px 6px', borderRadius: '6px', fontWeight: 800 }}>
+                                  #{idx + 1}
+                                </span>
+                                <span style={{ fontWeight: 800, fontSize: '13.5px', color: '#64748b' }}>{s.date}</span>
+                                <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>({arabicWeekday(s.date)})</span>
+                                <span style={{ fontSize: '11px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '2px 8px', borderRadius: '6px', fontWeight: 800 }}>
+                                  📅 وردية مجدولة مستقبلاً
+                                </span>
+                              </div>
+                              <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 700 }}>0 س</span>
+                            </div>
+                          </div>
+                        );
+                      }
+
                       const sBranch = (state.branches || []).find((b) =>
                         isBranchMatch(s.branchId, b) ||
                         (s.branchName && (isBranchMatch(s.branchName, b) || cleanBranchKey(s.branchName) === cleanBranchKey(b.name))) ||
@@ -6537,6 +6605,46 @@ export default function EmployeePortalView({
                                 </td>
                                 <td colSpan={5} style={{ textAlign: 'center', color: '#94a3b8', fontSize: '11.5px' }}>
                                   {s.isOtherBranchShift ? `مجدول بالفرع الآخر (${s.otherBranchName})` : 'راحة أسبوعية مجدولة وفق جدول العمل'}
+                                </td>
+                                <td style={{ color: '#94a3b8', fontSize: '11px' }}>—</td>
+                                {canEditShift && <td></td>}
+                              </tr>
+                            );
+                          }
+
+                          if (s.recordType === 'past_absence' || s.recordType === 'missing_shift') {
+                            return (
+                              <tr key={`absence_${s.id || s.date}`} style={{ background: '#fffbeb' }}>
+                                <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
+                                <td style={{ fontWeight: 700, color: '#b45309' }}>{s.date}</td>
+                                <td style={{ fontWeight: 600, color: '#92400e' }}>{arabicWeekday(s.date)}</td>
+                                <td>
+                                  <span style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #f87171', padding: '3px 8px', borderRadius: '6px', fontWeight: 800, fontSize: '11px' }}>
+                                    ⚠️ غياب سابق
+                                  </span>
+                                </td>
+                                <td colSpan={5} style={{ textAlign: 'center', color: '#b45309', fontSize: '11.5px' }}>
+                                  يوم عمل سابق لم يتم تسجيل بصمة له
+                                </td>
+                                <td style={{ color: '#b45309', fontSize: '11px' }}>—</td>
+                                {canEditShift && <td></td>}
+                              </tr>
+                            );
+                          }
+
+                          if (s.recordType === 'future_scheduled') {
+                            return (
+                              <tr key={`future_${s.id || s.date}`} style={{ background: 'rgba(248, 250, 252, 0.7)', opacity: 0.85 }}>
+                                <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
+                                <td style={{ fontWeight: 600, color: '#64748b' }}>{s.date}</td>
+                                <td style={{ color: '#94a3b8' }}>{arabicWeekday(s.date)}</td>
+                                <td>
+                                  <span style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '3px 8px', borderRadius: '6px', fontWeight: 800, fontSize: '11px' }}>
+                                    📅 وردية مجدولة
+                                  </span>
+                                </td>
+                                <td colSpan={5} style={{ textAlign: 'center', color: '#64748b', fontSize: '11.5px' }}>
+                                  وردية عمل مقررة بالجدول لم يحن موعدها بعد
                                 </td>
                                 <td style={{ color: '#94a3b8', fontSize: '11px' }}>—</td>
                                 {canEditShift && <td></td>}
@@ -7910,7 +8018,8 @@ export default function EmployeePortalView({
               showToast={showToast}
               userRole="employee"
               currentEmpId={emp.id}
-              currentBranchId={selectedBranchId || emp.branchId}
+              currentBranchId={selectedBranchId ? selectedBranchId : null}
+              activeSubTab="records"
               monthPicker={selectedMonth}
               filterFn={filterFn}
             />

@@ -127,7 +127,7 @@ export default function AndroidSettingsModal({ isOpen, onClose, onConfigSaved })
 
   // تغيير نسبة تكبير الخطوط والواجهة مع معاينة حية لحظية
   const handleScaleChange = (newScale) => {
-    const clamped = Math.min(Math.max(Number(newScale), 0.85), 1.25);
+    const clamped = Math.min(Math.max(Number(newScale), 0.75), 1.25);
     setFontScale(clamped);
     applyMobileScale(clamped);
     triggerHaptic('light');
@@ -709,9 +709,9 @@ export default function AndroidSettingsModal({ isOpen, onClose, onConfigSaved })
 
                     <input
                       type="range"
-                      min="0.85"
-                      max="1.25"
-                      step="0.02"
+                      min="0.75"
+                      max="1.15"
+                      step="0.05"
                       value={fontScale}
                       onChange={(e) => handleScaleChange(e.target.value)}
                       style={{
@@ -723,23 +723,26 @@ export default function AndroidSettingsModal({ isOpen, onClose, onConfigSaved })
                     />
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '11px', color: '#64748b' }}>
-                      <span>85% (مضغوط)</span>
+                      <span>75% (مدمج جداً لمنع التداخل)</span>
+                      <span>85% (موصى به للهواتف)</span>
                       <span>100% (قياسي)</span>
-                      <span>125% (مكبر للوضوح)</span>
+                      <span>115% (كبير)</span>
                     </div>
                   </div>
 
                   {/* أزرار سريعة بنقرة واحدة */}
                   <div>
                     <span style={{ fontSize: '11.5px', color: '#94a3b8', display: 'block', marginBottom: '8px' }}>
-                      أحجام جاهزة موصى بها:
+                      مقاسات شاشة ذكية جاهزة (بنقرة واحدة):
                     </span>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       {[
-                        { label: '85% (شاشات صغيرة)', value: 0.85 },
+                        { label: '75% (مدمج جداً - لا تمرير)', value: 0.75 },
+                        { label: '80% (مدمج مركز)', value: 0.80 },
+                        { label: '85% (متوازن - موصى به)', value: 0.85 },
+                        { label: '90% (مريح)', value: 0.90 },
                         { label: '100% (الافتراضي)', value: 1.00 },
-                        { label: '112% (كبير مريح)', value: 1.12 },
-                        { label: '125% (شاشات كبيرة)', value: 1.25 }
+                        { label: '110% (كبير)', value: 1.10 }
                       ].map((preset) => {
                         const isSelected = Math.abs(fontScale - preset.value) < 0.02;
                         return (
@@ -765,21 +768,26 @@ export default function AndroidSettingsModal({ isOpen, onClose, onConfigSaved })
                     </div>
                   </div>
 
-                  {/* تنبيه المعاينة اللحظية */}
+                  {/* صندوق معاينة فورية وميزة تصغير الشاشة */}
                   <div
                     style={{
-                      background: 'rgba(16, 185, 129, 0.08)',
-                      border: '1px solid rgba(16, 185, 129, 0.2)',
-                      borderRadius: '10px',
-                      padding: '10px 12px',
+                      background: 'rgba(16, 185, 129, 0.06)',
+                      border: '1px solid rgba(16, 185, 129, 0.25)',
+                      borderRadius: '12px',
+                      padding: '12px 14px',
                       display: 'flex',
-                      alignItems: 'center',
+                      flexDirection: 'column',
                       gap: '8px'
                     }}
                   >
-                    <Zap style={{ width: '16px', height: '16px', color: '#34d399', flexShrink: 0 }} />
-                    <span style={{ fontSize: '11.5px', color: '#a7f3d0' }}>
-                      يتم تطبيق حجم الخط فورياً على الصفحة أثناء تحريك الشريط لتجربة القراءة قبل الحفظ.
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Zap style={{ width: '16px', height: '16px', color: '#34d399', flexShrink: 0 }} />
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#34d399' }}>
+                        المعاينة الحية الفورية (Live UI Zoom Engine):
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '11.5px', color: '#cbd5e1', lineHeight: '1.5' }}>
+                      تطبيق المقاس (80% أو 85%) يقوم بتصغير الجداول والبطاقات ونوافذ الطلبات بنسبة متناسقة تماماً، مما يتيح رؤية كافة الأعمدة والأزرار في شاشة الهاتف مباشرة دون الحاجة لأي تمرير أفقي أو تداخل للبيانات.
                     </span>
                   </div>
                 </div>

@@ -87,7 +87,8 @@ export function getEmployeeUnifiedLoans(empId, state = {}) {
       : (history.length > 0 ? historySum : rawPaid);
 
     const loanDate = l.date || (l.createdAt ? l.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
-    const startMonth = l.startMonth || getPayrollMonthForDate(loanDate, orgSettings);
+    const firstInstallmentMonth = l.firstInstallmentMonth || (isInstallment ? l.startMonth : null);
+    const startMonth = firstInstallmentMonth || l.startMonth || getPayrollMonthForDate(loanDate, orgSettings);
 
     return {
       ...l,
@@ -105,8 +106,9 @@ export function getEmployeeUnifiedLoans(empId, state = {}) {
       monthlyDeduction,
       paymentsHistory: history,
       date: loanDate,
+      firstInstallmentMonth,
       startMonth,
-      status: paidAmount >= totalAmount && totalAmount > 0 ? 'paid' : (paidAmount > 0 ? 'partial' : (l.status || 'approved'))
+      status: (paidAmount >= totalAmount && totalAmount > 0) || l.status === 'paid' ? 'paid' : (paidAmount > 0 ? 'partial' : (l.status || 'approved'))
     };
   });
 }
@@ -152,11 +154,12 @@ export function computeEmployeeLoanDeductionsForPeriod(empId, targetMonth, state
   unifiedLoans.forEach((loan) => {
     const total = loan.totalAmount;
     if (total <= 0) return;
+    if (loan.status === 'paid' || loan.isPaid === true || (loan.remainingAmount !== undefined && loan.remainingAmount <= 0)) return;
 
-    const startMonth = loan.startMonth;
+    const startMonth = loan.firstInstallmentMonth || loan.startMonth;
     const diff = getMonthDiff(startMonth, activeMonth);
 
-    // الحالة 1: السلفة مسجلة في شهر مستقبلي بالنسبة للشهر المفحوص
+    // الحالة 1: السلفة مسجلة في شهر مستقبلي بالنسبة للشهر المفحوص (فترة سماح)
     if (diff < 0) return;
 
     const isInstallment = loan.isInstallment;
@@ -226,7 +229,9 @@ export function computeEmployeeLoanDeductionsForPeriod(empId, targetMonth, state
         const autoPrevInstallments = (currentInstallmentNum - 1) * monthlyInstallment;
         previouslyPaid = Math.max(autoPrevInstallments, priorPayments);
 
-        const remBefore = Math.max(0, total - previouslyPaid);
+        // حساب إجمالي المدفوعات المباشرة بما فيها السداد المبكر
+        const allManualPayments = (loan.paymentsHistory || []).filter(p => p && p.type !== 'payroll_auto').reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+        const remBefore = Math.max(0, total - Math.max(previouslyPaid, allManualPayments - cycleManualPayments));
         if (remBefore <= 0) {
           // مسددة بالكامل
           return;
@@ -454,3 +459,78 @@ export function revertPeriodLoanSettlements(monthStr, state = {}) {
   };
 }
 
+/**
+ * الفحص الدوري والخصم التلقائي لكافة دورات الرواتب المنتهية
+ * يضمن:
+ * 1. استخراج الدورة السابقة المنتهية آلياً
+ * 2. التحقق من انقضاء تاريخ ونهاية الدورة
+ * 3. صمام عدم التكرار (Idempotency Guard) عبر سجل payrollLoanSettlements
+ * 4. تسوية السلف والأقساط وتوثيق إيصالات السداد بدقة
+ */
+export function checkAndAutoSettleExpiredPayrollLoans(state = {}) {
+  if (!state || typeof state !== 'object') {
+    return { shouldUpdate: false, state };
+  }
+
+  const orgSettings = state.orgSettings || {};
+  const activeMonth = getActivePayrollMonth(orgSettings);
+  if (!activeMonth) return { shouldUpdate: false, state };
+
+  // استخراج الشهر المالي السابق
+  const [yStr, mStr] = activeMonth.split('-');
+  let prevY = parseInt(yStr, 10);
+  let prevM = parseInt(mStr, 10) - 1;
+  if (prevM < 1) {
+    prevM = 12;
+    prevY -= 1;
+  }
+  const prevMonthStr = `${prevY}-${String(prevM).padStart(2, '0')}`;
+
+  const settlements = { ...(orgSettings.payrollLoanSettlements || {}) };
+
+  // هل تم تسوية هذا الشهر من قبل؟
+  if (settlements[prevMonthStr]?.settled) {
+    return { shouldUpdate: false, state };
+  }
+
+  // حساب نطاق الدورة السابقة
+  const prevCycleRange = getCycleDateRange(prevMonthStr, orgSettings);
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const cycleEndIso = `${prevCycleRange.endDate}T23:59:59`;
+
+  // التحقق من انقضاء تاريخ الدورة
+  if (nowIso < cycleEndIso) {
+    return { shouldUpdate: false, state };
+  }
+
+  // تنفيذ التسوية المحاسبية الآلية
+  const { updatedLoans, updatedRequests, settledCount } = autoSettlePeriodLoans(prevMonthStr, state);
+
+  const updatedSettlements = {
+    ...settlements,
+    [prevMonthStr]: {
+      settled: true,
+      settledAt: new Date().toISOString(),
+      settledCount,
+      cycleRange: prevCycleRange
+    }
+  };
+
+  const nextState = {
+    ...state,
+    loans: updatedLoans,
+    requests: updatedRequests,
+    orgSettings: {
+      ...orgSettings,
+      payrollLoanSettlements: updatedSettlements
+    }
+  };
+
+  return {
+    shouldUpdate: settledCount > 0,
+    settledCount,
+    settledMonth: prevMonthStr,
+    nextState
+  };
+}

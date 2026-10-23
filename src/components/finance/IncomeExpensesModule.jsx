@@ -267,7 +267,7 @@ export default function IncomeExpensesModule({
         adminApproved: shouldDirectApprove,
         attachmentData: attachmentData || null,
         attachmentName: rawFileName || null,
-        attachmentType: fileType,
+        attachmentType: attachmentType || null,
         targetRole: 'admin',
         isDirectToAdmin: true
       };

@@ -32,6 +32,7 @@ import {
   parseEgyptTimeToEpoch,
   calculatePunchMinutesDiff
 } from './egypt-time.js';
+import { startPayrollLoansSettlementDaemon } from './payroll-loans-daemon.js';
 
 dotenv.config();
 
@@ -660,12 +661,18 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
               s && s.timeOut && s.timeOut !== '' && s.timeOut !== '—' && s.timeOut !== '-' && s.timeOut !== 'قيد العمل الآن' && !s.isLiveActive
             );
 
+            const isSameBranchShift = (s) => (
+              (!existingShift.branchId || !s.branchId) ||
+              String(existingShift.branchId).trim() === String(s.branchId).trim() ||
+              (existingShift.branchName && s.branchName && existingShift.branchName.trim() === s.branchName.trim())
+            );
+
             const hasClosedInIncoming = Array.isArray(stateValue.shifts) && stateValue.shifts.some(s =>
               isEmpShiftMatch(s) &&
               (
                 (existingShift.shiftId && (s.id === existingShift.shiftId || s.shiftId === existingShift.shiftId)) ||
-                (s.date === existingShift.date && (!existingShift.timeIn || !s.timeIn || s.timeIn.slice(0, 5) === existingShift.timeIn.slice(0, 5))) ||
-                (s.date === existingShift.date)
+                (isSameBranchShift(s) && s.date === existingShift.date && (!existingShift.timeIn || !s.timeIn || s.timeIn.slice(0, 5) === existingShift.timeIn.slice(0, 5))) ||
+                (isSameBranchShift(s) && s.date === existingShift.date)
               ) &&
               isShiftTrulyClosed(s)
             );
@@ -680,15 +687,15 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
               continue;
             }
 
-            // الوردية النشطة: بدأت خلال آخر 24 ساعة (مع دعم الورديات الليلية والعابرة لمنتصف الليل)، ولها timeIn، وليس لها timeOut صريح، وليست مكتملة
+            // الوردية النشطة: بدأت خلال آخر 20 ساعة (صمام أمان موحد)، ولها timeIn، وليس لها timeOut صريح، وليست مكتملة
             const sDate = existingShift.date || today;
             const sTime = (existingShift.timeIn || '09:00').slice(0, 5);
             const shiftAgeHours = calculatePunchMinutesDiff(sDate, sTime, today, nowTime) / 60;
-            const isWithin24Hours = shiftAgeHours >= 0 && shiftAgeHours < 24;
+            const isWithinSafetyHours = shiftAgeHours >= 0 && shiftAgeHours < 20;
             const hasCheckIn = Boolean(existingShift.timeIn && existingShift.timeIn !== '');
             const noCheckOut = !existingShift.timeOut || existingShift.timeOut === '' || existingShift.timeOut === '—' || existingShift.timeOut === '-';
             const isNotCompleted = existingShift.status !== 'completed' && existingShift.isLiveActive !== false;
-            const isGenuinelyActive = isWithin24Hours && hasCheckIn && noCheckOut && isNotCompleted;
+            const isGenuinelyActive = isWithinSafetyHours && hasCheckIn && noCheckOut && isNotCompleted;
 
             if (isGenuinelyActive) {
               const incomingShift = incomingActiveShifts[empId] || incomingActiveShifts[String(empId)] || (empCode && incomingActiveShifts[empCode]);
@@ -733,12 +740,14 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
           const deletedIdsSet = new Set((stateValue._deletedIds || []).map(String));
           const incomingShiftIds = new Set(stateValue.shifts.map(s => s && s.id).filter(Boolean));
 
-          // خريطة أيام الموظفين القائمة في البيانات الجديدة لمنع تدبيل الورديات لنفس الموظف في نفس اليوم
-          const incomingEmpDayMap = new Set();
+          // خريطة أيام وفروع الموظفين القائمة في البيانات الجديدة لمنع تدبيل الورديات لنفس الموظف في نفس الفرع في نفس اليوم مع السماح بتعدد الفروع والورديات المنفصلة
+          const incomingEmpBranchDayMap = new Set();
           stateValue.shifts.forEach(s => {
             if (s && s.date) {
-              if (s.employeeId) incomingEmpDayMap.add(`${String(s.employeeId)}_${s.date}`);
-              if (s.employeeCode) incomingEmpDayMap.add(`${String(s.employeeCode)}_${s.date}`);
+              const bKey = String(s.branchId || s.branchName || 'default').trim().toLowerCase();
+              const inPrefix = (s.timeIn || '').slice(0, 5);
+              if (s.employeeId) incomingEmpBranchDayMap.add(`${String(s.employeeId)}_${bKey}_${s.date}_${inPrefix || 'shift'}`);
+              if (s.employeeCode) incomingEmpBranchDayMap.add(`${String(s.employeeCode)}_${bKey}_${s.date}_${inPrefix || 'shift'}`);
             }
           });
 
@@ -746,12 +755,18 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
             if (!s || !s.id) return false;
             const sidStr = String(s.id);
             if (incomingShiftIds.has(s.id) || incomingShiftIds.has(sidStr)) return false;
-            if (deletedIdsSet.has(sidStr) || deletedIdsSet.has(sidStr.replace(/^(shift_|punch_)/, ''))) return false;
+            if (s.isRestored || sidStr.startsWith('shift_restored_') || s.isManual || s.manualPunch || s.adminApproved || s.editedByAdmin) {
+              // حصانة قطعية للورديات المستعادة والمعتمدة يدوياً
+            } else if (deletedIdsSet.has(sidStr) || deletedIdsSet.has(sidStr.replace(/^(shift_|punch_)/, ''))) {
+              return false;
+            }
 
-            // إذا كان الموظف لديه وردية بالفعل في ذلك اليوم، فإن هذه الوردية مكررة ومحذوفة صراحة -> لا نسترجعها أبداً
-            const empDayKey1 = s.employeeId ? `${String(s.employeeId)}_${s.date}` : null;
-            const empDayKey2 = s.employeeCode ? `${String(s.employeeCode)}_${s.date}` : null;
-            if ((empDayKey1 && incomingEmpDayMap.has(empDayKey1)) || (empDayKey2 && incomingEmpDayMap.has(empDayKey2))) {
+            // إذا كان الموظف لديه وردية مطابقة بالفعل في ذلك اليوم في نفس الفرع وبنفس التوقيت، فإن هذه الوردية مكررة ومحذوفة صراحة -> لا نسترجعها
+            const sbKey = String(s.branchId || s.branchName || 'default').trim().toLowerCase();
+            const sInPrefix = (s.timeIn || '').slice(0, 5);
+            const empDayKey1 = s.employeeId ? `${String(s.employeeId)}_${sbKey}_${s.date}_${sInPrefix || 'shift'}` : null;
+            const empDayKey2 = s.employeeCode ? `${String(s.employeeCode)}_${sbKey}_${s.date}_${sInPrefix || 'shift'}` : null;
+            if ((empDayKey1 && incomingEmpBranchDayMap.has(empDayKey1)) || (empDayKey2 && incomingEmpBranchDayMap.has(empDayKey2))) {
               return false;
             }
 
@@ -765,6 +780,82 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
         }
       } catch (shiftsGuardErr) {
         console.warn('[Shifts Guard] ⚠️ Non-critical guard error:', shiftsGuardErr.message);
+      }
+    }
+    // ══════════════════════════════════════════════════════════════════════════
+    // 🛡️ APPROVED ROSTERS MERGE GUARD - حارس الجداول الشهرية المعتمدة
+    // ══════════════════════════════════════════════════════════════════════════
+    // يحمي الجداول الشهرية المعتمدة من المسح أو التراجع بسبب مزامنة قديمة قادمة من أجهزة متأخرة
+    if (!isExplicitReset && stateValue && typeof stateValue === 'object') {
+      try {
+        const existingForRosters = await getSettingsFromStorage(key);
+        if (existingForRosters && Array.isArray(existingForRosters.rosters) && existingForRosters.rosters.length > 0) {
+          const incomingRosterIds = new Set((stateValue.rosters || []).map(r => r && String(r.id)).filter(Boolean));
+          const deletedIdsSet = new Set((stateValue._deletedIds || []).map(String));
+
+          const incomingEmpMonthMap = new Map();
+          (stateValue.rosters || []).forEach(r => {
+            if (r && (r.employeeId || r.employeeCode) && r.month) {
+              const eId = String(r.employeeId || r.employeeCode);
+              const m = String(r.month).slice(0, 7);
+              const b = String(r.branchId || '');
+              const isUni = r.isUnifiedMaster || (r.id && String(r.id).includes('unified'));
+              const k = isUni ? `${eId}_${m}_unified` : `${eId}_${m}_${b}`;
+              incomingEmpMonthMap.set(k, r);
+            }
+          });
+
+          const protectedRosters = [];
+          for (const exR of existingForRosters.rosters) {
+            if (!exR || !exR.id) continue;
+            const exId = String(exR.id);
+            if (deletedIdsSet.has(exId)) continue;
+
+            const eId = String(exR.employeeId || exR.employeeCode || '');
+            const m = exR.month ? String(exR.month).slice(0, 7) : '';
+            const b = String(exR.branchId || '');
+            const isUni = exR.isUnifiedMaster || exId.includes('unified');
+            const logicalKey = isUni ? `${eId}_${m}_unified` : `${eId}_${m}_${b}`;
+
+            const incomingMatch = incomingEmpMonthMap.get(logicalKey) || (incomingRosterIds.has(exId) ? (stateValue.rosters || []).find(r => r && String(r.id) === exId) : null);
+
+            if (!incomingMatch) {
+              // إذا كان الروستر معتمداً وليس محذوفاً صراحة، نحميه ونبقيه
+              if (exR.status === 'approved' || exR.adminApproved === true || exR.branchApproved === true) {
+                protectedRosters.push(exR);
+              }
+            } else {
+              // إذا كان كلاهما موجوداً، نتحقق من طابع التحديث ونحمي النسخة المعتمدة الأحدث
+              const exTime = new Date(exR.updatedAt || exR.approvedAt || exR.createdAt || 0).getTime();
+              const inTime = new Date(incomingMatch.updatedAt || incomingMatch.approvedAt || incomingMatch.createdAt || 0).getTime();
+              const exApproved = exR.status === 'approved' || exR.adminApproved === true;
+              const inApproved = incomingMatch.status === 'approved' || incomingMatch.adminApproved === true;
+
+              if (exApproved && !inApproved) {
+                // القديم معتمد والجديد ليس معتمداً -> المعتمد يفوز
+                incomingMatch.status = 'approved';
+                incomingMatch.adminApproved = true;
+                if (!incomingMatch.schedule || Object.keys(incomingMatch.schedule).length === 0) {
+                  incomingMatch.schedule = exR.schedule;
+                }
+              } else if (exApproved && inApproved && exTime > inTime) {
+                // كلاهما معتمد ولكن المخزن في السيرفر أحدث من الآتي من جهاز متأخر المزامنة
+                const idx = (stateValue.rosters || []).indexOf(incomingMatch);
+                if (idx >= 0) {
+                  stateValue.rosters[idx] = exR;
+                }
+              }
+            }
+          }
+
+          if (protectedRosters.length > 0) {
+            if (!Array.isArray(stateValue.rosters)) stateValue.rosters = [];
+            stateValue.rosters = [...stateValue.rosters, ...protectedRosters];
+            console.log(`[Rosters Guard] 🛡️ تم حماية واستبقاء ${protectedRosters.length} جدول شهري معتمد من المسح.`);
+          }
+        }
+      } catch (rosterGuardErr) {
+        console.warn('[Rosters Guard] ⚠️ Non-critical guard error:', rosterGuardErr.message);
       }
     }
     // ══════════════════════════════════════════════════════════════════════════
@@ -825,10 +916,8 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
       console.error('[PostgreSQL Write-Behind Error]:', dbErr.message);
     });
 
-  // إذا كان خادم Redis غير متصل، ننتظر كتابة PostgreSQL لضمان موثوقية وأمان البيانات
-  if (!isRedisConnected || !redis) {
-    await pgPromise;
-  }
+  // انتظر كتابة PostgreSQL دائماً لضمان موثوقية وأمان البيانات في قاعدة البيانات
+  await pgPromise;
 
   const payload = typeof value === 'string' ? JSON.parse(value) : value;
 
@@ -1120,11 +1209,16 @@ app.post('/api/punches/record', async (req, res) => {
         existing._endedShiftEmpIds = existing._endedShiftEmpIds.filter(id => !possibleKeys.has(String(id)));
       }
 
-      // إضافة سجل الوردية في shifts[]
+      // إضافة سجل الوردية في shifts[] مع الحفاظ على ورديات الفروع الأخرى لنفس اليوم
       if (shiftRecord) {
-        currentShifts = [shiftRecord, ...currentShifts.filter(s =>
-          !(possibleKeys.has(String(s.employeeId)) && s.date === (date || egyptNowDate) && (!s.timeOut || s.timeOut === '' || s.isLiveActive))
-        )];
+        const curShiftBranch = String(shiftRecord.branchId || branchId || '').trim();
+        currentShifts = [shiftRecord, ...currentShifts.filter(s => {
+          const isSameEmp = possibleKeys.has(String(s.employeeId));
+          const isSameDate = s.date === (date || egyptNowDate);
+          const isOpen = (!s.timeOut || s.timeOut === '' || s.isLiveActive);
+          const isSameBranch = (!curShiftBranch || !s.branchId || String(s.branchId).trim() === curShiftBranch);
+          return !(isSameEmp && isSameDate && isOpen && isSameBranch);
+        })];
       }
 
     } else if (actionType === 'check_out' || actionType === 'stop_shift') {
@@ -2219,8 +2313,25 @@ async function flushRequestBatch() {
     const newNotifs = [];
     for (const item of batch) {
       if (item.request && item.request.id) {
-        const r = item.request;
+        let r = item.request;
         const rId = String(r.id);
+        const existingR = reqMap.get(rId) || leaveMap.get(rId) || loansMap.get(rId) || swapsMap.get(rId) || resMap.get(rId);
+
+        // 🛡️ حماية الحالات النهائية: إذا كان الطلب معتمداً أو مرفوضاً مسبقاً في الذاكرة، لا نرجعه أبداً لـ pending
+        if (existingR && (existingR.adminApproved === true || ['approved', 'rejected', 'completed', 'paid', 'partial', 'cancelled'].includes(String(existingR.status).toLowerCase()))) {
+          r = {
+            ...r,
+            status: existingR.status,
+            adminApproved: existingR.adminApproved,
+            approvedAt: existingR.approvedAt || r.approvedAt,
+            approvedBy: existingR.approvedBy || r.approvedBy,
+            rejectedAt: existingR.rejectedAt || r.rejectedAt,
+            rejectedBy: existingR.rejectedBy || r.rejectedBy,
+            branchApproved: existingR.branchApproved !== undefined ? existingR.branchApproved : r.branchApproved,
+            updatedAt: existingR.updatedAt || new Date().toISOString()
+          };
+        }
+
         reqMap.set(rId, r);
 
         // Synchronize specialty arrays atomically
@@ -2341,6 +2452,446 @@ app.post(['/api/requests/submit', '/api/request/submit'], async (req, res) => {
     });
   } catch (err) {
     console.error('[API /requests/submit Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── 6.1.1 اعتماد ورفض الطلبات الذري الفوري (< 20ms) مع التثبيت الشامل في DB و Redis ──
+app.post(['/api/requests/decide', '/api/request/decide'], async (req, res) => {
+  try {
+    const clientAuth = verifyClientRequest(req);
+    if (!clientAuth.isAuthorized) {
+      return res.status(401).json({ success: false, error: 'غير مصرح: يرجى تسجيل الدخول أو استخدام توكن جهاز معتمد' });
+    }
+
+    const {
+      key = STORAGE_KEY,
+      requestId,
+      id,
+      decision = 'approve',
+      status,
+      adminApproved,
+      branchApproved,
+      reason = '',
+      comment = '',
+      request: reqItem,
+      shifts: incomingShifts,
+      actorRole = 'admin',
+      actorName = 'الإدارة'
+    } = req.body;
+
+    const targetId = String(requestId || id || reqItem?.id || '').trim();
+    if (!targetId) {
+      return res.status(400).json({ success: false, error: 'Missing requestId or id' });
+    }
+
+    const rawId = targetId.replace(/^(req_|leave_|swap_|res_|loan_|medreq_|perm_|adj_)/, '');
+    const idVariations = new Set([
+      targetId,
+      rawId,
+      `req_${rawId}`,
+      `leave_${rawId}`,
+      `swap_${rawId}`,
+      `res_${rawId}`,
+      `loan_${rawId}`,
+      `perm_${rawId}`
+    ]);
+
+    const isApprove = decision === 'approve' || status === 'approved' || adminApproved === true;
+    const isReject = decision === 'reject' || status === 'rejected' || (adminApproved === false && !isApprove);
+    const finalStatus = isApprove ? 'approved' : (isReject ? 'rejected' : String(status || 'approved').toLowerCase());
+    const finalAdminApproved = isApprove || ['approved', 'completed', 'paid', 'partial'].includes(finalStatus);
+    const nowIso = new Date().toISOString();
+
+    // 1. تحديث أو تحييد الطلب داخل طابور المعالجة الدفعية requestBatchQueue إن وجد
+    for (const queuedItem of requestBatchQueue) {
+      if (queuedItem?.request?.id && idVariations.has(String(queuedItem.request.id))) {
+        queuedItem.request.status = finalStatus;
+        queuedItem.request.adminApproved = finalAdminApproved;
+        queuedItem.request.updatedAt = nowIso;
+        if (finalAdminApproved) {
+          queuedItem.request.approvedAt = nowIso;
+          queuedItem.request.approvedBy = actorName;
+        } else if (isReject) {
+          queuedItem.request.rejectedAt = nowIso;
+          queuedItem.request.rejectedBy = actorName;
+        }
+      }
+    }
+
+    // 2. تحديث فوري مباشر في جدول public.requests (< 3ms)
+    try {
+      const curReq = await db.query(
+        'SELECT id, status, branch_id, payload FROM public.requests WHERE id = $1 OR id = $2 OR id = $3 OR id = $4 LIMIT 1',
+        [targetId, rawId, `req_${rawId}`, `leave_${rawId}`]
+      );
+      if (curReq.rows.length > 0) {
+        const existingRow = curReq.rows[0];
+        const curPayload = (existingRow.payload && typeof existingRow.payload === 'object') ? existingRow.payload : {};
+        curPayload.status = finalStatus;
+        curPayload.adminApproved = finalAdminApproved;
+        curPayload.updatedAt = nowIso;
+        if (finalAdminApproved) {
+          curPayload.approvedAt = curPayload.approvedAt || nowIso;
+          curPayload.approvedBy = actorName;
+          curPayload.branchApproved = true;
+          curPayload.branchDecision = 'approved';
+        } else if (isReject) {
+          curPayload.rejectedAt = curPayload.rejectedAt || nowIso;
+          curPayload.rejectedBy = actorName;
+          if (reason || comment) curPayload.rejectionReason = reason || comment;
+        }
+        await db.query(
+          `UPDATE public.requests 
+           SET status = $1, 
+               payload = $2::jsonb, 
+               completed_at = CASE WHEN $1 IN ('approved', 'rejected', 'completed', 'paid') THEN NOW() ELSE completed_at END,
+               updated_at = NOW()
+           WHERE id = $3`,
+          [finalStatus.toUpperCase(), JSON.stringify(curPayload), existingRow.id]
+        );
+      }
+    } catch (dbReqErr) {
+      console.warn('[requests/decide] DB public.requests update error:', dbReqErr.message);
+    }
+
+    // 3. جلب وتحديث الحالة في app_settings و Redis
+    const settings = await getSettingsFromStorage(key);
+    let newVer = 1;
+
+    if (settings && typeof settings === 'object') {
+      let matched = false;
+
+      const patchArray = (arrName) => {
+        if (!Array.isArray(settings[arrName])) return;
+        settings[arrName] = settings[arrName].map(item => {
+          if (!item) return item;
+          const iId = String(item.id || '');
+          const iRaw = iId.replace(/^(req_|leave_|swap_|res_|loan_|medreq_|perm_|adj_)/, '');
+          if (idVariations.has(iId) || idVariations.has(iRaw)) {
+            matched = true;
+            const updated = {
+              ...item,
+              status: finalStatus,
+              adminApproved: finalAdminApproved,
+              updatedAt: nowIso
+            };
+            if (finalAdminApproved) {
+              updated.approvedAt = updated.approvedAt || nowIso;
+              updated.approvedBy = actorName;
+              updated.branchApproved = true;
+              updated.branchDecision = 'approved';
+            } else if (isReject) {
+              updated.rejectedAt = updated.rejectedAt || nowIso;
+              updated.rejectedBy = actorName;
+              if (reason || comment) updated.rejectionReason = reason || comment;
+            }
+            return updated;
+          }
+          return item;
+        });
+      };
+
+      patchArray('requests');
+      patchArray('leaveRequests');
+      patchArray('loans');
+      patchArray('shiftSwaps');
+      patchArray('resignationRequests');
+      patchArray('permissionRequests');
+
+      // إذا لم يكن موجوداً وتم إرسال كائن الطلب، نضيفه مع الحالة المعتمدة
+      if (!matched && reqItem && reqItem.id) {
+        const freshItem = {
+          ...reqItem,
+          status: finalStatus,
+          adminApproved: finalAdminApproved,
+          updatedAt: nowIso,
+          ...(finalAdminApproved ? { approvedAt: nowIso, approvedBy: actorName, branchApproved: true, branchDecision: 'approved' } : {}),
+          ...(isReject ? { rejectedAt: nowIso, rejectedBy: actorName, rejectionReason: reason || comment } : {})
+        };
+        const targetArrName = freshItem.type === 'leave' || freshItem.leaveType ? 'leaveRequests' :
+                             freshItem.type === 'loan' ? 'loans' :
+                             freshItem.type === 'swap' || freshItem.swapType ? 'shiftSwaps' :
+                             freshItem.type === 'resignation' ? 'resignationRequests' : 'requests';
+        if (!Array.isArray(settings[targetArrName])) settings[targetArrName] = [];
+        settings[targetArrName] = [freshItem, ...settings[targetArrName].filter(x => x && !idVariations.has(String(x.id)))];
+      }
+
+      // 4. تحديث الورديات المتأثرة إن وجدت (إضافي / تصحيح بصمة / إذن / جزاء)
+      if (Array.isArray(incomingShifts) && incomingShifts.length > 0) {
+        const shiftMap = new Map((settings.shifts || []).map(s => [String(s.id), s]));
+        for (const s of incomingShifts) {
+          if (s && s.id) shiftMap.set(String(s.id), { ...s, updatedAt: nowIso });
+        }
+        settings.shifts = Array.from(shiftMap.values());
+        settings._shiftsUpdatedAt = nowIso;
+      }
+
+      settings._requestsUpdatedAt = nowIso;
+      settings.updatedAt = nowIso;
+
+      const saveRes = await saveSettingsToStorage(key, settings, req.ip || 'request-decide');
+      newVer = saveRes.version;
+    }
+
+    // 5. بث التحديث الذري فورا عبر Socket.io لكافة الشاشات والموظفين
+    const broadcastPayload = {
+      requestId: targetId,
+      id: targetId,
+      decision,
+      status: finalStatus,
+      adminApproved: finalAdminApproved,
+      branchApproved: finalAdminApproved,
+      updatedAt: nowIso,
+      request: reqItem || { id: targetId, status: finalStatus, adminApproved: finalAdminApproved, updatedAt: nowIso },
+      timestamp: nowIso
+    };
+
+    io.emit('request:updated', broadcastPayload);
+    io.emit('entity:changed', {
+      entityType: 'requests',
+      entityId: targetId,
+      data: broadcastPayload,
+      action: finalStatus,
+      timestamp: nowIso
+    });
+
+    res.json({
+      success: true,
+      message: `تم اعتماد/تحديث قرار الطلب (${targetId}) فورياً بنجاح وثبات تام`,
+      requestId: targetId,
+      status: finalStatus,
+      adminApproved: finalAdminApproved,
+      version: newVer,
+      updated_at: nowIso
+    });
+  } catch (err) {
+    console.error('[API /requests/decide Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 🚀 نقطة الاتصال المركزية الذرية لحفظ واعتماد الجداول الشهرية (Atomic Roster Save API)
+// تحفظ الجدول + الورديات المطابقة + وقائع التأخير + ملف الموظف في معاملة واحدة فائقة السرعة (< 20ms)
+// ══════════════════════════════════════════════════════════════════════════════
+app.post(['/api/rosters/save', '/api/rosters/set'], async (req, res) => {
+  try {
+    const clientAuth = verifyClientRequest(req);
+    if (!clientAuth.isAuthorized) {
+      return res.status(401).json({ success: false, error: 'غير مصرح: يرجى تسجيل الدخول أو استخدام توكن جهاز معتمد' });
+    }
+
+    const {
+      key = STORAGE_KEY,
+      employeeId,
+      employeeCode,
+      employeeName,
+      month,
+      branchId,
+      branchName,
+      roster,
+      rosters: incomingRostersList,
+      employees: incomingEmployees,
+      shifts: incomingShifts,
+      lateIncidents: incomingLateIncidents,
+      requests: incomingRequests,
+      notifications: incomingNotifications,
+      deletedRosterIds = []
+    } = req.body;
+
+    const empIdStr = String(employeeId || roster?.employeeId || '').trim();
+    const empCodeStr = String(employeeCode || roster?.employeeCode || '').trim();
+    const normMonth = String(month || roster?.month || getEgyptDate().slice(0, 7)).slice(0, 7);
+    const nowIso = new Date().toISOString();
+
+    const settings = await getSettingsFromStorage(key);
+    if (!settings || typeof settings !== 'object') {
+      return res.status(500).json({ success: false, error: 'تعذر جلب حالة النظام الحالية' });
+    }
+
+    if (!Array.isArray(settings.rosters)) settings.rosters = [];
+    if (!Array.isArray(settings.shifts)) settings.shifts = [];
+    if (!Array.isArray(settings.lateIncidents)) settings.lateIncidents = [];
+    if (!Array.isArray(settings.employees)) settings.employees = [];
+    if (!Array.isArray(settings.requests)) settings.requests = [];
+    if (!Array.isArray(settings._deletedIds)) settings._deletedIds = [];
+
+    // 1. تسجيل المعرفات المحذوفة في _deletedIds لمنع ارتدادها من كاش الأجهزة
+    const tombstoneSet = new Set(settings._deletedIds.map(String));
+    if (Array.isArray(deletedRosterIds)) {
+      deletedRosterIds.forEach(id => {
+        if (id) tombstoneSet.add(String(id));
+      });
+    }
+
+    // 2. معالجة وتوحيد الجداول الشهرية للموظف المستهدف لهذا الشهر
+    const newRostersToInsert = [];
+
+    if (Array.isArray(incomingRostersList) && incomingRostersList.length > 0) {
+      incomingRostersList.forEach(r => {
+        if (r && r.schedule && Object.keys(r.schedule).length > 0) {
+          newRostersToInsert.push({
+            ...r,
+            updatedAt: nowIso,
+            approvedAt: r.approvedAt || nowIso,
+            status: r.status || 'approved',
+            adminApproved: r.adminApproved !== false
+          });
+        }
+      });
+    } else if (roster && roster.schedule && Object.keys(roster.schedule).length > 0) {
+      newRostersToInsert.push({
+        ...roster,
+        id: roster.id || `roster_${empIdStr}_${normMonth}`,
+        employeeId: empIdStr,
+        employeeCode: empCodeStr,
+        month: normMonth,
+        status: roster.status || 'approved',
+        adminApproved: roster.adminApproved !== false,
+        updatedAt: nowIso,
+        approvedAt: roster.approvedAt || nowIso
+      });
+    }
+
+    // حذف أي جداول سابقة لهذا الموظف لنفس الشهر لتفادي أي تضارب أو ازدواج
+    if (empIdStr) {
+      const isMultiBranchTarget = newRostersToInsert.some(r => r.isUnifiedMaster || r.isMultiBranch);
+      settings.rosters = settings.rosters.filter(r => {
+        if (!r) return false;
+        const isMatchEmp = String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr);
+        if (!isMatchEmp) return true;
+        const rMonth = String(r.month || r.fromDate || '').slice(0, 7);
+        const isSameMonth = !rMonth || rMonth === normMonth;
+        if (!isSameMonth) return true;
+
+        if (r.id) tombstoneSet.add(String(r.id));
+        return false;
+      });
+    }
+
+    // إدراج الجداول الجديدة المعتمدة في المقدمة
+    settings.rosters = [...newRostersToInsert, ...settings.rosters];
+    settings._rostersUpdatedAt = nowIso;
+
+    // 3. تحديث ملف الموظف إن وجد
+    if (empIdStr) {
+      const primaryRoster = newRostersToInsert.find(r => r.isUnifiedMaster) || newRostersToInsert[0];
+      if (primaryRoster) {
+        settings.employees = settings.employees.map(e => {
+          if (String(e.id) === empIdStr || (empCodeStr && String(e.code) === empCodeStr)) {
+            const updatedRosterSchedule = primaryRoster.schedule || e.roster?.schedule || {};
+            return {
+              ...e,
+              roster: { ...(e.roster || {}), ...primaryRoster, schedule: updatedRosterSchedule },
+              updatedAt: nowIso
+            };
+          }
+          return e;
+        });
+        settings._employeesUpdatedAt = nowIso;
+      }
+    }
+    if (Array.isArray(incomingEmployees) && incomingEmployees.length > 0) {
+      const empMap = new Map(settings.employees.map(e => [String(e.id), e]));
+      incomingEmployees.forEach(e => {
+        if (e && e.id) empMap.set(String(e.id), { ...empMap.get(String(e.id)), ...e });
+      });
+      settings.employees = Array.from(empMap.values());
+    }
+
+    // 4. تحديث الورديات المطابقة (shifts) لشهر الروستر
+    if (Array.isArray(incomingShifts) && incomingShifts.length > 0) {
+      const shiftMap = new Map(settings.shifts.map(s => [String(s.id), s]));
+      incomingShifts.forEach(s => {
+        if (s && s.id) shiftMap.set(String(s.id), { ...s, updatedAt: nowIso });
+      });
+      settings.shifts = Array.from(shiftMap.values());
+      settings._shiftsUpdatedAt = nowIso;
+    }
+
+    // 5. تحديث وقائع التأخير (lateIncidents)
+    if (Array.isArray(incomingLateIncidents)) {
+      if (empIdStr) {
+        const otherIncidents = settings.lateIncidents.filter(inc => {
+          if (!inc) return false;
+          const isMatchEmp = String(inc.employeeId) === empIdStr || (empCodeStr && String(inc.employeeCode) === empCodeStr);
+          if (!isMatchEmp) return true;
+          const incMonth = String(inc.date || '').slice(0, 7);
+          return incMonth !== normMonth;
+        });
+        const newIncidentsForEmp = incomingLateIncidents.filter(inc => {
+          if (!inc) return false;
+          return String(inc.employeeId) === empIdStr || (empCodeStr && String(inc.employeeCode) === empCodeStr);
+        });
+        settings.lateIncidents = [...otherIncidents, ...newIncidentsForEmp];
+      } else {
+        settings.lateIncidents = incomingLateIncidents;
+      }
+      settings._lateIncidentsUpdatedAt = nowIso;
+    }
+
+    // 6. تحديث الطلبات (requests) في حال إلغاء طلبات الجزاء
+    if (Array.isArray(incomingRequests) && incomingRequests.length > 0) {
+      const reqMap = new Map(settings.requests.map(r => [String(r.id), r]));
+      incomingRequests.forEach(r => {
+        if (r && r.id) reqMap.set(String(r.id), { ...r, updatedAt: nowIso });
+      });
+      settings.requests = Array.from(reqMap.values());
+      settings._requestsUpdatedAt = nowIso;
+    }
+
+    // 7. إضافة أي إشعارات جديدة
+    if (Array.isArray(incomingNotifications) && incomingNotifications.length > 0) {
+      settings.notifications = [...incomingNotifications, ...(settings.notifications || [])].slice(0, 500);
+    }
+
+    settings._deletedIds = Array.from(tombstoneSet).slice(-20000);
+    settings.updatedAt = nowIso;
+
+    // حفظ فوري في Redis و PostgreSQL
+    const saveRes = await saveSettingsToStorage(key, settings, req.ip || 'roster-atomic-save');
+
+    // بث ذري فوري عبر WebSockets لكافة الأجهزة
+    io.emit('entity:changed', {
+      entityType: 'rosters',
+      entityId: empIdStr || 'all',
+      data: settings.rosters,
+      action: 'update',
+      timestamp: nowIso
+    });
+
+    if (Array.isArray(incomingShifts) && incomingShifts.length > 0) {
+      io.emit('entity:changed', {
+        entityType: 'shifts',
+        entityId: empIdStr || 'all',
+        data: settings.shifts,
+        action: 'update',
+        timestamp: nowIso
+      });
+    }
+
+    if (Array.isArray(incomingLateIncidents)) {
+      io.emit('entity:changed', {
+        entityType: 'lateIncidents',
+        entityId: empIdStr || 'all',
+        data: settings.lateIncidents,
+        action: 'update',
+        timestamp: nowIso
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'تم حفظ واعتماد الجدول الشهري وإعادة مطابقة البصمات والجزاءات بنجاح وثبات تام',
+      employeeId: empIdStr,
+      month: normMonth,
+      rostersCount: newRostersToInsert.length,
+      version: saveRes.version,
+      updated_at: nowIso
+    });
+  } catch (err) {
+    console.error('[API /rosters/save Error]:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -3767,6 +4318,24 @@ app.post('/api/sync/push', async (req, res) => {
               console.warn('[sync/push] app_settings patch error:', errSync.message);
             }
 
+            // إبطال كاش Redis فوراً بعد تحديث app_settings المباشر لمنع ارتداد حالة الطلبات المعلقة
+            if (isRedisConnected && redis) {
+              try {
+                await redis.del('hr:settings:pharmacy-tracker-data');
+                await redis.del('hr:version:pharmacy-tracker-data');
+              } catch {}
+            }
+
+            // بث تحديث الطلب اللحظي لكافة الشاشات
+            io.emit('request:updated', {
+              requestId: reqId,
+              id: reqId,
+              status: cleanStatus,
+              adminApproved: isAdminApproved,
+              branchApproved: Boolean(curPayload.branchApproved),
+              updatedAt: new Date().toISOString()
+            });
+
             await db.query(
               `INSERT INTO public.request_status_history (request_id, from_status, to_status, actor_id, actor_name, actor_role, comment)
                VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -5104,7 +5673,7 @@ io.on('connection', (socket) => {
   });
 
   // استقبال وبث قرارات وتحديثات الطلبات الفورية (< 5ms) لجميع الأجهزة وصفحات الموظفين
-  socket.on('request:update', (payload) => {
+  socket.on('request:update', async (payload) => {
     try {
       if (payload && (payload.request || payload.requestId || payload.id)) {
         const reqObj = payload.request || payload;
@@ -5116,6 +5685,24 @@ io.on('connection', (socket) => {
         };
         console.log(`⚡ [Socket.io] بث فوري لقرار/تحديث الطلب (${reqId}) لكافة الموظفين والأجهزة`);
         io.emit('request:updated', normalizedPayload);
+
+        // تثبيت فوري لحالة الاعتماد أو الرفض في قاعدة البيانات لضمان عدم ارتدادها
+        const pStatus = String(reqObj.status || payload.status || '').toLowerCase();
+        const isAdminApproved = Boolean(reqObj.adminApproved || payload.adminApproved || pStatus === 'approved');
+        if (isAdminApproved || pStatus === 'approved' || pStatus === 'rejected') {
+          try {
+            const rawId = reqId.replace(/^(req_|leave_|swap_|res_|loan_|medreq_|perm_|adj_)/, '');
+            await db.query(
+              `UPDATE public.requests 
+               SET status = $1, 
+                   payload = jsonb_set(COALESCE(payload, '{}'::jsonb), '{adminApproved}', $2::jsonb),
+                   completed_at = CASE WHEN $1 IN ('APPROVED', 'REJECTED', 'COMPLETED') THEN NOW() ELSE completed_at END,
+                   updated_at = NOW()
+               WHERE id = $3 OR id = $4 OR id = $5`,
+              [pStatus.toUpperCase(), JSON.stringify(isAdminApproved), reqId, rawId, `req_${rawId}`]
+            ).catch(() => {});
+          } catch {}
+        }
       }
     } catch (err) {
       console.warn('[Socket.io] error on request:update:', err.message);
@@ -5159,6 +5746,9 @@ registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromStorage, saveSett
 
 // ── 9.7 تسجيل مسارات محرك أجهزة البصمة الحيوية (ZKTeco MB20 / ADMS Push Engine) ───
 registerBiometricRoutes(app, db, io, redis, getSettingsFromStorage, saveSettingsToStorage);
+
+// ── 9.8 تشغيل شيطان الفحص والتسوية المحاسبية الآلية للسلف والأقساط 24/7 ────────
+startPayrollLoansSettlementDaemon(STORAGE_KEY, getSettingsFromStorage, saveSettingsToStorage, io);
 
 // ── 10. بدء تشغيل الخادم والإغلاق الآمن ───────────────────────────────────────
 server.listen(PORT, '0.0.0.0', () => {

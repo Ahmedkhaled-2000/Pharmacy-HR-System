@@ -53,6 +53,7 @@ import {
   getActiveShortcuts,
   matchesShortcutEvent
 } from '../../utils/shortcutsConfig';
+import { getSocket } from '../../utils/socketClient';
 
 // بوابات الصيدلية
 import PharmacyOrdersTab from './pharmacy/PharmacyOrdersTab';
@@ -110,7 +111,16 @@ export default function OutstockSystemView({
   toggleTheme,
   showToast = alert
 }) {
-  const isProcurementManager = Boolean(
+  const isOwner = Boolean(
+    initialRole === 'owner' ||
+    initialRole === 'outstock_owner' ||
+    currentUser?.role === 'owner' ||
+    currentUser?.role === 'outstock_owner' ||
+    currentUser?.isOwner === true ||
+    (!isOwnerSimulating && localStorage.getItem('app_auth_role') === 'owner')
+  );
+
+  const isProcurementManager = !isOwner && Boolean(
     initialRole === 'procurement_manager' ||
     initialRole === 'outstock_procurement_manager' ||
     currentUser?.role === 'procurement_manager' ||
@@ -127,6 +137,9 @@ export default function OutstockSystemView({
       r = r.replace('outstock_', '');
     }
     if (r === 'pharmacy') r = 'branch';
+    if (isOwner || r === 'owner' || currentUser?.role === 'owner') {
+      return 'owner';
+    }
     if (
       isProcurementManager ||
       ['procurement_manager', 'procurement_officer', 'cosmetics_officer', 'procurement'].includes(r) ||
@@ -148,6 +161,10 @@ export default function OutstockSystemView({
       r = r.replace('outstock_', '');
     }
     if (r === 'pharmacy') r = 'branch';
+    if (isOwner || r === 'owner' || currentUser?.role === 'owner') {
+      setUserRole('owner');
+      return;
+    }
     if (
       isProcurementManager ||
       ['procurement_manager', 'procurement_officer', 'cosmetics_officer', 'procurement'].includes(r) ||
@@ -161,45 +178,143 @@ export default function OutstockSystemView({
       r = 'procurement';
     }
     setUserRole(r);
-  }, [initialRole, currentUser, isProcurementManager]);
+  }, [initialRole, currentUser, isProcurementManager, isOwner]);
 
-  const isProcurementRole = userRole === 'procurement' ||
-                            userRole === 'procurement_manager' ||
-                            userRole === 'procurement_officer' ||
-                            userRole === 'cosmetics_officer' ||
-                            userRole === 'outstock_procurement_officer' ||
-                            userRole === 'outstock_cosmetics_officer' ||
-                            isProcurementManager ||
-                            currentUser?.role === 'procurement_manager' ||
-                            currentUser?.role === 'procurement_officer' ||
-                            currentUser?.role === 'cosmetics_officer' ||
-                            currentUser?.role === 'outstock_cosmetics_officer' ||
-                            currentUser?.role === 'outstock_procurement_officer' ||
-                            currentUser?.originalRole === 'cosmetics_officer' ||
-                            currentUser?.originalRole === 'outstock_cosmetics_officer' ||
-                            currentUser?.category_scope === 'cosmetics' ||
-                            currentUser?.username === 'admin-stock';
+  const isProcurementRole = !isOwner && (
+    userRole === 'procurement' ||
+    userRole === 'procurement_manager' ||
+    userRole === 'procurement_officer' ||
+    userRole === 'cosmetics_officer' ||
+    userRole === 'outstock_procurement_officer' ||
+    userRole === 'outstock_cosmetics_officer' ||
+    isProcurementManager ||
+    currentUser?.role === 'procurement_manager' ||
+    currentUser?.role === 'procurement_officer' ||
+    currentUser?.role === 'cosmetics_officer' ||
+    currentUser?.role === 'outstock_cosmetics_officer' ||
+    currentUser?.role === 'outstock_procurement_officer' ||
+    currentUser?.originalRole === 'cosmetics_officer' ||
+    currentUser?.originalRole === 'outstock_cosmetics_officer' ||
+    currentUser?.category_scope === 'cosmetics' ||
+    currentUser?.username === 'admin-stock'
+  );
 
-  // استخلاص الصلاحيات الدقيقة للمستخدم الحالي
+  // حالات الصلاحيات والفروع الحية المستلمة عبر السوكت فور قيام المدير بالتعديل
+  const [livePermissions, setLivePermissions] = useState(null);
+  const [liveAllowedBranches, setLiveAllowedBranches] = useState(null);
+
+  // ── نظام الإشعارات المنبثقة الاحترافية داخل النظام (مُعرّفة في البداية لمنع أي خطأ TDZ) ──
+  const [activeNotification, setActiveNotification] = useState(null);
+
+  const triggerNotification = useCallback((msgOrObj) => {
+    if (!msgOrObj) return;
+    if (typeof msgOrObj === 'string') {
+      setActiveNotification({ message: msgOrObj });
+    } else {
+      setActiveNotification(msgOrObj);
+    }
+  }, []);
+
+  // استماع للحدث الموحد من أي مكان بالنظام
+  useEffect(() => {
+    const handleOutstockNotify = (e) => {
+      const detail = e?.detail || e;
+      if (detail) triggerNotification(detail);
+    };
+    window.addEventListener('outstock:notify', handleOutstockNotify);
+    return () => window.removeEventListener('outstock:notify', handleOutstockNotify);
+  }, [triggerNotification]);
+
+  // استخلاص الصلاحيات الدقيقة للمستخدم الحالي مع دمج التحديثات اللحظية
   const effectivePermissions = useMemo(() => {
     const isMgr = isProcurementManager || currentUser?.role === 'procurement_manager' || currentUser?.isProcurementManager || userRole === 'owner';
-    const p = currentUser?.permissions || {};
-    return {
-      can_edit_items: isMgr ? true : (p.can_edit_items !== undefined ? p.can_edit_items : currentUser?.can_edit_items),
-      can_view_orders: isMgr ? true : (p.can_view_orders !== undefined ? p.can_view_orders : currentUser?.can_view_orders),
-      can_change_status: isMgr ? true : (p.can_change_status !== undefined ? p.can_change_status : currentUser?.can_change_status),
-      can_access_suppliers: isMgr ? true : (p.can_access_suppliers !== undefined ? p.can_access_suppliers : currentUser?.can_access_suppliers),
-      can_access_supplier_accounts: isMgr ? true : (p.can_access_supplier_accounts !== undefined ? p.can_access_supplier_accounts : currentUser?.can_access_supplier_accounts),
-      can_access_order_receiving: isMgr ? true : (p.can_access_order_receiving !== undefined ? p.can_access_order_receiving : currentUser?.can_access_order_receiving),
-      can_access_supplier_invoices: isMgr ? true : (p.can_access_supplier_invoices !== undefined ? p.can_access_supplier_invoices : currentUser?.can_access_supplier_invoices),
-      can_access_branch_withdrawals: isMgr ? true : (p.can_access_branch_withdrawals !== undefined ? p.can_access_branch_withdrawals : currentUser?.can_access_branch_withdrawals),
-      can_access_discounts_comparison: isMgr ? true : (p.can_access_discounts_comparison !== undefined ? p.can_access_discounts_comparison : currentUser?.can_access_discounts_comparison),
-      can_access_pharmafly: isMgr ? true : (p.can_access_pharmafly !== undefined ? p.can_access_pharmafly : currentUser?.can_access_pharmafly),
-      can_manage_team: isMgr ? true : (p.can_manage_team !== undefined ? p.can_manage_team : currentUser?.can_manage_team),
-      can_access_order_returns: isMgr ? true : (p.can_access_order_returns !== undefined ? p.can_access_order_returns : currentUser?.can_access_order_returns),
-      category_scope: p.category_scope || currentUser?.category_scope || (currentUser?.role === 'cosmetics_officer' ? 'cosmetics' : 'all')
+    const baseP = currentUser?.permissions || {};
+    const uAccessP = currentUser?.unifiedAccess?.permissions?.outstockHandling?.permissions || currentUser?.unifiedAccess?.permissions?.outstockHandling?.customPermissions || {};
+    const liveP = livePermissions || {};
+    const p = { ...baseP, ...uAccessP, ...liveP };
+
+    const getPerm = (key, defaultVal = false) => {
+      if (isMgr) return true;
+      if (p[key] !== undefined) return Boolean(p[key]);
+      if (currentUser?.[key] !== undefined) return Boolean(currentUser[key]);
+      return defaultVal;
     };
-  }, [currentUser, isProcurementManager, userRole]);
+
+    return {
+      can_edit_items: getPerm('can_edit_items', true),
+      can_view_orders: getPerm('can_view_orders', true),
+      can_change_status: getPerm('can_change_status', true),
+      can_access_suppliers: getPerm('can_access_suppliers', false),
+      can_access_supplier_accounts: getPerm('can_access_supplier_accounts', false),
+      can_access_order_receiving: getPerm('can_access_order_receiving', false),
+      can_access_supplier_invoices: getPerm('can_access_supplier_invoices', false),
+      can_access_branch_withdrawals: getPerm('can_access_branch_withdrawals', false),
+      can_access_discounts_comparison: getPerm('can_access_discounts_comparison', false),
+      can_access_pharmafly: getPerm('can_access_pharmafly', false),
+      can_manage_team: getPerm('can_manage_team', false),
+      can_access_order_returns: getPerm('can_access_order_returns', false),
+      can_delivery_tracking: getPerm('can_delivery_tracking', true),
+      can_unavailable_items: getPerm('can_unavailable_items', true),
+      can_access_procurement_whatsapp: getPerm('can_access_procurement_whatsapp', true),
+      can_access_medications_catalog: getPerm('can_access_medications_catalog', true),
+      can_access_complaints: getPerm('can_access_complaints', true),
+      can_access_cosmetics_customers: getPerm('can_access_cosmetics_customers', false),
+      category_scope: liveP.category_scope || p.category_scope || currentUser?.category_scope || (currentUser?.role === 'cosmetics_officer' ? 'cosmetics' : 'all')
+    };
+  }, [currentUser, isProcurementManager, userRole, livePermissions]);
+
+  // مزامنة فورية لتحديث صلاحيات وفروع العضو عند قيام مدير المشتريات بتعديلها
+  useEffect(() => {
+    const handleProcurementTeamUpdated = (e) => {
+      const data = e?.detail || e;
+      if (!data) return;
+      const myId = String(currentUser?.id || currentUser?.employeeId || '');
+      const myUser = String(currentUser?.username || '').trim().toLowerCase();
+      const targetId = String(data.id || data.employeeId || '');
+      const targetUser = String(data.username || '').trim().toLowerCase();
+
+      const isMatch = (myId && targetId && (myId === targetId || myId.includes(targetId) || targetId.includes(myId))) ||
+                      (myUser && targetUser && myUser === targetUser);
+
+      if (isMatch) {
+        if (data.permissions && typeof data.permissions === 'object') {
+          setLivePermissions(prev => ({ ...(prev || {}), ...data.permissions }));
+        }
+        if (data.assignedBranches !== undefined || data.allowed_branches !== undefined) {
+          const raw = data.assignedBranches !== undefined ? data.assignedBranches : data.allowed_branches;
+          setLiveAllowedBranches(Array.isArray(raw) ? raw : [raw]);
+        }
+        triggerNotification('🔔 تم تحديث صلاحيات ونطاق حسابك من قبل مدير المشتريات وتطبيقها لحظياً');
+      }
+    };
+
+    window.addEventListener('outstock:procurement_team_updated', handleProcurementTeamUpdated);
+    const socket = getSocket();
+    if (socket) {
+      socket.on('outstock:procurement_team_updated', handleProcurementTeamUpdated);
+    }
+    return () => {
+      window.removeEventListener('outstock:procurement_team_updated', handleProcurementTeamUpdated);
+      if (socket) {
+        socket.off('outstock:procurement_team_updated', handleProcurementTeamUpdated);
+      }
+    };
+  }, [currentUser, triggerNotification]);
+
+  // الكائن الفعال والموحد للمستخدم مع الصلاحيات والفروع الحية
+  const effectiveCurrentUser = useMemo(() => {
+    const allowed = liveAllowedBranches !== null ? liveAllowedBranches : (currentUser?.allowedBranches || currentUser?.assignedBranches || []);
+    return {
+      ...currentUser,
+      permissions: {
+        ...(currentUser?.permissions || {}),
+        ...effectivePermissions
+      },
+      ...effectivePermissions,
+      allowedBranches: allowed,
+      assignedBranches: allowed
+    };
+  }, [currentUser, effectivePermissions, liveAllowedBranches]);
 
   // مسؤول مستحضرات التجميل (نطاق مخصص للمستحضرات فقط)
   const isCosmeticsOfficer = (
@@ -224,6 +339,9 @@ export default function OutstockSystemView({
   );
 
   const [activeBranch, setActiveBranch] = useState(() => {
+    if (isOwner) {
+      return { id: 'all', name: 'كافة الفروع (المالك السيادي)' };
+    }
     if (isProcurementManager) {
       return { id: 'all', name: 'كافة الفروع (مركزي)' };
     }
@@ -244,6 +362,7 @@ export default function OutstockSystemView({
 
   // التبويب النشط
   const [activeTab, setActiveTab] = useState(() => {
+    if (isOwner || userRole === 'owner') return 'owner_branches';
     if (userRole === 'branch') return 'orders';
     if (userRole === 'procurement' || isProcurementRole) return 'branch_orders';
     return 'owner_branches';
@@ -379,6 +498,12 @@ export default function OutstockSystemView({
       icon: Building2
     },
     {
+      id: 'owner_returns',
+      title: 'مرتجعات الفروع',
+      desc: 'مراجعة واعتماد أو رفض طلبات مرتجعات الفروع وإعدادات مهلة المرتجع',
+      icon: RotateCcw
+    },
+    {
       id: 'owner_complaints',
       title: 'شكاوى الفروع المصعدة',
       desc: 'متابعة الشكاوى المرفوعة للمالك بخصوص تأخر الرد أو عدم توفر الصنف',
@@ -481,34 +606,18 @@ export default function OutstockSystemView({
       icon: Keyboard
     },
     {
+      id: 'return_policy',
+      title: 'سياسات وإعدادات مهلة المرتجعات',
+      desc: 'تحديد مهلة قبول المرتجعات بالأيام وسياسات الاسترداد المالي',
+      icon: RotateCcw
+    },
+    {
       id: 'danger_zone',
       title: 'منطقة مسح وتصفير النظام وحفظ النسخ الاحتياطية',
       desc: 'تصفير دورة العمل السابقة مع إنشاء نسخة احتياطية وحماية تامة لقاعدة بيانات الأدوية والإعدادات',
       icon: ShieldCheck
     }
   ];
-
-  // ── نظام الإشعارات المنبثقة الاحترافية داخل النظام ──
-  const [activeNotification, setActiveNotification] = useState(null);
-
-  const triggerNotification = useCallback((msgOrObj) => {
-    if (!msgOrObj) return;
-    if (typeof msgOrObj === 'string') {
-      setActiveNotification({ message: msgOrObj });
-    } else {
-      setActiveNotification(msgOrObj);
-    }
-  }, []);
-
-  // استماع للحدث الموحد من أي مكان بالنظام
-  useEffect(() => {
-    const handleOutstockNotify = (e) => {
-      const detail = e?.detail || e;
-      if (detail) triggerNotification(detail);
-    };
-    window.addEventListener('outstock:notify', handleOutstockNotify);
-    return () => window.removeEventListener('outstock:notify', handleOutstockNotify);
-  }, []);
 
   // ── قسم إعدادات المالك والقائمة المنسدلة الذكية ──
   const [ownerSettingsSection, setOwnerSettingsSection] = useState('pharmacy_identity');
@@ -604,12 +713,12 @@ export default function OutstockSystemView({
 
   const canAccessMedicationsCatalog = useMemo(() => {
     if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock' || isProcurementManager) return true;
-    return effectivePermissions.can_edit_items === true;
+    return effectivePermissions.can_access_medications_catalog === true || effectivePermissions.can_edit_items === true;
   }, [userRole, currentUser, effectivePermissions, isProcurementManager]);
 
   const canAccessProcurementWhatsApp = useMemo(() => {
     if (userRole === 'owner' || currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock' || isProcurementManager) return true;
-    return effectivePermissions.can_view_orders !== false;
+    return effectivePermissions.can_access_procurement_whatsapp !== false && effectivePermissions.can_view_orders !== false;
   }, [userRole, currentUser, effectivePermissions, isProcurementManager]);
 
   const filteredBranchOrdersSubsections = useMemo(() => {
@@ -625,8 +734,8 @@ export default function OutstockSystemView({
         return effectivePermissions.can_view_orders !== false;
       }
       if (sub.id === 'procurement_inquiries') return effectivePermissions.can_view_orders !== false || effectivePermissions.can_edit_items === true;
-      if (sub.id === 'delivery_tracking') return effectivePermissions.can_view_orders !== false;
-      if (sub.id === 'unavailable_items') return effectivePermissions.can_view_orders !== false;
+      if (sub.id === 'delivery_tracking') return effectivePermissions.can_delivery_tracking !== false && effectivePermissions.can_view_orders !== false;
+      if (sub.id === 'unavailable_items') return effectivePermissions.can_unavailable_items !== false && effectivePermissions.can_view_orders !== false;
       return true;
     }).map(sub => {
       if (isCosmeticsOfficer) {
@@ -658,14 +767,14 @@ export default function OutstockSystemView({
       }
     }
     if (effectivePermissions.can_view_orders !== false || effectivePermissions.can_edit_items === true || isProcurementManager) tabs.push('procurement_inquiries');
-    if (canAccessBranchOrders) tabs.push('delivery_tracking');
-    if (effectivePermissions.can_view_orders !== false || isProcurementManager) tabs.push('unavailable_items');
+    if (canAccessBranchOrders && effectivePermissions.can_delivery_tracking !== false) tabs.push('delivery_tracking');
+    if ((effectivePermissions.can_unavailable_items !== false && effectivePermissions.can_view_orders !== false) || isProcurementManager) tabs.push('unavailable_items');
     if (canAccessSuppliersTab) tabs.push('procurement_suppliers');
     if (canManageTeam) tabs.push('procurement_team');
     if (canAccessProcurementWhatsApp) tabs.push('procurement_whatsapp');
     if (canAccessMedicationsCatalog) tabs.push('procurement_medications');
-    tabs.push('procurement_complaints');
-    if (isCosmeticsOfficer) {
+    if (effectivePermissions.can_access_complaints !== false) tabs.push('procurement_complaints');
+    if (isCosmeticsOfficer || effectivePermissions.can_access_cosmetics_customers === true) {
       tabs.push('cosmetics_customers');
     }
     return tabs;
@@ -680,12 +789,12 @@ export default function OutstockSystemView({
 
   // التحقق التلقائي من التبويب النشط وفق الصلاحيات الدقيقة
   useEffect(() => {
-    if (userRole === 'procurement' || isProcurementRole) {
+    if (!isOwner && (userRole === 'procurement' || isProcurementRole)) {
       if (allowedProcurementTabs.length > 0 && !allowedProcurementTabs.includes(activeTab)) {
         setActiveTab(allowedProcurementTabs[0]);
       }
     }
-  }, [userRole, isProcurementRole, allowedProcurementTabs, activeTab]);
+  }, [userRole, isProcurementRole, allowedProcurementTabs, activeTab, isOwner]);
 
   // ── شريط الأوامر السريع المركزي والبحث الشامل (HUD / Command Palette - Ctrl+K) ──
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -1241,28 +1350,6 @@ export default function OutstockSystemView({
 
         {/* أدوات التحكم والوضع الليلي وتسجيل الخروج */}
         <div className="outstock-user-controls">
-          {/* زر تبديل المنظومة والصفحات المصرح بها */}
-          <button
-            type="button"
-            className="outstock-btn outstock-btn-secondary"
-            style={{
-              padding: '6px 12px',
-              borderRadius: '10px',
-              background: 'rgba(13, 148, 136, 0.12)',
-              color: '#0d9488',
-              border: '1px solid rgba(13, 148, 136, 0.3)',
-              fontWeight: 800,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-            onClick={() => window.dispatchEvent(new CustomEvent('app:open-workspace-switcher', { detail: { user: currentUser } }))}
-            title="التبديل بين المنظومات والصفحات المصرح بها (نظام HR، مدير الفرع، الإدارة العليا)"
-          >
-            <span>🔄</span>
-            <span className="outstock-btn-text-desktop">تبديل المنظومة</span>
-          </button>
-
           {/* زر شريط الأوامر السريع العالمي (Command Palette) */}
           <button
             type="button"
@@ -1459,22 +1546,22 @@ export default function OutstockSystemView({
               <button
                 ref={pharmacyOrdersButtonRef}
                 type="button"
-                className={`outstock-subnav-btn ${['orders', 'branch_orders', 'transferred_orders', 'procurement_tracking', 'inquiries', 'restocked_items'].includes(activeTab) ? 'is-active' : ''}`}
+                className={`outstock-subnav-btn ${['orders', 'branch_orders', 'transferred_orders', 'procurement_tracking', 'inquiries', 'restocked_items', 'order_returns'].includes(activeTab) ? 'is-active' : ''}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   setPharmacyOrdersMenuCoords(calculateMenuCoords(pharmacyOrdersButtonRef));
                   setIsPharmacyOrdersMenuOpen(prev => !prev);
                 }}
-                title="طلبات العملاء، طلبات الفرع، متابعة المشتريات، الاستعلامات، والأصناف التي أعيد توافرها"
+                title="طلبات العملاء، طلبات الفرع، متابعة المشتريات، الاستعلامات، والأصناف التي أعيد توافرها والمرتجعات"
                 aria-haspopup="true"
                 aria-expanded={isPharmacyOrdersMenuOpen}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
               >
                 <Package size={16} />
                 <span>طلبات</span>
-                {(notificationsSummary.branchReadyOrdersCount + (notificationsSummary.branchRestockedItemsCount || 0) + (notificationsSummary.branchRepliedInquiriesCount || 0) + (notificationsSummary.pendingReturnsCount || 0)) > 0 && (
-                  <span className="outstock-nav-badge success" title={`${notificationsSummary.branchReadyOrdersCount} جاهز، ${notificationsSummary.branchRestockedItemsCount || 0} صنف متوفر، ${notificationsSummary.pendingReturnsCount || 0} مرتجع معلق`}>
-                    {notificationsSummary.branchReadyOrdersCount + (notificationsSummary.branchRestockedItemsCount || 0) + (notificationsSummary.branchRepliedInquiriesCount || 0) + (notificationsSummary.pendingReturnsCount || 0)}
+                {(notificationsSummary.branchReadyOrdersCount + (notificationsSummary.branchRestockedItemsCount || 0) + (notificationsSummary.branchRepliedInquiriesCount || 0) + (notificationsSummary.branchPendingReturnsCount ?? (userRole === 'branch' ? 0 : (notificationsSummary.pendingReturnsCount || 0)))) > 0 && (
+                  <span className="outstock-nav-badge success" title={`${notificationsSummary.branchReadyOrdersCount} جاهز، ${notificationsSummary.branchRestockedItemsCount || 0} صنف متوفر، ${(notificationsSummary.branchPendingReturnsCount ?? (userRole === 'branch' ? 0 : (notificationsSummary.pendingReturnsCount || 0)))} مرتجع معلق`}>
+                    {notificationsSummary.branchReadyOrdersCount + (notificationsSummary.branchRestockedItemsCount || 0) + (notificationsSummary.branchRepliedInquiriesCount || 0) + (notificationsSummary.branchPendingReturnsCount ?? (userRole === 'branch' ? 0 : (notificationsSummary.pendingReturnsCount || 0)))}
                   </span>
                 )}
                 <ChevronDown
@@ -1703,7 +1790,7 @@ export default function OutstockSystemView({
               <button
                 ref={ownerBranchOrdersButtonRef}
                 type="button"
-                className={`outstock-subnav-btn ${['owner_branches', 'owner_complaints', 'owner_inquiries'].includes(activeTab) ? 'is-active' : ''}`}
+                className={`outstock-subnav-btn ${['owner_branches', 'owner_returns', 'owner_complaints', 'owner_inquiries'].includes(activeTab) ? 'is-active' : ''}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   setOwnerBranchOrdersMenuCoords(calculateMenuCoords(ownerBranchOrdersButtonRef));
@@ -1713,16 +1800,16 @@ export default function OutstockSystemView({
                   if (isSuppliersMenuOpen) setIsSuppliersMenuOpen(false);
                   if (isSettingsMenuOpen) setIsSettingsMenuOpen(false);
                 }}
-                title="طلبات الفروع وأرصدتها، شكاوى الفروع المصعدة، واستعلامات وتصحيح الأصناف"
+                title="طلبات الفروع وأرصدتها، مرتجعات الفروع، شكاوى الفروع المصعدة، واستعلامات وتصحيح الأصناف"
                 aria-haspopup="true"
                 aria-expanded={isOwnerBranchOrdersMenuOpen}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
               >
                 <Building2 size={16} />
                 <span>طلبات الفروع</span>
-                {(notificationsSummary.pendingBranchOrdersCount + notificationsSummary.ownerPendingComplaintsCount + notificationsSummary.pendingInquiriesCount) > 0 && (
-                  <span className="outstock-nav-badge warning" title={`${notificationsSummary.pendingBranchOrdersCount} طلب فرع، ${notificationsSummary.ownerPendingComplaintsCount} شكوى، ${notificationsSummary.pendingInquiriesCount} استعلام`}>
-                    {notificationsSummary.pendingBranchOrdersCount + notificationsSummary.ownerPendingComplaintsCount + notificationsSummary.pendingInquiriesCount}
+                {(notificationsSummary.pendingBranchOrdersCount + notificationsSummary.ownerPendingComplaintsCount + notificationsSummary.pendingInquiriesCount + (notificationsSummary.pendingReturnsCount || 0)) > 0 && (
+                  <span className="outstock-nav-badge warning" title={`${notificationsSummary.pendingBranchOrdersCount} طلب فرع، ${notificationsSummary.pendingReturnsCount || 0} مرتجع فرع، ${notificationsSummary.ownerPendingComplaintsCount} شكوى، ${notificationsSummary.pendingInquiriesCount} استعلام`}>
+                    {notificationsSummary.pendingBranchOrdersCount + notificationsSummary.ownerPendingComplaintsCount + notificationsSummary.pendingInquiriesCount + (notificationsSummary.pendingReturnsCount || 0)}
                   </span>
                 )}
                 <ChevronDown
@@ -1868,12 +1955,8 @@ export default function OutstockSystemView({
                 className={`outstock-subnav-btn ${activeTab === 'owner_settings' || activeTab === 'owner_team' ? 'is-active' : ''}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (activeTab !== 'owner_settings' && activeTab !== 'owner_team') {
-                    setActiveTab('owner_settings');
-                    setIsSettingsMenuOpen(true);
-                  } else {
-                    setIsSettingsMenuOpen(prev => !prev);
-                  }
+                  setMenuCoords(calculateMenuCoords(settingsButtonRef));
+                  setIsSettingsMenuOpen(prev => !prev);
                   if (isOwnerBranchOrdersMenuOpen) setIsOwnerBranchOrdersMenuOpen(false);
                   if (isOwnerProcurementMenuOpen) setIsOwnerProcurementMenuOpen(false);
                   if (isOwnerReportsMenuOpen) setIsOwnerReportsMenuOpen(false);
@@ -2021,6 +2104,7 @@ export default function OutstockSystemView({
               <ProcurementOrdersTab
                 showToast={triggerNotification}
                 categoryScope={isCosmeticsOfficer ? 'cosmetics' : null}
+                currentUser={effectiveCurrentUser}
               />
             )}
 
@@ -2034,7 +2118,7 @@ export default function OutstockSystemView({
             {activeTab === 'procurement_suppliers' && canAccessSuppliersTab && (
               <ProcurementSuppliersTab
                 initialSubTab={suppliersActiveSubTab}
-                currentUser={currentUser}
+                currentUser={effectiveCurrentUser}
                 showToast={triggerNotification}
                 categoryScope={isCosmeticsOfficer ? 'cosmetics' : null}
               />
@@ -2045,7 +2129,7 @@ export default function OutstockSystemView({
                 userRole={currentUser?.role === 'procurement_manager' || currentUser?.username === 'admin-stock' ? 'procurement_manager' : 'procurement_officer'}
                 branchId={effectiveBranchId}
                 currentBranch={activeBranch}
-                currentUser={currentUser}
+                currentUser={effectiveCurrentUser}
                 showToast={triggerNotification}
                 categoryScope={isCosmeticsOfficer ? 'cosmetics' : null}
               />
@@ -2067,7 +2151,7 @@ export default function OutstockSystemView({
             {activeTab === 'procurement_team' && canManageTeam && (
               <ProcurementTeamTab
                 showToast={triggerNotification}
-                currentUser={currentUser}
+                currentUser={effectiveCurrentUser}
               />
             )}
 
@@ -2079,7 +2163,7 @@ export default function OutstockSystemView({
                   currentPharmacist={currentUser?.fullName || currentUser?.name || 'مسؤول تسويق المستحضرات'}
                   showToast={triggerNotification}
                   userRole="cosmetics_officer"
-                  currentUser={currentUser}
+                  currentUser={effectiveCurrentUser}
                 />
               ) : (
                 <ProcurementWhatsAppCenterTab
@@ -2094,13 +2178,15 @@ export default function OutstockSystemView({
               <OwnerMedicationsPricingTab
                 showToast={triggerNotification}
                 categoryScope={isCosmeticsOfficer ? 'cosmetics' : null}
+                currentUser={effectiveCurrentUser}
               />
             )}
 
             {activeTab === 'procurement_complaints' && (
               <ProcurementComplaintsTab
-                currentUser={currentUser}
+                currentUser={effectiveCurrentUser}
                 showToast={triggerNotification}
+                categoryScope={isCosmeticsOfficer ? 'cosmetics' : null}
               />
             )}
 
@@ -2166,6 +2252,13 @@ export default function OutstockSystemView({
 
             {activeTab === 'owner_branches' && (
               <OwnerBranchOrdersTab showToast={triggerNotification} />
+            )}
+
+            {activeTab === 'owner_returns' && (
+              <ProcurementReturnsTab
+                showToast={triggerNotification}
+                categoryScope={null}
+              />
             )}
 
             {activeTab === 'owner_procurement' && (
@@ -2353,7 +2446,7 @@ export default function OutstockSystemView({
                   : sub.id === 'restocked_items'
                   ? (notificationsSummary.branchRestockedItemsCount || 0)
                   : sub.id === 'order_returns'
-                  ? (notificationsSummary.pendingReturnsCount || 0)
+                  ? (notificationsSummary.branchPendingReturnsCount ?? (userRole === 'branch' ? 0 : notificationsSummary.pendingReturnsCount) ?? 0)
                   : 0;
 
                 const badgeType = sub.id === 'inquiries' ? 'info' : (sub.id === 'order_returns' ? 'warning' : 'success');
@@ -2593,14 +2686,16 @@ export default function OutstockSystemView({
                 const IconComp = sub.icon;
                 const badgeCount = sub.id === 'owner_branches'
                   ? notificationsSummary.pendingBranchOrdersCount
+                  : sub.id === 'owner_returns'
+                  ? (notificationsSummary.pendingReturnsCount || 0)
                   : sub.id === 'owner_complaints'
                   ? notificationsSummary.ownerPendingComplaintsCount
                   : sub.id === 'owner_inquiries'
                   ? notificationsSummary.pendingInquiriesCount
                   : 0;
 
-                const badgeType = sub.id === 'owner_complaints' ? 'warning' : 'info';
-                const badgeSuffix = sub.id === 'owner_complaints' ? 'شكوى' : (sub.id === 'owner_inquiries' ? 'استعلام' : 'جديد');
+                const badgeType = sub.id === 'owner_complaints' ? 'warning' : (sub.id === 'owner_returns' ? 'warning' : 'info');
+                const badgeSuffix = sub.id === 'owner_complaints' ? 'شكوى' : (sub.id === 'owner_inquiries' ? 'استعلام' : (sub.id === 'owner_returns' ? 'مرتجع' : 'جديد'));
 
                 return (
                   <button

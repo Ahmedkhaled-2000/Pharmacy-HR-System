@@ -137,18 +137,45 @@ export async function exportProcurementOrdersExcel(aggregatedData = [], options 
   // سطر فارغ للفصل
   wsSummary.getRow(5).height = 10;
 
-  // 4. عناوين جدول الأصناف
+  // تجميع تنفيذي موحد لكافة الفروع لشركات التوزيع (ابن سينا، فارما أوفرسيز، المتحدة، إلخ)
+  const distributorMap = new Map();
+  aggregatedData.forEach((item) => {
+    const medKey = `${String(item.medication_name || '').trim().toLowerCase()}_${item.unit_type || 'pack'}`;
+    if (!distributorMap.has(medKey)) {
+      distributorMap.set(medKey, {
+        medicationName: item.medication_name,
+        unitType: item.unit_type,
+        itemType: item.item_type,
+        totalRequestedQty: 0,
+        ordersCount: 0,
+        branchList: [],
+        details: []
+      });
+    }
+    const entry = distributorMap.get(medKey);
+    const qty = Number(item.total_requested_qty || 0);
+    entry.totalRequestedQty += qty;
+    entry.ordersCount += Number(item.orders_count || 1);
+    const bName = item.branch_name || item.branch_id || 'الفرع';
+    entry.branchList.push(`${bName} (${qty})`);
+    if (Array.isArray(item.item_details)) {
+      entry.details.push(...item.item_details);
+    }
+  });
+  const distributorAggregated = Array.from(distributorMap.values());
+
+  // 4. عناوين جدول أمر الشراء الموحد لشركات التوزيع
   const summaryHeaders = [
     'م',
-    'اسم الدواء / الصنف',
+    'اسم الصنف الدوائي / المستحضر',
     'الوحدة',
-    'الفرع الطالب',
-    'إجمالي الكمية المطلوبة',
-    'عدد طلبات العملاء',
+    'إجمالي الكمية المطلوبة لكافة الفروع',
+    'توزيع الحصص بالفروع الطالبة',
+    'عدد الطلبات',
     'متوسط السعر (ج.م)',
     'إجمالي القيمة التقديرية (ج.م)',
-    'حالة التوفير المقترحة',
-    'ملاحظات المشتريات والتوريد'
+    'شركة التوزيع المقترحة',
+    'ملاحظات أمر التوريد'
   ];
 
   const headerRow = wsSummary.getRow(6);
@@ -166,23 +193,22 @@ export async function exportProcurementOrdersExcel(aggregatedData = [], options 
     { key: 'index', width: 6 },
     { key: 'medication_name', width: 34 },
     { key: 'unit_type', width: 14 },
-    { key: 'branch_name', width: 22 },
-    { key: 'total_qty', width: 20 },
-    { key: 'orders_count', width: 18 },
-    { key: 'unit_price', width: 18 },
-    { key: 'total_price', width: 22 },
-    { key: 'status_label', width: 20 },
-    { key: 'procurement_notes', width: 28 }
+    { key: 'total_qty', width: 22 },
+    { key: 'branch_breakdown', width: 36 },
+    { key: 'orders_count', width: 14 },
+    { key: 'unit_price', width: 16 },
+    { key: 'total_price', width: 20 },
+    { key: 'distributor', width: 24 },
+    { key: 'procurement_notes', width: 26 }
   ];
 
-  // 5. كتابة صفوف البيانات
+  // 5. كتابة صفوف البيانات المجمعة
   let currentRowIndex = 7;
-  aggregatedData.forEach((item, idx) => {
+  distributorAggregated.forEach((item, idx) => {
     const isEven = idx % 2 === 0;
-    const unitLabel = item.unit_type === 'strip' ? 'شريط' : 'علبة';
+    const unitLabel = item.unitType === 'strip' ? 'شريط' : 'علبة';
 
-    // حساب متوسط السعر إن وجد في تفاصيل الأصناف
-    const details = item.item_details || [];
+    const details = item.details || [];
     let avgPrice = 0;
     if (details.length > 0) {
       const sumPrices = details.reduce((sum, d) => sum + parseFloat(d.unitPrice || 0), 0);
@@ -192,46 +218,44 @@ export async function exportProcurementOrdersExcel(aggregatedData = [], options 
     const row = wsSummary.getRow(currentRowIndex);
     row.values = [
       idx + 1,
-      item.medication_name || '',
+      item.medicationName || '',
       unitLabel,
-      item.branch_name || item.branch_id || 'الفرع',
-      Number(item.total_requested_qty || 0),
-      Number(item.orders_count || 0),
+      Number(item.totalRequestedQty || 0),
+      item.branchList.join(' | '),
+      Number(item.ordersCount || 0),
       avgPrice > 0 ? parseFloat(avgPrice.toFixed(2)) : 0,
-      { formula: `E${currentRowIndex}*G${currentRowIndex}`, result: (Number(item.total_requested_qty || 0) * avgPrice) },
-      'قيد توفير المشتريات',
-      ''
+      { formula: `D${currentRowIndex}*G${currentRowIndex}`, result: (Number(item.totalRequestedQty || 0) * avgPrice) },
+      'ابن سينا / فارما أوفرسيز / المتحدة',
+      'أمر شراء مجمع معتمد'
     ];
-    row.height = 24;
+    row.height = 25;
 
     row.eachCell((cell, colNumber) => {
       cell.font = { name: 'Arial', size: 10.5, color: { argb: THEME.textDark } };
       cell.border = THIN_BORDER;
       cell.alignment = { vertical: 'middle' };
 
-      // محاذاة النص والأرقام
       if (colNumber === 1 || colNumber === 3) {
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
       } else if (colNumber === 2) {
         cell.font = { name: 'Arial', bold: true, size: 11, color: { argb: '0F172A' } };
         cell.alignment = { horizontal: 'right', vertical: 'middle' };
       } else if (colNumber === 4) {
-        cell.alignment = { horizontal: 'right', vertical: 'middle' };
-      } else if (colNumber === 5) {
-        cell.font = { name: 'Arial', bold: true, size: 11, color: { argb: '0E7490' } };
+        cell.font = { name: 'Arial', bold: true, size: 12, color: { argb: '0E7490' } };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (colNumber === 5) {
+        cell.alignment = { horizontal: 'right', vertical: 'middle' };
+        cell.font = { name: 'Arial', size: 10, color: { argb: '334155' } };
       } else if (colNumber === 6) {
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
       } else if (colNumber === 7 || colNumber === 8) {
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
         cell.numFmt = '#,##0.00';
-      } else if (colNumber === 9) {
+      } else if (colNumber === 9 || colNumber === 10) {
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        cell.font = { name: 'Arial', bold: true, size: 10, color: { argb: THEME.textAmber } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.highlightAmber } };
       }
 
-      if (colNumber !== 9 && !isEven) {
+      if (!isEven) {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.altRowBg } };
       }
     });
@@ -241,15 +265,19 @@ export async function exportProcurementOrdersExcel(aggregatedData = [], options 
 
   // 6. صف المجاميع الإجمالية (Totals Row)
   const totalRow = wsSummary.getRow(currentRowIndex);
-  wsSummary.mergeCells(`A${currentRowIndex}:D${currentRowIndex}`);
+  wsSummary.mergeCells(`A${currentRowIndex}:C${currentRowIndex}`);
   const totLabel = wsSummary.getCell(`A${currentRowIndex}`);
-  totLabel.value = 'الإجمالي العام لكافة طلبات الأصناف:';
+  totLabel.value = 'الإجمالي العام لكافة أصناف أمر الشراء:';
   totLabel.font = { name: 'Arial', bold: true, size: 11.5, color: { argb: THEME.white } };
   totLabel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.totalBg } };
   totLabel.alignment = { horizontal: 'center', vertical: 'middle' };
 
-  totalRow.getCell(5).value = { formula: `SUM(E7:E${currentRowIndex - 1})` };
-  totalRow.getCell(5).font = { name: 'Arial', bold: true, size: 12, color: { argb: THEME.white } };
+  totalRow.getCell(4).value = { formula: `SUM(D7:D${currentRowIndex - 1})` };
+  totalRow.getCell(4).font = { name: 'Arial', bold: true, size: 12, color: { argb: THEME.white } };
+  totalRow.getCell(4).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.totalBg } };
+  totalRow.getCell(4).alignment = { horizontal: 'center', vertical: 'middle' };
+
+  totalRow.getCell(5).value = '-';
   totalRow.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.totalBg } };
   totalRow.getCell(5).alignment = { horizontal: 'center', vertical: 'middle' };
 
@@ -270,7 +298,7 @@ export async function exportProcurementOrdersExcel(aggregatedData = [], options 
 
   wsSummary.mergeCells(`I${currentRowIndex}:J${currentRowIndex}`);
   const totEnd = wsSummary.getCell(`I${currentRowIndex}`);
-  totEnd.value = 'جاهز للتسليم والشحن المباشر';
+  totEnd.value = 'جاهز للتوريد المباشر من الموزعين';
   totEnd.font = { name: 'Arial', bold: true, size: 10, color: { argb: THEME.white } };
   totEnd.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.totalBg } };
   totEnd.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -279,16 +307,16 @@ export async function exportProcurementOrdersExcel(aggregatedData = [], options 
   totalRow.eachCell((c) => { c.border = THIN_BORDER; });
 
   // ══════════════════════════════════════════════════════════════════════════════
-  // الورقة الثانية: التفاصيل الكاملة لطلبات العملاء والفواتير (Drill-Down)
+  // الورقة الثانية: كشف الطلبات الفردية المفصلة لكافة الفروع (بدون رقم العميل للخصوصية)
   // ══════════════════════════════════════════════════════════════════════════════
-  const wsDetails = wb.addWorksheet('تفاصيل طلبات العملاء بالفروع', {
+  const wsDetails = wb.addWorksheet('الطلبات الفردية التفصيلية', {
     views: [{ rightToLeft: true, showGridLines: true, state: 'frozen', ySplit: 2 }]
   });
 
   // ترويسة الورقة الثانية
-  wsDetails.mergeCells('A1:I1');
+  wsDetails.mergeCells('A1:J1');
   const dTitle = wsDetails.getCell('A1');
-  dTitle.value = '📋 تفاصيل إيصالات العملاء والأدوية المحجوزة بالفروع (بيانات الاتصال والاستلام)';
+  dTitle.value = '📋 كشف طلبات الفروع الفردية المفصلة (بالتاريخ والوقت الدقيق واسم الصيدلي والفرع)';
   dTitle.font = { name: 'Arial', bold: true, size: 13, color: { argb: THEME.white } };
   dTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.accentRoyal } };
   dTitle.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -296,14 +324,15 @@ export async function exportProcurementOrdersExcel(aggregatedData = [], options 
 
   const detailHeaders = [
     'م',
-    'رقم الإيصال',
-    'الفرع',
-    'اسم الدواء / الصنف',
-    'نوع الوحدة',
-    'الكمية',
-    'اسم العميل',
-    'هاتف الواتساب',
-    'تاريخ وتوقيت الطلب'
+    'رقم الطلب',
+    'الفرع الطالب',
+    'الصيدلي المسؤول',
+    'تاريخ وتوقيت الطلب الدقيق',
+    'نوع الطلب',
+    'اسم المستحضر / الصنف',
+    'الوحدة',
+    'الكمية المطلوبة',
+    'ملاحظات الصيدلي ومستوى الاستعجال'
   ];
 
   const dHeadRow = wsDetails.getRow(2);
@@ -318,60 +347,99 @@ export async function exportProcurementOrdersExcel(aggregatedData = [], options 
 
   wsDetails.columns = [
     { key: 'idx', width: 6 },
-    { key: 'orderNumber', width: 22 },
+    { key: 'orderNumber', width: 20 },
     { key: 'branch', width: 22 },
-    { key: 'medication', width: 30 },
+    { key: 'pharmacist', width: 22 },
+    { key: 'date', width: 24 },
+    { key: 'type', width: 22 },
+    { key: 'medication', width: 32 },
     { key: 'unit', width: 14 },
-    { key: 'qty', width: 12 },
-    { key: 'customer', width: 24 },
-    { key: 'phone', width: 20 },
-    { key: 'date', width: 22 }
+    { key: 'qty', width: 14 },
+    { key: 'notes', width: 30 }
   ];
 
   let detailRowIdx = 3;
   let counter = 1;
 
-  aggregatedData.forEach((group) => {
-    const details = group.item_details || [];
-    details.forEach((d) => {
-      const dRow = wsDetails.getRow(detailRowIdx);
-      const isEvenD = counter % 2 === 0;
-      const orderDate = d.createdAt
-        ? new Date(d.createdAt).toLocaleDateString('ar-EG') + ' ' + new Date(d.createdAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
-        : '-';
+  const itemsList = Array.isArray(options.individualOrders) && options.individualOrders.length > 0
+    ? options.individualOrders.map(o => ({
+        orderNumber: o.orderNumber,
+        branchName: o.branchName || o.branchId || 'الفرع',
+        responsiblePharmacist: o.responsiblePharmacist || 'الصيدلي المسؤول',
+        createdAt: o.createdAt,
+        orderType: o.orderType,
+        medicationName: o.medicationName,
+        unitType: o.unitType,
+        quantity: o.quantity,
+        notes: [o.pharmacistNotes, o.urgencyLevel === 'urgent' ? '⚠️ عاجل' : ''].filter(Boolean).join(' | ') || '-'
+      }))
+    : (() => {
+        const list = [];
+        aggregatedData.forEach((group) => {
+          (group.item_details || []).forEach((d) => {
+            list.push({
+              orderNumber: d.orderNumber,
+              branchName: group.branch_name || group.branch_id || 'الفرع',
+              responsiblePharmacist: d.responsiblePharmacist || 'الصيدلي المسؤول',
+              createdAt: d.createdAt,
+              orderType: d.orderType,
+              medicationName: group.medication_name,
+              unitType: group.unit_type,
+              quantity: d.quantity,
+              notes: [d.pharmacistNotes, d.branchRequestReason].filter(Boolean).join(' | ') || (d.urgencyLevel === 'urgent' ? '⚠️ عاجل' : '-')
+            });
+          });
+        });
+        return list;
+      })();
 
-      dRow.values = [
-        counter,
-        d.orderNumber || '-',
-        group.branch_name || group.branch_id || 'الفرع',
-        group.medication_name || '',
-        group.unit_type === 'strip' ? 'شريط' : 'علبة',
-        Number(d.quantity || 1),
-        d.customerName || 'عميل نقدي',
-        d.customerPhone || '-',
-        orderDate
-      ];
-      dRow.height = 22;
+  itemsList.forEach((d) => {
+    const dRow = wsDetails.getRow(detailRowIdx);
+    const isEvenD = counter % 2 === 0;
+    const orderDate = d.createdAt
+      ? new Date(d.createdAt).toLocaleDateString('ar-EG') + ' - ' + new Date(d.createdAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+      : '-';
 
-      dRow.eachCell((c, cIdx) => {
-        c.font = { name: 'Arial', size: 10, color: { argb: THEME.textDark } };
-        c.border = THIN_BORDER;
-        c.alignment = { vertical: 'middle' };
+    const typeLabel = d.orderType === 'branch' ? '🏢 طلب مخزون للفرع (عجز رفوف)' : '👤 طلب عميل نقدي';
 
-        if (cIdx === 1 || cIdx === 5 || cIdx === 6 || cIdx === 8) {
-          c.alignment = { horizontal: 'center', vertical: 'middle' };
-        } else if (cIdx === 2 || cIdx === 4) {
-          c.font = { name: 'Arial', bold: true, size: 10, color: { argb: '0F172A' } };
-        }
+    dRow.values = [
+      counter,
+      d.orderNumber || '-',
+      d.branchName,
+      d.responsiblePharmacist,
+      orderDate,
+      typeLabel,
+      d.medicationName || '',
+      d.unitType === 'strip' ? 'شريط' : 'علبة',
+      Number(d.quantity || 1),
+      d.notes
+    ];
+    dRow.height = 24;
 
-        if (!isEvenD) {
-          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.altRowBg } };
-        }
-      });
+    dRow.eachCell((c, cIdx) => {
+      c.font = { name: 'Arial', size: 10, color: { argb: THEME.textDark } };
+      c.border = THIN_BORDER;
+      c.alignment = { vertical: 'middle' };
 
-      detailRowIdx++;
-      counter++;
+      if (cIdx === 1 || cIdx === 8 || cIdx === 9) {
+        c.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (cIdx === 2 || cIdx === 7) {
+        c.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: '0F172A' } };
+      } else if (cIdx === 5) {
+        c.alignment = { horizontal: 'center', vertical: 'middle' };
+        c.font = { name: 'Arial', bold: true, size: 9.5, color: { argb: '475569' } };
+      } else if (cIdx === 6) {
+        c.alignment = { horizontal: 'center', vertical: 'middle' };
+        c.font = { name: 'Arial', bold: true, size: 10, color: d.orderType === 'branch' ? { argb: '92400E' } : { argb: '047857' } };
+      }
+
+      if (!isEvenD) {
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME.altRowBg } };
+      }
     });
+
+    detailRowIdx++;
+    counter++;
   });
 
   // إنشاء الملف وتنزيله

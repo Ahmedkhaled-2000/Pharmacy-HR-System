@@ -61,10 +61,32 @@ export default function OrderReturnModal({
       const paid = parseFloat(order.paid_amount || order.paidAmount || 0);
       setDownPaymentRefund(paid > 0 ? paid : 0);
 
-      // استخراج الأصناف
+      // استخراج الأصناف المؤهلة للإرجاع: لا يمكن عمل مرتجع إلا بعد رد المشتريات على الصنف أو تسليمه بالفعل
       const rawItems = Array.isArray(order.items) ? order.items : [];
+      const eligibleItems = rawItems.filter((it) => {
+        const isPruned = Boolean(it.pruned_from_bill || it.prunedFromBill);
+        const itStatus = String(it.item_status || it.itemStatus || it.status || '').toLowerCase();
+        if (isPruned || itStatus === 'returned') {
+          return false;
+        }
+
+        // شرط إلزامي: رد المشتريات على الصنف أو تسليمه بالفعل
+        const hasProcurementReplied = Boolean(
+          it.procurement_replied_at ||
+          it.procurementRepliedAt ||
+          itStatus === 'available_by_procurement' ||
+          itStatus === 'delivered' ||
+          itStatus === 'available' ||
+          itStatus === 'unavailable' ||
+          itStatus === 'unavailable_in_market' ||
+          it.is_delivered
+        );
+
+        return hasProcurementReplied;
+      });
+
       const initSelected = {};
-      rawItems.forEach((it, idx) => {
+      eligibleItems.forEach((it, idx) => {
         const id = it.id || `item_${idx}`;
         const qty = parseInt(it.quantity || 1, 10);
         const price = parseFloat(it.unit_price || it.unitPrice || 0);
@@ -148,10 +170,11 @@ export default function OrderReturnModal({
 
   if (!isOpen || !order) return null;
 
-  // حساب الإجماليات
+  // حساب الإجماليات: في حال دفع العميل عربون يتم إرجاع قيمة العربون فقط، وإذا لم يدفع عربون يكون المسترد 0
   const activeReturnItems = Object.values(selectedItems).filter((i) => i.selected);
-  const totalItemsRefund = activeReturnItems.reduce((sum, i) => sum + (i.totalPrice || 0), 0);
-  const totalRefund = totalItemsRefund;
+  const orderPaidAmount = parseFloat(order.paid_amount || order.paidAmount || 0);
+  const refundableDeposit = orderPaidAmount > 0 ? orderPaidAmount : 0;
+  const totalRefund = refundableDeposit;
 
   // إرسال طلب المرتجع
   const handleSubmitReturn = async (e) => {
@@ -182,17 +205,17 @@ export default function OrderReturnModal({
           itemType: i.itemType,
           returnReason: i.returnReason
         })),
-        totalRefundAmount: totalRefund,
-        downPaymentRefund: parseFloat(downPaymentRefund || 0),
+        totalRefundAmount: refundableDeposit,
+        downPaymentRefund: refundableDeposit,
         generalReturnReason: finalGeneralReason,
-        refundDestination,
+        refundDestination: refundableDeposit > 0 ? refundDestination : 'none',
         employeeCode: employeeCode.trim(),
         employeeName: employeeName.trim() || 'مسؤول الصيدلية'
       };
 
       const res = await outstockCreateOrderReturn(order.id, payload);
       if (res?.success) {
-        const walletMsg = res.walletCredited ? ' وتم إضافة المبلغ لمحفظة العميل بنجاح 👛' : '';
+        const walletMsg = res.walletCredited ? ' وتم إضافة العربون لمحفظة العميل بنجاح 👛' : '';
         showToast?.(`✅ تم تسجيل المرتجع بنجاح${walletMsg} وإشعار إدارة المشتريات 📲`);
         const completeData = {
           ...payload,
@@ -200,7 +223,8 @@ export default function OrderReturnModal({
           orderNumber: order.order_number || order.orderNumber,
           branchName,
           customerName: order.customer_name || order.customer?.full_name || 'عميل نقدي',
-          customerPhone: order.customer_phone || order.customer?.whatsapp_phone || ''
+          customerPhone: order.customer_phone || order.customer?.whatsapp_phone || '',
+          orderPaidAmount
         };
         setSubmittedReturnData(completeData);
         // طباعة إيصال المرتجع الحراري 80mm تلقائياً
@@ -425,16 +449,29 @@ export default function OrderReturnModal({
                   </span>
                 </div>
 
-                <div
-                  style={{
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '10px',
-                    overflow: 'hidden',
-                    maxHeight: '260px',
-                    overflowY: 'auto'
-                  }}
-                >
-                  {Object.entries(selectedItems).map(([id, item]) => (
+                {Object.keys(selectedItems).length === 0 ? (
+                  <div style={{ padding: '24px 16px', textAlign: 'center', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px' }}>
+                    <AlertTriangle size={32} color="#dc2626" style={{ margin: '0 auto 8px auto' }} />
+                    <h4 style={{ margin: '0 0 6px', color: '#991b1b', fontWeight: '800', fontSize: '14px' }}>
+                      لا يمكن عمل مرتجع لهذا الطلب حالياً
+                    </h4>
+                    <p style={{ margin: 0, fontSize: '12.5px', color: '#7f1d1d', lineHeight: '1.6' }}>
+                      إدارة المشتريات لم تقم بالرد على أصناف هذا الطلب بعد. <strong>لا يمكن عمل مرتجع إلا بعد رد المشتريات على الصنف</strong> أو تسليمه بالفعل.
+                      <br />
+                      في حال رغبة العميل بالإلغاء، يرجى استخدام زر <strong>(حذف الطلب واسترداد العربون)</strong> من شاشة الطلبات النشطة.
+                    </p>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '10px',
+                      overflow: 'hidden',
+                      maxHeight: '260px',
+                      overflowY: 'auto'
+                    }}
+                  >
+                    {Object.entries(selectedItems).map(([id, item]) => (
                     <div
                       key={id}
                       style={{
@@ -512,7 +549,8 @@ export default function OrderReturnModal({
                     </div>
                   ))}
                 </div>
-              </div>
+              )}
+            </div>
 
               {/* وجهة المبلغ المسترد */}
               <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
@@ -683,9 +721,16 @@ export default function OrderReturnModal({
                 }}
               >
                 <div>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>إجمالي القيمة المستردة للعميل:</div>
-                  <div style={{ fontSize: '20px', fontWeight: '900', color: '#dc2626' }}>
-                    {totalRefund.toFixed(2)} ج.م
+                  <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '700' }}>
+                    {orderPaidAmount > 0 ? 'قيمة العربون المسترد للعميل (المستحق فعلياً):' : 'المبلغ المسترد للعميل:'}
+                  </div>
+                  <div style={{ fontSize: '20px', fontWeight: '900', color: orderPaidAmount > 0 ? '#dc2626' : '#1e293b' }}>
+                    {orderPaidAmount > 0 ? `${orderPaidAmount.toFixed(2)} ج.م` : '0.00 ج.م (بدون عربون)'}
+                  </div>
+                  <div style={{ fontSize: '11px', color: orderPaidAmount > 0 ? '#b91c1c' : '#64748b', marginTop: '2px', fontWeight: '700' }}>
+                    {orderPaidAmount > 0 
+                      ? '⚠️ يتم رد قيمة العربون المدفوع فقط للعميل ولا يتم رد ثمن الصنف'
+                      : 'ℹ️ الطلب بدون عربون مسبق، سيتم تسجيل المرتجع بدون صرف أي مبالغ مالية'}
                   </div>
                 </div>
 

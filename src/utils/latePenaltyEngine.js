@@ -13,13 +13,15 @@
 import { arabicWeekday } from './formatters.js';
 import { getEmployeeDaySchedule } from './rosterEngine.js';
 import { getAuthoritativeShiftHours, calculateShiftMetrics, calcRawDurationMinutes } from './workHoursEngine.js';
+import { getActiveSecondment } from './secondmentEngine.js';
+import { getAuthoritativeEmployeeRates } from './unifiedPayrollEngine.js';
 
 /**
- * فحص ما إذا كان الموظف يعمل بنظام الدوام الحر/المتغير (ليس له جدول شهري ثابت)
+ * فحص ما إذا كان الموظف يعمل بنظام الدوام الحر/المتغير (ليس له جدول شهري ثابت أو منتدب بمواعيد متغيرة)
  */
-export function isVariableScheduleEmployee(emp) {
+export function isVariableScheduleEmployee(emp, dateStr = null, state = null) {
   if (!emp) return false;
-  return Boolean(
+  if (
     emp.noMonthlySchedule === true ||
     emp.noMonthlySchedule === 'true' ||
     emp.noMonthlySchedule === 1 ||
@@ -28,7 +30,17 @@ export function isVariableScheduleEmployee(emp) {
     emp.hasNoRoster === true ||
     emp.scheduleType === 'flexible' ||
     emp.scheduleType === 'variable'
-  );
+  ) {
+    return true;
+  }
+  // فحص ما إذا كان الموظف في فترة انتداب ذات مواعيد متغيرة
+  if (state && state.secondments && dateStr) {
+    const sec = getActiveSecondment(emp.id, dateStr, state);
+    if (sec && sec.scheduleType === 'variable') {
+      return true;
+    }
+  }
+  return false;
 }
 
 // ── السياسة الافتراضية المعتمدة للائحة جزاءات التأخير ──
@@ -194,45 +206,12 @@ export function getPenaltyForOccurrence(tier, occurrenceNumber) {
  * 3. سعر الدقيقة = سعر الساعة اليومي / 60
  * 4. قيمة الخصم المالي = دقائق الخصم * سعر الدقيقة
  */
-export function computeLatenessFinancialAmount(deductionMinutes, employee, branchId = null) {
+export function computeLatenessFinancialAmount(deductionMinutes, employee, branchId = null, state = null) {
   const mins = Math.max(0, parseFloat(deductionMinutes) || 0);
   if (mins === 0 || !employee) return 0;
 
-  let hourlyBase = parseFloat(employee.salary) || 0;
-  let workDays = parseFloat(employee.workDaysPerMonth) || parseFloat(employee.workDays) || 26;
-  let workHours = parseFloat(employee.workHoursPerDay) || parseFloat(employee.workHours) || 8;
-
-  if (branchId && employee.branchesDetails && employee.branchesDetails.length > 0) {
-    const bd = employee.branchesDetails.find((b) => String(b.branchId) === String(branchId));
-    if (bd) {
-      hourlyBase = parseFloat(bd.salary) || hourlyBase;
-      workDays = parseFloat(bd.workDaysPerMonth) || parseFloat(bd.workDays) || workDays;
-      workHours = parseFloat(bd.workHoursPerDay) || parseFloat(bd.workHours) || workHours;
-    }
-  }
-
-  // 1. سعر اليوم = (سعر الساعة الشهري * ساعات اليوم) / أيام الشهر
-  const dailyRate = workDays > 0 ? (hourlyBase * workHours) / workDays : (hourlyBase * workHours);
-
-  // 2. سعر الساعة اليومي (أجر الساعة):
-  // إذا كان hourlyBase مدخل كسعر ساعة (مثلاً 75) أو سعر شهري مدخل (مثلاً 600 أو 650):
-  // - إذا كان hourlyBase >= 200: سعر الساعة اليومي = hourlyBase / workDays (مثال: 600 / 26 = 23.08 ج.م / ساعة)
-  // - إذا كان hourlyBase < 200: سعر الساعة اليومي = (hourlyBase * workHours) / workDays (مثال: (75 * 8) / 26 = 23.08 ج.م / ساعة)
-  let hourlyRate = 0;
-  if (hourlyBase > 0 && workDays > 0) {
-    if (hourlyBase >= 200) {
-      hourlyRate = hourlyBase / workDays;
-    } else {
-      hourlyRate = (hourlyBase * workHours) / workDays;
-    }
-  } else {
-    hourlyRate = dailyRate > 0 ? dailyRate : hourlyBase;
-  }
-
-  // 3. سعر الدقيقة
-  const minuteRate = hourlyRate / 60;
-
-  return Math.round(mins * minuteRate * 100) / 100;
+  const rates = getAuthoritativeEmployeeRates(employee, branchId, state);
+  return Math.round(mins * rates.minuteRate * 100) / 100;
 }
 
 /**
@@ -282,21 +261,25 @@ export function isApprovedPermissionForDate(employeeId, dateStr, state) {
       r.isApproved === true ||
       r.status === 'approved_permission_exempt';
 
-    const isRejected =
+    const isRejectedOrVoided =
       r.status === 'rejected' ||
       r.isRejected === true ||
       r.status === 'cancelled' ||
       r.isCancelled === true ||
-      r.voidedOnShiftDelete === true;
+      r.decoupledFromPunch === true ||
+      r.voidedOnManualPunch === true ||
+      r.voidedOnShiftDelete === true ||
+      r.unlinkPriorRequests === true ||
+      r.isDecoupled === true;
 
-    return isApproved && !isRejected;
+    return isApproved && !isRejectedOrVoided;
   }) || null;
 }
 
 /**
  * استخراج بداية الشيفت المجدول للموظف لتاريخ معين من الجداول الشهرية المعتمدة والتبديلات
  */
-export function getScheduledShiftForDate(employeeId, dateStr, state) {
+export function getScheduledShiftForDate(employeeId, dateStr, state, targetBranchId = null) {
   if (!employeeId || !dateStr || !state) return null;
 
   const empIdStr = String(employeeId);
@@ -304,7 +287,7 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
   const empCodeStr = emp?.code ? String(emp.code) : '';
 
   // الموظف الذي ليس له جدول شهري أو مواعيد متغيرة لا يمتلك مواعيد شفتات محددة أو ملزمة
-  if (isVariableScheduleEmployee(emp)) return null;
+  if (isVariableScheduleEmployee(emp, dateStr, state)) return null;
 
   // 🛡️ القاعدة الذهبية المركزية: الحصانة المطلقة لما قبل تاريخ التعيين الرسمي للموظف
   const hireDate = emp?.hireDate || emp?.hiring_date || emp?.contractStartDate;
@@ -390,29 +373,114 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
     }
   }
 
-  // 3. جدول الموظف المركزي من rosterEngine مع مراعاة كافة التبديلات والتعديلات
+  // 3. جدول الموظف المركزي من rosterEngine مع مراعاة كافة التبديلات والتعديلات والفرع المستهدف
   try {
-    const daySchedule = getEmployeeDaySchedule(empIdStr, dateStr, state);
+    const daySchedule = getEmployeeDaySchedule(empIdStr, dateStr, state, targetBranchId);
     if (daySchedule) {
       const isOff = daySchedule.type === 'off' || daySchedule.isOff === true;
       if (isOff) {
-        // حاسم: اليوم راحة معتمدة، يُعاد كراحة حتى لا يتم تطبيق موعد افتراضي 08:00
+        // إذا كان الموظف موسوماً كـ "مجدول بفرع آخر" وكان targetBranchId محدداً، نفحص هل الفرع له جدول أصلي في هذا اليوم
+        if (targetBranchId) {
+          // 1. فحص otherBranchShifts المرفقة مباشرة في daySchedule
+          if (Array.isArray(daySchedule.otherBranchShifts)) {
+            const matchShift = daySchedule.otherBranchShifts.find((s) => String(s.branchId) === String(targetBranchId));
+            if (matchShift && matchShift.start && !matchShift.isOff && matchShift.type !== 'off') {
+              return {
+                start: matchShift.start.slice(0, 5),
+                end: matchShift.end ? matchShift.end.slice(0, 5) : '',
+                type: 'work',
+                isOff: false,
+                branchId: targetBranchId,
+                source: 'other_branch_shift_match'
+              };
+            }
+          }
+
+          // 2. فحص سجلات الفروع في emp.branchesDetails
+          if (Array.isArray(emp?.branchesDetails)) {
+            const arDay = arabicWeekday(dateStr);
+            for (const bd of emp.branchesDetails) {
+              if (String(bd.branchId) === String(targetBranchId) && bd.schedule) {
+                const bdItem = bd.schedule[dateStr] || bd.schedule[arDay];
+                if (bdItem && !bdItem.isOff && bdItem.type !== 'off' && bdItem.start) {
+                  return {
+                    start: bdItem.start.slice(0, 5),
+                    end: bdItem.end ? bdItem.end.slice(0, 5) : '',
+                    type: 'work',
+                    isOff: false,
+                    branchId: targetBranchId,
+                    source: 'branchesDetails_match'
+                  };
+                }
+              }
+              if (bd.schedule) {
+                const sItem = bd.schedule[dateStr] || bd.schedule[arDay];
+                if (sItem && Array.isArray(sItem.otherBranchShifts)) {
+                  const mOther = sItem.otherBranchShifts.find((s) => String(s.branchId) === String(targetBranchId));
+                  if (mOther && mOther.start && !mOther.isOff && mOther.type !== 'off') {
+                    return {
+                      start: mOther.start.slice(0, 5),
+                      end: mOther.end ? mOther.end.slice(0, 5) : '',
+                      type: 'work',
+                      isOff: false,
+                      branchId: targetBranchId,
+                      source: 'branchesDetails_otherBranchShifts_match'
+                    };
+                  }
+                }
+              }
+            }
+          }
+
+          // 3. فحص الجداول الشهرية المعتمدة في state.rosters للفرع المستهدف
+          const bRoster = (state.rosters || []).find((r) => 
+            (r.status === 'approved' || r.adminApproved || !r.status) &&
+            (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) &&
+            String(r.branchId) === String(targetBranchId) &&
+            r.schedule
+          );
+          if (bRoster) {
+            const arDay = arabicWeekday(dateStr);
+            const rawItem = bRoster.schedule[dateStr] || bRoster.schedule[arDay];
+            if (rawItem && !rawItem.isOff && rawItem.type !== 'off' && rawItem.start) {
+              return {
+                start: rawItem.start.slice(0, 5),
+                end: rawItem.end ? rawItem.end.slice(0, 5) : '',
+                type: 'work',
+                isOff: false,
+                branchId: targetBranchId,
+                rosterId: bRoster.id,
+                source: 'roster_branch_override'
+              };
+            }
+          }
+        }
         return {
           type: 'off',
           isOff: true,
           start: '',
           end: '',
-          branchId: daySchedule.branchId || emp?.branchId || '',
+          branchId: daySchedule.branchId || targetBranchId || emp?.branchId || '',
           source: 'roster_engine_off'
         };
       }
+      if (daySchedule.variable || daySchedule.isVariable) {
+        // دوام متغير / حر بالساعات (انتداب أو موظف حر): لا توجد مواعيد ملزمة لفرض جزاءات تأخير
+        return null;
+      }
       if (daySchedule.start) {
+        let normStart = daySchedule.start?.slice(0, 5);
+        let normEnd = daySchedule.end?.slice(0, 5) || '';
+        // تصحيح الخطأ الشائع: شيفت مسائي 18:00 تم تسجيله 06:00 إلى 00:00 (18 ساعة مستحيلة)
+        if (normStart === '06:00' && normEnd === '00:00') {
+          normStart = '18:00';
+        }
         return {
-          start: daySchedule.start?.slice(0, 5),
-          end: daySchedule.end?.slice(0, 5) || '',
+          start: normStart,
+          end: normEnd,
           type: daySchedule.type || 'work',
           isOff: false,
-          branchId: daySchedule.branchId || emp?.branchId || '',
+          branchId: daySchedule.branchId || targetBranchId || emp?.branchId || '',
           source: 'roster_engine'
         };
       }
@@ -421,15 +489,20 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
     console.error('Error fetching employee day schedule in getScheduledShiftForDate:', e);
   }
 
-  // 4. فحص الجداول المعتمدة مباشرة مع دعم نطاق التواريخ الكامل (fromDate <= dateStr <= toDate)
+  // 4. فحص الجداول المعتمدة مباشرة مع دعم الفرع المستهدف ونطاق التواريخ الكامل
   const allEmpRosters = (state.rosters || []).filter(
     (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) &&
       (r.status === 'approved' || r.adminApproved || !r.status) &&
       r.schedule
   );
 
-  // فرز الجداول: التي تحتوي على التاريخ الدقيق أولاً، ثم التي في نطاق fromDate/toDate، ثم حسب حداثة التحديث
+  // فرز الجداول: إعطاء الأولوية للفرع المستهدف، ثم التي تحتوي على التاريخ الدقيق، ثم النطاق، ثم الأحدث
   allEmpRosters.sort((a, b) => {
+    if (targetBranchId) {
+      const matchA = String(a.branchId) === String(targetBranchId) ? 1 : 0;
+      const matchB = String(b.branchId) === String(targetBranchId) ? 1 : 0;
+      if (matchA !== matchB) return matchB - matchA;
+    }
     const hasDateA = a.schedule && a.schedule[dateStr] ? 1 : 0;
     const hasDateB = b.schedule && b.schedule[dateStr] ? 1 : 0;
     if (hasDateA !== hasDateB) return hasDateB - hasDateA;
@@ -454,6 +527,20 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
     if (sched) {
       const isOff = sched.type === 'off' || sched.isOff === true;
       if (isOff) {
+        if (sched.isOtherBranchShift && targetBranchId && String(ros.branchId) === String(targetBranchId)) {
+          const arDayItem = ros.schedule[arDay];
+          if (arDayItem && !arDayItem.isOff && arDayItem.start) {
+            return {
+              start: arDayItem.start.slice(0, 5),
+              end: arDayItem.end ? arDayItem.end.slice(0, 5) : '',
+              type: 'work',
+              isOff: false,
+              branchId: ros.branchId,
+              rosterId: ros.id,
+              source: 'roster_branch_override'
+            };
+          }
+        }
         return {
           type: 'off',
           isOff: true,
@@ -563,7 +650,9 @@ export function recalculateEmployeeCycleLateness({
   employeeId,
   cycleFilterFn,
   state,
-  payrollCycleId = null
+  payrollCycleId = null,
+  changedDates = null,
+  clearPenaltiesOnChangedDates = false
 }) {
   if (!employeeId || !state) return { incidents: [], updatedRequests: state.requests || [] };
 
@@ -621,15 +710,57 @@ export function recalculateEmployeeCycleLateness({
       r.status !== 'cancelled'
   );
 
+  const changedDatesSet = new Set(Array.isArray(changedDates) ? changedDates : []);
+
+  let lastShiftPayrollCycle = null;
+
   for (const shift of empShifts) {
     if (!shift.date || !shift.timeIn) continue;
 
-    // استخراج بداية الشيفت المجدول
-    const sched = getScheduledShiftForDate(emp.id, shift.date, state);
-    if (!sched || sched.isOff || sched.type === 'off' || !sched.start) continue;
+    // 🛡️ صمام حماية دورات الرواتب اللائحية: تصفير عدادات التكرار عند بدء دورة رواتب جديدة (من 21 إلى 20)
+    const [sY, sM, sD] = shift.date.split('-').map(Number);
+    const shiftPayrollCycle = sD >= 21
+      ? (sM === 12 ? `${sY + 1}-01` : `${sY}-${String(sM + 1).padStart(2, '0')}`)
+      : `${sY}-${String(sM).padStart(2, '0')}`;
+
+    if (lastShiftPayrollCycle && shiftPayrollCycle !== lastShiftPayrollCycle) {
+      tierCounters.tier_0_10 = 0;
+      tierCounters.tier_11_15 = 0;
+      tierCounters.tier_16_30 = 0;
+      tierCounters.tier_31_60 = 0;
+      tierCounters.tier_over_60 = 0;
+    }
+    lastShiftPayrollCycle = shiftPayrollCycle;
+
+    // 🛡️ حماية حاسمة: إذا كانت الوردية معفاة من جزاء التأخير يدوياً أو بقرار إداري معتمد
+    if (shift.latePenaltyExempt === true) {
+      const oldInc = existingIncidentsByShift.get(`${emp.id}_${shift.id}`) || existingIncidentsByDate.get(`${emp.id}_${shift.date}`);
+      if (oldInc && oldInc.id) {
+        supersededIncidentIds.push(String(oldInc.id));
+      }
+      continue;
+    }
+
+    // استخراج بداية الشيفت المجدول مع مطابقة فرع الوردية الفعلي
+    const sched = getScheduledShiftForDate(emp.id, shift.date, state, shift.branchId);
+    if (!sched || sched.isOff || sched.type === 'off' || !sched.start) {
+      // إذا تحول اليوم إلى راحة أسبوعية أو لا يوجد شيفت مجدول، يتم تصفير أي واقعة تأخير سابقة
+      const oldInc = existingIncidentsByShift.get(`${emp.id}_${shift.id}`) || existingIncidentsByDate.get(`${emp.id}_${shift.date}`);
+      if (oldInc && oldInc.id) {
+        supersededIncidentIds.push(String(oldInc.id));
+      }
+      continue;
+    }
 
     const diffMinutes = calculateLatenessMinutes(sched.start, shift.timeIn);
-    if (diffMinutes <= 0) continue; // حضور في الموعد أو مبكر
+    if (diffMinutes <= 0) {
+      // حضور في الموعد أو مبكر: إلغاء/حذف أي واقعة تأخير سابقة لهذا اليوم
+      const oldInc = existingIncidentsByShift.get(`${emp.id}_${shift.id}`) || existingIncidentsByDate.get(`${emp.id}_${shift.date}`);
+      if (oldInc && oldInc.id) {
+        supersededIncidentIds.push(String(oldInc.id));
+      }
+      continue;
+    }
 
     // فحص ذكي: هل البصمة هي بصمة انصراف عند نهاية الوردية سجلت خطأ كحضور؟
     if (sched.end) {
@@ -713,7 +844,43 @@ export function recalculateEmployeeCycleLateness({
         (r.date === shift.date || (Array.isArray(r.dates) && r.dates.includes(shift.date)) || (r.schedule && r.schedule[shift.date]))
     );
 
-    if (approvedPerm) {
+    // 🛡️ فحص: هل تقدم الموظف بطلب تعديل بصمة رسمي أو طلب بصمة يدوية لهذا التاريخ؟
+    // عند إرسال تعديل بصمة للموظف في يوم كان واقع عليه جزاء تأخير يتم إسقاط الجزاء
+    const activePunchEditReq = (state.requests || []).find((r) => {
+      if (!r || r.status === 'rejected' || r.status === 'cancelled' || r.isCancelled || r.rejected || r.adminRejected) return false;
+      const isReqEmp = String(r.employeeId) === empIdStr || (empCodeStr && (String(r.employeeCode) === empCodeStr || String(r.employeeId) === empCodeStr));
+      if (!isReqEmp) return false;
+      const isPunchEdit = r.type === 'punch_correction' || r.type === 'manual_punch_request' || r.type === 'attendance_punch' || r.subType === 'administrative_punch_request' || r.subType === 'punch_correction';
+      if (!isPunchEdit) return false;
+      const rDate = String(r.date || r.startDate || r.punchDate || '').slice(0, 10);
+      const rDates = Array.isArray(r.dates) ? r.dates : (r.batchDays ? r.batchDays.map(b => b.date) : []);
+      return rDate === shift.date || rDates.includes(shift.date);
+    });
+
+    // 🛡️ فحص: هل تم تعديل الوردية أو الجدول الشهري لهذا اليوم صراحة من الإدارة؟
+    const isDateExplicitlyChanged = changedDatesSet.has(shift.date);
+
+    // 🛡️ فحص حاسم: هل الواقعة الحالية معتمدة ومؤكدة رسمياً من الإدارة وبها خصم مالي ساري؟
+    // الجزاءات الإدارية المعتمدة لها حصانة قطعية ولا يجوز إسقاطها آلياً بسبب إذن أو تعديل بصمة في الخلفية
+    const hasAdminConfirmedPenalty = Boolean(
+      prevInc &&
+      (prevInc.status === 'approved' || prevInc.status === 'overridden' || prevInc.isConfirmedByAdmin || prevInc.adminApproved) &&
+      (parseFloat(prevInc.deductionMinutes) > 0 || parseFloat(prevInc.penaltyAmount) > 0) &&
+      !prevInc.isCancelled &&
+      prevInc.status !== 'cancelled' &&
+      prevInc.objection?.status !== 'approved'
+    );
+
+    if (hasAdminConfirmedPenalty) {
+      occurrenceNumber = prevInc.occurrenceNumber || (tierCounters[tierKey] = (tierCounters[tierKey] || 0) + 1);
+      tierCounters[tierKey] = Math.max(tierCounters[tierKey] || 0, occurrenceNumber);
+      actionType = prevInc.actionType || 'deduction';
+      actionLabel = prevInc.actionLabel || `خصم ${prevInc.deductionMinutes} دقيقة`;
+      deductionMins = parseFloat(prevInc.deductionMinutes) || 0;
+      penaltyAmount = parseFloat(prevInc.penaltyAmount) || computeLatenessFinancialAmount(deductionMins, emp, effectiveShiftBranchId);
+      status = 'approved';
+      overrideReason = prevInc.overrideReason || '';
+    } else if (approvedPerm) {
       // ✅ تم إلغاء الخصم والجزاء لوجود إذن معتمد رسمي
       actionType = 'grace';
       actionLabel = `سماح (${approvedPerm.permType === 'early' ? 'إذن خروج مبكر معتمد' : 'إذن تأخير معتمد'})`;
@@ -721,6 +888,28 @@ export function recalculateEmployeeCycleLateness({
       penaltyAmount = 0;
       status = 'approved_permission_exempt';
       overrideReason = `تم إلغاء الجزاء والخصم تلقائياً لوجود إذن معتمد (${approvedPerm.permType === 'early' ? 'إذن خروج مبكر' : 'إذن تأخير'} من ${approvedPerm.startTime || '—'} إلى ${approvedPerm.endTime || '—'})${approvedPerm.reason ? ' - سبب الإذن: ' + approvedPerm.reason : ''}`;
+      occurrenceNumber = 0;
+    } else if (activePunchEditReq) {
+      // 🌟 تم إسقاط الجزاء تلقائياً لتقديم طلب تعديل بصمة رسمي
+      actionType = 'grace';
+      actionLabel = 'سماح (طلب تعديل بصمة)';
+      deductionMins = 0;
+      penaltyAmount = 0;
+      status = 'cancelled';
+      isCancelled = true;
+      cancellationReason = `تم إلغاء الجزاء لتقديم طلب تعديل بصمة رسمي (${activePunchEditReq.id || ''})`;
+      overrideReason = 'تم إلغاء جزاء التأخير لتقديم طلب تعديل بصمة جاري أو معتمد';
+      occurrenceNumber = 0;
+    } else if (isDateExplicitlyChanged && clearPenaltiesOnChangedDates) {
+      // 🌟 تم إسقاط الجزاء تلقائياً لتعديل الشفت/الجدول من قبل الإدارة
+      actionType = 'grace';
+      actionLabel = 'سماح (تعديل شفت/جدول بالإدارة)';
+      deductionMins = 0;
+      penaltyAmount = 0;
+      status = 'cancelled';
+      isCancelled = true;
+      cancellationReason = 'تم إلغاء الجزاء تلقائياً لتعديل الشفت أو الجدول من قبل الإدارة';
+      overrideReason = 'تم إلغاء الجزاء لتعديل الشفت/الجدول';
       occurrenceNumber = 0;
     } else if (approvedShiftAdj) {
       // ✅ تم إلغاء الجزاء والخصم رسمياً لاعتماد طلب تعديل الشيفت
@@ -811,6 +1000,28 @@ export function recalculateEmployeeCycleLateness({
 
     newIncidents.push(incident);
   }
+
+  // 🛡️ صمام الأمان الذهبي: الحفاظ على أي جزاءات إدارية معتمدة مسبقاً للموظف لم تتطابق مع شفت جديد
+  (state.lateIncidents || []).forEach((oldInc) => {
+    if (!oldInc) return;
+    const isEmp = String(oldInc.employeeId) === empIdStr || (empCodeStr && (String(oldInc.employeeCode) === empCodeStr || String(oldInc.employeeId) === empCodeStr));
+    if (!isEmp) return;
+    if (cycleFilterFn && !cycleFilterFn(oldInc.date)) return;
+    if (oldInc.status === 'cancelled' || oldInc.isCancelled || oldInc.objection?.status === 'approved') return;
+    if (!(parseFloat(oldInc.deductionMinutes) > 0 || parseFloat(oldInc.penaltyAmount) > 0)) return;
+
+    // هل تم تضمين واقعة لهذا التاريخ ونفس الفرع في newIncidents؟
+    const alreadyIncluded = newIncidents.some(
+      (ni) => ni.date === oldInc.date && String(ni.branchId || '') === String(oldInc.branchId || '')
+    );
+    const isSuperseded = supersededIncidentIds.includes(String(oldInc.id));
+
+    if (!alreadyIncluded && !isSuperseded) {
+      newIncidents.push(oldInc);
+    }
+  });
+
+  newIncidents.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
   // 2. تحديث الطلبات والتسويات (Requests) لتعكس الجزاءات المحدثة
   const existingReqs = state.requests || [];
@@ -919,6 +1130,8 @@ export function applyApprovedPermissionsToShifts(stateOrPerms, maybeShifts, mayb
     const perm = isApprovedPermissionForDate(shift.employeeId, shift.date, state);
     if (!perm) return shift;
 
+    const isUnpaid = perm.compensationType === 'unpaid' || perm.isUnpaid === true || perm.isUnpaidPermission === true;
+
     // حساب ساعات الإذن
     let permHours = parseFloat(perm.hours) || 0;
     if (!permHours && perm.durationMinutes) {
@@ -938,7 +1151,8 @@ export function applyApprovedPermissionsToShifts(stateOrPerms, maybeShifts, mayb
     }
 
     const permTypeLabel = perm.permType === 'early' ? 'إذن انصراف مبكر' : (perm.isExceptional ? 'إذن استثنائي معتمد' : 'إذن تأخير عن الوردية');
-    const noteText = `⏰ تم تعديل البصمة واحتساب ساعات ${permTypeLabel} المعتمد (${perm.startTime || '—'} إلى ${perm.endTime || '—'}) [${permHours} س]${perm.reason ? ' - ' + perm.reason : ''}`;
+    const compLabel = isUnpaid ? ' [غير مدفوع الأجر - إعفاء من الجزاء فقط دون احتساب ساعات]' : ' [مدفوع الأجر ومحتسب ضمن ساعات العمل]';
+    const noteText = `⏰ تم اعتماد ${permTypeLabel}${compLabel} (${perm.startTime || '—'} إلى ${perm.endTime || '—'}) [${permHours} س]${perm.reason ? ' - ' + perm.reason : ''}`;
 
     const effectiveHours = getEffectiveShiftHours(shift, state);
 
@@ -947,14 +1161,17 @@ export function applyApprovedPermissionsToShifts(stateOrPerms, maybeShifts, mayb
       hours: effectiveHours,
       workHours: effectiveHours,
       netHours: effectiveHours,
-      actualWorkedHours: Math.max(0, Math.round((effectiveHours - permHours) * 100) / 100),
+      actualWorkedHours: isUnpaid ? effectiveHours : Math.max(0, Math.round((effectiveHours - permHours) * 100) / 100),
       hasApprovedPermission: true,
+      isUnpaidPermission: isUnpaid,
+      compensationType: isUnpaid ? 'unpaid' : 'paid',
       permissionId: perm.id,
       permissionType: perm.permType || 'late',
-      permissionHours: permHours,
+      permissionHours: isUnpaid ? 0 : permHours,
+      unpaidPermissionHours: isUnpaid ? permHours : 0,
       permissionTimeRange: `من ${perm.startTime || '—'} إلى ${perm.endTime || '—'}`,
       permissionNotes: noteText,
-      notes: shift.notes && shift.notes.includes('⏰ تم تعديل البصمة') ? shift.notes : `${noteText}${shift.notes ? ' | ' + shift.notes : ''}`
+      notes: shift.notes && (shift.notes.includes('⏰ تم تعديل البصمة') || shift.notes.includes('⏰ تم اعتماد')) ? shift.notes : `${noteText}${shift.notes ? ' | ' + shift.notes : ''}`
     };
   });
 }
@@ -1107,6 +1324,7 @@ export function reconcileEmployeeScheduleOrPunchChange({
     }
   });
 
+  const clearPenaltiesOnChanged = options.clearPenaltiesOnChangedDates ?? true;
   // 2. إعادة احتساب وقائع التأخير للدورة كاملة وفق الجداول والبصمات المحدثة
   const recRes = isFlex
     ? { incidents: [], updatedRequests: state.requests || [], supersededIncidentIds: [] }
@@ -1114,13 +1332,17 @@ export function reconcileEmployeeScheduleOrPunchChange({
         employeeId: emp.id,
         cycleFilterFn: null,
         state,
-        payrollCycleId: null
+        payrollCycleId: null,
+        changedDates,
+        clearPenaltiesOnChangedDates: clearPenaltiesOnChanged
       });
 
   const newIncidentsForEmp = isFlex ? [] : (recRes.incidents || []);
   const newIncidentsMap = new Map(newIncidentsForEmp.map((i) => [i.id, i]));
+  const changedDatesList = Array.isArray(changedDates) ? changedDates : (changedDates ? [changedDates] : []);
+  const changedDatesSet = new Set(changedDatesList);
 
-  // 3. تحديد الوقائع التي ألغيت أو تم تصفير خصمها لتسوية طلبات الجزاء المقابلة لها
+  // 3. تحديد الوقائع السابقة التي ألغيت أو تم تصفير خصمها لتسوية طلبات الجزاء المقابلة لها
   const eliminatedOrWaivedIncidents = [];
   prevEmpIncidents.forEach((oldInc) => {
     if (isFlex) {
@@ -1135,7 +1357,7 @@ export function reconcileEmployeeScheduleOrPunchChange({
     }
   });
 
-  // 4. استبدال وقائع هذا الموظف فقط في مصفوفة lateIncidents
+  // 4. استبدال وقائع هذا الموظف فقط في مصفوفة lateIncidents بالوقائع المحسوبة الدقيقة الجديدة
   const otherEmployeesIncidents = (state.lateIncidents || []).filter(
     (inc) => inc && String(inc.employeeId) !== empIdStr && (!emp.code || String(inc.employeeCode) !== String(emp.code))
   );
@@ -1167,7 +1389,9 @@ export function reconcileEmployeeScheduleOrPunchChange({
     }
 
     const reqIncId = req.penaltyId || (String(req.id || '').startsWith('req_') ? req.id.replace('req_', '') : null);
-    const isTargetIncident = (reqIncId && waivedIncidentIds.has(reqIncId)) || (req.date && waivedDates.has(req.date));
+    const hasActiveNewIncidentOnDate = newIncidentsForEmp.some(i => i.date === req.date && (parseFloat(i.deductionMinutes) || 0) > 0);
+    const isTargetIncident = (reqIncId && waivedIncidentIds.has(reqIncId)) || 
+                             (req.date && waivedDates.has(req.date) && !hasActiveNewIncidentOnDate);
 
     if (isTargetIncident && req.status !== 'cancelled') {
       return {
@@ -1217,8 +1441,86 @@ export function reconcileEmployeeScheduleOrPunchChange({
   const waivedMins = Math.max(0, prevDedMins - newDedMins);
   const waivedMoney = Math.max(0, Math.round((prevMoney - newMoney) * 100) / 100);
 
+  // 6.5. إعادة احتساب وتحديث ساعات الورديات والإضافي للموظف وفق الجدول المحدث
+  const currentShifts = [...(state.shifts || [])];
+  const updatedShifts = currentShifts.map((s) => {
+    if (!s) return s;
+    const isEmpMatch = String(s.employeeId) === empIdStr || (emp.code && String(s.employeeCode) === String(emp.code));
+    if (!isEmpMatch) return s;
+
+    if (changedDates && Array.isArray(changedDates) && changedDates.length > 0 && !changedDates.includes(s.date)) {
+      return s;
+    }
+
+    try {
+      const daySched = getEmployeeDaySchedule(emp.id, s.date, state, s.branchId);
+      const metrics = calculateShiftMetrics(s, {
+        ...state,
+        lateIncidents: updatedLateIncidents,
+        requests: updatedRequests
+      });
+
+      const newOtHours = metrics.overtimeHours !== undefined ? metrics.overtimeHours : (parseFloat(s.overtimeHours) || 0);
+      const hadApprovedOt = s.overtimeStatus === 'approved' || s.isOvertimeApproved || (s.adminApproved && (parseFloat(s.overtimeHours) || 0) > 0);
+      const isApprovedOt = Boolean(newOtHours > 0 && hadApprovedOt);
+
+      let newStatusLabel = s.statusLabel || '';
+      if (newOtHours === 0) {
+        newStatusLabel = newStatusLabel.replace(/\s*\(مع إضافي معتمد\)|\s*\(إضافي معلق\)|\s*\(إضافي قيد المراجعة\)/g, '').trim();
+      } else if (isApprovedOt && !newStatusLabel.includes('إضافي معتمد')) {
+        newStatusLabel = newStatusLabel ? `${newStatusLabel} (مع إضافي معتمد)` : 'تسجيل معتمد (مع إضافي معتمد)';
+      }
+
+      let shiftNote = s.note || s.notes || '';
+      if (waivedDates.has(s.date) && !shiftNote.includes('تم إلغاء جزاء التأخير')) {
+        shiftNote = (shiftNote.trim() ? `${shiftNote.trim()} | ` : '') + '✅ تم تحديث مواعيد الشفت والإضافي وفق الجدول الشهري وإلغاء جزاء التأخير';
+      }
+
+      const matchingInc = newIncidentsForEmp.find(inc => {
+        if (!inc) return false;
+        if (s.id && inc.shiftId && String(inc.shiftId) === String(s.id)) return true;
+        const isSameDate = inc.date === s.date;
+        if (!isSameDate) return false;
+        const isSameBranch = !inc.branchId || !s.branchId || String(inc.branchId).trim() === String(s.branchId).trim();
+        const isSameTime = !inc.actualPunchInTime || !s.timeIn || inc.actualPunchInTime === s.timeIn;
+        return isSameBranch && isSameTime;
+      }) || newIncidentsForEmp.find(inc => {
+        if (!inc || inc.date !== s.date) return false;
+        const isSameBranch = !inc.branchId || !s.branchId || String(inc.branchId).trim() === String(s.branchId).trim();
+        return isSameBranch;
+      });
+
+      const isLateExempt = matchingInc ? Boolean(matchingInc.status === 'approved_permission_exempt' || matchingInc.actionType === 'grace' || matchingInc.isCancelled) : undefined;
+      const shiftLateMins = matchingInc ? matchingInc.lateMinutes : undefined;
+
+      return {
+        ...s,
+        scheduledStart: (daySched && daySched.start) ? daySched.start : (matchingInc?.scheduledStartTime || s.scheduledStart),
+        scheduledEnd: (daySched && daySched.end) ? daySched.end : s.scheduledEnd,
+        scheduledHours: metrics.scheduledHours !== undefined ? metrics.scheduledHours : s.scheduledHours,
+        regularHours: metrics.regularHours !== undefined ? metrics.regularHours : s.regularHours,
+        overtimeHours: newOtHours,
+        isOvertimeApproved: isApprovedOt,
+        overtimeStatus: newOtHours > 0 ? (isApprovedOt ? 'approved' : metrics.overtimeStatus) : 'none',
+        hours: isApprovedOt ? (metrics.regularHours + newOtHours) : (metrics.regularHours !== undefined ? metrics.regularHours : s.hours),
+        netHours: metrics.netHours !== undefined ? metrics.netHours : s.netHours,
+        actualWorkedHours: metrics.actualWorkedHours !== undefined ? metrics.actualWorkedHours : s.actualWorkedHours,
+        lateMinutes: shiftLateMins,
+        latenessMinutes: shiftLateMins,
+        latePenaltyExempt: isLateExempt,
+        penaltyAmount: matchingInc ? matchingInc.penaltyAmount : s.penaltyAmount,
+        statusLabel: newStatusLabel || s.statusLabel,
+        note: shiftNote,
+        notes: shiftNote
+      };
+    } catch {
+      return s;
+    }
+  });
+
   const updatedState = {
     ...state,
+    shifts: updatedShifts,
     lateIncidents: updatedLateIncidents,
     requests: updatedRequests,
     _deletedIds: Array.from(tombstoneIds)
@@ -1283,3 +1585,166 @@ export function reconcileMultipleEmployeesScheduleChange({
     }
   };
 }
+
+/**
+ * 🌟 المحرك الموحد المعتمد لجلب وقائع وجزاءات التأخير الخاصة بالموظف
+ * يضمن تطابق البيانات بنسبة 100% في جميع الشاشات:
+ * (لوحة الإدارة العليا، لوحة مدير الفرع، بوابة الموظف)
+ */
+export function getUnifiedEmployeeLatePenalties(employee, state, options = {}) {
+  const {
+    branchId = null,
+    filterFn = null,
+    cycleMonth = null,
+    includeCancelled = false
+  } = options;
+
+  if (!employee || !state) return [];
+  const empIdStr = String(employee.id || employee.employeeId || '').trim();
+  const empCodeStr = String(employee.code || employee.employeeCode || '').trim();
+  const deletedIdsSet = new Set((state._deletedIds || []).map(String));
+
+  const isEmpMatch = (item) => {
+    if (!item) return false;
+    const rId = String(item.employeeId || item.empId || '').trim();
+    const rCode = String(item.employeeCode || item.empCode || '').trim();
+    return (
+      (empIdStr && (rId === empIdStr || rCode === empIdStr)) ||
+      (empCodeStr && (rId === empCodeStr || rCode === empCodeStr))
+    );
+  };
+
+  const isBranchMatch = (itemBId) => {
+    if (!branchId || branchId === 'all') return true;
+    const bStr = String(itemBId || '').trim();
+    if (!bStr) return true; // السجلات غير المحددة بفرع تعتبر تابعة للموظف
+    return bStr === String(branchId).trim();
+  };
+
+  const isDateMatch = (dateStr) => {
+    if (!dateStr) return true;
+    if (typeof filterFn === 'function') return filterFn(dateStr);
+    if (cycleMonth && typeof cycleMonth === 'string') return String(dateStr).startsWith(cycleMonth);
+    return true;
+  };
+
+  const list = [];
+  const seenIds = new Set();
+  const seenDates = new Set();
+
+  // 1. من جدول lateIncidents (وقائع التأخير الآلية)
+  (state.lateIncidents || []).forEach((inc) => {
+    if (!inc || !isEmpMatch(inc)) return;
+    if (deletedIdsSet.has(String(inc.id))) return;
+    if (!includeCancelled && (inc.status === 'cancelled' || inc.isCancelled || inc.actionType === 'grace')) return;
+    if (!isBranchMatch(inc.branchId)) return;
+    if (!isDateMatch(inc.date)) return;
+
+    const sId = String(inc.id);
+    seenIds.add(sId);
+    seenIds.add(`req_${sId}`);
+    if (inc.date) seenDates.add(inc.date);
+
+    const bObj = (state.branches || []).find((b) => String(b.id) === String(inc.branchId));
+    const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, employee, inc.branchId);
+    const amount = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
+
+    list.push({
+      id: inc.id,
+      sourceType: 'late_incident',
+      employeeId: employee.id,
+      employeeName: employee.name,
+      employeeCode: employee.code || '',
+      branchId: inc.branchId || employee.branchId,
+      branchName: bObj?.name || inc.branchName || 'الفرع الرئيسي',
+      date: inc.date,
+      timeIn: inc.actualPunchInTime || '',
+      scheduledTime: inc.scheduledStartTime || '',
+      lateMinutes: inc.lateMinutes || 0,
+      deductionMinutes: inc.deductionMinutes || 0,
+      amount,
+      ruleTitle: inc.violationTitle || `تأخير عن الشيفت (${inc.lateMinutes || 0} دقيقة)`,
+      actionTitle: inc.actionLabel || `خصم ${inc.deductionMinutes || 0} دقيقة`,
+      status: inc.status || 'approved',
+      isCancelled: Boolean(inc.isCancelled || inc.status === 'cancelled'),
+      cancellationReason: inc.cancellationReason || '',
+      reason: inc.overrideReason || inc.reason || `حضور متأخر (${inc.lateMinutes || 0} دقيقة)`,
+      objection: inc.objection || null,
+      createdAt: inc.createdAt || inc.date
+    });
+  });
+
+  // 2. من جدول requests (الجزاءات الإدارية وطلبات التأخير المعتمدة المنفصلة)
+  (state.requests || []).forEach((r) => {
+    if (!r || !isEmpMatch(r)) return;
+    if (deletedIdsSet.has(String(r.id))) return;
+    const isLateReq =
+      r.subType === 'lateness' ||
+      r.type === 'late_penalty' ||
+      r.type === 'penalty' ||
+      r.subType === 'penalty' ||
+      String(r.id).startsWith('req_late_inc_');
+    if (!isLateReq) return;
+    if (!includeCancelled && (r.status === 'cancelled' || r.isCancelled)) return;
+    if (!isBranchMatch(r.branchId)) return;
+
+    const reqDate = r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '');
+    if (!isDateMatch(reqDate)) return;
+
+    const sId = String(r.id);
+    const cleanId = sId.replace(/^req_/, '');
+    if (
+      seenIds.has(sId) ||
+      seenIds.has(cleanId) ||
+      (reqDate && seenDates.has(reqDate) && (r.subType === 'lateness' || sId.startsWith('req_late_inc_')))
+    ) {
+      return;
+    }
+    seenIds.add(sId);
+
+    const bObj = (state.branches || []).find((b) => String(b.id) === String(r.branchId));
+    let amount = parseFloat(r.amount) || 0;
+    if (!amount && (r.impactType === 'deduction_days' || r.deductionDays)) {
+      let hourlyBase = parseFloat(employee.salary) || 0;
+      let workDays = parseFloat(employee.workDaysPerMonth) || parseFloat(employee.workDays) || 26;
+      let workHours = parseFloat(employee.workHoursPerDay) || parseFloat(employee.workHours) || 8;
+      const dailyRate = workDays > 0 ? (hourlyBase * workHours) / workDays : (hourlyBase * workHours);
+      amount = Math.round(dailyRate * (parseFloat(r.impactVal || r.deductionDays) || 1) * 100) / 100;
+    }
+
+    list.push({
+      id: r.id,
+      sourceType: 'request',
+      employeeId: employee.id,
+      employeeName: employee.name,
+      employeeCode: employee.code || '',
+      branchId: r.branchId || employee.branchId,
+      branchName: bObj?.name || 'الفرع الرئيسي',
+      date: reqDate,
+      timeIn: r.timeIn || '',
+      scheduledTime: r.scheduledTime || '',
+      lateMinutes: r.lateMinutes || r.latenessMinutes || 0,
+      deductionMinutes: r.deductionMinutes || 0,
+      amount,
+      ruleTitle:
+        r.ruleTitle ||
+        (r.subType === 'lateness' ? `تأخير (${r.latenessMinutes || ''} د)` : (r.reason || 'جزاء إداري')),
+      actionTitle:
+        r.actionTitle ||
+        (r.deductionDays
+          ? `خصم ${r.deductionDays} يوم`
+          : amount > 0
+          ? `خصم ${amount} ج.م`
+          : 'تنبيه موثق'),
+      status: r.status || (r.adminApproved ? 'approved' : 'pending_admin'),
+      isCancelled: Boolean(r.isCancelled || r.status === 'cancelled'),
+      cancellationReason: r.cancellationReason || '',
+      reason: r.reason || r.details || 'مخالفة لائحية',
+      objection: r.objection || null,
+      createdAt: r.createdAt || reqDate
+    });
+  });
+
+  return list.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+

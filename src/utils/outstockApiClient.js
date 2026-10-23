@@ -320,7 +320,29 @@ export async function outstockGetProcurementAggregated(params = {}) {
   const qs = new URLSearchParams();
   if (params.category || params.itemType) qs.append('category', params.category || params.itemType);
   if (params.branchId) qs.append('branchId', params.branchId);
+  if (params.status) qs.append('status', params.status);
+  if (params.cutoffTime) qs.append('cutoffTime', params.cutoffTime);
+  if (params.dateFrom) qs.append('dateFrom', params.dateFrom);
+  if (params.dateTo) qs.append('dateTo', params.dateTo);
   return await outstockRequest(`procurement/aggregated?${qs.toString()}`, { method: 'GET' });
+}
+
+export async function outstockGetCyclesConfig() {
+  return await outstockRequest('procurement/cycles-config', { method: 'GET' });
+}
+
+export async function outstockSaveCyclesConfig(data) {
+  return await outstockRequest('procurement/cycles-config', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  });
+}
+
+export async function outstockBulkImportCustomers(customers) {
+  return await outstockRequest('customers/bulk-import', {
+    method: 'POST',
+    body: JSON.stringify({ customers })
+  });
 }
 
 export async function outstockProcurementItemAction(payload) {
@@ -429,9 +451,13 @@ export async function outstockGetOwnerOverview() {
 // ── 9. كتالوج أدوية هيئة الدواء المصرية ودراج آي (EDA & Drug Eye Catalog) ───
 export async function outstockSearchMedications(term, limit = 15, itemType = null) {
   const clean = String(term || '').trim();
-  if (!clean || clean.length < 2) return { success: true, medications: [] };
+  // إذا لم يكن هناك نص ولا تصنيف محدد وطلب إكمال تلقائي صغير، نرجع مصفوفة فارغة لتفادي الاستعلام العشوائي
+  if (!clean && (!itemType || itemType === 'all') && limit < 30) {
+    return { success: true, medications: [] };
+  }
 
-  const params = { q: clean, limit: String(limit) };
+  const params = { limit: String(limit) };
+  if (clean) params.q = clean;
   if (itemType && itemType !== 'all') {
     params.itemType = itemType;
   }
@@ -1028,6 +1054,8 @@ export async function outstockGetOwnerComplaints(params = {}) {
   const query = new URLSearchParams();
   if (params.status) query.set('status', params.status);
   if (params.branchId) query.set('branchId', params.branchId);
+  if (params.category_scope) query.set('category_scope', params.category_scope);
+  if (params.categoryScope) query.set('category_scope', params.categoryScope);
   return outstockRequest(`owner/complaints?${query.toString()}`);
 }
 

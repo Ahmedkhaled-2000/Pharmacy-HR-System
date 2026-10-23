@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Clock, CheckCircle, XCircle, Search, Filter } from 'lucide-react';
+import { RefreshCw, Clock, CheckCircle, XCircle, Search, Filter, MessageSquare } from 'lucide-react';
 import { outstockGetOrders } from '../../../utils/outstockApiClient';
 
 /**
@@ -165,6 +165,7 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
                   <th>تاريخ الإرسال</th>
                   <th>حالة التوفير من المشتريات</th>
                   <th>ملاحظات المشتريات</th>
+                  <th>إشعار العميل</th>
                 </tr>
               </thead>
               <tbody>
@@ -215,6 +216,49 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
                         <span style={{ color: '#475569', fontSize: '12px' }}>
                           {item.procurementNotes || item.procurement_notes || '—'}
                         </span>
+                      </td>
+                      <td>
+                        {item.customerPhone ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              let cleanPhone = String(item.customerPhone || '').replace(/\D/g, '');
+                              if (cleanPhone.startsWith('01')) cleanPhone = '2' + cleanPhone;
+                              const custName = item.customerName || 'عميلنا العزيز';
+                              const medName = item.medicationName || item.medication_name || 'الدواء';
+                              let msg = '';
+                              if (isAvailable) {
+                                msg = `السلام عليكم ورحمة الله وبركاته، أ/ ${custName}، نود إبلاغكم بتوفر صنف (${medName}) في الصيدلية بناءً على طلبكم رقم #${item.orderNumber}. نتشرف بزيارتكم للاستلام في أي وقت.`;
+                              } else if (isUnavailable) {
+                                msg = `السلام عليكم ورحمة الله وبركاته، أ/ ${custName}، بخصوص طلبكم رقم #${item.orderNumber} لصنف (${medName})، نعتذر لعدم توفره بالأسواق حالياً. نسعد باستقبالكم لتوفير البديل الطبي المناسب أو استرداد العربون.`;
+                              } else {
+                                msg = `السلام عليكم ورحمة الله وبركاته، أ/ ${custName}، بخصوص طلبكم رقم #${item.orderNumber} لصنف (${medName})، جاري متابعته وتدبيره من إدارة المشتريات.`;
+                              }
+                              window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`, '_blank');
+                            }}
+                            className="outstock-btn"
+                            style={{
+                              padding: '5px 10px',
+                              fontSize: '11.5px',
+                              fontWeight: '800',
+                              background: '#10b981',
+                              color: '#ffffff',
+                              border: 'none',
+                              borderRadius: '6px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              cursor: 'pointer',
+                              whiteSpace: 'nowrap'
+                            }}
+                            title="إرسال رسالة واتساب للعميل بخصوص هذا الصنف (يدوياً بنقرة الصيدلي)"
+                          >
+                            <MessageSquare size={13} color="#ffffff" />
+                            <span>مراسلة العميل 📱</span>
+                          </button>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontSize: '11.5px' }}>—</span>
+                        )}
                       </td>
                     </tr>
                   );

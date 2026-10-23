@@ -515,6 +515,206 @@ export default function OwnerAccessAndIdentityModule({
     }
   };
 
+  // ══════════════════════════════════════════════════════════════════════
+  // إدارة محطات نقاط البيع وصلاحيات الفروع (POS Terminals & Branch Permissions)
+  // ══════════════════════════════════════════════════════════════════════
+  const posTerminals = useMemo(() => {
+    return Array.isArray(orgSettings?.posTerminals) ? orgSettings.posTerminals : [];
+  }, [orgSettings?.posTerminals]);
+
+  const [selectedTerminalBranch, setSelectedTerminalBranch] = useState('all');
+  const [showTerminalModal, setShowTerminalModal] = useState(false);
+  const [editingTerminalId, setEditingTerminalId] = useState(null);
+  const [isSavingTerminal, setIsSavingTerminal] = useState(false);
+
+  const initialTerminalForm = {
+    terminalCode: '',
+    name: '',
+    branchId: branches[0]?.id || 'branch-1',
+    username: '',
+    password: '',
+    defaultCashierCode: '',
+    isActive: true,
+    permissions: {
+      canDiscount: true,
+      maxDiscountPct: 10,
+      canPriceOverride: false,
+      canVoidItem: true,
+      canVoidInvoice: false,
+      canOpenDrawerNoSale: false,
+      canRefundVerified: true,
+      canRefundBlind: false,
+      canViewCosts: false,
+      canViewReports: true,
+      canCloseShift: true,
+      canDeadStockExchange: true,
+      canOcrInvoices: true,
+      canHoldBill: true,
+      canDeliverySettlement: true
+    }
+  };
+  const [terminalForm, setTerminalForm] = useState(initialTerminalForm);
+
+  const handleSaveTerminal = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!terminalForm.terminalCode.trim()) {
+      showToast?.('⚠️ يرجى إدخال كود المحطة (مثال: POS-01)');
+      return;
+    }
+    if (!terminalForm.username.trim() || !terminalForm.password.trim()) {
+      showToast?.('⚠️ يرجى إدخال اسم المستخدم وكلمة المرور لمحطة نقطة البيع');
+      return;
+    }
+    setIsSavingTerminal(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const cleanTermCode = terminalForm.terminalCode.trim().toUpperCase();
+      const cleanU = terminalForm.username.trim().toLowerCase();
+      const cleanP = terminalForm.password.trim();
+
+      const existingIndex = posTerminals.findIndex(t => t.id === editingTerminalId);
+      const newOrUpdatedTerm = {
+        id: editingTerminalId || `term_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        terminalCode: cleanTermCode,
+        name: terminalForm.name.trim() || `محطة (${cleanTermCode})`,
+        branchId: terminalForm.branchId,
+        username: cleanU,
+        password: cleanP,
+        defaultCashierCode: terminalForm.defaultCashierCode || '',
+        isActive: Boolean(terminalForm.isActive),
+        permissions: { ...terminalForm.permissions },
+        updatedAt: nowIso,
+        createdAt: existingIndex >= 0 ? (posTerminals[existingIndex].createdAt || nowIso) : nowIso
+      };
+
+      let updatedList = [...posTerminals];
+      if (existingIndex >= 0) {
+        updatedList[existingIndex] = newOrUpdatedTerm;
+      } else {
+        updatedList.push(newOrUpdatedTerm);
+      }
+
+      const updatedOrg = {
+        ...orgSettings,
+        posTerminals: updatedList,
+        updatedAt: nowIso
+      };
+
+      const updatedState = {
+        ...state,
+        orgSettings: updatedOrg
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      try {
+        await apiSaveSettingsSlice('orgSettings', updatedOrg);
+      } catch (sliceErr) {
+        console.warn('[PosTerminalManagement] Slice save warning:', sliceErr);
+      }
+
+      showToast?.(`✅ تم ${editingTerminalId ? 'تعديل بيانات' : 'إضافة'} محطة نقطة البيع وتحديث صلاحيات الفرع بنجاح`);
+      setShowTerminalModal(false);
+      setEditingTerminalId(null);
+      setTerminalForm(initialTerminalForm);
+    } catch (err) {
+      showToast?.('❌ حدث خطأ أثناء حفظ محطة نقطة البيع');
+    } finally {
+      setIsSavingTerminal(false);
+    }
+  };
+
+  const handleDeleteTerminal = async (term) => {
+    if (!window.confirm(`هل أنت متأكد من حذف محطة نقطة البيع (${term.name || term.terminalCode})؟`)) {
+      return;
+    }
+    try {
+      const nowIso = new Date().toISOString();
+      const updatedList = posTerminals.filter(t => t.id !== term.id);
+      const updatedOrg = {
+        ...orgSettings,
+        posTerminals: updatedList,
+        updatedAt: nowIso
+      };
+      const updatedState = { ...state, orgSettings: updatedOrg };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      try {
+        await apiSaveSettingsSlice('orgSettings', updatedOrg);
+      } catch (sliceErr) {
+        console.warn('[PosTerminalManagement] Slice save warning:', sliceErr);
+      }
+      showToast?.('🗑️ تم حذف محطة نقطة البيع بنجاح');
+    } catch (err) {
+      showToast?.('❌ حدث خطأ أثناء الحذف');
+    }
+  };
+
+  const handleSeedDefaultTerminals = async () => {
+    if (branches.length === 0) {
+      showToast?.('⚠️ لا توجد فروع مسجلة لتوليد محطات لها.');
+      return;
+    }
+    try {
+      const nowIso = new Date().toISOString();
+      const updatedList = [...posTerminals];
+
+      branches.forEach((b, idx) => {
+        const hasTerm = updatedList.some(t => String(t.branchId) === String(b.id));
+        if (!hasTerm) {
+          const bSlug = (b.code || b.name || `branch${idx+1}`).toLowerCase().replace(/[^a-z0-9]/g, '_');
+          updatedList.push({
+            id: `term_branch_${b.id}`,
+            terminalCode: `POS-${b.code || (idx + 1).toString().padStart(2, '0')}`,
+            name: `نقطة بيع كاشير 1 (${b.name || 'الفرع'})`,
+            branchId: b.id,
+            username: `pos_${bSlug}`,
+            password: '123',
+            defaultCashierCode: '',
+            isActive: true,
+            permissions: {
+              canDiscount: true,
+              maxDiscountPct: 10,
+              canPriceOverride: false,
+              canVoidItem: true,
+              canVoidInvoice: false,
+              canOpenDrawerNoSale: false,
+              canRefundVerified: true,
+              canRefundBlind: false,
+              canViewCosts: false,
+              canViewReports: true,
+              canCloseShift: true,
+              canDeadStockExchange: true,
+              canOcrInvoices: true,
+              canHoldBill: true,
+              canDeliverySettlement: true
+            },
+            createdAt: nowIso,
+            updatedAt: nowIso
+          });
+        }
+      });
+
+      const updatedOrg = {
+        ...orgSettings,
+        posTerminals: updatedList,
+        updatedAt: nowIso
+      };
+      const updatedState = { ...state, orgSettings: updatedOrg };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      try {
+        await apiSaveSettingsSlice('orgSettings', updatedOrg);
+      } catch (sliceErr) {
+        console.warn('[PosTerminalManagement] Slice save warning:', sliceErr);
+      }
+      showToast?.(`✅ تم تهيئة وتوليد محطات نقاط البيع لجميع الفروع بنجاح`);
+    } catch (err) {
+      showToast?.('❌ حدث خطأ أثناء تهيئة المحطات الافتراضية');
+    }
+  };
+
   // قائمة وحدات وتراخيص الإدارة العليا المتوافقة كلياً مع كافة شاشات وأقسام النظام
   const topMgmtModules = TOP_MGMT_MODULES;
 
@@ -703,6 +903,28 @@ export default function OwnerAccessAndIdentityModule({
           >
             <span>👑</span>
             <span>إدارة المالكين ({systemOwners.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('pos-terminals')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: 'none',
+              background: activeTab === 'pos-terminals' ? 'var(--primary, #0d9488)' : 'transparent',
+              color: activeTab === 'pos-terminals' ? '#ffffff' : 'var(--text, #334155)',
+              fontWeight: 800,
+              fontSize: '13px',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <span>🖥️</span>
+            <span>محطات نقاط البيع وصلاحيات الفروع ({posTerminals.length})</span>
           </button>
         </div>
       </div>
@@ -1301,6 +1523,778 @@ export default function OwnerAccessAndIdentityModule({
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          التبويب الرابع: محطات نقاط البيع وتراخيص الفروع (POS Terminals Governance)
+         ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'pos-terminals' && (
+        <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
+          {/* شريط الإجراءات والترويسة */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: '16px',
+            flexWrap: 'wrap',
+            gap: '12px'
+          }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 900, color: 'var(--text)' }}>
+                🖥️ محطات نقاط البيع وتراخيص الفروع المستقلة (POS Terminals & Branch Governance)
+              </h2>
+              <p style={{ margin: '3px 0 0', fontSize: '12.5px', color: 'var(--muted)' }}>
+                إنشاء محطات نقاط بيع مستقلة لكل فرع بيوزر وباسورد مخصص مع ضبط 14+ صلاحية رقابية دقيقة لكل محطة
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={handleSeedDefaultTerminals}
+                style={{
+                  background: 'rgba(13, 148, 136, 0.1)',
+                  color: 'var(--primary, #0d9488)',
+                  border: '1.5px solid var(--primary, #0d9488)',
+                  padding: '8px 16px',
+                  borderRadius: '10px',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>⚡</span>
+                <span>تهيئة محطات افتراضية لجميع الفروع</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingTerminalId(null);
+                  setTerminalForm({
+                    ...initialTerminalForm,
+                    branchId: branches[0]?.id || 'branch-1',
+                    terminalCode: `POS-${(posTerminals.length + 1).toString().padStart(2, '0')}`
+                  });
+                  setShowTerminalModal(true);
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '8px 18px',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 4px 14px rgba(13, 148, 136, 0.3)'
+                }}
+              >
+                <span>➕</span>
+                <span>إضافة نقطة بيع جديدة لفرع</span>
+              </button>
+            </div>
+          </div>
+
+          {/* فلتر الفرع */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            marginBottom: '16px',
+            background: 'var(--surface, #ffffff)',
+            padding: '10px 16px',
+            borderRadius: '12px',
+            border: '1px solid var(--border, #e2e8f0)'
+          }}>
+            <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--muted)' }}>تصفية حسب الفرع:</span>
+            <select
+              value={selectedTerminalBranch}
+              onChange={(e) => setSelectedTerminalBranch(e.target.value)}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: '1px solid var(--border, #cbd5e1)',
+                fontSize: '12.5px',
+                fontWeight: 700,
+                background: 'var(--surface-hover, #f8fafc)'
+              }}
+            >
+              <option value="all">كافة الفروع ({posTerminals.length} محطة)</option>
+              {branches.map(b => (
+                <option key={b.id} value={b.id}>
+                  {b.name} ({posTerminals.filter(t => String(t.branchId) === String(b.id)).length} محطة)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* قائمة المحطات */}
+          {posTerminals.length === 0 ? (
+            <div style={{
+              background: 'var(--surface, #ffffff)',
+              borderRadius: '16px',
+              padding: '40px',
+              textAlign: 'center',
+              border: '1.5px dashed var(--border, #cbd5e1)'
+            }}>
+              <div style={{ fontSize: '42px', marginBottom: '10px' }}>🖥️</div>
+              <h3 style={{ fontSize: '16px', fontWeight: 800, margin: '0 0 6px' }}>لا توجد محطات نقاط بيع مسجلة حالياً</h3>
+              <p style={{ fontSize: '13px', color: 'var(--muted)', margin: '0 0 16px' }}>
+                يمكنك الضغط على زر "تهيئة محطات افتراضية لجميع الفروع" لإنشاء محطة كاشير مخصصة لكل فرع تلقائياً
+              </p>
+              <button
+                type="button"
+                onClick={handleSeedDefaultTerminals}
+                style={{
+                  background: 'var(--primary, #0d9488)',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '9px 20px',
+                  borderRadius: '10px',
+                  fontWeight: 800,
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+              >
+                ⚡ تهيئة المحطات الآن
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
+              {posTerminals
+                .filter(t => selectedTerminalBranch === 'all' || String(t.branchId) === String(selectedTerminalBranch))
+                .map(term => {
+                  const branchObj = branches.find(b => String(b.id) === String(term.branchId));
+                  const perms = term.permissions || {};
+                  const activePermsCount = Object.values(perms).filter(Boolean).length;
+
+                  return (
+                    <div
+                      key={term.id}
+                      style={{
+                        background: 'var(--surface, #ffffff)',
+                        borderRadius: '16px',
+                        border: term.isActive ? '1.5px solid var(--border, #cbd5e1)' : '1.5px solid #fee2e2',
+                        padding: '18px',
+                        boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '12px',
+                        position: 'relative'
+                      }}
+                    >
+                      {/* رأس كارت المحطة */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{
+                              fontFamily: 'monospace',
+                              fontWeight: 900,
+                              fontSize: '14px',
+                              background: 'rgba(13, 148, 136, 0.1)',
+                              color: 'var(--primary, #0d9488)',
+                              padding: '2px 8px',
+                              borderRadius: '6px'
+                            }}>
+                              {term.terminalCode}
+                            </span>
+                            <span style={{ fontWeight: 900, fontSize: '15px', color: 'var(--text)' }}>
+                              {term.name}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
+                            📍 الفرع: <strong style={{ color: 'var(--text)' }}>{branchObj?.name || 'الفرع'}</strong>
+                          </div>
+                        </div>
+
+                        <span style={{
+                          padding: '3px 10px',
+                          borderRadius: '99px',
+                          fontSize: '11px',
+                          fontWeight: 800,
+                          background: term.isActive ? '#ecfdf5' : '#fee2e2',
+                          color: term.isActive ? '#047857' : '#b91c1c'
+                        }}>
+                          {term.isActive ? '● نشطة' : '○ معطلة'}
+                        </span>
+                      </div>
+
+                      {/* بيانات تسجيل الدخول الخاصة بالمحطة */}
+                      <div style={{
+                        background: 'var(--surface-hover, #f8fafc)',
+                        padding: '10px 12px',
+                        borderRadius: '10px',
+                        border: '1px solid var(--border, #e2e8f0)',
+                        fontSize: '12px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span style={{ color: 'var(--muted)' }}>يوزر الدخول:</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 800, color: 'var(--primary, #0d9488)' }}>
+                            {term.username}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--muted)' }}>كلمة المرور:</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 800, color: '#0f172a' }}>
+                            {term.password}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* ملخص الصلاحيات الممنوحة للمحطة */}
+                      <div>
+                        <div style={{ fontSize: '11.5px', fontWeight: 800, color: 'var(--muted)', marginBottom: '6px' }}>
+                          الصلاحيات المفعلة ({activePermsCount} من 15):
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                          {perms.canDiscount && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#e0f2fe', color: '#0369a1', borderRadius: '4px', fontWeight: 700 }}>
+                              خصومات ({perms.maxDiscountPct || 10}%)
+                            </span>
+                          )}
+                          {perms.canPriceOverride && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#fef3c7', color: '#b45309', borderRadius: '4px', fontWeight: 700 }}>
+                              تعديل السعر
+                            </span>
+                          )}
+                          {perms.canVoidItem && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#f3e8ff', color: '#7e22ce', borderRadius: '4px', fontWeight: 700 }}>
+                              حذف بند
+                            </span>
+                          )}
+                          {perms.canVoidInvoice && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#fee2e2', color: '#b91c1c', borderRadius: '4px', fontWeight: 700 }}>
+                              إلغاء فاتورة
+                            </span>
+                          )}
+                          {perms.canOpenDrawerNoSale && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#fef3c7', color: '#92400e', borderRadius: '4px', fontWeight: 700 }}>
+                              فتح الدرج بدون بيع
+                            </span>
+                          )}
+                          {perms.canRefundVerified && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#ecfdf5', color: '#047857', borderRadius: '4px', fontWeight: 700 }}>
+                              مرتجع بفاتورة
+                            </span>
+                          )}
+                          {perms.canRefundBlind && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#fee2e2', color: '#dc2626', borderRadius: '4px', fontWeight: 700 }}>
+                              مرتجع حر
+                            </span>
+                          )}
+                          {perms.canViewCosts && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#e0e7ff', color: '#3730a3', borderRadius: '4px', fontWeight: 700 }}>
+                              رؤية التكلفة
+                            </span>
+                          )}
+                          {perms.canViewReports && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#ccfbf1', color: '#0f766e', borderRadius: '4px', fontWeight: 700 }}>
+                              مركز التقارير (X)
+                            </span>
+                          )}
+                          {perms.canCloseShift && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#ede9fe', color: '#5b21b6', borderRadius: '4px', fontWeight: 700 }}>
+                              إغلاق وردية (Z)
+                            </span>
+                          )}
+                          {perms.canDeadStockExchange && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#dcfce7', color: '#15803d', borderRadius: '4px', fontWeight: 700 }}>
+                              تبادل الرواكد P2P
+                            </span>
+                          )}
+                          {perms.canOcrInvoices && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#e0f2fe', color: '#0284c7', borderRadius: '4px', fontWeight: 700 }}>
+                              قارئ الذكاء الاصطناعي
+                            </span>
+                          )}
+                          {perms.canHoldBill && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#f1f5f9', color: '#475569', borderRadius: '4px', fontWeight: 700 }}>
+                              تعليق الفواتير
+                            </span>
+                          )}
+                          {perms.canDeliverySettlement && (
+                            <span style={{ fontSize: '10.5px', padding: '2px 6px', background: '#ffedd5', color: '#c2410c', borderRadius: '4px', fontWeight: 700 }}>
+                              تسوية الدليفري
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* أزرار الإجراءات */}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '10px', borderTop: '1px solid var(--border, #f1f5f9)' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingTerminalId(term.id);
+                            setTerminalForm({
+                              terminalCode: term.terminalCode || '',
+                              name: term.name || '',
+                              branchId: term.branchId || branches[0]?.id || '',
+                              username: term.username || '',
+                              password: term.password || '',
+                              defaultCashierCode: term.defaultCashierCode || '',
+                              isActive: term.isActive !== false,
+                              permissions: {
+                                ...initialTerminalForm.permissions,
+                                ...(term.permissions || {})
+                              }
+                            });
+                            setShowTerminalModal(true);
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            background: 'var(--surface-hover, #f8fafc)',
+                            border: '1px solid var(--border, #cbd5e1)',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          ✏️ تعديل وضبط الصلاحيات
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTerminal(term)}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            background: '#fee2e2',
+                            color: '#dc2626',
+                            border: '1px solid #fca5a5',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🗑️ حذف
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          نافذة إضافة/تعديل محطة نقطة بيع وتراخيص الفرع (Terminal Modal)
+         ══════════════════════════════════════════════════════════════════════ */}
+      {showTerminalModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(5px)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px',
+          direction: 'rtl'
+        }}>
+          <div style={{
+            background: 'var(--surface, #ffffff)',
+            borderRadius: '20px',
+            width: '100%',
+            maxWidth: '720px',
+            maxHeight: '92vh',
+            overflowY: 'auto',
+            boxShadow: '0 25px 60px rgba(0,0,0,0.3)',
+            border: '1px solid var(--border, #cbd5e1)',
+            padding: '24px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px'
+          }}>
+            {/* رأس النافذة */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: 'var(--text)' }}>
+                  {editingTerminalId ? '✏️ تعديل محطة نقطة البيع وضبط الصلاحيات' : '➕ إضافة محطة نقطة بيع جديدة للفرع'}
+                </h3>
+                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                  تخصيص بيانات الدخول وصلاحيات الكاشير الحصرية
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setShowTerminalModal(false); setEditingTerminalId(null); }}
+                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--muted)' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* النموذج الأساسي */}
+            <form onSubmit={handleSaveTerminal} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 800, marginBottom: '4px', display: 'block' }}>
+                    الفرع التابع له المحطة:
+                  </label>
+                  <select
+                    value={terminalForm.branchId}
+                    onChange={(e) => setTerminalForm({ ...terminalForm, branchId: e.target.value })}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
+                  >
+                    {branches.map(b => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 800, marginBottom: '4px', display: 'block' }}>
+                    كود المحطة (Terminal Code):
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="مثال: POS-01 أو POS-DOKKI-1"
+                    value={terminalForm.terminalCode}
+                    onChange={(e) => setTerminalForm({ ...terminalForm, terminalCode: e.target.value })}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', fontFamily: 'monospace' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 800, marginBottom: '4px', display: 'block' }}>
+                  اسم المحطة / الوصف:
+                </label>
+                <input
+                  type="text"
+                  placeholder="مثال: كاشير 1 - الصالة الرئيسية"
+                  value={terminalForm.name}
+                  onChange={(e) => setTerminalForm({ ...terminalForm, name: e.target.value })}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
+                />
+              </div>
+
+              {/* بيانات الدخول المستقلة */}
+              <div style={{ background: 'var(--surface-hover, #f8fafc)', padding: '14px', borderRadius: '12px', border: '1px solid var(--border, #cbd5e1)' }}>
+                <div style={{ fontSize: '12.5px', fontWeight: 900, marginBottom: '8px', color: 'var(--primary, #0d9488)' }}>
+                  🔐 بيانات الدخول المستقلة لنظام الكاشير (Central Login Credentials):
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: 800, marginBottom: '4px', display: 'block' }}>
+                      اسم المستخدم (Username):
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="مثال: pos_dokki1"
+                      value={terminalForm.username}
+                      onChange={(e) => setTerminalForm({ ...terminalForm, username: e.target.value })}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', fontFamily: 'monospace' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: 800, marginBottom: '4px', display: 'block' }}>
+                      كلمة المرور (Password):
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="كلمة مرور المحطة"
+                      value={terminalForm.password}
+                      onChange={(e) => setTerminalForm({ ...terminalForm, password: e.target.value })}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', fontFamily: 'monospace' }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* حالة التفعيل */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="checkbox"
+                  id="termActive"
+                  checked={terminalForm.isActive}
+                  onChange={(e) => setTerminalForm({ ...terminalForm, isActive: e.target.checked })}
+                  style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                />
+                <label htmlFor="termActive" style={{ fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>
+                  تفعيل هذه المحطة والسماح بتسجيل الدخول منها
+                </label>
+              </div>
+
+              {/* الصلاحيات الرقابية التفصيلية (14+ Granular Permissions) */}
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+                <h4 style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: 900, color: 'var(--text)' }}>
+                  🛡️ الصلاحيات الرقابية الحصرية لنقطة البيع (14 صلاحية):
+                </h4>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
+                  {/* canDiscount & maxPct */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <input
+                        type="checkbox"
+                        id="canDisc"
+                        checked={terminalForm.permissions?.canDiscount}
+                        onChange={(e) => setTerminalForm({
+                          ...terminalForm,
+                          permissions: { ...terminalForm.permissions, canDiscount: e.target.checked }
+                        })}
+                      />
+                      <label htmlFor="canDisc" style={{ fontSize: '12px', fontWeight: 800 }}>منح خصومات نقدية/نسبية</label>
+                    </div>
+                    {terminalForm.permissions?.canDiscount && (
+                      <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--muted)' }}>الحد الأقصى للخصم:</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="100"
+                          value={terminalForm.permissions?.maxDiscountPct || 10}
+                          onChange={(e) => setTerminalForm({
+                            ...terminalForm,
+                            permissions: { ...terminalForm.permissions, maxDiscountPct: parseFloat(e.target.value) || 0 }
+                          })}
+                          style={{ width: '60px', padding: '3px 6px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                        />
+                        <span style={{ fontSize: '11px' }}>%</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* canPriceOverride */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="checkbox"
+                      id="canPriceOver"
+                      checked={terminalForm.permissions?.canPriceOverride}
+                      onChange={(e) => setTerminalForm({
+                        ...terminalForm,
+                        permissions: { ...terminalForm.permissions, canPriceOverride: e.target.checked }
+                      })}
+                    />
+                    <label htmlFor="canPriceOver" style={{ fontSize: '12px', fontWeight: 800 }}>تعديل سعر البيع يدوياً</label>
+                  </div>
+
+                  {/* canVoidItem */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="checkbox"
+                      id="canVoidItm"
+                      checked={terminalForm.permissions?.canVoidItem}
+                      onChange={(e) => setTerminalForm({
+                        ...terminalForm,
+                        permissions: { ...terminalForm.permissions, canVoidItem: e.target.checked }
+                      })}
+                    />
+                    <label htmlFor="canVoidItm" style={{ fontSize: '12px', fontWeight: 800 }}>حذف بند من السلة (Line Void)</label>
+                  </div>
+
+                  {/* canVoidInvoice */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="checkbox"
+                      id="canVoidInv"
+                      checked={terminalForm.permissions?.canVoidInvoice}
+                      onChange={(e) => setTerminalForm({
+                        ...terminalForm,
+                        permissions: { ...terminalForm.permissions, canVoidInvoice: e.target.checked }
+                      })}
+                    />
+                    <label htmlFor="canVoidInv" style={{ fontSize: '12px', fontWeight: 800 }}>إلغاء الفاتورة بالكامل</label>
+                  </div>
+
+                  {/* canOpenDrawerNoSale */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="checkbox"
+                      id="canDrawer"
+                      checked={terminalForm.permissions?.canOpenDrawerNoSale}
+                      onChange={(e) => setTerminalForm({
+                        ...terminalForm,
+                        permissions: { ...terminalForm.permissions, canOpenDrawerNoSale: e.target.checked }
+                      })}
+                    />
+                    <label htmlFor="canDrawer" style={{ fontSize: '12px', fontWeight: 800 }}>فتح الدرج بدون بيع (No Sale)</label>
+                  </div>
+
+                  {/* canRefundVerified */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="checkbox"
+                      id="canRefVer"
+                      checked={terminalForm.permissions?.canRefundVerified}
+                      onChange={(e) => setTerminalForm({
+                        ...terminalForm,
+                        permissions: { ...terminalForm.permissions, canRefundVerified: e.target.checked }
+                      })}
+                    />
+                    <label htmlFor="canRefVer" style={{ fontSize: '12px', fontWeight: 800 }}>مرتجع مبيعات بأصل فاتورة</label>
+                  </div>
+
+                  {/* canRefundBlind */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="checkbox"
+                      id="canRefBlind"
+                      checked={terminalForm.permissions?.canRefundBlind}
+                      onChange={(e) => setTerminalForm({
+                        ...terminalForm,
+                        permissions: { ...terminalForm.permissions, canRefundBlind: e.target.checked }
+                      })}
+                    />
+                    <label htmlFor="canRefBlind" style={{ fontSize: '12px', fontWeight: 800 }}>مرتجع حر بدون أصل فاتورة</label>
+                  </div>
+
+                  {/* canViewCosts */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="checkbox"
+                      id="canCosts"
+                      checked={terminalForm.permissions?.canViewCosts}
+                      onChange={(e) => setTerminalForm({
+                        ...terminalForm,
+                        permissions: { ...terminalForm.permissions, canViewCosts: e.target.checked }
+                      })}
+                    />
+                    <label htmlFor="canCosts" style={{ fontSize: '12px', fontWeight: 800 }}>رؤية التكلفة وهوامش الربح</label>
+                  </div>
+
+                  {/* canViewReports */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="checkbox"
+                      id="canReps"
+                      checked={terminalForm.permissions?.canViewReports}
+                      onChange={(e) => setTerminalForm({
+                        ...terminalForm,
+                        permissions: { ...terminalForm.permissions, canViewReports: e.target.checked }
+                      })}
+                    />
+                    <label htmlFor="canReps" style={{ fontSize: '12px', fontWeight: 800 }}>مركز التقارير وطباعة تقرير X</label>
+                  </div>
+
+                  {/* canCloseShift */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="checkbox"
+                      id="canCloseSh"
+                      checked={terminalForm.permissions?.canCloseShift}
+                      onChange={(e) => setTerminalForm({
+                        ...terminalForm,
+                        permissions: { ...terminalForm.permissions, canCloseShift: e.target.checked }
+                      })}
+                    />
+                    <label htmlFor="canCloseSh" style={{ fontSize: '12px', fontWeight: 800 }}>إغلاق الوردية وتقرير Z الأعمى</label>
+                  </div>
+
+                  {/* canDeadStockExchange */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="checkbox"
+                      id="canDeadStock"
+                      checked={terminalForm.permissions?.canDeadStockExchange}
+                      onChange={(e) => setTerminalForm({
+                        ...terminalForm,
+                        permissions: { ...terminalForm.permissions, canDeadStockExchange: e.target.checked }
+                      })}
+                    />
+                    <label htmlFor="canDeadStock" style={{ fontSize: '12px', fontWeight: 800 }}>تبادل الرواكد مع الفروع P2P</label>
+                  </div>
+
+                  {/* canOcrInvoices */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="checkbox"
+                      id="canOcr"
+                      checked={terminalForm.permissions?.canOcrInvoices}
+                      onChange={(e) => setTerminalForm({
+                        ...terminalForm,
+                        permissions: { ...terminalForm.permissions, canOcrInvoices: e.target.checked }
+                      })}
+                    />
+                    <label htmlFor="canOcr" style={{ fontSize: '12px', fontWeight: 800 }}>قراءة الفواتير بالذكاء الاصطناعي</label>
+                  </div>
+
+                  {/* canHoldBill */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="checkbox"
+                      id="canHold"
+                      checked={terminalForm.permissions?.canHoldBill}
+                      onChange={(e) => setTerminalForm({
+                        ...terminalForm,
+                        permissions: { ...terminalForm.permissions, canHoldBill: e.target.checked }
+                      })}
+                    />
+                    <label htmlFor="canHold" style={{ fontSize: '12px', fontWeight: 800 }}>تعليق واسترجاع الفواتير</label>
+                  </div>
+
+                  {/* canDeliverySettlement */}
+                  <div style={{ background: 'var(--surface-hover)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="checkbox"
+                      id="canDeliv"
+                      checked={terminalForm.permissions?.canDeliverySettlement}
+                      onChange={(e) => setTerminalForm({
+                        ...terminalForm,
+                        permissions: { ...terminalForm.permissions, canDeliverySettlement: e.target.checked }
+                      })}
+                    />
+                    <label htmlFor="canDeliv" style={{ fontSize: '12px', fontWeight: 800 }}>تسوية حسابات طياري الدليفري</label>
+                  </div>
+                </div>
+              </div>
+
+              {/* أزرار الحفظ والإلغاء */}
+              <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
+                <button
+                  type="submit"
+                  disabled={isSavingTerminal}
+                  style={{
+                    flex: 1,
+                    padding: '10px',
+                    borderRadius: '10px',
+                    background: 'var(--primary, #0d9488)',
+                    color: '#fff',
+                    border: 'none',
+                    fontWeight: 900,
+                    fontSize: '14px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {isSavingTerminal ? 'جاري الحفظ...' : 'حفظ وتثبيت بيانات المحطة'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowTerminalModal(false)}
+                  style={{
+                    padding: '10px 20px',
+                    borderRadius: '10px',
+                    background: 'var(--surface-hover)',
+                    border: '1px solid var(--border)',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

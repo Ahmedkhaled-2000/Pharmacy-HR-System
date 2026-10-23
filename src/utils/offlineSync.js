@@ -21,12 +21,14 @@ import {
   addToPendingQueue,
   clearPendingQueue,
   getPendingCount,
+  getPendingQueue,
   clearLocalDatabase,
 } from './offlineStorage';
 import {
   deleteRequestLocal,
   clearAllRequestsLocal,
-  bulkDeleteRequestsLocal
+  bulkDeleteRequestsLocal,
+  putRequestsBatch
 } from './localDatabase';
 export { clearLocalDatabase, saveStateLocally };
 import { smartMergeStates } from './stateMerger';
@@ -459,6 +461,22 @@ export function listenToConnectionChanges(onOnline, onOffline) {
     }
   }, 2500);
 
+  // استماع فوري لعودة التطبيق للواجهة على هواتف أندرويد والتابلت (Android App Resume / Screen Unlock)
+  const handleVisibilityOrFocus = async () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      const isOnlineNow = await verifyRealConnection(2000);
+      if (isOnlineNow) {
+        console.log('[Sync] Mobile app resumed to foreground and network is verified, executing instant sync...');
+        triggerInstantReconnection();
+      }
+    }
+  };
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+  }
+  window.addEventListener('focus', handleVisibilityOrFocus);
+
   // الاستماع لحدث استيقاظ الجهاز من السكون في سطح المكتب Electron
   let unsubDesktopResume = null;
   if (typeof window !== 'undefined' && window.desktopAPI?.onSystemResume) {
@@ -471,6 +489,10 @@ export function listenToConnectionChanges(onOnline, onOffline) {
   return () => {
     window.removeEventListener('online', handleOnlineEvent);
     window.removeEventListener('offline', handleOfflineEvent);
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    }
+    window.removeEventListener('focus', handleVisibilityOrFocus);
     clearInterval(probeInterval);
     if (unsubDesktopResume) unsubDesktopResume();
   };

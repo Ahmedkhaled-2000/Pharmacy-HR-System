@@ -601,10 +601,27 @@ export function normalizeState(parsed) {
       employeeId: remapEmpId(s.employeeId || s.jobId || (employees[0] ? employees[0].id : ''))
     }));
 
-  // 1. فلترة الورديات المحذوفة وفق شواهد القبور (_deletedIds) مع حصانة الورديات المستعادة
+  // 0. فك الحظر عن أي وردية معتمدة أو يدوية أو نشطة أو ذات ساعات حقيقية موجودة صراحة في shifts لمنع حظرها بشواهد قبور سابقة
+  for (const s of rawShifts) {
+    if (s && s.id) {
+      const sIdLower = String(s.id).trim().toLowerCase();
+      if (s.isManual || s.manualPunch || s.adminApproved || s.editedByAdmin || s.isLiveActive || (s.timeIn && s.timeOut && s.timeOut !== '—')) {
+        deletedSet.delete(sIdLower);
+        deletedSet.delete(`shift_${sIdLower}`);
+        deletedSet.delete(`punch_${sIdLower}`);
+        if (s.date && s.timeIn) {
+          deletedSet.delete(`shift_${s.employeeId}_${s.date}_${s.timeIn}`);
+          deletedSet.delete(`${s.employeeId}_${s.date}_${s.timeIn}`);
+        }
+      }
+    }
+  }
+
+  // 1. فلترة الورديات المحذوفة وفق شواهد القبور (_deletedIds) مع حصانة الورديات المستعادة والمعتمدة يدوياً
   rawShifts = rawShifts.filter((s) => {
     if (!s) return false;
     if (s.isRestored || String(s.id || '').startsWith('shift_restored_')) return true;
+    if (s.isManual || s.manualPunch || s.adminApproved || s.editedByAdmin) return true; // حصانة للورديات المعتمدة يدوياً
     const sId = String(s.id || '').trim().toLowerCase();
     if (deletedSet.has(sId) || deletedSet.has(`shift_${sId}`)) return false;
     return true;
@@ -649,67 +666,109 @@ export function normalizeState(parsed) {
     return s;
   });
 
-  // 3. الاستشفاء الذاتي لمنع تكرار الورديات (Self-Healing Daily Shift Deduplication):
-  // فحص كل موظف وكل تاريخ: إذا وُجد أكثر من وردية في نفس اليوم لنفس الموظف:
-  // اختيار الوردية الأصح (الوردية المعتمدة يدوياً من الإدارة أولاً، ثم المكتملة ذات الساعات الحقيقية)،
-  // وحذف الورديات الزائدة وشطبها فوراً وتضمين معرّفاتها في deletedSet لمنع قيامها مجدداً من localStorage
-  const shiftsByEmpAndDate = new Map();
+  // 3. الاستشفاء الذاتي ومنع تكرار البصمات الذكي (Smart Shift Deduplication Guard):
+  // 🛡️ دعم كامل واحترافي لتعدد الفروع والورديات المنفصلة للموظف في نفس اليوم (سواء في فروع مختلفة أو ورديات منفصلة في نفس الفرع).
+  // يتم دمج السجلات وتنقيتها فقط إذا كانت لنفس الموظف، في نفس اليوم، وفي نفس الفرع، وبتوقيت متطابق أو متداخل مباشرة (مثل تسجيل بيومتري خام وتعديل يدوي للإدارة).
+  const getBranchKey = (shift) => {
+    if (!shift) return 'default';
+    const bId = shift.branchId || shift.actualBranchId;
+    if (bId) return String(bId).trim().toLowerCase();
+    if (shift.branchName) return String(shift.branchName).trim().toLowerCase();
+    return 'default';
+  };
+
+  const getShiftTimeInMins = (t) => {
+    if (!t) return null;
+    const [h, m] = String(t).slice(0, 5).split(':').map(Number);
+    if (isNaN(h)) return null;
+    return h * 60 + (m || 0);
+  };
+
+  // تجميع الورديات بدقة حسب الموظف + التاريخ + الفرع (فصل فروع الموظف تماماً في نفس اليوم)
+  const shiftsByEmpDateBranch = new Map();
   rawShifts.forEach((s) => {
     if (!s || !s.employeeId || !s.date) return;
-    const groupKey = `${s.employeeId}_${s.date}`;
-    if (!shiftsByEmpAndDate.has(groupKey)) {
-      shiftsByEmpAndDate.set(groupKey, []);
+    const bKey = getBranchKey(s);
+    const groupKey = `${s.employeeId}_${s.date}_${bKey}`;
+    if (!shiftsByEmpDateBranch.has(groupKey)) {
+      shiftsByEmpDateBranch.set(groupKey, []);
     }
-    shiftsByEmpAndDate.get(groupKey).push(s);
+    shiftsByEmpDateBranch.get(groupKey).push(s);
   });
 
   const validShiftIds = new Set();
-  shiftsByEmpAndDate.forEach((group) => {
-    if (group.length === 1) {
-      if (group[0].id) validShiftIds.add(String(group[0].id));
+  shiftsByEmpDateBranch.forEach((branchGroup) => {
+    if (branchGroup.length === 1) {
+      if (branchGroup[0].id) validShiftIds.add(String(branchGroup[0].id));
       return;
     }
 
-    // فرز واختيار الوردية الأصح
-    const sortedGroup = [...group].sort((a, b) => {
-      // أ. الوردية اليدوية / المعتمدة من الإدارة تفوز على البيومترية التلقائية
-      const aManual = Boolean(a.isManual || a.manualPunch || a.adminApproved || a.editedByAdmin);
-      const bManual = Boolean(b.isManual || b.manualPunch || b.adminApproved || b.editedByAdmin);
-      if (aManual && !bManual) return -1;
-      if (!aManual && bManual) return 1;
+    // داخل نفس الفرع في نفس اليوم: فحص هل هي ورديات منفصلة زمنياً (مثل وردية صباحية ووردية مسائية) أم نفس الوردية مسجلة مرتين
+    const timeClusters = [];
+    branchGroup.forEach((shift) => {
+      const sInMins = getShiftTimeInMins(shift.timeIn);
 
-      // ب. الوردية ذات وقت الانصراف المكتمل والساعات الحقيقية تفوز
-      const aHasOut = Boolean(a.timeOut && a.timeOut !== '—' && a.timeOut !== '' && a.timeOut !== 'غير مسجل');
-      const bHasOut = Boolean(b.timeOut && b.timeOut !== '—' && b.timeOut !== '' && b.timeOut !== 'غير مسجل');
-      if (aHasOut && !bHasOut) return -1;
-      if (!aHasOut && bHasOut) return 1;
+      // البحث عن كلاستر مطابق أو متقارب في وقت الحضور (أقل من 20 دقيقة فارق حضور لنفس الوردية في نفس الفرع)
+      let foundCluster = false;
+      for (const cluster of timeClusters) {
+        const rep = cluster[0];
+        const repInMins = getShiftTimeInMins(rep.timeIn);
 
-      const aHrs = parseFloat(a.actualWorkedHours || a.hours || 0);
-      const bHrs = parseFloat(b.actualWorkedHours || b.hours || 0);
-      if (aHrs > 0 && bHrs === 0) return -1;
-      if (aHrs === 0 && bHrs > 0) return 1;
+        const isTimeMatch = (sInMins !== null && repInMins !== null)
+          ? Math.abs(sInMins - repInMins) <= 20
+          : (!shift.timeIn || !rep.timeIn || shift.timeIn === rep.timeIn);
 
-      // ج. تفضيل الساعات الأكبر المعقولة
-      if (Math.abs(aHrs - bHrs) > 0.1) return bHrs - aHrs;
+        if (isTimeMatch) {
+          cluster.push(shift);
+          foundCluster = true;
+          break;
+        }
+      }
 
-      // د. الأحدث تعديلاً أو إنشاءً
-      const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
-      const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
-      return bTime - aTime;
+      if (!foundCluster) {
+        timeClusters.push([shift]);
+      }
     });
 
-    const canonicalShift = sortedGroup[0];
-    if (canonicalShift && canonicalShift.id) {
-      validShiftIds.add(String(canonicalShift.id));
-    }
-
-    // إدراج كافة الورديات الأخرى المكررة في deletedSet لشطبها نهائياً
-    sortedGroup.slice(1).forEach((loser) => {
-      if (loser && loser.id) {
-        const loserId = String(loser.id);
-        deletedSet.add(loserId.toLowerCase());
-        deletedSet.add(`shift_${loserId.toLowerCase()}`);
+    // لكل كلاستر مكرر في نفس التوقيت في نفس الفرع: اختيار الوردية الأصح واليدوية المعتمدة
+    timeClusters.forEach((cluster) => {
+      if (cluster.length === 1) {
+        if (cluster[0].id) validShiftIds.add(String(cluster[0].id));
+        return;
       }
+
+      const sortedCluster = [...cluster].sort((a, b) => {
+        // أ. الوردية اليدوية / المعتمدة من الإدارة تفوز على البيومترية التلقائية
+        const aManual = Boolean(a.isManual || a.manualPunch || a.adminApproved || a.editedByAdmin);
+        const bManual = Boolean(b.isManual || b.manualPunch || b.adminApproved || b.editedByAdmin);
+        if (aManual && !bManual) return -1;
+        if (!aManual && bManual) return 1;
+
+        // ب. الوردية ذات وقت الانصراف المكتمل والساعات الحقيقية تفوز
+        const aHasOut = Boolean(a.timeOut && a.timeOut !== '—' && a.timeOut !== '' && a.timeOut !== 'غير مسجل' && a.timeOut !== 'قيد العمل الآن');
+        const bHasOut = Boolean(b.timeOut && b.timeOut !== '—' && b.timeOut !== '' && b.timeOut !== 'غير مسجل' && b.timeOut !== 'قيد العمل الآن');
+        if (aHasOut && !bHasOut) return -1;
+        if (!aHasOut && bHasOut) return 1;
+
+        const aHrs = parseFloat(a.actualWorkedHours || a.hours || 0);
+        const bHrs = parseFloat(b.actualWorkedHours || b.hours || 0);
+        if (aHrs > 0 && bHrs === 0) return -1;
+        if (aHrs === 0 && bHrs > 0) return 1;
+
+        // ج. تفضيل الساعات الأكبر المعقولة
+        if (Math.abs(aHrs - bHrs) > 0.1) return bHrs - aHrs;
+
+        // د. الأحدث تعديلاً أو إنشاءً
+        const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+        return bTime - aTime;
+      });
+
+      const canonicalShift = sortedCluster[0];
+      if (canonicalShift && canonicalShift.id) {
+        validShiftIds.add(String(canonicalShift.id));
+      }
+      // حماية صارمة: لا نضيف السجلات البديلة إلى deletedSet حتى لا نحظرها كشواهد قبور في قاعدة البيانات
     });
   });
 

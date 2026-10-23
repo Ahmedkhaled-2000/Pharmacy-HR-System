@@ -3,8 +3,8 @@ import {
   createRequestDecisionNotification
 } from '../utils/notificationEngine';
 import { notifyOnPenaltyApplied } from '../utils/gmailService';
-import { applyApprovedPermissionsToShifts, recalculateEmployeeCycleLateness } from '../utils/latePenaltyEngine';
-import { applyShiftSwapToRosters, getEmployeeDaySchedule, normalizeSchedule } from '../utils/rosterEngine';
+import { applyApprovedPermissionsToShifts, recalculateEmployeeCycleLateness, reconcileEmployeeScheduleOrPunchChange } from '../utils/latePenaltyEngine';
+import { applyShiftSwapToRosters, getEmployeeDaySchedule, normalizeSchedule, projectRosterToMonth } from '../utils/rosterEngine';
 import { saveFaceDescriptor, saveHandDescriptor, deleteFaceDescriptor, deleteHandDescriptor } from '../utils/faceStorage';
 import { enqueueRequestDecision } from '../utils/syncEngine';
 import { emitLiveRequestUpdated } from '../utils/socketClient';
@@ -13,6 +13,7 @@ import { useData } from '../context/DataContext';
 import { useUI } from '../context/UIContext';
 import { sendEmployeeRequestDecisionWhatsApp } from '../utils/whatsappTemplates';
 import { calculateShiftMetrics } from '../utils/workHoursEngine';
+import { apiSaveSettingsSlice, apiSubmitRequestDecision } from '../utils/apiClient';
 
 export function useRequestsManager() {
   const { state, setState, saveState } = useData();
@@ -20,22 +21,47 @@ export function useRequestsManager() {
 
   const handleApproveRequest = useCallback(async (requestId, role = 'admin', customData = null) => {
     if (!state) return;
+    const reqIdStr = String(requestId || '');
     const currentRequests = state?.requests || [];
-    const target = currentRequests.find((r) => r && r.id === requestId);
-    if (!target) return;
+    let target = currentRequests.find((r) => r && String(r.id) === reqIdStr);
+    if (!target) {
+      target = (state?.leaveRequests || []).find((r) => r && String(r.id) === reqIdStr);
+      if (target) target = { ...target, type: target.type || 'leave' };
+    }
+    if (!target) {
+      target = (state?.loans || []).find((r) => r && (String(r.id) === reqIdStr || String(r.requestId) === reqIdStr));
+      if (target) target = { ...target, type: target.type || 'loan' };
+    }
+    if (!target) {
+      target = (state?.shiftSwaps || []).find((r) => r && String(r.id) === reqIdStr);
+      if (target) target = { ...target, type: target.type || 'swap' };
+    }
+    if (!target) {
+      target = (state?.resignationRequests || []).find((r) => r && String(r.id) === reqIdStr);
+      if (target) target = { ...target, type: target.type || 'resignation' };
+    }
+    if (!target) {
+      target = (state?.permissionRequests || []).find((r) => r && String(r.id) === reqIdStr);
+      if (target) target = { ...target, type: target.type || 'permission' };
+    }
+    if (!target) {
+      console.warn('handleApproveRequest: Target request not found across any state arrays:', requestId);
+      return;
+    }
 
     const performApprove = async () => {
+      const nowIso = new Date().toISOString();
       let isBranchApproved = target.branchApproved;
       let isAdminApproved = target.adminApproved;
 
-      if (role === 'admin') {
+      if (role === 'admin' || role === 'owner') {
         isAdminApproved = true;
         isBranchApproved = true;
       } else if (role === 'branch') {
         isBranchApproved = true;
       }
 
-      const isFullyApproved = role === 'admin' || (isBranchApproved && isAdminApproved);
+      const isFullyApproved = role === 'admin' || role === 'owner' || (isBranchApproved && isAdminApproved);
 
       const finalBreakHours = customData?.breakHours !== undefined && customData?.breakHours !== null
         ? Math.max(0, parseFloat(customData.breakHours) || 0)
@@ -43,20 +69,36 @@ export function useRequestsManager() {
           ? Math.max(0, parseFloat(target.adjustedBreakHours) || 0)
           : Math.max(0, parseFloat(target.currentBreakHours || target.breakHours || 0)));
 
+      let foundInRequests = false;
       let updatedRequests = currentRequests.map((r) => {
-        if (r.id === requestId) {
+        if (r && String(r.id) === reqIdStr) {
+          foundInRequests = true;
           return {
             ...r,
             branchApproved: isBranchApproved,
             adminApproved: isAdminApproved,
             status: isFullyApproved ? 'approved' : 'pending_admin',
-            approvedAt: isFullyApproved ? new Date().toISOString() : r.approvedAt,
+            approvedAt: isFullyApproved ? (r.approvedAt || nowIso) : r.approvedAt,
+            updatedAt: nowIso,
             adjustedBreakHours: customData?.breakHours !== undefined ? finalBreakHours : r.adjustedBreakHours,
             adminNotes: customData?.adminNotes !== undefined ? customData.adminNotes : r.adminNotes
           };
         }
         return r;
       });
+
+      if (!foundInRequests) {
+        updatedRequests.unshift({
+          ...target,
+          branchApproved: isBranchApproved,
+          adminApproved: isAdminApproved,
+          status: isFullyApproved ? 'approved' : 'pending_admin',
+          approvedAt: isFullyApproved ? (target.approvedAt || nowIso) : target.approvedAt,
+          updatedAt: nowIso,
+          adjustedBreakHours: customData?.breakHours !== undefined ? finalBreakHours : target.adjustedBreakHours,
+          adminNotes: customData?.adminNotes !== undefined ? customData.adminNotes : target.adminNotes
+        });
+      }
 
       let updatedAdjs = [...(state.adjustments || [])];
       let updatedLoans = [...(state.loans || [])];
@@ -288,7 +330,10 @@ export function useRequestsManager() {
                 },
                 payrollCycleId: monthKey
               });
-              updatedLateIncidents = recomputedIncidents;
+              const otherEmpLateIncs = (updatedLateIncidents || []).filter(
+                (inc) => String(inc.employeeId) !== empIdStr && (!empCodeStr || String(inc.employeeCode) !== empCodeStr)
+              );
+              updatedLateIncidents = [...otherEmpLateIncs, ...recomputedIncidents];
               updatedRequests = recomputedReqs;
             } catch (e) {
               console.warn('Recalculate cycle lateness after schedule deviation approval:', e);
@@ -525,6 +570,51 @@ export function useRequestsManager() {
               }
             }
           });
+
+          // 🌟 التسوية التلقائية اللحظية لجزاءات التأخير وإسقاط أي جزاء عن التواريخ المعدلة
+          const punchDatesList = daysToProcess.map(d => d.date || target.date || target.punchDate).filter(Boolean);
+          const punchDatesSet = new Set(punchDatesList);
+
+          // 1. إسقاط وإلغاء أي واقعة تأخير مسجلة لهذا الموظف في تلك التواريخ
+          updatedLateIncidents = updatedLateIncidents.map((inc) => {
+            const matchesEmp = String(inc.employeeId) === String(target.employeeId) || (emp?.code && String(inc.employeeCode) === String(emp.code));
+            if (matchesEmp && punchDatesSet.has(inc.date)) {
+              return {
+                ...inc,
+                status: 'cancelled',
+                actionType: 'grace',
+                actionLabel: 'سماح (تم اعتماد تعديل البصمة)',
+                penaltyAmount: 0,
+                deductionMinutes: 0,
+                isCancelled: true,
+                cancellationReason: `تم إلغاء الجزاء تلقائياً لاعتماد طلب تعديل/تصحيح البصمة (${target.id || ''})`
+              };
+            }
+            return inc;
+          });
+
+          // 2. إعادة احتساب دورة الموظف وتعديل شرائح التكرار عبر محرك التسوية المركزي
+          try {
+            const reconRes = reconcileEmployeeScheduleOrPunchChange({
+              employeeId: target.employeeId || emp?.id,
+              changedDates: punchDatesList,
+              state: {
+                ...state,
+                shifts: updatedShifts,
+                lateIncidents: updatedLateIncidents,
+                requests: updatedRequests,
+                rosters: updatedRosters
+              },
+              options: { reason: 'اعتماد وتصحيح بصمة الحضور', clearPenaltiesOnChangedDates: true }
+            });
+            if (reconRes?.updatedState) {
+              if (reconRes.updatedState.shifts) updatedShifts = reconRes.updatedState.shifts;
+              if (reconRes.updatedState.lateIncidents) updatedLateIncidents = reconRes.updatedState.lateIncidents;
+              if (reconRes.updatedState.requests) updatedRequests = reconRes.updatedState.requests;
+            }
+          } catch (reconErr) {
+            console.warn('Reconcile after punch correction approval error:', reconErr);
+          }
         }
 
         // 1. Leave Requests Integration
@@ -545,7 +635,8 @@ export function useRequestsManager() {
             adminApproved: true,
             branchApproved: true,
             reason: target.reason || target.details || '',
-            approvedAt: new Date().toISOString()
+            approvedAt: nowIso,
+            updatedAt: nowIso
           };
 
           if (leaveTypeResolved === 'comp_off' || target.type === 'leave_comp_off') {
@@ -728,10 +819,11 @@ export function useRequestsManager() {
             date: target.date || (target.createdAt ? target.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
             status: 'approved',
             adminApproved: true,
-            approvedAt: new Date().toISOString()
+            approvedAt: nowIso,
+            updatedAt: nowIso
           };
 
-          const lIdx = updatedLoans.findIndex((l) => String(l.id) === String(target.id));
+          const lIdx = updatedLoans.findIndex((l) => String(l.id) === String(target.id) || String(l.requestId) === String(target.id));
           if (lIdx >= 0) {
             updatedLoans[lIdx] = { ...updatedLoans[lIdx], ...approvedLoanObj };
           } else {
@@ -742,7 +834,7 @@ export function useRequestsManager() {
         // 5. Shift Swaps Integration
         if (target.type === 'swap' || target.type === 'shift_swap' || target.type === 'shift_edit') {
           updatedSwaps = updatedSwaps.map((s) =>
-            s.id === target.id ? { ...s, status: 'approved', adminApproved: true, branchApproved: true, approvedAt: new Date().toISOString() } : s
+            s.id === target.id ? { ...s, status: 'approved', adminApproved: true, branchApproved: true, approvedAt: nowIso, updatedAt: nowIso } : s
           );
           updatedRosters = applyShiftSwapToRosters(target, updatedRosters, state.employees || []);
         }
@@ -756,7 +848,8 @@ export function useRequestsManager() {
             branchApproved: isBranchApproved,
             adminApproved: isAdminApproved,
             status: isFullyApproved ? 'approved' : 'pending_admin',
-            approvedAt: isFullyApproved ? new Date().toISOString() : target.approvedAt
+            approvedAt: isFullyApproved ? nowIso : target.approvedAt,
+            updatedAt: nowIso
           };
           if (pIdx >= 0) {
             updatedPermRequests[pIdx] = { ...updatedPermRequests[pIdx], ...approvedPermObj };
@@ -788,11 +881,21 @@ export function useRequestsManager() {
             }
           }
 
-          const normalizedSch = normalizeSchedule(bestSchedule);
+          const targetMonthNorm = (target.month || target.cycleMonth || (target.fromDate ? String(target.fromDate).slice(0, 7) : new Date().toISOString().slice(0, 7))).slice(0, 7);
+          const rawHireDate = empObj?.hireDate || empObj?.hiring_date || empObj?.contractStartDate;
+          const normalizedSch = projectRosterToMonth(bestSchedule, targetMonthNorm || target.fromDate, {
+            branchId: targetBranch,
+            branchName: targetBName,
+            hireDate: rawHireDate,
+            orgSettings: state.orgSettings
+          }) || normalizeSchedule(bestSchedule);
 
           if (normalizedSch && Object.keys(normalizedSch).length > 0) {
-            const targetMonthNorm = (target.month || target.cycleMonth || new Date().toISOString().slice(0, 7)).slice(0, 7);
-            const rosterDocId = target.id ? (String(target.id).startsWith('roster_') ? String(target.id) : `roster_${target.id}`) : `roster_${Date.now()}`;
+            const cleanEmpId = String(target.employeeId || empObj?.id);
+            const isMultiBranchTarget = Array.isArray(empObj?.branchesDetails) && empObj.branchesDetails.length > 1;
+            const rosterDocId = isMultiBranchTarget && targetBranch 
+              ? `roster_${cleanEmpId}_${targetMonthNorm}_b_${targetBranch}`
+              : `roster_${cleanEmpId}_${targetMonthNorm}`;
             const activeRosterObj = {
               id: rosterDocId,
               employeeId: target.employeeId || empObj?.id,
@@ -811,7 +914,8 @@ export function useRequestsManager() {
               updatedAt: new Date().toISOString()
             };
 
-            // إزالة أي وثائق روستر سابقة لهذا الموظف لنفس الشهر أو نفس المعرف لمنع التضارب
+            // إزالة أي وثائق روستر سابقة لهذا الموظف لنفس الشهر ونفس الفرع لمنع التضارب، مع الحفاظ التام على فروع الموظف المتعدد الفروع
+            const isMultiBranchEmp = Array.isArray(empObj?.branchesDetails) && empObj.branchesDetails.length > 1;
             updatedRosters = updatedRosters.filter((ros) => {
               if (!ros) return false;
               const isSameId = String(ros.id) === String(target.id) || String(ros.id) === String(rosterDocId);
@@ -824,10 +928,41 @@ export function useRequestsManager() {
               if (!empMatch && !isSameId) return true;
               const rMonthNorm = ros.month ? String(ros.month).slice(0, 7) : null;
               const isSameMonth = !rMonthNorm || !targetMonthNorm || rMonthNorm === targetMonthNorm;
+
+              if (isMultiBranchEmp && targetBranch && ros.branchId && String(ros.branchId) !== String(targetBranch)) {
+                // الحفاظ على جداول الفروع الأخرى للموظف متعدد الفروع
+                return true;
+              }
+
               return !(isSameMonth || isSameId);
             });
 
             updatedRosters = [activeRosterObj, ...updatedRosters];
+
+            // 🌟 إعادة احتساب الورديات وتسوية الخصومات والجزاءات تلقائياً عند اعتماد الجدول
+            try {
+              const empIdToReconcile = target.employeeId || empObj?.id;
+              if (empIdToReconcile) {
+                const reconRes = reconcileEmployeeScheduleOrPunchChange({
+                  employeeId: empIdToReconcile,
+                  state: {
+                    ...state,
+                    rosters: updatedRosters,
+                    requests: updatedRequests,
+                    shifts: updatedShifts,
+                    lateIncidents: updatedLateIncidents
+                  },
+                  options: { reason: 'اعتماد وتعديل الجدول الشهري' }
+                });
+                if (reconRes?.updatedState) {
+                  if (reconRes.updatedState.shifts) updatedShifts = reconRes.updatedState.shifts;
+                  if (reconRes.updatedState.lateIncidents) updatedLateIncidents = reconRes.updatedState.lateIncidents;
+                  if (reconRes.updatedState.requests) updatedRequests = reconRes.updatedState.requests;
+                }
+              }
+            } catch (reconErr) {
+              console.warn('Reconcile after roster approval error:', reconErr);
+            }
           }
         }
 
@@ -1468,6 +1603,57 @@ export function useRequestsManager() {
 
       setState(updatedState);
       showToast('✅ تمت الموافقة على الطلب بنجاح');
+
+      const finalApprovedReq = updatedRequests.find(r => r && String(r.id) === String(requestId)) || target;
+
+      // 🚀 1. بث لحظي فوري (< 5ms) لجميع الأجهزة وصفحة الموظف عبر الـ WebSocket والبث المحلي
+      try {
+        emitLiveRequestUpdated({
+          request: finalApprovedReq,
+          notification: decisionNotif,
+          decision: 'approve',
+          requestId,
+          newStatus: isFullyApproved ? 'approved' : 'pending_admin'
+        });
+        broadcastStateChange(updatedState);
+      } catch (broadcastErr) {
+        console.warn('Realtime request broadcast error:', broadcastErr);
+      }
+
+      // 🚀 2. إرسال فوري ومباشر لنقطة نهاية السيرفر الذرية /api/requests/decide لتحديث Redis وقاعدة البيانات (< 30ms)
+      apiSubmitRequestDecision({
+        requestId: target.id,
+        decision: 'approve',
+        newStatus: isFullyApproved ? 'approved' : 'pending_admin',
+        role,
+        approvedAt: nowIso,
+        adminNotes: customData?.adminNotes || target.adminNotes,
+        adjustedBreakHours: customData?.breakHours !== undefined ? finalBreakHours : undefined,
+        request: finalApprovedReq
+      }).catch(err => console.warn('apiSubmitRequestDecision error:', err));
+
+      // 🚀 3. حفظ ذري سريع للشرائح الأساسية (Slices) لتثبيت التعديل في السيرفر دون إبطاء
+      apiSaveSettingsSlice('requests', updatedRequests).catch(() => {});
+      if (['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave', 'leave_comp_off', 'comp_off'].includes(target.type) || target.leaveType) {
+        apiSaveSettingsSlice('leaveRequests', updatedLeaveRequests).catch(() => {});
+      }
+      if (target.type === 'loan' || target.type === 'advance' || target.type === 'meds' || target.type === 'credit_medicine') {
+        apiSaveSettingsSlice('loans', updatedLoans).catch(() => {});
+      }
+      if (target.type === 'swap' || target.type === 'shift_swap') {
+        apiSaveSettingsSlice('shiftSwaps', updatedSwaps).catch(() => {});
+      }
+      if (target.type === 'resignation') {
+        apiSaveSettingsSlice('resignationRequests', updatedResignations).catch(() => {});
+      }
+      if (updatedShifts !== state.shifts) {
+        apiSaveSettingsSlice('shifts', updatedShifts).catch(() => {});
+      }
+      if (updatedAdjs !== state.adjustments) {
+        apiSaveSettingsSlice('adjustments', updatedAdjs).catch(() => {});
+      }
+
+      // 🚀 4. حفظ الحالة كاملة في الخلفية كصمام أمان شامل
       if (saveState) {
         saveState(updatedState).catch(err => console.error('Background save error:', err));
       }
@@ -1487,21 +1673,6 @@ export function useRequestsManager() {
           decisionNotes: target.reviewNotes || target.adminReply || '',
           approverRole: role
         }).catch(e => console.warn('WhatsApp decision dispatch error:', e));
-      }
-
-      // بث لحظي فوري (< 5ms) لجميع الأجهزة وصفحة الموظف عبر الـ WebSocket والبث المحلي
-      try {
-        const finalApprovedReq = updatedRequests.find(r => r && String(r.id) === String(requestId)) || target;
-        emitLiveRequestUpdated({
-          request: finalApprovedReq,
-          notification: decisionNotif,
-          decision: 'approve',
-          requestId,
-          newStatus: isFullyApproved ? 'approved' : 'pending_admin'
-        });
-        broadcastStateChange(updatedState);
-      } catch (broadcastErr) {
-        console.warn('Realtime request broadcast error:', broadcastErr);
       }
 
       // إشعار فوري عبر Gmail بتطبيق الجزاء / الخصم المعتمد
@@ -1546,6 +1717,7 @@ export function useRequestsManager() {
       const isResignation = target.type === 'resignation';
       const isBonus = target.type === 'bonus';
       const isComplaint = ['complaint', 'eval_edit_request', 'penalty_objection', 'objection'].includes(target.type);
+      const isSwap = ['shift_swap', 'swap', 'swap_request', 'exchange'].includes(target.type);
 
       if (isLeave && locks.lockApproveLeaves) {
         executeWithOwnerGuard({
@@ -1677,20 +1849,67 @@ export function useRequestsManager() {
 
   const handleRejectRequest = useCallback(async (requestId, role = 'admin') => {
     if (!state) return;
+    const reqIdStr = String(requestId || '');
+    const currentRequests = state?.requests || [];
+    let target = currentRequests.find((r) => r && String(r.id) === reqIdStr);
+    if (!target) {
+      target = (state?.leaveRequests || []).find((r) => r && String(r.id) === reqIdStr);
+      if (target) target = { ...target, type: target.type || 'leave' };
+    }
+    if (!target) {
+      target = (state?.loans || []).find((r) => r && (String(r.id) === reqIdStr || String(r.requestId) === reqIdStr));
+      if (target) target = { ...target, type: target.type || 'loan' };
+    }
+    if (!target) {
+      target = (state?.shiftSwaps || []).find((r) => r && String(r.id) === reqIdStr);
+      if (target) target = { ...target, type: target.type || 'swap' };
+    }
+    if (!target) {
+      target = (state?.resignationRequests || []).find((r) => r && String(r.id) === reqIdStr);
+      if (target) target = { ...target, type: target.type || 'resignation' };
+    }
+    if (!target) {
+      target = (state?.permissionRequests || []).find((r) => r && String(r.id) === reqIdStr);
+      if (target) target = { ...target, type: target.type || 'permission' };
+    }
+
     const performReject = async () => {
+      const nowIso = new Date().toISOString();
       let targetReq = null;
+      let foundInRequests = false;
       const updatedRequests = (state?.requests || []).map((r) => {
-        if (r.id === requestId) {
+        if (r && String(r.id) === reqIdStr) {
+          foundInRequests = true;
           targetReq = {
             ...r,
             status: 'rejected',
             adminApproved: false,
-            rejectedAt: new Date().toISOString()
+            rejectedAt: nowIso,
+            updatedAt: nowIso
           };
           return targetReq;
         }
         return r;
       });
+
+      if (!foundInRequests && target) {
+        targetReq = {
+          ...target,
+          status: 'rejected',
+          adminApproved: false,
+          rejectedAt: nowIso,
+          updatedAt: nowIso
+        };
+        updatedRequests.unshift(targetReq);
+      } else if (!targetReq && target) {
+        targetReq = {
+          ...target,
+          status: 'rejected',
+          adminApproved: false,
+          rejectedAt: nowIso,
+          updatedAt: nowIso
+        };
+      }
 
       let updatedShifts = [...(state.shifts || [])];
       let updatedActiveShifts = { ...(state.activeShifts || {}) };
@@ -1866,36 +2085,38 @@ export function useRequestsManager() {
       }
 
       const updatedSwaps = (state.shiftSwaps || []).map((s) =>
-        s.id === requestId ? { ...s, status: 'rejected', adminApproved: false } : s
+        (String(s.id) === reqIdStr || (targetReq && String(s.id) === String(targetReq.id)))
+          ? { ...s, status: 'rejected', adminApproved: false, rejectedAt: nowIso, updatedAt: nowIso }
+          : s
       );
 
       const updatedLeaveRequests = (state.leaveRequests || []).map((lr) =>
-        lr.id === requestId || (targetReq && String(lr.employeeId) === String(targetReq.employeeId) && lr.startDate === targetReq.startDate)
-          ? { ...lr, status: 'rejected', adminApproved: false }
+        (String(lr.id) === reqIdStr || (targetReq && (String(lr.id) === String(targetReq.id) || (String(lr.employeeId) === String(targetReq.employeeId) && lr.startDate === targetReq.startDate))))
+          ? { ...lr, status: 'rejected', adminApproved: false, rejectedAt: nowIso, updatedAt: nowIso }
           : lr
       );
 
       const updatedPermRequests = (state.permissionRequests || []).map((p) =>
-        p.id === requestId || (targetReq && String(p.employeeId) === String(targetReq.employeeId) && p.date === targetReq.date)
-          ? { ...p, status: 'rejected', adminApproved: false, rejectedAt: new Date().toISOString() }
+        (String(p.id) === reqIdStr || (targetReq && (String(p.id) === String(targetReq.id) || (String(p.employeeId) === String(targetReq.employeeId) && p.date === targetReq.date))))
+          ? { ...p, status: 'rejected', adminApproved: false, rejectedAt: nowIso, updatedAt: nowIso }
           : p
       );
 
       const updatedLoans = (state.loans || []).map((l) =>
-        l.id === requestId || l.requestId === requestId || (targetReq && String(l.employeeId) === String(targetReq.employeeId) && (l.amount === targetReq.amount || l.totalAmount === targetReq.totalAmount))
-          ? { ...l, status: 'rejected', adminApproved: false, rejectedAt: new Date().toISOString() }
+        (String(l.id) === reqIdStr || String(l.requestId) === reqIdStr || (targetReq && (String(l.id) === String(targetReq.id) || String(l.requestId) === String(targetReq.id) || (String(l.employeeId) === String(targetReq.employeeId) && (l.amount === targetReq.amount || l.totalAmount === targetReq.totalAmount)))))
+          ? { ...l, status: 'rejected', adminApproved: false, rejectedAt: nowIso, updatedAt: nowIso }
           : l
       );
 
       const updatedResignations = (state.resignationRequests || []).map((r) =>
-        String(r.id) === String(requestId)
+        (String(r.id) === reqIdStr || (targetReq && String(r.id) === String(targetReq.id)))
           ? {
               ...r,
               status: 'rejected',
               adminStatus: 'rejected',
               adminApproved: false,
-              rejectedAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString()
+              rejectedAt: nowIso,
+              updatedAt: nowIso
             }
           : r
       );
@@ -1966,6 +2187,50 @@ export function useRequestsManager() {
       };
       setState(updatedState);
       showToast('❌ تم رفض الطلب وتحديث السجلات بنجاح');
+
+      // 🚀 1. بث لحظي فوري (< 5ms) لجميع الأجهزة وصفحة الموظف عبر الـ WebSocket والبث المحلي
+      try {
+        emitLiveRequestUpdated({
+          request: targetReq,
+          notification: decisionNotif,
+          decision: 'reject',
+          requestId,
+          newStatus: 'rejected'
+        });
+        broadcastStateChange(updatedState);
+      } catch (broadcastErr) {
+        console.warn('Realtime reject broadcast error:', broadcastErr);
+      }
+
+      // 🚀 2. إرسال فوري ومباشر لنقطة نهاية السيرفر الذرية /api/requests/decide لتحديث Redis وقاعدة البيانات (< 30ms)
+      apiSubmitRequestDecision({
+        requestId: targetReq?.id || requestId,
+        decision: 'reject',
+        newStatus: 'rejected',
+        role,
+        rejectedAt: nowIso,
+        request: targetReq
+      }).catch(err => console.warn('apiSubmitRequestDecision reject error:', err));
+
+      // 🚀 3. حفظ ذري سريع للشرائح الأساسية (Slices) لتثبيت التعديل في السيرفر دون إبطاء
+      apiSaveSettingsSlice('requests', updatedRequests).catch(() => {});
+      if (['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave'].includes(targetReq?.type)) {
+        apiSaveSettingsSlice('leaveRequests', updatedLeaveRequests).catch(() => {});
+      }
+      if (['loan', 'advance', 'meds', 'credit_medicine'].includes(targetReq?.type)) {
+        apiSaveSettingsSlice('loans', updatedLoans).catch(() => {});
+      }
+      if (['swap', 'shift_swap'].includes(targetReq?.type)) {
+        apiSaveSettingsSlice('shiftSwaps', updatedSwaps).catch(() => {});
+      }
+      if (targetReq?.type === 'resignation') {
+        apiSaveSettingsSlice('resignationRequests', updatedResignations).catch(() => {});
+      }
+      if (updatedShifts !== state.shifts) {
+        apiSaveSettingsSlice('shifts', updatedShifts).catch(() => {});
+      }
+
+      // 🚀 4. حفظ الحالة كاملة في الخلفية كصمام أمان شامل
       if (saveState) {
         saveState(updatedState).catch(err => console.error('Background save error:', err));
       }
@@ -1984,20 +2249,6 @@ export function useRequestsManager() {
         decisionNotes: targetReq?.rejectReason || targetReq?.reason || '',
         approverRole: role
       }).catch(err => console.warn('WhatsApp decision dispatch error:', err));
-
-      // بث لحظي فوري (< 5ms) لجميع الأجهزة وصفحة الموظف عبر الـ WebSocket والبث المحلي
-      try {
-        emitLiveRequestUpdated({
-          request: targetReq,
-          notification: decisionNotif,
-          decision: 'reject',
-          requestId,
-          newStatus: 'rejected'
-        });
-        broadcastStateChange(updatedState);
-      } catch (broadcastErr) {
-        console.warn('Realtime reject broadcast error:', broadcastErr);
-      }
     };
 
     if ((role === 'admin' || role === 'owner') && state.orgSettings?.ownerModificationLocks?.lockRejectRequests) {

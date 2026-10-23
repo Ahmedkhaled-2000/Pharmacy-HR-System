@@ -695,9 +695,10 @@ export function mergeRosters(localRosters = [], remoteRosters = [], options = {}
   const getLogicalKey = (r) => {
     if (!r || typeof r !== 'object') return null;
     const empId = String(r.employeeId || r.employeeCode || '').trim();
-    const m = r.month ? String(r.month).slice(0, 7) : '';
+    const m = r.month ? String(r.month).slice(0, 7) : (r.fromDate ? String(r.fromDate).slice(0, 7) : '');
     const bId = String(r.branchId || '').trim();
-    if (empId && m) return `${empId}_${m}_${bId}`;
+    const isUni = r.isUnifiedMaster || (r.id && String(r.id).includes('unified'));
+    if (empId && m) return isUni ? `${empId}_${m}_unified` : `${empId}_${m}_${bId}`;
     if (r.id) return String(r.id);
     return null;
   };
@@ -705,26 +706,36 @@ export function mergeRosters(localRosters = [], remoteRosters = [], options = {}
   const map = new Map();
 
   const combineRosterEntries = (existing, incoming) => {
-    const existingSch = existing.schedule && typeof existing.schedule === 'object' ? existing.schedule : {};
-    const incomingSch = incoming.schedule && typeof incoming.schedule === 'object' ? incoming.schedule : {};
-    
-    const existingIsoCount = Object.keys(existingSch).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).length;
-    const incomingIsoCount = Object.keys(incomingSch).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).length;
+    const timeExist = new Date(existing.approvedAt || existing.updatedAt || existing.createdAt || 0).getTime() || 0;
+    const timeIncom = new Date(incoming.approvedAt || incoming.updatedAt || incoming.createdAt || 0).getTime() || 0;
+    const isIncomingApproved = incoming.status === 'approved' || incoming.adminApproved === true;
+    const isExistingApproved = existing.status === 'approved' || existing.adminApproved === true;
 
-    // دمج الجداول مع إعطاء الأولوية للجدول الغني بالتواريخ الشهرية المفصلة ISO
-    const mergedSchedule = incomingIsoCount >= existingIsoCount
-      ? { ...existingSch, ...incomingSch }
-      : { ...incomingSch, ...existingSch };
+    let base = incoming;
+    let other = existing;
 
-    const timeExist = new Date(existing.approvedAt || existing.updatedAt || 0).getTime() || 0;
-    const timeIncom = new Date(incoming.approvedAt || incoming.updatedAt || 0).getTime() || 0;
-    const base = timeIncom >= timeExist ? incoming : existing;
-    const other = timeIncom >= timeExist ? existing : incoming;
+    if (isIncomingApproved && !isExistingApproved) {
+      base = incoming;
+      other = existing;
+    } else if (!isIncomingApproved && isExistingApproved) {
+      base = existing;
+      other = incoming;
+    } else if (timeIncom >= timeExist) {
+      base = incoming;
+      other = existing;
+    } else {
+      base = existing;
+      other = incoming;
+    }
+
+    const chosenSchedule = (base.schedule && typeof base.schedule === 'object' && Object.keys(base.schedule).length > 0)
+      ? base.schedule
+      : (other.schedule || {});
 
     return {
       ...other,
       ...base,
-      schedule: mergedSchedule
+      schedule: chosenSchedule
     };
   };
 

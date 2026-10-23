@@ -8,6 +8,7 @@ import EmployeeComprehensiveDossierModal from './EmployeeComprehensiveDossierMod
 import EmployeeSalaryDetailsModal from './EmployeeSalaryDetailsModal';
 import SalaryIncreasesHub from './SalaryIncreasesHub';
 import EmployeeCredentialsModal from './EmployeeCredentialsModal';
+import { getActiveSecondment, formatSecondmentPeriodText } from '../../utils/secondmentEngine';
 
 export default function EmployeeCardsGrid({
   state,
@@ -168,7 +169,7 @@ export default function EmployeeCardsGrid({
           if (!matchesMain && !matchesDetails && !matchesArchived) return false;
         } else {
           const matchesMain = String(emp.branchId) === String(selectedBranchFilter);
-          const matchesDetails = emp.branchesDetails?.some((b) => String(b.branchId) === String(selectedBranchFilter));
+          const matchesDetails = emp.branchesDetails?.some((b) => String(b.branchId) === String(selectedBranchFilter) && b.status !== 'cycle_terminated' && !b.isTerminatedInCycle);
           if (!matchesMain && !matchesDetails) return false;
         }
       }
@@ -192,20 +193,24 @@ export default function EmployeeCardsGrid({
     const validBranchIds = new Set((branches || []).map((b) => String(b.id)));
 
     displayedEmployees.forEach((emp) => {
+      const activeSec = getActiveSecondment(emp.id, null, state);
+
       if (selectedBranchFilter !== 'all') {
-        // When a specific branch is selected in filter, strictly group under that branch only
         const key = selectedBranchFilter;
         let belongs = false;
         if (activeMainTab === 'resigned') {
           belongs = (Array.isArray(emp.archivedBranchesDetails) && emp.archivedBranchesDetails.some((ab) => String(ab.branchId) === key)) ||
                     (!isEmployeeActive(emp) && (String(emp.branchId) === key || emp.branchesDetails?.some((b) => String(b.branchId) === key)));
         } else {
-          belongs = String(emp.branchId) === key || emp.branchesDetails?.some((b) => String(b.branchId) === key);
+          belongs = (String(emp.branchId) === key && (!emp.branchesDetails || !emp.branchesDetails.some((b) => String(b.branchId) === key && (b.status === 'cycle_terminated' || b.isTerminatedInCycle)))) || 
+                    emp.branchesDetails?.some((b) => String(b.branchId) === key && b.status !== 'cycle_terminated' && !b.isTerminatedInCycle) ||
+                    (activeSec && String(activeSec.targetBranchId) === key);
         }
         if (belongs) {
           if (!grouped[key]) grouped[key] = [];
           if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
-            grouped[key].push(emp);
+            const isSecInBranch = activeSec && String(activeSec.targetBranchId) === key;
+            grouped[key].push(isSecInBranch ? { ...emp, isSecondedInThisBranch: true, secondmentInfo: activeSec } : emp);
           }
         }
       } else {
@@ -242,8 +247,12 @@ export default function EmployeeCardsGrid({
             }
           }
         } else {
-          if (emp.branchesDetails && emp.branchesDetails.length > 0) {
-            emp.branchesDetails.forEach((bd) => {
+          // في تبويب الموظفين الحاليين: إدراج الفروع النشطة فقط واستبعاد أي فرع تم إنهاء خدمته منه
+          const activeDetails = (emp.branchesDetails || []).filter(
+            (bd) => bd && bd.status !== 'cycle_terminated' && !bd.isTerminatedInCycle
+          );
+          if (activeDetails.length > 0) {
+            activeDetails.forEach((bd) => {
               const rawId = bd.branchId ? String(bd.branchId) : '';
               const key = rawId && validBranchIds.has(rawId) ? rawId : 'main';
               if (!grouped[key]) grouped[key] = [];
@@ -257,6 +266,15 @@ export default function EmployeeCardsGrid({
             if (!grouped[key]) grouped[key] = [];
             if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
               grouped[key].push(emp);
+            }
+          }
+
+          // إضافة الموظف أيضاً تحت الفرع المنتدب إليه خلال فترة الانتداب النشط
+          if (activeSec && activeSec.targetBranchId) {
+            const secKey = String(activeSec.targetBranchId);
+            if (!grouped[secKey]) grouped[secKey] = [];
+            if (!grouped[secKey].some((e) => String(e.id) === String(emp.id))) {
+              grouped[secKey].push({ ...emp, isSecondedInThisBranch: true, secondmentInfo: activeSec });
             }
           }
         }
@@ -277,28 +295,42 @@ export default function EmployeeCardsGrid({
 
       // Case A: Single-Branch Termination (Employee stays active in other branches, branch remains in grace period for current cycle)
       if (data.terminationScope === 'single_branch' && data.targetBranchId) {
+        const termDate = data.terminationDate || new Date().toISOString().slice(0, 10);
+        const termCycleMonth = getActivePayrollMonth(state.orgSettings, new Date(termDate + 'T12:00:00'));
+        const termCycleRange = getCycleDateRange(termCycleMonth, state.orgSettings);
+        const todayStr = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
         const activeCycleMonth = getActivePayrollMonth(state.orgSettings);
-        const cycleRange = getCycleDateRange(activeCycleMonth, state.orgSettings);
 
-        // وسم الفرع المنتهي بحالة cycle_terminated مع بقائه في branchesDetails حتى نهاية دورة الشهر
-        const updatedBranchesDetails = (targetEmp?.branchesDetails || []).map((b) => {
-          if (String(b.branchId) === String(data.targetBranchId)) {
-            return {
-              ...b,
-              status: 'cycle_terminated',
-              isTerminatedInCycle: true,
-              terminationDate: data.terminationDate,
-              terminationReason: data.terminationReason || 'إنهاء خدمة من الفرع',
-              terminatedCycleMonth: activeCycleMonth,
-              cycleEndDate: cycleRange.endDate,
-              finalSettlement: data.settlement,
-              clearanceNotes: data.clearanceNotes || '',
-              signedClearanceDoc: data.signedClearanceDoc || null,
-              terminatedAt: new Date().toISOString()
-            };
-          }
-          return b;
-        });
+        // هل انقضت دورة الإنهاء بالفعل؟ (مثال: تاريخ الإنهاء في دورة شهر سابق انتهت، والنظام حالياً في دورة جديدة)
+        const isCycleExpired = activeCycleMonth > termCycleMonth || todayStr > termCycleRange.endDate;
+
+        let updatedBranchesDetails;
+        if (isCycleExpired) {
+          // دورة الإنهاء انقضت بالفعل: إزالة الفرع فوراً وبشكل نهائي من قائمة الفروع الحالية
+          updatedBranchesDetails = (targetEmp?.branchesDetails || []).filter(
+            (b) => String(b.branchId) !== String(data.targetBranchId)
+          );
+        } else {
+          // دورة الإنهاء لا تزال جارية: وسم الفرع المنتهي بحالة cycle_terminated مع بقائه في branchesDetails حتى نهاية دورة الشهر
+          updatedBranchesDetails = (targetEmp?.branchesDetails || []).map((b) => {
+            if (String(b.branchId) === String(data.targetBranchId)) {
+              return {
+                ...b,
+                status: 'cycle_terminated',
+                isTerminatedInCycle: true,
+                terminationDate: termDate,
+                terminationReason: data.terminationReason || 'إنهاء خدمة من الفرع',
+                terminatedCycleMonth: termCycleMonth,
+                cycleEndDate: termCycleRange.endDate,
+                finalSettlement: data.settlement,
+                clearanceNotes: data.clearanceNotes || '',
+                signedClearanceDoc: data.signedClearanceDoc || null,
+                terminatedAt: new Date().toISOString()
+              };
+            }
+            return b;
+          });
+        }
 
         // اختيار الفرع الأساسي الجديد من بين الفروع النشطة فعلياً (غير المنتهية)
         const activeRemainingBranches = updatedBranchesDetails.filter((b) => b.status !== 'cycle_terminated');
@@ -308,14 +340,14 @@ export default function EmployeeCardsGrid({
         const branchArchiveRecord = {
           branchId: data.targetBranchId,
           branchName: data.targetBranchName || `فرع ${data.targetBranchId}`,
-          terminationDate: data.terminationDate,
-          terminationReason: data.terminationReason,
-          clearanceNotes: data.clearanceNotes,
+          terminationDate: termDate,
+          terminationReason: data.terminationReason || 'إنهاء خدمة من الفرع',
+          clearanceNotes: data.clearanceNotes || '',
           finalSettlement: data.settlement,
           signedClearanceDoc: data.signedClearanceDoc || null,
           terminatedAt: new Date().toISOString(),
-          terminatedCycleMonth: activeCycleMonth,
-          cycleEndDate: cycleRange.endDate
+          terminatedCycleMonth: termCycleMonth,
+          cycleEndDate: termCycleRange.endDate
         };
 
         const updatedEmployees = employees.map((e) => {
@@ -331,7 +363,7 @@ export default function EmployeeCardsGrid({
               branchesDetails: updatedBranchesDetails,
               archivedBranchesDetails: [
                 ...(e.archivedBranchesDetails || []).filter(
-                  (ab) => !(String(ab.branchId) === String(data.targetBranchId) && ab.terminatedCycleMonth === activeCycleMonth)
+                  (ab) => !(String(ab.branchId) === String(data.targetBranchId) && ab.terminatedCycleMonth === termCycleMonth)
                 ),
                 branchArchiveRecord
               ],
@@ -1177,6 +1209,30 @@ export default function EmployeeCardsGrid({
                                 ⏱️ مواعيد متغيرة
                               </span>
                             )}
+                            {(() => {
+                              const sec = getActiveSecondment(emp.id, null, state);
+                              if (!sec) return null;
+                              return (
+                                <span
+                                  style={{
+                                    background: 'rgba(2, 132, 199, 0.15)',
+                                    color: '#0284c7',
+                                    border: '1px solid rgba(2, 132, 199, 0.35)',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    padding: '2px 8px',
+                                    borderRadius: '6px',
+                                    marginRight: '6px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px'
+                                  }}
+                                  title={`منتدب إلى: ${sec.targetBranchName} (${formatSecondmentPeriodText(sec)})`}
+                                >
+                                  🔀 منتدب: {sec.targetBranchName} ({sec.assignmentType === 'open_ended' ? 'مفتوح' : `حتى ${sec.endDate}`})
+                                </span>
+                              );
+                            })()}
                           </div>
                           <span style={{ color: 'var(--muted)', fontSize: '13px', display: 'block' }}>
                             {emp.jobTitle} {emp.department ? ` · قسم: ${emp.department}` : ''} {(emp.phone || emp.phones?.[0]?.number) ? ` · 📞 ${emp.phone || emp.phones?.[0]?.number}` : ''}

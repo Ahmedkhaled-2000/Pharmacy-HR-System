@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Pill, Search, AlertTriangle, Snowflake, Sparkles, Check, ChevronDown, RefreshCw, Layers, Plus } from 'lucide-react';
 import { outstockSearchMedications, outstockGetSubstitutes, outstockGetMedicationByBarcode } from '../../../utils/outstockApiClient';
+import { renderActiveIngredientBadges } from '../../../utils/activeIngredientsHelper';
 
 // ── كتالوج محلي فائق السرعة لضمان العمل اللحظي دون أي تأخير ───────────────
 const LOCAL_FALLBACK_MEDS = [
@@ -1192,7 +1193,8 @@ export default function MedicationAutocompleteInput({
                   <span>المثائل والبدائل المعتمدة (منظومة Drug Eye)</span>
                 </h3>
                 <div style={{ fontSize: '12px', color: '#64748b', marginTop: '3px' }}>
-                  المادة الفعالة: <strong style={{ color: '#0369a1' }}>{selectedMed?.generic_name}</strong>
+                  <span style={{ fontWeight: '700', display: 'block', marginBottom: '2px' }}>المادة الفعالة:</span>
+                  {renderActiveIngredientBadges(selectedMed?.generic_name, selectedMed?.active_ingredients_list)}
                 </div>
               </div>
               <button

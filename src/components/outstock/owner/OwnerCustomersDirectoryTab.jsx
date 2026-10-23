@@ -22,8 +22,11 @@ import {
   ShieldCheck,
   TrendingUp,
   Download,
-  Filter
+  Filter,
+  FileSpreadsheet,
+  Upload
 } from 'lucide-react';
+import ExcelJS from 'exceljs';
 import {
   outstockGetCustomers,
   outstockSaveCustomer,
@@ -33,6 +36,7 @@ import {
 } from '../../../utils/outstockApiClient';
 import CustomerWalletModal from '../common/CustomerWalletModal';
 import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
+import CustomerBulkImportModal from './CustomerBulkImportModal';
 import { useDeliveryZones } from '../../../utils/deliveryZonesService';
 
 /**
@@ -95,6 +99,120 @@ export default function OwnerCustomersDirectoryTab({ showToast = alert }) {
       name: 'المالك والمشرف العام'
     });
     setWalletCustomer(cust);
+  };
+
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+  // تصدير دليل العملاء بالكامل إلى شيت إكسل فاخر
+  const handleExportCustomersExcel = async () => {
+    if (filteredCustomers.length === 0) {
+      showToast?.('⚠️ لا توجد بيانات عملاء للتصدير حالياً');
+      return;
+    }
+    setIsExportingExcel(true);
+    try {
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'منظومة إدارة النواقص والمشتريات';
+      wb.created = new Date();
+
+      const ws = wb.addWorksheet('دليل عملاء المجموعة', {
+        views: [{ rightToLeft: true, showGridLines: true, state: 'frozen', ySplit: 2 }]
+      });
+
+      // ترويسة الشيت
+      ws.mergeCells('A1:K1');
+      const titleCell = ws.getCell('A1');
+      titleCell.value = '👥 الدليل المركزي الموحد لعملاء المجموعة — الإدارة العامة';
+      titleCell.font = { name: 'Arial', bold: true, size: 14, color: { argb: 'FFFFFF' } };
+      titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '0F766E' } };
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(1).height = 36;
+
+      const headers = [
+        'م',
+        'كود العميل',
+        'اسم العميل',
+        'رقم الواتساب',
+        'الهاتف الأرضي',
+        'الفرع المسجل فيه',
+        'المنطقة / الحي',
+        'العنوان التفصيلي',
+        'رصيد المحفظة (ج.م)',
+        'الخصم الدائم',
+        'إجمالي الطلبات'
+      ];
+
+      const headRow = ws.getRow(2);
+      headRow.values = headers;
+      headRow.height = 28;
+      headRow.eachCell((cell) => {
+        cell.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '115E59' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      });
+
+      ws.columns = [
+        { key: 'idx', width: 6 },
+        { key: 'code', width: 16 },
+        { key: 'name', width: 28 },
+        { key: 'phone', width: 18 },
+        { key: 'landline', width: 16 },
+        { key: 'branch', width: 22 },
+        { key: 'zone', width: 18 },
+        { key: 'address', width: 32 },
+        { key: 'wallet', width: 18 },
+        { key: 'discount', width: 16 },
+        { key: 'orders', width: 14 }
+      ];
+
+      filteredCustomers.forEach((c, i) => {
+        const branchName = branches.find(b => b.id === c.primary_branch_id)?.name || c.primary_branch_id || 'الفرع الرئيسي';
+        const discountLabel = c.custom_discount_type && c.custom_discount_type !== 'none'
+          ? `${c.custom_discount_value} ${c.custom_discount_type === 'percentage' ? '%' : 'ج.م'}`
+          : 'بدون خصم';
+
+        const row = ws.addRow([
+          i + 1,
+          c.customer_code || '—',
+          c.full_name || '',
+          c.whatsapp_phone || '',
+          c.landline_phone || '—',
+          branchName,
+          c.zone || '—',
+          c.address || '—',
+          parseFloat(c.wallet_balance || 0).toFixed(2),
+          discountLabel,
+          Number(c.total_orders_count || 0)
+        ]);
+        row.height = 24;
+
+        row.eachCell((cell, colNum) => {
+          cell.font = { name: 'Arial', size: 10 };
+          cell.alignment = { vertical: 'middle' };
+          if (colNum === 1 || colNum === 2 || colNum === 4 || colNum === 5 || colNum === 9 || colNum === 10 || colNum === 11) {
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          } else {
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+          }
+        });
+      });
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `دليل_عملاء_المجموعة_${new Date().toLocaleDateString('ar-EG').replace(/\//g, '-')}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast?.('📊 تم استخراج وتنزيل شيت إكسل عملاء المجموعة بنجاح');
+    } catch (err) {
+      console.error(err);
+      showToast?.('حدث خطأ أثناء تصدير ملف الإكسل');
+    } finally {
+      setIsExportingExcel(false);
+    }
   };
 
   // جلب كافة بيانات العملاء والفروع
@@ -440,7 +558,32 @@ export default function OwnerCustomersDirectoryTab({ showToast = alert }) {
             </select>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            {/* زر تصدير إكسل لعملاء المجموعة */}
+            <button
+              type="button"
+              className="outstock-btn outstock-btn-secondary"
+              onClick={handleExportCustomersExcel}
+              disabled={isExportingExcel || filteredCustomers.length === 0}
+              style={{ background: '#f0fdf4', borderColor: '#86efac', color: '#15803d', fontWeight: '800' }}
+              title="تصدير شيت إكسل فاخر بقاعدة بيانات العملاء"
+            >
+              <FileSpreadsheet size={15} style={{ color: '#16a34a' }} />
+              <span>{isExportingExcel ? 'جاري التصدير...' : 'تصدير إكسل'}</span>
+            </button>
+
+            {/* زر استيراد مجمع للعملاء من إكسل أو CSV */}
+            <button
+              type="button"
+              className="outstock-btn outstock-btn-secondary"
+              onClick={() => setIsImportModalOpen(true)}
+              style={{ background: '#f0f9ff', borderColor: '#bae6fd', color: '#0369a1', fontWeight: '800' }}
+              title="استيراد وتحديث قاعدة بيانات العملاء دفعة واحدة من ملف إكسل أو CSV"
+            >
+              <Upload size={15} style={{ color: '#0284c7' }} />
+              <span>استيراد مجمّع (Excel/CSV)</span>
+            </button>
+
             <button
               type="button"
               className="outstock-btn outstock-btn-secondary"
@@ -1121,6 +1264,18 @@ export default function OwnerCustomersDirectoryTab({ showToast = alert }) {
           showToast={showToast}
         />
       )}
+
+      {/* ── نافذة استيراد قاعدة بيانات العملاء المجمعة ── */}
+      <CustomerBulkImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onSuccess={() => {
+          fetchCustomers();
+          showToast?.('✅ تم تحديث دليل العملاء بنجاح');
+        }}
+        branches={branches}
+        showToast={showToast}
+      />
     </div>
   );
 }

@@ -151,8 +151,25 @@ export function calculateEmployeeActualSummary({
     if (String(r.employeeId) !== String(emp.id)) return false;
     const isApproved = (r.status === 'approved' || r.adminApproved === true) && !r.isCancelled && r.status !== 'cancelled' && r.status !== 'rejected';
     if (!isApproved) return false;
-    if (r.objection?.status === 'approved') return false;
-    const isPen = r.type === 'penalty' || r.type === 'disciplinary_penalty' || r.subType === 'disciplinary_penalty' || r.type === 'violation' || r.type === 'deduction' || String(r.id || '').startsWith('disc_');
+    const idStr = String(r.id || '');
+    const isAttendanceOrLate = (
+      idStr.startsWith('req_late_inc_') ||
+      idStr.startsWith('req_late_') ||
+      idStr.startsWith('late_inc_') ||
+      idStr.startsWith('req_early_') ||
+      r.type === 'lateness' ||
+      r.type === 'late_penalty' ||
+      r.type === 'early_exit' ||
+      r.subType === 'lateness' ||
+      r.subType === 'early_exit' ||
+      r.source === 'late_penalty_engine' ||
+      r.source === 'system_lateness' ||
+      (typeof r.ruleTitle === 'string' && r.ruleTitle.includes('تأخير')) ||
+      (typeof r.reason === 'string' && (r.reason.includes('تأخر الموظف') || r.reason.includes('جزاء تأخير')))
+    );
+    if (isAttendanceOrLate) return false;
+
+    const isPen = r.type === 'penalty' || r.type === 'disciplinary_penalty' || r.subType === 'disciplinary_penalty' || r.type === 'violation' || r.type === 'deduction' || idStr.startsWith('disc_');
     if (!isPen) return false;
     if (existingAdjReqIds.has(r.id) || existingAdjReqIds.has(`adj_pen_${r.id}`) || existingAdjReqIds.has(`adj_disc_${r.id}`)) return false;
     const rDate = r.date || r.startDate || (r.createdAt ? r.createdAt.slice(0, 10) : '');

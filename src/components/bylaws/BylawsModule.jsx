@@ -11,6 +11,7 @@ import {
 import { useUI } from '../../context/UIContext';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { canUserModifyOrExemptPenalties } from '../../utils/permissionUtils';
+import { getEmployeeDailyRate } from '../../utils/disciplinaryPenaltyEngine';
 
 export default function BylawsModule({
   state,
@@ -40,7 +41,7 @@ export default function BylawsModule({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const [activeTab, setActiveTab] = useState(activeSubTab || 'disciplinary_penalties'); // 'disciplinary_penalties' | 'text' | 'records' | 'late_penalties'
+  const [activeTab, setActiveTab] = useState(activeSubTab || (userRole === 'employee' ? 'records' : 'disciplinary_penalties')); // 'disciplinary_penalties' | 'text' | 'records' | 'late_penalties'
 
   useEffect(() => {
     if (activeSubTab) {
@@ -205,6 +206,122 @@ export default function BylawsModule({
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.('✅ تم مسح سجل الجزاءات والمخالفات والقرارات بنجاح وتصفير السجل');
+  };
+
+  // 🛡️ إسقاط الجزاءات الإدارية وعجز الجرد فقط مع الاحتفاظ التام بجميع جزاءات وتأخيرات البصمة
+  const handleClearAdminAndShortageOnly = async () => {
+    if (!canModifyOrExempt || !isAdmin) {
+      showToast?.('🚫 مسح الجزاءات مقتصر حصرياً على الإدارة العليا المصرح لها.');
+      return;
+    }
+    const isConfirmed = await showConfirm({
+      title: '⚖️ إسقاط الجزاءات الإدارية وعجز الجرد',
+      message: 'هل أنت متأكد من رغبتك في إزالة كافة الجزاءات الإدارية، الخصومات التأديبية، واستقطاعات عجز الجرد من جميع الموظفين؟ (سيتم الاحتفاظ بكافة جزاءات التأخير اللائحية وحركات الحضور كما هي دون أي مساس).',
+      confirmText: 'نعم، إزالة الجزاءات الإدارية وعجز الجرد',
+      cancelText: 'تراجع وإلغاء',
+      type: 'warning',
+      icon: '⚖️'
+    });
+    if (!isConfirmed) return;
+
+    const allDeletedKeys = new Set((state._deletedIds || []).map(String));
+    const collectKeys = (rawKey) => {
+      if (!rawKey) return;
+      const s = String(rawKey);
+      const raw = s.replace(/^(req_|late_inc_|adj_|adj-inv-shortage-|disc_|obj_inc_|obj_adj_|obj_req_)/, '');
+      [s, raw, `req_${raw}`, `adj_${raw}`, `adj_pen_${raw}`, `adj_disc_${raw}`, `disc_${raw}`].forEach((k) => {
+        if (k) allDeletedKeys.add(k);
+      });
+    };
+
+    // Filter out ONLY disciplinary & shortage requests, PRESERVE all lateness/attendance requests
+    const cleanRequests = (state.requests || []).map((r) => {
+      if (!r) return r;
+      const t = r.type;
+      const st = r.subType;
+      const idStr = String(r.id || '');
+      
+      const isLateOrAttendance = (
+        idStr.startsWith('req_late_inc_') ||
+        idStr.startsWith('req_late_') ||
+        idStr.startsWith('late_inc_') ||
+        idStr.startsWith('req_early_') ||
+        t === 'lateness' ||
+        t === 'late_penalty' ||
+        t === 'early_exit' ||
+        st === 'lateness' ||
+        st === 'early_exit' ||
+        r.source === 'late_penalty_engine' ||
+        r.source === 'system_lateness' ||
+        (typeof r.ruleTitle === 'string' && r.ruleTitle.includes('تأخير')) ||
+        (typeof r.reason === 'string' && (r.reason.includes('تأخر الموظف') || r.reason.includes('جزاء تأخير')))
+      );
+      if (isLateOrAttendance) return r; // Keep intact!
+
+      const isTarget =
+        t === 'disciplinary_penalty' ||
+        st === 'disciplinary_penalty' ||
+        t === 'shortage' ||
+        idStr.startsWith('disc_') ||
+        (t === 'penalty' && st !== 'lateness') ||
+        (t === 'deduction' && !r.reason?.includes('سلفة') && !r.isLoan) ||
+        (r.reason && (r.reason.includes('عجز') || r.reason.includes('جرد') || r.reason.includes('تأديبي')));
+
+      if (isTarget) {
+        collectKeys(idStr);
+        return {
+          ...r,
+          status: 'cancelled',
+          isCancelled: true,
+          clearedAt: new Date().toISOString()
+        };
+      }
+      return r;
+    });
+
+    // Filter out penalty & shortage adjustments, preserve loans, meds, bonuses, lateness
+    const cleanAdjustments = (state.adjustments || []).filter((a) => {
+      if (!a) return false;
+      const aId = String(a.id || '');
+      const isLoanOrMeds = a.isLoan || a.loanId || a.type === 'loan' || a.type === 'loan_installment' || a.type === 'meds' ||
+        (a.reason && (a.reason.includes('سلفة') || a.reason.includes('أدوية') || a.reason.includes('قسط')));
+      if (isLoanOrMeds) return true;
+      if (a.type === 'bonus' || a.type === 'مكافأة') return true;
+
+      const isLateness = aId.startsWith('adj_late_') || a.source === 'late_penalty_engine' || (a.reason && a.reason.includes('تأخير'));
+      if (isLateness) return true;
+
+      const isPenaltyAdj =
+        a.type === 'penalty' ||
+        a.type === 'deduction' ||
+        a.type === 'shortage' ||
+        a.type === 'خصم' ||
+        aId.startsWith('adj_pen_') ||
+        aId.startsWith('adj_disc_') ||
+        aId.startsWith('adj-inv-shortage') ||
+        (a.reason && (a.reason.includes('جزاء') || a.reason.includes('مخالفة') || a.reason.includes('عجز') || a.reason.includes('جرد')));
+
+      if (isPenaltyAdj) {
+        collectKeys(aId);
+        if (a.requestId) collectKeys(a.requestId);
+        return false;
+      }
+      return true;
+    });
+
+    const updatedDeleted = Array.from(allDeletedKeys);
+    const updatedState = {
+      ...state,
+      requests: cleanRequests,
+      adjustments: cleanAdjustments,
+      disciplinaryRecords: [],
+      disciplinaryDecisions: [],
+      _deletedIds: updatedDeleted
+    };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('✅ تم مسح جميع الجزاءات الإدارية واستقطاعات عجز الجرد بنجاح مع الاحتفاظ بكافة جزاءات التأخير اللائحية.');
   };
 
   // Delete a single penalty record permanently
@@ -747,7 +864,8 @@ export default function BylawsModule({
     const seenLateKeys = new Set();
     const deletedIdsSet = new Set((state._deletedIds || []).map(String));
 
-    const isIdDeleted = (rawId, itemDate = null, createdAt = null) => {
+    const isIdDeleted = (rawId, itemDate = null, createdAt = null, isExplicitApproved = false) => {
+      if (isExplicitApproved) return false;
       if (!rawId) return false;
       const s = String(rawId);
       const raw = s.replace(/^(req_|late_inc_|adj_|adj-inv-shortage-|disc_|obj_inc_|obj_adj_|obj_req_)/, '');
@@ -785,7 +903,8 @@ export default function BylawsModule({
         r.ruleTitle
       ) {
         const idStr = String(r.id);
-        if (isIdDeleted(idStr, r.date, r.createdAt)) return;
+        const isExplicitApproved = (r.adminApproved === true || r.status === 'approved') && !r.isCancelled && (parseFloat(r.amount) > 0 || parseFloat(r.penaltyAmount) > 0);
+        if (isIdDeleted(idStr, r.date, r.createdAt, isExplicitApproved)) return;
 
         const cleanId = idStr.replace(/^req_/, '');
         seenReqIds.add(idStr);
@@ -795,11 +914,12 @@ export default function BylawsModule({
         seenReqIds.add(`req_late_inc_${cleanId.replace(/^late_inc_/, '')}`);
 
         const isLateReq = r.subType === 'lateness' || r.type === 'late_penalty' || idStr.startsWith('req_late_inc_');
-        if (isLateReq && (isApprovedPermissionForDate(r.employeeId, r.date, state) || r.status === 'approved_permission_exempt')) {
+        if (isLateReq && !isExplicitApproved && (isApprovedPermissionForDate(r.employeeId, r.date, state) || r.status === 'approved_permission_exempt')) {
           return;
         }
         if (isLateReq && r.employeeId && r.date) {
-          seenLateKeys.add(`${r.employeeId}_${r.date}`);
+          const reqBranchKey = r.branchId ? `_${r.branchId}` : '';
+          seenLateKeys.add(`${r.employeeId}_${r.date}${reqBranchKey}`);
         }
 
         const emp = employees.find((e) => e && String(e.id) === String(r.employeeId));
@@ -808,9 +928,7 @@ export default function BylawsModule({
         let amount = parseFloat(r.amount) || 0;
         if (!amount && (r.impactType || r.impactVal || r.deductionDays || r.penaltyDays)) {
           if (r.impactType === 'deduction_days' || r.deductionDays || r.penaltyDays) {
-            const salary = emp ? parseFloat(emp.salary) || 0 : 0;
-            const workDays = emp ? (parseFloat(emp.workDaysPerMonth) || parseFloat(emp.workDays) || 26) : 26;
-            const dailyRate = r.dailyRate ? parseFloat(r.dailyRate) : (workDays > 0 ? (salary / workDays) : (salary / 30));
+            const dailyRate = r.dailyRate ? parseFloat(r.dailyRate) : getEmployeeDailyRate(emp, r.branchId);
             const days = parseFloat(r.impactVal || r.deductionDays || r.penaltyDays || 1);
             amount = Math.round(dailyRate * days * 100) / 100;
           } else if (r.impactType === 'fixed_amount') {
@@ -818,16 +936,21 @@ export default function BylawsModule({
           }
         }
 
-        // Check for approved objection in requests
+        let effectiveStatus = r.status || (r.adminApproved ? 'approved' : 'pending');
+        let effectiveObjection = r.objection ? { ...r.objection } : null;
+
+        // Check for approved objection in requests (exact ID match only)
         const isApprovedObjection =
-          r.objection?.status === 'approved' ||
-          r.isCancelled ||
-          r.status === 'cancelled' ||
-          (state.requests || []).some(
-            (req) =>
-              (req.type === 'penalty_objection' || req.type === 'objection') &&
-              (req.status === 'approved' || req.adminApproved) &&
-              (req.penaltyId === r.id || req.id === `obj_inc_${r.id}` || req.id === `obj_req_${r.id}` || (String(req.employeeId) === String(r.employeeId) && req.date === r.date))
+          !isExplicitApproved && (
+            r.objection?.status === 'approved' ||
+            r.isCancelled ||
+            r.status === 'cancelled' ||
+            (state.requests || []).some(
+              (req) =>
+                (req.type === 'penalty_objection' || req.type === 'objection') &&
+                (req.status === 'approved' || req.adminApproved) &&
+                (req.penaltyId === r.id || req.id === `obj_inc_${r.id}` || req.id === `obj_req_${r.id}`)
+            )
           );
 
         const isPendingObjection =
@@ -838,11 +961,24 @@ export default function BylawsModule({
              (req) =>
                (req.type === 'penalty_objection' || req.type === 'objection') &&
                req.status === 'pending' &&
-               (req.penaltyId === r.id || req.id === `obj_inc_${r.id}` || req.id === `obj_req_${r.id}` || (String(req.employeeId) === String(r.employeeId) && req.date === r.date))
+               (req.penaltyId === r.id || req.id === `obj_inc_${r.id}` || req.id === `obj_req_${r.id}`)
            ));
 
-        let effectiveStatus = r.status || (r.adminApproved ? 'approved' : 'pending');
-        let effectiveObjection = r.objection ? { ...r.objection } : null;
+        // matching incident check
+        const matchingInc = isLateReq ? (state.lateIncidents || []).find(inc => 
+          String(inc.id) === cleanId || 
+          `req_${inc.id}` === idStr || 
+          (String(inc.employeeId) === String(r.employeeId) && inc.date === r.date && (!r.branchId || String(inc.branchId) === String(r.branchId)))
+        ) : null;
+
+        if (matchingInc && !isExplicitApproved) {
+          if (matchingInc.status === 'cancelled' || matchingInc.isCancelled || matchingInc.actionType === 'grace') {
+            effectiveStatus = 'cancelled';
+            amount = 0;
+          } else if (matchingInc.penaltyAmount !== undefined && parseFloat(matchingInc.penaltyAmount) > 0) {
+            amount = parseFloat(matchingInc.penaltyAmount);
+          }
+        }
 
         if (isApprovedObjection) {
           effectiveStatus = 'cancelled';
@@ -879,29 +1015,34 @@ export default function BylawsModule({
 
     (state.lateIncidents || []).forEach((inc) => {
       if (!inc) return;
-      if (isIdDeleted(inc.id, inc.date, inc.createdAt)) return;
+      const isExplicitApprovedInc = (inc.adminApproved === true || inc.status === 'approved') && !inc.isCancelled && (parseFloat(inc.penaltyAmount) > 0 || inc.deductionMinutes > 0);
+      if (isIdDeleted(inc.id, inc.date, inc.createdAt, isExplicitApprovedInc)) return;
       if (
-        inc.status === 'cancelled' ||
-        inc.isCancelled ||
-        inc.objection?.status === 'approved' ||
-        inc.status === 'approved_permission_exempt' ||
-        inc.actionType === 'grace' ||
-        isApprovedPermissionForDate(inc.employeeId, inc.date, state)
+        !isExplicitApprovedInc && (
+          inc.status === 'cancelled' ||
+          inc.isCancelled ||
+          inc.objection?.status === 'approved' ||
+          inc.status === 'approved_permission_exempt' ||
+          inc.actionType === 'grace' ||
+          ((inc.deductionMinutes || 0) <= 0 && (parseFloat(inc.penaltyAmount) || 0) <= 0) ||
+          isApprovedPermissionForDate(inc.employeeId, inc.date, state)
+        )
       ) return;
       const incIdStr = String(inc.id);
       const cleanIncId = incIdStr.replace(/^late_inc_/, '');
+      const lateBranchKey = inc.branchId ? `_${inc.branchId}` : '';
       if (
         seenReqIds.has(incIdStr) ||
         seenReqIds.has(cleanIncId) ||
         seenReqIds.has(`req_${incIdStr}`) ||
         seenReqIds.has(`req_late_inc_${cleanIncId}`) ||
-        (inc.employeeId && inc.date && seenLateKeys.has(`${inc.employeeId}_${inc.date}`))
+        (inc.employeeId && inc.date && seenLateKeys.has(`${inc.employeeId}_${inc.date}${lateBranchKey}`))
       ) {
         return;
       }
       seenReqIds.add(incIdStr);
       seenReqIds.add(`req_${incIdStr}`);
-      if (inc.employeeId && inc.date) seenLateKeys.add(`${inc.employeeId}_${inc.date}`);
+      if (inc.employeeId && inc.date) seenLateKeys.add(`${inc.employeeId}_${inc.date}${lateBranchKey}`);
 
       const emp = employees.find((e) => e && String(e.id) === String(inc.employeeId));
       const bObj = branches.find((b) => b && String(b.id) === String(inc.branchId || emp?.branchId));
@@ -909,14 +1050,16 @@ export default function BylawsModule({
       const incAmount = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
 
       const isApprovedObjection =
-        inc.objection?.status === 'approved' ||
-        inc.isCancelled ||
-        inc.status === 'cancelled' ||
-        (state.requests || []).some(
-          (req) =>
-            (req.type === 'penalty_objection' || req.type === 'objection') &&
-            (req.status === 'approved' || req.adminApproved) &&
-            (req.penaltyId === inc.id || req.id === `obj_inc_${inc.id}` || (String(req.employeeId) === String(inc.employeeId) && req.date === inc.date))
+        !isExplicitApprovedInc && (
+          inc.objection?.status === 'approved' ||
+          inc.isCancelled ||
+          inc.status === 'cancelled' ||
+          (state.requests || []).some(
+            (req) =>
+              (req.type === 'penalty_objection' || req.type === 'objection') &&
+              (req.status === 'approved' || req.adminApproved) &&
+              (req.penaltyId === inc.id || req.id === `obj_inc_${inc.id}` || req.id === `obj_req_${inc.id}`)
+          )
         );
 
       if (isApprovedObjection) return;
@@ -1579,27 +1722,50 @@ export default function BylawsModule({
               </p>
             </div>
             {isAdmin && (
-              <button
-                type="button"
-                className="btn btn-outline"
-                style={{
-                  borderColor: '#ef4444',
-                  color: '#dc2626',
-                  fontWeight: 'bold',
-                  fontSize: '13px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '8px 16px',
-                  borderRadius: '8px',
-                  background: '#ffffff',
-                  boxShadow: '0 1px 3px rgba(220,38,38,0.08)'
-                }}
-                onClick={handleClearAllPenaltiesLog}
-                title="مسح سجل الجزاءات والمخالفات والقرارات والبدء من جديد"
-              >
-                <span>🗑️</span> مسح السجل والبدء من جديد
-              </button>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{
+                    borderColor: '#0284c7',
+                    color: '#0369a1',
+                    fontWeight: 'bold',
+                    fontSize: '13px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    background: '#f0f9ff',
+                    boxShadow: '0 1px 3px rgba(2,132,199,0.08)'
+                  }}
+                  onClick={handleClearAdminAndShortageOnly}
+                  title="إسقاط جميع الجزاءات والاستقطاعات الإدارية وعجز الجرد مع الاحتفاظ الكامل بجزاءات التأخير اللائحية"
+                >
+                  <span>⚖️</span> إسقاط الجزاءات الإدارية وعجز الجرد (مع الحفاظ على التأخيرات)
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{
+                    borderColor: '#ef4444',
+                    color: '#dc2626',
+                    fontWeight: 'bold',
+                    fontSize: '13px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    background: '#ffffff',
+                    boxShadow: '0 1px 3px rgba(220,38,38,0.08)'
+                  }}
+                  onClick={handleClearAllPenaltiesLog}
+                  title="مسح سجل الجزاءات والمخالفات والقرارات والبدء من جديد"
+                >
+                  <span>🗑️</span> مسح السجل والبدء من جديد
+                </button>
+              </div>
             )}
           </div>
 

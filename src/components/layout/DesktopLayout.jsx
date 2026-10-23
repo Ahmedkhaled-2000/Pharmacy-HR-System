@@ -1282,6 +1282,14 @@ export default function DesktopLayout({
           label: 'التعيينات والتوظيف',
           icon: '🎯',
           desc: 'إدارة طلبات التعيين، الشواغر، المقابلات، وقوائم الانتظار'
+        },
+        {
+          id: 'employees:secondments',
+          targetTab: 'employees',
+          targetSubTab: 'secondments',
+          label: 'الانتدابات والنقل بين الفروع',
+          icon: '🔀',
+          desc: 'إدارة انتدابات الموظفين، النقل المؤقت والنهائي، والتحكم بأجهزة الفروع'
         }
       ]
     },
@@ -2240,6 +2248,13 @@ if (subItem.openInNewTab || subItem.targetTab === 'pharmacy-archive') {
 setActiveTab(subItem.targetTab);
 if (subItem.targetSubTab && setActiveSubTab) {
   setActiveSubTab(subItem.targetSubTab);
+}
+if (subItem.posAction) {
+  setTimeout(() => {
+    window.dispatchEvent(new CustomEvent('pos:trigger-action', {
+      detail: { action: subItem.posAction }
+    }));
+  }, 60);
 }
 if (subItem.targetTab === 'requests' && subItem.filterType) {
   try {

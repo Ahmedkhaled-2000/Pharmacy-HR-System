@@ -151,15 +151,48 @@ export function initOutstockSyncService() {
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
 
+  // مراقبة استعادة تطبيق الأندرويد والتركيز في الواجهة (App Resume / Visibility Change)
+  const handleAppResume = () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible' && navigator.onLine) {
+      syncState.isOnline = true;
+      notifyStateChange();
+      syncPendingOfflineOrders();
+    }
+  };
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleAppResume);
+  }
+  window.addEventListener('focus', handleAppResume);
+
   // 2. ربط ومراقبة Socket.io
   const setupSocket = () => {
     const socket = getSocket();
     if (!socket) return;
 
+    const joinOutstockRoom = () => {
+      try {
+        const outUser = JSON.parse(localStorage.getItem('outstock_user') || '{}');
+        const outBranch = JSON.parse(localStorage.getItem('outstock_branch') || '{}');
+        const role = outUser.role || localStorage.getItem('app_auth_role') || 'outstock_user';
+        const branchId = outBranch.id || outUser.branchId || null;
+        socket.emit('join_room', { role, branchId, system: 'outstock' });
+      } catch (_) {}
+    };
+
+    if (socket.connected) {
+      syncState.isSocketConnected = true;
+      syncState.isOnline = true;
+      notifyStateChange();
+      joinOutstockRoom();
+      syncPendingOfflineOrders();
+    }
+
     socket.on('connect', () => {
       syncState.isSocketConnected = true;
       syncState.isOnline = true;
       notifyStateChange();
+      joinOutstockRoom();
       // مزامنة الطابور فور عودة اتصال السوكت
       syncPendingOfflineOrders();
     });
@@ -183,10 +216,13 @@ export function initOutstockSyncService() {
       'outstock:refresh_notifications',
       'outstock:branch_order_replied',
       'outstock:medication_request_created',
-      'outstock:medication_request_updated'
+      'outstock:medication_request_updated',
+      'outstock:procurement_team_updated'
     ];
 
     outstockSocketEvents.forEach(evtName => {
+      // إزالة المستمع القديم لمنع تكرار الأحداث
+      socket.off(evtName);
       socket.on(evtName, (payload) => {
         try {
           // 1. إطلاق CustomEvent لنافذة المتصفح

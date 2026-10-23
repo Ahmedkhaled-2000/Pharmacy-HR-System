@@ -804,6 +804,7 @@ export async function notifyAdminOnEarlyDepartureBeforeClosing({
   if (targetRecipients.length === 0) return { success: false, reason: 'لم يتم تحديد بريد الإدارة' };
 
   const empName = emp?.name || 'موظف';
+  const branchName = branch?.name || branch?.branchName || (branch?.id ? `فرع ${branch.id}` : 'الفرع');
   const effectiveGrace = (allowedGraceMinutes !== undefined && allowedGraceMinutes !== null && allowedGraceMinutes !== '')
     ? Number(allowedGraceMinutes)
     : (branch?.earlyDepartureBeforeClosingGraceMinutes !== undefined && branch?.earlyDepartureBeforeClosingGraceMinutes !== null && branch?.earlyDepartureBeforeClosingGraceMinutes !== '')

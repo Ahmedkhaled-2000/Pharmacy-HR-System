@@ -87,6 +87,7 @@ export default function PendingRosterModal({
   // Handler for printing submitted schedule
   const handlePrintSchedule = () => {
     const companyName = state?.orgSettings?.companyName || 'مجموعة صيدليات د. منار الكومي';
+    const empName = emp?.name || pendingReq?.employeeName || 'الموظف';
     const safeSchedule = submittedSchedule || {};
     const rowsHTML = STANDARD_DAYS.map(d => {
       const conf = safeSchedule[d.key];

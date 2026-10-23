@@ -113,6 +113,9 @@ export default function ProcurementReturnsTab({ showToast, categoryScope = null 
       if (searchQuery.trim()) {
         params.search = searchQuery.trim();
       }
+      if (categoryScope) {
+        params.category_scope = categoryScope;
+      }
 
       const res = await outstockGetOrderReturns(params);
       if (res?.success && Array.isArray(res.returns)) {
@@ -126,7 +129,7 @@ export default function ProcurementReturnsTab({ showToast, categoryScope = null 
     } finally {
       setIsLoading(false);
     }
-  }, [selectedBranchId, activeStatusFilter, searchQuery, showToast]);
+  }, [selectedBranchId, activeStatusFilter, searchQuery, categoryScope, showToast]);
 
   useEffect(() => {
     fetchReturns();

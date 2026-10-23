@@ -72,7 +72,15 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
     can_access_supplier_invoices: true,
     can_access_branch_withdrawals: true,
     can_access_discounts_comparison: true,
-    can_access_order_returns: false
+    can_access_pharmafly: false,
+    can_access_order_returns: false,
+    can_delivery_tracking: true,
+    can_unavailable_items: true,
+    can_access_procurement_whatsapp: true,
+    can_access_medications_catalog: true,
+    can_access_complaints: true,
+    can_access_cosmetics_customers: false,
+    can_manage_team: false
   });
 
   const [selectedBranchForEmp, setSelectedBranchForEmp] = useState('');
@@ -98,7 +106,6 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
             const r = String(m.role || '').toLowerCase();
             if (u === 'admin-stock' || u === 'procurement_manager' || u === 'procurement-manager' || u === 'manager') return false;
             if (r === 'procurement_manager' || r === 'outstock_procurement_manager' || r === 'manager') return false;
-            if (m.permissions?.can_manage_team) return false;
             return true;
           })
           .map(m => {
@@ -120,8 +127,15 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
               can_access_supplier_invoices: p.can_access_supplier_invoices === true || m.can_access_supplier_invoices === true,
               can_access_branch_withdrawals: p.can_access_branch_withdrawals === true || m.can_access_branch_withdrawals === true,
               can_access_discounts_comparison: p.can_access_discounts_comparison === true || m.can_access_discounts_comparison === true,
+              can_access_pharmafly: p.can_access_pharmafly === true || m.can_access_pharmafly === true,
               can_access_order_returns: p.can_access_order_returns === true || m.can_access_order_returns === true,
-              can_manage_team: false
+              can_delivery_tracking: p.can_delivery_tracking !== false && m.can_delivery_tracking !== false,
+              can_unavailable_items: p.can_unavailable_items !== false && m.can_unavailable_items !== false,
+              can_access_procurement_whatsapp: p.can_access_procurement_whatsapp !== false && m.can_access_procurement_whatsapp !== false,
+              can_access_medications_catalog: p.can_access_medications_catalog === true || m.can_access_medications_catalog === true,
+              can_access_complaints: p.can_access_complaints !== false && m.can_access_complaints !== false,
+              can_access_cosmetics_customers: p.can_access_cosmetics_customers === true || m.can_access_cosmetics_customers === true,
+              can_manage_team: p.can_manage_team === true || m.can_manage_team === true
             };
           });
         setTeamMembers(normalized);
@@ -182,15 +196,24 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
       role: 'procurement_officer',
       category_scope: 'all',
       allowed_branches: [],
-      can_edit_items: false,
+      can_edit_items: true,
       can_view_orders: true,
-      can_change_status: false,
-      can_access_suppliers: false,
-      can_access_supplier_accounts: false,
-      can_access_order_receiving: false,
-      can_access_supplier_invoices: false,
-      can_access_branch_withdrawals: false,
-      can_access_discounts_comparison: false
+      can_change_status: true,
+      can_access_suppliers: true,
+      can_access_supplier_accounts: true,
+      can_access_order_receiving: true,
+      can_access_supplier_invoices: true,
+      can_access_branch_withdrawals: true,
+      can_access_discounts_comparison: true,
+      can_access_pharmafly: false,
+      can_access_order_returns: false,
+      can_delivery_tracking: true,
+      can_unavailable_items: true,
+      can_access_procurement_whatsapp: true,
+      can_access_medications_catalog: true,
+      can_access_complaints: true,
+      can_access_cosmetics_customers: false,
+      can_manage_team: false
     });
     setIsMemberModalOpen(true);
   };
@@ -236,9 +259,65 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
       can_access_supplier_invoices: member.can_access_supplier_invoices === true || p.can_access_supplier_invoices === true,
       can_access_branch_withdrawals: member.can_access_branch_withdrawals === true || p.can_access_branch_withdrawals === true,
       can_access_discounts_comparison: member.can_access_discounts_comparison === true || p.can_access_discounts_comparison === true,
-      can_access_order_returns: member.can_access_order_returns === true || p.can_access_order_returns === true
+      can_access_pharmafly: member.can_access_pharmafly === true || p.can_access_pharmafly === true,
+      can_access_order_returns: member.can_access_order_returns === true || p.can_access_order_returns === true,
+      can_delivery_tracking: member.can_delivery_tracking !== false && p.can_delivery_tracking !== false,
+      can_unavailable_items: member.can_unavailable_items !== false && p.can_unavailable_items !== false,
+      can_access_procurement_whatsapp: member.can_access_procurement_whatsapp !== false && p.can_access_procurement_whatsapp !== false,
+      can_access_medications_catalog: member.can_access_medications_catalog === true || p.can_access_medications_catalog === true,
+      can_access_complaints: member.can_access_complaints !== false && p.can_access_complaints !== false,
+      can_access_cosmetics_customers: member.can_access_cosmetics_customers === true || p.can_access_cosmetics_customers === true,
+      can_manage_team: member.can_manage_team === true || p.can_manage_team === true
     });
     setIsMemberModalOpen(true);
+  };
+
+  const handleSelectAllPermissions = () => {
+    setMemberForm((prev) => ({
+      ...prev,
+      can_edit_items: true,
+      can_view_orders: true,
+      can_change_status: true,
+      can_access_suppliers: true,
+      can_access_supplier_accounts: true,
+      can_access_order_receiving: true,
+      can_access_supplier_invoices: true,
+      can_access_branch_withdrawals: true,
+      can_access_discounts_comparison: true,
+      can_access_pharmafly: true,
+      can_access_order_returns: true,
+      can_delivery_tracking: true,
+      can_unavailable_items: true,
+      can_access_procurement_whatsapp: true,
+      can_access_medications_catalog: true,
+      can_access_complaints: true,
+      can_access_cosmetics_customers: true,
+      can_manage_team: true
+    }));
+  };
+
+  const handleDeselectAllPermissions = () => {
+    setMemberForm((prev) => ({
+      ...prev,
+      can_edit_items: false,
+      can_view_orders: false,
+      can_change_status: false,
+      can_access_suppliers: false,
+      can_access_supplier_accounts: false,
+      can_access_order_receiving: false,
+      can_access_supplier_invoices: false,
+      can_access_branch_withdrawals: false,
+      can_access_discounts_comparison: false,
+      can_access_pharmafly: false,
+      can_access_order_returns: false,
+      can_delivery_tracking: false,
+      can_unavailable_items: false,
+      can_access_procurement_whatsapp: false,
+      can_access_medications_catalog: false,
+      can_access_complaints: false,
+      can_access_cosmetics_customers: false,
+      can_manage_team: false
+    }));
   };
 
   const handleToggleBranchScope = (branchId) => {
@@ -275,7 +354,15 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
       can_access_supplier_invoices: Boolean(memberForm.can_access_supplier_invoices),
       can_access_branch_withdrawals: Boolean(memberForm.can_access_branch_withdrawals),
       can_access_discounts_comparison: Boolean(memberForm.can_access_discounts_comparison),
+      can_access_pharmafly: Boolean(memberForm.can_access_pharmafly),
       can_access_order_returns: Boolean(memberForm.can_access_order_returns),
+      can_delivery_tracking: Boolean(memberForm.can_delivery_tracking),
+      can_unavailable_items: Boolean(memberForm.can_unavailable_items),
+      can_access_procurement_whatsapp: Boolean(memberForm.can_access_procurement_whatsapp),
+      can_access_medications_catalog: Boolean(memberForm.can_access_medications_catalog),
+      can_access_complaints: Boolean(memberForm.can_access_complaints),
+      can_access_cosmetics_customers: Boolean(memberForm.can_access_cosmetics_customers),
+      can_manage_team: Boolean(memberForm.can_manage_team),
       category_scope: isCosmetics ? 'cosmetics' : 'all'
     };
 
@@ -731,13 +818,23 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                               </span>
                             )}
                             {m.can_change_status === true && (
-                              <span style={{ background: '#f1f5f9', color: '#334155', padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: '700' }}>
-                                توريد وتغيير الحالة
+                              <span style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: '700' }}>
+                                توريد وتغيير الحالة ✅
+                              </span>
+                            )}
+                            {m.can_delivery_tracking !== false && (
+                              <span style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
+                                متابعة التسليم 🚚
+                              </span>
+                            )}
+                            {m.can_unavailable_items !== false && (
+                              <span style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
+                                غير المتوفر ⚠️
                               </span>
                             )}
                             {(m.role === 'cosmetics_officer' || m.category_scope === 'cosmetics') ? (
                               <span style={{ background: '#fce7f3', color: '#be185d', padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: '800' }}>
-                                معزول عن الموردين 💄
+                                نطاق مستحضرات التجميل 💄
                               </span>
                             ) : m.can_access_suppliers === true ? (
                               <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', marginTop: '2px' }}>
@@ -766,11 +863,41 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                                     مقارنة الخصومات
                                   </span>
                                 )}
+                                {m.can_access_pharmafly === true && (
+                                  <span style={{ background: '#e0e7ff', color: '#4338ca', border: '1px solid #c7d2fe', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
+                                    PharmaFly ✈️
+                                  </span>
+                                )}
                               </div>
                             ) : null}
                             {m.can_access_order_returns === true && (
                               <span style={{ background: '#fdf2f8', color: '#be185d', border: '1px solid #fbcfe8', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
                                 مرتجعات العملاء ↩️
+                              </span>
+                            )}
+                            {m.can_access_procurement_whatsapp !== false && (
+                              <span style={{ background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
+                                واتساب المشتريات 📱
+                              </span>
+                            )}
+                            {m.can_access_medications_catalog === true && (
+                              <span style={{ background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
+                                كتالوج الأصناف 💊
+                              </span>
+                            )}
+                            {m.can_access_complaints !== false && (
+                              <span style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
+                                شكاوى الفروع 🔔
+                              </span>
+                            )}
+                            {m.can_access_cosmetics_customers === true && (
+                              <span style={{ background: '#fdf2f8', color: '#db2777', border: '1px solid #fbcfe8', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
+                                عملاء التجميل 💄
+                              </span>
+                            )}
+                            {m.can_manage_team === true && (
+                              <span style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
+                                تفويض إدارة الفريق 🛡️
                               </span>
                             )}
                           </div>
@@ -1275,166 +1402,300 @@ export default function ProcurementTeamTab({ showToast = alert, currentUser = nu
                 </div>
               </div>
 
-              {/* الصلاحيات الدقيقة */}
+              {/* الصلاحيات الدقيقة الشاملة */}
               <div
                 style={{
                   background: '#f8fafc',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '10px',
-                  padding: '12px',
-                  marginBottom: '14px'
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: '12px',
+                  padding: '14px',
+                  marginBottom: '16px'
                 }}
               >
-                <label className="outstock-form-label" style={{ fontWeight: 'bold', marginBottom: '8px', color: '#0f172a' }}>
-                  الصلاحيات الممنوحة للعضو:
-                </label>
-
-                {/* صلاحية التعديل على الأصناف - الشرط الأساسي */}
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    padding: '8px',
-                    background: '#f0fdf4',
-                    border: '1px solid #bbf7d0',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    marginBottom: '8px'
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={memberForm.can_edit_items}
-                    onChange={(e) => setMemberForm({ ...memberForm, can_edit_items: e.target.checked })}
-                    style={{ width: '16px', height: '16px', accentColor: '#16a34a' }}
-                  />
-                  <div>
-                    <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#15803d' }}>
-                      صلاحية التعديل على الأصناف والأدوية (تعديل السعر والبيانات)
-                    </span>
-                    <div style={{ fontSize: '11px', color: '#166534' }}>
-                      تسمح للعضو بتعديل بيانات الأصناف وكارتة الصنف وأسعارها بالكتالوج
-                    </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                  <label className="outstock-form-label" style={{ fontWeight: '900', margin: 0, color: '#0f172a', fontSize: '13.5px' }}>
+                    الصلاحيات السيادية والتشغيلية الممنوحة للعضو:
+                  </label>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button
+                      type="button"
+                      onClick={handleSelectAllPermissions}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '11.5px',
+                        fontWeight: '800',
+                        borderRadius: '6px',
+                        border: '1px solid #10b981',
+                        background: '#ecfdf5',
+                        color: '#065f46',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      تحديد الكل ✅
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeselectAllPermissions}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '11.5px',
+                        fontWeight: '800',
+                        borderRadius: '6px',
+                        border: '1px solid #cbd5e1',
+                        background: '#ffffff',
+                        color: '#64748b',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      إلغاء التحديد ❌
+                    </button>
                   </div>
-                </label>
+                </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '6px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', cursor: 'pointer' }}>
+                {/* المجموعة الأولى: العمليات التشغيلية وإدارة الطلبات */}
+                <div style={{ marginBottom: '14px', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: '800', color: '#0369a1', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <Pill size={14} />
+                    <span>1. العمليات التشغيلية وإدارة طلبات الفروع:</span>
+                  </div>
+
+                  {/* صلاحية التعديل على الأصناف - الشرط الأساسي */}
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      padding: '8px 10px',
+                      background: memberForm.can_edit_items ? '#f0fdf4' : '#fafafa',
+                      border: memberForm.can_edit_items ? '1.5px solid #86efac' : '1px solid #e2e8f0',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      marginBottom: '8px'
+                    }}
+                  >
                     <input
                       type="checkbox"
-                      checked={memberForm.can_view_orders}
-                      onChange={(e) => setMemberForm({ ...memberForm, can_view_orders: e.target.checked })}
-                      style={{ accentColor: '#0f766e' }}
+                      checked={memberForm.can_edit_items}
+                      onChange={(e) => setMemberForm({ ...memberForm, can_edit_items: e.target.checked })}
+                      style={{ width: '16px', height: '16px', accentColor: '#16a34a' }}
                     />
-                    <span>صلاحية استعراض طلبات الفروع المجمعة</span>
+                    <div>
+                      <span style={{ fontWeight: 'bold', fontSize: '12.5px', color: '#15803d' }}>
+                        صلاحية التعديل على الأصناف والأدوية (البيانات والأسعار بالكتالوج)
+                      </span>
+                      <div style={{ fontSize: '11px', color: '#166534' }}>
+                        تسمح للعضو بتعديل بيانات الأصناف وكارتة الصنف وأسعارها بالكتالوج العام
+                      </div>
+                    </div>
                   </label>
 
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', cursor: 'pointer' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '6px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', padding: '4px' }}>
+                      <input
+                        type="checkbox"
+                        checked={memberForm.can_view_orders}
+                        onChange={(e) => setMemberForm({ ...memberForm, can_view_orders: e.target.checked })}
+                        style={{ accentColor: '#0f766e' }}
+                      />
+                      <span>استعراض طلبات الفروع المجمعة</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', padding: '4px' }}>
+                      <input
+                        type="checkbox"
+                        checked={memberForm.can_change_status}
+                        onChange={(e) => setMemberForm({ ...memberForm, can_change_status: e.target.checked })}
+                        style={{ accentColor: '#0f766e' }}
+                      />
+                      <span style={{ fontWeight: 'bold', color: '#0f766e' }}>توريد وشحن الطلبات وتغيير الحالات (اتخاذ القرارات)</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', padding: '4px' }}>
+                      <input
+                        type="checkbox"
+                        checked={memberForm.can_delivery_tracking}
+                        onChange={(e) => setMemberForm({ ...memberForm, can_delivery_tracking: e.target.checked })}
+                        style={{ accentColor: '#0f766e' }}
+                      />
+                      <span>متابعة تسليم وشحن الطلبيات للفروع 🚚</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', padding: '4px' }}>
+                      <input
+                        type="checkbox"
+                        checked={memberForm.can_unavailable_items}
+                        onChange={(e) => setMemberForm({ ...memberForm, can_unavailable_items: e.target.checked })}
+                        style={{ accentColor: '#0f766e' }}
+                      />
+                      <span>إدارة الأصناف غير المتوفرة بالسوق والبدائل ⚠️</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', padding: '4px' }}>
+                      <input
+                        type="checkbox"
+                        checked={memberForm.can_access_order_returns}
+                        onChange={(e) => setMemberForm({ ...memberForm, can_access_order_returns: e.target.checked })}
+                        style={{ accentColor: '#0f766e' }}
+                      />
+                      <span style={{ fontWeight: memberForm.role === 'cosmetics_officer' ? 'bold' : 'normal', color: memberForm.role === 'cosmetics_officer' ? '#be185d' : 'inherit' }}>
+                        إدارة واستعراض مرتجعات العملاء ↩️
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* المجموعة الثانية: إدارة الموردين والعمليات المالية والمزامنة */}
+                <div style={{ marginBottom: '14px', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: '800', color: '#047857', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <Shield size={14} />
+                    <span>2. إدارة الموردين والعمليات المالية والمزامنة:</span>
+                  </div>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', cursor: 'pointer', marginBottom: '8px' }}>
                     <input
                       type="checkbox"
-                      checked={memberForm.can_change_status}
-                      onChange={(e) => setMemberForm({ ...memberForm, can_change_status: e.target.checked })}
+                      checked={memberForm.can_access_suppliers}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setMemberForm({
+                          ...memberForm,
+                          can_access_suppliers: checked,
+                          can_access_supplier_accounts: checked,
+                          can_access_order_receiving: checked,
+                          can_access_supplier_invoices: checked,
+                          can_access_branch_withdrawals: checked,
+                          can_access_discounts_comparison: checked,
+                          can_access_pharmafly: checked ? memberForm.can_access_pharmafly : false
+                        });
+                      }}
                       style={{ accentColor: '#0f766e' }}
                     />
-                    <span>صلاحية توريد وشحن الطلبات وتغيير الحالات</span>
+                    <span style={{ fontWeight: '900', color: '#047857' }}>تفعيل قسم الموردين والحسابات العامة</span>
                   </label>
 
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={memberForm.can_access_order_returns}
-                      onChange={(e) => setMemberForm({ ...memberForm, can_access_order_returns: e.target.checked })}
-                      style={{ accentColor: '#0f766e' }}
-                    />
-                    <span style={{ fontWeight: memberForm.role === 'cosmetics_officer' ? 'bold' : 'normal', color: memberForm.role === 'cosmetics_officer' ? '#be185d' : 'inherit' }}>
-                      صلاحية إدارة واستعراض مرتجعات العملاء {memberForm.role === 'cosmetics_officer' ? '(مقتصرة تلقائياً على أصناف التجميل فقط)' : ''} ↩️
-                    </span>
-                  </label>
-
-                  {memberForm.role === 'cosmetics_officer' && (
-                    <div style={{ marginTop: '8px', marginBottom: '8px', padding: '10px 12px', background: '#fdf2f8', border: '1.5px dashed #f472b6', borderRadius: '8px', fontSize: '12px', color: '#be185d', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Sparkles size={16} />
-                      <span>💄 مسؤول مستحضرات التجميل: يختص بإدارة وتوريد مستحضرات التجميل، ويمكنك تفعيل أو تقييد صلاحيات الموردين والعمليات له حسب رغبتك:</span>
+                  {memberForm.can_access_suppliers && (
+                    <div style={{ marginRight: '16px', padding: '10px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', marginBottom: '8px' }}>
+                        حدد الأقسام المسموح للعضو بالوصول إليها وإدارتها:
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={memberForm.can_access_supplier_accounts}
+                            onChange={(e) => setMemberForm({ ...memberForm, can_access_supplier_accounts: e.target.checked })}
+                            style={{ accentColor: '#0f766e' }}
+                          />
+                          <span>كشف حساب الموردين</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={memberForm.can_access_order_receiving}
+                            onChange={(e) => setMemberForm({ ...memberForm, can_access_order_receiving: e.target.checked })}
+                            style={{ accentColor: '#0f766e' }}
+                          />
+                          <span>استلام طلبية وتوثيق الدفع</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={memberForm.can_access_supplier_invoices}
+                            onChange={(e) => setMemberForm({ ...memberForm, can_access_supplier_invoices: e.target.checked })}
+                            style={{ accentColor: '#0f766e' }}
+                          />
+                          <span>فواتير الموردين والمسودات</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={memberForm.can_access_branch_withdrawals}
+                            onChange={(e) => setMemberForm({ ...memberForm, can_access_branch_withdrawals: e.target.checked })}
+                            style={{ accentColor: '#0f766e' }}
+                          />
+                          <span>مسحوبات الفروع من الموردين</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={memberForm.can_access_discounts_comparison}
+                            onChange={(e) => setMemberForm({ ...memberForm, can_access_discounts_comparison: e.target.checked })}
+                            style={{ accentColor: '#0f766e' }}
+                          />
+                          <span>مقارنة الخصومات وأفضل سعر</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={memberForm.can_access_pharmafly}
+                            onChange={(e) => setMemberForm({ ...memberForm, can_access_pharmafly: e.target.checked })}
+                            style={{ accentColor: '#4338ca' }}
+                          />
+                          <span style={{ fontWeight: 'bold', color: '#4338ca' }}>الربط والمزامنة مع PharmaFly ✈️</span>
+                        </label>
+                      </div>
                     </div>
                   )}
+                </div>
 
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={memberForm.can_access_suppliers}
-                          onChange={(e) => {
-                            const checked = e.target.checked;
-                            setMemberForm({
-                              ...memberForm,
-                              can_access_suppliers: checked,
-                              can_access_supplier_accounts: checked,
-                              can_access_order_receiving: checked,
-                              can_access_supplier_invoices: checked,
-                              can_access_branch_withdrawals: checked,
-                              can_access_discounts_comparison: checked
-                            });
-                          }}
-                          style={{ accentColor: '#0f766e' }}
-                        />
-                        <span style={{ fontWeight: 'bold', color: '#0f766e' }}>صلاحية إدارة الموردين والعمليات المالية</span>
-                      </label>
+                {/* المجموعة الثالثة: المراسلات والشكاوى والتسويق والإدارة */}
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: '800', color: '#7c3aed', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <Users size={14} />
+                    <span>3. المراسلات، الشكاوى، الخدمات المتخصصة وإدارة الفريق:</span>
+                  </div>
 
-                      {/* التقسيم الدقيق لخمس صلاحيات لإدارة الموردين */}
-                      {memberForm.can_access_suppliers && (
-                        <div style={{ marginTop: '6px', marginRight: '22px', padding: '10px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                          <div style={{ fontSize: '11.5px', fontWeight: 'bold', color: '#475569', marginBottom: '8px' }}>
-                            اختر الأقسام المسموح للعضو بالوصول إليها:
-                          </div>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer' }}>
-                              <input
-                                type="checkbox"
-                                checked={memberForm.can_access_supplier_accounts}
-                                onChange={(e) => setMemberForm({ ...memberForm, can_access_supplier_accounts: e.target.checked })}
-                                style={{ accentColor: '#0f766e' }}
-                              />
-                              <span>حساب الموردين</span>
-                            </label>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer' }}>
-                              <input
-                                type="checkbox"
-                                checked={memberForm.can_access_order_receiving}
-                                onChange={(e) => setMemberForm({ ...memberForm, can_access_order_receiving: e.target.checked })}
-                                style={{ accentColor: '#0f766e' }}
-                              />
-                              <span>استلام طلبية</span>
-                            </label>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer' }}>
-                              <input
-                                type="checkbox"
-                                checked={memberForm.can_access_supplier_invoices}
-                                onChange={(e) => setMemberForm({ ...memberForm, can_access_supplier_invoices: e.target.checked })}
-                                style={{ accentColor: '#0f766e' }}
-                              />
-                              <span>فواتير الموردين</span>
-                            </label>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer' }}>
-                              <input
-                                type="checkbox"
-                                checked={memberForm.can_access_branch_withdrawals}
-                                onChange={(e) => setMemberForm({ ...memberForm, can_access_branch_withdrawals: e.target.checked })}
-                                style={{ accentColor: '#0f766e' }}
-                              />
-                              <span>مسحوبات الفروع</span>
-                            </label>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer' }}>
-                              <input
-                                type="checkbox"
-                                checked={memberForm.can_access_discounts_comparison}
-                                onChange={(e) => setMemberForm({ ...memberForm, can_access_discounts_comparison: e.target.checked })}
-                                style={{ accentColor: '#0f766e' }}
-                              />
-                              <span>مقارنة الخصومات</span>
-                            </label>
-                          </div>
-                        </div>
-                      )}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '8px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', padding: '4px' }}>
+                      <input
+                        type="checkbox"
+                        checked={memberForm.can_access_procurement_whatsapp}
+                        onChange={(e) => setMemberForm({ ...memberForm, can_access_procurement_whatsapp: e.target.checked })}
+                        style={{ accentColor: '#059669' }}
+                      />
+                      <span>شاشة واتساب المشتريات ومراسلة الفروع 📱</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', padding: '4px' }}>
+                      <input
+                        type="checkbox"
+                        checked={memberForm.can_access_medications_catalog}
+                        onChange={(e) => setMemberForm({ ...memberForm, can_access_medications_catalog: e.target.checked })}
+                        style={{ accentColor: '#2563eb' }}
+                      />
+                      <span>كتالوج وتسعير الأدوية والمستحضرات 💊</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', padding: '4px' }}>
+                      <input
+                        type="checkbox"
+                        checked={memberForm.can_access_complaints}
+                        onChange={(e) => setMemberForm({ ...memberForm, can_access_complaints: e.target.checked })}
+                        style={{ accentColor: '#ea580c' }}
+                      />
+                      <span>متابعة ومعالجة شكاوى الفروع المصعدة 🔔</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', padding: '4px' }}>
+                      <input
+                        type="checkbox"
+                        checked={memberForm.can_access_cosmetics_customers}
+                        onChange={(e) => setMemberForm({ ...memberForm, can_access_cosmetics_customers: e.target.checked })}
+                        style={{ accentColor: '#db2777' }}
+                      />
+                      <span>قاعدة عملاء مستحضرات التجميل وحملات الواتساب 💄</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', padding: '4px', background: '#fef2f2', borderRadius: '6px', border: '1px dashed #fca5a5' }}>
+                      <input
+                        type="checkbox"
+                        checked={memberForm.can_manage_team}
+                        onChange={(e) => setMemberForm({ ...memberForm, can_manage_team: e.target.checked })}
+                        style={{ accentColor: '#dc2626' }}
+                      />
+                      <span style={{ fontWeight: 'bold', color: '#b91c1c' }}>تفويض إدارة وتعديل صلاحيات باقي أعضاء الفريق 🛡️</span>
+                    </label>
+                  </div>
                 </div>
               </div>
 

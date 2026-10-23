@@ -64,7 +64,7 @@ function getDayScheduleFromSchedule(schedule, dateStr, arDayName) {
  * Build a list of all days in the given month with their weekday name and whether it's off
  * based on the weekly schedule template or dynamic swap resolution.
  */
-function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = null, state = null) {
+function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = null, state = null, targetBranchId = null) {
   const result = [];
   const hasApprovedSchedule = Boolean(schedule && typeof schedule === 'object' && Object.keys(schedule).length > 0);
 
@@ -81,17 +81,18 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = n
         const arDayName = Object.keys(WEEKDAY_AR_MAP).find(k => WEEKDAY_AR_MAP[k] === jsDay) || '';
         
         let daySchedule = null;
-        if (empId && state) {
-          const dynamicSchedule = getEmployeeDaySchedule(empId, dateStr, state);
-          if (dynamicSchedule) {
-            daySchedule = dynamicSchedule;
-          } else if (hasApprovedSchedule) {
-            daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
-          } else {
-            daySchedule = null;
-          }
-        } else if (hasApprovedSchedule) {
+        if (hasApprovedSchedule) {
           daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
+        }
+        if (empId && state) {
+          const dynamicSchedule = getEmployeeDaySchedule(empId, dateStr, state, targetBranchId);
+          if (dynamicSchedule) {
+            if (targetBranchId) {
+              daySchedule = dynamicSchedule;
+            } else if (!daySchedule) {
+              daySchedule = dynamicSchedule;
+            }
+          }
         }
 
         result.push({ date: dateStr, day: d, arDayName, daySchedule });
@@ -110,17 +111,18 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = n
     const arDayName = Object.keys(WEEKDAY_AR_MAP).find(k => WEEKDAY_AR_MAP[k] === jsDay) || '';
     
     let daySchedule = null;
-    if (empId && state) {
-      const dynamicSchedule = getEmployeeDaySchedule(empId, dateStr, state);
-      if (dynamicSchedule) {
-        daySchedule = dynamicSchedule;
-      } else if (hasApprovedSchedule) {
-        daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
-      } else {
-        daySchedule = null;
-      }
-    } else if (hasApprovedSchedule) {
+    if (hasApprovedSchedule) {
       daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
+    }
+    if (empId && state) {
+      const dynamicSchedule = getEmployeeDaySchedule(empId, dateStr, state, targetBranchId);
+      if (dynamicSchedule) {
+        if (targetBranchId) {
+          daySchedule = dynamicSchedule;
+        } else if (!daySchedule) {
+          daySchedule = dynamicSchedule;
+        }
+      }
     }
 
     result.push({ date: dateStr, day: d, arDayName, daySchedule });
@@ -167,7 +169,15 @@ export default function EmployeeRosterModule({
   }, [autoOpenRosterModal, setAutoOpenRosterModal]);
 
   const [viewMode, setViewMode] = useState('calendar'); // 'calendar' | 'week'
+  const [activeViewBranchId, setActiveViewBranchId] = useState(isMultiBranch ? 'all' : (selectedBranchId || primaryBranch || ''));
   const [activeFormBranchId, setActiveFormBranchId] = useState(selectedBranchId || primaryBranch || '');
+
+  useEffect(() => {
+    if (selectedBranchId) {
+      setActiveViewBranchId(selectedBranchId);
+      setActiveFormBranchId(selectedBranchId);
+    }
+  }, [selectedBranchId]);
 
   // Admin-defined payroll cycle range for current selected month
   const cycleRange = useMemo(() => {
@@ -189,8 +199,10 @@ export default function EmployeeRosterModule({
   const [fromDate, setFromDate] = useState(defaultCycleFrom);
   const [toDate, setToDate] = useState(defaultCycleTo);
 
-  // Determine current active branch ID for roster lookups
-  const curBranch = selectedBranchId || activeFormBranchId || primaryBranch;
+  // Determine current active branch ID for roster lookups (supports all / specific branch)
+  const curBranch = (activeViewBranchId && activeViewBranchId !== 'all')
+    ? activeViewBranchId
+    : (isMultiBranch ? null : (selectedBranchId || primaryBranch || null));
 
   // Active Approved Roster for current selected branch & month
   const currentRoster = useMemo(() => {
@@ -260,7 +272,8 @@ export default function EmployeeRosterModule({
     currentRoster?.fromDate || fromDate,
     currentRoster?.toDate || toDate,
     emp?.id,
-    state
+    state,
+    curBranch
   );
 
   // Stats (Only count when actual scheduled shift exists)
@@ -656,7 +669,7 @@ export default function EmployeeRosterModule({
               const bName = branchObj ? branchObj.name : `فرع ${bId}`;
               const bRoster = getResolvedEmployeeRoster(emp, bId, selectedMonth, state);
               const bSchedule = bRoster?.schedule || null;
-              const bCalendar = buildMonthCalendar(selectedMonth, bSchedule, bRoster?.fromDate || fromDate, bRoster?.toDate || toDate, emp?.id, state);
+              const bCalendar = buildMonthCalendar(selectedMonth, bSchedule, bRoster?.fromDate || fromDate, bRoster?.toDate || toDate, emp?.id, state, bId);
               const bWorkDays = bCalendar.filter((d) => d.daySchedule && d.daySchedule.type !== 'off' && !d.daySchedule.isOff).length;
               const bOffDays = bCalendar.filter((d) => d.daySchedule && (d.daySchedule.type === 'off' || d.daySchedule.isOff)).length;
               const bDailyHours = bd.workHoursPerDay || 8;
@@ -716,7 +729,7 @@ export default function EmployeeRosterModule({
           );
 
           const bSchedule = bRoster?.schedule || null;
-          const bCalendar = buildMonthCalendar(selectedMonth, bSchedule, bRoster?.fromDate || fromDate, bRoster?.toDate || toDate, emp?.id, state);
+          const bCalendar = buildMonthCalendar(selectedMonth, bSchedule, bRoster?.fromDate || fromDate, bRoster?.toDate || toDate, emp?.id, state, bId);
           const bWorkDays = bCalendar.filter(d => d.daySchedule && d.daySchedule.type !== 'off' && !d.daySchedule.isOff).length;
           const bOffDays = bCalendar.filter(d => d.daySchedule && (d.daySchedule.type === 'off' || d.daySchedule.isOff)).length;
 
@@ -947,7 +960,9 @@ export default function EmployeeRosterModule({
 
   // Branch Name helper for single branch view
   const currentBranchObj = (state.branches || []).find(b => b.id === curBranch);
-  const currentBranchName = currentBranchObj ? currentBranchObj.name : `فرع ${curBranch}`;
+  const currentBranchName = (!curBranch || curBranch === 'all')
+    ? 'كافة الفروع (الجدول الموحد الشامل)'
+    : (currentBranchObj ? currentBranchObj.name : `فرع ${curBranch}`);
 
   return (
     <div className="card ep-tab-content fade-in">
@@ -956,7 +971,7 @@ export default function EmployeeRosterModule({
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{ fontSize: '26px' }}>📅</span>
           <div>
-            <h3 style={{ margin: 0 }}>الجدول الشهري (Monthly Roster) {isMultiBranch && `— فرع: ${currentBranchName}`}</h3>
+            <h3 style={{ margin: 0 }}>الجدول الشهري (Monthly Roster) {isMultiBranch && `— ${currentBranchName}`}</h3>
             <p style={{ margin: '2px 0 0', color: 'var(--muted)', fontSize: '0.88rem' }}>
               الجدول المعتمد لشهر {selectedMonth} — يتطلب اعتماد مدير الفرع والإدارة العليا
             </p>
@@ -1006,6 +1021,49 @@ export default function EmployeeRosterModule({
           </button>
         </div>
       </div>
+
+      {/* Multi-branch selection tabs (الموظف متعدد الفروع) */}
+      {isMultiBranch && (
+        <div style={{
+          display: 'flex',
+          gap: '8px',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          margin: '14px 0 16px',
+          padding: '8px 12px',
+          background: 'linear-gradient(135deg, #f0fdf4, #ecfdf5)',
+          border: '1.5px solid #a7f3d0',
+          borderRadius: '12px'
+        }}>
+          <span style={{ fontSize: '12.5px', fontWeight: 800, color: '#065f46' }}>
+            🏢 استعراض جدول الفرع:
+          </span>
+          <button
+            type="button"
+            className={`btn ${(!activeViewBranchId || activeViewBranchId === 'all') ? 'btn-start' : 'btn-ghost'}`}
+            style={{ padding: '5px 14px', fontSize: '12px', fontWeight: 800, borderRadius: '8px' }}
+            onClick={() => setActiveViewBranchId('all')}
+          >
+            🌐 الجدول الموحد (كافة الفروع)
+          </button>
+          {emp.branchesDetails.map((bd) => {
+            const bObj = (state.branches || []).find((b) => String(b.id) === String(bd.branchId));
+            const bName = bObj ? bObj.name : (bd.branchName || `فرع ${bd.branchId}`);
+            const isSel = activeViewBranchId === String(bd.branchId);
+            return (
+              <button
+                key={bd.branchId}
+                type="button"
+                className={`btn ${isSel ? 'btn-start' : 'btn-ghost'}`}
+                style={{ padding: '5px 14px', fontSize: '12px', fontWeight: 800, borderRadius: '8px' }}
+                onClick={() => setActiveViewBranchId(String(bd.branchId))}
+              >
+                🏢 {bName}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Pending request notice with quick view action */}
       {pendingRosterReq && (
@@ -1240,6 +1298,32 @@ export default function EmployeeRosterModule({
                           <div style={{ fontSize: '12.5px', fontWeight: 800, color: isSwapped ? '#b45309' : 'var(--primary-dark)' }}>
                             {daySchedule?.start} – {daySchedule?.end}
                           </div>
+                          {daySchedule?.branchName && (
+                            <div style={{ fontSize: '11px', color: '#0369a1', fontWeight: 800, marginTop: '2px' }}>
+                              🏢 {daySchedule.branchName}
+                            </div>
+                          )}
+                          {daySchedule?.isOtherBranchShift && (
+                            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                              {daySchedule.label || 'مجدول بفرع آخر'}
+                            </div>
+                          )}
+                          {/* الوردية الثانية للموظف متعدد الفروع */}
+                          {(daySchedule?.secondShift || daySchedule?.otherBranchSecondShift) && (
+                            <div style={{ marginTop: '5px', paddingTop: '5px', borderTop: '1px dashed #e2e8f0' }}>
+                              <span className="badge" style={{ fontSize: '10px', display: 'inline-block', marginBottom: '2px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd' }}>
+                                ⏰ وردية ثانية
+                              </span>
+                              <div style={{ fontSize: '12px', fontWeight: 800, color: '#0284c7' }}>
+                                {(daySchedule.secondShift || daySchedule.otherBranchSecondShift).start} – {(daySchedule.secondShift || daySchedule.otherBranchSecondShift).end}
+                              </div>
+                              {((daySchedule.secondShift || daySchedule.otherBranchSecondShift).branchName || (daySchedule.secondShift || daySchedule.otherBranchSecondShift).otherBranchName) && (
+                                <div style={{ fontSize: '10.5px', color: '#0369a1', fontWeight: 700, marginTop: '1px' }}>
+                                  🏢 {(daySchedule.secondShift || daySchedule.otherBranchSecondShift).branchName || (daySchedule.secondShift || daySchedule.otherBranchSecondShift).otherBranchName}
+                                </div>
+                              )}
+                            </div>
+                          )}
                           {isSwapped && (
                             <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
                               قبل: {daySchedule.prevType === 'off' ? '🔴 راحة' : `(${daySchedule.prevStart}-${daySchedule.prevEnd})`}
@@ -1309,13 +1393,37 @@ export default function EmployeeRosterModule({
                                   قبل التبديل: {daySchedule.prevType === 'off' ? '🔴 راحة' : `🟢 وردية (${daySchedule.prevStart} - ${daySchedule.prevEnd})`}
                                 </div>
                               </div>
-                            ) : '—'
+                            ) : (
+                              daySchedule?.isOtherBranchShift ? (
+                                <div style={{ fontSize: '11.5px', color: '#1e40af', background: '#eff6ff', padding: '3px 8px', borderRadius: '6px', border: '1px solid #bfdbfe', display: 'inline-block' }}>
+                                  🏢 {daySchedule.label || 'مجدول بفرع آخر'}
+                                </div>
+                              ) : '—'
+                            )
                           ) : (
                             <div>
                               <div style={{ fontWeight: 800, color: isSwapped ? '#b45309' : 'inherit' }}>
                                 {daySchedule?.start} – {daySchedule?.end}
                                 {isSwapped && daySchedule.swappedWithName ? ` (بديل عن ${daySchedule.swappedWithName})` : ''}
                               </div>
+                              {daySchedule?.branchName && (
+                                <div style={{ fontSize: '11px', color: '#0284c7', fontWeight: 800, marginTop: '2px' }}>
+                                  🏢 {daySchedule.branchName}
+                                </div>
+                              )}
+                              {/* الوردية الثانية للموظف متعدد الفروع */}
+                              {(daySchedule?.secondShift || daySchedule?.otherBranchSecondShift) && (
+                                <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px dashed #cbd5e1' }}>
+                                  <div style={{ fontWeight: 800, color: '#0284c7', fontSize: '12px' }}>
+                                    ⏰ {(daySchedule.secondShift || daySchedule.otherBranchSecondShift).start} – {(daySchedule.secondShift || daySchedule.otherBranchSecondShift).end}
+                                  </div>
+                                  {((daySchedule.secondShift || daySchedule.otherBranchSecondShift).branchName || (daySchedule.secondShift || daySchedule.otherBranchSecondShift).otherBranchName) && (
+                                    <div style={{ fontSize: '11px', color: '#0369a1', fontWeight: 700 }}>
+                                      🏢 {(daySchedule.secondShift || daySchedule.otherBranchSecondShift).branchName || (daySchedule.secondShift || daySchedule.otherBranchSecondShift).otherBranchName}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                               {isSwapped && (
                                 <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
                                   قبل التبديل: {daySchedule.prevType === 'off' ? '🔴 راحة أسبوعية' : `🟢 وردية (${daySchedule.prevStart} - ${daySchedule.prevEnd})`}

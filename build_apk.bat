@@ -82,15 +82,17 @@ call node scripts/sync_assets.js
 
 echo [4/4] Compiling Android APK with Gradle...
 cd "%BASE_DIR%android"
-call gradlew.bat assembleDebug
+call gradlew.bat assembleDebug --no-daemon
 
 if exist "app\build\outputs\apk\debug\app-debug.apk" (
     copy /y "app\build\outputs\apk\debug\app-debug.apk" "%USERPROFILE%\Desktop\بوابة_الموظف.apk" >nul
     copy /y "app\build\outputs\apk\debug\app-debug.apk" "%BASE_DIR%بوابة_الموظف.apk" >nul
     copy /y "app\build\outputs\apk\debug\app-debug.apk" "%BASE_DIR%pharmacy-employee-portal.apk" >nul
+    if not exist "%BASE_DIR%public\downloads" mkdir "%BASE_DIR%public\downloads" >nul 2>&1
+    copy /y "app\build\outputs\apk\debug\app-debug.apk" "%BASE_DIR%public\downloads\pharmacy-employee-portal.apk" >nul
     echo.
     echo ===================================================
-    echo  SUCCESS! تم استخراج ملف التطبيق بنجاح:
+    echo  SUCCESS! تم استخراج ملف التطبيق بنجاح بحجم خفيف فائق السرعة:
     echo  1. على سطح المكتب: %USERPROFILE%\Desktop\بوابة_الموظف.apk
     echo  2. في مجلد المشروع: %BASE_DIR%بوابة_الموظف.apk
     echo  3. ملف التحديث السحابي: %BASE_DIR%pharmacy-employee-portal.apk
@@ -101,5 +103,5 @@ if exist "app\build\outputs\apk\debug\app-debug.apk" (
 )
 
 cd "%BASE_DIR%"
-pause
+if not "%1"=="--no-pause" pause
 

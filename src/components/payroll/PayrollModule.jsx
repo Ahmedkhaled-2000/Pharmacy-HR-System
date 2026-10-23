@@ -2,10 +2,13 @@ import React, { useState, useEffect } from 'react';
 import PayslipPrintModal from './PayslipPrintModal';
 import { fmt, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, isVariableScheduleEmployee } from '../../utils/latePenaltyEngine';
+import { getActiveSecondment } from '../../utils/secondmentEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import { getCycleDateRange } from '../../utils/periodEngine';
 import { autoSettlePeriodLoans, revertPeriodLoanSettlements } from '../../utils/loansEngine';
+import { isBranchMatch } from '../../utils/branchMatcher';
 import { useUI } from '../../context/UIContext';
+import { buildEmployeeMonthTimeline } from '../../utils/payrollTimelineHelper';
 
 export default function PayrollModule({
   state,
@@ -22,6 +25,7 @@ export default function PayrollModule({
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterBranch, setFilterBranch] = useState('');
+  const [timelineFilter, setTimelineFilter] = useState('all');
 
   // Monthly Payout Cutoff Period Settings
   const [periodType, setPeriodType] = useState(() => {
@@ -99,7 +103,31 @@ export default function PayrollModule({
 
   const filteredEmployees = employees.filter((emp) => {
     if (!isEmployeeActive(emp)) return false;
-    if (filterBranch && emp.branchId !== filterBranch && (!emp.branchesDetails || !emp.branchesDetails.some((bd) => bd.branchId === filterBranch))) return false;
+    if (filterBranch) {
+      const matchPrimary = isBranchMatch(emp.branchId, { id: filterBranch });
+      const matchDetails = emp.branchesDetails && emp.branchesDetails.some((bd) => isBranchMatch(bd.branchId, { id: filterBranch }));
+      const hasActiveSecondmentInBranch = (state.secondments || []).some(sec => {
+        if (!sec || sec.status !== 'ACTIVE') return false;
+        if (!isBranchMatch(sec.targetBranchId, { id: filterBranch })) return false;
+        const sEmpId = String(sec.employeeId || '');
+        const sEmpCode = String(sec.employeeCode || '');
+        const eId = String(emp.id || '');
+        const eCode = String(emp.code || '');
+        return (eId && (sEmpId === eId || sEmpCode === eId)) || (eCode && (sEmpId === eCode || sEmpCode === eCode));
+      });
+      const hasShiftsInBranch = (state.shifts || []).some(s => {
+        if (!s || !s.date || !payrollFilterFn(s.date)) return false;
+        if (s.status === 'cancelled' || s.isCancelled) return false;
+        const sEmpId = String(s.employeeId || '');
+        const sEmpCode = String(s.employeeCode || '');
+        const eId = String(emp.id || '');
+        const eCode = String(emp.code || '');
+        const isMatchEmp = (eId && (sEmpId === eId || sEmpCode === eId)) || (eCode && (sEmpId === eCode || sEmpCode === eCode));
+        if (!isMatchEmp) return false;
+        return isBranchMatch(s.branchId, { id: filterBranch });
+      });
+      if (!matchPrimary && !matchDetails && !hasActiveSecondmentInBranch && !hasShiftsInBranch) return false;
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const matchName = emp.name?.toLowerCase().includes(q);
@@ -545,6 +573,17 @@ export default function PayrollModule({
                           </span>
                         </div>
                       )}
+                      {(() => {
+                        const sec = getActiveSecondment(emp.id, null, state);
+                        if (!sec) return null;
+                        return (
+                          <div style={{ marginTop: '3px' }}>
+                            <span style={{ background: '#ecfdf5', color: '#047857', padding: '1px 7px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', border: '1px solid #a7f3d0' }}>
+                              🔀 منتدب: {sec.targetBranchName || 'فرع آخر'} ({sec.scheduleType === 'variable' ? 'مواعيد متغيرة' : 'جدول محدد'})
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td>
                       <strong style={{ color: '#0f766e' }}>{empSum.hours || 0} س أساسي</strong>
@@ -565,6 +604,11 @@ export default function PayrollModule({
                     </td>
                     <td style={{ color: '#dc2626', fontWeight: '700' }}>
                       {totalDed > 0 ? `-${fmt(totalDed)} ج.م` : '0 ج.م'}
+                      {empSum.manualDeduction > 0 && (
+                        <div style={{ fontSize: '11px', color: '#b91c1c', fontWeight: 'bold', marginTop: '3px', background: '#fee2e2', padding: '1px 6px', borderRadius: '4px', display: 'inline-block' }}>
+                          منها {fmt(empSum.manualDeduction)} ج.م جزاءات/عجز
+                        </div>
+                      )}
                     </td>
                     <td style={{ color: '#0d9488', fontWeight: '900', fontSize: '15px' }}>
                       {fmt(empSum.netSalary)} ج.م
@@ -726,6 +770,18 @@ export default function PayrollModule({
                   </div>
                 )}
 
+                {empSum.manualDeduction > 0 && (
+                  <div style={{ background: '#fef2f2', padding: '14px', borderRadius: '10px', border: '1.5px solid #f87171' }}>
+                    <span style={{ fontSize: '12px', color: '#991b1b', fontWeight: 'bold' }}>⚖️ جزاءات واستقطاعات إدارية / عجز جرد</span>
+                    <h4 style={{ margin: '4px 0 0 0', color: '#b91c1c' }}>
+                      -{fmt(empSum.manualDeduction)} ج.م
+                    </h4>
+                    <div style={{ fontSize: '11px', color: '#7f1d1d', marginTop: '2px' }}>
+                      خصومات وجزاءات إدارية وعجز جرد معتمد ({empSum.manualDeductionsList?.length || 1} بند)
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ background: '#fef2f2', padding: '14px', borderRadius: '10px', border: '1px solid #fecaca' }}>
                   <span style={{ fontSize: '12px', color: '#991b1b' }}>إجمالي الخصومات الشاملة</span>
                   <h4 style={{ margin: '4px 0 0 0', color: '#dc2626' }}>
@@ -733,28 +789,365 @@ export default function PayrollModule({
                   </h4>
                 </div>
               </div>
+
+              {/* Full Month Chronological Timeline Table (سجل الشهر بالكامل بالتسلسل الزمني الدقيق: ورديات، راحات أسبوعية، إجازات) */}
+              {(() => {
+                const payrollRange = getPayrollRangeObj();
+                const timeline = buildEmployeeMonthTimeline({
+                  emp: selectedEmpModal,
+                  month: monthPicker,
+                  state,
+                  startCutoff: payrollRange?.startDate,
+                  endCutoff: payrollRange?.endDate,
+                  selectedBranchId: filterBranch || null,
+                  hourlyRate: empSum?.rate || null,
+                  dailyRate: empSum?.dailyRate || null
+                });
+
+                const filteredTimelineRows = timeline.rows.filter((row) => {
+                  if (timelineFilter === 'shifts') return row.type === 'shift';
+                  if (timelineFilter === 'rests') return row.type === 'rest' || row.isRestDayWork;
+                  if (timelineFilter === 'leaves') return row.type === 'leave';
+                  if (timelineFilter === 'absences') return row.type === 'absence';
+                  return true;
+                });
+
+                return (
+                  <div style={{ marginBottom: '22px', background: 'var(--surface)', border: '1.5px solid #0d9488', borderRadius: '12px', padding: '16px', boxShadow: '0 2px 8px rgba(13,148,136,0.06)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#0d9488', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>📅</span> سجل أيام وورديات وراحات وإجازات الشهر بالكامل بالتسلسل الزمني ({timeline.rows.length} يوم)
+                        </h4>
+                        <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
+                          الفترة المالية المعتمدة: من <strong>{payrollRange?.startDate}</strong> إلى <strong>{payrollRange?.endDate}</strong> (التسلسل الكامل لدورة الشهر بدون استثناء)
+                        </span>
+                      </div>
+
+                      {/* Summary stats pills */}
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        <span style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
+                          🟢 ورديات: {timeline.stats.workedShiftsCount} ({fmt(timeline.stats.totalRegularHours)} س أساسي{timeline.stats.totalOvertimeHours > 0 ? ` + ${fmt(timeline.stats.totalOvertimeHours)} س إضافي` : ''})
+                        </span>
+                        <span style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
+                          🛋️ راحات أسبوعية: {timeline.stats.restDaysCount}{timeline.stats.restDaysWorkCount > 0 ? ` (+${timeline.stats.restDaysWorkCount} عمل راحة)` : ''}
+                        </span>
+                        <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
+                          🌴 إجازات: {timeline.stats.leavesCount}{timeline.stats.unpaidLeavesCount > 0 ? ` (${timeline.stats.unpaidLeavesCount} بدون أجر)` : ''}
+                        </span>
+                        {timeline.stats.absenceDaysCount > 0 && (
+                          <span style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
+                            🚫 غياب: {timeline.stats.absenceDaysCount}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Filter buttons */}
+                    <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => setTimelineFilter('all')}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          fontSize: '11.5px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          border: timelineFilter === 'all' ? '1.5px solid #0d9488' : '1px solid var(--border)',
+                          background: timelineFilter === 'all' ? '#0d9488' : 'var(--surface-muted)',
+                          color: timelineFilter === 'all' ? '#fff' : 'var(--text)'
+                        }}
+                      >
+                        الكل ({timeline.rows.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTimelineFilter('shifts')}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          fontSize: '11.5px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          border: timelineFilter === 'shifts' ? '1.5px solid #16a34a' : '1px solid var(--border)',
+                          background: timelineFilter === 'shifts' ? '#16a34a' : 'var(--surface-muted)',
+                          color: timelineFilter === 'shifts' ? '#fff' : 'var(--text)'
+                        }}
+                      >
+                        🟢 الورديات الفعلية ({timeline.stats.workedShiftsCount})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTimelineFilter('rests')}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          fontSize: '11.5px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          border: timelineFilter === 'rests' ? '1.5px solid #0284c7' : '1px solid var(--border)',
+                          background: timelineFilter === 'rests' ? '#0284c7' : 'var(--surface-muted)',
+                          color: timelineFilter === 'rests' ? '#fff' : 'var(--text)'
+                        }}
+                      >
+                        🛋️ الراحات الأسبوعية ({timeline.stats.restDaysCount + timeline.stats.restDaysWorkCount})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTimelineFilter('leaves')}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          fontSize: '11.5px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          border: timelineFilter === 'leaves' ? '1.5px solid #d97706' : '1px solid var(--border)',
+                          background: timelineFilter === 'leaves' ? '#d97706' : 'var(--surface-muted)',
+                          color: timelineFilter === 'leaves' ? '#fff' : 'var(--text)'
+                        }}
+                      >
+                        🌴 الإجازات ({timeline.stats.leavesCount})
+                      </button>
+                      {timeline.stats.absenceDaysCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setTimelineFilter('absences')}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            fontSize: '11.5px',
+                            fontWeight: 'bold',
+                            cursor: 'pointer',
+                            border: timelineFilter === 'absences' ? '1.5px solid #dc2626' : '1px solid var(--border)',
+                            background: timelineFilter === 'absences' ? '#dc2626' : 'var(--surface-muted)',
+                            color: timelineFilter === 'absences' ? '#fff' : 'var(--text)'
+                          }}
+                        >
+                          🚫 الغيابات ({timeline.stats.absenceDaysCount})
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ overflowX: 'auto', maxHeight: '420px', overflowY: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px', textAlign: 'center', background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                        <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                          <tr style={{ background: '#f1f5f9', color: '#1e293b', borderBottom: '2px solid #cbd5e1' }}>
+                            <th style={{ padding: '6px 8px', width: '4%' }}>#</th>
+                            <th style={{ padding: '6px 8px', width: '18%' }}>اليوم والتاريخ</th>
+                            <th style={{ padding: '6px 8px', width: '18%' }}>نوع اليوم / التصنيف</th>
+                            <th style={{ padding: '6px 8px', width: '9%' }}>وقت الدخول</th>
+                            <th style={{ padding: '6px 8px', width: '9%' }}>وقت الخروج</th>
+                            <th style={{ padding: '6px 8px', width: '7%' }}>البريك</th>
+                            <th style={{ padding: '6px 8px', width: '15%' }}>ساعات العمل</th>
+                            <th style={{ padding: '6px 8px', width: '12%' }}>الأجر / الأثر المالي</th>
+                            <th style={{ padding: '6px 8px', width: '18%', textAlign: 'right' }}>البيان والملاحظات والسبب</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredTimelineRows.length === 0 ? (
+                            <tr>
+                              <td colSpan={9} style={{ padding: '16px', color: 'var(--muted)' }}>
+                                لا توجد سجلات تطابق الفلتر المختار
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredTimelineRows.map((row) => {
+                              const isShift = row.type === 'shift';
+                              const isRest = row.type === 'rest';
+                              const isLeave = row.type === 'leave';
+                              const isAbs = row.type === 'absence';
+                              const isPre = row.type === 'pre_hire';
+
+                              let rowBg = '#fff';
+                              if (isShift) {
+                                if (row.isRejectedPhoto) rowBg = '#fef2f2';
+                                else if (row.isRestDayWork) rowBg = '#f0fdf4';
+                                else if (row.hasPerm) rowBg = '#fefce8';
+                                else if (row.seq % 2 === 0) rowBg = '#f8fafc';
+                              } else if (isRest) {
+                                rowBg = '#f0f9ff';
+                              } else if (isLeave) {
+                                rowBg = row.isUnpaid ? '#f8fafc' : '#f0fdf4';
+                              } else if (isAbs) {
+                                rowBg = '#fee2e2';
+                              } else if (isPre) {
+                                rowBg = '#f8fafc';
+                              }
+
+                              return (
+                                <tr key={row.id} style={{ background: rowBg, borderBottom: '1px solid var(--border)' }}>
+                                  <td style={{ padding: '5px 8px', fontWeight: 'bold', color: 'var(--muted)' }}>
+                                    {row.seq}
+                                  </td>
+                                  <td style={{ padding: '5px 8px', fontWeight: 'bold' }}>
+                                    <div style={{ color: isRest ? '#0369a1' : (isLeave ? (row.isUnpaid ? '#64748b' : '#15803d') : (isAbs ? '#dc2626' : 'var(--text)')) }}>
+                                      {row.dayName} {row.date}
+                                    </div>
+                                    {row.hasPerm && (
+                                      <span style={{ fontSize: '9px', color: '#b45309', display: 'block', marginTop: '1px' }}>
+                                        ⏰ إذن رسمي معتمد
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '5px 8px' }}>
+                                    {isShift ? (
+                                      <div>
+                                        <span style={{
+                                          background: row.isRestDayWork ? '#e0f2fe' : (row.isSwapped ? '#fef3c7' : '#dcfce7'),
+                                          color: row.isRestDayWork ? '#0369a1' : (row.isSwapped ? '#b45309' : '#15803d'),
+                                          border: `1px solid ${row.isRestDayWork ? '#bae6fd' : (row.isSwapped ? '#fde68a' : '#86efac')}`,
+                                          padding: '2px 6px',
+                                          borderRadius: '4px',
+                                          fontWeight: 'bold',
+                                          fontSize: '10px',
+                                          display: 'inline-block'
+                                        }}>
+                                          {row.isRestDayWork ? '🛋️ عمل في يوم راحة' : (row.isSwapped ? '🔄 وردية متبدلة' : '🟢 وردية عمل')}
+                                        </span>
+                                        {row.isRestDayWork && (
+                                          <div style={{ fontSize: '9px', color: '#0369a1', marginTop: '2px', fontWeight: 'bold' }}>
+                                            (راحة أسبوعية مجدولة)
+                                          </div>
+                                        )}
+                                        {row.isSwapped && row.swappedWithName && (
+                                          <div style={{ fontSize: '9px', color: '#b45309', marginTop: '1px' }}>
+                                            بديل عن {row.swappedWithName}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : isRest ? (
+                                      <span style={{
+                                        background: row.isSwapped ? '#fef3c7' : '#e0f2fe',
+                                        color: row.isSwapped ? '#b45309' : '#0369a1',
+                                        border: `1px solid ${row.isSwapped ? '#fde68a' : '#bae6fd'}`,
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        fontWeight: 'bold',
+                                        fontSize: '10px',
+                                        display: 'inline-block'
+                                      }}>
+                                        {row.isSwapped ? `🔄 راحة متبدلة مع ${row.swappedWithName || 'الزميل'}` : '🛋️ راحة أسبوعية مجدولة'}
+                                      </span>
+                                    ) : isLeave ? (
+                                      <span style={{
+                                        background: row.isUnpaid ? '#f1f5f9' : (row.leaveType === 'sick' ? '#fef3c7' : '#dcfce7'),
+                                        color: row.isUnpaid ? '#475569' : (row.leaveType === 'sick' ? '#92400e' : '#15803d'),
+                                        border: `1px solid ${row.isUnpaid ? '#cbd5e1' : (row.leaveType === 'sick' ? '#fde68a' : '#86efac')}`,
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        fontWeight: 'bold',
+                                        fontSize: '10px',
+                                        display: 'inline-block'
+                                      }}>
+                                        {row.isUnpaid ? '⚪ إجازة بدون أجر' : (row.leaveType === 'sick' ? '🤒 إجازة مرضية' : '🌴 إجازة سنوية')}
+                                      </span>
+                                    ) : isAbs ? (
+                                      <span style={{
+                                        background: '#fee2e2',
+                                        color: '#991b1b',
+                                        border: '1px solid #fca5a5',
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        fontWeight: 'bold',
+                                        fontSize: '10px',
+                                        display: 'inline-block'
+                                      }}>
+                                        🚫 غياب بدون إذن
+                                      </span>
+                                    ) : isPre ? (
+                                      <span style={{
+                                        background: '#f1f5f9',
+                                        color: '#64748b',
+                                        border: '1px solid #cbd5e1',
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        fontWeight: 'bold',
+                                        fontSize: '10px',
+                                        display: 'inline-block'
+                                      }}>
+                                        🔒 خارج العمل
+                                      </span>
+                                    ) : (
+                                      <span style={{
+                                        background: '#f1f5f9',
+                                        color: '#64748b',
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        fontSize: '10px'
+                                      }}>
+                                        ⏳ متبقي بالدورة
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '5px 8px', color: isShift ? (row.isRejectedPhoto ? '#94a3b8' : '#16a34a') : '#94a3b8', textDecoration: row.isRejectedPhoto ? 'line-through' : 'none' }}>
+                                    {row.timeIn}
+                                  </td>
+                                  <td style={{ padding: '5px 8px', color: isShift ? (row.isRejectedPhoto ? '#94a3b8' : '#dc2626') : '#94a3b8', textDecoration: row.isRejectedPhoto ? 'line-through' : 'none' }}>
+                                    {row.timeOut}
+                                  </td>
+                                  <td style={{ padding: '5px 8px', color: 'var(--muted)' }}>
+                                    {row.breakHours > 0 ? `${fmt(row.breakHours)} س` : '—'}
+                                  </td>
+                                  <td style={{ padding: '5px 8px', fontWeight: 'bold' }}>
+                                    {isShift ? (
+                                      row.isRejectedPhoto ? (
+                                        <span style={{ color: '#dc2626' }}>0 س (مرفوض)</span>
+                                      ) : (
+                                        <div>
+                                          <span>{fmt(row.totalHours)} س</span>
+                                          {row.isOtApproved && row.overtimeHours > 0 && (
+                                            <div style={{ fontSize: '9px', color: '#16a34a', marginTop: '1px' }}>
+                                              (أساسي: {fmt(row.regularHours)} + ⭐ إضافي: {fmt(row.overtimeHours)})
+                                            </div>
+                                          )}
+                                          {row.otStatus === 'rejected' && row.rejectedOtHours > 0 && (
+                                            <div style={{ fontSize: '9px', color: '#dc2626', marginTop: '1px' }}>
+                                              (❌ إضافي مرفوض: {fmt(row.rejectedOtHours)} س)
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
+                                    ) : (
+                                      <span style={{ color: 'var(--muted)' }}>—</span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '5px 8px', fontWeight: 'bold', color: row.effectColor || 'inherit' }}>
+                                    {row.financialStatus}
+                                  </td>
+                                  <td style={{ padding: '5px 8px', textAlign: 'right', fontSize: '10.5px', color: row.reason ? 'var(--text)' : 'var(--muted)' }}>
+                                    {row.reason || '—'}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Late Penalties Detailed Incidents Table */}
               {(() => {
                 if (isVariableScheduleEmployee(selectedEmpModal)) return null;
-                const empLateIncidents = (state.lateIncidents || []).filter(
-                  (inc) =>
-                    String(inc.employeeId) === String(selectedEmpModal.id) &&
-                    inc.status !== 'cancelled' &&
-                    !inc.isCancelled &&
-                    inc.objection?.status !== 'approved' &&
-                    inc.status !== 'approved_permission_exempt' &&
-                    inc.actionType !== 'grace' &&
-                    !isApprovedPermissionForDate(selectedEmpModal.id, inc.date, state) &&
-                    !(state?.requests || []).some(
-                      (r) =>
-                        (r.type === 'penalty_objection' || r.type === 'objection') &&
-                        (r.status === 'approved' || r.adminApproved) &&
-                        (r.penaltyId === inc.id || r.id === `obj_inc_${inc.id}` || (String(r.employeeId) === String(selectedEmpModal.id) && r.date === inc.date))
-                    ) &&
-                    (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
-                    (!filterBranch || String(inc.branchId) === String(filterBranch)) &&
-                    payrollFilterFn(inc.date)
-                );
+                const empLateIncidents = (Array.isArray(empSum.lateIncidentsList) && empSum.lateIncidentsList.length > 0)
+                  ? empSum.lateIncidentsList.filter(
+                      (inc) =>
+                        (!filterBranch || String(inc.branchId) === String(filterBranch)) &&
+                        payrollFilterFn(inc.date)
+                    )
+                  : (state.lateIncidents || []).filter(
+                      (inc) =>
+                        String(inc.employeeId) === String(selectedEmpModal.id) &&
+                        inc.status !== 'cancelled' &&
+                        !inc.isCancelled &&
+                        inc.objection?.status !== 'approved' &&
+                        (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
+                        (!filterBranch || String(inc.branchId) === String(filterBranch)) &&
+                        payrollFilterFn(inc.date)
+                    );
 
                 if (empLateIncidents.length === 0) return null;
 
@@ -865,6 +1258,43 @@ export default function PayrollModule({
                                 {l.remainingBalance === 0 ? '✅ مسددة بالكامل' : (l.isInstallment ? `⏳ سداد جاري (${l.currentInstallmentNumber}/${l.installmentsCount})` : '⏳ جاري السداد')}
                               </span>
                             </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Manual Deductions & Inventory Shortages Table */}
+              {empSum.manualDeduction > 0 && Array.isArray(empSum.manualDeductionsList) && empSum.manualDeductionsList.length > 0 && (
+                <div style={{ marginBottom: '22px', background: 'var(--surface)', border: '1.5px solid #fca5a5', borderRadius: '12px', padding: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                    <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#991b1b', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>⚖️</span> جدول الجزاءات والاستقطاعات الإدارية وعجز الجرد ({empSum.manualDeductionsList.length} بند)
+                    </h4>
+                    <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#991b1b', background: '#fee2e2', padding: '3px 10px', borderRadius: '6px' }}>
+                      إجمالي الاستقطاعات الإدارية: -{fmt(empSum.manualDeduction)} ج.م
+                    </span>
+                  </div>
+
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', background: 'var(--surface)', borderRadius: '8px', overflow: 'hidden', border: '1px solid #fecaca' }}>
+                      <thead>
+                        <tr style={{ background: '#fee2e2', color: '#991b1b', borderBottom: '1px solid #fca5a5' }}>
+                          <th style={{ padding: '8px 10px' }}>النوع والبيان</th>
+                          <th style={{ padding: '8px 10px' }}>التاريخ</th>
+                          <th style={{ padding: '8px 10px' }}>قيمة الخصم</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'right' }}>السبب / الملاحظات</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {empSum.manualDeductionsList.map((item, idx) => (
+                          <tr key={item.id || idx} style={{ borderBottom: '1px solid #fee2e2' }}>
+                            <td style={{ padding: '7px 10px', fontWeight: 700, color: '#991b1b' }}>{item.typeLabel || 'خصم إداري'}</td>
+                            <td style={{ padding: '7px 10px' }}>{item.date || '—'}</td>
+                            <td style={{ padding: '7px 10px', fontWeight: 800, color: '#dc2626' }}>-{fmt(item.amount)} ج.م</td>
+                            <td style={{ padding: '7px 10px', textAlign: 'right', color: '#7f1d1d' }}>{item.reason || '—'}</td>
                           </tr>
                         ))}
                       </tbody>

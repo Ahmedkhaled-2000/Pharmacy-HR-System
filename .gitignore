@@ -59,3 +59,5 @@ server/whatsapp-auth/
 whatsapp-auth/
 *.tar.gz
 server/data/
+scratch_*
+backups/

@@ -45,14 +45,24 @@ export default function OrderDeliverySettlementModal({
   const allOrderItems = useMemo(() => Array.isArray(order?.items) ? order.items : [], [order]);
 
   // تصنيف الأصناف:
-  // 1. الأصناف المتوفرة الجاهزة للتسليم (ردت المشتريات عليها بالتوفر أو معتمدة ولم تسلم بعد)
+  // 1. الأصناف المتوفرة الجاهزة للتسليم (ردت المشتريات عليها بالتوفر الفعلي وليست قيد التجهيز)
   const availableItems = useMemo(() => {
     return allOrderItems.filter((it) => {
       const isPruned = Boolean(it.pruned_from_bill || it.prunedFromBill);
       const itmStatus = String(it.item_status || it.itemStatus || it.status || '').toLowerCase();
       const isDelivered = itmStatus === 'delivered';
-      const hasProcurementApproval = Boolean(it.procurement_replied_at) || itmStatus === 'available_by_procurement' || itmStatus === 'available';
-      return !isPruned && !isDelivered && hasProcurementApproval;
+      const isInPreparation = itmStatus === 'in_preparation';
+      const isAvailable = itmStatus === 'available_by_procurement' || itmStatus === 'available';
+      return !isPruned && !isDelivered && !isInPreparation && isAvailable;
+    });
+  }, [allOrderItems]);
+
+  // 1.5 الأصناف قيد التجهيز من المشتريات (غير متاحة للتسليم)
+  const inPreparationItems = useMemo(() => {
+    return allOrderItems.filter((it) => {
+      const isPruned = Boolean(it.pruned_from_bill || it.prunedFromBill);
+      const itmStatus = String(it.item_status || it.itemStatus || it.status || '').toLowerCase();
+      return !isPruned && itmStatus === 'in_preparation';
     });
   }, [allOrderItems]);
 
@@ -1098,19 +1108,26 @@ export default function OrderDeliverySettlementModal({
           {/* الصيدلي ورقم الحركة والملاحظات */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <label style={{ fontSize: '12px', color: '#475569', fontWeight: '600', display: 'block', marginBottom: '4px' }}>
-                الصيدلي / الكاشير المستلم:
+              <label style={{ fontSize: '12px', color: '#475569', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+                <span>الصيدلي / الكاشير المستلم:</span>
+                <span style={{ fontSize: '11px', color: '#0d9488', fontWeight: 'bold' }}>🔒 موثق بالنظام</span>
               </label>
               <input
                 type="text"
                 value={cashierName}
-                onChange={(e) => setCashierName(e.target.value)}
+                readOnly={true}
+                tabIndex={-1}
+                title="اسم الصيدلي المستلم موثق بنظام الصلاحيات وغير قابل للتعديل اليدوي"
                 style={{
                   width: '100%',
                   padding: '8px 12px',
                   borderRadius: '8px',
-                  border: '1px solid #cbd5e1',
+                  border: '1.5px solid #e2e8f0',
+                  background: '#f8fafc',
+                  color: '#1e293b',
+                  fontWeight: '700',
                   fontSize: '13px',
+                  cursor: 'not-allowed',
                   boxSizing: 'border-box'
                 }}
               />

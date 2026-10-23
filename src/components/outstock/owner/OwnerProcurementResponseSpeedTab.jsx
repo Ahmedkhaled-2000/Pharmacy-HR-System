@@ -62,16 +62,26 @@ export default function OwnerProcurementResponseSpeedTab({ showToast = alert }) 
     return DEFAULT_SLA_WORKING_HOURS_CONFIG;
   });
 
-  // نافذة ضبط وتعديل أوقات مصفوفة السرعة وساعات العمل
+  // نافذة ضبط وتعديل أوقات مصفوفة السرعة وساعات العمل (بالساعات)
   const [isSlaConfigModalOpen, setIsSlaConfigModalOpen] = useState(false);
-  const [editFastMin, setEditFastMin] = useState(15);
-  const [editStandardMin, setEditStandardMin] = useState(45);
-  const [editLateMin, setEditLateMin] = useState(120);
+  const [editFastHours, setEditFastHours] = useState(6);
+  const [editStandardHours, setEditStandardHours] = useState(12);
+  const [editLateHours, setEditLateHours] = useState(24);
   const [editExcludedDays, setEditExcludedDays] = useState([5]);
   const [editWorkStartHour, setEditWorkStartHour] = useState(9);
   const [editWorkEndHour, setEditWorkEndHour] = useState(18);
   const [editUseWorkingHoursOnly, setEditUseWorkingHoursOnly] = useState(true);
   const [isSavingSla, setIsSavingSla] = useState(false);
+
+  // دالة مساعدة لتنسيق الوقت بالساعات أو الدقائق
+  const formatSlaUnit = (mins) => {
+    if (!mins && mins !== 0) return '—';
+    const hours = mins / 60;
+    if (hours >= 1) {
+      return Number.isInteger(hours) ? `${hours} ساعة` : `${hours.toFixed(1)} ساعة`;
+    }
+    return `${mins} دقيقة`;
+  };
 
   // ── الفلاتر ──
   const [selectedBranch, setSelectedBranch] = useState('all');
@@ -127,11 +137,15 @@ export default function OwnerProcurementResponseSpeedTab({ showToast = alert }) 
     fetchData();
   }, []);
 
-  // فتح نافذة ضبط معايير مصفوفة السرعة وساعات العمل
+  // فتح نافذة ضبط معايير مصفوفة السرعة وساعات العمل بالساعات
   const handleOpenSlaConfig = () => {
-    setEditFastMin(slaBuckets.fastMinutes || 15);
-    setEditStandardMin(slaBuckets.standardMinutes || 45);
-    setEditLateMin(slaBuckets.lateMinutes || 120);
+    const fM = slaBuckets.fastMinutes || 360;
+    const sM = slaBuckets.standardMinutes || 720;
+    const lM = slaBuckets.lateMinutes || 1440;
+
+    setEditFastHours(Number((fM / 60).toFixed(1)));
+    setEditStandardHours(Number((sM / 60).toFixed(1)));
+    setEditLateHours(Number((lM / 60).toFixed(1)));
 
     setEditExcludedDays(workingHoursConfig.excludedDays || [5]);
     setEditWorkStartHour(workingHoursConfig.workStartHour ?? 9);
@@ -141,27 +155,39 @@ export default function OwnerProcurementResponseSpeedTab({ showToast = alert }) 
     setIsSlaConfigModalOpen(true);
   };
 
-  // حفظ معايير مصفوفة السرعة وساعات العمل الجديدة
+  // حفظ معايير مصفوفة السرعة وساعات العمل الجديدة (بالساعات وتحويلها تلقائياً لدقائق)
   const handleSaveSlaConfig = async (e) => {
     e.preventDefault();
-    const fast = parseInt(editFastMin, 10);
-    const standard = parseInt(editStandardMin, 10);
-    const late = parseInt(editLateMin, 10);
+    const fastH = parseFloat(editFastHours);
+    const standardH = parseFloat(editStandardHours);
+    const lateH = parseFloat(editLateHours);
 
-    if (isNaN(fast) || fast <= 0) {
-      showToast?.('⚠️ يرجى إدخال حد زمني صحيح للرد الفوري');
+    if (isNaN(fastH) || fastH <= 0) {
+      showToast?.('⚠️ يرجى إدخال حد زمني صحيح للرد الفوري (بالساعات)');
       return;
     }
-    if (isNaN(standard) || standard <= fast) {
+    if (isNaN(standardH) || standardH <= fastH) {
       showToast?.('⚠️ الحد القياسي يجب أن يكون أكبر من الحد الفوري');
       return;
     }
-    if (isNaN(late) || late <= standard) {
+    if (isNaN(lateH) || lateH <= standardH) {
       showToast?.('⚠️ حد الرد المتأخر يجب أن يكون أكبر من الحد القياسي');
       return;
     }
 
-    const newBuckets = { fastMinutes: fast, standardMinutes: standard, lateMinutes: late };
+    const fast = Math.round(fastH * 60);
+    const standard = Math.round(standardH * 60);
+    const late = Math.round(lateH * 60);
+
+    const newBuckets = {
+      fastMinutes: fast,
+      standardMinutes: standard,
+      lateMinutes: late,
+      fastHours: fastH,
+      standardHours: standardH,
+      lateHours: lateH
+    };
+
     const newWorkingHours = {
       excludedDays: editExcludedDays,
       workStartHour: parseInt(editWorkStartHour, 10) || 9,
@@ -184,7 +210,7 @@ export default function OwnerProcurementResponseSpeedTab({ showToast = alert }) 
           localStorage.setItem('outstock_speed_sla_buckets', JSON.stringify(newBuckets));
           localStorage.setItem('outstock_procurement_working_hours', JSON.stringify(newWorkingHours));
         } catch {}
-        showToast?.('✅ تم حفظ وتحديث معايير مصفوفة سرعة الرد وساعات الدوام بنجاح!');
+        showToast?.('✅ تم حفظ وتحديث معايير مصفوفة سرعة الرد بالساعات وساعات الدوام بنجاح!');
         setIsSlaConfigModalOpen(false);
       } else {
         showToast?.(`⚠️ فشل الحفظ: ${res?.error || 'خطأ غير معروف'}`);
@@ -372,7 +398,7 @@ export default function OwnerProcurementResponseSpeedTab({ showToast = alert }) 
 
         <div className="outstock-stat-card">
           <div className="outstock-stat-info">
-            <p>رد فوري ممتاز (≤ {slaBuckets.fastMinutes} دقيقة)</p>
+            <p>رد فوري ممتاز (≤ {formatSlaUnit(slaBuckets.fastMinutes)})</p>
             <h3 style={{ color: '#16a34a' }}>
               {metrics.fastCount} طلب ({metrics.fastRate}%)
             </h3>
@@ -384,7 +410,7 @@ export default function OwnerProcurementResponseSpeedTab({ showToast = alert }) 
 
         <div className="outstock-stat-card">
           <div className="outstock-stat-info">
-            <p>رد قياسي جيد ({slaBuckets.fastMinutes} - {slaBuckets.standardMinutes} دقيقة)</p>
+            <p>رد قياسي جيد ({formatSlaUnit(slaBuckets.fastMinutes)} - {formatSlaUnit(slaBuckets.standardMinutes)})</p>
             <h3 style={{ color: '#d97706' }}>{metrics.standardCount} طلب</h3>
           </div>
           <div className="outstock-stat-icon" style={{ background: '#fef3c7', color: '#d97706' }}>
@@ -394,7 +420,7 @@ export default function OwnerProcurementResponseSpeedTab({ showToast = alert }) 
 
         <div className="outstock-stat-card">
           <div className="outstock-stat-info">
-            <p>ردود متأخرة أو حرجة (&gt; {slaBuckets.standardMinutes} دقيقة)</p>
+            <p>ردود متأخرة أو حرجة (&gt; {formatSlaUnit(slaBuckets.standardMinutes)})</p>
             <h3 style={{ color: '#dc2626' }}>
               {metrics.lateCount + metrics.criticalCount} طلب ({metrics.lateRate}%)
             </h3>
@@ -441,10 +467,10 @@ export default function OwnerProcurementResponseSpeedTab({ showToast = alert }) 
               style={{ minWidth: '170px', height: '40px' }}
             >
               <option value="all">كافة مستويات السرعة</option>
-              <option value="fast">🟢 رد فوري (≤ {slaBuckets.fastMinutes} دقيقة)</option>
-              <option value="standard">🟡 رد قياسي ({slaBuckets.fastMinutes} - {slaBuckets.standardMinutes} دقيقة)</option>
-              <option value="late">🔴 رد متأخر ({slaBuckets.standardMinutes} - {slaBuckets.lateMinutes} دقيقة)</option>
-              <option value="critical">🚨 رد حرج جداً (&gt; {slaBuckets.lateMinutes} دقيقة)</option>
+              <option value="fast">🟢 رد فوري (≤ {formatSlaUnit(slaBuckets.fastMinutes)})</option>
+              <option value="standard">🟡 رد قياسي ({formatSlaUnit(slaBuckets.fastMinutes)} - {formatSlaUnit(slaBuckets.standardMinutes)})</option>
+              <option value="late">🔴 رد متأخر ({formatSlaUnit(slaBuckets.standardMinutes)} - {formatSlaUnit(slaBuckets.lateMinutes)})</option>
+              <option value="critical">🚨 رد حرج جداً (&gt; {formatSlaUnit(slaBuckets.lateMinutes)})</option>
               <option value="pending">⏳ طلبات معلقة بانتظار الرد</option>
             </select>
           </div>
@@ -588,11 +614,24 @@ export default function OwnerProcurementResponseSpeedTab({ showToast = alert }) 
       {/* ── نافذة تعديل أوقات مصفوفة السرعة (Speed SLA Buckets Configuration Modal) ── */}
       {isSlaConfigModalOpen && (
         <div className="outstock-modal-backdrop" onClick={() => !isSavingSla && setIsSlaConfigModalOpen(false)}>
-          <div className="outstock-modal-panel" style={{ maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
-            <div className="outstock-modal-header">
+          <div
+            className="outstock-modal-panel"
+            style={{
+              maxWidth: '540px',
+              width: '95%',
+              maxHeight: '88vh',
+              display: 'flex',
+              flexDirection: 'column',
+              borderRadius: '16px',
+              overflow: 'hidden',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="outstock-modal-header" style={{ padding: '14px 20px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Sliders size={20} color="#0f766e" />
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#0f172a' }}>
                   تخصيص أوقات مصفوفة سرعة الرد (Speed SLA Thresholds)
                 </h3>
               </div>
@@ -605,10 +644,21 @@ export default function OwnerProcurementResponseSpeedTab({ showToast = alert }) 
               </button>
             </div>
 
-            <form onSubmit={handleSaveSlaConfig}>
-              <div className="outstock-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <form onSubmit={handleSaveSlaConfig} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <div
+                className="outstock-modal-body"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px',
+                  flex: 1,
+                  overflowY: 'auto',
+                  padding: '16px 20px',
+                  maxHeight: 'calc(88vh - 120px)'
+                }}
+              >
                 <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: '1.6' }}>
-                  بصفتك المالك، يمكنك تحديد المعايير الزمنية (بالدقائق) التي تُقاس عليها كفاءة إدارة المشتريات وتُصنف بها سرعة الرد:
+                  بصفتك المالك، يمكنك تحديد المعايير الزمنية (بالساعات) التي تُقاس عليها كفاءة إدارة المشتريات وتُصنف بها سرعة الرد:
                 </p>
 
                 {/* 1. حد الرد الفوري */}
@@ -619,16 +669,17 @@ export default function OwnerProcurementResponseSpeedTab({ showToast = alert }) 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <input
                       type="number"
-                      min="1"
+                      step="0.5"
+                      min="0.5"
                       className="outstock-form-input"
-                      value={editFastMin}
-                      onChange={(e) => setEditFastMin(e.target.value)}
+                      value={editFastHours}
+                      onChange={(e) => setEditFastHours(e.target.value)}
                       required
                       disabled={isSavingSla}
                       style={{ width: '120px', fontWeight: 'bold' }}
                     />
                     <span style={{ fontSize: '13px', color: '#166534' }}>
-                      دقيقة أو أقل (الافتراضي 15 دقيقة)
+                      ساعة أو أقل (الافتراضي: 6 ساعات)
                     </span>
                   </div>
                 </div>
@@ -641,16 +692,17 @@ export default function OwnerProcurementResponseSpeedTab({ showToast = alert }) 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <input
                       type="number"
-                      min={parseInt(editFastMin, 10) + 1 || 2}
+                      step="0.5"
+                      min={parseFloat(editFastHours) + 0.5 || 1}
                       className="outstock-form-input"
-                      value={editStandardMin}
-                      onChange={(e) => setEditStandardMin(e.target.value)}
+                      value={editStandardHours}
+                      onChange={(e) => setEditStandardHours(e.target.value)}
                       required
                       disabled={isSavingSla}
                       style={{ width: '120px', fontWeight: 'bold' }}
                     />
                     <span style={{ fontSize: '13px', color: '#92400e' }}>
-                      دقيقة (الافتراضي 45 دقيقة)
+                      ساعة (الافتراضي: 12 ساعة)
                     </span>
                   </div>
                 </div>
@@ -663,16 +715,17 @@ export default function OwnerProcurementResponseSpeedTab({ showToast = alert }) 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <input
                       type="number"
-                      min={parseInt(editStandardMin, 10) + 1 || 3}
+                      step="0.5"
+                      min={parseFloat(editStandardHours) + 0.5 || 2}
                       className="outstock-form-input"
-                      value={editLateMin}
-                      onChange={(e) => setEditLateMin(e.target.value)}
+                      value={editLateHours}
+                      onChange={(e) => setEditLateHours(e.target.value)}
                       required
                       disabled={isSavingSla}
                       style={{ width: '120px', fontWeight: 'bold' }}
                     />
                     <span style={{ fontSize: '13px', color: '#991b1b' }}>
-                      دقيقة (أي طلب يتجاوز هذا الوقت يُصنف كـ حرج جداً 🚨)
+                      ساعة (أي طلب يتجاوز هذا الوقت يُصنف كـ حرج جداً 🚨)
                     </span>
                   </div>
                 </div>

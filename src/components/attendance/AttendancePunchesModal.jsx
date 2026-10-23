@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { isApprovedPermissionForDate, getEffectiveShiftHours, getShiftHoursMetrics, recalculateEmployeeCycleLateness, reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
 import { calcRawDurationMinutes, checkShiftConflicts, buildUnifiedAttendanceTimeline } from '../../utils/workHoursEngine';
-import { getCycleDateRange } from '../../utils/periodEngine';
+import { getCycleDateRange, getActivePayrollMonth, buildCycleAttendanceTimeline, getCycleProgress } from '../../utils/periodEngine';
 import { getEmployeeDaySchedule, findEmployeeRoster } from '../../utils/rosterEngine';
+import { getRealTodayStr } from '../../utils/timeEngine';
 import {
   getEmployeeManualPunchesCount,
   isShiftManualPunch,
@@ -26,9 +27,13 @@ export default function AttendancePunchesModal({
   executeWithOwnerGuard,
   filterFn = null,
   monthPicker = null,
+  setMonthPicker = null,
   filterMode = 'month',
+  setFilterMode = null,
   customFrom = '',
+  setCustomFrom = null,
   customTo = '',
+  setCustomTo = null,
   stopShift,
   onClose
 }) {
@@ -76,17 +81,98 @@ export default function AttendancePunchesModal({
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [selectedDayDetails, editingPunch, isAddingNewPunch, onClose]);
 
+  // Default active cycle from orgSettings or fallback to current month
+  const autoActiveCycle = useMemo(() => {
+    return getActivePayrollMonth(state?.orgSettings);
+  }, [state?.orgSettings]);
+
+  // Local month state synced with parent props or local storage
+  const [modalMonth, setModalMonth] = useState(() => {
+    return monthPicker || autoActiveCycle || new Date().toISOString().slice(0, 7);
+  });
+
+  const [modalFilterMode, setModalFilterMode] = useState(() => {
+    return filterMode || 'month';
+  });
+
+  useEffect(() => {
+    if (monthPicker && monthPicker !== modalMonth) {
+      setModalMonth(monthPicker);
+    }
+  }, [monthPicker]);
+
+  useEffect(() => {
+    if (filterMode && filterMode !== modalFilterMode) {
+      setModalFilterMode(filterMode);
+    }
+  }, [filterMode]);
+
+  const handleModalMonthChange = (newMonth) => {
+    if (!newMonth) return;
+    setModalMonth(newMonth);
+    setModalFilterMode('month');
+    if (typeof setMonthPicker === 'function') {
+      setMonthPicker(newMonth);
+    }
+    if (typeof setFilterMode === 'function') {
+      setFilterMode('month');
+    }
+  };
+
+  const handleModalPrevMonth = () => {
+    const [y, m] = (modalMonth || autoActiveCycle).split('-').map(Number);
+    let prevY = y;
+    let prevM = m - 1;
+    if (prevM < 1) { prevM = 12; prevY = y - 1; }
+    handleModalMonthChange(`${prevY}-${String(prevM).padStart(2, '0')}`);
+  };
+
+  const handleModalNextMonth = () => {
+    const [y, m] = (modalMonth || autoActiveCycle).split('-').map(Number);
+    let nextY = y;
+    let nextM = m + 1;
+    if (nextM > 12) { nextM = 1; nextY = y + 1; }
+    handleModalMonthChange(`${nextY}-${String(nextM).padStart(2, '0')}`);
+  };
+
+  const handleModalCurrentCycle = () => {
+    handleModalMonthChange(autoActiveCycle);
+  };
+
+  const handleModalToggleAll = () => {
+    const nextMode = modalFilterMode === 'all' ? 'month' : 'all';
+    setModalFilterMode(nextMode);
+    if (typeof setFilterMode === 'function') {
+      setFilterMode(nextMode);
+    }
+  };
+
+  const modalCycleRange = useMemo(() => {
+    return getCycleDateRange(modalMonth, state?.orgSettings);
+  }, [modalMonth, state?.orgSettings]);
+
   if (!employee) return null;
 
   const activePeriodFilter = (d) => {
     if (!d) return false;
+    if (modalFilterMode === 'all') return true;
+    if (modalFilterMode === 'custom' && customFrom && customTo) {
+      const dateStr = String(d).slice(0, 10);
+      return dateStr >= customFrom && dateStr <= customTo;
+    }
     const dateStr = String(d).slice(0, 10);
-    if (typeof filterFn === 'function') return filterFn(dateStr);
-    return true;
+    return Boolean(
+      modalCycleRange?.startDate &&
+      modalCycleRange?.endDate &&
+      dateStr >= modalCycleRange.startDate &&
+      dateStr <= modalCycleRange.endDate
+    );
   };
 
-  const isCustom = (filterMode === 'custom' || filterMode === 'range') && customFrom && customTo;
-  const periodLabel = isCustom ? `الفترة المخصصة: من ${customFrom} إلى ${customTo}` : (monthPicker ? `دورة شهر (${monthPicker})` : '');
+  const isCustom = (modalFilterMode === 'custom' || modalFilterMode === 'range') && customFrom && customTo;
+  const periodLabel = modalFilterMode === 'all'
+    ? 'كافة السجلات المسجلة (بدون تقييد)'
+    : (isCustom ? `الفترة المخصصة: من ${customFrom} إلى ${customTo}` : (modalCycleRange?.label || `دورة شهر (${modalMonth})`));
 
   // فحص بصمة الحضور النشطة الحالية للموظف (Live Active Shift)
   const todayStrNow = typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
@@ -287,7 +373,7 @@ export default function AttendancePunchesModal({
     rawSortedPunches.forEach(p => {
       if (!p || !p.date) return;
       const bKey = getCanonicalBranchKey(p);
-      const pInPrefix = p.timeIn ? p.timeIn.slice(0, 5) : '';
+      const pInPrefix = p.timeIn ? String(p.timeIn).slice(0, 5) : '';
       const key = p.id ? `id_${p.id}` : `${bKey}_${p.date}_${pInPrefix || 'shift'}`;
 
       // فحص ما إذا كان هناك سجل سابق لنفس الفرع واليوم يتطابق معه
@@ -299,8 +385,11 @@ export default function AttendancePunchesModal({
           (p.branchName && existing.branchName && p.branchName.trim() === existing.branchName.trim());
 
         if (isSameBranch && existing.date === p.date) {
-          // تطابق في نفس الفرع واليوم
-          if (!pInPrefix || !existing.timeIn || existing.timeIn.slice(0, 5) === pInPrefix || p.id === existing.id) {
+          // تطابق في نفس الفرع واليوم: فقط إذا تطابق المعرف أو توقيت الدخول
+          const exInPrefix = existing.timeIn ? String(existing.timeIn).slice(0, 5) : '';
+          const isSameId = Boolean(p.id && existing.id && String(p.id) === String(existing.id));
+          const isSameTime = Boolean(pInPrefix && exInPrefix && pInPrefix === exInPrefix);
+          if (isSameId || isSameTime) {
             matchedKey = k;
             break;
           }
@@ -354,36 +443,57 @@ export default function AttendancePunchesModal({
   }, [rawSortedPunches, state.branches]);
 
   // ── بناء الخط الزمني الموحد لسجل البصمات (ورديات فعلية + إجازات معتمدة + أيام راحة مجدولة) ──
-  const [timelineFilter, setTimelineFilter] = useState('all'); // 'all' | 'shifts' | 'leaves' | 'off_days'
+  const [timelineFilter, setTimelineFilter] = useState('all'); // 'all' | 'shifts' | 'leaves' | 'off_days' | 'past_absences' | 'future_scheduled'
+  const [timelineSortOrder, setTimelineSortOrder] = useState('asc'); // 'asc' = بالتسلسل الزمني التصاعدي من بداية الشهر حتى اليوم (الافتراضي) | 'desc' = من الأحدث إلى الأقدم
 
   const attendanceTimeline = useMemo(() => {
     let range = null;
-    if ((filterMode === 'custom' || filterMode === 'range') && customFrom && customTo) {
+    if (modalFilterMode === 'all') {
+      range = null;
+    } else if ((modalFilterMode === 'custom' || modalFilterMode === 'range') && customFrom && customTo) {
       range = { startDate: customFrom, endDate: customTo };
-    } else if (monthPicker) {
-      range = getCycleDateRange(monthPicker, state?.orgSettings);
+    } else if (modalCycleRange) {
+      range = modalCycleRange;
     }
-    return buildUnifiedAttendanceTimeline(employee, monthPunches, state, {
+    return buildCycleAttendanceTimeline(employee, monthPunches, state, {
       cycleRange: range,
+      selectedMonth: modalMonth,
+      monthPicker: modalMonth,
+      filterMode: modalFilterMode,
+      customFrom,
+      customTo,
       activePeriodFilter,
-      includeAbsences: false
+      sortOrder: timelineSortOrder,
+      includeFutureScheduled: timelineFilter === 'future_scheduled',
+      includePastAbsences: timelineFilter === 'past_absences'
     });
-  }, [employee, monthPunches, state, filterMode, customFrom, customTo, monthPicker]);
+  }, [employee, monthPunches, state, modalFilterMode, customFrom, customTo, modalCycleRange, activePeriodFilter, modalMonth, timelineSortOrder, timelineFilter]);
 
   const timelineCounts = useMemo(() => {
+    if (attendanceTimeline?.counts) {
+      return attendanceTimeline.counts;
+    }
     let shifts = 0;
     let leaves = 0;
     let offDays = 0;
+    let pastAbsences = 0;
     (attendanceTimeline || []).forEach((item) => {
       if (item.recordType === 'shift') shifts++;
       else if (item.recordType === 'leave') leaves++;
       else if (item.recordType === 'off_day') offDays++;
+      else if (item.recordType === 'past_absence' || item.recordType === 'missing_shift') pastAbsences++;
     });
     return {
       all: attendanceTimeline.length,
       shifts,
       leaves,
-      offDays
+      offDays,
+      pastAbsences,
+      futureDays: attendanceTimeline?.futureScheduledDays?.length || 0,
+      cycleTotalDays: 30,
+      cycleElapsedDays: 0,
+      cycleRemainingDays: 0,
+      progressPercent: 0
     };
   }, [attendanceTimeline]);
 
@@ -396,6 +506,12 @@ export default function AttendancePunchesModal({
     }
     if (timelineFilter === 'off_days') {
       return attendanceTimeline.filter((item) => item.recordType === 'off_day');
+    }
+    if (timelineFilter === 'past_absences') {
+      return attendanceTimeline.filter((item) => item.recordType === 'past_absence' || item.recordType === 'missing_shift');
+    }
+    if (timelineFilter === 'future_scheduled') {
+      return attendanceTimeline.filter((item) => item.recordType === 'future_scheduled' || item.isFuture);
     }
     return attendanceTimeline;
   }, [attendanceTimeline, timelineFilter]);
@@ -704,25 +820,42 @@ export default function AttendancePunchesModal({
     }, 0)
     .toFixed(2);
 
-  const handleOpenAddPunch = () => {
+  const handleOpenAddPunch = (initialDate = null, initialBranchId = null, initialTimeIn = null, initialTimeOut = null) => {
     setIsAddingNewPunch(true);
     setEditingPunch({ id: `new_${Date.now()}` });
-    setEditDate(new Date().toISOString().slice(0, 10));
-    setEditTimeIn('09:00');
-    setEditTimeOut('17:00');
+    const safeDate = (typeof initialDate === 'string' && initialDate.length >= 10)
+      ? initialDate.slice(0, 10)
+      : (typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10));
+    setEditDate(safeDate);
+
+    // استخراج مواعيد الوردية المجدولة بالروستر لهذا اليوم تلقائياً إن وُجدت
+    const daySched = getEmployeeDaySchedule(employee.id, safeDate, state);
+    const hasSched = daySched && daySched.type !== 'off' && daySched.start && daySched.end;
+    const defaultIn = initialTimeIn || (hasSched ? daySched.start : '09:00');
+    const defaultOut = initialTimeOut || (hasSched ? daySched.end : '17:00');
+
+    setEditTimeIn(defaultIn);
+    setEditTimeOut(defaultOut);
     setEditBreakHours('0');
-    setEditBranchId(employee.branchId || (employee.branchesDetails && employee.branchesDetails[0]?.branchId) || '');
+    const safeBranchId = (typeof initialBranchId === 'string' || typeof initialBranchId === 'number')
+      ? String(initialBranchId)
+      : (daySched?.branchId || employee.branchId || (employee.branchesDetails && employee.branchesDetails[0]?.branchId) || '');
+    setEditBranchId(safeBranchId);
     setEditNotes('');
     setEditApproveOvertime(true);
     setEditDecouplePriorDayRequests(true);
   };
 
   const handleOpenEdit = (punch) => {
+    if (!punch) return;
     setIsAddingNewPunch(false);
     setEditingPunch(punch);
-    setEditDate(punch.date || new Date().toISOString().slice(0, 10));
-    setEditTimeIn(punch.timeIn && punch.timeIn !== '—' ? punch.timeIn.slice(0, 5) : '09:00');
-    const safeTimeOut = (punch.timeOut && punch.timeOut !== '—' && punch.timeOut !== 'قيد العمل الآن' && punch.timeOut !== 'قيد العمل') ? punch.timeOut.slice(0, 5) : '';
+    const safeDate = punch.date ? String(punch.date).slice(0, 10) : (typeof getRealTodayStr === 'function' ? getRealTodayStr() : new Date().toISOString().slice(0, 10));
+    setEditDate(safeDate);
+    const pIn = String(punch.timeIn || '');
+    setEditTimeIn(pIn && pIn !== '—' ? pIn.slice(0, 5) : '09:00');
+    const pOut = String(punch.timeOut || '');
+    const safeTimeOut = (pOut && pOut !== '—' && pOut !== 'قيد العمل الآن' && pOut !== 'قيد العمل') ? pOut.slice(0, 5) : '';
     setEditTimeOut(safeTimeOut);
     setEditBreakHours(String(punch.breakHours || 0));
     
@@ -732,7 +865,7 @@ export default function AttendancePunchesModal({
     setEditBranchId(matchingDetail ? matchingDetail.branchId : currentBId);
 
     // تنظيف الملاحظات من أي نصوص رفض إضافي قديمة حتى لا تتكرر داخل حقل الإدخال
-    const rawNotes = punch.note || punch.notes || '';
+    const rawNotes = String(punch.note || punch.notes || '');
     const cleanedNotes = rawNotes
       .replace(/❌\s*(تم رفض الساعات الإضافية|إضافي مرفوض)[^|]*/g, '')
       .replace(/\|\s*\|/g, '|')
@@ -743,6 +876,28 @@ export default function AttendancePunchesModal({
     // عند تعديل البصمة بواسطة الإدارة العليا، يتم تفعيل اعتماد الساعات الإضافية وفك الارتباط تلقائياً
     setEditApproveOvertime(true);
     setEditDecouplePriorDayRequests(true);
+  };
+
+  // ⚡ إعادة احتساب ومطابقة البصمات مع الجدول الشهري وتحديث الساعات الإضافية وإلغاء جزاءات التأخير تلقائياً
+  const handleSyncAndRecalculateWithRoster = async () => {
+    try {
+      const { updatedState: reconState, summary: reconSummary } = reconcileEmployeeScheduleOrPunchChange({
+        employeeId: employee.id,
+        state,
+        options: { reason: 'مطابقة وإعادة احتساب مع الجدول الشهري المعتمد' }
+      });
+
+      setState?.(reconState);
+      if (saveState) await saveState(reconState);
+
+      const waivedMsg = reconSummary?.waivedDeductionMinutes > 0
+        ? ` وتم إلغاء جزاء تأخير (${reconSummary.waivedDeductionMinutes} دقيقة - ${reconSummary.waivedAmount} ج.م)`
+        : '';
+      showToast?.(`✅ تمت مطابقة البصمات مع الجدول الشهري وتحديث الساعات الإضافية بنجاح!${waivedMsg}`);
+    } catch (err) {
+      console.error('Error recalculating shifts:', err);
+      showToast?.('❌ حدث خطأ أثناء إعادة احتساب السجلات');
+    }
   };
 
   // ⚡ المحرك التفاعلي للمعاينة اللحظية لاحتساب ساعات العمل والإضافي في نافذة التعديل/التسجيل اليدوي
@@ -776,25 +931,26 @@ export default function AttendancePunchesModal({
     let overtime = 0;
     const isOvernight = (outH < inH) || (outH === inH && outM < inM);
 
-    if (hasApprovedRoster && daySched && daySched.start && daySched.end && daySched.type !== 'off' && editTimeIn && editTimeOut) {
+    if (hasApprovedRoster && daySched && (daySched.type === 'off' || daySched.isOff)) {
+      regular = 0;
+      overtime = actualWorked;
+      scheduledHours = 0;
+    } else if (hasApprovedRoster && daySched && daySched.start && daySched.end && daySched.type !== 'off' && editTimeIn && editTimeOut) {
       const [sH, sM] = daySched.start.split(':').map(Number);
       let [eH, eM] = daySched.end.split(':').map(Number);
       let schedStartMins = sH * 60 + (sM || 0);
       let schedEndMins = eH * 60 + (eM || 0);
       if (schedEndMins <= schedStartMins) schedEndMins += 24 * 60;
       scheduledHours = Math.round(((schedEndMins - schedStartMins) / 60) * 100) / 100;
+      const targetHours = scheduledHours > 0 ? scheduledHours : profileHours;
 
-      let actInMins = inH * 60 + (inM || 0);
-      let actOutMins = outH * 60 + (outM || 0);
-      if (actOutMins <= actInMins) actOutMins += 24 * 60;
-
-      const earlyArrivalMins = actInMins < schedStartMins ? (schedStartMins - actInMins) : 0;
-      const lateDepartureMins = actOutMins > schedEndMins ? (actOutMins - schedEndMins) : 0;
-
-      const earlyOtHours = Math.round((earlyArrivalMins / 60) * 100) / 100;
-      const lateOtHours = Math.round((lateDepartureMins / 60) * 100) / 100;
-      overtime = Math.round((earlyOtHours + lateOtHours) * 100) / 100;
-      regular = Math.max(0, Math.round((actualWorked - overtime) * 100) / 100);
+      if (actualWorked > targetHours) {
+        regular = targetHours;
+        overtime = Math.round((actualWorked - targetHours) * 100) / 100;
+      } else {
+        regular = actualWorked;
+        overtime = 0;
+      }
     } else {
       if (actualWorked > profileHours) {
         regular = profileHours;
@@ -904,27 +1060,26 @@ export default function AttendancePunchesModal({
       let overtimeHours = 0;
 
       // ── الحالة الأولى: الموظفون الذين لديهم جدول شهري معتمد (حصراً) ──
-      if (hasApprovedRoster && daySched && daySched.start && daySched.end && daySched.type !== 'off' && snapTimeIn && snapTimeOut) {
+      if (hasApprovedRoster && daySched && (daySched.type === 'off' || daySched.isOff)) {
+        regularHours = 0;
+        overtimeHours = calculatedHours;
+        scheduledShiftHours = 0;
+      } else if (hasApprovedRoster && daySched && daySched.start && daySched.end && daySched.type !== 'off' && snapTimeIn && snapTimeOut) {
         const [sH, sM] = daySched.start.split(':').map(Number);
         let [eH, eM] = daySched.end.split(':').map(Number);
         let schedStartMins = sH * 60 + (sM || 0);
         let schedEndMins = eH * 60 + (eM || 0);
         if (schedEndMins <= schedStartMins) schedEndMins += 24 * 60;
         scheduledShiftHours = Math.round(((schedEndMins - schedStartMins) / 60) * 100) / 100;
+        const targetHours = scheduledShiftHours > 0 ? scheduledShiftHours : profileHours;
 
-        const [actInH, actInM] = String(snapTimeIn).split(':').map(Number);
-        let [actOutH, actOutM] = String(snapTimeOut).split(':').map(Number);
-        let actInMins = actInH * 60 + (actInM || 0);
-        let actOutMins = actOutH * 60 + (actOutM || 0);
-        if (actOutMins <= actInMins) actOutMins += 24 * 60;
-
-        const earlyArrivalMins = actInMins < schedStartMins ? (schedStartMins - actInMins) : 0;
-        const lateDepartureMins = actOutMins > schedEndMins ? (actOutMins - schedEndMins) : 0;
-
-        const earlyOtHours = Math.round((earlyArrivalMins / 60) * 100) / 100;
-        const lateOtHours = Math.round((lateDepartureMins / 60) * 100) / 100;
-        overtimeHours = Math.round((earlyOtHours + lateOtHours) * 100) / 100;
-        regularHours = Math.max(0, Math.round((calculatedHours - overtimeHours) * 100) / 100);
+        if (calculatedHours > targetHours) {
+          regularHours = targetHours;
+          overtimeHours = Math.round((calculatedHours - targetHours) * 100) / 100;
+        } else {
+          regularHours = calculatedHours;
+          overtimeHours = 0;
+        }
       }
       // ── الحالة الثانية: الموظفون الذين ليس لديهم جدول شهري معتمد / دوام حر ──
       else {
@@ -1113,11 +1268,12 @@ export default function AttendancePunchesModal({
 
       let updatedState = { ...state, shifts: updatedShifts, activeShifts: updatedActiveShifts, _deletedIds: cleanDeletedIds };
 
-      // Auto recalculate late incidents and reconcile via unified engine
+      // Auto recalculate late incidents and reconcile via unified engine (removing penalties on changed date)
       const { updatedState: reconState } = reconcileEmployeeScheduleOrPunchChange({
         employeeId: employee.id,
+        changedDates: snapDate ? [snapDate] : null,
         state: updatedState,
-        options: { reason: 'تعديل بصمة يدوي بالإدارة' }
+        options: { reason: 'تعديل بصمة يدوي بالإدارة', clearPenaltiesOnChangedDates: true }
       });
 
       // 🛡️ فك الارتباط وتطهير طلبات الإضافي والأذونات السابقة لهذا اليوم
@@ -1377,11 +1533,12 @@ export default function AttendancePunchesModal({
         _deletedIds: updatedDeletedIds
       };
 
-      // 6. إعادة احتساب وقائع التأخير والتسوية للدورة المحاسبية
+      // 6. إعادة احتساب وقائع التأخير والتسوية للدورة المحاسبية (وإلغاء جزاءات التاريخ المحذوف)
       const { updatedState: reconState } = reconcileEmployeeScheduleOrPunchChange({
         employeeId: employee.id,
+        changedDates: punchDate ? [punchDate] : null,
         state: updatedState,
-        options: { reason: 'حذف بصمة' }
+        options: { reason: 'حذف بصمة', clearPenaltiesOnChangedDates: true }
       });
       updatedState = reconState;
 
@@ -1517,11 +1674,12 @@ export default function AttendancePunchesModal({
         requests: updatedRequests
       };
 
-      // إعادة احتساب الجزاءات والتأخيرات تلقائياً
+      // إعادة احتساب الجزاءات والتأخيرات تلقائياً (وإلغاء جزاءات التاريخ المحتسب)
       const { updatedState: reconState } = reconcileEmployeeScheduleOrPunchChange({
         employeeId: employee.id,
+        changedDates: punchDate ? [punchDate] : null,
         state: updatedState,
-        options: { reason: 'تسجيل/اعتماد بصمة يدوية' }
+        options: { reason: 'تسجيل/اعتماد بصمة يدوية', clearPenaltiesOnChangedDates: true }
       });
       updatedState = reconState;
 
@@ -2089,8 +2247,28 @@ export default function AttendancePunchesModal({
               </>
             )}
             <button
+              className="btn btn-outline"
+              onClick={handleSyncAndRecalculateWithRoster}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '12.5px',
+                padding: '6px 14px',
+                background: '#f8fafc',
+                color: '#0284c7',
+                border: '1.5px solid #0284c7',
+                borderRadius: '8px',
+                fontWeight: 800,
+                cursor: 'pointer'
+              }}
+              title="إعادة فحص واحتساب بصمات الموظف لهذا الشهر ومطابقتها مع الجدول الشهري وتحديث الساعات الإضافية وإسقاط أي جزاءات تأخير ملغاة"
+            >
+              ⚡ مطابقة وإعادة احتساب مع الجدول الشهري
+            </button>
+            <button
               className="btn btn-start"
-              onClick={handleOpenAddPunch}
+              onClick={() => handleOpenAddPunch()}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -2115,6 +2293,146 @@ export default function AttendancePunchesModal({
             >
               ✕ إغلاق Window
             </button>
+          </div>
+        </div>
+
+        {/* ── Modal Month & Cycle Navigation Bar ── */}
+        <div style={{
+          background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)',
+          border: '1.5px solid #a7f3d0',
+          borderRadius: '12px',
+          padding: '10px 16px',
+          marginBottom: '16px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '10px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', background: '#fff', border: '1px solid #10b981', borderRadius: '8px', padding: '2px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+              <button
+                type="button"
+                onClick={handleModalPrevMonth}
+                title="الشهر السابق"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '12.5px',
+                  color: '#065f46',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                ◀ الشهر السابق
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '0 6px', borderRight: '1px solid #e2e8f0', borderLeft: '1px solid #e2e8f0' }}>
+                <span style={{ fontSize: '14px' }}>📅</span>
+                <input
+                  type="month"
+                  value={modalMonth}
+                  onChange={(e) => handleModalMonthChange(e.target.value)}
+                  style={{
+                    border: 'none',
+                    outline: 'none',
+                    fontSize: '13px',
+                    fontWeight: 800,
+                    color: '#065f46',
+                    cursor: 'pointer',
+                    background: 'transparent',
+                    padding: '0 4px'
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleModalNextMonth}
+                title="الشهر التالي"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '12.5px',
+                  color: '#065f46',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                الشهر التالي ▶
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleModalCurrentCycle}
+              style={{
+                background: (modalMonth === autoActiveCycle && modalFilterMode === 'month') ? '#059669' : '#fff',
+                color: (modalMonth === autoActiveCycle && modalFilterMode === 'month') ? '#fff' : '#059669',
+                border: '1.5px solid #059669',
+                padding: '5px 12px',
+                borderRadius: '8px',
+                fontWeight: 800,
+                fontSize: '12px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px'
+              }}
+              title="العودة إلى دورة الرواتب الحالية"
+            >
+              <span>🎯</span>
+              <span>الدورة الحالية</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleModalToggleAll}
+              style={{
+                background: modalFilterMode === 'all' ? '#7c3aed' : '#fff',
+                color: modalFilterMode === 'all' ? '#fff' : '#7c3aed',
+                border: '1.5px solid #7c3aed',
+                padding: '5px 12px',
+                borderRadius: '8px',
+                fontWeight: 800,
+                fontSize: '12px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px'
+              }}
+              title="عرض كافة بصمات الموظف المسجلة على الإطلاق بدون تقييد بالشهر"
+            >
+              <span>🌐</span>
+              <span>{modalFilterMode === 'all' ? 'عرض الكل (نشط)' : 'كافة البصمات (الكل)'}</span>
+            </button>
+          </div>
+
+          <div style={{
+            background: modalFilterMode === 'all' ? '#ede9fe' : '#d1fae5',
+            color: modalFilterMode === 'all' ? '#5b21b6' : '#065f46',
+            border: `1px solid ${modalFilterMode === 'all' ? '#ddd6fe' : '#a7f3d0'}`,
+            padding: '5px 14px',
+            borderRadius: '8px',
+            fontSize: '12.5px',
+            fontWeight: 800,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            <span>{modalFilterMode === 'all' ? '🌐' : '🗓️'}</span>
+            <span>{periodLabel}</span>
+            <span style={{ background: '#059669', color: '#fff', padding: '1px 7px', borderRadius: '6px', fontSize: '11px', marginRight: '6px' }}>
+              {monthPunches.length} وردية
+            </span>
           </div>
         </div>
 
@@ -2277,8 +2595,9 @@ export default function AttendancePunchesModal({
                 color: timelineFilter === 'all' ? '#ffffff' : '#475569',
                 border: timelineFilter === 'all' ? 'none' : '1px solid #cbd5e1'
               }}
+              title="عرض أيام الحضور الفعلي والراحة المنقضية بالتسلسل"
             >
-              🌐 كافة أيام الفترة ({timelineCounts.all})
+              🌐 كافة أيام الحضور والراحة ({timelineCounts.all})
             </button>
             <button
               type="button"
@@ -2328,9 +2647,88 @@ export default function AttendancePunchesModal({
             >
               ☕ أيام الراحة المجدولة ({timelineCounts.offDays})
             </button>
+            {timelineCounts.pastAbsences > 0 && (
+              <button
+                type="button"
+                onClick={() => setTimelineFilter('past_absences')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '20px',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  background: timelineFilter === 'past_absences' ? 'linear-gradient(135deg, #ef4444, #dc2626)' : '#fef2f2',
+                  color: timelineFilter === 'past_absences' ? '#ffffff' : '#dc2626',
+                  border: timelineFilter === 'past_absences' ? 'none' : '1.5px solid #fca5a5'
+                }}
+                title="أيام عمل سابقة انقضت دون تسجيل حضور ودون عذر"
+              >
+                ⚠️ غياب سابق غير مسجل ({timelineCounts.pastAbsences})
+              </button>
+            )}
+            {timelineCounts.futureDays > 0 && (
+              <button
+                type="button"
+                onClick={() => setTimelineFilter('future_scheduled')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '20px',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  background: timelineFilter === 'future_scheduled' ? 'linear-gradient(135deg, #0369a1, #0284c7)' : '#f0f9ff',
+                  color: timelineFilter === 'future_scheduled' ? '#ffffff' : '#0369a1',
+                  border: timelineFilter === 'future_scheduled' ? 'none' : '1.5px solid #bae6fd'
+                }}
+                title="معاينة جدول الورديات المجدولة للأيام القادمة حتى نهاية الشهر"
+              >
+                🔮 الأيام المتبقية بالدورة ({timelineCounts.futureDays})
+              </button>
+            )}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => setTimelineSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                background: '#ffffff',
+                color: '#0d9488',
+                border: '1.5px solid #0d9488',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+              }}
+              title={timelineSortOrder === 'asc' ? 'الترتيب الحالي: بالتسلسل الزمني المتصل من بداية الدورة حتى اليوم. اضغط للفرز التنازلي' : 'الترتيب الحالي: تنازلي من الأحدث إلى الأقدم. اضغط للفرز بالتسلسل'}
+            >
+              <span>{timelineSortOrder === 'asc' ? '⬆️ بالتسلسل (من البداية)' : '⬇️ تنازلي (من الأحدث)'}</span>
+            </button>
+
+            {attendanceTimeline?.progress?.isCurrentMonth && (
+              <span style={{
+                fontSize: '12px',
+                background: '#ecfdf5',
+                color: '#065f46',
+                border: '1px solid #a7f3d0',
+                padding: '5px 12px',
+                borderRadius: '20px',
+                fontWeight: 800,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}>
+                <span>📊</span>
+                <span>اليوم {attendanceTimeline.progress.elapsedDays} من {attendanceTimeline.progress.totalDays}</span>
+                <span style={{ opacity: 0.8 }}>(المتبقي: {attendanceTimeline.progress.remainingDays} يوم)</span>
+              </span>
+            )}
+
             <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 700 }}>
               📅 {periodLabel}
             </span>
@@ -2406,6 +2804,12 @@ export default function AttendancePunchesModal({
                 const bTimeline = displayedTimeline.filter((p) => {
                   if (p.recordType === 'off_day') {
                     if (p.isOtherBranchShift) return true;
+                    if (p.branchId) {
+                      return isBranchMatch(p.branchId, targetB) || (p.branchName && bObj?.name && p.branchName.trim() === bObj.name.trim());
+                    }
+                    return true;
+                  }
+                  if (p.recordType === 'missing_shift') {
                     if (p.branchId) {
                       return isBranchMatch(p.branchId, targetB) || (p.branchName && bObj?.name && p.branchName.trim() === bObj.name.trim());
                     }
@@ -2519,6 +2923,90 @@ export default function AttendancePunchesModal({
                               );
                             }
 
+                            if (p.recordType === 'past_absence' || p.recordType === 'missing_shift') {
+                              return (
+                                <tr key={p.id || `absence_${p.date}`} style={{ background: '#fffbeb', borderBottom: '1px solid #fde68a' }}>
+                                  <td style={{ textAlign: 'center', fontWeight: 800, color: '#b45309' }}>#{index + 1}</td>
+                                  <td style={{ fontWeight: 800, color: '#b45309' }}>{p.date}</td>
+                                  <td style={{ fontWeight: 800, color: '#92400e' }}>{arabicWeekday(p.date)}</td>
+                                  <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                    <span style={{
+                                      background: '#fef3c7',
+                                      color: '#92400e',
+                                      border: '1px solid #fde68a',
+                                      padding: '4px 10px',
+                                      borderRadius: '8px',
+                                      fontSize: '11.5px',
+                                      fontWeight: 800,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}>
+                                      <span>⚠️</span>
+                                      <span>غياب سابق غير مسجل</span>
+                                    </span>
+                                  </td>
+                                  <td style={{ textAlign: 'center', color: '#b45309', fontWeight: 700 }}>
+                                    {p.timeIn && p.timeIn !== '—' ? p.timeIn : '—'} <span style={{ fontSize: '10px', color: '#92400e' }}>(مقرر)</span>
+                                  </td>
+                                  <td style={{ textAlign: 'center', color: '#b45309', fontWeight: 700 }}>
+                                    {p.timeOut && p.timeOut !== '—' ? p.timeOut : '—'} <span style={{ fontSize: '10px', color: '#92400e' }}>(مقرر)</span>
+                                  </td>
+                                  <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                                  <td style={{ textAlign: 'center', color: '#d97706', fontWeight: 800, fontSize: '12px' }}>
+                                    0 س <span style={{ fontSize: '10.5px', color: '#92400e' }}>(مقرر {p.scheduledHours || 8} س)</span>
+                                  </td>
+                                  <td style={{ textAlign: 'center', fontSize: '11.5px', color: '#92400e', fontWeight: 700 }}>
+                                    {p.notes || `يوم عمل ماضٍ (${p.date}) لم تسجل له بصمة ولم يكن راحة أو إجازة`}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-primary"
+                                      onClick={() => handleOpenAddPunch(p.date, p.branchId || (typeof bId !== 'undefined' ? bId : null), p.timeIn && p.timeIn !== '—' ? p.timeIn : '09:00', p.timeOut && p.timeOut !== '—' ? p.timeOut : '18:00')}
+                                      style={{ fontSize: '11px', padding: '4px 10px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 800, cursor: 'pointer' }}
+                                      title="تسجيل واحتساب بصمة يدوية لهذا اليوم"
+                                    >
+                                      ➕ تسجيل البصمة
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            }
+
+                            if (p.recordType === 'future_scheduled') {
+                              return (
+                                <tr key={p.id || `future_${p.date}`} style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', opacity: 0.9 }}>
+                                  <td style={{ textAlign: 'center', fontWeight: 700, color: '#64748b' }}>#{index + 1}</td>
+                                  <td style={{ fontWeight: 700, color: '#475569' }}>{p.date}</td>
+                                  <td style={{ fontWeight: 700, color: '#64748b' }}>{arabicWeekday(p.date)}</td>
+                                  <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                    <span style={{
+                                      background: '#f1f5f9',
+                                      color: '#475569',
+                                      border: '1px solid #cbd5e1',
+                                      padding: '4px 10px',
+                                      borderRadius: '8px',
+                                      fontSize: '11.5px',
+                                      fontWeight: 700,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}>
+                                      <span>📅</span>
+                                      <span>وردية مجدولة مستقبلاً</span>
+                                    </span>
+                                  </td>
+                                  <td style={{ textAlign: 'center', color: '#64748b' }}>{p.timeIn && p.timeIn !== '—' ? p.timeIn : '—'} <span style={{ fontSize: '10px' }}>(مقرر)</span></td>
+                                  <td style={{ textAlign: 'center', color: '#64748b' }}>{p.timeOut && p.timeOut !== '—' ? p.timeOut : '—'} <span style={{ fontSize: '10px' }}>(مقرر)</span></td>
+                                  <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                                  <td style={{ textAlign: 'center', color: '#94a3b8', fontSize: '12px', fontWeight: 700 }}>0 س <span style={{ fontSize: '10px' }}>(مقرر {p.scheduledHours || 8} س)</span></td>
+                                  <td style={{ textAlign: 'center', fontSize: '11.5px', color: '#64748b' }}>وردية عمل مقررة بالجدول الشهري لم يحن موعدها بعد</td>
+                                  <td style={{ textAlign: 'center', color: '#94a3b8', fontSize: '11.5px' }}>—</td>
+                                </tr>
+                              );
+                            }
+
                             if (p.recordType === 'off_day') {
                               return (
                                 <tr key={p.id || `off_${p.date}`} style={{ background: p.isOtherBranchShift ? '#f8fafc' : '#fefce8', borderBottom: '1px solid ' + (p.isOtherBranchShift ? '#cbd5e1' : '#fde68a') }}>
@@ -2553,7 +3041,7 @@ export default function AttendancePunchesModal({
                                     <button
                                       type="button"
                                       className="btn btn-ghost"
-                                      onClick={() => { setEditDate(p.date); setIsAddingNewPunch(true); }}
+                                      onClick={() => handleOpenAddPunch(p.date, p.branchId || (typeof bId !== 'undefined' ? bId : null))}
                                       style={{ fontSize: '11px', padding: '3px 8px', color: '#0284c7', border: '1px solid #bae6fd', borderRadius: '6px' }}
                                       title="تسجيل بصمة عمل يدوية في هذا اليوم"
                                     >
@@ -2684,7 +3172,7 @@ export default function AttendancePunchesModal({
                                   )}
                                   {p.isOfflineSynced && (
                                     <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }} title="سُجلت في وضع عدم الاتصال وموزامنة لاحقاً">
-                                      📴 مزامنة أوفلاين {p.syncedAt ? `(${p.syncedAt.slice(11, 16)})` : ''}
+                                      📴 مزامنة أوفلاين {p.syncedAt ? `(${String(p.syncedAt).slice(11, 16)})` : ''}
                                     </span>
                                   )}
                                   {p.isEmergencyCover && (
@@ -2731,7 +3219,7 @@ export default function AttendancePunchesModal({
                                 </td>
                                 <td style={{ textAlign: 'center' }}>
                                   <span style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '12px', fontWeight: '800', fontSize: '12.5px', display: 'inline-block' }}>
-                                    {p.timeIn || p.checkIn || p.inTime || '09:00'}
+                                    {(p.timeIn && p.timeIn !== '—') ? p.timeIn : (p.checkIn || p.inTime || '—')}
                                   </span>
                                 </td>
                                 <td style={{ textAlign: 'center' }}>
@@ -2741,7 +3229,7 @@ export default function AttendancePunchesModal({
                                     </span>
                                   ) : (
                                     <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '4px 10px', borderRadius: '12px', fontWeight: '800', fontSize: '12.5px', display: 'inline-block' }}>
-                                      {p.timeOut || p.checkOut || p.outTime || '17:00'}
+                                      {(p.timeOut && p.timeOut !== '—' && p.timeOut !== 'قيد العمل الآن') ? p.timeOut : (p.checkOut || p.outTime || '—')}
                                     </span>
                                   )}
                                 </td>
@@ -3043,6 +3531,90 @@ export default function AttendancePunchesModal({
                       );
                     }
 
+                    if (p.recordType === 'past_absence' || p.recordType === 'missing_shift') {
+                      return (
+                        <tr key={p.id || `absence_${p.date}`} style={{ background: '#fffbeb', borderBottom: '1px solid #fde68a' }}>
+                          <td style={{ textAlign: 'center', fontWeight: 800, color: '#b45309' }}>#{index + 1}</td>
+                          <td style={{ fontWeight: 800, color: '#b45309' }}>{p.date}</td>
+                          <td style={{ fontWeight: 800, color: '#92400e' }}>{arabicWeekday(p.date)}</td>
+                          <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                            <span style={{
+                              background: '#fef3c7',
+                              color: '#92400e',
+                              border: '1px solid #fde68a',
+                              padding: '4px 10px',
+                              borderRadius: '8px',
+                              fontSize: '11.5px',
+                              fontWeight: 800,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}>
+                              <span>⚠️</span>
+                              <span>غياب سابق غير مسجل</span>
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center', color: '#b45309', fontWeight: 700 }}>
+                            {p.timeIn && p.timeIn !== '—' ? p.timeIn : '—'} <span style={{ fontSize: '10px', color: '#92400e' }}>(مقرر)</span>
+                          </td>
+                          <td style={{ textAlign: 'center', color: '#b45309', fontWeight: 700 }}>
+                            {p.timeOut && p.timeOut !== '—' ? p.timeOut : '—'} <span style={{ fontSize: '10px', color: '#92400e' }}>(مقرر)</span>
+                          </td>
+                          <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                          <td style={{ textAlign: 'center', color: '#d97706', fontWeight: 800, fontSize: '12px' }}>
+                            0 س <span style={{ fontSize: '10.5px', color: '#92400e' }}>(مقرر {p.scheduledHours || 8} س)</span>
+                          </td>
+                          <td style={{ textAlign: 'center', fontSize: '11.5px', color: '#92400e', fontWeight: 700 }}>
+                            {p.notes || `يوم عمل ماضٍ (${p.date}) لم تسجل له بصمة ولم يكن راحة أو إجازة`}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              onClick={() => handleOpenAddPunch(p.date, p.branchId || null, p.timeIn && p.timeIn !== '—' ? p.timeIn : '09:00', p.timeOut && p.timeOut !== '—' ? p.timeOut : '18:00')}
+                              style={{ fontSize: '11px', padding: '4px 10px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 800, cursor: 'pointer' }}
+                              title="تسجيل واحتساب بصمة يدوية لهذا اليوم"
+                            >
+                              ➕ تسجيل البصمة
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    if (p.recordType === 'future_scheduled') {
+                      return (
+                        <tr key={p.id || `future_${p.date}`} style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', opacity: 0.9 }}>
+                          <td style={{ textAlign: 'center', fontWeight: 700, color: '#64748b' }}>#{index + 1}</td>
+                          <td style={{ fontWeight: 700, color: '#475569' }}>{p.date}</td>
+                          <td style={{ fontWeight: 700, color: '#64748b' }}>{arabicWeekday(p.date)}</td>
+                          <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                            <span style={{
+                              background: '#f1f5f9',
+                              color: '#475569',
+                              border: '1px solid #cbd5e1',
+                              padding: '4px 10px',
+                              borderRadius: '8px',
+                              fontSize: '11.5px',
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}>
+                              <span>📅</span>
+                              <span>وردية مجدولة مستقبلاً</span>
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center', color: '#64748b' }}>{p.timeIn && p.timeIn !== '—' ? p.timeIn : '—'} <span style={{ fontSize: '10px' }}>(مقرر)</span></td>
+                          <td style={{ textAlign: 'center', color: '#64748b' }}>{p.timeOut && p.timeOut !== '—' ? p.timeOut : '—'} <span style={{ fontSize: '10px' }}>(مقرر)</span></td>
+                          <td style={{ textAlign: 'center', color: 'var(--muted)' }}>—</td>
+                          <td style={{ textAlign: 'center', color: '#94a3b8', fontSize: '12px', fontWeight: 700 }}>0 س <span style={{ fontSize: '10px' }}>(مقرر {p.scheduledHours || 8} س)</span></td>
+                          <td style={{ textAlign: 'center', fontSize: '11.5px', color: '#64748b' }}>وردية عمل مقررة بالجدول الشهري لم يحن موعدها بعد</td>
+                          <td style={{ textAlign: 'center', color: '#94a3b8', fontSize: '11.5px' }}>—</td>
+                        </tr>
+                      );
+                    }
+
                     if (p.recordType === 'off_day') {
                       return (
                         <tr key={p.id || `off_${p.date}`} style={{ background: p.isOtherBranchShift ? '#f8fafc' : '#fefce8', borderBottom: '1px solid ' + (p.isOtherBranchShift ? '#cbd5e1' : '#fde68a') }}>
@@ -3077,7 +3649,7 @@ export default function AttendancePunchesModal({
                             <button
                               type="button"
                               className="btn btn-ghost"
-                              onClick={() => { setEditDate(p.date); setIsAddingNewPunch(true); }}
+                              onClick={() => handleOpenAddPunch(p.date, p.branchId || null)}
                               style={{ fontSize: '11px', padding: '3px 8px', color: '#0284c7', border: '1px solid #bae6fd', borderRadius: '6px' }}
                               title="تسجيل بصمة عمل يدوية في هذا اليوم"
                             >
@@ -3191,7 +3763,7 @@ export default function AttendancePunchesModal({
                           )}
                           {p.isOfflineSynced && (
                             <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }} title="سُجلت في وضع عدم الاتصال وموزامنة لاحقاً">
-                              📴 مزامنة أوفلاين {p.syncedAt ? `(${p.syncedAt.slice(11, 16)})` : ''}
+                              📴 مزامنة أوفلاين {p.syncedAt ? `(${String(p.syncedAt).slice(11, 16)})` : ''}
                             </span>
                           )}
                           {(p.branchId || p.branchName) && (
@@ -3255,7 +3827,7 @@ export default function AttendancePunchesModal({
                             fontSize: '12.5px',
                             display: 'inline-block'
                           }}>
-                            {p.timeIn || p.checkIn || p.inTime || '09:00'}
+                            {(p.timeIn && p.timeIn !== '—') ? p.timeIn : (p.checkIn || p.inTime || '—')}
                           </span>
                         </td>
 
@@ -3275,7 +3847,7 @@ export default function AttendancePunchesModal({
                               fontSize: '12.5px',
                               display: 'inline-block'
                             }}>
-                              {p.timeOut || p.checkOut || p.outTime || '17:00'}
+                              {(p.timeOut && p.timeOut !== '—' && p.timeOut !== 'قيد العمل الآن') ? p.timeOut : (p.checkOut || p.outTime || '—')}
                             </span>
                           )}
                         </td>
@@ -3801,9 +4373,34 @@ export default function AttendancePunchesModal({
                     gap: '10px',
                     boxShadow: '0 2px 6px rgba(239, 68, 68, 0.1)'
                   }}>
-                    <span style={{ fontSize: '20px', lineHeight: 1 }}>⚠️</span>
                     <div style={{ flex: 1, lineHeight: '1.5' }}>
-                      {liveConflictResult.message}
+                      <div>{liveConflictResult.message}</div>
+                      {liveConflictResult.isSameBranch && liveConflictResult.conflictingShift && (
+                        <div style={{ marginTop: '8px' }}>
+                          <button
+                            type="button"
+                            style={{
+                              background: '#b45309',
+                              color: '#fff',
+                              border: 'none',
+                              padding: '5px 12px',
+                              borderRadius: '6px',
+                              fontSize: '11.5px',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px'
+                            }}
+                            onClick={() => {
+                              handleOpenEdit(liveConflictResult.conflictingShift);
+                            }}
+                          >
+                            <span>✏️</span>
+                            <span>تعديل الوردية القائمة المذكورة وتحديث مواعيدها مباشرة</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

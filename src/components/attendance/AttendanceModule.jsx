@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
 import { recalculateEmployeeCycleLateness, getEffectiveShiftHours, reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { checkShiftConflicts } from '../../utils/workHoursEngine';
 import { isBranchMatch } from '../../utils/branchMatcher';
 import { apiSaveSettingsSlice } from '../../utils/apiClient';
+import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
 import {
   getEmpDisplayName,
   isEmployeeActive,
@@ -23,9 +24,13 @@ export default function AttendanceModule({
   showToast,
   filterFn = null,
   monthPicker = null,
+  setMonthPicker = null,
   filterMode = 'month',
+  setFilterMode = null,
   customFrom = '',
+  setCustomFrom = null,
   customTo = '',
+  setCustomTo = null,
   executeWithOwnerGuard,
   stopShift
 }) {
@@ -33,16 +38,120 @@ export default function AttendanceModule({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPunchEmp, setSelectedPunchEmp] = useState(null);
 
-  // Active period filter helper
-  const activePeriodFilter = (d) => {
-    if (!d) return false;
-    const dateStr = String(d).slice(0, 10);
-    if (typeof filterFn === 'function') return filterFn(dateStr);
-    return true;
+  // Default active cycle from orgSettings or fallback to current month
+  const autoActiveCycle = useMemo(() => {
+    return getActivePayrollMonth(state?.orgSettings);
+  }, [state?.orgSettings]);
+
+  // Local month state synced with parent props or local storage
+  const [effectiveMonth, setEffectiveMonth] = useState(() => {
+    return monthPicker || autoActiveCycle || new Date().toISOString().slice(0, 7);
+  });
+
+  const [effectiveFilterMode, setEffectiveFilterMode] = useState(() => {
+    return filterMode || 'month';
+  });
+
+  const [effectiveCustomFrom, setEffectiveCustomFrom] = useState(customFrom || '');
+  const [effectiveCustomTo, setEffectiveCustomTo] = useState(customTo || '');
+
+  // Synchronize with parent monthPicker if changed externally
+  useEffect(() => {
+    if (monthPicker && monthPicker !== effectiveMonth) {
+      setEffectiveMonth(monthPicker);
+    }
+  }, [monthPicker]);
+
+  useEffect(() => {
+    if (filterMode && filterMode !== effectiveFilterMode) {
+      setEffectiveFilterMode(filterMode);
+    }
+  }, [filterMode]);
+
+  // Handle Month Change
+  const handleMonthChange = (newMonth) => {
+    if (!newMonth) return;
+    setEffectiveMonth(newMonth);
+    setEffectiveFilterMode('month');
+    if (typeof setMonthPicker === 'function') {
+      setMonthPicker(newMonth);
+    }
+    if (typeof setFilterMode === 'function') {
+      setFilterMode('month');
+    }
   };
 
-  const isCustom = (filterMode === 'custom' || filterMode === 'range') && customFrom && customTo;
-  const periodLabel = isCustom ? `الفترة المخصصة: من ${customFrom} إلى ${customTo}` : (monthPicker ? `دورة شهر (${monthPicker})` : '');
+  // Previous Month
+  const handlePrevMonth = () => {
+    const [y, m] = (effectiveMonth || autoActiveCycle).split('-').map(Number);
+    let prevY = y;
+    let prevM = m - 1;
+    if (prevM < 1) {
+      prevM = 12;
+      prevY = y - 1;
+    }
+    const prevMonthStr = `${prevY}-${String(prevM).padStart(2, '0')}`;
+    handleMonthChange(prevMonthStr);
+  };
+
+  // Next Month
+  const handleNextMonth = () => {
+    const [y, m] = (effectiveMonth || autoActiveCycle).split('-').map(Number);
+    let nextY = y;
+    let nextM = m + 1;
+    if (nextM > 12) {
+      nextM = 1;
+      nextY = y + 1;
+    }
+    const nextMonthStr = `${nextY}-${String(nextM).padStart(2, '0')}`;
+    handleMonthChange(nextMonthStr);
+  };
+
+  // Jump to Current Active Cycle
+  const handleCurrentCycle = () => {
+    handleMonthChange(autoActiveCycle);
+  };
+
+  // Toggle All Records
+  const handleToggleAllRecords = () => {
+    const newMode = effectiveFilterMode === 'all' ? 'month' : 'all';
+    setEffectiveFilterMode(newMode);
+    if (typeof setFilterMode === 'function') {
+      setFilterMode(newMode);
+    }
+  };
+
+  // Cycle range for effective month
+  const activeCycleRange = useMemo(() => {
+    return getCycleDateRange(effectiveMonth, state?.orgSettings);
+  }, [effectiveMonth, state?.orgSettings]);
+
+  // Predicate function for attendance filtering
+  const activePeriodFilter = useMemo(() => {
+    if (effectiveFilterMode === 'all') {
+      return () => true;
+    }
+    if (effectiveFilterMode === 'custom' && effectiveCustomFrom && effectiveCustomTo) {
+      return (d) => {
+        if (!d) return false;
+        const s = String(d).slice(0, 10);
+        return s >= effectiveCustomFrom && s <= effectiveCustomTo;
+      };
+    }
+    return (d) => {
+      if (!d) return false;
+      const s = String(d).slice(0, 10);
+      return Boolean(activeCycleRange?.startDate && activeCycleRange?.endDate && s >= activeCycleRange.startDate && s <= activeCycleRange.endDate);
+    };
+  }, [effectiveFilterMode, effectiveCustomFrom, effectiveCustomTo, activeCycleRange]);
+
+  const periodLabel = useMemo(() => {
+    if (effectiveFilterMode === 'all') return 'كافة السجلات المسجلة (بدون تقييد)';
+    if (effectiveFilterMode === 'custom' && effectiveCustomFrom && effectiveCustomTo) {
+      return `فترة مخصصة: من ${effectiveCustomFrom} إلى ${effectiveCustomTo}`;
+    }
+    return activeCycleRange?.label || `دورة شهر (${effectiveMonth})`;
+  }, [effectiveFilterMode, effectiveCustomFrom, effectiveCustomTo, activeCycleRange, effectiveMonth]);
 
   const getTodayDateStr = () => {
     const d = new Date();
@@ -65,7 +174,22 @@ export default function AttendanceModule({
 
   const filteredEmployees = employees.filter((emp) => {
     if (!isEmployeeActive(emp)) return false;
-    if (selectedBranch && emp.branchId !== selectedBranch && (!emp.branchesDetails || !emp.branchesDetails.some((bd) => bd.branchId === selectedBranch))) return false;
+    if (selectedBranch) {
+      const matchPrimary = isBranchMatch(emp.branchId, { id: selectedBranch });
+      const matchDetails = emp.branchesDetails && emp.branchesDetails.some((bd) => isBranchMatch(bd.branchId, { id: selectedBranch }));
+      const hasShiftsInBranch = (state.shifts || []).some(s => {
+        if (!s || !s.date || !activePeriodFilter(s.date)) return false;
+        if (s.status === 'cancelled' || s.isCancelled) return false;
+        const sEmpId = String(s.employeeId || '');
+        const sEmpCode = String(s.employeeCode || '');
+        const eId = String(emp.id || '');
+        const eCode = String(emp.code || '');
+        const isMatchEmp = (eId && (sEmpId === eId || sEmpCode === eId)) || (eCode && (sEmpId === eCode || sEmpCode === eCode));
+        if (!isMatchEmp) return false;
+        return isBranchMatch(s.branchId, { id: selectedBranch });
+      });
+      if (!matchPrimary && !matchDetails && !hasShiftsInBranch) return false;
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const matchName = emp.name?.toLowerCase().includes(q);
@@ -84,6 +208,24 @@ export default function AttendanceModule({
       return false;
     });
   }, [state.employees, manualFilterBranchId]);
+
+  // 🛡️ فحص التعارض والتنقل اللحظي بين الفروع للبصمة اليدوية
+  const manualConflictResult = useMemo(() => {
+    if (!manualEmpId || !manualDate || !manualInTime || !manualOutTime) return null;
+    const empObj = employees.find((e) => e.id === manualEmpId);
+    return checkShiftConflicts({
+      employeeId: manualEmpId,
+      employeeCode: empObj?.code,
+      branchId: manualBranchId || empObj?.branchId,
+      branchName: (state.branches || []).find(b => isBranchMatch(manualBranchId || empObj?.branchId, b))?.name,
+      date: manualDate,
+      timeIn: manualInTime,
+      timeOut: manualOutTime,
+      excludeShiftId: null,
+      shifts: state.shifts || [],
+      branches: state.branches || []
+    });
+  }, [manualEmpId, manualDate, manualInTime, manualOutTime, manualBranchId, employees, state]);
 
   const handleAddManualPunch = async (e) => {
     e.preventDefault();
@@ -140,12 +282,17 @@ export default function AttendanceModule({
       const overtimeHours = Math.max(0, Math.round((workHours - scheduledShiftHours) * 100) / 100);
       const otStatus = overtimeHours > 0 ? 'approved' : 'none';
 
+      const bObj = (state.branches || []).find(b => isBranchMatch(manualBranchId || empObj?.branchId, b));
+      const targetBId = bObj ? bObj.id : (manualBranchId || empObj?.branchId || '');
+      const targetBName = bObj ? bObj.name : '';
+
       const newPunch = {
         id: `punch_manual_${Date.now()}`,
         employeeId: manualEmpId,
         employeeCode: empObj?.code || '',
         employeeName: empObj?.name || '',
-        branchId: manualBranchId || empObj?.branchId || '',
+        branchId: targetBId,
+        branchName: targetBName,
         date: manualDate,
         timeIn: manualInTime,
         timeOut: manualOutTime,
@@ -209,10 +356,18 @@ export default function AttendanceModule({
         return r;
       });
 
+      const cleanDeletedIds = (reconState._deletedIds || state._deletedIds || []).filter(d => {
+        if (!d) return false;
+        const dStr = String(d).toLowerCase();
+        const fId = newPunch.id.toLowerCase();
+        return dStr !== fId && dStr !== `shift_${fId}` && dStr !== `punch_${fId}`;
+      });
+
       updatedState = {
         ...reconState,
         lateIncidents: markedIncidents,
-        requests: markedRequests
+        requests: markedRequests,
+        _deletedIds: cleanDeletedIds
       };
 
       // 0ms instant optimistic UI response
@@ -440,10 +595,198 @@ export default function AttendanceModule({
             );
           })()}
 
+          {manualConflictResult?.hasConflict && (
+            <div style={{
+              gridColumn: '1 / -1',
+              background: '#fef2f2',
+              border: '1.5px solid #ef4444',
+              borderRadius: '10px',
+              padding: '12px 14px',
+              fontSize: '12.5px',
+              color: '#991b1b',
+              fontWeight: '700',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '10px',
+              boxShadow: '0 2px 6px rgba(239, 68, 68, 0.1)'
+            }}>
+              <span style={{ fontSize: '20px', lineHeight: 1 }}>⚠️</span>
+              <div style={{ flex: 1, lineHeight: '1.5' }}>
+                {manualConflictResult.message}
+              </div>
+            </div>
+          )}
+
           <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
-            <button type="submit" className="btn btn-start">💾 تسجيل البصمة اليدوية</button>
+            <button
+              type="submit"
+              className="btn btn-start"
+              style={{
+                opacity: manualConflictResult?.hasConflict ? 0.7 : 1,
+                cursor: manualConflictResult?.hasConflict ? 'not-allowed' : 'pointer'
+              }}
+            >
+              💾 تسجيل البصمة اليدوية
+            </button>
           </div>
         </form>
+      </div>
+
+      {/* ── Month & Period Navigation Toolbar ── */}
+      <div style={{
+        background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+        border: '1.5px solid #cbd5e1',
+        borderRadius: '14px',
+        padding: '14px 18px',
+        marginBottom: '18px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '12px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+      }}>
+        {/* Navigation Buttons & Month Picker */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', background: '#fff', border: '1.5px solid #0d9488', borderRadius: '10px', padding: '3px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+            <button
+              type="button"
+              onClick={handlePrevMonth}
+              title="الانتقال إلى الشهر السابق"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '13px',
+                color: '#0f766e',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              ◀ الشهر السابق
+            </button>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 8px', borderRight: '1px solid #e2e8f0', borderLeft: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '15px' }}>📅</span>
+              <input
+                type="month"
+                value={effectiveMonth}
+                onChange={(e) => handleMonthChange(e.target.value)}
+                style={{
+                  border: 'none',
+                  outline: 'none',
+                  fontSize: '14px',
+                  fontWeight: 800,
+                  color: '#0f766e',
+                  cursor: 'pointer',
+                  background: 'transparent'
+                }}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleNextMonth}
+              title="الانتقال إلى الشهر التالي"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '13px',
+                color: '#0f766e',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              الشهر التالي ▶
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleCurrentCycle}
+            style={{
+              background: (effectiveMonth === autoActiveCycle && effectiveFilterMode === 'month') ? '#0d9488' : '#fff',
+              color: (effectiveMonth === autoActiveCycle && effectiveFilterMode === 'month') ? '#fff' : '#0d9488',
+              border: '1.5px solid #0d9488',
+              padding: '6px 14px',
+              borderRadius: '10px',
+              fontWeight: 800,
+              fontSize: '12.5px',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.2s'
+            }}
+            title="العودة إلى دورة الرواتب النشطة الحالية"
+          >
+            <span>🎯</span>
+            <span>الدورة النشطة الحالية</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleToggleAllRecords}
+            style={{
+              background: effectiveFilterMode === 'all' ? '#7c3aed' : '#fff',
+              color: effectiveFilterMode === 'all' ? '#fff' : '#7c3aed',
+              border: '1.5px solid #7c3aed',
+              padding: '6px 14px',
+              borderRadius: '10px',
+              fontWeight: 800,
+              fontSize: '12.5px',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.2s'
+            }}
+            title="عرض كافة بصمات الموظفين المسجلة بدون تقييد زمني بشهر معين"
+          >
+            <span>🌐</span>
+            <span>{effectiveFilterMode === 'all' ? 'عرض الكل نشط (إلغاء التقييد)' : 'كافة السجلات (الكل)'}</span>
+          </button>
+        </div>
+
+        {/* Active Range Summary Info */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{
+            background: effectiveFilterMode === 'all' ? '#ede9fe' : '#ccfbf1',
+            color: effectiveFilterMode === 'all' ? '#5b21b6' : '#115e59',
+            border: `1px solid ${effectiveFilterMode === 'all' ? '#ddd6fe' : '#99f6e4'}`,
+            padding: '6px 14px',
+            borderRadius: '10px',
+            fontSize: '13px',
+            fontWeight: 800,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <span>{effectiveFilterMode === 'all' ? '🌐' : '🗓️'}</span>
+            <span>{periodLabel}</span>
+            {effectiveFilterMode === 'month' && activeCycleRange?.daysCount && (
+              <span style={{
+                background: '#0d9488',
+                color: '#fff',
+                padding: '2px 8px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                marginRight: '6px'
+              }}>
+                {activeCycleRange.daysCount} يوم
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Filter and Employees List */}
@@ -540,6 +883,7 @@ export default function AttendanceModule({
                   : 0;
 
                 const validPunches = empPunches.filter((p) => !p.isRejectedPhoto && p.status !== 'rejected_photo');
+                const distinctBranchesCount = new Set(validPunches.map(p => p.branchId || p.branchName).filter(Boolean)).size;
                 const totalCompletedHours = validPunches.reduce((acc, p) => acc + (getEffectiveShiftHours(p, state) || 0), 0);
                 const totalHours = (totalCompletedHours + liveElapsedHours).toFixed(1);
                 const hasLiveAlreadyInValidPunches = validPunches.some(p => p.isLiveActive || (!p.timeOut || p.timeOut === '—' || p.timeOut === '' || p.timeOut === 'قيد العمل الآن'));
@@ -560,11 +904,16 @@ export default function AttendanceModule({
                       )}
                       {hasLiveShift && (
                         <div style={{ marginTop: '3px', display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '11px', color: '#059669', fontWeight: '800' }}>
+                          <span style={{ fontSize: '11px', color: liveElapsedHours >= 15 ? '#dc2626' : '#059669', fontWeight: '800' }}>
                             {isOvernightActive
                               ? `🟢 متواجد الآن 🌙 (${activeShift.timeIn})`
                               : `🟢 متواجد الآن (${activeShift.timeIn})`}
                           </span>
+                          {liveElapsedHours >= 15 && (
+                            <span style={{ fontSize: '10px', color: '#b91c1c', background: '#fee2e2', border: '1px solid #fca5a5', padding: '1px 6px', borderRadius: '4px', fontWeight: '900' }}>
+                              ⚠️ {liveElapsedHours} س جارية
+                            </span>
+                          )}
                           {(() => {
                             const meth = getPunchMethodDetails(activeShift);
                             return (
@@ -596,6 +945,16 @@ export default function AttendanceModule({
                         {hasLiveShift && (
                           <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: '800', textAlign: 'center' }}>
                             {isOvernightActive ? 'حضور حي 🌙 عابر لمنتصف الليل' : 'حضور حي'}
+                          </span>
+                        )}
+                        {hasLiveShift && liveElapsedHours >= 15 && (
+                          <span style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #f87171', padding: '1px 6px', borderRadius: '6px', fontSize: '10px', fontWeight: '900', textAlign: 'center' }}>
+                            ⚠️ مفتوحة &gt; 15 ساعة
+                          </span>
+                        )}
+                        {distinctBranchesCount > 1 && (
+                          <span style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '6px', fontSize: '10px', fontWeight: '800', textAlign: 'center' }}>
+                            🏢 متعدد الفروع ({distinctBranchesCount})
                           </span>
                         )}
                         {approvedLeaveToday && !hasLiveShift && (
@@ -648,11 +1007,15 @@ export default function AttendanceModule({
           saveState={saveState}
           showToast={showToast}
           executeWithOwnerGuard={executeWithOwnerGuard}
-          filterFn={filterFn}
-          monthPicker={monthPicker}
-          filterMode={filterMode}
-          customFrom={customFrom}
-          customTo={customTo}
+          filterFn={activePeriodFilter}
+          monthPicker={effectiveMonth}
+          setMonthPicker={handleMonthChange}
+          filterMode={effectiveFilterMode}
+          setFilterMode={setEffectiveFilterMode}
+          customFrom={effectiveCustomFrom}
+          setCustomFrom={setEffectiveCustomFrom}
+          customTo={effectiveCustomTo}
+          setCustomTo={setEffectiveCustomTo}
           stopShift={stopShift}
           onClose={() => setSelectedPunchEmp(null)}
         />
