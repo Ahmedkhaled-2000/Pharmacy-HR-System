@@ -30,9 +30,10 @@ export function AuthProvider({ children }) {
   const [authRole, setAuthRole] = useState(() => {
     try {
       const saved = localStorage.getItem('app_auth_role');
-      if (saved && (['owner', 'admin', 'branch', 'employee', 'developer'].includes(saved) || saved.startsWith('outstock_'))) {
+      if (saved && (['owner', 'admin', 'branch', 'employee', 'developer', 'pos'].includes(saved) || saved.startsWith('outstock_'))) {
         return saved;
       }
+      if (localStorage.getItem('app_pos_authenticated') === 'true') return 'pos';
       if (localStorage.getItem('app_current_emp_user')) return 'employee';
       if (localStorage.getItem('app_current_branch')) return 'branch';
       if (localStorage.getItem('app_is_admin') === 'true') return 'admin';
@@ -44,7 +45,7 @@ export function AuthProvider({ children }) {
 
   const [currentBranch, setCurrentBranch] = useState(() => {
     try {
-      const saved = localStorage.getItem('app_current_branch') || localStorage.getItem('outstock_branch');
+      const saved = localStorage.getItem('app_current_branch') || localStorage.getItem('outstock_branch') || localStorage.getItem('app_pos_branch_data');
       return saved ? JSON.parse(saved) : null;
     } catch { return null; }
   });
@@ -467,6 +468,28 @@ export function AuthProvider({ children }) {
         if (user) localStorage.setItem('outstock_user', JSON.stringify(user));
         if (effectiveBranch) localStorage.setItem('outstock_branch', JSON.stringify(effectiveBranch));
       } catch {}
+    } else if (role === 'pos') {
+      setIsAdminLoggedIn(false);
+      const effectiveBranch = branch || user?.branch || null;
+      setCurrentBranch(effectiveBranch);
+      setCurrentEmpUser(user || null);
+      try {
+        localStorage.setItem('app_auth_role', 'pos');
+        localStorage.setItem('app_pos_authenticated', 'true');
+        if (user) {
+          localStorage.setItem('app_pos_terminal', user.terminalCode || user.id);
+          localStorage.setItem('app_pos_terminal_data', JSON.stringify(user));
+        }
+        if (effectiveBranch) {
+          localStorage.setItem('app_pos_branch_id', effectiveBranch.id);
+          localStorage.setItem('app_pos_branch_name', effectiveBranch.name || 'الفرع');
+          localStorage.setItem('app_active_branch_id', effectiveBranch.id);
+          localStorage.setItem('app_pos_branch_data', JSON.stringify(effectiveBranch));
+          localStorage.setItem('app_current_branch', JSON.stringify(effectiveBranch));
+        }
+        localStorage.removeItem('app_owner_authenticated');
+        sessionStorage.removeItem('app_owner_authenticated');
+      } catch {}
     }
     setActiveNavTab(redirectTab);
   };
@@ -551,6 +574,12 @@ export function AuthProvider({ children }) {
       localStorage.removeItem('pharmacy_owner_username');
       localStorage.removeItem('outstock_token');
       localStorage.removeItem('outstock_user');
+      localStorage.removeItem('app_pos_authenticated');
+      localStorage.removeItem('app_pos_terminal');
+      localStorage.removeItem('app_pos_terminal_data');
+      localStorage.removeItem('app_pos_branch_id');
+      localStorage.removeItem('app_pos_branch_name');
+      localStorage.removeItem('app_pos_branch_data');
       sessionStorage.removeItem('app_owner_authenticated');
       sessionStorage.removeItem('app_settings_owner_tab_unlocked');
     } catch {}

@@ -3308,6 +3308,40 @@ app.post('/api/auth/login', async (req, res) => {
       }
     }
 
+    // 3.0 فحص محطات نقاط البيع المستقلة للفروع (POS Terminals)
+    if (!authenticated && (role === 'pos' || role === 'auto')) {
+      const posTerminals = Array.isArray(org.posTerminals) ? org.posTerminals : [];
+      const matchedTerm = posTerminals.find(term => {
+        if (!term || term.isActive === false) return false;
+        const tUser = String(term.username || '').trim().toLowerCase();
+        const tPass = String(term.password || '').trim();
+        const isUserOk = tUser === cleanUser || (stdUser && toStdDigits(tUser) === stdUser);
+        const isPassOk = cleanPass === tPass || (stdPass && toStdDigits(tPass) === stdPass);
+        return isUserOk && isPassOk;
+      });
+
+      if (matchedTerm) {
+        authenticated = true;
+        userRole = 'pos';
+        const branches = Array.isArray(settings?.branches) ? settings.branches : [];
+        const termBranch = branches.find(b => String(b.id) === String(matchedTerm.branchId)) || {
+          id: matchedTerm.branchId,
+          name: matchedTerm.name || 'فرع الصيدلية'
+        };
+        targetUserObj = {
+          id: matchedTerm.id,
+          terminalCode: matchedTerm.terminalCode || matchedTerm.id,
+          name: matchedTerm.name || matchedTerm.terminalCode,
+          username: matchedTerm.username,
+          branchId: matchedTerm.branchId,
+          branch: termBranch,
+          branchData: termBranch,
+          permissions: matchedTerm.permissions || {},
+          role: 'pos'
+        };
+      }
+    }
+
     // 3.1 فحص جدول فروع ومستخدمي النواقص والمشتريات (Outstock Users / Branches - دور منفصل تماماً)
     if (!authenticated && (role === 'auto' || String(role).startsWith('outstock'))) {
       try {

@@ -844,7 +844,7 @@ export default function AppRoutes() {
     ? 'kiosk'
     : location.pathname.startsWith('/outstock')
     ? 'outstock'
-    : location.pathname.startsWith('/pos')
+    : location.pathname.startsWith('/pos') || authRole === 'pos'
     ? 'pos'
     : location.pathname === '/employee'
     ? 'employee'
@@ -1469,6 +1469,24 @@ export default function AppRoutes() {
               redirectTab: 'outstock'
             });
             return { success: true, role: targetRole };
+          } else if (sRole === 'pos') {
+            const terminal = sUser;
+            const termBranch = sUser.branch || (state?.branches || []).find(b => String(b.id) === String(sUser.branchId)) || {
+              id: sUser.branchId,
+              name: sUser.name || 'الفرع'
+            };
+            handleUnifiedLogin({
+              role: 'pos',
+              branch: termBranch,
+              user: terminal,
+              redirectTab: 'pos'
+            });
+            try {
+              if (window.location.pathname !== '/pos') {
+                window.history.pushState({}, '', '/pos');
+              }
+            } catch {}
+            return { success: true, role: 'pos' };
           } else if (sRole === 'admin') {
             authResult = { role: 'admin', matched: true, org: state?.orgSettings || {} };
           } else if (sRole === 'owner') {
@@ -1694,22 +1712,22 @@ export default function AppRoutes() {
       }
 
       if (role === 'pos') {
-        const terminal = authResult.terminal;
-        const termBranch = authResult.branch;
+        const terminal = authResult.terminal || authResult.user;
+        const termBranch = authResult.branch || terminal?.branch;
+
+        handleUnifiedLogin({
+          role: 'pos',
+          branch: termBranch,
+          user: terminal,
+          redirectTab: 'pos'
+        });
+
         try {
-          localStorage.setItem('app_auth_role', 'pos');
-          localStorage.setItem('app_pos_authenticated', 'true');
-          localStorage.setItem('app_pos_terminal', terminal.terminalCode || terminal.id);
-          localStorage.setItem('app_pos_terminal_data', JSON.stringify(terminal));
-          localStorage.setItem('app_pos_branch_id', termBranch?.id || terminal.branchId);
-          localStorage.setItem('app_pos_branch_name', termBranch?.name || terminal.name || 'الفرع');
-          localStorage.setItem('app_active_branch_id', termBranch?.id || terminal.branchId);
+          if (window.location.pathname !== '/pos') {
+            window.history.pushState({}, '', '/pos');
+          }
         } catch {}
 
-        setCurrentBranch(termBranch);
-        setAuthRole('pos');
-        setIsAdminLoggedIn(false);
-        window.history.pushState({}, '', '/pos');
         return { success: true, role: 'pos' };
       }
 
@@ -2193,7 +2211,7 @@ export default function AppRoutes() {
       )}
 
       {/* ── 2. Authenticated / Unauthenticated App Views ── */}
-      {viewMode !== 'kiosk' && viewMode !== 'archive' && viewMode !== 'accounts' && viewMode !== 'careers' && viewMode !== 'interview' && viewMode !== 'developer' && viewMode !== 'register' && viewMode !== 'outstock' && viewMode !== 'pos' && authRole !== 'developer' && !(typeof authRole === 'string' && authRole.startsWith('outstock_')) && (
+      {viewMode !== 'kiosk' && viewMode !== 'archive' && viewMode !== 'accounts' && viewMode !== 'careers' && viewMode !== 'interview' && viewMode !== 'developer' && viewMode !== 'register' && viewMode !== 'outstock' && viewMode !== 'pos' && authRole !== 'developer' && authRole !== 'pos' && !(typeof authRole === 'string' && authRole.startsWith('outstock_')) && (
         (!isAdminLoggedIn && !currentEmpUser && !currentBranch) || authRole === 'none' ? (
           <ErrorBoundary fallbackTitle="حدث خطأ في شاشة تسجيل الدخول">
             <LoginPage
