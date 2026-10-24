@@ -35,6 +35,20 @@ export default function PosDeliveryModal() {
     }
   }, [isDeliveryModalOpen]);
 
+  // إغلاق المودال بزر Escape
+  useEffect(() => {
+    if (!isDeliveryModalOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDeliveryModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDeliveryModalOpen, setIsDeliveryModalOpen]);
+
   if (!isDeliveryModalOpen) return null;
 
   const filteredOrders = deliveryOrders.filter((order) => {
@@ -70,16 +84,16 @@ export default function PosDeliveryModal() {
     >
       <div
         style={{
-          background: 'var(--surface, #0f172a)',
-          color: 'var(--text, #f8fafc)',
-          border: '1.5px solid rgba(139, 92, 246, 0.4)',
+          background: '#0f172a',
+          color: '#f8fafc',
+          border: '1.5px solid rgba(139, 92, 246, 0.45)',
           borderRadius: '20px',
           width: '100%',
           maxWidth: '850px',
           maxHeight: '90vh',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: '0 25px 60px -12px rgba(0, 0, 0, 0.55), 0 0 40px rgba(139, 92, 246, 0.15)',
+          boxShadow: '0 25px 60px -12px rgba(0, 0, 0, 0.75), 0 0 40px rgba(139, 92, 246, 0.25)',
           overflow: 'hidden'
         }}
         onClick={(e) => e.stopPropagation()}

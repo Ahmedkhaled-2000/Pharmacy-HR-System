@@ -267,8 +267,9 @@ export default function PosReportsCenter({ isOpen, onClose }) {
     >
       <div
         style={{
-          background: 'var(--surface, #111A28)',
-          border: '1.5px solid var(--border, rgba(255,255,255,0.12))',
+          background: '#0b1329',
+          color: '#f8fafc',
+          border: '1.5px solid rgba(13, 148, 136, 0.4)',
           borderRadius: '20px',
           width: '95%',
           maxWidth: '1240px',

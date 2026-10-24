@@ -15,6 +15,8 @@ import PosReportsCenter from './PosReportsCenter';
 import PosBranchStockModal from './PosBranchStockModal';
 import PosDeliveryModal from './PosDeliveryModal';
 import PosCustomerModal from './PosCustomerModal';
+import PosCustomerHistoryModal from './PosCustomerHistoryModal';
+import PosOwnerMultiBranchHub from './PosOwnerMultiBranchHub';
 
 function PosSystemContent() {
   const {
@@ -31,6 +33,7 @@ function PosSystemContent() {
     setIsDeliveryModalOpen,
     setIsBranchStockModalOpen,
     setIsCustomerModalOpen,
+    setIsOwnerHubOpen,
     salesWindows,
     activeWindowId,
     toggleCartItemUnit,
@@ -236,6 +239,8 @@ function PosSystemContent() {
       <PosBranchStockModal />
       <PosDeliveryModal />
       <PosCustomerModal />
+      <PosCustomerHistoryModal />
+      <PosOwnerMultiBranchHub />
 
       {/* مركز التقارير والرقابة الحصري لنظام نقاط البيع */}
       <PosReportsCenter
@@ -262,6 +267,14 @@ export default function PosSystemView({
   const terminalCode = localStorage.getItem('app_pos_terminal') || 'POS-01';
   const posBranchName = localStorage.getItem('app_pos_branch_name') || currentBranch?.name || 'الفرع الرئيسي';
 
+  // ⛔ تفعيل علم عزل اختصارات الـ POS لمنع أي تداخل مع نظام الـ HR
+  useEffect(() => {
+    window.__IS_POS_SYSTEM_ACTIVE__ = true;
+    return () => {
+      window.__IS_POS_SYSTEM_ACTIVE__ = false;
+    };
+  }, []);
+
   const handleTerminalLogout = () => {
     try {
       localStorage.removeItem('app_pos_authenticated');
@@ -279,6 +292,20 @@ export default function PosSystemView({
 
   return (
     <POSProvider>
+      <div
+        id="pos-system-shell"
+        className="pos-system-shell pos-container"
+        data-pos-system="true"
+        style={{
+          width: '100vw',
+          height: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          background: '#0b1329',
+          color: '#f8fafc'
+        }}
+      >
       {isStandalone && (
         <div
           style={{
@@ -384,7 +411,8 @@ export default function PosSystemView({
           </div>
         </div>
       )}
-      <PosSystemContent />
+        <PosSystemContent />
+      </div>
     </POSProvider>
   );
 }

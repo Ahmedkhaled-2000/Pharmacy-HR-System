@@ -56,9 +56,9 @@ export default function PosMultiWindowManager() {
       const deltaX = e.clientX - dragState.startX;
       const deltaY = e.clientY - dragState.startY;
 
-      // سحب حر 360 درجة مع ضمان بقاء شريط العنوان مرئياً دائماً في أعلى الشاشة
-      const newX = Math.max(0, Math.min(window.innerWidth - 300, dragState.origX - deltaX));
-      const newY = Math.max(34, Math.min(window.innerHeight - 80, dragState.origY + deltaY));
+      // سحب حر 360 درجة في كامل محيط الشاشة بسلاسة مطلقة
+      const newX = Math.max(10, Math.min(window.innerWidth - 120, dragState.origX + deltaX));
+      const newY = Math.max(10, Math.min(window.innerHeight - 60, dragState.origY + deltaY));
 
       updateWindowPosition(dragState.windowId, { x: newX, y: newY });
     };
@@ -98,8 +98,7 @@ export default function PosMultiWindowManager() {
     if (!resizeState) return;
 
     const handleMouseMove = (e) => {
-      // بما أن المقبض في الجهة اليسرى السفلية باللغة العربية (RTL):
-      const deltaX = resizeState.startX - e.clientX;
+      const deltaX = e.clientX - resizeState.startX;
       const deltaY = e.clientY - resizeState.startY;
 
       const newW = Math.max(750, Math.min(window.innerWidth - 40, resizeState.origW + deltaX));
@@ -132,6 +131,64 @@ export default function PosMultiWindowManager() {
     <>
       {/* ── لوحة النوافذ العائمة المنبثقة (Floating Windows Canvas) ── */}
       <div className="pos-floating-windows-canvas">
+        {salesWindows.length === 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '16px',
+              direction: 'rtl',
+              zIndex: 5
+            }}
+          >
+            <div
+              style={{
+                background: 'rgba(15, 23, 42, 0.88)',
+                border: '1.5px dashed rgba(13, 148, 136, 0.45)',
+                borderRadius: '24px',
+                padding: '36px 48px',
+                textAlign: 'center',
+                boxShadow: '0 25px 60px rgba(0,0,0,0.6)',
+                backdropFilter: 'blur(16px)',
+                maxWidth: '480px'
+              }}
+            >
+              <div style={{ fontSize: '42px', marginBottom: '8px' }}>🛒</div>
+              <h3 style={{ fontSize: '20px', fontWeight: 900, color: '#ffffff', margin: '0 0 8px' }}>
+                لا توجد شاشات بيع مفتوحة حالياً
+              </h3>
+              <p style={{ fontSize: '13px', color: '#94a3b8', margin: '0 0 20px', lineHeight: 1.6 }}>
+                تم إغلاق شاشات البيع بنجاح. يمكنك فتح شاشة بيع جديدة في أي لحظة أو التنقل عبر الشريط العلوي.
+              </p>
+              <button
+                type="button"
+                onClick={() => openNewSalesWindow()}
+                style={{
+                  background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '12px',
+                  padding: '12px 28px',
+                  fontSize: '14px',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  boxShadow: '0 8px 24px rgba(13, 148, 136, 0.4)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                <Plus size={18} />
+                <span>فتح شاشة بيع جديدة [F1]</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {salesWindows.map((win) => {
           if (win.isMinimized) return null;
 
@@ -148,7 +205,7 @@ export default function PosMultiWindowManager() {
             ? { zIndex: win.zIndex }
             : {
                 top: `${win.position.y}px`,
-                right: `${win.position.x}px`,
+                left: `${win.position.x}px`,
                 width: `${win.size.width}px`,
                 height: `${win.size.height}px`,
                 zIndex: win.zIndex

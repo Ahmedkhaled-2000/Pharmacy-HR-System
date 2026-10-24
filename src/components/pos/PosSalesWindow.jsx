@@ -58,7 +58,8 @@ export default function PosSalesWindow({ windowId }) {
     setActiveSubstituteTarget,
     openBranchStockModal,
     setIsDeliveryModalOpen,
-    setIsCustomerModalOpen
+    setIsCustomerModalOpen,
+    openCustomerHistoryModal
   } = usePOS();
 
   const currentWindow = salesWindows.find((w) => w.id === windowId);
@@ -82,6 +83,49 @@ export default function PosSalesWindow({ windowId }) {
   // الخصم المزدوج (نسبة مئوية % أم مبلغ قطعي ج.م)
   const [discountType, setDiscountType] = useState('fixed'); // 'fixed' | 'percent'
   const [discountValue, setDiscountValue] = useState(0);
+  const [useWallet, setUseWallet] = useState(false);
+
+  // ── 0. حساب إجماليات السلة والخصم والمحفظة والضرائب في أعلى المكون (منع خطأ TDZ تماماً) ──
+  const subtotal = useMemo(() => {
+    return cart.reduce((sum, it) => sum + (it.lineTotal || 0), 0);
+  }, [cart]);
+
+  const totalCommissions = useMemo(() => {
+    return cart.reduce((sum, it) => sum + (it.instantCommission || 0), 0);
+  }, [cart]);
+
+  const calculatedDiscount = useMemo(() => {
+    const val = parseFloat(discountValue) || 0;
+    if (discountType === 'percent') {
+      return Math.min(subtotal, (subtotal * (Math.min(100, Math.max(0, val)) / 100)));
+    }
+    return Math.min(subtotal, Math.max(0, val));
+  }, [discountType, discountValue, subtotal]);
+
+  const deliveryFee = deliveryDetails.isDelivery ? (parseFloat(deliveryDetails.deliveryFee) || 0) : 0;
+  const remainingBeforeWallet = Math.max(0, subtotal - calculatedDiscount + deliveryFee);
+  const availableWallet = Math.max(0, parseFloat(customer?.walletBalance || 0));
+  const walletDeducted = useWallet ? Math.min(availableWallet, remainingBeforeWallet) : 0;
+  const netTotal = Math.max(0, remainingBeforeWallet - walletDeducted);
+
+  // فتح نافذة الدفع
+  const handleOpenPayment = useCallback((method = 'cash') => {
+    if (cart.length === 0) return;
+    setActivePaymentSale({
+      windowId,
+      cart,
+      subtotal,
+      discountAmount: calculatedDiscount,
+      walletDeducted,
+      totalAmount: netTotal,
+      customer,
+      invoiceType,
+      rxImage,
+      deliveryDetails,
+      paymentMethod: method
+    });
+    setIsPaymentModalOpen(true);
+  }, [cart, windowId, subtotal, calculatedDiscount, walletDeducted, netTotal, customer, invoiceType, rxImage, deliveryDetails, setActivePaymentSale, setIsPaymentModalOpen]);
 
   // إبقاء مؤشر الكتابة داخل حقل الباركود دائماً عند تنشيط النافذة
   useEffect(() => {
@@ -115,7 +159,7 @@ export default function PosSalesWindow({ windowId }) {
     return () => window.removeEventListener('paste', handlePaste);
   }, [activeWindowId, windowId, updateWindowRxImage]);
 
-  // ── 2. اختصارات لوحة المفاتيح الخاصة بالنافذة (Ctrl+1, Ctrl+2, Ctrl+3, Ctrl+4, F5, F6) ──
+  // ── 2. اختصارات لوحة المفاتيح الخاصة بالنافذة (Ctrl+1..4, F5, F6) ──
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (activeWindowId !== windowId) return;
@@ -144,7 +188,7 @@ export default function PosSalesWindow({ windowId }) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeWindowId, windowId, updateWindowInvoiceType, cart, subtotal]);
+  }, [activeWindowId, windowId, updateWindowInvoiceType, handleOpenPayment]);
 
   // ── 3. البحث الفوري الثنائي (محلياً + من قاعدة بيانات Outstock السحابية) ──
   useEffect(() => {
@@ -218,7 +262,7 @@ export default function PosSalesWindow({ windowId }) {
     if (barcodeInputRef.current) barcodeInputRef.current.focus();
   };
 
-  // معالجة مفاتيح الكيبورد داخل حقل البحث (Zero-Mouse Navigation)
+  // معالجة مفاتيح الكيبورد داخل حقل البحث (Zero-Mouse Navigation بالأسهم و Tab و Enter و Esc)
   const handleSearchKeyDown = (e) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -234,6 +278,16 @@ export default function PosSalesWindow({ windowId }) {
         scrollSelectedIntoView(next);
         return next;
       });
+    } else if (e.key === 'Tab') {
+      if (searchResults.length > 0) {
+        e.preventDefault();
+        const delta = e.shiftKey ? -1 : 1;
+        setSelectedResultIndex((prev) => {
+          const next = (prev + delta + searchResults.length) % searchResults.length;
+          scrollSelectedIntoView(next);
+          return next;
+        });
+      }
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (searchResults.length > 0 && searchResults[selectedResultIndex]) {
@@ -248,6 +302,7 @@ export default function PosSalesWindow({ windowId }) {
         }
       }
     } else if (e.key === 'Escape') {
+      e.preventDefault();
       setSearchQuery('');
       setSearchResults([]);
     }
@@ -265,39 +320,6 @@ export default function PosSalesWindow({ windowId }) {
   const drugInteractions = useMemo(() => {
     return detectCartDrugInteractions(cart);
   }, [cart]);
-
-  // ── 5. إجماليات السلة وحساب الخصم المزدوج (% أو ج.م) ──
-  const subtotal = cart.reduce((sum, it) => sum + (it.lineTotal || 0), 0);
-  const totalCommissions = cart.reduce((sum, it) => sum + (it.instantCommission || 0), 0);
-
-  const calculatedDiscount = useMemo(() => {
-    const val = parseFloat(discountValue) || 0;
-    if (discountType === 'percent') {
-      return Math.min(subtotal, (subtotal * (Math.min(100, Math.max(0, val)) / 100)));
-    }
-    return Math.min(subtotal, Math.max(0, val));
-  }, [discountType, discountValue, subtotal]);
-
-  const deliveryFee = deliveryDetails.isDelivery ? (parseFloat(deliveryDetails.deliveryFee) || 0) : 0;
-  const netTotal = Math.max(0, subtotal - calculatedDiscount + deliveryFee);
-
-  // فتح نافذة الدفع
-  const handleOpenPayment = (method = 'cash') => {
-    if (cart.length === 0) return;
-    setActivePaymentSale({
-      windowId,
-      cart,
-      subtotal,
-      discountAmount: calculatedDiscount,
-      totalAmount: netTotal,
-      customer,
-      invoiceType,
-      rxImage,
-      deliveryDetails,
-      paymentMethod: method
-    });
-    setIsPaymentModalOpen(true);
-  };
 
   // فحص البدائل للصنف
   const handleInspectSubstitutes = (item) => {
@@ -752,29 +774,56 @@ export default function PosSalesWindow({ windowId }) {
       {/* ── الجانب الأيسر: بيانات العميل والروشتة والإجماليات والدفع ── */}
       <div className="pos-checkout-sidebar">
         {/* بطاقة العميل والمحفظة */}
-        <div style={{ background: 'var(--surface, #ffffff)', padding: '12px', borderRadius: '12px', border: '1px solid var(--border, #cbd5e1)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--muted, #475569)' }}>
+        <div style={{ background: 'var(--surface-hover, rgba(255,255,255,0.04))', padding: '14px', borderRadius: '14px', border: '1px solid var(--border, rgba(255,255,255,0.1))' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <span style={{ fontSize: '12.5px', fontWeight: 900, color: 'var(--text, #ffffff)', display: 'flex', alignItems: 'center', gap: '5px' }}>
               👤 بيانات العميل والمحفظة
             </span>
-            <button
-              type="button"
-              onClick={() => setIsCustomerModalOpen(true)}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--primary, #0d9488)',
-                fontSize: '11.5px',
-                fontWeight: 800,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '2px'
-              }}
-            >
-              <UserPlus size={13} />
-              + عميل جديد
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {customer.name && (
+                <button
+                  type="button"
+                  onClick={() => openCustomerHistoryModal(customer)}
+                  style={{
+                    background: 'rgba(56, 189, 248, 0.15)',
+                    border: '1px solid rgba(56, 189, 248, 0.35)',
+                    color: '#38bdf8',
+                    padding: '3px 8px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '3px'
+                  }}
+                  title="عرض سجل مشتريات وفواتير العميل السابقة والروشتات والمحفظة"
+                >
+                  <FileText size={12} />
+                  📜 سجل العميل
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsCustomerModalOpen(true)}
+                style={{
+                  background: 'rgba(13, 148, 136, 0.15)',
+                  border: '1px solid var(--primary, #0d9488)',
+                  color: 'var(--primary, #0d9488)',
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px'
+                }}
+              >
+                <UserPlus size={12} />
+                + عميل جديد
+              </button>
+            </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -784,46 +833,88 @@ export default function PosSalesWindow({ windowId }) {
               value={customer.name}
               onChange={(e) => updateWindowCustomer(windowId, { name: e.target.value })}
               style={{
-                padding: '7px 10px',
+                padding: '8px 10px',
                 borderRadius: '8px',
-                border: '1px solid var(--border, #cbd5e1)',
+                border: '1px solid var(--border, rgba(255,255,255,0.12))',
+                background: 'var(--surface, #0f172a)',
+                color: 'var(--text, #ffffff)',
                 fontSize: '12px'
               }}
             />
 
             <input
               type="tel"
-              placeholder="رقم الهاتف (11 رقم لجلب المحفظة)..."
+              placeholder="رقم الهاتف (11 رقم لجلب العميل والمحفظة)..."
               value={customer.phone}
               onChange={(e) => handlePhoneLookup(e.target.value)}
               style={{
-                padding: '7px 10px',
+                padding: '8px 10px',
                 borderRadius: '8px',
-                border: '1px solid var(--border, #cbd5e1)',
+                border: '1px solid var(--border, rgba(255,255,255,0.12))',
+                background: 'var(--surface, #0f172a)',
+                color: 'var(--text, #ffffff)',
                 fontSize: '12px'
               }}
             />
 
-            {/* شارة رصيد المحفظة إن وجد */}
-            {customer.walletBalance > 0 && (
+            {/* إذا كان الرقم مدخلاً والعميل غير مسجل */}
+            {!customer.name && customer.phone && customer.phone.replace(/\D/g, '').length >= 10 && (
+              <button
+                type="button"
+                onClick={() => setIsCustomerModalOpen(true)}
+                style={{
+                  padding: '7px 10px',
+                  borderRadius: '8px',
+                  background: 'rgba(245, 158, 11, 0.12)',
+                  border: '1px dashed #f59e0b',
+                  color: '#fbbf24',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '5px'
+                }}
+              >
+                <UserPlus size={13} />
+                هاتف غير مسجل! انقر لإضافة العميل للقاعدة المركزية
+              </button>
+            )}
+
+            {/* شارة رصيد المحفظة مع إمكانية الدفع منها */}
+            {availableWallet > 0 && (
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  padding: '6px 10px',
+                  padding: '8px 10px',
                   borderRadius: '8px',
-                  background: 'rgba(16,185,129,0.12)',
-                  border: '1px solid rgba(16,185,129,0.3)',
-                  fontSize: '11.5px'
+                  background: useWallet ? 'rgba(16,185,129,0.2)' : 'rgba(16,185,129,0.08)',
+                  border: useWallet ? '1.5px solid #10b981' : '1px solid rgba(16,185,129,0.3)',
+                  fontSize: '11.5px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
                 }}
+                onClick={() => setUseWallet((prev) => !prev)}
               >
-                <span style={{ color: '#059669', fontWeight: 700 }}>💰 رصيد المحفظة متاح:</span>
-                <span style={{ fontWeight: 900, color: '#059669' }}>{customer.walletBalance.toFixed(2)} ج.م</span>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', margin: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={useWallet}
+                    onChange={(e) => setUseWallet(e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <span style={{ color: '#10b981', fontWeight: 800 }}>💰 سداد من المحفظة ({availableWallet.toFixed(2)} ج)</span>
+                </label>
+                <span style={{ fontWeight: 900, color: useWallet ? '#10b981' : '#94a3b8' }}>
+                  {useWallet ? `-${walletDeducted.toFixed(2)} ج` : 'غير مفعل'}
+                </span>
               </div>
             )}
 
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', cursor: 'pointer' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', cursor: 'pointer', color: 'var(--muted, #94a3b8)' }}>
               <input
                 type="checkbox"
                 checked={customer.isChronic}
@@ -831,21 +922,50 @@ export default function PosSalesWindow({ windowId }) {
               />
               <span>تفعيل متابعة العلاج المزمن وتذكير الواتساب</span>
             </label>
+
+            {/* زر تحويل الفاتورة لدليفري أو العكس */}
+            <button
+              type="button"
+              onClick={() => {
+                const nextType = invoiceType === 'delivery' ? 'otc' : 'delivery';
+                updateWindowInvoiceType(windowId, nextType);
+                updateWindowDeliveryDetails(windowId, { isDelivery: nextType === 'delivery' });
+              }}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                padding: '7px 12px',
+                borderRadius: '8px',
+                background: invoiceType === 'delivery' ? 'rgba(139, 92, 246, 0.22)' : 'rgba(255, 255, 255, 0.05)',
+                border: invoiceType === 'delivery' ? '1.5px solid #8b5cf6' : '1px solid rgba(255, 255, 255, 0.12)',
+                color: invoiceType === 'delivery' ? '#c4b5fd' : 'var(--text-muted, #94a3b8)',
+                fontSize: '11.5px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <Bike size={14} color={invoiceType === 'delivery' ? '#a78bfa' : '#94a3b8'} />
+              <span>{invoiceType === 'delivery' ? '✅ الفاتورة محولة لدليفري' : '🛵 تحويل الفاتورة إلى دليفري'}</span>
+            </button>
           </div>
         </div>
 
         {/* بطاقة صورة الروشتة المنسوخة (Prescription Clipboard Card) */}
         {rxImage ? (
-          <div style={{ background: 'var(--surface, #ffffff)', padding: '10px', borderRadius: '12px', border: '1px solid #38bdf8' }}>
+          <div style={{ background: 'var(--surface-hover, rgba(255,255,255,0.04))', padding: '10px', borderRadius: '12px', border: '1px solid #38bdf8' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-              <span style={{ fontSize: '11.5px', fontWeight: 800, color: '#0284c7', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ fontSize: '11.5px', fontWeight: 800, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <Image size={13} />
                 روشتة طبية مرفقة (Ctrl+V)
               </span>
               <button
                 type="button"
                 onClick={() => updateWindowRxImage(windowId, null)}
-                style={{ background: 'transparent', border: 'none', color: '#dc2626', cursor: 'pointer', padding: 0 }}
+                style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0 }}
                 title="حذف الروشتة"
               >
                 <Trash2 size={13} />
@@ -853,7 +973,7 @@ export default function PosSalesWindow({ windowId }) {
             </div>
             <div style={{ position: 'relative', height: '70px', borderRadius: '6px', overflow: 'hidden', cursor: 'pointer' }} onClick={() => setIsRxImageZoomed(true)}>
               <img src={rxImage} alt="Prescription" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '11px', fontWeight: 700 }}>
+              <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '11px', fontWeight: 700 }}>
                 <Eye size={14} style={{ marginLeft: '4px' }} /> تكبير
               </div>
             </div>
@@ -863,10 +983,10 @@ export default function PosSalesWindow({ windowId }) {
             style={{
               padding: '8px 10px',
               borderRadius: '8px',
-              border: '1px dashed var(--border, #cbd5e1)',
-              background: 'rgba(0,0,0,0.02)',
+              border: '1px dashed var(--border, rgba(255,255,255,0.15))',
+              background: 'rgba(255,255,255,0.02)',
               fontSize: '11px',
-              color: 'var(--muted, #64748b)',
+              color: 'var(--muted, #94a3b8)',
               textAlign: 'center'
             }}
           >
@@ -876,8 +996,8 @@ export default function PosSalesWindow({ windowId }) {
 
         {/* قسم الدليفري والتوصيل */}
         {invoiceType === 'delivery' && (
-          <div style={{ background: 'rgba(139, 92, 246, 0.08)', padding: '10px', borderRadius: '12px', border: '1px solid rgba(139, 92, 246, 0.3)' }}>
-            <div style={{ fontSize: '11.5px', fontWeight: 800, color: '#7c3aed', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <div style={{ background: 'rgba(139, 92, 246, 0.1)', padding: '10px', borderRadius: '12px', border: '1px solid rgba(139, 92, 246, 0.35)' }}>
+            <div style={{ fontSize: '11.5px', fontWeight: 800, color: '#a78bfa', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <Bike size={14} />
               تفاصيل التوصيل (دليفري)
             </div>
@@ -886,7 +1006,7 @@ export default function PosSalesWindow({ windowId }) {
               placeholder="عنوان العميل بالتفصيل..."
               value={deliveryDetails.address}
               onChange={(e) => updateWindowDeliveryDetails(windowId, { address: e.target.value, isDelivery: true })}
-              style={{ width: '100%', padding: '5px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11.5px', marginBottom: '6px', boxSizing: 'border-box' }}
+              style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', background: 'var(--surface, #0f172a)', color: '#fff', fontSize: '11.5px', marginBottom: '6px', boxSizing: 'border-box' }}
             />
             <div style={{ display: 'flex', gap: '6px' }}>
               <input
@@ -894,14 +1014,14 @@ export default function PosSalesWindow({ windowId }) {
                 placeholder="اسم الطيار..."
                 value={deliveryDetails.pilotName}
                 onChange={(e) => updateWindowDeliveryDetails(windowId, { pilotName: e.target.value, isDelivery: true })}
-                style={{ flex: 1, padding: '5px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11.5px' }}
+                style={{ flex: 1, padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', background: 'var(--surface, #0f172a)', color: '#fff', fontSize: '11.5px' }}
               />
               <input
                 type="number"
                 placeholder="التوصيل ج.م"
                 value={deliveryDetails.deliveryFee || ''}
                 onChange={(e) => updateWindowDeliveryDetails(windowId, { deliveryFee: parseFloat(e.target.value) || 0, isDelivery: true })}
-                style={{ width: '70px', padding: '5px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11.5px' }}
+                style={{ width: '75px', padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', background: 'var(--surface, #0f172a)', color: '#fff', fontSize: '11.5px' }}
               />
             </div>
           </div>
@@ -924,8 +1044,9 @@ export default function PosSalesWindow({ windowId }) {
                 style={{
                   padding: '1px 6px',
                   borderRadius: '4px',
-                  background: 'var(--surface-hover, #f1f5f9)',
-                  border: '1px solid var(--border, #cbd5e1)',
+                  background: 'var(--surface-hover, rgba(255,255,255,0.1))',
+                  border: '1px solid var(--border, rgba(255,255,255,0.15))',
+                  color: 'var(--text, #ffffff)',
                   fontSize: '11px',
                   fontWeight: 800,
                   cursor: 'pointer'
@@ -947,13 +1068,15 @@ export default function PosSalesWindow({ windowId }) {
                   width: '65px',
                   textAlign: 'left',
                   padding: '2px 6px',
-                  border: '1px solid var(--border, #cbd5e1)',
+                  border: '1px solid var(--border, rgba(255,255,255,0.15))',
+                  background: 'var(--surface, #0f172a)',
+                  color: '#fff',
                   borderRadius: '6px',
                   fontSize: '12px'
                 }}
               />
               {calculatedDiscount > 0 && (
-                <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: 700 }}>
+                <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 700 }}>
                   (-{calculatedDiscount.toFixed(2)} ج)
                 </span>
               )}
@@ -961,9 +1084,16 @@ export default function PosSalesWindow({ windowId }) {
           </div>
 
           {deliveryFee > 0 && (
-            <div className="pos-total-row" style={{ color: '#7c3aed' }}>
+            <div className="pos-total-row" style={{ color: '#a78bfa' }}>
               <span>خدمة التوصيل:</span>
               <span>+{deliveryFee.toFixed(2)} ج</span>
+            </div>
+          )}
+
+          {walletDeducted > 0 && (
+            <div className="pos-total-row" style={{ color: '#10b981' }}>
+              <span>خصم من رصيد المحفظة:</span>
+              <span>-{walletDeducted.toFixed(2)} ج</span>
             </div>
           )}
 
@@ -973,7 +1103,7 @@ export default function PosSalesWindow({ windowId }) {
                 <Zap size={12} />
                 عمولة الكاشير اللحظية
               </span>
-              <span style={{ fontWeight: 800, color: '#059669', fontSize: '13px' }}>
+              <span style={{ fontWeight: 800, color: '#10b981', fontSize: '13px' }}>
                 +{totalCommissions.toFixed(2)} ج
               </span>
             </div>

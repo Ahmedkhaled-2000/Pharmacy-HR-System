@@ -147,9 +147,9 @@ export default function PosBranchStockModal() {
     >
       <div
         style={{
-          background: 'var(--surface, #0f172a)',
-          color: 'var(--text, #f8fafc)',
-          border: '1.5px solid rgba(13, 148, 136, 0.4)',
+          background: '#0f172a',
+          color: '#f8fafc',
+          border: '1.5px solid rgba(13, 148, 136, 0.45)',
           borderRadius: '20px',
           width: '100%',
           maxWidth: '740px',

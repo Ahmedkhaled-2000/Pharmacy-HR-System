@@ -109,6 +109,22 @@ export default function UniversalShortcutsController() {
 
     // ── Universal Keyboard Shortcuts Engine (Capture Phase) ─────────────────────
     const handleGlobalKeyDown = (e) => {
+      // ⛔ عزل فوري وكامل لنظام نقاط البيع (POS Isolation Guard)
+      // إذا كان المستخدم داخل شاشة الـ POS، يتم ترك معالجة الاختصارات بالكامل لنظام الـ POS
+      // لمنع تداخل F1 و F2 و F4 و F7 و F9 و Esc مع اختصارات نظام الـ HR
+      const isPosScreen =
+        window.__IS_POS_SYSTEM_ACTIVE__ ||
+        Boolean(document.getElementById('pos-system-shell')) ||
+        Boolean(document.querySelector('.pos-system-shell, .pos-dashboard-container, [data-pos-system="true"], .pos-floating-windows-canvas')) ||
+        window.location.pathname.startsWith('/pos') ||
+        window.location.hash.includes('pos') ||
+        localStorage.getItem('app_view_mode') === 'pos' ||
+        localStorage.getItem('app_auth_role') === 'pos';
+
+      if (isPosScreen) {
+        return;
+      }
+
       const currentList = shortcutsRef.current || [];
       const getDef = (id) => currentList.find((s) => s.id === id);
 

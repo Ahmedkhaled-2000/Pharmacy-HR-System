@@ -164,30 +164,15 @@ export function POSProvider({ children }) {
     return newId;
   }, [salesWindows]);
 
-  // إغلاق نافذة بيع
+  // إغلاق نافذة بيع (مع السماح بإغلاق كافة النوافذ بحرية تامة دون إجبار)
   const closeSalesWindow = useCallback((windowId) => {
     setSalesWindows((prev) => {
       const filtered = prev.filter((w) => w.id !== windowId);
       if (filtered.length === 0) {
-        // إذا أغلقت كل النوافذ، نفتح تلقائياً نافذة بيع جديدة فارغة
-        const fallbackId = `win-${Date.now()}`;
-        return [
-          {
-            id: fallbackId,
-            title: 'شاشة بيع رئيسية #1',
-            invoiceType: 'otc',
-            rxImage: null,
-            deliveryDetails: { isDelivery: false, address: '', pilotName: '', deliveryFee: 0 },
-            cart: [],
-            customer: { name: '', phone: '', isChronic: false, walletBalance: 0 },
-            position: { x: 30, y: 30 },
-            size: { width: 920, height: 600 },
-            isMinimized: false,
-            isMaximized: false,
-            zIndex: 10
-          }
-        ];
+        setActiveWindowId(null);
+        return [];
       }
+      setActiveWindowId(filtered[filtered.length - 1].id);
       return filtered;
     });
   }, []);
@@ -508,6 +493,18 @@ export function POSProvider({ children }) {
   const [isShortcutsGuideOpen, setIsShortcutsGuideOpen] = useState(false);
   const [isReportsModalOpen, setIsReportsModalOpen] = useState(false);
 
+  // مودال سجل العميل والمشتريات السابقة والمحفظة (Customer Purchase History & Wallet Modal)
+  const [isCustomerHistoryOpen, setIsCustomerHistoryOpen] = useState(false);
+  const [customerHistoryTarget, setCustomerHistoryTarget] = useState(null);
+
+  const openCustomerHistoryModal = useCallback((customerObj) => {
+    setCustomerHistoryTarget(customerObj);
+    setIsCustomerHistoryOpen(true);
+  }, []);
+
+  // شاشة ورادار المالك لمتابعة كافة الفروع (Owner Multi-Branch POS Hub)
+  const [isOwnerHubOpen, setIsOwnerHubOpen] = useState(false);
+
   // إحصائيات المزامنة الحية
   const [pendingSyncCount, setPendingSyncCount] = useState(() => getLocalOutbox().length);
 
@@ -580,6 +577,12 @@ export function POSProvider({ children }) {
     setIsShortcutsGuideOpen,
     isReportsModalOpen,
     setIsReportsModalOpen,
+    isCustomerHistoryOpen,
+    setIsCustomerHistoryOpen,
+    customerHistoryTarget,
+    openCustomerHistoryModal,
+    isOwnerHubOpen,
+    setIsOwnerHubOpen,
     pendingSyncCount
   };
 
