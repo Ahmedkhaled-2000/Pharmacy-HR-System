@@ -20,7 +20,8 @@ import {
   FileSpreadsheet,
   CheckCircle2,
   DollarSign,
-  BarChart3
+  BarChart3,
+  Bike
 } from 'lucide-react';
 
 export default function PosDashboard() {
@@ -36,6 +37,7 @@ export default function PosDashboard() {
     setIsOcrModalOpen,
     setIsShortcutsGuideOpen,
     setIsReportsModalOpen,
+    setIsDeliveryModalOpen,
     pendingSyncCount
   } = usePOS();
 
@@ -265,6 +267,21 @@ export default function PosDashboard() {
               <div style={{ fontSize: '10.5px', color: 'var(--muted, #475569)' }}>تقارير X و Z واليومية وحركة الأصناف</div>
             </div>
             <BarChart3 size={18} color="#0d9488" />
+          </button>
+
+          {/* F7: طلبات الدليفري والتوصيل */}
+          <button
+            type="button"
+            className="pos-shortcut-btn"
+            onClick={() => setIsDeliveryModalOpen(true)}
+            style={{ borderColor: 'rgba(139, 92, 246, 0.4)', background: 'rgba(139, 92, 246, 0.05)' }}
+          >
+            <span className="pos-shortcut-key-badge" style={{ background: '#7c3aed' }}>F7</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: '13px' }}>طلبات الدليفري والتوصيل</div>
+              <div style={{ fontSize: '10.5px', color: 'var(--muted, #475569)' }}>تتبع الطيارين وفواتير التوصيل</div>
+            </div>
+            <Bike size={18} color="#8b5cf6" />
           </button>
 
           {/* F9: مرتجع الفاتورة */}

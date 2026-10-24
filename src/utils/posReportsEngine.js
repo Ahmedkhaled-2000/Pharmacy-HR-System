@@ -96,6 +96,7 @@ export function calculateDailySalesJournal(sales = [], filterParams = {}) {
       if (filterParams.branchId && filterParams.branchId !== 'all' && s.branchId !== filterParams.branchId) return false;
       if (filterParams.cashierEmpCode && filterParams.cashierEmpCode !== 'all' && s.cashierEmpCode !== filterParams.cashierEmpCode) return false;
       if (filterParams.paymentMethod && filterParams.paymentMethod !== 'all' && s.paymentMethod !== filterParams.paymentMethod) return false;
+      if (filterParams.invoiceType && filterParams.invoiceType !== 'all' && (s.invoiceType || 'otc') !== filterParams.invoiceType) return false;
       if (filterParams.dateFrom && s.createdAt && s.createdAt.slice(0, 10) < filterParams.dateFrom) return false;
       if (filterParams.dateTo && s.createdAt && s.createdAt.slice(0, 10) > filterParams.dateTo) return false;
       if (filterParams.search) {
@@ -103,7 +104,8 @@ export function calculateDailySalesJournal(sales = [], filterParams = {}) {
         const num = String(s.invoiceNumber || '').toLowerCase();
         const cust = String(s.customerName || '').toLowerCase();
         const phone = String(s.customerPhone || '').toLowerCase();
-        if (!num.includes(q) && !cust.includes(q) && !phone.includes(q)) return false;
+        const type = String(s.invoiceType || 'otc').toLowerCase();
+        if (!num.includes(q) && !cust.includes(q) && !phone.includes(q) && !type.includes(q)) return false;
       }
       return true;
     })
@@ -112,6 +114,13 @@ export function calculateDailySalesJournal(sales = [], filterParams = {}) {
       const discount = parseFloat(s.discountAmount || 0);
       const total = parseFloat(s.totalAmount || s.netTotal || 0);
       const profit = parseFloat(s.actualGrossProfit || (total * 0.22)); // تقدير ربح إن لم يكن مسجلاً
+      const invoiceType = s.invoiceType || 'otc';
+      const invoiceTypeLabel = {
+        otc: '🟢 OTC (لا وصفية)',
+        rx: '💊 روشتة (Rx)',
+        customer_order: '📋 طلب عميل',
+        delivery: '🛵 دليفري'
+      }[invoiceType] || '🟢 OTC';
 
       return {
         id: s.id || s.invoiceNumber,
@@ -126,6 +135,8 @@ export function calculateDailySalesJournal(sales = [], filterParams = {}) {
         discountAmount: discount,
         netTotal: total,
         paymentMethod: s.paymentMethod || 'cash',
+        invoiceType,
+        invoiceTypeLabel,
         grossProfit: profit,
         isChronic: Boolean(s.isChronic),
         deliveryPilotName: s.deliveryPilotName || null,

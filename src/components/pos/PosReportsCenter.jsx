@@ -13,6 +13,7 @@ import {
   formatThermalShiftReport
 } from '../../utils/posReportsEngine';
 import { getLocalAuditLogs } from '../../utils/posAuditLogger';
+import { printPosSaleReceipt } from '../../utils/posPrintService';
 import {
   FileText,
   Clock,
@@ -31,7 +32,10 @@ import {
   AlertTriangle,
   X,
   Sparkles,
-  Zap
+  Zap,
+  Eye,
+  Pill,
+  Truck
 } from 'lucide-react';
 
 export default function PosReportsCenter({ isOpen, onClose }) {
@@ -42,6 +46,7 @@ export default function PosReportsCenter({ isOpen, onClose }) {
   const [activeTab, setActiveTab] = useState('shifts'); // 'shifts' | 'sales' | 'items' | 'traffic' | 'security' | 'returns' | 'kpis'
   const [selectedBranch, setSelectedBranch] = useState(currentBranch?.id || 'all');
   const [selectedCashier, setSelectedCashier] = useState('all');
+  const [selectedInvoiceType, setSelectedInvoiceType] = useState('all');
   const [dateFilter, setDateFilter] = useState('today'); // 'today' | 'yesterday' | 'week' | 'month' | 'custom'
   const [customFrom, setCustomFrom] = useState(() => new Date().toISOString().slice(0, 10));
   const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
@@ -50,6 +55,9 @@ export default function PosReportsCenter({ isOpen, onClose }) {
 
   // نافذة معاينة الطباعة الحرارية 80mm
   const [thermalPreviewText, setThermalPreviewText] = useState(null);
+
+  // نافذة فحص تفاصيل وبنود الفاتورة المحددة (مع أنواع كل صنف)
+  const [selectedInvoiceDetail, setSelectedInvoiceDetail] = useState(null);
 
   // تحميل البيانات الحية من التخزين المحلي
   const allSales = useMemo(() => {
@@ -99,11 +107,12 @@ export default function PosReportsCenter({ isOpen, onClose }) {
     return {
       branchId: selectedBranch,
       cashierEmpCode: selectedCashier,
+      invoiceType: selectedInvoiceType,
       dateFrom,
       dateTo,
       search: searchQuery.trim()
     };
-  }, [selectedBranch, selectedCashier, dateFilter, customFrom, customTo, searchQuery]);
+  }, [selectedBranch, selectedCashier, selectedInvoiceType, dateFilter, customFrom, customTo, searchQuery]);
 
   // حسابات التقارير المختلفة
   const shiftReportData = useMemo(() => {
@@ -165,6 +174,7 @@ export default function PosReportsCenter({ isOpen, onClose }) {
           columns: [
             { header: 'رقم الفاتورة', key: 'invoiceNumber', width: 16 },
             { header: 'الوقت', key: 'time', width: 14 },
+            { header: 'نوع الفاتورة', key: 'invoiceTypeLabel', width: 18 },
             { header: 'كود البائع', key: 'cashierEmpCode', width: 14 },
             { header: 'اسم الصيدلي', key: 'cashierEmpName', width: 22 },
             { header: 'اسم العميل', key: 'customerName', width: 20 },
@@ -404,6 +414,29 @@ export default function PosReportsCenter({ isOpen, onClose }) {
               <option value="week">آخر 7 أيام</option>
               <option value="month">الشهر الحالي</option>
               <option value="custom">فترة مخصصة</option>
+            </select>
+          </div>
+
+          {/* اختيار نوع الفاتورة */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '13px' }}>🏷️</span>
+            <select
+              value={selectedInvoiceType}
+              onChange={(e) => setSelectedInvoiceType(e.target.value)}
+              style={{
+                background: 'var(--surface-hover, #1a2638)',
+                color: 'var(--text, #ffffff)',
+                border: '1px solid var(--border, rgba(255,255,255,0.1))',
+                borderRadius: '8px',
+                padding: '6px 12px',
+                fontSize: '12.5px'
+              }}
+            >
+              <option value="all">كل أنواع الفواتير</option>
+              <option value="otc">🟢 OTC (أدوية لا وصفية)</option>
+              <option value="rx">💊 روشتات طبية (Rx)</option>
+              <option value="customer_order">📋 طلبات عملاء خاصة</option>
+              <option value="delivery">🛵 توصيل منازل (دليفري)</option>
             </select>
           </div>
 
@@ -650,52 +683,116 @@ export default function PosReportsCenter({ isOpen, onClose }) {
                     <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                       <th style={{ padding: '10px 14px', color: '#94a3b8' }}>رقم الفاتورة</th>
                       <th style={{ padding: '10px 14px', color: '#94a3b8' }}>التوقيت</th>
+                      <th style={{ padding: '10px 14px', color: '#94a3b8', textAlign: 'center' }}>نوع الفاتورة</th>
                       <th style={{ padding: '10px 14px', color: '#94a3b8' }}>البائع (الموظف)</th>
                       <th style={{ padding: '10px 14px', color: '#94a3b8' }}>العميل</th>
                       <th style={{ padding: '10px 14px', color: '#94a3b8', textAlign: 'center' }}>الأصناف</th>
                       <th style={{ padding: '10px 14px', color: '#94a3b8', textAlign: 'center' }}>طريقة الدفع</th>
                       <th style={{ padding: '10px 14px', color: '#94a3b8', textAlign: 'center' }}>الخصم</th>
                       <th style={{ padding: '10px 14px', color: '#94a3b8', textAlign: 'center' }}>الصافي</th>
+                      <th style={{ padding: '10px 14px', color: '#94a3b8', textAlign: 'center' }}>فحص وتفاصيل</th>
                     </tr>
                   </thead>
                   <tbody>
                     {dailySalesJournal.length === 0 ? (
                       <tr>
-                        <td colSpan={8} style={{ padding: '30px', textAlign: 'center', color: '#94a3b8' }}>
+                        <td colSpan={10} style={{ padding: '30px', textAlign: 'center', color: '#94a3b8' }}>
                           لا توجد فواتير مطابقة لخيارات الفرز الحالية.
                         </td>
                       </tr>
                     ) : (
-                      dailySalesJournal.map((sale) => (
-                        <tr key={sale.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                          <td style={{ padding: '10px 14px', fontWeight: 800, color: '#0d9488' }}>
-                            #{sale.invoiceNumber}
-                          </td>
-                          <td style={{ padding: '10px 14px', color: '#cbd5e1' }}>
-                            {new Date(sale.createdAt).toLocaleTimeString('ar-EG')}
-                          </td>
-                          <td style={{ padding: '10px 14px', fontWeight: 700 }}>
-                            {sale.cashierEmpName} <span style={{ fontSize: '11px', color: '#94a3b8' }}>({sale.cashierEmpCode})</span>
-                          </td>
-                          <td style={{ padding: '10px 14px' }}>
-                            {sale.customerName}
-                          </td>
-                          <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                            {sale.itemsCount} صنف
-                          </td>
-                          <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                            <span style={{ padding: '3px 8px', borderRadius: '6px', background: 'rgba(255,255,255,0.06)', fontSize: '11px' }}>
-                              {sale.paymentMethod === 'cash' ? 'نقدي' : sale.paymentMethod === 'card' ? 'فيزا' : sale.paymentMethod}
-                            </span>
-                          </td>
-                          <td style={{ padding: '10px 14px', textAlign: 'center', color: sale.discountAmount > 0 ? '#f59e0b' : '#94a3b8' }}>
-                            {sale.discountAmount > 0 ? `${sale.discountAmount.toFixed(2)} ج.م` : '-'}
-                          </td>
-                          <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 800, color: '#10b981' }}>
-                            {sale.netTotal.toFixed(2)} ج.م
-                          </td>
-                        </tr>
-                      ))
+                      dailySalesJournal.map((sale) => {
+                        const invType = sale.invoiceType || 'otc';
+                        const badgeStyle = {
+                          otc: { bg: 'rgba(16,185,129,0.15)', color: '#34d399', border: 'rgba(16,185,129,0.3)', label: '🟢 OTC لا وصفية' },
+                          rx: { bg: 'rgba(14,165,233,0.15)', color: '#38bdf8', border: 'rgba(14,165,233,0.3)', label: '💊 روشتة (Rx)' },
+                          customer_order: { bg: 'rgba(245,158,11,0.15)', color: '#fbbf24', border: 'rgba(245,158,11,0.3)', label: '📋 طلب عميل' },
+                          delivery: { bg: 'rgba(139,92,246,0.15)', color: '#c4b5fd', border: 'rgba(139,92,246,0.3)', label: '🛵 دليفري' }
+                        }[invType] || { bg: 'rgba(16,185,129,0.15)', color: '#34d399', border: 'rgba(16,185,129,0.3)', label: '🟢 OTC' };
+
+                        return (
+                          <tr
+                            key={sale.id}
+                            onClick={() => setSelectedInvoiceDetail(sale)}
+                            style={{
+                              borderBottom: '1px solid rgba(255,255,255,0.04)',
+                              cursor: 'pointer',
+                              transition: 'background 0.15s ease'
+                            }}
+                            className="pos-journal-row"
+                            title="انقر لفحص تفاصيل الفاتورة وأصنافها"
+                          >
+                            <td style={{ padding: '10px 14px', fontWeight: 800, color: '#0d9488' }}>
+                              #{sale.invoiceNumber}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#cbd5e1' }}>
+                              {new Date(sale.createdAt).toLocaleTimeString('ar-EG')}
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                              <span
+                                style={{
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  background: badgeStyle.bg,
+                                  color: badgeStyle.color,
+                                  border: `1px solid ${badgeStyle.border}`,
+                                  fontSize: '11px',
+                                  fontWeight: 800,
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                {badgeStyle.label}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', fontWeight: 700 }}>
+                              {sale.cashierEmpName} <span style={{ fontSize: '11px', color: '#94a3b8' }}>({sale.cashierEmpCode})</span>
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              {sale.customerName}
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                              {sale.itemsCount} صنف
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                              <span style={{ padding: '3px 8px', borderRadius: '6px', background: 'rgba(255,255,255,0.06)', fontSize: '11px' }}>
+                                {sale.paymentMethod === 'cash' ? 'نقدي' : sale.paymentMethod === 'card' ? 'فيزا' : sale.paymentMethod}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'center', color: sale.discountAmount > 0 ? '#f59e0b' : '#94a3b8' }}>
+                              {sale.discountAmount > 0 ? `${sale.discountAmount.toFixed(2)} ج.م` : '-'}
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 800, color: '#10b981' }}>
+                              {sale.netTotal.toFixed(2)} ج.م
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedInvoiceDetail(sale);
+                                }}
+                                style={{
+                                  padding: '4px 10px',
+                                  borderRadius: '6px',
+                                  background: 'rgba(13,148,136,0.15)',
+                                  border: '1px solid rgba(13,148,136,0.3)',
+                                  color: '#0d9488',
+                                  fontSize: '11.5px',
+                                  fontWeight: 800,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                                title="فحص أصناف وتفاصيل الفاتورة"
+                              >
+                                <Eye size={12} />
+                                فحص
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -872,6 +969,343 @@ export default function PosReportsCenter({ isOpen, onClose }) {
             </div>
           )}
         </div>
+
+        {/* ── مودال فحص تفاصيل وبنود الفاتورة وتصنيف كل صنف ── */}
+        {selectedInvoiceDetail && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0, 0, 0, 0.8)',
+              backdropFilter: 'blur(8px)',
+              zIndex: 2550,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              direction: 'rtl'
+            }}
+          >
+            <div
+              style={{
+                background: 'var(--surface, #0f172a)',
+                color: 'var(--text, #ffffff)',
+                border: '1px solid var(--border, rgba(255,255,255,0.12))',
+                borderRadius: '18px',
+                width: '94%',
+                maxWidth: '780px',
+                maxHeight: '88vh',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                boxShadow: '0 25px 60px rgba(0,0,0,0.6)'
+              }}
+            >
+              {/* ترويسة المودال */}
+              <div
+                style={{
+                  padding: '16px 20px',
+                  borderBottom: '1px solid var(--border, rgba(255,255,255,0.08))',
+                  background: 'rgba(255,255,255,0.02)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '10px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <FileText size={22} color="var(--primary, #0d9488)" />
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 900 }}>
+                      تفاصيل الفاتورة #{selectedInvoiceDetail.invoiceNumber}
+                    </h3>
+                    <div style={{ fontSize: '11px', color: 'var(--muted, #94a3b8)', marginTop: '2px' }}>
+                      {new Date(selectedInvoiceDetail.createdAt).toLocaleString('ar-EG')} • فرع: {selectedInvoiceDetail.branchName || 'الفرع الحالي'}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {/* شارة نوع الفاتورة المعتمد */}
+                  {(() => {
+                    const invType = selectedInvoiceDetail.invoiceType || 'otc';
+                    const badge = {
+                      otc: { bg: 'rgba(16,185,129,0.18)', color: '#34d399', border: 'rgba(16,185,129,0.4)', label: '🟢 فاتورة OTC (أدوية لا وصفية)' },
+                      rx: { bg: 'rgba(14,165,233,0.18)', color: '#38bdf8', border: 'rgba(14,165,233,0.4)', label: '💊 روشتة طبية (Rx Prescription)' },
+                      customer_order: { bg: 'rgba(245,158,11,0.18)', color: '#fbbf24', border: 'rgba(245,158,11,0.4)', label: '📋 طلب عميل خاص (نواقص)' },
+                      delivery: { bg: 'rgba(139,92,246,0.18)', color: '#c4b5fd', border: 'rgba(139,92,246,0.4)', label: '🛵 توصيل منازل (دليفري)' }
+                    }[invType] || { bg: 'rgba(16,185,129,0.18)', color: '#34d399', border: 'rgba(16,185,129,0.4)', label: '🟢 OTC' };
+
+                    return (
+                      <span
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '8px',
+                          background: badge.bg,
+                          color: badge.color,
+                          border: `1.5px solid ${badge.border}`,
+                          fontSize: '12px',
+                          fontWeight: 800
+                        }}
+                      >
+                        {badge.label}
+                      </span>
+                    );
+                  })()}
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedInvoiceDetail(null)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--muted, #94a3b8)',
+                      cursor: 'pointer',
+                      padding: '4px'
+                    }}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              {/* جسم المودال القابل للتمرير */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {/* شريط معلومات البائع والعميل */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                    gap: '10px',
+                    background: 'var(--surface-hover, #1a2638)',
+                    padding: '12px 16px',
+                    borderRadius: '12px',
+                    fontSize: '12px'
+                  }}
+                >
+                  <div>
+                    <span style={{ color: 'var(--muted, #94a3b8)' }}>الصيدلي المسؤول: </span>
+                    <strong style={{ color: '#fff' }}>
+                      {selectedInvoiceDetail.cashierEmpName || selectedInvoiceDetail.cashierName}
+                    </strong>
+                    {selectedInvoiceDetail.cashierEmpCode && (
+                      <span style={{ color: '#0d9488', fontWeight: 800, marginRight: '4px' }}>
+                        ({selectedInvoiceDetail.cashierEmpCode})
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--muted, #94a3b8)' }}>العميل: </span>
+                    <strong style={{ color: '#fff' }}>
+                      {selectedInvoiceDetail.customerName || 'عميل نقدي سريع'}
+                    </strong>
+                    {selectedInvoiceDetail.customerPhone && (
+                      <span style={{ color: '#94a3b8', marginRight: '6px' }}>
+                        📞 {selectedInvoiceDetail.customerPhone}
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--muted, #94a3b8)' }}>طريقة الدفع: </span>
+                    <strong style={{ color: '#fbbf24' }}>
+                      {selectedInvoiceDetail.paymentMethod === 'cash' ? 'نقدي (Cash)' : selectedInvoiceDetail.paymentMethod === 'card' ? 'بطاقة بنكية / فيزا' : selectedInvoiceDetail.paymentMethod}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* صورة الروشتة إن وجدت */}
+                {selectedInvoiceDetail.rxImage && (
+                  <div style={{ background: 'rgba(14,165,233,0.08)', border: '1px solid rgba(14,165,233,0.25)', borderRadius: '12px', padding: '12px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 800, color: '#38bdf8', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>📷 صورة الروشتة المرفقة بالفاتورة:</span>
+                    </div>
+                    <img
+                      src={selectedInvoiceDetail.rxImage}
+                      alt="Prescription"
+                      style={{ maxHeight: '160px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', objectFit: 'contain' }}
+                    />
+                  </div>
+                )}
+
+                {/* تفاصيل التوصيل إن وجدت */}
+                {selectedInvoiceDetail.deliveryDetails?.isDelivery && (
+                  <div style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.25)', borderRadius: '12px', padding: '12px', fontSize: '12px' }}>
+                    <div style={{ fontWeight: 800, color: '#c4b5fd', marginBottom: '6px' }}>🛵 بيانات التوصيل والدليفري:</div>
+                    <div style={{ color: '#cbd5e1' }}>
+                      الطيار: <strong>{selectedInvoiceDetail.deliveryDetails.pilotName || 'طيار الفرع'}</strong> • هاتف: <strong>{selectedInvoiceDetail.deliveryDetails.pilotPhone || '-'}</strong> • العنوان: <strong>{selectedInvoiceDetail.deliveryDetails.address || '-'}</strong> • خدمة التوصيل: <strong>{selectedInvoiceDetail.deliveryDetails.deliveryFee || 0} ج.م</strong>
+                    </div>
+                  </div>
+                )}
+
+                {/* جدول بنود وأصناف الفاتورة مع توضيح تصنيف كل صنف (OTC / روشتة / طلب عميل) */}
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 800, marginBottom: '8px', color: '#cbd5e1' }}>
+                    قائمة الأصناف المباعة ({selectedInvoiceDetail.items?.length || 0} صنف):
+                  </div>
+                  <div style={{ background: 'var(--surface-hover, #1a2638)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '12px' }}>
+                      <thead>
+                        <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                          <th style={{ padding: '8px 12px', color: '#94a3b8', width: '5%' }}>#</th>
+                          <th style={{ padding: '8px 12px', color: '#94a3b8' }}>الصنف الدوائي والمادة الفعالة</th>
+                          <th style={{ padding: '8px 12px', color: '#94a3b8', textAlign: 'center' }}>نوع الصنف</th>
+                          <th style={{ padding: '8px 12px', color: '#94a3b8', textAlign: 'center' }}>الوحدة</th>
+                          <th style={{ padding: '8px 12px', color: '#94a3b8', textAlign: 'center' }}>الكمية</th>
+                          <th style={{ padding: '8px 12px', color: '#94a3b8', textAlign: 'left' }}>سعر الوحدة</th>
+                          <th style={{ padding: '8px 12px', color: '#94a3b8', textAlign: 'left' }}>الإجمالي</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(selectedInvoiceDetail.items || []).map((it, idx) => {
+                          const itemType = it.itemType || selectedInvoiceDetail.invoiceType || 'otc';
+                          const itBadge = {
+                            otc: { label: '🟢 OTC لا وصفي', bg: 'rgba(16,185,129,0.15)', color: '#34d399', border: 'rgba(16,185,129,0.3)' },
+                            rx: { label: '💊 روشتة Rx', bg: 'rgba(14,165,233,0.15)', color: '#38bdf8', border: 'rgba(14,165,233,0.3)' },
+                            customer_order: { label: '📋 طلب عميل', bg: 'rgba(245,158,11,0.15)', color: '#fbbf24', border: 'rgba(245,158,11,0.3)' }
+                          }[itemType] || { label: '🟢 OTC', bg: 'rgba(16,185,129,0.15)', color: '#34d399', border: 'rgba(16,185,129,0.3)' };
+
+                          return (
+                            <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                              <td style={{ padding: '8px 12px', color: '#94a3b8', fontWeight: 700 }}>{idx + 1}</td>
+                              <td style={{ padding: '8px 12px' }}>
+                                <div style={{ fontWeight: 800, color: '#ffffff' }}>{it.tradeNameAr || it.name}</div>
+                                {it.genericName && (
+                                  <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>{it.genericName}</div>
+                                )}
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                <span
+                                  style={{
+                                    padding: '2px 8px',
+                                    borderRadius: '6px',
+                                    background: itBadge.bg,
+                                    color: itBadge.color,
+                                    border: `1px solid ${itBadge.border}`,
+                                    fontSize: '11px',
+                                    fontWeight: 800
+                                  }}
+                                >
+                                  {itBadge.label}
+                                </span>
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'center', color: '#cbd5e1' }}>
+                                {it.unitLabel || 'علبة'}
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 800, color: '#ffffff' }}>
+                                {it.quantity}
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'left', color: '#cbd5e1' }}>
+                                {(it.unitPrice || 0).toFixed(2)} ج.م
+                              </td>
+                              <td style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 800, color: '#10b981' }}>
+                                {(it.lineTotal || (it.quantity * (it.unitPrice || 0))).toFixed(2)} ج.م
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* ملخص الإجماليات المالية */}
+                <div
+                  style={{
+                    background: 'rgba(13,148,136,0.08)',
+                    border: '1px solid rgba(13,148,136,0.25)',
+                    borderRadius: '12px',
+                    padding: '12px 18px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                  }}
+                >
+                  <div>
+                    <span style={{ fontSize: '12px', color: 'var(--muted, #94a3b8)' }}>الإجمالي الفرعي: </span>
+                    <strong style={{ fontSize: '14px', color: '#fff' }}>
+                      {(selectedInvoiceDetail.subtotal || selectedInvoiceDetail.totalAmount || 0).toFixed(2)} ج.م
+                    </strong>
+                  </div>
+                  {selectedInvoiceDetail.discountAmount > 0 && (
+                    <div>
+                      <span style={{ fontSize: '12px', color: '#f59e0b' }}>الخصم الممنوح: </span>
+                      <strong style={{ fontSize: '14px', color: '#f59e0b' }}>
+                        -{(selectedInvoiceDetail.discountAmount || 0).toFixed(2)} ج.م
+                      </strong>
+                    </div>
+                  )}
+                  <div>
+                    <span style={{ fontSize: '12px', color: '#10b981' }}>الصافي النهائي: </span>
+                    <strong style={{ fontSize: '18px', color: '#10b981', fontWeight: 900 }}>
+                      {(selectedInvoiceDetail.totalAmount || selectedInvoiceDetail.netTotal || 0).toFixed(2)} ج.م
+                    </strong>
+                  </div>
+                  {selectedInvoiceDetail.paidAmount && (
+                    <div>
+                      <span style={{ fontSize: '12px', color: 'var(--muted, #94a3b8)' }}>المدفوع: </span>
+                      <strong style={{ fontSize: '14px', color: '#fff' }}>
+                        {(selectedInvoiceDetail.paidAmount || 0).toFixed(2)} ج.م
+                      </strong>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* أزرار الإجراءات السفلية */}
+              <div
+                style={{
+                  padding: '12px 20px',
+                  borderTop: '1px solid var(--border, rgba(255,255,255,0.08))',
+                  background: 'rgba(255,255,255,0.02)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '10px'
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => printPosSaleReceipt(selectedInvoiceDetail, currentBranch, selectedInvoiceDetail.cashierEmpName)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    background: 'var(--primary, #0d9488)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontWeight: 800,
+                    fontSize: '13px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <Printer size={15} />
+                  إعادة طباعة الريسيت الحراري (80mm)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedInvoiceDetail(null)}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    background: 'rgba(255,255,255,0.08)',
+                    color: '#cbd5e1',
+                    border: 'none',
+                    fontWeight: 700,
+                    fontSize: '13px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  إغلاق
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── مودال معاينة الريسيت الحراري 80mm ── */}
         {thermalPreviewText && (

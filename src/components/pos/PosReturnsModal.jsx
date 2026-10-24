@@ -266,8 +266,23 @@ export default function PosReturnsModal() {
                       }}
                     >
                       <div>
-                        <div style={{ fontWeight: 800, fontSize: '13px' }}>{sale.invoiceNumber}</div>
-                        <div style={{ fontSize: '11px', color: 'var(--muted, #475569)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontWeight: 800, fontSize: '13px' }}>{sale.invoiceNumber}</span>
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              fontWeight: 800,
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              background: sale.invoiceType === 'rx' ? '#0ea5e920' : sale.invoiceType === 'customer_order' ? '#f59e0b20' : '#10b98120',
+                              color: sale.invoiceType === 'rx' ? '#0284c7' : sale.invoiceType === 'customer_order' ? '#d97706' : '#059669',
+                              border: `1px solid ${sale.invoiceType === 'rx' ? '#0ea5e940' : sale.invoiceType === 'customer_order' ? '#f59e0b40' : '#10b98140'}`
+                            }}
+                          >
+                            {sale.invoiceType === 'rx' ? '💊 روشتة' : sale.invoiceType === 'customer_order' ? '📋 طلب عميل' : sale.invoiceType === 'delivery' ? '🛵 دليفري' : '🟢 OTC'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--muted, #475569)', marginTop: '2px' }}>
                           {new Date(sale.createdAt).toLocaleString('ar-EG')} • {sale.customerName || 'عميل نقدي'}
                         </div>
                       </div>
@@ -290,10 +305,23 @@ export default function PosReturnsModal() {
           {selectedInvoice && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-hover, #f8fafc)', padding: '10px 14px', borderRadius: '10px' }}>
-                <div>
-                  <span style={{ fontWeight: 800 }}>الفاتورة المحددة: {selectedInvoice.invoiceNumber}</span>
-                  <span style={{ fontSize: '11px', color: 'var(--muted, #475569)', marginRight: '10px' }}>
-                    ({selectedInvoice.items?.length} أصناف مباعة)
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontWeight: 800 }}>الفاتورة: {selectedInvoice.invoiceNumber}</span>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      background: selectedInvoice.invoiceType === 'rx' ? '#0ea5e920' : selectedInvoice.invoiceType === 'customer_order' ? '#f59e0b20' : '#10b98120',
+                      color: selectedInvoice.invoiceType === 'rx' ? '#0284c7' : selectedInvoice.invoiceType === 'customer_order' ? '#d97706' : '#059669',
+                      border: `1px solid ${selectedInvoice.invoiceType === 'rx' ? '#0ea5e940' : selectedInvoice.invoiceType === 'customer_order' ? '#f59e0b40' : '#10b98140'}`
+                    }}
+                  >
+                    {selectedInvoice.invoiceType === 'rx' ? '💊 روشتة (Rx)' : selectedInvoice.invoiceType === 'customer_order' ? '📋 طلب عميل' : selectedInvoice.invoiceType === 'delivery' ? '🛵 دليفري' : '🟢 OTC لا وصفية'}
+                  </span>
+                  <span style={{ fontSize: '11px', color: 'var(--muted, #475569)' }}>
+                    ({selectedInvoice.items?.length} أصناف)
                   </span>
                 </div>
                 <button
@@ -323,7 +351,22 @@ export default function PosReturnsModal() {
                     return (
                       <tr key={idx} style={{ borderBottom: '1px solid var(--border-subtle, #e2e8f0)' }}>
                         <td style={{ padding: '8px' }}>
-                          <div style={{ fontWeight: 800 }}>{it.tradeNameAr}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontWeight: 800 }}>{it.tradeNameAr}</span>
+                            <span
+                              style={{
+                                fontSize: '9.5px',
+                                fontWeight: 800,
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                background: it.itemType === 'rx' ? '#0ea5e915' : it.itemType === 'customer_order' ? '#f59e0b15' : '#10b98115',
+                                color: it.itemType === 'rx' ? '#0284c7' : it.itemType === 'customer_order' ? '#d97706' : '#059669',
+                                border: `1px solid ${it.itemType === 'rx' ? '#0ea5e930' : it.itemType === 'customer_order' ? '#f59e0b30' : '#10b98130'}`
+                              }}
+                            >
+                              {it.itemType === 'rx' ? '💊 Rx' : it.itemType === 'customer_order' ? '📋 طلب' : '🟢 OTC'}
+                            </span>
+                          </div>
                           <div style={{ fontSize: '10.5px', color: 'var(--muted, #475569)' }}>{it.unitLabel} @ {it.unitPrice.toFixed(2)} ج</div>
                         </td>
                         <td style={{ padding: '8px', textAlign: 'center', fontWeight: 800 }}>

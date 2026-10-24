@@ -12,6 +12,9 @@ import PosChronicRefillModal from './PosChronicRefillModal';
 import PosInvoiceOcrModal from './PosInvoiceOcrModal';
 import PosShortcutsGuideModal from './PosShortcutsGuideModal';
 import PosReportsCenter from './PosReportsCenter';
+import PosBranchStockModal from './PosBranchStockModal';
+import PosDeliveryModal from './PosDeliveryModal';
+import PosCustomerModal from './PosCustomerModal';
 
 function PosSystemContent() {
   const {
@@ -25,6 +28,9 @@ function PosSystemContent() {
     setIsShortcutsGuideOpen,
     isReportsModalOpen,
     setIsReportsModalOpen,
+    setIsDeliveryModalOpen,
+    setIsBranchStockModalOpen,
+    setIsCustomerModalOpen,
     salesWindows,
     activeWindowId,
     toggleCartItemUnit,
@@ -102,6 +108,10 @@ function PosSystemContent() {
             }
           }
           break;
+        case 'F7':
+          // شاشة طلبات الدليفري والتوصيل
+          setIsDeliveryModalOpen(true);
+          break;
         case 'F9':
           // مرتجع مبيعات
           setIsReturnsModalOpen(true);
@@ -136,6 +146,9 @@ function PosSystemContent() {
     setIsChronicModalOpen,
     setIsShiftModalOpen,
     setIsShortcutsGuideOpen,
+    setIsDeliveryModalOpen,
+    setIsBranchStockModalOpen,
+    setIsCustomerModalOpen,
     activeWindowId,
     salesWindows,
     toggleCartItemUnit,
@@ -154,6 +167,12 @@ function PosSystemContent() {
           break;
         case 'substitutes':
           setIsSubstitutesModalOpen(true);
+          break;
+        case 'delivery':
+          setIsDeliveryModalOpen(true);
+          break;
+        case 'customer':
+          setIsCustomerModalOpen(true);
           break;
         case 'returns':
           setIsReturnsModalOpen(true);
@@ -192,7 +211,9 @@ function PosSystemContent() {
     setIsShiftModalOpen,
     setIsOcrModalOpen,
     setIsReportsModalOpen,
-    setIsShortcutsGuideOpen
+    setIsShortcutsGuideOpen,
+    setIsDeliveryModalOpen,
+    setIsCustomerModalOpen
   ]);
 
   return (
@@ -212,6 +233,9 @@ function PosSystemContent() {
       <PosChronicRefillModal />
       <PosInvoiceOcrModal />
       <PosShortcutsGuideModal />
+      <PosBranchStockModal />
+      <PosDeliveryModal />
+      <PosCustomerModal />
 
       {/* مركز التقارير والرقابة الحصري لنظام نقاط البيع */}
       <PosReportsCenter
@@ -280,13 +304,35 @@ export default function PosSystemView({
             <button
               type="button"
               onClick={() => {
+                window.dispatchEvent(new CustomEvent('pos:trigger-action', { detail: { action: 'delivery' } }));
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: 'rgba(139, 92, 246, 0.15)',
+                border: '1px solid #8b5cf6',
+                borderRadius: '8px',
+                padding: '4px 10px',
+                color: '#a78bfa',
+                fontSize: '12px',
+                cursor: 'pointer',
+                fontWeight: 800
+              }}
+            >
+              🛵 طلبات الدليفري [F7]
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
                 window.dispatchEvent(new CustomEvent('pos:trigger-action', { detail: { action: 'reports' } }));
               }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '5px',
-                background: 'rgba(13, 148, 136, 0.15)',
+                background: 'rgba(139, 92, 246, 0.15)',
                 border: '1px solid var(--primary, #0d9488)',
                 borderRadius: '8px',
                 padding: '4px 10px',

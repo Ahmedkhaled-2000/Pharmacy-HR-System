@@ -4,10 +4,12 @@ import {
   calculateCartItemLine,
   detectCartDrugInteractions,
   findSmartSubstitutes,
-  searchProducts
+  searchProducts,
+  INVOICE_TYPES
 } from '../utils/posEngine';
 import { commitLocalSale, getLocalOutbox } from '../utils/posOfflineSync';
 import { printPosSaleReceipt } from '../utils/posPrintService';
+import { playBarcodeSuccessBeep, playCashRegisterChime, playWarningAlertSound } from '../utils/posAudioService';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 
@@ -80,8 +82,11 @@ export function POSProvider({ children }) {
       {
         id: 'win-1',
         title: 'شاشة بيع رئيسية #1',
+        invoiceType: 'otc', // 'otc' | 'rx' | 'customer_order' | 'delivery'
+        rxImage: null,
+        deliveryDetails: { isDelivery: false, address: '', pilotName: '', deliveryFee: 0 },
         cart: [],
-        customer: { name: '', phone: '', isChronic: false },
+        customer: { name: '', phone: '', isChronic: false, walletBalance: 0 },
         position: { x: 30, y: 30 },
         size: { width: 920, height: 600 },
         isMinimized: false,
@@ -111,6 +116,22 @@ export function POSProvider({ children }) {
     );
   }, []);
 
+  // التبديل بين النوافذ عبر اختصار الكيبورد (Ctrl + Tab / Ctrl + Shift + Tab)
+  const cycleActiveSalesWindow = useCallback((direction = 1) => {
+    setSalesWindows((prev) => {
+      if (!prev || prev.length <= 1) return prev;
+      const currentIndex = prev.findIndex((w) => w.id === activeWindowId);
+      const nextIndex = (currentIndex + direction + prev.length) % prev.length;
+      const nextWin = prev[nextIndex];
+      if (nextWin) {
+        maxZIndexRef.current += 1;
+        setActiveWindowId(nextWin.id);
+        return prev.map((w) => (w.id === nextWin.id ? { ...w, zIndex: maxZIndexRef.current, isMinimized: false } : w));
+      }
+      return prev;
+    });
+  }, [activeWindowId]);
+
   // فتح نافذة بيع جديدة مستقلة تماماً (Multi-Customer / Multi-Cart Canvas)
   const openNewSalesWindow = useCallback((customTitle = null) => {
     maxZIndexRef.current += 1;
@@ -126,8 +147,11 @@ export function POSProvider({ children }) {
     const newWindow = {
       id: newId,
       title: defaultTitle,
+      invoiceType: 'otc',
+      rxImage: null,
+      deliveryDetails: { isDelivery: false, address: '', pilotName: '', deliveryFee: 0 },
       cart: [],
-      customer: { name: '', phone: '', isChronic: false },
+      customer: { name: '', phone: '', isChronic: false, walletBalance: 0 },
       position: { x: newX, y: newY },
       size: { width: 920, height: 600 },
       isMinimized: false,
@@ -151,8 +175,11 @@ export function POSProvider({ children }) {
           {
             id: fallbackId,
             title: 'شاشة بيع رئيسية #1',
+            invoiceType: 'otc',
+            rxImage: null,
+            deliveryDetails: { isDelivery: false, address: '', pilotName: '', deliveryFee: 0 },
             cart: [],
-            customer: { name: '', phone: '', isChronic: false },
+            customer: { name: '', phone: '', isChronic: false, walletBalance: 0 },
             position: { x: 30, y: 30 },
             size: { width: 920, height: 600 },
             isMinimized: false,
@@ -200,6 +227,35 @@ export function POSProvider({ children }) {
     );
   }, []);
 
+  // تحديث نوع الفاتورة بالكامل (OTC / روشتة / طلب عميل / دليفري) وتحديث تصنيف بنود السلة
+  const updateWindowInvoiceType = useCallback((windowId, invoiceType) => {
+    setSalesWindows((prev) =>
+      prev.map((w) => {
+        if (w.id !== windowId) return w;
+        const itemTypeTarget = invoiceType === 'delivery' ? 'otc' : invoiceType;
+        const updatedCart = (w.cart || []).map((it) => ({
+          ...it,
+          itemType: itemTypeTarget
+        }));
+        return { ...w, invoiceType, cart: updatedCart };
+      })
+    );
+  }, []);
+
+  // تحديث صورة الروشتة المنسوخة بالنافذة
+  const updateWindowRxImage = useCallback((windowId, rxImage) => {
+    setSalesWindows((prev) =>
+      prev.map((w) => (w.id === windowId ? { ...w, rxImage, invoiceType: rxImage ? 'rx' : w.invoiceType } : w))
+    );
+  }, []);
+
+  // تحديث تفاصيل الدليفري
+  const updateWindowDeliveryDetails = useCallback((windowId, deliveryDetails) => {
+    setSalesWindows((prev) =>
+      prev.map((w) => (w.id === windowId ? { ...w, deliveryDetails: { ...(w.deliveryDetails || {}), ...deliveryDetails } } : w))
+    );
+  }, []);
+
   // تحديث بيانات عميل نافذة بيع معينة
   const updateWindowCustomer = useCallback((windowId, customerData) => {
     setSalesWindows((prev) =>
@@ -208,14 +264,18 @@ export function POSProvider({ children }) {
   }, []);
 
   // ── 4. عمليات السلة الذكية ──
-  // إضافة صنف لسلة النافذة النشطة
-  const addItemToActiveWindowCart = useCallback((product, unitType = 'base', qty = 1) => {
+  // إضافة صنف لسلة النافذة النشطة مع تشغيل صوت الباركود الفوري وتحديد نوع الصنف
+  const addItemToActiveWindowCart = useCallback((product, unitType = 'base', qty = 1, customItemType = null) => {
     if (!product || !activeWindowId) return;
+
+    // تشغيل نغمة مسح الباركود اللحظية
+    playBarcodeSuccessBeep();
 
     setSalesWindows((prev) =>
       prev.map((win) => {
         if (win.id !== activeWindowId) return win;
 
+        const effectiveItemType = customItemType || win.invoiceType || (product.isTableDrug || product.isChronic ? 'rx' : 'otc');
         const currentCart = [...win.cart];
         const existingIndex = currentCart.findIndex(
           (item) => item.productId === product.id && item.unitType === unitType
@@ -229,11 +289,12 @@ export function POSProvider({ children }) {
             product,
             unitType,
             updatedQty,
-            existingItem.discountPct
+            existingItem.discountPct,
+            existingItem.itemType || effectiveItemType
           );
         } else {
           // إضافة سطر جديد
-          const newLine = calculateCartItemLine(product, unitType, qty, 0);
+          const newLine = calculateCartItemLine(product, unitType, qty, 0, effectiveItemType);
           currentCart.push(newLine);
         }
 
@@ -241,6 +302,21 @@ export function POSProvider({ children }) {
       })
     );
   }, [activeWindowId]);
+
+  // تعديل نوع الصنف الفردي داخل السلة (OTC ↔ Rx ↔ طلب عميل)
+  const updateCartItemType = useCallback((windowId, itemIndex, newItemType) => {
+    setSalesWindows((prev) =>
+      prev.map((win) => {
+        if (win.id !== windowId) return win;
+        const targetItem = win.cart[itemIndex];
+        if (!targetItem) return win;
+
+        const newCart = [...win.cart];
+        newCart[itemIndex] = { ...targetItem, itemType: newItemType };
+        return { ...win, cart: newCart };
+      })
+    );
+  }, []);
 
   // إزالة صنف من السلة
   const removeItemFromCart = useCallback((windowId, itemIndex) => {
@@ -343,6 +419,9 @@ export function POSProvider({ children }) {
       cashierName: cashierEmpName || currentEmpUser?.name || 'صيدلي الكاشير',
       cashierEmpCode: cashierEmpCode || currentEmpUser?.code || '101',
       shiftId: currentShift.id,
+      invoiceType: targetWindow.invoiceType || 'otc', // 'otc' | 'rx' | 'customer_order' | 'delivery'
+      rxImage: targetWindow.rxImage || null,
+      deliveryDetails: targetWindow.deliveryDetails || null,
       items: targetWindow.cart,
       subtotal,
       discountAmount: finalDiscount,
@@ -358,6 +437,9 @@ export function POSProvider({ children }) {
 
     // 1. اعتماد الفاتورة محلياً وحفظها في الـ Outbox
     const committed = commitLocalSale(salePayload);
+
+    // تشغيل نغمة فتح الدرج ونجاح إتمام الفاتورة
+    playCashRegisterChime();
 
     // 2. تحديث إحصائيات الوردية الحالية
     setCurrentShift((prev) => ({
@@ -377,7 +459,7 @@ export function POSProvider({ children }) {
           employeeName: currentEmpUser.name || 'الصيدلي',
           type: 'bonus',
           category: 'sales_commission',
-          title: `عمولة مبيعات لحظية - فاتورة #${committed.invoiceNumber}`,
+          title: `عمولة مبيعات لحظية - فاتورة #${committed.invoiceNumber} [${targetWindow.invoiceType === 'rx' ? 'روشتة' : 'مباشر'}]`,
           amount: totalCommissions,
           date: new Date().toISOString().slice(0, 10),
           status: 'approved',
@@ -402,6 +484,21 @@ export function POSProvider({ children }) {
 
   const [isSubstitutesModalOpen, setIsSubstitutesModalOpen] = useState(false);
   const [activeSubstituteTarget, setActiveSubstituteTarget] = useState(null);
+
+  // مودال رصيد الفروع الأخرى (Inter-Branch Stock Inspector)
+  const [isBranchStockModalOpen, setIsBranchStockModalOpen] = useState(false);
+  const [branchStockTarget, setBranchStockTarget] = useState(null);
+
+  const openBranchStockModal = useCallback((product) => {
+    setBranchStockTarget(product);
+    setIsBranchStockModalOpen(true);
+  }, []);
+
+  // مودال طلبات التوصيل والدليفري (Delivery Orders Modal)
+  const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
+
+  // مودال إدارة العملاء السريع (Quick Customer Register Modal)
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
 
   const [isReturnsModalOpen, setIsReturnsModalOpen] = useState(false);
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
@@ -437,11 +534,16 @@ export function POSProvider({ children }) {
     minimizeSalesWindow,
     toggleMaximizeSalesWindow,
     bringWindowToFront,
+    cycleActiveSalesWindow,
     updateWindowPosition,
     updateWindowSize,
     updateWindowCart,
+    updateWindowInvoiceType,
+    updateWindowRxImage,
+    updateWindowDeliveryDetails,
     updateWindowCustomer,
     addItemToActiveWindowCart,
+    updateCartItemType,
     removeItemFromCart,
     updateCartItemQuantity,
     toggleCartItemUnit,
@@ -455,6 +557,15 @@ export function POSProvider({ children }) {
     setIsSubstitutesModalOpen,
     activeSubstituteTarget,
     setActiveSubstituteTarget,
+    isBranchStockModalOpen,
+    setIsBranchStockModalOpen,
+    branchStockTarget,
+    setBranchStockTarget,
+    openBranchStockModal,
+    isDeliveryModalOpen,
+    setIsDeliveryModalOpen,
+    isCustomerModalOpen,
+    setIsCustomerModalOpen,
     isReturnsModalOpen,
     setIsReturnsModalOpen,
     isShiftModalOpen,

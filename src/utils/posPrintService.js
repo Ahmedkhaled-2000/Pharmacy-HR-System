@@ -36,6 +36,13 @@ export function generatePosReceiptHtml(sale, branch = null, cashierName = 'صي�
     insurance: 'تأمين طبي 🏥'
   }[sale.paymentMethod || 'cash'] || 'نقدي';
 
+  const invoiceTypeLabel = {
+    otc: '🟢 OTC (أدوية لا وصفية)',
+    rx: '💊 روشتة طبية معتمدة (Rx)',
+    customer_order: '📋 طلب عميل خاص',
+    delivery: '🛵 توصيل منازل (دليفري)'
+  }[sale.invoiceType || 'otc'] || '🟢 OTC (لا وصفية)';
+
   return `
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
@@ -173,6 +180,10 @@ export function generatePosReceiptHtml(sale, branch = null, cashierName = 'صي�
       <strong>${sale.invoiceNumber}</strong>
     </div>
     <div class="meta-row">
+      <span>نوع الفاتورة:</span>
+      <strong style="color: #0284c7;">${invoiceTypeLabel}</strong>
+    </div>
+    <div class="meta-row">
       <span>التاريخ والوقت:</span>
       <span>${dateStr}</span>
     </div>
@@ -204,7 +215,10 @@ export function generatePosReceiptHtml(sale, branch = null, cashierName = 'صي�
         <tr>
           <td>
             <div class="item-name">${it.tradeNameAr || it.tradeNameEn}</div>
-            <div class="item-sub">${it.unitLabel || 'علبة'} @ ${parseFloat(it.unitPrice).toFixed(2)} ج</div>
+            <div class="item-sub">
+              [${it.itemType === 'rx' ? 'روشتة Rx' : it.itemType === 'customer_order' ? 'طلب' : 'OTC'}] 
+              ${it.unitLabel || 'علبة'} @ ${parseFloat(it.unitPrice).toFixed(2)} ج
+            </div>
           </td>
           <td style="text-align: center; font-weight: bold;">
             ${it.quantity}

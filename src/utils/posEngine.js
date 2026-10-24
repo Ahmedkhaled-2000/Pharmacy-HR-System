@@ -528,13 +528,39 @@ export function normalizePosSearchText(str) {
     .replace(/\s+/g, ' ');
 }
 
+export const INVOICE_TYPES = {
+  otc: { id: 'otc', label: 'OTC (لا وصفية)', icon: '🟢', color: '#10b981', badgeClass: 'pos-badge-otc', desc: 'أدوية ومستلزمات البيع المباشر' },
+  rx: { id: 'rx', label: 'روشتة طبية (Rx)', icon: '💊', color: '#0ea5e9', badgeClass: 'pos-badge-rx', desc: 'صرف وصفة وتذكرة طبية معتمدة' },
+  customer_order: { id: 'customer_order', label: 'طلب عميل (خاص)', icon: '📋', color: '#f59e0b', badgeClass: 'pos-badge-order', desc: 'توفير طلب ونواقص مخصوصة لعميل' },
+  delivery: { id: 'delivery', label: 'توصيل منازل (دليفري)', icon: '🛵', color: '#8b5cf6', badgeClass: 'pos-badge-delivery', desc: 'فاتورة مرسلة مع طيار التوصيل' }
+};
+
+// قاموس الأعراض والمؤشرات الدوائية للبحث الذكي السريري
+const INDICATION_KEYWORDS = {
+  'صداع': ['paracetamol', 'ibuprofen', 'aspirin', 'بانادول', 'كتافلام', 'بروفين', 'بنادول'],
+  'مسكن': ['paracetamol', 'ibuprofen', 'ketoprofen', 'diclofenac', 'بروفين', 'كتافلام', 'بانادول'],
+  'سخونية': ['paracetamol', 'ibuprofen', 'بانادول', 'بروفين', 'سيتال'],
+  'حرارة': ['paracetamol', 'ibuprofen', 'بانادول', 'بروفين'],
+  'مغص': ['antispasmodic', 'drotaverine', 'hyoscine', 'بسكوبان', 'سبازموبيرالجين'],
+  'ضغط': ['bisoprolol', 'amlodipine', 'valsartan', 'كونكور', 'بيسوكارد'],
+  'سكر': ['metformin', 'glimepiride', 'سيدوفاج', 'جلوكوفاج', 'اماريل'],
+  'مضاد': ['amoxicillin', 'clavulanic', 'ceftriaxone', 'أوجمنتين', 'كيورام', 'هاي بيوتك'],
+  'حساسية': ['cetirizine', 'loratadine', 'fexofenadine', 'تلفاست', 'زيرتك'],
+  'معدة': ['omeprazole', 'pantoprazole', 'esomeprazole', 'كونترولوك', 'نيكسيوم', 'انتودين']
+};
+
 /**
- * 4. البحث الدوائي الفوري بالباركود أو الاسم العربي أو الإنجليزي أو المادة الفعالة
+ * 4. البحث الدوائي الفوري بالباركود أو الاسم العربي أو الإنجليزي أو المادة الفعالة أو العرض الطبي
  */
 export function searchProducts(catalog, query) {
   if (!query || !query.trim()) return [];
   const cleanQ = normalizePosSearchText(query);
   const rawQ = query.trim().toLowerCase();
+
+  // فحص الكلمات الدلالية للأعراض (صداع، مسكن، ضغط...)
+  const matchingIndicationTerms = Object.entries(INDICATION_KEYWORDS)
+    .filter(([key]) => cleanQ.includes(key))
+    .flatMap(([, terms]) => terms);
 
   return (catalog || []).filter((prod) => {
     if (!prod) return false;
@@ -565,6 +591,17 @@ export function searchProducts(catalog, query) {
 
     // تطابق الشركة المصنعة
     if ((prod.manufacturer || '').toLowerCase().includes(rawQ)) return true;
+
+    // تطابق فئة الدواء أو القسم
+    if (prod.category && normalizePosSearchText(prod.category).includes(cleanQ)) return true;
+
+    // تطابق الأعراض والمؤشرات الدلالية
+    if (matchingIndicationTerms.length > 0) {
+      const pCombined = `${prod.tradeNameAr} ${prod.tradeNameEn} ${prod.genericName}`.toLowerCase();
+      if (matchingIndicationTerms.some((t) => pCombined.includes(t.toLowerCase()))) {
+        return true;
+      }
+    }
 
     return false;
   });
@@ -663,7 +700,7 @@ export function findSmartSubstitutes(targetProduct, allProducts = []) {
 /**
  * 7. محرك حساب بند السلة واختيار وحدة البيع (علبة / شريط / قرص)
  */
-export function calculateCartItemLine(product, unitType = 'base', qty = 1, customDiscount = 0) {
+export function calculateCartItemLine(product, unitType = 'base', qty = 1, customDiscount = 0, customItemType = null) {
   const packSize = parseInt(product.packSize || 1, 10);
   const piecesPerSubUnit = parseInt(product.piecesPerSubUnit || 1, 10);
   const publicPrice = parseFloat(product.publicPrice || 0);
@@ -697,6 +734,9 @@ export function calculateCartItemLine(product, unitType = 'base', qty = 1, custo
   const commPct = parseFloat(product.commissionPct || 0);
   const instantCommission = (lineTotal * (commPct / 100));
 
+  // تحديد تصنيف البند (OTC أم روشتة أم طلب عميل)
+  const itemType = customItemType || (product.itemType ? product.itemType : (product.isTableDrug || product.isChronic ? 'rx' : 'otc'));
+
   return {
     productId: product.id,
     tradeNameAr: product.tradeNameAr,
@@ -714,7 +754,8 @@ export function calculateCartItemLine(product, unitType = 'base', qty = 1, custo
     lineTotal: parseFloat(lineTotal.toFixed(2)),
     instantCommission: parseFloat(instantCommission.toFixed(2)),
     isChronic: Boolean(product.isChronic),
-    chronicDailyDose: product.chronicDailyDose || 1
+    chronicDailyDose: product.chronicDailyDose || 1,
+    itemType // 'otc' | 'rx' | 'customer_order'
   };
 }
 

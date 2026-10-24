@@ -8,6 +8,7 @@ export default function PosMultiWindowManager() {
     salesWindows,
     activeWindowId,
     bringWindowToFront,
+    cycleActiveSalesWindow,
     closeSalesWindow,
     minimizeSalesWindow,
     toggleMaximizeSalesWindow,
@@ -18,6 +19,18 @@ export default function PosMultiWindowManager() {
 
   // إدارة السحب والتحريك (Dragging)
   const [dragState, setDragState] = useState(null); // { windowId, startX, startY, origX, origY }
+
+  // اختصار التبديل بين النوافذ Ctrl + Tab
+  useEffect(() => {
+    const handleGlobalShortcuts = (e) => {
+      if (e.ctrlKey && e.key === 'Tab') {
+        e.preventDefault();
+        cycleActiveSalesWindow(e.shiftKey ? -1 : 1);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalShortcuts);
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts);
+  }, [cycleActiveSalesWindow]);
 
   const handleTitleBarMouseDown = (e, windowId) => {
     // عدم بدء السحب إذا تم النقر على أزرار التحكم (إغلاق، تصغير، تكبير)
@@ -43,8 +56,9 @@ export default function PosMultiWindowManager() {
       const deltaX = e.clientX - dragState.startX;
       const deltaY = e.clientY - dragState.startY;
 
-      const newX = Math.max(0, Math.min(window.innerWidth - 300, dragState.origX + deltaX));
-      const newY = Math.max(34, Math.min(window.innerHeight - 150, dragState.origY + deltaY));
+      // سحب حر 360 درجة مع ضمان بقاء شريط العنوان مرئياً دائماً في أعلى الشاشة
+      const newX = Math.max(0, Math.min(window.innerWidth - 300, dragState.origX - deltaX));
+      const newY = Math.max(34, Math.min(window.innerHeight - 80, dragState.origY + deltaY));
 
       updateWindowPosition(dragState.windowId, { x: newX, y: newY });
     };
@@ -106,6 +120,14 @@ export default function PosMultiWindowManager() {
     };
   }, [resizeState, updateWindowSize]);
 
+  const handleCloseClick = (win) => {
+    if (win.cart.length > 0) {
+      const confirmClose = window.confirm(`شاشة البيع [${win.title}] تحتوي على ${win.cart.length} أصناف في السلة.\nهل أنت متأكد من إغلاقها؟`);
+      if (!confirmClose) return;
+    }
+    closeSalesWindow(win.id);
+  };
+
   return (
     <>
       {/* ── لوحة النوافذ العائمة المنبثقة (Floating Windows Canvas) ── */}
@@ -114,6 +136,13 @@ export default function PosMultiWindowManager() {
           if (win.isMinimized) return null;
 
           const isFocused = win.id === activeWindowId;
+
+          const typeBadge = {
+            otc: { label: 'OTC لا وصفية', icon: '🟢', color: '#10b981' },
+            rx: { label: 'روشتة Rx', icon: '💊', color: '#0ea5e9' },
+            customer_order: { label: 'طلب عميل', icon: '📋', color: '#f59e0b' },
+            delivery: { label: 'دليفري', icon: '🛵', color: '#8b5cf6' }
+          }[win.invoiceType || 'otc'] || { label: 'OTC', icon: '🟢', color: '#10b981' };
 
           const style = win.isMaximized
             ? { zIndex: win.zIndex }
@@ -140,6 +169,26 @@ export default function PosMultiWindowManager() {
                 <div className="pos-window-title-text">
                   <ShoppingCart size={16} color="var(--primary, #0d9488)" />
                   <span>{win.title}</span>
+
+                  {/* شارة نوع الفاتورة */}
+                  <span
+                    style={{
+                      padding: '1px 8px',
+                      borderRadius: '99px',
+                      background: `${typeBadge.color}22`,
+                      border: `1px solid ${typeBadge.color}50`,
+                      color: typeBadge.color,
+                      fontSize: '10.5px',
+                      fontWeight: 800,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '3px'
+                    }}
+                  >
+                    <span>{typeBadge.icon}</span>
+                    <span>{typeBadge.label}</span>
+                  </span>
+
                   {win.cart.length > 0 && (
                     <span
                       style={{
@@ -190,7 +239,7 @@ export default function PosMultiWindowManager() {
                     title="إغلاق شاشة البيع"
                     onClick={(e) => {
                       e.stopPropagation();
-                      closeSalesWindow(win.id);
+                      handleCloseClick(win);
                     }}
                   >
                     <X size={15} />
