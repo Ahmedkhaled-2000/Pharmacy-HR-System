@@ -21,6 +21,7 @@ function PosSystemContent() {
     setIsDeadStockModalOpen,
     setIsChronicModalOpen,
     setIsShiftModalOpen,
+    setIsOcrModalOpen,
     setIsShortcutsGuideOpen,
     isReportsModalOpen,
     setIsReportsModalOpen,
