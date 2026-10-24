@@ -3,21 +3,22 @@
  * مزود وموحد الروابط العامة للمنظومة (Public System URL Resolver & Clipboard Formatter)
  * 
  * يضمن دائماً أنه عند نسخ أي رابط داخل تطبيق سطح المكتب (Windows Electron) أو بيئة المتصفح (HTTP/HTTPS)
- * يتم نسخ الرابط العام الحي الرسمي لسيرفر الـ VPS المعتمد (http://63.183.147.199) بدلاً من روابط محليه أو روابط قديمة.
+ * يضمن دائماً أنه عند نسخ أي رابط داخل تطبيق سطح المكتب (Windows Electron) أو بيئة المتصفح (HTTP/HTTPS)
+ * يتم نسخ الرابط العام الحي الرسمي لسيرفر الـ VPS المعتمد الجديد (https://169-58-214-20.sslip.io) بدلاً من روابط محليه أو روابط السيرفر القديم المتوقف.
  */
 
-export const DEFAULT_PRODUCTION_URL = 'https://63-183-147-199.sslip.io';
+export const DEFAULT_PRODUCTION_URL = 'https://169-58-214-20.sslip.io';
 
-// تنظيف فوري واستباقي لأي قيم قديمة مخزنة في المتصفح للحسابات السابقة أو الروابط غير المشفرة
+// تنظيف فوري واستباقي لأي قيم قديمة مخزنة في المتصفح للسيرفر القديم المتوقف (63.183.147.199)
 try {
   if (typeof localStorage !== 'undefined') {
     const saved = localStorage.getItem('pharmacy_system_url');
-    if (saved && (saved.includes('apexthunder.com') || saved.includes('172.20.10.3') || saved.includes('vercel.app') || saved === 'http://63.183.147.199' || saved === 'https://63.183.147.199')) {
+    if (saved && (saved.includes('apexthunder.com') || saved.includes('172.20.10.3') || saved.includes('vercel.app') || saved.includes('63.183.147.199') || saved.includes('63-183-147-199'))) {
       localStorage.setItem('pharmacy_system_url', DEFAULT_PRODUCTION_URL);
     }
     const localGmail = localStorage.getItem('pharmacy_gmail_config');
-    if (localGmail && (localGmail.includes('apexthunder.com') || localGmail.includes('http://63.183.147.199') || localGmail.includes('https://63.183.147.199'))) {
-      localStorage.setItem('pharmacy_gmail_config', localGmail.replace(/https?:\/\/63\.183\.147\.199/g, DEFAULT_PRODUCTION_URL).replace(/https?:\/\/[^"'\s]*apexthunder\.com/gi, DEFAULT_PRODUCTION_URL));
+    if (localGmail && (localGmail.includes('apexthunder.com') || localGmail.includes('63.183.147.199') || localGmail.includes('63-183-147-199'))) {
+      localStorage.setItem('pharmacy_gmail_config', localGmail.replace(/https?:\/\/(?:63\.183\.147\.199|63-183-147-199\.sslip\.io)/g, DEFAULT_PRODUCTION_URL).replace(/https?:\/\/[^"'\s]*apexthunder\.com/gi, DEFAULT_PRODUCTION_URL));
     }
   }
 } catch {}
@@ -37,6 +38,8 @@ export function isLocalOrDesktopUrl(url) {
     trimmed.includes('0.0.0.0') ||
     trimmed.includes('apexthunder.com') ||
     trimmed.includes('172.20.10.3') ||
+    trimmed.includes('63.183.147.199') ||
+    trimmed.includes('63-183-147-199') ||
     trimmed.includes('pharmacy-hr-system.vercel.app')
   );
 }
@@ -121,6 +124,7 @@ export function sanitizeSystemUrl(text) {
   const publicOrigin = getPublicSystemOrigin();
   return text
     .replace(/https?:\/\/63\.183\.147\.199(:\d+)?/gi, publicOrigin)
+    .replace(/https?:\/\/[^/]*63-183-147-199\.sslip\.io(:\d+)?/gi, publicOrigin)
     .replace(/https?:\/\/[^/]*apexthunder\.com/gi, publicOrigin)
     .replace(/https?:\/\/172\.20\.10\.3(:\d+)?/gi, publicOrigin)
     .replace(/https?:\/\/pharmacy-hr-system\.vercel\.app/gi, publicOrigin)
@@ -234,6 +238,8 @@ export function installClipboardUrlSanitizer() {
       writeText: async (text) => {
         const publicOrigin = getPublicSystemOrigin();
         let sanitized = String(text || '')
+          .replace(/https?:\/\/63\.183\.147\.199(:\d+)?/gi, publicOrigin)
+          .replace(/https?:\/\/[^/]*63-183-147-199\.sslip\.io(:\d+)?/gi, publicOrigin)
           .replace(/app:\/\/localhost/gi, publicOrigin)
           .replace(/https?:\/\/localhost:\d+/gi, publicOrigin)
           .replace(/https?:\/\/127\.0\.0\.1:\d+/gi, publicOrigin)
@@ -259,6 +265,8 @@ export function installClipboardUrlSanitizer() {
     if (typeof text === 'string') {
       const publicOrigin = getPublicSystemOrigin();
       sanitizedText = sanitizedText
+        .replace(/https?:\/\/63\.183\.147\.199(:\d+)?/gi, publicOrigin)
+        .replace(/https?:\/\/[^/]*63-183-147-199\.sslip\.io(:\d+)?/gi, publicOrigin)
         .replace(/app:\/\/localhost/gi, publicOrigin)
         .replace(/https?:\/\/localhost:\d+/gi, publicOrigin)
         .replace(/https?:\/\/127\.0\.0\.1:\d+/gi, publicOrigin)
@@ -291,7 +299,8 @@ export function getResolvedWhatsAppServerUrl(state = null) {
     }
 
     if (
-      hostname === '63.183.147.199' ||
+      hostname === '169.58.214.20' ||
+      (hostname && hostname.includes('169-58-214-20')) ||
       (hostname && hostname.includes('sslip.io')) ||
       hostname === 'pharmacore.site' ||
       (hostname && hostname.endsWith('.pharmacore.site'))
@@ -334,5 +343,5 @@ export function getResolvedWhatsAppServerUrl(state = null) {
     return configured.replace(/\/+$/, '');
   }
 
-  return 'https://63-183-147-199.sslip.io/whatsapp';
+  return 'https://169-58-214-20.sslip.io/whatsapp';
 }

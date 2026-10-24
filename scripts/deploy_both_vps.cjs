@@ -4,13 +4,7 @@ const fs = require('fs');
 const sshKey = 'vps-p-spark-1803.pem';
 const targets = [
   {
-    name: 'Old Live VPS (63.183.147.199)',
-    host: 'ubuntu@63.183.147.199',
-    userHome: '/home/ubuntu',
-    appDir: '/home/ubuntu/hr-system'
-  },
-  {
-    name: 'New VPS (169.58.214.20)',
+    name: 'Primary New VPS (169.58.214.20)',
     host: 'admin@169.58.214.20',
     userHome: '/home/admin',
     appDir: '/home/admin/hr-system'

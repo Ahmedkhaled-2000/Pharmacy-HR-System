@@ -5717,7 +5717,7 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
         serverIp,
         serverPort: port,
         serverUrl: hostUrl,
-        backupServerIp: '63.183.147.199',
+        backupServerIp: null,
         files: {
           'zkhost.cfg': zkhostContent,
           'sys.cfg': sysContent,

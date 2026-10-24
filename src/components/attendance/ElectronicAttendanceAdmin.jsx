@@ -61,10 +61,14 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
     const path = branchId ? `/kiosk/${branchId}` : '/kiosk';
     const link = getPublicSystemUrl(path, state);
     await safeCopyToClipboard(link);
+    const targetBranch = branchId ? (state.branches || []).find(b => b.id === branchId) : null;
+    const msg = targetBranch 
+      ? `✅ تم نسخ رابط كشك البصمة لفرع (${targetBranch.name}) بنجاح: ${link}`
+      : `✅ تم نسخ الرابط العام لكشك البصمة بنجاح: ${link}`;
     if (showToast) {
-      showToast('✅ تم نسخ رابط البصمة العام بنجاح: ' + link);
+      showToast(msg);
     } else {
-      alert('تم نسخ رابط البصمة العام بنجاح: ' + link);
+      alert(msg);
     }
   };
 

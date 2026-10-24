@@ -2069,7 +2069,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
                             <ol style={{ margin: '0 0 10px 0', paddingRight: '18px', display: 'flex', flexDirection: 'column', gap: '5px', fontSize: '0.78rem' }}>
                               <li><strong>شاشة الماكينة:</strong> تأكد من أيقونة الشبكة بأعلى الشاشة (يجب ظهور شاشة كمبيوتر متصلة بدون علامة X). إذا وُجدت X فالكابل غير متصل بالراوتر.</li>
                               <li><strong>قائمة الإيثرنت (Comm. ➔ Ethernet):</strong> فعّل DHCP أو اكتب البوابة (Gateway: 192.168.1.1) و DNS: 8.8.8.8.</li>
-                              <li><strong>خادم السحابة (Cloud Server):</strong> اكتب IP السيرفر الأساسي: <strong style={{ color: '#0369a1' }}>169.58.214.20</strong> والمنفذ: <strong style={{ color: '#0369a1' }}>5000</strong> (أو السيرفر الاحتياطي: <strong>63.183.147.199</strong> منفذ <strong>80</strong>) مع إغلاق تام لـ <strong>(Domain: OFF)</strong> و <strong>(Proxy: OFF)</strong>.</li>
+                              <li><strong>خادم السحابة (Cloud Server):</strong> اكتب IP السيرفر الأساسي المعتمد: <strong style={{ color: '#0369a1' }}>169.58.214.20</strong> والمنفذ: <strong style={{ color: '#0369a1' }}>5000</strong> (أو منفذ <strong>80</strong>) مع إغلاق تام لـ <strong>(Domain: OFF)</strong> و <strong>(Proxy: OFF)</strong>.</li>
                               <li><strong>إعادة التشغيل (Reboot):</strong> اطفئ الماكينة وشغّلها من زر الباور لتطبيق الإعدادات في الذاكرة.</li>
                             </ol>
                             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -4901,7 +4901,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
                     تهيئة ماكينة البصمة بملف الفلاشة USB أو الضبط السريع
                   </h3>
                   <p style={{ margin: '3px 0 0', fontSize: '0.82rem', color: '#64748b' }}>
-                    الماكينة: <strong>{selectedDeviceSnForUsers}</strong> | خادم السحابة: <strong>169.58.214.20:5000</strong> (الاحتياطي: <strong>63.183.147.199:80</strong>)
+                    الماكينة: <strong>{selectedDeviceSnForUsers}</strong> | خادم السحابة المعتمد: <strong>169.58.214.20:5000</strong>
                   </p>
                 </div>
               </div>
@@ -5105,7 +5105,7 @@ export default function BiometricDevicesCard({ state, showToast }) {
                 <strong>الخطوات من أزرار الماكينة:</strong><br />
                 1. اضغط <strong>M/OK</strong> ➔ ادخل على <strong>الاتصال (Comm.)</strong> ➔ <strong>خادم السحابة (Cloud Server / ADMS)</strong>.<br />
                 2. فعّل خيار <strong>Enable Cloud Server = ON</strong>.<br />
-                3. اكتب عنوان الخادم: <strong>169.58.214.20</strong> والمنفذ: <strong>5000</strong> (أو المنفذ <strong>80</strong>، أو السيرفر الاحتياطي <strong>63.183.147.199:80</strong>).<br />
+                3. اكتب عنوان الخادم: <strong>169.58.214.20</strong> والمنفذ: <strong>5000</strong> (أو المنفذ <strong>80</strong>).<br />
                 4. ارجع للشاشة الرئيسية، ستظهر علامة الكرة الأرضية أو السحابة خضراء 🌐 وتتصل الماكينة فوراً بالنظام!
               </div>
             </div>

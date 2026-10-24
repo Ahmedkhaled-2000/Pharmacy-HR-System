@@ -62,7 +62,7 @@ export default function WhatsAppStatusCard({
       }
       return custom.replace(/\/+$/, '');
     }
-    return 'https://63-183-147-199.sslip.io/whatsapp';
+    return 'https://169-58-214-20.sslip.io/whatsapp';
   };
 
   const triggerServerWakeup = () => {

@@ -137,8 +137,8 @@ public class BackgroundNotificationService extends Service {
     private void pollVpsNotifications() {
         HttpURLConnection conn = null;
         try {
-            // الاستعلام من خادم VPS السحابي مباشرة
-            URL url = new URL("http://63.183.147.199/api/settings?key=pharmacy-tracker-data");
+            // الاستعلام من خادم VPS السحابي الجديد مباشرة عبر HTTPS
+            URL url = new URL("https://169-58-214-20.sslip.io/api/settings?key=pharmacy-tracker-data");
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(8000);

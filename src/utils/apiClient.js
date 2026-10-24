@@ -43,8 +43,8 @@ const getApiBaseUrl = () => {
     return envUrl;
   }
 
-  // 4. الرابط السحابي المركزي الموثوق والمشفر عالمياً (HTTPS)
-  return 'https://63-183-147-199.sslip.io/api';
+  // 4. الرابط السحابي المركزي الموثوق والمشفر عالمياً (HTTPS) للسيرفر المعتمد الجديد
+  return 'https://169-58-214-20.sslip.io/api';
 };
 
 export const API_BASE_URL = getApiBaseUrl();

@@ -65,7 +65,7 @@ export default function LocalBiometricInspectorModal({ isOpen, onClose }) {
       } else {
         // اختبار من المتصفح عبر fetch
         const start = Date.now();
-        const testRes = await fetch('https://63-183-147-199.sslip.io/api/health', { mode: 'cors' });
+        const testRes = await fetch('https://169-58-214-20.sslip.io/api/health', { mode: 'cors' });
         const latency = Date.now() - start;
         setCloudStatus({
           success: true,

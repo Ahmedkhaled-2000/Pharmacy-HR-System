@@ -225,7 +225,7 @@ export const GITHUB_LATEST_APK_URL = 'https://github.com/Ahmedkhaled-2000/Pharma
 export function getAndroidApkDownloadUrl() {
   if (typeof window !== 'undefined' && window.location) {
     const { hostname, origin } = window.location;
-    if (hostname === '63.183.147.199' || hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site')) {
+    if (hostname === '169.58.214.20' || hostname.includes('169-58-214-20') || hostname.includes('sslip.io') || hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site')) {
       return `${origin}/downloads/${LATEST_ANDROID_APK_FILENAME}`;
     }
   }

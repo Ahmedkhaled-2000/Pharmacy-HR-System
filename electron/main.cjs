@@ -515,8 +515,8 @@ function startLocalStaticServer(distDir) {
 function fetchCloudDataDirect() {
   return new Promise((resolve, reject) => {
     const cb = `_cb=${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const targetUrl = `https://63-183-147-199.sslip.io/api/settings?key=pharmacy-tracker-data&${cb}`;
-    const fallbackUrl = `http://63.183.147.199/api/settings?key=pharmacy-tracker-data&${cb}`;
+    const targetUrl = `https://169-58-214-20.sslip.io/api/settings?key=pharmacy-tracker-data&${cb}`;
+    const fallbackUrl = `http://169.58.214.20:5000/api/settings?key=pharmacy-tracker-data&${cb}`;
 
     const executeFetch = (urlToUse) => {
       const isHttps = urlToUse.startsWith('https');
@@ -613,7 +613,7 @@ async function ensureLocalStatePopulated() {
     }
 
     if (needsFetch) {
-      console.log('[Desktop State] Local state empty or missing. Fetching from VPS (63.183.147.199)...');
+      console.log('[Desktop State] Local state empty or missing. Fetching from new VPS (169.58.214.20)...');
       const cloudData = await fetchCloudDataDirect();
       if (cloudData && Array.isArray(cloudData.employees) && cloudData.employees.length > 0) {
         fs.writeFileSync(LOCAL_STATE_FILE, JSON.stringify(cloudData), 'utf8');
@@ -1637,10 +1637,10 @@ function startLocalBiometricServer(port = 7005) {
       } catch {}
 
       // توجيه ذكي فوري للسيرفر السحابي VPS
-      const cloudUrl = `http://63.183.147.199:5000${reqUrl}`;
+      const cloudUrl = `http://169.58.214.20:5000${reqUrl}`;
       const proxyReq = http.request(cloudUrl, {
         method: req.method,
-        headers: { ...req.headers, host: '63.183.147.199:5000' },
+        headers: { ...req.headers, host: '169.58.214.20:5000' },
         timeout: 6000
       }, (proxyRes) => {
         res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
@@ -1694,8 +1694,8 @@ ipcMain.handle('biometric:get-network-info', async () => {
 
 ipcMain.handle('biometric:test-cloud', async () => {
   const [res80, res5000] = await Promise.all([
-    probeTcpSocket('63.183.147.199', 80, 2000),
-    probeTcpSocket('63.183.147.199', 5000, 2000)
+    probeTcpSocket('169.58.214.20', 80, 2000),
+    probeTcpSocket('169.58.214.20', 5000, 2000)
   ]);
   return {
     success: true,

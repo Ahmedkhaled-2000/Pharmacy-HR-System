@@ -39,7 +39,7 @@ const getSocketUrl = () => {
     }
     return sUrl;
   }
-  return 'https://63-183-147-199.sslip.io';
+  return 'https://169-58-214-20.sslip.io';
 };
 
 export const SOCKET_SERVER_URL = getSocketUrl();

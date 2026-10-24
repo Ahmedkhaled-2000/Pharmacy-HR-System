@@ -2,7 +2,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 
 const sshKey = 'vps-p-spark-1803.pem';
-const host = 'ubuntu@63.183.147.199';
+const host = 'admin@169.58.214.20';
 
 console.log('1. Packaging web app assets into frontend_update.tar.gz...');
 execSync('tar --exclude="*.wasm" -czf frontend_update.tar.gz -C dist index.html assets sw.js registerSW.js manifest.webmanifest');

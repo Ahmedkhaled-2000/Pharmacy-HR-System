@@ -92,7 +92,7 @@ export default function WhatsAppCenterModule({
 
     // 1. في بيئة المتصفح السحابية / VPS (أي HTTPS أو نطاق VPS):
     // استخدام نفس المنشأ عبر /whatsapp مباشرة لمنع Mixed Content وحظر المتصفح نهائياً
-    if (isHttps || hostname === '63.183.147.199' || hostname.includes('sslip.io') || hostname.includes('pharmacore.site')) {
+    if (isHttps || hostname === '169.58.214.20' || hostname.includes('169-58-214-20') || hostname.includes('sslip.io') || hostname.includes('pharmacore.site')) {
       return `${origin}/whatsapp`;
     }
 
@@ -126,7 +126,7 @@ export default function WhatsAppCenterModule({
       return configured.replace(/\/+$/, '');
     }
 
-    return 'https://63-183-147-199.sslip.io/whatsapp';
+    return 'https://169-58-214-20.sslip.io/whatsapp';
   }, [deviceServerUrl, isDesktop, state?.orgSettings?.waServerUrl, state?.orgSettings?.waServerLanUrl, isPrivateLanIp]);
 
   // احتساب عنوان خادم الواتساب المقترح لربط الهواتف والموبايلات والأجهزة
@@ -135,7 +135,8 @@ export default function WhatsAppCenterModule({
       const { hostname, origin, protocol } = window.location;
       if (
         protocol === 'https:' ||
-        hostname === '63.183.147.199' ||
+        hostname === '169.58.214.20' ||
+        hostname.includes('169-58-214-20') ||
         hostname.includes('sslip.io') ||
         hostname === 'pharmacore.site' ||
         hostname.endsWith('.pharmacore.site')
@@ -154,13 +155,13 @@ export default function WhatsAppCenterModule({
     if (networkInfo?.suggestedLanUrl && !networkInfo.suggestedLanUrl.includes('172.20.10.3')) {
       return networkInfo.suggestedLanUrl.replace(/\/+$/, '');
     }
-    return 'https://63-183-147-199.sslip.io/whatsapp';
+    return 'https://169-58-214-20.sslip.io/whatsapp';
   }, [networkInfo, state?.orgSettings?.waServerLanUrl, state?.orgSettings?.waServerUrl]);
 
   // هل الخادم الحالي هو سيرفر الـ VPS السحابي؟
   const isVpsServer = useMemo(() => {
     const url = primaryLanUrl || serverUrl || '';
-    return Boolean(url.includes('63.183.147.199') || url.includes('sslip.io') || url.includes('pharmacore.site') || url.includes('/whatsapp'));
+    return Boolean(url.includes('169.58.214.20') || url.includes('169-58-214-20') || url.includes('sslip.io') || url.includes('pharmacore.site') || url.includes('/whatsapp'));
   }, [primaryLanUrl, serverUrl]);
 
   // هل خدمة الـ IP معلنة ومفعلة حالياً للهواتف والأجهزة الأخرى؟
@@ -186,7 +187,7 @@ export default function WhatsAppCenterModule({
   const handleSwitchToVpsServer = async () => {
     const vpsUrl = typeof window !== 'undefined' && window.location?.origin
       ? `${window.location.origin}/whatsapp`
-      : 'https://63-183-147-199.sslip.io/whatsapp';
+      : 'https://169-58-214-20.sslip.io/whatsapp';
     try {
       localStorage.removeItem('PHARMACY_DEVICE_WA_URL');
       setDeviceServerUrl('');
@@ -198,7 +199,7 @@ export default function WhatsAppCenterModule({
   // إظهار باركود QR للهواتف لربط الموبايل بنقرة واحدة
   const handleOpenMobileQr = async () => {
     try {
-      const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'http://63.183.147.199';
+      const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'https://169-58-214-20.sslip.io';
       const connectUrl = `${origin}?wa_url=${encodeURIComponent(primaryLanUrl)}`;
       const qr = await QRCode.toDataURL(connectUrl, { width: 280, margin: 2 });
       setMobileQrDataUrl(qr);
@@ -757,9 +758,9 @@ export default function WhatsAppCenterModule({
       const { hostname, origin } = window.location;
       addCandidate(`${origin}/whatsapp`);
       addCandidate(`http://${hostname}:3100`);
-      if (hostname === '63.183.147.199' || hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site')) {
-        addCandidate('http://63.183.147.199/whatsapp');
-        addCandidate('http://63.183.147.199:3100');
+      if (hostname === '169.58.214.20' || hostname.includes('169-58-214-20') || hostname === 'pharmacore.site' || hostname.endsWith('.pharmacore.site')) {
+        addCandidate('https://169-58-214-20.sslip.io/whatsapp');
+        addCandidate('http://169.58.214.20:3100');
       }
     }
 

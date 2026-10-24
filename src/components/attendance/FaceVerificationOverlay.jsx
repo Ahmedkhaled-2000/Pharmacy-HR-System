@@ -566,8 +566,8 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
                 cursor: 'pointer'
               }}
               onClick={() => {
-                if (window.location.hostname === '63.183.147.199' || window.location.hostname.includes('sslip.io')) {
-                  window.location.href = 'https://63-183-147-199.sslip.io' + window.location.pathname + window.location.search;
+                if (window.location.hostname === '169.58.214.20' || window.location.hostname === '63.183.147.199' || window.location.hostname.includes('sslip.io')) {
+                  window.location.href = 'https://169-58-214-20.sslip.io' + window.location.pathname + window.location.search;
                 } else {
                   window.location.href = window.location.href.replace(/^http:/, 'https:');
                 }
