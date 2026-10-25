@@ -322,16 +322,17 @@ export default function PosSystemView({
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          background: '#0b1329',
-          color: '#f8fafc'
+          background: '#f1f5f9',
+          color: '#0f172a'
         }}
       >
       {isStandalone && (
         <div
           style={{
             height: '46px',
-            background: 'var(--surface, #111A28)',
-            borderBottom: '1px solid var(--border, rgba(255,255,255,0.08))',
+            background: '#ffffff',
+            borderBottom: '1px solid #e2e8f0',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -357,11 +358,11 @@ export default function PosSystemView({
                 display: 'flex',
                 alignItems: 'center',
                 gap: '5px',
-                background: 'rgba(139, 92, 246, 0.15)',
-                border: '1px solid #8b5cf6',
+                background: '#f5f3ff',
+                border: '1px solid #c4b5fd',
                 borderRadius: '8px',
-                padding: '4px 10px',
-                color: '#a78bfa',
+                padding: '5px 12px',
+                color: '#7c3aed',
                 fontSize: '12px',
                 cursor: 'pointer',
                 fontWeight: 800
@@ -379,11 +380,11 @@ export default function PosSystemView({
                 display: 'flex',
                 alignItems: 'center',
                 gap: '5px',
-                background: 'rgba(139, 92, 246, 0.15)',
-                border: '1px solid var(--primary, #0d9488)',
+                background: '#f0fdfa',
+                border: '1px solid #99f6e4',
                 borderRadius: '8px',
-                padding: '4px 10px',
-                color: 'var(--primary, #0d9488)',
+                padding: '5px 12px',
+                color: '#0d9488',
                 fontSize: '12px',
                 cursor: 'pointer',
                 fontWeight: 800
@@ -401,7 +402,7 @@ export default function PosSystemView({
                   border: 'none',
                   cursor: 'pointer',
                   fontSize: '12px',
-                  color: 'var(--muted, #94a3b8)',
+                  color: '#64748b',
                   padding: '4px 6px'
                 }}
               >
@@ -416,11 +417,11 @@ export default function PosSystemView({
                 display: 'flex',
                 alignItems: 'center',
                 gap: '4px',
-                background: 'rgba(239, 68, 68, 0.12)',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
+                background: '#fef2f2',
+                border: '1px solid #fecaca',
                 borderRadius: '8px',
-                padding: '4px 10px',
-                color: '#ef4444',
+                padding: '5px 12px',
+                color: '#dc2626',
                 fontSize: '12px',
                 cursor: 'pointer',
                 fontWeight: 700

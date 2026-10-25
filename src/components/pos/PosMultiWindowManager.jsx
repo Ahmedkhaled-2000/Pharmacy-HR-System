@@ -147,21 +147,20 @@ export default function PosMultiWindowManager() {
           >
             <div
               style={{
-                background: 'rgba(15, 23, 42, 0.88)',
-                border: '1.5px dashed rgba(13, 148, 136, 0.45)',
+                background: '#ffffff',
+                border: '1.5px dashed var(--primary, #0d9488)',
                 borderRadius: '24px',
                 padding: '36px 48px',
                 textAlign: 'center',
-                boxShadow: '0 25px 60px rgba(0,0,0,0.6)',
-                backdropFilter: 'blur(16px)',
+                boxShadow: '0 20px 40px rgba(0,0,0,0.06)',
                 maxWidth: '480px'
               }}
             >
               <div style={{ fontSize: '42px', marginBottom: '8px' }}>🛒</div>
-              <h3 style={{ fontSize: '20px', fontWeight: 900, color: '#ffffff', margin: '0 0 8px' }}>
+              <h3 style={{ fontSize: '20px', fontWeight: 900, color: '#0f172a', margin: '0 0 8px' }}>
                 لا توجد شاشات بيع مفتوحة حالياً
               </h3>
-              <p style={{ fontSize: '13px', color: '#94a3b8', margin: '0 0 20px', lineHeight: 1.6 }}>
+              <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 20px', lineHeight: 1.6 }}>
                 تم إغلاق شاشات البيع بنجاح. يمكنك فتح شاشة بيع جديدة في أي لحظة أو التنقل عبر الشريط العلوي.
               </p>
               <button

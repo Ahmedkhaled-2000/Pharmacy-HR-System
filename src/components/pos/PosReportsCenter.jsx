@@ -251,13 +251,16 @@ export default function PosReportsCenter({ isOpen, onClose }) {
     win.document.close();
   };
 
+  if (!isOpen) return null;
+
   return (
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0, 0, 0, 0.75)',
-        backdropFilter: 'blur(8px)',
+        background: 'rgba(15, 23, 42, 0.28)',
+        backdropFilter: 'blur(5px)',
+        WebkitBackdropFilter: 'blur(5px)',
         zIndex: 2200,
         display: 'flex',
         alignItems: 'center',
@@ -267,16 +270,16 @@ export default function PosReportsCenter({ isOpen, onClose }) {
     >
       <div
         style={{
-          background: '#0b1329',
-          color: '#f8fafc',
-          border: '1.5px solid rgba(13, 148, 136, 0.4)',
+          background: '#ffffff',
+          color: '#0f172a',
+          border: '1px solid #cbd5e1',
           borderRadius: '20px',
           width: '95%',
           maxWidth: '1240px',
           height: '90vh',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: '0 30px 80px rgba(0, 0, 0, 0.5)',
+          boxShadow: '0 25px 60px rgba(0, 0, 0, 0.15)',
           overflow: 'hidden'
         }}
       >
@@ -284,8 +287,8 @@ export default function PosReportsCenter({ isOpen, onClose }) {
         <div
           style={{
             padding: '16px 24px',
-            background: 'linear-gradient(135deg, rgba(13,148,136,0.15) 0%, rgba(17,26,40,0.95) 100%)',
-            borderBottom: '1px solid var(--border, rgba(255,255,255,0.1))',
+            background: 'linear-gradient(135deg, #f0fdfa 0%, #ffffff 100%)',
+            borderBottom: '1px solid #e2e8f0',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between'
@@ -977,8 +980,9 @@ export default function PosReportsCenter({ isOpen, onClose }) {
             style={{
               position: 'fixed',
               inset: 0,
-              background: 'rgba(0, 0, 0, 0.8)',
-              backdropFilter: 'blur(8px)',
+              background: 'rgba(15, 23, 42, 0.28)',
+              backdropFilter: 'blur(5px)',
+              WebkitBackdropFilter: 'blur(5px)',
               zIndex: 2550,
               display: 'flex',
               alignItems: 'center',
@@ -988,9 +992,9 @@ export default function PosReportsCenter({ isOpen, onClose }) {
           >
             <div
               style={{
-                background: 'var(--surface, #0f172a)',
-                color: 'var(--text, #ffffff)',
-                border: '1px solid var(--border, rgba(255,255,255,0.12))',
+                background: '#ffffff',
+                color: '#0f172a',
+                border: '1px solid #cbd5e1',
                 borderRadius: '18px',
                 width: '94%',
                 maxWidth: '780px',
@@ -998,7 +1002,7 @@ export default function PosReportsCenter({ isOpen, onClose }) {
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
-                boxShadow: '0 25px 60px rgba(0,0,0,0.6)'
+                boxShadow: '0 25px 60px rgba(0,0,0,0.15)'
               }}
             >
               {/* ترويسة المودال */}
@@ -1314,7 +1318,9 @@ export default function PosReportsCenter({ isOpen, onClose }) {
             style={{
               position: 'fixed',
               inset: 0,
-              background: 'rgba(0, 0, 0, 0.85)',
+              background: 'rgba(15, 23, 42, 0.28)',
+              backdropFilter: 'blur(5px)',
+              WebkitBackdropFilter: 'blur(5px)',
               zIndex: 2600,
               display: 'flex',
               alignItems: 'center',

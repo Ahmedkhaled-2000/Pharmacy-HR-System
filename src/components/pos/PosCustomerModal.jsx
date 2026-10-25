@@ -1,53 +1,121 @@
 import React, { useState } from 'react';
 import { usePOS } from '../../context/POSContext';
-import { User, Phone, MapPin, Heart, X, CheckCircle2 } from 'lucide-react';
+import { saveUnifiedCustomer } from '../../services/posCustomerService';
+import {
+  User,
+  Phone,
+  MapPin,
+  Heart,
+  X,
+  CheckCircle2,
+  Building2,
+  FileText,
+  Save,
+  Clock,
+  Sparkles
+} from 'lucide-react';
 
+/**
+ * PosCustomerModal
+ * نافذة تسجيل وتعديل بيانات العميل المركزية الموحدة
+ * متصلة مباشرة بقاعدة بيانات OutStock و POS الموحدة (public.outstock_customers)
+ * تصميم فاتح عالمي أنيق مع خلفية زجاجية طبيعية شفافة
+ */
 export default function PosCustomerModal() {
-  const { isCustomerModalOpen, setIsCustomerModalOpen, activeWindowId, updateWindowCustomer } = usePOS();
+  const {
+    isCustomerModalOpen,
+    setIsCustomerModalOpen,
+    activeWindowId,
+    updateWindowCustomer,
+    salesWindows
+  } = usePOS();
+
+  const currentWindow = salesWindows?.find((w) => w.id === activeWindowId);
+  const activeCustomer = currentWindow?.customer || {};
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [landlinePhone, setLandlinePhone] = useState('');
   const [address, setAddress] = useState('');
+  const [zone, setZone] = useState('');
+  const [notes, setNotes] = useState('');
   const [isChronic, setIsChronic] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
   const [isSaved, setIsSaved] = useState(false);
+
+  // ملء الحقول تلقائياً إذا كان هناك رقم هاتف أو اسم مكتوب في شاشة البيع
+  React.useEffect(() => {
+    if (isCustomerModalOpen) {
+      setName(activeCustomer.name || '');
+      setPhone(activeCustomer.phone || '');
+      setAddress(activeCustomer.address || '');
+      setIsChronic(Boolean(activeCustomer.isChronic));
+      setErrorMsg('');
+      setIsSaved(false);
+    }
+  }, [isCustomerModalOpen, activeCustomer]);
 
   if (!isCustomerModalOpen) return null;
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault();
-    if (!name.trim() || !phone.trim()) return;
+    setErrorMsg('');
 
-    const newCustomer = {
-      id: `cust_${Date.now()}`,
-      name: name.trim(),
-      phone: phone.trim(),
-      address: address.trim(),
-      isChronic,
-      walletBalance: 0
-    };
-
-    // حفظ في الذاكرة المحلية للعملاء
-    try {
-      const raw = localStorage.getItem('pharma_pos_customers');
-      const customers = raw ? JSON.parse(raw) : [];
-      customers.unshift(newCustomer);
-      localStorage.setItem('pharma_pos_customers', JSON.stringify(customers));
-    } catch {}
-
-    // ربط العميل بالنافذة النشطة
-    if (activeWindowId) {
-      updateWindowCustomer(activeWindowId, newCustomer);
+    if (!name.trim()) {
+      setErrorMsg('⚠️ يرجى إدخال اسم العميل');
+      return;
     }
 
-    setIsSaved(true);
-    setTimeout(() => {
-      setIsSaved(false);
-      setIsCustomerModalOpen(false);
-      setName('');
-      setPhone('');
-      setAddress('');
-      setIsChronic(false);
-    }, 900);
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.length < 10) {
+      setErrorMsg('⚠️ يرجى إدخال رقم هاتف صحيح (11 رقم للموبايل)');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const branchId = localStorage.getItem('app_pos_branch_id') || 'main';
+      const result = await saveUnifiedCustomer({
+        name: name.trim(),
+        phone: cleanPhone,
+        landlinePhone: landlinePhone.trim(),
+        address: address.trim(),
+        zone: zone.trim(),
+        notes: notes.trim(),
+        isChronic
+      }, branchId);
+
+      if (result.success && result.customer) {
+        const unifiedCust = {
+          id: result.customer.id,
+          name: result.customer.full_name || name.trim(),
+          phone: result.customer.whatsapp_phone || cleanPhone,
+          address: result.customer.address || address.trim(),
+          isChronic: Boolean(result.customer.is_chronic),
+          walletBalance: parseFloat(result.customer.wallet_balance || 0),
+          customerCode: result.customer.customer_code
+        };
+
+        // ربط العميل فورياً بنافذة البيع النشطة
+        if (activeWindowId) {
+          updateWindowCustomer(activeWindowId, unifiedCust);
+        }
+
+        setIsSaved(true);
+        setTimeout(() => {
+          setIsSaved(false);
+          setIsCustomerModalOpen(false);
+        }, 800);
+      } else {
+        setErrorMsg(result.error || 'حدث خطأ أثناء حفظ العميل بقاعدة البيانات');
+      }
+    } catch (err) {
+      console.error('Customer save error:', err);
+      setErrorMsg('تعذر حفظ العميل، يرجى المحاولة مرة أخرى');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -55,64 +123,70 @@ export default function PosCustomerModal() {
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.72)',
-        backdropFilter: 'blur(8px)',
+        backgroundColor: 'rgba(15, 23, 42, 0.28)',
+        backdropFilter: 'blur(5px)',
+        WebkitBackdropFilter: 'blur(5px)',
         zIndex: 99999,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         padding: '16px',
-        direction: 'rtl'
+        direction: 'rtl',
+        animation: 'posFadeIn 0.15s ease-out'
       }}
-      onClick={() => setIsCustomerModalOpen(false)}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) setIsCustomerModalOpen(false);
+      }}
     >
       <div
         style={{
-          background: 'var(--surface, #0f172a)',
-          color: 'var(--text, #f8fafc)',
-          border: '1.5px solid rgba(13, 148, 136, 0.4)',
+          background: '#ffffff',
+          color: '#0f172a',
+          border: '1px solid #cbd5e1',
           borderRadius: '20px',
           width: '100%',
-          maxWidth: '500px',
+          maxWidth: '540px',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: '0 25px 60px -12px rgba(0, 0, 0, 0.55)',
-          overflow: 'hidden'
+          boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.05)',
+          overflow: 'hidden',
+          animation: 'posPopScale 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
         }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* شريط رأس المودال */}
         <div
           style={{
-            padding: '16px 20px',
-            background: 'linear-gradient(135deg, rgba(13,148,136,0.18) 0%, rgba(15,23,42,0.95) 100%)',
-            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            padding: '16px 22px',
+            background: 'linear-gradient(135deg, #f0fdfa 0%, #ffffff 100%)',
+            borderBottom: '1px solid #e2e8f0',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div
               style={{
-                width: '38px',
-                height: '38px',
-                borderRadius: '10px',
-                background: 'rgba(13,148,136,0.2)',
+                width: '40px',
+                height: '40px',
+                borderRadius: '12px',
+                background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#14b8a6'
+                color: '#ffffff',
+                boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)'
               }}
             >
               <User size={20} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 900, color: '#ffffff' }}>
-                إضافة وتسجيل عميل جديد (Quick Customer CRM)
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 900, color: '#0f172a' }}>
+                تسجيل عميل مركزي جديد (OutStock & POS)
               </h3>
-              <p style={{ margin: '2px 0 0', fontSize: '11.5px', color: '#94a3b8' }}>
-                تسجيل العميل لربط المحفظة، تذكير الروشتات، وخدمة التوصيل
+              <p style={{ margin: '2px 0 0', fontSize: '11.5px', color: '#64748b' }}>
+                يتم الحفظ في قاعدة البيانات الموحدة ويكون متاحاً في النواقص ونقاط البيع فوراً
               </p>
             </div>
           </div>
@@ -121,12 +195,12 @@ export default function PosCustomerModal() {
             type="button"
             onClick={() => setIsCustomerModalOpen(false)}
             style={{
-              background: 'rgba(255,255,255,0.06)',
-              border: 'none',
-              color: '#94a3b8',
-              width: '32px',
-              height: '32px',
+              width: '34px',
+              height: '34px',
               borderRadius: '8px',
+              background: '#f1f5f9',
+              border: '1px solid #e2e8f0',
+              color: '#475569',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -137,146 +211,257 @@ export default function PosCustomerModal() {
           </button>
         </div>
 
-        {/* نموذج الإدخال */}
-        <form onSubmit={handleSave} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {isSaved && (
+        {/* نموذج تسجيل العميل */}
+        <form onSubmit={handleSave} style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {errorMsg && (
             <div
               style={{
-                padding: '10px',
-                borderRadius: '8px',
-                background: 'rgba(16,185,129,0.15)',
-                color: '#10b981',
-                fontSize: '13px',
-                fontWeight: 700,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
+                padding: '10px 14px',
+                borderRadius: '10px',
+                background: '#fef2f2',
+                border: '1px solid #fecaca',
+                color: '#b91c1c',
+                fontSize: '12px',
+                fontWeight: 700
               }}
             >
-              <CheckCircle2 size={16} />
-              <span>تم تسجيل العميل وربطه بالفاتورة الحالية بنجاح! ✅</span>
+              {errorMsg}
             </div>
           )}
 
+          {/* اسم العميل */}
           <div>
-            <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '6px', color: '#cbd5e1' }}>
-              اسم العميل بالكامل *
+            <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+              اسم العميل بالكامل <span style={{ color: '#ef4444' }}>*</span>
             </label>
-            <input
-              type="text"
-              required
-              placeholder="مثال: أحمد عبد الله..."
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                borderRadius: '8px',
-                border: '1px solid rgba(255,255,255,0.12)',
-                background: 'rgba(255,255,255,0.05)',
-                color: '#ffffff',
-                fontSize: '13px',
-                boxSizing: 'border-box'
-              }}
-              autoFocus
-            />
+            <div style={{ position: 'relative' }}>
+              <User size={16} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+              <input
+                type="text"
+                required
+                placeholder="أدخل اسم العميل ثلاثي أو الاسم التجاري..."
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                style={{
+                  width: '100%',
+                  height: '40px',
+                  padding: '0 38px 0 12px',
+                  borderRadius: '10px',
+                  border: '1.5px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  fontSize: '13px',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
           </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '6px', color: '#cbd5e1' }}>
-              رقم الهاتف / الواتساب (11 رقم) *
-            </label>
-            <input
-              type="tel"
-              required
-              placeholder="مثال: 01012345678"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                borderRadius: '8px',
-                border: '1px solid rgba(255,255,255,0.12)',
-                background: 'rgba(255,255,255,0.05)',
-                color: '#ffffff',
-                fontSize: '13px',
-                boxSizing: 'border-box'
-              }}
-            />
+          {/* رقم الهاتف والواتساب */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                رقم الموبايل / واتساب <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <div style={{ position: 'relative' }}>
+                <Phone size={16} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                <input
+                  type="tel"
+                  required
+                  placeholder="01xxxxxxxxx (11 رقم)"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: '40px',
+                    padding: '0 38px 0 12px',
+                    borderRadius: '10px',
+                    border: '1.5px solid #cbd5e1',
+                    background: '#ffffff',
+                    color: '#0f172a',
+                    fontSize: '13px',
+                    direction: 'ltr',
+                    textAlign: 'right',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                الهاتف الأرضي (اختياري)
+              </label>
+              <input
+                type="tel"
+                placeholder="02xxxxxxxx"
+                value={landlinePhone}
+                onChange={(e) => setLandlinePhone(e.target.value)}
+                style={{
+                  width: '100%',
+                  height: '40px',
+                  padding: '0 12px',
+                  borderRadius: '10px',
+                  border: '1.5px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  fontSize: '13px',
+                  direction: 'ltr',
+                  textAlign: 'right',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
           </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '6px', color: '#cbd5e1' }}>
-              عنوان التوصيل (اختياري)
-            </label>
-            <input
-              type="text"
-              placeholder="مثال: 15 شارع الطيران، الدور الرابع، شقة 8..."
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                borderRadius: '8px',
-                border: '1px solid rgba(255,255,255,0.12)',
-                background: 'rgba(255,255,255,0.05)',
-                color: '#ffffff',
-                fontSize: '13px',
-                boxSizing: 'border-box'
-              }}
-            />
+          {/* العنوان والمنطقة */}
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                العنوان بالتفصيل
+              </label>
+              <div style={{ position: 'relative' }}>
+                <MapPin size={16} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                <input
+                  type="text"
+                  placeholder="الشارع، رقم العمارة، الدور، الشقة..."
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: '40px',
+                    padding: '0 38px 0 12px',
+                    borderRadius: '10px',
+                    border: '1.5px solid #cbd5e1',
+                    background: '#ffffff',
+                    color: '#0f172a',
+                    fontSize: '13px',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                المنطقة / خط السير
+              </label>
+              <input
+                type="text"
+                placeholder="مثال: وسط البلد"
+                value={zone}
+                onChange={(e) => setZone(e.target.value)}
+                style={{
+                  width: '100%',
+                  height: '40px',
+                  padding: '0 12px',
+                  borderRadius: '10px',
+                  border: '1.5px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  fontSize: '13px',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
           </div>
 
-          <label
+          {/* ميزة متابعة الأمراض المزمنة */}
+          <div
             style={{
+              padding: '12px 14px',
+              borderRadius: '12px',
+              background: isChronic ? '#f0fdfa' : '#f8fafc',
+              border: isChronic ? '1.5px solid #0d9488' : '1px solid #e2e8f0',
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
-              padding: '10px 12px',
-              background: 'rgba(13,148,136,0.1)',
-              borderRadius: '8px',
+              justifyContent: 'space-between',
               cursor: 'pointer',
-              border: '1px solid rgba(13,148,136,0.2)'
+              transition: 'all 0.15s ease'
             }}
+            onClick={() => setIsChronic(!isChronic)}
           >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Heart size={20} color={isChronic ? '#0d9488' : '#94a3b8'} />
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>
+                  عميل علاج شهري ومزمن (Chronic Refill)
+                </div>
+                <div style={{ fontSize: '11px', color: '#64748b' }}>
+                  تفعيل التذكير الآلي عبر الواتساب بميعاد تكرار الروشتة قبل نفاد الدواء
+                </div>
+              </div>
+            </div>
+
             <input
               type="checkbox"
               checked={isChronic}
               onChange={(e) => setIsChronic(e.target.checked)}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#0d9488' }}
             />
-            <Heart size={16} color="#ef4444" />
-            <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#f8fafc' }}>
-              عميل علاج مزمن (تفعيل جدول إعادة الصرف وتذكير الواتساب التلقائي)
-            </span>
-          </label>
+          </div>
 
-          <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+          {/* أزرار الحفظ والإلغاء */}
+          <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
             <button
               type="submit"
+              disabled={isSaving || isSaved}
               style={{
                 flex: 1,
-                padding: '10px',
-                borderRadius: '8px',
-                border: 'none',
-                background: '#0d9488',
+                height: '44px',
+                borderRadius: '12px',
+                background: isSaved
+                  ? '#059669'
+                  : 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
                 color: '#ffffff',
-                fontSize: '13px',
-                fontWeight: 800,
-                cursor: 'pointer'
+                border: 'none',
+                fontSize: '14px',
+                fontWeight: 900,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                boxShadow: '0 6px 18px rgba(13, 148, 136, 0.3)',
+                transition: 'all 0.15s ease'
               }}
             >
-              حفظ وربط العميل فوراً
+              {isSaved ? (
+                <>
+                  <CheckCircle2 size={18} />
+                  <span>تم الحفظ والربط بنجاح!</span>
+                </>
+              ) : isSaving ? (
+                <>
+                  <Clock size={18} className="pos-spin-icon" />
+                  <span>جاري الحفظ في القاعدة المركزية...</span>
+                </>
+              ) : (
+                <>
+                  <Save size={18} />
+                  <span>حفظ العميل وربطه بالفاتورة</span>
+                </>
+              )}
             </button>
+
             <button
               type="button"
               onClick={() => setIsCustomerModalOpen(false)}
               style={{
-                padding: '10px 16px',
-                borderRadius: '8px',
-                border: 'none',
-                background: 'rgba(255,255,255,0.08)',
-                color: '#cbd5e1',
+                padding: '0 18px',
+                height: '44px',
+                borderRadius: '12px',
+                background: '#ffffff',
+                border: '1.5px solid #cbd5e1',
+                color: '#475569',
                 fontSize: '13px',
+                fontWeight: 700,
                 cursor: 'pointer'
               }}
             >

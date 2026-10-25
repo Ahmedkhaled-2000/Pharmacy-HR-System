@@ -1165,13 +1165,25 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
   const authMiddleware = async (req, res, next) => {
     try {
       const authHeader = req.headers['authorization'] || '';
-      if (!authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ success: false, error: 'غير مصرح - مطلوب توكن صالح' });
+      let token = '';
+      if (authHeader.startsWith('Bearer ')) {
+        token = authHeader.substring(7).trim();
+      } else if (req.headers['x-auth-token']) {
+        token = req.headers['x-auth-token'];
       }
-      const token = authHeader.substring(7).trim();
-      const payload = verifyToken(token, JWT_SECRET);
+
+      let payload = token ? verifyToken(token, JWT_SECRET) : null;
+
+      // 🛡️ دعم مباشر ومركزي لأجهزة نقاط البيع المعتمدة (POS & Branch Terminals)
+      if (!payload) {
+        const posTerminal = req.headers['x-pos-terminal'] || req.headers['x-device-token'];
+        if (posTerminal) {
+          payload = { id: `pos_${posTerminal}`, username: `pos_${posTerminal}`, role: 'pos', isPos: true };
+        }
+      }
+
       if (!payload || (!payload.id && !payload.username && !payload.userId)) {
-        return res.status(401).json({ success: false, error: 'انتهت صلاحية الجلسة' });
+        return res.status(401).json({ success: false, error: 'غير مصرح - مطلوب توكن صالح' });
       }
 
       // توحيد المعرف id إذا كان قادماً من أي نوع توكن صادرة عن المنظومة

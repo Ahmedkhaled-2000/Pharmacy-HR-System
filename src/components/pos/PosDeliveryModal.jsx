@@ -71,30 +71,33 @@ export default function PosDeliveryModal() {
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        backdropFilter: 'blur(8px)',
+        backgroundColor: 'rgba(15, 23, 42, 0.28)',
+        backdropFilter: 'blur(5px)',
+        WebkitBackdropFilter: 'blur(5px)',
         zIndex: 99999,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         padding: '16px',
-        direction: 'rtl'
+        direction: 'rtl',
+        animation: 'posFadeIn 0.15s ease-out'
       }}
       onClick={() => setIsDeliveryModalOpen(false)}
     >
       <div
         style={{
-          background: '#0f172a',
-          color: '#f8fafc',
-          border: '1.5px solid rgba(139, 92, 246, 0.45)',
+          background: '#ffffff',
+          color: '#0f172a',
+          border: '1px solid #cbd5e1',
           borderRadius: '20px',
           width: '100%',
           maxWidth: '850px',
           maxHeight: '90vh',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: '0 25px 60px -12px rgba(0, 0, 0, 0.75), 0 0 40px rgba(139, 92, 246, 0.25)',
-          overflow: 'hidden'
+          boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.05)',
+          overflow: 'hidden',
+          animation: 'posPopScale 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -102,8 +105,8 @@ export default function PosDeliveryModal() {
         <div
           style={{
             padding: '18px 24px',
-            background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.2) 0%, rgba(15,23,42,0.95) 100%)',
-            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            background: 'linear-gradient(135deg, #f5f3ff 0%, #ffffff 100%)',
+            borderBottom: '1px solid #e2e8f0',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between'
@@ -115,21 +118,21 @@ export default function PosDeliveryModal() {
                 width: '44px',
                 height: '44px',
                 borderRadius: '12px',
-                background: 'rgba(139, 92, 246, 0.25)',
-                border: '1px solid rgba(139, 92, 246, 0.4)',
+                background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#a78bfa'
+                color: '#ffffff',
+                boxShadow: '0 4px 12px rgba(139, 92, 246, 0.3)'
               }}
             >
               <Bike size={24} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: '#ffffff' }}>
+              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: '#0f172a' }}>
                 مركز إدارة ومتابعة طلبات الدليفري (Delivery Orders Dispatcher)
               </h3>
-              <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#94a3b8' }}>
+              <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
                 تتبع فواتير التوصيل، خط سير الطيارين، وتحصيل المبالغ النقدية للفرع
               </p>
             </div>
@@ -139,9 +142,9 @@ export default function PosDeliveryModal() {
             type="button"
             onClick={() => setIsDeliveryModalOpen(false)}
             style={{
-              background: 'rgba(255,255,255,0.06)',
-              border: 'none',
-              color: '#94a3b8',
+              background: '#f1f5f9',
+              border: '1px solid #e2e8f0',
+              color: '#475569',
               width: '36px',
               height: '36px',
               borderRadius: '10px',
@@ -159,8 +162,8 @@ export default function PosDeliveryModal() {
         <div
           style={{
             padding: '14px 24px',
-            background: 'rgba(255,255,255,0.02)',
-            borderBottom: '1px solid rgba(255,255,255,0.06)',
+            background: '#f8fafc',
+            borderBottom: '1px solid #e2e8f0',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -169,16 +172,16 @@ export default function PosDeliveryModal() {
           }}
         >
           <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
-            <div style={{ background: 'rgba(139, 92, 246, 0.1)', border: '1px solid rgba(139, 92, 246, 0.25)', borderRadius: '10px', padding: '8px 14px' }}>
-              <div style={{ fontSize: '11px', color: '#a78bfa', fontWeight: 700 }}>إجمالي طلبات التوصيل</div>
-              <div style={{ fontSize: '16px', fontWeight: 900, color: '#ffffff', marginTop: '2px' }}>
+            <div style={{ background: '#ffffff', border: '1px solid #ddd6fe', borderRadius: '10px', padding: '8px 14px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+              <div style={{ fontSize: '11px', color: '#7c3aed', fontWeight: 700 }}>إجمالي طلبات التوصيل</div>
+              <div style={{ fontSize: '16px', fontWeight: 900, color: '#6d28d9', marginTop: '2px' }}>
                 {deliveryOrders.length} طلب
               </div>
             </div>
 
-            <div style={{ background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.25)', borderRadius: '10px', padding: '8px 14px' }}>
-              <div style={{ fontSize: '11px', color: '#10b981', fontWeight: 700 }}>إجمالي قيمة المبيعات</div>
-              <div style={{ fontSize: '16px', fontWeight: 900, color: '#ffffff', marginTop: '2px' }}>
+            <div style={{ background: '#ffffff', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '8px 14px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+              <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: 700 }}>إجمالي قيمة المبيعات</div>
+              <div style={{ fontSize: '16px', fontWeight: 900, color: '#15803d', marginTop: '2px' }}>
                 {totalDeliveryAmount.toFixed(2)} ج.م
               </div>
             </div>
@@ -196,12 +199,13 @@ export default function PosDeliveryModal() {
                 style={{
                   width: '100%',
                   padding: '7px 32px 7px 10px',
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.1)',
+                  background: '#ffffff',
+                  border: '1.5px solid #cbd5e1',
                   borderRadius: '8px',
-                  color: '#ffffff',
+                  color: '#0f172a',
                   fontSize: '12px',
-                  boxSizing: 'border-box'
+                  boxSizing: 'border-box',
+                  outline: 'none'
                 }}
               />
             </div>
@@ -209,7 +213,7 @@ export default function PosDeliveryModal() {
         </div>
 
         {/* أزرار التصفية بحالة الطلب */}
-        <div style={{ padding: '10px 24px', display: 'flex', gap: '8px', overflowX: 'auto', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div style={{ padding: '10px 24px', display: 'flex', gap: '8px', overflowX: 'auto', borderBottom: '1px solid #e2e8f0', background: '#ffffff' }}>
           {[
             { id: 'all', label: 'كل الطلبات' },
             { id: 'pending', label: 'قيد التجهيز ⏳' },
@@ -223,12 +227,13 @@ export default function PosDeliveryModal() {
               style={{
                 padding: '6px 14px',
                 borderRadius: '8px',
-                border: 'none',
-                background: activeFilter === tab.id ? '#8b5cf6' : 'rgba(255,255,255,0.05)',
-                color: activeFilter === tab.id ? '#ffffff' : '#94a3b8',
+                border: activeFilter === tab.id ? '1px solid #8b5cf6' : '1px solid #cbd5e1',
+                background: activeFilter === tab.id ? '#8b5cf6' : '#f8fafc',
+                color: activeFilter === tab.id ? '#ffffff' : '#475569',
                 fontSize: '12px',
                 fontWeight: 700,
-                cursor: 'pointer'
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
               }}
             >
               {tab.label}
@@ -237,12 +242,12 @@ export default function PosDeliveryModal() {
         </div>
 
         {/* قائمة الطلبات */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: '10px', background: '#fafafa' }}>
           {filteredOrders.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '50px 20px', color: '#94a3b8' }}>
+            <div style={{ textAlign: 'center', padding: '50px 20px', color: '#64748b' }}>
               <Bike size={44} style={{ opacity: 0.3, marginBottom: '8px' }} />
-              <div style={{ fontWeight: 800, fontSize: '14px' }}>لا توجد طلبات دليفري مطابقة</div>
-              <div style={{ fontSize: '12px' }}>يمكنك تحويل أي فاتورة بيع إلى دليفري عبر النقر على زر "تحويل لدليفري 🛵" في شاشة البيع</div>
+              <div style={{ fontWeight: 800, fontSize: '14px', color: '#334155' }}>لا توجد طلبات دليفري مطابقة</div>
+              <div style={{ fontSize: '12px', marginTop: '4px' }}>يمكنك تحويل أي فاتورة بيع إلى دليفري عبر النقر على زر "تحويل لدليفري 🛵" في شاشة البيع</div>
             </div>
           ) : (
             filteredOrders.map((order) => {
@@ -254,28 +259,30 @@ export default function PosDeliveryModal() {
                 <div
                   key={order.id}
                   style={{
-                    background: 'rgba(255,255,255,0.03)',
-                    border: '1px solid rgba(139, 92, 246, 0.25)',
+                    background: '#ffffff',
+                    border: '1px solid #e2e8f0',
                     borderRadius: '14px',
                     padding: '14px 18px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     flexWrap: 'wrap',
-                    gap: '12px'
+                    gap: '12px',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
                   }}
                 >
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontWeight: 800, fontSize: '14px', color: '#a78bfa' }}>
+                      <span style={{ fontWeight: 800, fontSize: '14px', color: '#7c3aed' }}>
                         #{order.invoiceNumber}
                       </span>
                       <span
                         style={{
                           padding: '2px 8px',
                           borderRadius: '99px',
-                          background: 'rgba(139,92,246,0.2)',
-                          color: '#c4b5fd',
+                          background: '#f5f3ff',
+                          color: '#6d28d9',
+                          border: '1px solid #ddd6fe',
                           fontSize: '10.5px',
                           fontWeight: 800
                         }}
@@ -287,29 +294,29 @@ export default function PosDeliveryModal() {
                       </span>
                     </div>
 
-                    <div style={{ marginTop: '4px', fontSize: '13px', fontWeight: 700, color: '#ffffff' }}>
+                    <div style={{ marginTop: '4px', fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>
                       👤 العميل: {order.customerName || 'عميل نقدي'} {order.customerPhone ? `(${order.customerPhone})` : ''}
                     </div>
 
-                    <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '2px' }}>
+                    <div style={{ fontSize: '11.5px', color: '#475569', marginTop: '2px' }}>
                       📍 العنوان: {address}
                     </div>
 
-                    <div style={{ fontSize: '11.5px', color: '#38bdf8', marginTop: '2px' }}>
+                    <div style={{ fontSize: '11.5px', color: '#0284c7', marginTop: '2px', fontWeight: 700 }}>
                       🛵 الطيار المسند إليه: <strong>{pilotName}</strong>
                     </div>
                   </div>
 
                   <div style={{ textAlign: 'left' }}>
-                    <div style={{ fontSize: '16px', fontWeight: 900, color: '#10b981' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 900, color: '#059669' }}>
                       {parseFloat(order.totalAmount || 0).toFixed(2)} ج.م
                     </div>
                     {delivery.deliveryFee > 0 && (
-                      <div style={{ fontSize: '11px', color: '#f59e0b' }}>
+                      <div style={{ fontSize: '11px', color: '#d97706', fontWeight: 700 }}>
                         خدمة توصيل: +{delivery.deliveryFee} ج.م
                       </div>
                     )}
-                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
                       {(order.items || []).length} أصناف
                     </div>
                   </div>
@@ -323,13 +330,13 @@ export default function PosDeliveryModal() {
         <div
           style={{
             padding: '12px 24px',
-            background: 'rgba(255,255,255,0.02)',
-            borderTop: '1px solid rgba(255,255,255,0.06)',
+            background: '#ffffff',
+            borderTop: '1px solid #e2e8f0',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             fontSize: '12px',
-            color: '#94a3b8'
+            color: '#64748b'
           }}
         >
           <div>
@@ -341,9 +348,9 @@ export default function PosDeliveryModal() {
             style={{
               padding: '6px 16px',
               borderRadius: '8px',
-              background: 'rgba(255,255,255,0.08)',
-              color: '#ffffff',
-              border: 'none',
+              background: '#f1f5f9',
+              color: '#334155',
+              border: '1px solid #cbd5e1',
               fontSize: '12px',
               fontWeight: 700,
               cursor: 'pointer'

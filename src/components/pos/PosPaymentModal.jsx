@@ -94,8 +94,9 @@ export default function PosPaymentModal() {
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0, 0, 0, 0.65)',
-        backdropFilter: 'blur(6px)',
+        background: 'rgba(15, 23, 42, 0.28)',
+        backdropFilter: 'blur(5px)',
+        WebkitBackdropFilter: 'blur(5px)',
         zIndex: 2000,
         display: 'flex',
         alignItems: 'center',

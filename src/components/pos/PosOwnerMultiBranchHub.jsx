@@ -120,8 +120,9 @@ export default function PosOwnerMultiBranchHub() {
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.82)',
-        backdropFilter: 'blur(12px)',
+        backgroundColor: 'rgba(15, 23, 42, 0.28)',
+        backdropFilter: 'blur(5px)',
+        WebkitBackdropFilter: 'blur(5px)',
         zIndex: 99999,
         display: 'flex',
         alignItems: 'center',
@@ -133,16 +134,16 @@ export default function PosOwnerMultiBranchHub() {
     >
       <div
         style={{
-          background: '#0b1329',
-          color: '#f8fafc',
-          border: '1.5px solid rgba(245, 158, 11, 0.4)',
+          background: '#ffffff',
+          color: '#0f172a',
+          border: '1px solid #cbd5e1',
           borderRadius: '24px',
           width: '100%',
           maxWidth: '1120px',
           maxHeight: '92vh',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: '0 30px 80px rgba(0, 0, 0, 0.75), 0 0 50px rgba(245, 158, 11, 0.15)',
+          boxShadow: '0 25px 60px rgba(0, 0, 0, 0.15)',
           overflow: 'hidden'
         }}
         onClick={(e) => e.stopPropagation()}
@@ -151,8 +152,8 @@ export default function PosOwnerMultiBranchHub() {
         <div
           style={{
             padding: '20px 28px',
-            background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(15,23,42,0.95) 100%)',
-            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            background: 'linear-gradient(135deg, #fffbeb 0%, #ffffff 100%)',
+            borderBottom: '1px solid #e2e8f0',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between'
