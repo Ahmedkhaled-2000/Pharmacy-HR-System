@@ -13,6 +13,7 @@ import {
 } from '../../utils/posEngine';
 import PosQuickItemsModal from './PosQuickItemsModal';
 import { searchUnifiedCustomers } from '../../services/posCustomerService';
+import { getDeliveryPilots } from '../../services/posDeliveryService';
 import {
   Search,
   Barcode,
@@ -1379,34 +1380,110 @@ export default function PosSalesWindow({ windowId }) {
           </div>
         )}
 
-        {/* قسم الدليفري والتوصيل */}
+        {/* قسم الدليفري والتوصيل المتقدم */}
         {invoiceType === 'delivery' && (
-          <div style={{ background: '#f5f3ff', padding: '10px', borderRadius: '12px', border: '1px solid #ddd6fe' }}>
-            <div style={{ fontSize: '11.5px', fontWeight: 800, color: '#7c3aed', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Bike size={14} />
-              تفاصيل التوصيل (دليفري)
+          <div style={{ background: '#f5f3ff', padding: '12px', borderRadius: '14px', border: '1.5px solid #c4b5fd', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ fontSize: '12px', fontWeight: 900, color: '#6d28d9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <Bike size={16} />
+                <span>بيانات التوصيل (دليفري)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDeliveryModalOpen(true)}
+                style={{ background: '#ffffff', border: '1px solid #c4b5fd', borderRadius: '6px', padding: '2px 8px', fontSize: '10.5px', color: '#7c3aed', fontWeight: 800, cursor: 'pointer' }}
+              >
+                مركز الدليفري 🛵
+              </button>
             </div>
-            <input
-              type="text"
-              placeholder="عنوان العميل بالتفصيل..."
-              value={deliveryDetails.address}
-              onChange={(e) => updateWindowDeliveryDetails(windowId, { address: e.target.value, isDelivery: true })}
-              style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#0f172a', fontSize: '11.5px', marginBottom: '6px', boxSizing: 'border-box' }}
-            />
-            <div style={{ display: 'flex', gap: '6px' }}>
+
+            {/* اختيار الطيار */}
+            <div>
+              <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', marginBottom: '3px' }}>
+                الطيار المسند للأوردر:
+              </label>
+              <select
+                value={deliveryDetails.pilotName || ''}
+                onChange={(e) => {
+                  const pilotsList = getDeliveryPilots();
+                  const p = pilotsList.find((x) => x.name === e.target.value);
+                  updateWindowDeliveryDetails(windowId, {
+                    pilotName: e.target.value,
+                    pilotId: p?.id || null,
+                    pilotPhone: p?.phone || '',
+                    isDelivery: true
+                  });
+                }}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#0f172a', fontSize: '11.5px', fontWeight: 700, outline: 'none' }}
+              >
+                <option value="">-- اختر طيار الفرع --</option>
+                {getDeliveryPilots().map((p) => (
+                  <option key={p.id} value={p.name}>
+                    {p.name} ({p.vehicle || 'موتوسيكل'})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* عنوان التوصيل */}
+            <div>
+              <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', marginBottom: '3px' }}>
+                عنوان التوصيل:
+              </label>
               <input
                 type="text"
-                placeholder="اسم الطيار..."
-                value={deliveryDetails.pilotName}
-                onChange={(e) => updateWindowDeliveryDetails(windowId, { pilotName: e.target.value, isDelivery: true })}
-                style={{ flex: 1, padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#0f172a', fontSize: '11.5px' }}
+                placeholder="العنوان، الشارع، علامة مميزة..."
+                value={deliveryDetails.address || customer?.address || ''}
+                onChange={(e) => updateWindowDeliveryDetails(windowId, { address: e.target.value, isDelivery: true })}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#0f172a', fontSize: '11.5px', boxSizing: 'border-box' }}
               />
+            </div>
+
+            {/* رسوم التوصيل */}
+            <div>
+              <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#475569', marginBottom: '3px' }}>
+                رسوم التوصيل (ج.م):
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                {[0, 5, 10, 15, 20].map((fee) => (
+                  <button
+                    key={fee}
+                    type="button"
+                    onClick={() => updateWindowDeliveryDetails(windowId, { deliveryFee: fee, isDelivery: true })}
+                    style={{
+                      flex: 1,
+                      padding: '4px 0',
+                      borderRadius: '6px',
+                      border: (deliveryDetails.deliveryFee === fee) ? '1.5px solid #7c3aed' : '1px solid #cbd5e1',
+                      background: (deliveryDetails.deliveryFee === fee) ? '#7c3aed' : '#ffffff',
+                      color: (deliveryDetails.deliveryFee === fee) ? '#ffffff' : '#475569',
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {fee === 0 ? 'مجاني' : `${fee}ج`}
+                  </button>
+                ))}
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="أخرى"
+                  value={deliveryDetails.deliveryFee ?? ''}
+                  onChange={(e) => updateWindowDeliveryDetails(windowId, { deliveryFee: Math.max(0, parseFloat(e.target.value) || 0), isDelivery: true })}
+                  style={{ width: '50px', padding: '4px 6px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#0f172a', fontSize: '11px', textAlign: 'center' }}
+                />
+              </div>
+            </div>
+
+            {/* ملاحظات الطيار */}
+            <div>
               <input
-                type="number"
-                placeholder="التوصيل ج.م"
-                value={deliveryDetails.deliveryFee || ''}
-                onChange={(e) => updateWindowDeliveryDetails(windowId, { deliveryFee: parseFloat(e.target.value) || 0, isDelivery: true })}
-                style={{ width: '75px', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#0f172a', fontSize: '11.5px' }}
+                type="text"
+                placeholder="ملاحظات: الدور، الشقة، مواعيد..."
+                value={deliveryDetails.notes || ''}
+                onChange={(e) => updateWindowDeliveryDetails(windowId, { notes: e.target.value, isDelivery: true })}
+                style={{ width: '100%', padding: '5px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#0f172a', fontSize: '11px', boxSizing: 'border-box' }}
               />
             </div>
           </div>

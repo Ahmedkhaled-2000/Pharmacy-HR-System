@@ -142,48 +142,70 @@ export default function PosMultiWindowManager() {
               justifyContent: 'center',
               gap: '16px',
               direction: 'rtl',
-              zIndex: 5
+              zIndex: 5,
+              padding: '20px'
             }}
           >
             <div
               style={{
                 background: '#ffffff',
-                border: '1.5px dashed var(--primary, #0d9488)',
+                border: '1px solid #cbd5e1',
                 borderRadius: '24px',
-                padding: '36px 48px',
+                padding: '36px 40px',
                 textAlign: 'center',
-                boxShadow: '0 20px 40px rgba(0,0,0,0.06)',
-                maxWidth: '480px'
+                boxShadow: '0 20px 45px -10px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(15, 23, 42, 0.04)',
+                maxWidth: '520px',
+                width: '100%'
               }}
             >
-              <div style={{ fontSize: '42px', marginBottom: '8px' }}>🛒</div>
-              <h3 style={{ fontSize: '20px', fontWeight: 900, color: '#0f172a', margin: '0 0 8px' }}>
-                لا توجد شاشات بيع مفتوحة حالياً
-              </h3>
-              <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 20px', lineHeight: 1.6 }}>
-                تم إغلاق شاشات البيع بنجاح. يمكنك فتح شاشة بيع جديدة في أي لحظة أو التنقل عبر الشريط العلوي.
-              </p>
-              <button
-                type="button"
-                onClick={() => openNewSalesWindow()}
+              <div
                 style={{
-                  background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '12px',
-                  padding: '12px 28px',
-                  fontSize: '14px',
-                  fontWeight: 900,
-                  cursor: 'pointer',
-                  boxShadow: '0 8px 24px rgba(13, 148, 136, 0.4)',
-                  display: 'inline-flex',
+                  width: '64px',
+                  height: '64px',
+                  borderRadius: '18px',
+                  background: '#f0fdfa',
+                  border: '1.5px solid #99f6e4',
+                  display: 'flex',
                   alignItems: 'center',
-                  gap: '8px'
+                  justifyContent: 'center',
+                  margin: '0 auto 16px',
+                  fontSize: '32px'
                 }}
               >
-                <Plus size={18} />
-                <span>فتح شاشة بيع جديدة [F1]</span>
-              </button>
+                🛒
+              </div>
+
+              <h2 style={{ fontSize: '20px', fontWeight: 900, color: '#0f172a', margin: '0 0 8px' }}>
+                طرفية البيع جاهزة لبدء المعاملات
+              </h2>
+              <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 24px', lineHeight: 1.6 }}>
+                لا توجد فواتير نشطة حالياً. انقر على الزر أدناه أو اضغط على اختصار <strong>[F1]</strong> لبدء تسجيل عملية بيع فورية.
+              </p>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => openNewSalesWindow()}
+                  style={{
+                    background: '#059669',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '12px',
+                    padding: '13px 24px',
+                    fontSize: '14.5px',
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 14px rgba(5, 150, 105, 0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  <Plus size={18} />
+                  <span>فتح شاشة بيع جديدة [F1]</span>
+                </button>
+              </div>
             </div>
           </div>
         )}

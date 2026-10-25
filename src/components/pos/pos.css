@@ -856,73 +856,78 @@
   font-weight: 800;
 }
 
-/* ── 10. شاشات الوضع الليلي (Dark Mode Support) ── */
+/* ── 10. إجبار المظهر الفاتح الناصع دائماً ومنع المظهر الداكن قطعياً (100% Pure Light Theme) ── */
+.pos-system-root,
 [data-theme='dark'] .pos-system-root {
-  background: var(--bg, #090e17);
-  color: var(--text, #ffffff);
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
 }
 
+.pos-hero-clock-card,
 [data-theme='dark'] .pos-hero-clock-card,
+.pos-kpi-card,
 [data-theme='dark'] .pos-kpi-card,
+.pos-shortcuts-palette-card,
 [data-theme='dark'] .pos-shortcuts-palette-card,
+.pos-floating-window-frame,
 [data-theme='dark'] .pos-floating-window-frame,
+.pos-window-body,
 [data-theme='dark'] .pos-window-body,
+.pos-totals-box,
 [data-theme='dark'] .pos-totals-box,
+.pos-cart-section,
 [data-theme='dark'] .pos-cart-section {
-  background: var(--surface, #111a28);
-  border-color: var(--border, #223249);
-  color: #ffffff;
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
 }
 
-[data-theme='dark'] .pos-window-titlebar,
-[data-theme='dark'] .pos-checkout-sidebar,
-[data-theme='dark'] .pos-shortcut-btn,
+.pos-window-titlebar,
+[data-theme='dark'] .pos-window-titlebar {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+.pos-checkout-sidebar,
+[data-theme='dark'] .pos-checkout-sidebar {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+.pos-cart-table th,
 [data-theme='dark'] .pos-cart-table th {
-  background: var(--surface-hover, #182538);
-  border-color: var(--border, #223249);
-  color: #ffffff;
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #475569 !important;
 }
 
+.pos-cart-table-wrap,
 [data-theme='dark'] .pos-cart-table-wrap {
-  background: var(--surface, #111a28);
-  border-color: var(--border, #223249);
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
 }
 
+.pos-cart-table td,
 [data-theme='dark'] .pos-cart-table td {
-  border-color: var(--border-subtle, #19263a);
-  color: #ffffff;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
 }
 
+.pos-docking-taskbar,
 [data-theme='dark'] .pos-docking-taskbar {
-  background: var(--surface-glass, rgba(17, 26, 40, 0.95));
-  border-color: var(--border, #223249);
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-color: #cbd5e1 !important;
 }
 
+.pos-dock-item,
 [data-theme='dark'] .pos-dock-item {
-  background: #111a28;
-  border-color: #223249;
-  color: #ffffff;
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
 }
 
-[data-theme='dark'] .pos-quick-items-tray {
-  background: #141f30;
-  border-color: #223249;
-}
-
-[data-theme='dark'] .pos-quick-filter-chip {
-  background: #182538;
-  border-color: #223249;
-  color: #94a3b8;
-}
-
-[data-theme='dark'] .pos-quick-item-card {
-  background: #111a28;
-  border-color: #223249;
-}
-
-[data-theme='dark'] .pos-quick-item-title {
-  color: #ffffff;
-}
 
 /* ── 11. النوافذ المنبثقة الشفافة الطبيعية (Natural Translucent Glass Modals) ── */
 .pos-modal-backdrop {

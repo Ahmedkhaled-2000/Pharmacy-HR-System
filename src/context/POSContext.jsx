@@ -164,6 +164,16 @@ export function POSProvider({ children }) {
     return newId;
   }, [salesWindows]);
 
+  // ── ضمان وجود شاشة بيع مفتوحة ونشطة دائماً لتفادي الشاشة الفارغة ──
+  useEffect(() => {
+    if (salesWindows.length === 0) {
+      const timer = setTimeout(() => {
+        openNewSalesWindow('شاشة البيع الرئيسية #1');
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [salesWindows.length, openNewSalesWindow]);
+
   // إغلاق نافذة بيع (مع السماح بإغلاق كافة النوافذ بحرية تامة دون إجبار)
   const closeSalesWindow = useCallback((windowId) => {
     setSalesWindows((prev) => {
@@ -484,6 +494,7 @@ export function POSProvider({ children }) {
       invoiceType: targetWindow.invoiceType || 'otc', // 'otc' | 'rx' | 'customer_order' | 'delivery'
       rxImage: targetWindow.rxImage || null,
       deliveryDetails: targetWindow.deliveryDetails || null,
+      deliveryStatus: targetWindow.invoiceType === 'delivery' ? 'pending' : null,
       items: targetWindow.cart,
       subtotal,
       discountAmount: finalDiscount,
