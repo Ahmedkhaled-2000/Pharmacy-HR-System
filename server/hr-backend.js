@@ -839,10 +839,14 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
                   incomingMatch.schedule = exR.schedule;
                 }
               } else if (exApproved && inApproved && exTime > inTime) {
-                // كلاهما معتمد ولكن المخزن في السيرفر أحدث من الآتي من جهاز متأخر المزامنة
-                const idx = (stateValue.rosters || []).indexOf(incomingMatch);
-                if (idx >= 0) {
-                  stateValue.rosters[idx] = exR;
+                // 🛡️ فحص ذكي لمنع تراجع التعديلات الحديثة بسبب فارق توقيت الساعة بين جهاز العميل والسيرفر (Clock Skew)
+                const isDifferentSchedule = JSON.stringify(incomingMatch.schedule || {}) !== JSON.stringify(exR.schedule || {});
+                const isRecentIncoming = inTime > (Date.now() - 3600000); // وارد خلال الساعة الأخيرة
+                if (!isDifferentSchedule || !isRecentIncoming) {
+                  const idx = (stateValue.rosters || []).indexOf(incomingMatch);
+                  if (idx >= 0) {
+                    stateValue.rosters[idx] = exR;
+                  }
                 }
               }
             }
@@ -1052,9 +1056,15 @@ app.post('/api/settings/slice', async (req, res) => {
       return res.status(401).json({ success: false, error: 'غير مصرح: يرجى تسجيل الدخول أو استخدام توكن جهاز معتمد' });
     }
 
-    const { key = STORAGE_KEY, sliceKey, sliceValue } = req.body;
-    if (!sliceKey || sliceValue === undefined) {
-      return res.status(400).json({ success: false, error: 'Missing sliceKey or sliceValue' });
+    const { key = STORAGE_KEY, sliceKey, sliceValue, slices } = req.body;
+    let slicesToApply = {};
+
+    if (slices && typeof slices === 'object' && Object.keys(slices).length > 0) {
+      slicesToApply = slices;
+    } else if (sliceKey && sliceValue !== undefined) {
+      slicesToApply[sliceKey] = sliceValue;
+    } else {
+      return res.status(400).json({ success: false, error: 'Missing sliceKey or slices batch' });
     }
 
     // جلب أحدث حالة من الذاكرة الفورية
@@ -1063,34 +1073,39 @@ app.post('/api/settings/slice', async (req, res) => {
       return res.status(500).json({ success: false, error: 'Current system state unavailable' });
     }
 
-    // تحديث الجزء المطلوب فقط في الحالة
-    existing[sliceKey] = sliceValue;
+    // تطبيق كافة الشرائح دفعة واحدة في معاملة ذرية متكاملة
+    const nowIso = new Date().toISOString();
+    for (const [k, v] of Object.entries(slicesToApply)) {
+      if (v !== undefined) {
+        existing[k] = v;
 
-    // إذا كان التحديث يخص قواعد الموافقات، نحدث الطابع الزمني المرجعي
-    if (sliceKey === 'approvalRules') {
-      existing._approvalRulesUpdatedAt = new Date().toISOString();
-    }
+        // إذا كان التحديث يخص قواعد الموافقات، نحدث الطابع الزمني المرجعي
+        if (k === 'approvalRules') {
+          existing._approvalRulesUpdatedAt = nowIso;
+        }
 
-    // إذا كان التحديث يخص الشفتات النشطة، نضع راية kiosk_slice لمنع الحارس من إعادة المحذوفات
-    if (sliceKey === 'activeShifts') {
-      existing._punchSource = 'kiosk_slice';
+        // إذا كان التحديث يخص الشفتات النشطة، نضع راية kiosk_slice لمنع الحارس من إعادة المحذوفات
+        if (k === 'activeShifts') {
+          existing._punchSource = 'kiosk_slice';
+        }
+
+        // بث التغيير الذري اللحظي لجميع الأجهزة لكل شريحة
+        io.emit('entity:changed', {
+          entityType: k,
+          entityId: 'all',
+          data: v,
+          action: 'update',
+          timestamp: nowIso
+        });
+      }
     }
 
     const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const result = await saveSettingsToStorage(key, existing, clientIp);
 
-    // بث التغيير الذري اللحظي لجميع الأجهزة مع البيانات الكاملة
-    io.emit('entity:changed', {
-      entityType: sliceKey,
-      entityId: 'all',
-      data: sliceValue,
-      action: 'update',
-      timestamp: new Date().toISOString()
-    });
-
     res.json({
       success: true,
-      sliceKey,
+      slicesCount: Object.keys(slicesToApply).length,
       version: result.version,
       updated_at: result.updated_at
     });
@@ -2769,6 +2784,14 @@ app.post(['/api/rosters/save', '/api/rosters/set'], async (req, res) => {
         return false;
       });
     }
+
+    // 🛡️ حماية قصوى: حذف معرفات الجداول المعتمدة الجديدة من شواهد القبور لمنع كتمها أو مسحها في أجهزة الكاش
+    newRostersToInsert.forEach(nr => {
+      if (nr && nr.id) {
+        tombstoneSet.delete(String(nr.id));
+        tombstoneSet.delete(String(nr.id).toLowerCase());
+      }
+    });
 
     // إدراج الجداول الجديدة المعتمدة في المقدمة
     settings.rosters = [...newRostersToInsert, ...settings.rosters];

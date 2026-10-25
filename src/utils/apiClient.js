@@ -492,16 +492,27 @@ export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
   });
 }
 
-// ── حفظ جزء محدد فقط من البيانات (Slice Saving) بحجم خفيف جداً (< 20KB) وسرعة فائقة ──
-export async function apiSaveSettingsSlice(sliceKey, sliceValue, options = {}) {
+// ── حفظ جزء محدد فقط أو مجموعة شرائح (Slice / Batch Slices Saving) بحجم خفيف جداً (< 20KB) وسرعة فائقة ──
+export async function apiSaveSettingsSlice(sliceKeyOrSlices, sliceValueOrOptions = null, options = {}) {
   resetBackendCircuitBreaker();
+  let bodyPayload = { key: STORAGE_KEY };
+  let opts = options;
+
+  if (typeof sliceKeyOrSlices === 'object' && sliceKeyOrSlices !== null) {
+    bodyPayload.slices = sliceKeyOrSlices;
+    opts = sliceValueOrOptions || {};
+  } else {
+    bodyPayload.sliceKey = sliceKeyOrSlices;
+    bodyPayload.sliceValue = sliceValueOrOptions;
+  }
+
   return await request('settings/slice', {
     method: 'POST',
-    body: JSON.stringify({ key: STORAGE_KEY, sliceKey, sliceValue }),
-    timeout: options.timeout || 20000,
-    retries: options.retries !== undefined ? options.retries : 2,
+    body: JSON.stringify(bodyPayload),
+    timeout: opts.timeout || 20000,
+    retries: opts.retries !== undefined ? opts.retries : 2,
     noCache: true,
-    isBackground: options.isBackground || false
+    isBackground: opts.isBackground || false
   });
 }
 

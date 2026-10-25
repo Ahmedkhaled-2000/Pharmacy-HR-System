@@ -31,6 +31,7 @@ import { triggerDirectPrint, generateClearanceSlipHTML } from '../../utils/print
 import { compressImage } from '../../utils/imageCompressor';
 import { useUI } from '../../context/UIContext';
 import { apiSaveSettingsSlice } from '../../utils/apiClient';
+import { saveStateLocally, broadcastStateChange } from '../../utils/offlineSync';
 import { checkShiftConflicts } from '../../utils/workHoursEngine';
 import { isBranchMatch } from '../../utils/branchMatcher';
 
@@ -545,22 +546,31 @@ export default function EmployeeComprehensiveDossierModal({
     if (typeof setState === 'function') {
       setState(nextState);
     }
-    if (Array.isArray(sliceKeyOrPairs)) {
-      for (const [k, v] of sliceKeyOrPairs) {
-        try {
-          await apiSaveSettingsSlice(k, v);
-        } catch (err) {
-          console.warn(`[Dossier API Slice Warn] ${k}:`, err);
-        }
-      }
-    } else if (sliceKeyOrPairs && sliceValue) {
-      try {
+    let atomicSaved = false;
+    try {
+      if (Array.isArray(sliceKeyOrPairs) && sliceKeyOrPairs.length > 0) {
+        const batchMap = Object.fromEntries(sliceKeyOrPairs);
+        await apiSaveSettingsSlice(batchMap);
+        atomicSaved = true;
+      } else if (typeof sliceKeyOrPairs === 'object' && sliceKeyOrPairs !== null && !Array.isArray(sliceKeyOrPairs)) {
+        await apiSaveSettingsSlice(sliceKeyOrPairs);
+        atomicSaved = true;
+      } else if (typeof sliceKeyOrPairs === 'string' && sliceValue !== undefined) {
         await apiSaveSettingsSlice(sliceKeyOrPairs, sliceValue);
-      } catch (err) {
-        console.warn(`[Dossier API Slice Warn] ${sliceKeyOrPairs}:`, err);
+        atomicSaved = true;
       }
+    } catch (err) {
+      console.warn('[Dossier Atomic Slice Warn]:', err);
     }
-    if (typeof saveState === 'function') {
+
+    if (atomicSaved) {
+      try {
+        await saveStateLocally(nextState);
+        broadcastStateChange(nextState);
+      } catch (locErr) {
+        console.warn('[Dossier Local Save Warn]:', locErr);
+      }
+    } else if (typeof saveState === 'function') {
       await saveState(nextState);
     }
     if (successMsg) showToast?.(successMsg);

@@ -7,6 +7,8 @@
  * - رصد فوري لعودة الاتصال والمزامنة الخلفية دون تعطيل واجهة المستخدم.
  */
 
+import { API_BASE_URL } from './apiClient';
+
 const STORAGE_KEYS = {
   PRODUCTS: 'pharma_pos_products',
   SALES: 'pharma_pos_sales',
@@ -157,7 +159,8 @@ export async function triggerBackgroundSync() {
     for (const evt of outbox) {
       try {
         // محاكاة أو إرسال الطلب للسيرفر السحابي
-        const res = await fetch('/api/pos/sync-event', {
+        const syncUrl = API_BASE_URL ? `${API_BASE_URL}/pos/sync-event` : '/api/pos/sync-event';
+        const res = await fetch(syncUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(evt)

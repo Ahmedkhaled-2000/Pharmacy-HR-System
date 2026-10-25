@@ -1632,26 +1632,30 @@ export function useRequestsManager() {
         request: finalApprovedReq
       }).catch(err => console.warn('apiSubmitRequestDecision error:', err));
 
-      // 🚀 3. حفظ ذري سريع للشرائح الأساسية (Slices) لتثبيت التعديل في السيرفر دون إبطاء
-      apiSaveSettingsSlice('requests', updatedRequests).catch(() => {});
+      // 🚀 3. حفظ ذري سريع للشرائح الأساسية (Slices) دفعة واحدة لتثبيت التعديل في السيرفر (< 25ms)
+      const slicesToSave = { requests: updatedRequests };
       if (['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave', 'leave_comp_off', 'comp_off'].includes(target.type) || target.leaveType) {
-        apiSaveSettingsSlice('leaveRequests', updatedLeaveRequests).catch(() => {});
+        slicesToSave.leaveRequests = updatedLeaveRequests;
       }
       if (target.type === 'loan' || target.type === 'advance' || target.type === 'meds' || target.type === 'credit_medicine') {
-        apiSaveSettingsSlice('loans', updatedLoans).catch(() => {});
+        slicesToSave.loans = updatedLoans;
       }
       if (target.type === 'swap' || target.type === 'shift_swap') {
-        apiSaveSettingsSlice('shiftSwaps', updatedSwaps).catch(() => {});
+        slicesToSave.shiftSwaps = updatedSwaps;
       }
       if (target.type === 'resignation') {
-        apiSaveSettingsSlice('resignationRequests', updatedResignations).catch(() => {});
+        slicesToSave.resignationRequests = updatedResignations;
       }
       if (updatedShifts !== state.shifts) {
-        apiSaveSettingsSlice('shifts', updatedShifts).catch(() => {});
+        slicesToSave.shifts = updatedShifts;
+      }
+      if (updatedRosters !== state.rosters) {
+        slicesToSave.rosters = updatedRosters;
       }
       if (updatedAdjs !== state.adjustments) {
-        apiSaveSettingsSlice('adjustments', updatedAdjs).catch(() => {});
+        slicesToSave.adjustments = updatedAdjs;
       }
+      apiSaveSettingsSlice(slicesToSave).catch(err => console.warn('apiSaveSettingsSlice batch error:', err));
 
       // 🚀 4. حفظ الحالة كاملة في الخلفية كصمام أمان شامل
       if (saveState) {
@@ -2212,23 +2216,24 @@ export function useRequestsManager() {
         request: targetReq
       }).catch(err => console.warn('apiSubmitRequestDecision reject error:', err));
 
-      // 🚀 3. حفظ ذري سريع للشرائح الأساسية (Slices) لتثبيت التعديل في السيرفر دون إبطاء
-      apiSaveSettingsSlice('requests', updatedRequests).catch(() => {});
+      // 🚀 3. حفظ ذري سريع للشرائح الأساسية (Slices) دفعة واحدة لتثبيت التعديل في السيرفر (< 25ms)
+      const slicesToSave = { requests: updatedRequests };
       if (['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave'].includes(targetReq?.type)) {
-        apiSaveSettingsSlice('leaveRequests', updatedLeaveRequests).catch(() => {});
+        slicesToSave.leaveRequests = updatedLeaveRequests;
       }
       if (['loan', 'advance', 'meds', 'credit_medicine'].includes(targetReq?.type)) {
-        apiSaveSettingsSlice('loans', updatedLoans).catch(() => {});
+        slicesToSave.loans = updatedLoans;
       }
       if (['swap', 'shift_swap'].includes(targetReq?.type)) {
-        apiSaveSettingsSlice('shiftSwaps', updatedSwaps).catch(() => {});
+        slicesToSave.shiftSwaps = updatedSwaps;
       }
       if (targetReq?.type === 'resignation') {
-        apiSaveSettingsSlice('resignationRequests', updatedResignations).catch(() => {});
+        slicesToSave.resignationRequests = updatedResignations;
       }
       if (updatedShifts !== state.shifts) {
-        apiSaveSettingsSlice('shifts', updatedShifts).catch(() => {});
+        slicesToSave.shifts = updatedShifts;
       }
+      apiSaveSettingsSlice(slicesToSave).catch(err => console.warn('apiSaveSettingsSlice reject batch error:', err));
 
       // 🚀 4. حفظ الحالة كاملة في الخلفية كصمام أمان شامل
       if (saveState) {

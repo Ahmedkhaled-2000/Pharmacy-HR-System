@@ -617,6 +617,166 @@
   box-shadow: 0 12px 26px rgba(13, 148, 136, 0.45);
 }
 
+/* ⚡ زر الإنهاء الفوري السريع بدون ريسيت (Instant Zero-Click Checkout) */
+.pos-instant-checkout-btn {
+  height: 56px;
+  background: linear-gradient(135deg, #059669 0%, #10b981 50%, #14b8a6 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 14px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.pos-instant-checkout-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 32px rgba(16, 185, 129, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  filter: brightness(1.06);
+}
+
+.pos-instant-checkout-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.pos-instant-checkout-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+  box-shadow: none;
+}
+
+/* درج الأصناف السريعة (Quick Items Dock Tray) */
+.pos-quick-items-tray {
+  background: var(--surface-hover, #f8fafc);
+  border: 1px solid var(--border, #cbd5e1);
+  border-radius: 14px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: all 0.25s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+
+.pos-quick-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.pos-quick-filter-chip {
+  padding: 5px 12px;
+  border-radius: 99px;
+  font-size: 11.5px;
+  font-weight: 800;
+  border: 1px solid var(--border, #cbd5e1);
+  background: var(--surface, #ffffff);
+  color: var(--text, #475569);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pos-quick-filter-chip:hover {
+  background: var(--primary-light, #f0fdfa);
+  border-color: var(--primary, #0d9488);
+}
+
+.pos-quick-filter-chip.active {
+  background: var(--primary, #0d9488);
+  border-color: var(--primary, #0d9488);
+  color: #ffffff;
+  box-shadow: 0 3px 10px rgba(13, 148, 136, 0.3);
+}
+
+.pos-quick-items-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+  max-height: 145px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.pos-quick-item-card {
+  background: var(--surface, #ffffff);
+  border: 1.5px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: right;
+  position: relative;
+  overflow: hidden;
+}
+
+.pos-quick-item-card:hover {
+  border-color: var(--primary, #0d9488);
+  background: var(--primary-light, #f0fdfa);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 14px rgba(13, 148, 136, 0.15);
+}
+
+.pos-quick-item-card:active {
+  transform: scale(0.97);
+}
+
+.pos-quick-item-title {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--text, #0b132b);
+  line-height: 1.3;
+  margin-bottom: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.pos-quick-item-price {
+  font-size: 13px;
+  font-weight: 900;
+  color: var(--primary, #0d9488);
+}
+
+.pos-quick-item-unit {
+  font-size: 10px;
+  color: var(--muted, #64748b);
+  font-weight: 700;
+}
+
+/* شارة الصنف الغير مكود في السلة */
+.pos-uncoded-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #d97706;
+  font-size: 10.5px;
+  font-weight: 800;
+}
+
 .pos-secondary-actions-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -702,5 +862,25 @@
 [data-theme='dark'] .pos-dock-item {
   background: #111a28;
   border-color: #223249;
+  color: #ffffff;
+}
+
+[data-theme='dark'] .pos-quick-items-tray {
+  background: #141f30;
+  border-color: #223249;
+}
+
+[data-theme='dark'] .pos-quick-filter-chip {
+  background: #182538;
+  border-color: #223249;
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .pos-quick-item-card {
+  background: #111a28;
+  border-color: #223249;
+}
+
+[data-theme='dark'] .pos-quick-item-title {
   color: #ffffff;
 }

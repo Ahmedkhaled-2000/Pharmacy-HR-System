@@ -16,6 +16,7 @@ import {
 import { useUI } from '../../context/UIContext';
 import { isBranchMatch } from '../../utils/branchMatcher';
 import { apiSaveSettingsSlice } from '../../utils/apiClient';
+import { saveStateLocally, broadcastStateChange } from '../../utils/offlineSync';
 import DayDetailsModal from './DayDetailsModal';
 
 export default function AttendancePunchesModal({
@@ -682,17 +683,21 @@ export default function AttendancePunchesModal({
         setState(nextState);
       }
 
-      // دفع ذري مباشر ومتسلسل إلى السيرفر عبر apiSaveSettingsSlice
-      try {
-        await apiSaveSettingsSlice('activeShifts', updatedActive);
-        await apiSaveSettingsSlice('shifts', updatedShifts);
-        await apiSaveSettingsSlice('_endedShiftEmpIds', endedEmpIds);
-      } catch (sliceErr) {
-        console.warn('[AttendancePunchesModal] Direct slice save error:', sliceErr);
-      }
+      // دفع ذري موحد للحزم إلى السيرفر دفعة واحدة عبر apiSaveSettingsSlice (< 15ms)
+      saveStateLocally(nextState).catch(() => {});
+      broadcastStateChange(nextState);
 
-      if (typeof saveState === 'function') {
-        await saveState(nextState);
+      try {
+        await apiSaveSettingsSlice({
+          activeShifts: updatedActive,
+          shifts: updatedShifts,
+          _endedShiftEmpIds: endedEmpIds
+        });
+      } catch (sliceErr) {
+        console.warn('[AttendancePunchesModal] Batch slice save fallback:', sliceErr);
+        if (typeof saveState === 'function') {
+          saveState(nextState, { entityType: 'activeShifts' }).catch(() => {});
+        }
       }
 
       showToast?.('⏹ تم إنهاء وردية الموظف بنجاح وتسجيل وقت الانصراف');
@@ -1348,23 +1353,21 @@ export default function AttendancePunchesModal({
 
       if (setState) setState(updatedState);
 
-      try {
-        await apiSaveSettingsSlice('shifts', updatedShifts);
-        await apiSaveSettingsSlice('requests', finalRequests);
-        if (updatedState.lateIncidents) {
-          await apiSaveSettingsSlice('lateIncidents', updatedState.lateIncidents);
-        }
-        if (updatedState._deletedIds) {
-          await apiSaveSettingsSlice('_deletedIds', updatedState._deletedIds);
-        }
-      } catch (sliceErr) {
-        console.warn('[AttendancePunchesModal] Slice save in handleSaveEdit:', sliceErr);
-      }
+      saveStateLocally(updatedState).catch(() => {});
+      broadcastStateChange(updatedState);
 
       try {
-        if (saveState) await saveState(updatedState);
-      } catch (saveErr) {
-        console.warn('[AttendancePunchesModal] saveState error in handleSaveEdit:', saveErr);
+        const slicesToSave = {
+          shifts: updatedShifts,
+          requests: finalRequests
+        };
+        if (updatedState.lateIncidents) slicesToSave.lateIncidents = updatedState.lateIncidents;
+        if (updatedState._deletedIds) slicesToSave._deletedIds = updatedState._deletedIds;
+
+        await apiSaveSettingsSlice(slicesToSave);
+      } catch (sliceErr) {
+        console.warn('[AttendancePunchesModal] Batch slice save fallback in handleSaveEdit:', sliceErr);
+        if (saveState) saveState(updatedState, { entityType: 'shifts' }).catch(() => {});
       }
 
       if (snapIsAdding) {
@@ -1543,19 +1546,22 @@ export default function AttendancePunchesModal({
       updatedState = reconState;
 
       if (setState) setState(updatedState);
+      saveStateLocally(updatedState).catch(() => {});
+      broadcastStateChange(updatedState);
+
       try {
-        await apiSaveSettingsSlice('shifts', updatedState.shifts);
-        await apiSaveSettingsSlice('requests', updatedState.requests);
-        if (updatedState.lateIncidents) {
-          await apiSaveSettingsSlice('lateIncidents', updatedState.lateIncidents);
-        }
-        if (updatedState._deletedIds) {
-          await apiSaveSettingsSlice('_deletedIds', updatedState._deletedIds);
-        }
+        const slicesToSave = {
+          shifts: updatedState.shifts,
+          requests: updatedState.requests
+        };
+        if (updatedState.lateIncidents) slicesToSave.lateIncidents = updatedState.lateIncidents;
+        if (updatedState._deletedIds) slicesToSave._deletedIds = updatedState._deletedIds;
+
+        await apiSaveSettingsSlice(slicesToSave);
       } catch (sliceErr) {
-        console.warn('[AttendancePunchesModal] Slice save in handleDeletePunch:', sliceErr);
+        console.warn('[AttendancePunchesModal] Batch slice save fallback in handleDeletePunch:', sliceErr);
+        if (saveState) saveState(updatedState, { entityType: 'shifts' }).catch(() => {});
       }
-      if (saveState) await saveState(updatedState);
 
       showToast?.('🗑️ تم حذف البصمة بنجاح واستبعاد هذا اليوم بالكامل من كشف المرتبات ونظام الأجور');
     };
@@ -1684,19 +1690,34 @@ export default function AttendancePunchesModal({
       updatedState = reconState;
 
       if (setState) setState(updatedState);
+      let atomicSaved = false;
       try {
-        await apiSaveSettingsSlice('shifts', updatedState.shifts);
-        await apiSaveSettingsSlice('requests', updatedState.requests);
+        const slicesToSave = {
+          shifts: updatedState.shifts,
+          requests: updatedState.requests
+        };
         if (updatedState.lateIncidents) {
-          await apiSaveSettingsSlice('lateIncidents', updatedState.lateIncidents);
+          slicesToSave.lateIncidents = updatedState.lateIncidents;
         }
         if (updatedState._deletedIds) {
-          await apiSaveSettingsSlice('_deletedIds', updatedState._deletedIds);
+          slicesToSave._deletedIds = updatedState._deletedIds;
         }
+        await apiSaveSettingsSlice(slicesToSave);
+        atomicSaved = true;
       } catch (sliceErr) {
         console.warn('[AttendancePunchesModal] Slice save in performApproveAndCalculate:', sliceErr);
       }
-      if (saveState) await saveState(updatedState);
+
+      if (atomicSaved) {
+        try {
+          await saveStateLocally(updatedState);
+          broadcastStateChange(updatedState);
+        } catch (locErr) {
+          console.warn('[AttendancePunchesModal] Local save error:', locErr);
+        }
+      } else if (saveState) {
+        await saveState(updatedState);
+      }
 
       showToast?.(`✅ تم احتساب البصمة وتفعيل الوردية (${netHours} س) في نظام الأجور والرواتب بنجاح!`);
     };
@@ -1804,16 +1825,28 @@ export default function AttendancePunchesModal({
 
       if (setState) setState(nextState);
 
+      let atomicSaved = false;
       try {
-        await apiSaveSettingsSlice('shifts', updatedShifts);
+        const slicesToSave = { shifts: updatedShifts };
         if (hasUpdatedReq) {
-          await apiSaveSettingsSlice('requests', updatedRequests);
+          slicesToSave.requests = updatedRequests;
         }
+        await apiSaveSettingsSlice(slicesToSave);
+        atomicSaved = true;
       } catch (err) {
         console.warn('[AttendancePunchesModal] Slice save warning:', err);
       }
 
-      if (saveState) await saveState(nextState);
+      if (atomicSaved) {
+        try {
+          await saveStateLocally(nextState);
+          broadcastStateChange(nextState);
+        } catch (locErr) {
+          console.warn('[AttendancePunchesModal] Local save error:', locErr);
+        }
+      } else if (saveState) {
+        await saveState(nextState);
+      }
 
       showToast?.(`✅ تم اعتماد الساعات الإضافية بنجاح: +${otHours} ساعة ليوم ${punchDate}`);
     };
@@ -1917,14 +1950,27 @@ export default function AttendancePunchesModal({
 
       if (setState) setState(nextState);
 
+      let atomicSaved = false;
       try {
-        await apiSaveSettingsSlice('shifts', updatedShifts);
-        await apiSaveSettingsSlice('requests', updatedRequests);
+        await apiSaveSettingsSlice({
+          shifts: updatedShifts,
+          requests: updatedRequests
+        });
+        atomicSaved = true;
       } catch (err) {
         console.warn('[AttendancePunchesModal] Slice save warning:', err);
       }
 
-      if (saveState) await saveState(nextState);
+      if (atomicSaved) {
+        try {
+          await saveStateLocally(nextState);
+          broadcastStateChange(nextState);
+        } catch (locErr) {
+          console.warn('[AttendancePunchesModal] Local save error:', locErr);
+        }
+      } else if (saveState) {
+        await saveState(nextState);
+      }
 
       showToast?.(`⭐ تم اعتماد كافة الساعات الإضافية المعلقة بنجاح: ${totalApprovedHours.toFixed(2)} ساعة لـ ${pendingPunches.length} وردية`);
     };
@@ -2033,16 +2079,28 @@ export default function AttendancePunchesModal({
 
       if (setState) setState(nextState);
 
+      let atomicSaved = false;
       try {
-        await apiSaveSettingsSlice('shifts', updatedShifts);
+        const slicesToSave = { shifts: updatedShifts };
         if (hasUpdatedReq) {
-          await apiSaveSettingsSlice('requests', updatedRequests);
+          slicesToSave.requests = updatedRequests;
         }
+        await apiSaveSettingsSlice(slicesToSave);
+        atomicSaved = true;
       } catch (err) {
         console.warn('[AttendancePunchesModal] Slice save warning in handleQuickRejectOvertime:', err);
       }
 
-      if (saveState) await saveState(nextState);
+      if (atomicSaved) {
+        try {
+          await saveStateLocally(nextState);
+          broadcastStateChange(nextState);
+        } catch (locErr) {
+          console.warn('[AttendancePunchesModal] Local save error:', locErr);
+        }
+      } else if (saveState) {
+        await saveState(nextState);
+      }
 
       showToast?.(`❌ تم رفض الساعات الإضافية (+${otHours} س) ليوم ${punchDate} واحتساب الساعات الأساسية فقط`);
     };
@@ -2147,16 +2205,28 @@ export default function AttendancePunchesModal({
 
       if (setState) setState(nextState);
 
+      let atomicSaved = false;
       try {
-        await apiSaveSettingsSlice('shifts', updatedShifts);
+        const slicesToSave = { shifts: updatedShifts };
         if (hasUpdatedReq) {
-          await apiSaveSettingsSlice('requests', updatedRequests);
+          slicesToSave.requests = updatedRequests;
         }
+        await apiSaveSettingsSlice(slicesToSave);
+        atomicSaved = true;
       } catch (err) {
         console.warn('[AttendancePunchesModal] Slice save warning in handleRejectAllPendingOvertime:', err);
       }
 
-      if (saveState) await saveState(nextState);
+      if (atomicSaved) {
+        try {
+          await saveStateLocally(nextState);
+          broadcastStateChange(nextState);
+        } catch (locErr) {
+          console.warn('[AttendancePunchesModal] Local save error:', locErr);
+        }
+      } else if (saveState) {
+        await saveState(nextState);
+      }
 
       showToast?.(`❌ تم رفض كافة الساعات الإضافية المعلقة (-${totalRejectedHours.toFixed(2)} س) بنجاح`);
     };

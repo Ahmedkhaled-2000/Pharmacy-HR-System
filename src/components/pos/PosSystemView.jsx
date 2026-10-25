@@ -45,6 +45,22 @@ function PosSystemContent() {
   // ── الاستماع المركزي لاختصارات Zero-Mouse (F1..F12) داخل نظام نقاط البيع ──
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // بيع نقدي سريع بدون ريسيت
+      if (e.shiftKey && e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        window.dispatchEvent(new CustomEvent('pos:quick-cash-checkout'));
+        return;
+      }
+
+      // إضافة صنف حر / غير مكود
+      if (e.ctrlKey && (e.key === 'm' || e.key === 'M')) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.dispatchEvent(new CustomEvent('pos:open-uncoded-modal'));
+        return;
+      }
+
       // حظر مفاتيح المساعدة والوظائف التقليدية في المتصفح
       if (['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'].includes(e.key)) {
         e.preventDefault();
@@ -55,6 +71,10 @@ function PosSystemContent() {
         case 'F1':
           // فتح شاشة بيع جديدة
           openNewSalesWindow();
+          break;
+        case 'F8':
+          // إظهار وإخفاء الأصناف السريعة
+          window.dispatchEvent(new CustomEvent('pos:toggle-quick-items'));
           break;
         case 'F2':
           // فحص البدائل الذكية

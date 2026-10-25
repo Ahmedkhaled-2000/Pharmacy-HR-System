@@ -746,17 +746,22 @@ export function DataProvider({ children, showToast = () => {} }) {
       const loanAutoRes = checkAndAutoSettleExpiredPayrollLoans(synced);
       const effectiveData = loanAutoRes.shouldUpdate ? loanAutoRes.nextState : synced;
 
+      const rolloverSlices = {};
       if (loanAutoRes.shouldUpdate) {
-        apiSaveSettingsSlice('loans', effectiveData.loans).catch(() => {});
-        apiSaveSettingsSlice('requests', effectiveData.requests).catch(() => {});
-        apiSaveSettingsSlice('orgSettings', effectiveData.orgSettings).catch(() => {});
+        rolloverSlices.loans = effectiveData.loans;
+        rolloverSlices.requests = effectiveData.requests;
+        rolloverSlices.orgSettings = effectiveData.orgSettings;
       }
 
       // 🔄 فحص وترحيل الفروع المنتهية وتثبيتها فور انقضاء دورتها الشهرية
       const { updatedEmployees: rolledOverEmployees, hasChanges: branchesRolledOver } = reconcileCycleTerminatedBranches(effectiveData.employees || [], effectiveData.orgSettings || {});
       if (branchesRolledOver) {
         effectiveData.employees = rolledOverEmployees;
-        apiSaveSettingsSlice('employees', rolledOverEmployees).catch(() => {});
+        rolloverSlices.employees = rolledOverEmployees;
+      }
+
+      if (Object.keys(rolloverSlices).length > 0) {
+        apiSaveSettingsSlice(rolloverSlices).catch(err => console.warn('[DataContext] Rollover batch slice error:', err));
       }
 
       setState((prev) => {
@@ -1211,9 +1216,56 @@ export function DataProvider({ children, showToast = () => {} }) {
       console.warn('[Sync] Instant delta broadcast error:', broadcastErr);
     }
 
-    // استخراج sliceKey إن وُجد لتسريع الحفظ السحابي وتفادي إرسال 4.2MB
-    const sliceKey = deltaHint?.entityType || (detectedDeltas.length === 1 ? detectedDeltas[0].entityType : null);
-    const sliceValue = sliceKey && updatedState[sliceKey] !== undefined ? updatedState[sliceKey] : null;
+    // قاموس تحويل أسماء الكيانات الذرية إلى مفاتيح الشرائح في الـ State
+    const ENTITY_TO_SLICE = {
+      employee: 'employees',
+      employees: 'employees',
+      shift: 'shifts',
+      shifts: 'shifts',
+      activeShifts: 'activeShifts',
+      adjustment: 'adjustments',
+      adjustments: 'adjustments',
+      roster: 'rosters',
+      rosters: 'rosters',
+      branches: 'branches',
+      branch: 'branches',
+      approvalRules: 'approvalRules',
+      bylaws: 'bylaws',
+      orgSettings: 'orgSettings',
+      request: 'requests',
+      requests: 'requests',
+      leaveRequests: 'leaveRequests',
+      loans: 'loans',
+      lateIncidents: 'lateIncidents',
+      notifications: 'notifications',
+      finances: 'finances',
+      transactions: 'transactions'
+    };
+
+    // استخراج sliceKey أو حزمة شرائح (slices) لتسريع الحفظ السحابي وتفادي إرسال 4.8MB
+    let sliceKey = deltaHint?.entityType ? (ENTITY_TO_SLICE[deltaHint.entityType] || deltaHint.entityType) : null;
+    let sliceValue = sliceKey && updatedState[sliceKey] !== undefined ? updatedState[sliceKey] : null;
+    let slices = null;
+
+    if (!sliceKey && detectedDeltas.length > 0) {
+      const sliceKeySet = new Set();
+      for (const d of detectedDeltas) {
+        const mapped = ENTITY_TO_SLICE[d.entityType] || d.entityType;
+        if (mapped && updatedState[mapped] !== undefined) {
+          sliceKeySet.add(mapped);
+        }
+      }
+
+      if (sliceKeySet.size === 1) {
+        sliceKey = Array.from(sliceKeySet)[0];
+        sliceValue = updatedState[sliceKey];
+      } else if (sliceKeySet.size > 1 && sliceKeySet.size <= 8) {
+        slices = {};
+        for (const k of sliceKeySet) {
+          slices[k] = updatedState[k];
+        }
+      }
+    }
 
     startSyncing();
     let result = null;
@@ -1221,6 +1273,7 @@ export function DataProvider({ children, showToast = () => {} }) {
       result = await smartSaveState(updatedState, {
         sliceKey,
         sliceValue,
+        slices,
         onSyncSuccess: (finalMerged) => {
           stopSyncing();
           setLastSyncTime(nowTimeStr());

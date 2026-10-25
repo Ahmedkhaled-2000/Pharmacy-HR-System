@@ -5,6 +5,7 @@ import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { checkShiftConflicts } from '../../utils/workHoursEngine';
 import { isBranchMatch } from '../../utils/branchMatcher';
 import { apiSaveSettingsSlice } from '../../utils/apiClient';
+import { saveStateLocally, broadcastStateChange } from '../../utils/offlineSync';
 import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngine';
 import {
   getEmpDisplayName,
@@ -391,21 +392,32 @@ export default function AttendanceModule({
         showToast?.('✅ تم إضافة البصمة اليدوية للموظف فوراً وحساب الساعات بنجاح (حضور في الموعد)');
       }
 
+      let atomicSaved = false;
       try {
-        await apiSaveSettingsSlice('shifts', updatedShifts);
-        await apiSaveSettingsSlice('requests', updatedState.requests);
+        const slicesToSave = {
+          shifts: updatedShifts,
+          requests: updatedState.requests
+        };
         if (updatedState.lateIncidents) {
-          await apiSaveSettingsSlice('lateIncidents', updatedState.lateIncidents);
+          slicesToSave.lateIncidents = updatedState.lateIncidents;
         }
         if (updatedState._deletedIds) {
-          await apiSaveSettingsSlice('_deletedIds', updatedState._deletedIds);
+          slicesToSave._deletedIds = updatedState._deletedIds;
         }
+        await apiSaveSettingsSlice(slicesToSave);
+        atomicSaved = true;
       } catch (sliceErr) {
         console.warn('[AttendanceModule] Slice save error:', sliceErr);
       }
 
-      // Non-blocking background sync
-      if (saveState) {
+      if (atomicSaved) {
+        try {
+          await saveStateLocally(updatedState);
+          broadcastStateChange(updatedState);
+        } catch (locErr) {
+          console.warn('[AttendanceModule] Local save error:', locErr);
+        }
+      } else if (saveState) {
         saveState(updatedState).catch(err => console.error('Background save error on manual punch:', err));
       }
     };

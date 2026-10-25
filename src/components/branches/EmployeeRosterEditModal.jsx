@@ -6,7 +6,8 @@ import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngi
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { getEmployeeDaySchedule, getResolvedEmployeeRoster, projectRosterToMonth, splitUnifiedRosterForBranches, checkShiftsOverlap, getDayShiftsList, checkAnyShiftsOverlap } from '../../utils/rosterEngine';
 import { reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
-import { apiSaveSettingsSlice, apiSaveRosterAtomic } from '../../utils/apiClient';
+import { apiSaveSettingsSlice, apiSaveRosterAtomic, apiSubmitRequestAtomic } from '../../utils/apiClient';
+import { saveStateLocally, broadcastStateChange } from '../../utils/offlineSync';
 
 const DEFAULT_SCHEDULE = {
   'السبت': { type: 'shift', start: '08:00', end: '16:00', hours: 8 },
@@ -1622,6 +1623,10 @@ export default function EmployeeRosterEditModal({
           .filter(Boolean);
 
         let updatedRosters;
+        let masterRosterObj = null;
+        let branchRosterObjs = [];
+        let newRosterObj = null;
+
         if (isMultiBranchEmp) {
           // 🌟 تقسيم ذكي وتلقائي لكل فرع على حدة مع جدول موحد رئيسي متكامل
           const branchSplits = splitUnifiedRosterForBranches(safeInputs, targetEmp, allBranches);
@@ -1635,7 +1640,7 @@ export default function EmployeeRosterEditModal({
           );
 
           // 1. الجدول الموحد الرئيسي الشامل
-          const masterRosterObj = {
+          masterRosterObj = {
             id: `roster_${targetEmp.id}_${selectedMonth}_unified`,
             employeeId: targetEmp.id,
             employeeCode: targetEmp.code || '',
@@ -1658,7 +1663,7 @@ export default function EmployeeRosterEditModal({
           };
 
           // 2. جداول الفروع المستقلة المخصصة لكل فرع
-          const branchRosterObjs = branchSplits.map((bs) => ({
+          branchRosterObjs = branchSplits.map((bs) => ({
             id: `roster_${targetEmp.id}_${selectedMonth}_b_${bs.branchId}`,
             employeeId: targetEmp.id,
             employeeCode: targetEmp.code || '',
@@ -1691,7 +1696,7 @@ export default function EmployeeRosterEditModal({
           );
 
           const rosterId = `roster_${targetEmp.id}_${selectedMonth}`;
-          const newRosterObj = {
+          newRosterObj = {
             id: rosterId,
             employeeId: targetEmp.id,
             employeeCode: targetEmp.code || '',
@@ -1807,7 +1812,12 @@ export default function EmployeeRosterEditModal({
         setState?.(reconciledState);
 
         // 🌟 حفظ ذري موحد فائق السرعة عبر نقطة الاتصال المركزية الجديدة للسيرفر (< 20ms)
+        let atomicSaveSuccess = false;
         try {
+          const newRostersList = isMultiBranchEmp ? [masterRosterObj, ...branchRosterObjs].filter(Boolean) : [newRosterObj].filter(Boolean);
+          const newRosterIds = new Set(newRostersList.map(r => r?.id).filter(Boolean));
+          const safeDeletedRosterIds = (replacedRosterIds || []).filter(id => !newRosterIds.has(id));
+
           await apiSaveRosterAtomic({
             employeeId: targetEmp.id,
             employeeCode: targetEmp.code || '',
@@ -1816,19 +1826,27 @@ export default function EmployeeRosterEditModal({
             branchId: effectiveBranchId,
             branchName: effectiveBranchName,
             roster: isMultiBranchEmp ? masterRosterObj : newRosterObj,
-            rosters: isMultiBranchEmp ? [masterRosterObj, ...branchRosterObjs] : [newRosterObj],
+            rosters: newRostersList,
             employees: reconciledState.employees,
             shifts: reconciledState.shifts,
             lateIncidents: reconciledState.lateIncidents,
             requests: reconciledState.requests,
             notifications: reconciledState.notifications,
-            deletedRosterIds: replacedRosterIds
+            deletedRosterIds: safeDeletedRosterIds
           });
+          atomicSaveSuccess = true;
         } catch (atomicErr) {
           console.warn('[RosterAtomicSave] Fallback to standard saveState:', atomicErr);
         }
 
-        if (saveState) await saveState(reconciledState);
+        // إذا نجح الحفظ الذري المباشر، نكتفي بالتحديث المحلي السريع وبث التغيير دون إرسال حمولة 4.8MB
+        // وإذا تعثر الحفظ الذري فقط نلجأ إلى saveState الاحتياطية
+        if (!atomicSaveSuccess && saveState) {
+          await saveState(reconciledState, { entityType: 'rosters' });
+        } else if (atomicSaveSuccess) {
+          saveStateLocally(reconciledState).catch(() => {});
+          broadcastStateChange(reconciledState);
+        }
 
         if (reconSummary?.waivedDeductionMinutes > 0) {
           showToast?.(`✅ تم اعتماد الجدول وإسقاط ${reconSummary.waivedDeductionMinutes} دقيقة خصم (${reconSummary.waivedAmount} ج.م) تلقائياً لتطابق الحضور!`);
@@ -1882,7 +1900,15 @@ export default function EmployeeRosterEditModal({
         };
 
         setState?.(updatedState);
-        if (saveState) await saveState(updatedState);
+        saveStateLocally(updatedState).catch(() => {});
+        broadcastStateChange(updatedState);
+
+        try {
+          await apiSubmitRequestAtomic(newRosterReq);
+        } catch (atomicReqErr) {
+          console.warn('[BranchManager RosterReq] Fallback to saveState:', atomicReqErr);
+          if (saveState) await saveState(updatedState, { entityType: 'requests' });
+        }
 
         // إشعار الإدارة العليا عبر Gmail
         try {

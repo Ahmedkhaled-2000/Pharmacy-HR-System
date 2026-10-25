@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { usePOS } from '../../context/POSContext';
+import { useAuth } from '../../context/AuthContext';
+import { useUI } from '../../context/UIContext';
 import {
   searchProducts,
   detectCartDrugInteractions,
   findSmartSubstitutes,
   checkBatchExpiryStatus,
-  INVOICE_TYPES
+  INVOICE_TYPES,
+  PHARMA_FAST_OTC_ITEMS,
+  FAST_OTC_CATEGORIES
 } from '../../utils/posEngine';
 import {
   Search,
@@ -34,20 +38,30 @@ import {
   CheckCircle2,
   ExternalLink,
   ChevronDown,
-  UserPlus
+  UserPlus,
+  PackagePlus,
+  Tag,
+  Layers,
+  ShoppingBag,
+  SlidersHorizontal,
+  X
 } from 'lucide-react';
 
 export default function PosSalesWindow({ windowId }) {
+  const { currentEmpUser, currentBranch } = useAuth?.() || {};
+  const { showToast } = useUI?.() || {};
   const {
     productsCatalog,
     salesWindows,
     activeWindowId,
     addItemToActiveWindowCart,
+    addUncodedItemToActiveCart,
     updateCartItemType,
     removeItemFromCart,
     updateCartItemQuantity,
     toggleCartItemUnit,
     clearCart,
+    finalizeSale,
     updateWindowCustomer,
     updateWindowInvoiceType,
     updateWindowRxImage,
@@ -108,7 +122,30 @@ export default function PosSalesWindow({ windowId }) {
   const walletDeducted = useWallet ? Math.min(availableWallet, remainingBeforeWallet) : 0;
   const netTotal = Math.max(0, remainingBeforeWallet - walletDeducted);
 
-  // فتح نافذة الدفع
+  // ── الأصناف السريعة الأكثر مبيعاً (Quick Items Drawer) ──
+  const [isQuickItemsOpen, setIsQuickItemsOpen] = useState(true);
+  const [activeQuickGroup, setActiveQuickGroup] = useState('all');
+
+  const filteredFastItems = useMemo(() => {
+    if (activeQuickGroup === 'all') return PHARMA_FAST_OTC_ITEMS;
+    return PHARMA_FAST_OTC_ITEMS.filter((item) => item.group === activeQuickGroup);
+  }, [activeQuickGroup]);
+
+  // ── نافذة الصنف الغير مكود / اليدوي (Uncoded Item Modal) ──
+  const [isUncodedModalOpen, setIsUncodedModalOpen] = useState(false);
+  const [uncodedForm, setUncodedForm] = useState({
+    name: '',
+    price: '',
+    costPrice: '',
+    qty: '1',
+    unit: 'علبة',
+    itemType: 'otc'
+  });
+
+  // ── حالة البيع السريع الجاري ──
+  const [isQuickCheckingOut, setIsQuickCheckingOut] = useState(false);
+
+  // ── فتح نافذة الدفع التقليدية ──
   const handleOpenPayment = useCallback((method = 'cash') => {
     if (cart.length === 0) return;
     setActivePaymentSale({
@@ -127,12 +164,100 @@ export default function PosSalesWindow({ windowId }) {
     setIsPaymentModalOpen(true);
   }, [cart, windowId, subtotal, calculatedDiscount, walletDeducted, netTotal, customer, invoiceType, rxImage, deliveryDetails, setActivePaymentSale, setIsPaymentModalOpen]);
 
+  // ── البيع السريع الفوري بدون طباعة ريسيت (< 1 ثانية) ──
+  const handleQuickCheckoutWithoutReceipt = useCallback(async () => {
+    if (cart.length === 0) {
+      showToast?.('⚠️ سلة الفاتورة فارغة، يرجى إضافة أصناف أولاً');
+      return;
+    }
+    if (isQuickCheckingOut) return;
+
+    setIsQuickCheckingOut(true);
+    try {
+      const activeCode = currentEmpUser?.code || '101';
+      const activeName = currentEmpUser?.name || 'صيدلي الكاشير';
+      const activeId = currentEmpUser?.id || 'cashier_1';
+
+      const committed = await finalizeSale({
+        windowId,
+        paymentMethod: 'cash',
+        paidAmount: netTotal,
+        discountAmount: calculatedDiscount,
+        cashierEmpCode: activeCode,
+        cashierEmpName: activeName,
+        cashierEmpId: activeId,
+        printReceipt: false // ⚡ تجاوز الطباعة نهائياً لسرعة متناهية
+      });
+
+      if (committed) {
+        showToast?.(`⚡ تم إنهاء الفاتورة #${committed.invoiceNumber} نقداً بنجاح بدون ريسيت (${netTotal.toFixed(2)} ج)`);
+      }
+    } catch (err) {
+      console.error('Quick checkout error:', err);
+      showToast?.('❌ حدث خطأ أثناء إتمام الفاتورة السريعة');
+    } finally {
+      setIsQuickCheckingOut(false);
+      setTimeout(() => {
+        if (barcodeInputRef.current) barcodeInputRef.current.focus();
+      }, 60);
+    }
+  }, [cart, isQuickCheckingOut, currentEmpUser, finalizeSale, windowId, netTotal, calculatedDiscount, showToast]);
+
+  // إضافة صنف حر غير مكود مباشرة
+  const handleAddUncodedItem = (e) => {
+    e?.preventDefault();
+    if (!uncodedForm.name.trim() || !uncodedForm.price) {
+      showToast?.('⚠️ يرجى إدخال اسم الصنف وسعر البيع');
+      return;
+    }
+    const price = Math.max(0, parseFloat(uncodedForm.price) || 0);
+    const cost = Math.max(0, parseFloat(uncodedForm.costPrice) || (price * 0.75));
+    const qty = Math.max(0.1, parseFloat(uncodedForm.qty) || 1);
+
+    addUncodedItemToActiveCart({
+      tradeNameAr: uncodedForm.name.trim(),
+      tradeNameEn: uncodedForm.name.trim(),
+      publicPrice: price,
+      costPrice: cost,
+      qty,
+      unitName: uncodedForm.unit || 'علبة',
+      itemType: uncodedForm.itemType || invoiceType || 'otc'
+    });
+
+    showToast?.(`✅ تم إدراج الصنف غير المكود: ${uncodedForm.name.trim()}`);
+    setIsUncodedModalOpen(false);
+    setUncodedForm({ name: '', price: '', costPrice: '', qty: '1', unit: 'علبة', itemType: 'otc' });
+    setTimeout(() => {
+      if (barcodeInputRef.current) barcodeInputRef.current.focus();
+    }, 50);
+  };
+
+  // ── إضافة صنف سريع بضغطة واحدة (OTC Fast Item Selection) ──
+  const handleSelectFastItem = useCallback((fastItem) => {
+    const fullProd = productsCatalog.find((p) => p.id === fastItem.id || p.barcode === fastItem.barcode) || {
+      id: fastItem.id,
+      tradeNameAr: fastItem.tradeName,
+      tradeNameEn: fastItem.tradeNameEn || fastItem.tradeName,
+      publicPrice: fastItem.publicPrice,
+      subUnitPrice: fastItem.subUnitPrice || (fastItem.publicPrice / (fastItem.packSize || 1)),
+      packSize: fastItem.packSize || 1,
+      barcode: fastItem.barcode,
+      genericName: fastItem.activeIngredient || 'OTC',
+      dosageForm: fastItem.dosageForm || 'أقراص',
+      strength: fastItem.strength || '',
+      batches: [{ id: `batch_${fastItem.id}`, expiryDate: '2028-12-31', qtyBase: 100, batchNumber: 'BATCH-OTC' }]
+    };
+    addItemToActiveWindowCart(fullProd, 'base', 1, invoiceType);
+    showToast?.(`⚡ تم إضافة ${fastItem.tradeName} إلى الفاتورة`);
+    if (barcodeInputRef.current) barcodeInputRef.current.focus();
+  }, [productsCatalog, addItemToActiveWindowCart, invoiceType, showToast]);
+
   // إبقاء مؤشر الكتابة داخل حقل الباركود دائماً عند تنشيط النافذة
   useEffect(() => {
-    if (activeWindowId === windowId && barcodeInputRef.current) {
+    if (activeWindowId === windowId && barcodeInputRef.current && !isUncodedModalOpen) {
       barcodeInputRef.current.focus();
     }
-  }, [activeWindowId, windowId]);
+  }, [activeWindowId, windowId, isUncodedModalOpen]);
 
   // ── 1. الاستماع لنسخ صورة الروشتة من الحافظة (Ctrl + V Prescription Clipboard Paste) ──
   useEffect(() => {
@@ -159,10 +284,53 @@ export default function PosSalesWindow({ windowId }) {
     return () => window.removeEventListener('paste', handlePaste);
   }, [activeWindowId, windowId, updateWindowRxImage]);
 
-  // ── 2. اختصارات لوحة المفاتيح الخاصة بالنافذة (Ctrl+1..4, F5, F6) ──
+  // ── الاستماع للأحداث الموجهة من الاختصارات المركزية ──
+  useEffect(() => {
+    if (activeWindowId !== windowId) return;
+
+    const handleQuickCheckoutEvt = () => handleQuickCheckoutWithoutReceipt();
+    const handleToggleQuickItemsEvt = () => setIsQuickItemsOpen((prev) => !prev);
+    const handleOpenUncodedEvt = () => setIsUncodedModalOpen(true);
+
+    window.addEventListener('pos:quick-cash-checkout', handleQuickCheckoutEvt);
+    window.addEventListener('pos:toggle-quick-items', handleToggleQuickItemsEvt);
+    window.addEventListener('pos:open-uncoded-modal', handleOpenUncodedEvt);
+
+    return () => {
+      window.removeEventListener('pos:quick-cash-checkout', handleQuickCheckoutEvt);
+      window.removeEventListener('pos:toggle-quick-items', handleToggleQuickItemsEvt);
+      window.removeEventListener('pos:open-uncoded-modal', handleOpenUncodedEvt);
+    };
+  }, [activeWindowId, windowId, handleQuickCheckoutWithoutReceipt]);
+
+  // ── 2. اختصارات لوحة المفاتيح الخاصة بالنافذة ──
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (activeWindowId !== windowId) return;
+
+      // إنهاء فوري بدون ريسيت
+      if (e.shiftKey && e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        handleQuickCheckoutWithoutReceipt();
+        return;
+      }
+
+      // إضافة صنف حر غير مكود
+      if (e.ctrlKey && (e.key === 'm' || e.key === 'M')) {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsUncodedModalOpen(true);
+        return;
+      }
+
+      // إظهار وإخفاء الأصناف السريعة
+      if (e.key === 'F8') {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsQuickItemsOpen((prev) => !prev);
+        return;
+      }
 
       // تبديل نوع الفاتورة بالكامل
       if (e.ctrlKey && e.key === '1') {
@@ -183,12 +351,18 @@ export default function PosSalesWindow({ windowId }) {
       } else if (e.key === 'F6') {
         e.preventDefault();
         handleOpenPayment('card');
+      } else if (e.key === 'F9') {
+        e.preventDefault();
+        handleQuickCheckoutWithoutReceipt();
+      } else if (e.key === 'F10') {
+        e.preventDefault();
+        setIsUncodedModalOpen(true);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeWindowId, windowId, updateWindowInvoiceType, handleOpenPayment]);
+  }, [activeWindowId, windowId, updateWindowInvoiceType, handleOpenPayment, handleQuickCheckoutWithoutReceipt]);
 
   // ── 3. البحث الفوري الثنائي (محلياً + من قاعدة بيانات Outstock السحابية) ──
   useEffect(() => {
@@ -435,8 +609,54 @@ export default function PosSalesWindow({ windowId }) {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '11px', color: 'var(--muted, #94a3b8)' }}>
-            <span>اختصارات: <strong>Ctrl+1</strong> OTC | <strong>Ctrl+2</strong> Rx | <strong>Ctrl+3</strong> طلب | <strong>Ctrl+4</strong> دليفري</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => setIsQuickItemsOpen((prev) => !prev)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: isQuickItemsOpen ? '1.5px solid #0d9488' : '1px solid var(--border, rgba(255,255,255,0.1))',
+                background: isQuickItemsOpen ? 'rgba(13, 148, 136, 0.22)' : 'transparent',
+                color: isQuickItemsOpen ? '#2dd4bf' : 'var(--muted, #94a3b8)',
+                fontSize: '12px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                boxShadow: isQuickItemsOpen ? '0 0 10px rgba(13, 148, 136, 0.3)' : 'none'
+              }}
+              title="إظهار / إخفاء رف الأصناف السريعة الأكثر طلباً (F8)"
+            >
+              <Zap size={14} />
+              <span>الأصناف السريعة [F8]</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsUncodedModalOpen(true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: '1.5px solid rgba(245, 158, 11, 0.5)',
+                background: 'rgba(245, 158, 11, 0.15)',
+                color: '#f59e0b',
+                fontSize: '12px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                boxShadow: '0 0 10px rgba(245, 158, 11, 0.2)'
+              }}
+              title="إضافة صنف حر غير مكود يدوياً للفاتورة (Ctrl + M)"
+            >
+              <PackagePlus size={14} />
+              <span>صنف غير مكود [Ctrl+M]</span>
+            </button>
           </div>
         </div>
 
@@ -563,6 +783,92 @@ export default function PosSalesWindow({ windowId }) {
           )}
         </div>
 
+        {/* ── 2.5 رف / درج الأصناف السريعة الأكثر طلباً (Quick Items Drawer) ── */}
+        {isQuickItemsOpen && (
+          <div className="pos-quick-items-tray">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Zap size={16} color="var(--primary, #0d9488)" />
+                <span style={{ fontSize: '13px', fontWeight: 900, color: 'var(--text, #f1f5f9)' }}>
+                  الأصناف السريعة والأكثر مبيعاً (OTC Fast Picks)
+                </span>
+                <span style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>
+                  (نقرة واحدة للإضافة المباشرة للسلة)
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsUncodedModalOpen(true)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '4px 10px',
+                    borderRadius: '7px',
+                    background: 'rgba(245, 158, 11, 0.15)',
+                    border: '1px solid rgba(245, 158, 11, 0.4)',
+                    color: '#f59e0b',
+                    fontSize: '11.5px',
+                    fontWeight: 800,
+                    cursor: 'pointer'
+                  }}
+                  title="إضافة صنف غير مكود يدوياً (Ctrl + M)"
+                >
+                  <PackagePlus size={13} />
+                  <span>صنف غير مكود [Ctrl+M]</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsQuickItemsOpen(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--muted, #94a3b8)',
+                    cursor: 'pointer',
+                    padding: '4px'
+                  }}
+                  title="إخفاء الدرج (F8)"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            </div>
+
+            {/* تصنيفات الأصناف السريعة */}
+            <div className="pos-quick-filter-bar">
+              {FAST_OTC_CATEGORIES.map((cat) => (
+                <button
+                  key={cat.id}
+                  type="button"
+                  className={`pos-quick-filter-chip ${activeQuickGroup === cat.id ? 'active' : ''}`}
+                  onClick={() => setActiveQuickGroup(cat.id)}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+
+            {/* شبكة البطاقات السريعة */}
+            <div className="pos-quick-items-grid">
+              {filteredFastItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="pos-quick-item-card"
+                  onClick={() => handleSelectFastItem(item)}
+                  title={`إضافة ${item.tradeName} للسلة`}
+                >
+                  <div className="pos-quick-item-name">{item.tradeName}</div>
+                  <div className="pos-quick-item-footer">
+                    <span className="pos-quick-item-price">{parseFloat(item.publicPrice || 0).toFixed(2)} ج</span>
+                    <span className="pos-quick-item-tag">{item.activeIngredient || 'OTC'}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ── 3. تنبيه رادار التفاعلات الدوائية الخطيرة بالسلة ── */}
         {drugInteractions.length > 0 && (
           <div className="pos-interaction-alert-banner">
@@ -617,59 +923,68 @@ export default function PosSalesWindow({ windowId }) {
                     <tr key={`${item.productId}-${item.unitType}-${idx}`}>
                       <td style={{ fontWeight: 700, color: 'var(--muted, #475569)' }}>{idx + 1}</td>
                       <td>
-                        <div style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text, #0b132b)' }}>
-                          {item.tradeNameAr}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text, #0b132b)' }}>
+                            {item.tradeNameAr}
+                          </span>
+                          {item.isUncoded && (
+                            <span className="pos-uncoded-badge">
+                              ✨ صنف حر غير مكود
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontSize: '11px', color: 'var(--muted, #475569)' }}>
                           {item.genericName}
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px' }}>
-                          {/* شارة فحص البدائل الذكية */}
-                          <button
-                            type="button"
-                            onClick={() => handleInspectSubstitutes(item)}
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: 'var(--accent, #d97706)',
-                              fontSize: '11px',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              padding: 0,
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '3px'
-                            }}
-                          >
-                            <Sparkles size={12} />
-                            فحص البدائل [F2]
-                          </button>
+                        {!item.isUncoded && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px' }}>
+                            {/* شارة فحص البدائل الذكية */}
+                            <button
+                              type="button"
+                              onClick={() => handleInspectSubstitutes(item)}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--accent, #d97706)',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                padding: 0,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px'
+                              }}
+                            >
+                              <Sparkles size={12} />
+                              فحص البدائل [F2]
+                            </button>
 
-                          {/* زر فحص الفروع الأخرى */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const prod = productsCatalog.find((p) => p.id === item.productId) || item;
-                              handleInspectBranchStock(prod);
-                            }}
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: '#0284c7',
-                              fontSize: '11px',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              padding: 0,
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '3px'
-                            }}
-                          >
-                            <Building2 size={12} />
-                            فروع أخرى 🏢
-                          </button>
-                        </div>
+                            {/* زر فحص الفروع الأخرى */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const prod = productsCatalog.find((p) => p.id === item.productId) || item;
+                                handleInspectBranchStock(prod);
+                              }}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#0284c7',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                padding: 0,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px'
+                              }}
+                            >
+                              <Building2 size={12} />
+                              فروع أخرى 🏢
+                            </button>
+                          </div>
+                        )}
                       </td>
 
                       {/* تصنيف الصنف الفردي (OTC / روشتة / طلب عميل) */}
@@ -1116,14 +1431,33 @@ export default function PosSalesWindow({ windowId }) {
         </div>
 
         {/* أزرار السداد السريع */}
+        {/* ⚡ الزر الخارق: إنهاء فوري بدون ريسيت (< 1 ثانية) */}
+        <button
+          type="button"
+          className="pos-instant-checkout-btn"
+          disabled={cart.length === 0 || isQuickCheckingOut}
+          onClick={handleQuickCheckoutWithoutReceipt}
+          title="إنهاء فوري نقدي بدون طباعة ريسيت وتفريغ السلة فوراً (Shift + Enter)"
+        >
+          <Zap size={22} className={isQuickCheckingOut ? 'pos-spin-icon' : ''} />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
+            <span style={{ fontSize: '14px', fontWeight: 900 }}>
+              {isQuickCheckingOut ? 'جاري الإنهاء اللحظي...' : '⚡ بيع سريع بدون ريسيت'}
+            </span>
+            <span style={{ fontSize: '11px', opacity: 0.9, fontWeight: 700 }}>
+              نقدي فوري [Shift + Enter]
+            </span>
+          </div>
+        </button>
+
         <button
           type="button"
           className="pos-pay-fast-btn"
           disabled={cart.length === 0}
           onClick={() => handleOpenPayment('cash')}
         >
-          <Banknote size={22} />
-          <span>دفع نقدي سريع [F5]</span>
+          <Banknote size={20} />
+          <span>دفع نقدي بالريسيت [F5]</span>
         </button>
 
         <div className="pos-secondary-actions-grid">
@@ -1188,6 +1522,295 @@ export default function PosSalesWindow({ windowId }) {
             >
               <X size={20} />
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── مودال إضافة صنف حر غير مكود يدوياً (Uncoded Item Modal) ── */}
+      {isUncodedModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(6px)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsUncodedModalOpen(false);
+          }}
+        >
+          <div
+            style={{
+              background: 'var(--surface, #0f172a)',
+              border: '1.5px solid rgba(245, 158, 11, 0.5)',
+              borderRadius: '16px',
+              width: '100%',
+              maxWidth: '520px',
+              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.6)',
+              overflow: 'hidden'
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '16px 20px',
+                background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(15, 23, 42, 0.8))',
+                borderBottom: '1px solid rgba(245, 158, 11, 0.3)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '10px',
+                    background: 'rgba(245, 158, 11, 0.2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#f59e0b'
+                  }}
+                >
+                  <PackagePlus size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 900, color: '#f8fafc' }}>
+                    إدراج صنف حر / غير مكود
+                  </h3>
+                  <div style={{ fontSize: '11.5px', color: '#94a3b8' }}>
+                    للأدوية والمستلزمات والتركيبات التي لم تُسجل بالباركود بعد [Ctrl + M]
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsUncodedModalOpen(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: '4px'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddUncodedItem} style={{ padding: '20px' }}>
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: '#cbd5e1', marginBottom: '6px' }}>
+                  اسم الصنف الدوائي / المستلزم <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="مثال: شاش معقم 10*10، تركيبة مرهم كبريت، قطن طبي 200 جم..."
+                  value={uncodedForm.name}
+                  onChange={(e) => setUncodedForm({ ...uncodedForm, name: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1.5px solid rgba(255,255,255,0.15)',
+                    color: '#ffffff',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: '#cbd5e1', marginBottom: '6px' }}>
+                    سعر البيع للجمهور (ج.م) <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.25"
+                    min="0"
+                    required
+                    placeholder="0.00"
+                    value={uncodedForm.price}
+                    onChange={(e) => setUncodedForm({ ...uncodedForm, price: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1.5px solid rgba(13, 148, 136, 0.4)',
+                      color: '#2dd4bf',
+                      fontSize: '15px',
+                      fontWeight: 900,
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: '#cbd5e1', marginBottom: '6px' }}>
+                    سعر التكلفة التقديري (ج.م)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.25"
+                    min="0"
+                    placeholder="افتراضي: 75% من البيع"
+                    value={uncodedForm.costPrice}
+                    onChange={(e) => setUncodedForm({ ...uncodedForm, costPrice: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1.5px solid rgba(255,255,255,0.15)',
+                      color: '#ffffff',
+                      fontSize: '14px',
+                      fontWeight: 700,
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.2fr', gap: '12px', marginBottom: '20px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: '#cbd5e1', marginBottom: '6px' }}>
+                    الكمية
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    value={uncodedForm.qty}
+                    onChange={(e) => setUncodedForm({ ...uncodedForm, qty: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1.5px solid rgba(255,255,255,0.15)',
+                      color: '#ffffff',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: '#cbd5e1', marginBottom: '6px' }}>
+                    الوحدة
+                  </label>
+                  <select
+                    value={uncodedForm.unit}
+                    onChange={(e) => setUncodedForm({ ...uncodedForm, unit: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      background: '#1e293b',
+                      border: '1.5px solid rgba(255,255,255,0.15)',
+                      color: '#ffffff',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  >
+                    <option value="علبة">علبة</option>
+                    <option value="شريط">شريط</option>
+                    <option value="قرص">قرص</option>
+                    <option value="أمبول">أمبول</option>
+                    <option value="قارورة">قارورة</option>
+                    <option value="أنبوبة">أنبوبة</option>
+                    <option value="كيس">كيس</option>
+                    <option value="قطعة">قطعة</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: '#cbd5e1', marginBottom: '6px' }}>
+                    نوع الفاتورة
+                  </label>
+                  <select
+                    value={uncodedForm.itemType}
+                    onChange={(e) => setUncodedForm({ ...uncodedForm, itemType: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      background: '#1e293b',
+                      border: '1.5px solid rgba(255,255,255,0.15)',
+                      color: '#ffffff',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  >
+                    <option value="otc">🟢 OTC لا وصفي</option>
+                    <option value="rx">💊 روشتة Rx</option>
+                    <option value="customer_order">📋 طلب عميل</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsUncodedModalOpen(false)}
+                  style={{
+                    padding: '9px 18px',
+                    borderRadius: '8px',
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#94a3b8',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  إلغاء [Esc]
+                </button>
+
+                <button
+                  type="submit"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '9px 20px',
+                    borderRadius: '8px',
+                    background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                    border: 'none',
+                    color: '#ffffff',
+                    fontSize: '13px',
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 15px rgba(245, 158, 11, 0.4)'
+                  }}
+                >
+                  <PackagePlus size={16} />
+                  <span>إدراج الصنف للفاتورة [Enter]</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

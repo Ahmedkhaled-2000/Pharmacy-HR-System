@@ -5,6 +5,7 @@ import { getCycleDateRange, getActivePayrollMonth } from '../../utils/periodEngi
 import { getEmployeeDaySchedule, getDayScheduleFromMap, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
 import { reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
 import { apiSaveSettingsSlice, apiSaveRosterAtomic } from '../../utils/apiClient';
+import { saveStateLocally, broadcastStateChange } from '../../utils/offlineSync';
 
 function getDayShiftInfo(schedule, day, fallbackHours = 8) {
   // If no schedule was provided or empty, do NOT invent fake shifts
@@ -293,6 +294,7 @@ export default function RosterPreviewModal({
     setState?.(reconciledState);
 
     // 🌟 حفظ ذري موحد فائق السرعة عبر نقطة الاتصال المركزية الجديدة للسيرفر (< 20ms)
+    let atomicSuccess = false;
     try {
       await apiSaveRosterAtomic({
         employeeId: employee.id,
@@ -308,11 +310,17 @@ export default function RosterPreviewModal({
         requests: reconciledState.requests,
         notifications: reconciledState.notifications
       });
+      atomicSuccess = true;
     } catch (atomicErr) {
       console.warn('[RosterAtomicSave] Fallback in RosterPreviewModal:', atomicErr);
     }
 
-    if (saveState) await saveState(reconciledState);
+    if (!atomicSuccess && saveState) {
+      await saveState(reconciledState, { entityType: 'rosters' });
+    } else if (atomicSuccess) {
+      saveStateLocally(reconciledState).catch(() => {});
+      broadcastStateChange(reconciledState);
+    }
 
     if (reconSummary?.waivedDeductionMinutes > 0) {
       showToast?.(`✅ تم حفظ شفت يوم ${editingDay.dayName} وإسقاط ${reconSummary.waivedDeductionMinutes} دقيقة تأخير (${reconSummary.waivedAmount} ج.م) تلقائياً!`, 'success');

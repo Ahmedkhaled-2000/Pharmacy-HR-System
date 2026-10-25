@@ -377,6 +377,82 @@ export function POSProvider({ children }) {
     );
   }, []);
 
+  // إضافة صنف حر / غير مكود لسلة النافذة النشطة مباشرة
+  const addUncodedItemToActiveCart = useCallback(({
+    tradeNameAr = 'صنف غير مكود',
+    tradeNameEn = 'Custom Item',
+    publicPrice = 0,
+    costPrice = 0,
+    qty = 1,
+    unitName = 'قطعة',
+    itemType = 'otc'
+  }) => {
+    if (!activeWindowId) return;
+
+    playBarcodeSuccessBeep();
+
+    const priceNum = Math.max(0, parseFloat(publicPrice) || 0);
+    const costNum = Math.max(0, parseFloat(costPrice) || (priceNum * 0.75));
+    const qtyNum = Math.max(0.1, parseFloat(qty) || 1);
+    const uncodedId = `uncoded_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+    const uncodedProduct = {
+      id: uncodedId,
+      barcode: uncodedId,
+      barcodes: [uncodedId],
+      tradeNameAr: tradeNameAr.trim() || 'صنف غير مكود',
+      tradeNameEn: tradeNameEn.trim() || 'Custom Item',
+      genericName: 'صنف يدوي غير مكود',
+      category: 'أصناف حرة',
+      dosageForm: unitName || 'قطعة',
+      strength: '',
+      packSize: 1,
+      baseUnit: unitName || 'قطعة',
+      subUnit: unitName || 'قطعة',
+      piecesPerSubUnit: 1,
+      publicPrice: priceNum,
+      costPrice: costNum,
+      subUnitPrice: priceNum,
+      isTableDrug: false,
+      isChronic: false,
+      isUncoded: true,
+      commissionPct: 0,
+      batches: [{ id: `b_${uncodedId}`, batchNo: 'MANUAL', expiryDate: '2029-12-31', qtyBase: 999 }]
+    };
+
+    setSalesWindows((prev) =>
+      prev.map((win) => {
+        if (win.id !== activeWindowId) return win;
+        const currentCart = [...win.cart];
+        const lineTotal = parseFloat((priceNum * qtyNum).toFixed(2));
+        const newLine = {
+          productId: uncodedProduct.id,
+          tradeNameAr: uncodedProduct.tradeNameAr,
+          tradeNameEn: uncodedProduct.tradeNameEn,
+          genericName: uncodedProduct.genericName,
+          barcode: uncodedProduct.barcode,
+          category: uncodedProduct.category,
+          unitType: 'base',
+          unitLabel: unitName || 'قطعة',
+          quantity: qtyNum,
+          unitPrice: priceNum,
+          unitCost: costNum,
+          discountPct: 0,
+          discountAmount: 0,
+          lineTotal,
+          instantCommission: 0,
+          isChronic: false,
+          chronicDailyDose: 1,
+          itemType: itemType || win.invoiceType || 'otc',
+          isUncoded: true,
+          selectedBatch: uncodedProduct.batches[0]
+        };
+        currentCart.push(newLine);
+        return { ...win, cart: currentCart };
+      })
+    );
+  }, [activeWindowId]);
+
   // ── 5. إتمام وتأكيد الفاتورة المعتمدة (Finalize & Checkout) ──
   const finalizeSale = useCallback(async ({
     windowId,
@@ -385,7 +461,8 @@ export function POSProvider({ children }) {
     discountAmount = 0,
     cashierEmpCode = null,
     cashierEmpName = null,
-    cashierEmpId = null
+    cashierEmpId = null,
+    printReceipt = true
   }) => {
     const targetWindow = salesWindows.find((w) => w.id === windowId);
     if (!targetWindow || targetWindow.cart.length === 0) return null;
@@ -454,8 +531,10 @@ export function POSProvider({ children }) {
       });
     }
 
-    // 4. طباعة الريسيت الحراري التلقائي
-    printPosSaleReceipt(committed, currentBranch, currentEmpUser?.name || 'صيدلي الكاشير');
+    // 4. طباعة الريسيت الحراري التلقائي (إذا لم يتم تخطيه للبيع السريع بدون ريسيت)
+    if (printReceipt !== false) {
+      printPosSaleReceipt(committed, currentBranch, currentEmpUser?.name || 'صيدلي الكاشير');
+    }
 
     // 5. إفراغ سلة النافذة بعد نجاح البيع
     clearCart(windowId);
@@ -540,6 +619,7 @@ export function POSProvider({ children }) {
     updateWindowDeliveryDetails,
     updateWindowCustomer,
     addItemToActiveWindowCart,
+    addUncodedItemToActiveCart,
     updateCartItemType,
     removeItemFromCart,
     updateCartItemQuantity,

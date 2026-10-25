@@ -219,9 +219,11 @@ let bgPendingCallbacks = [];
  * تعمل بنظام التجميع الذكي (Debounced Buffer) وتمنع إرهاق الشبكة أو تجميد المتصفح
  */
 async function dispatchBackgroundCloudSync(cleanUpdated, options = {}) {
-  const { onSyncSuccess, onSyncFail, onQueuedOffline, sliceKey, sliceValue } = options;
+  const { onSyncSuccess, onSyncFail, onQueuedOffline, sliceKey, sliceValue, slices } = options;
   bgPendingState = cleanUpdated;
-  if (sliceKey && sliceValue !== undefined) {
+  if (slices && typeof slices === 'object' && Object.keys(slices).length > 0) {
+    bgPendingSlice = { slices };
+  } else if (sliceKey && sliceValue !== undefined) {
     bgPendingSlice = { sliceKey, sliceValue };
   }
 
@@ -251,8 +253,13 @@ async function dispatchBackgroundCloudSync(cleanUpdated, options = {}) {
 
       try {
         let res;
-        // إذا كان هناك قسم محدد تم تعديله، نستخدم مسار الحفظ الجزئي الخفيف جداً (< 20KB)
-        if (sliceToPush && sliceToPush.sliceKey && sliceToPush.sliceValue !== undefined) {
+        // إذا كان هناك قسم محدد أو حزمة شرائح تم تعديلها، نستخدم مسار الحفظ الجزئي الخفيف جداً (< 20KB)
+        if (sliceToPush && sliceToPush.slices) {
+          res = await apiSaveSettingsSlice(sliceToPush.slices, null, {
+            timeout: 25000,
+            isBackground: true
+          });
+        } else if (sliceToPush && sliceToPush.sliceKey && sliceToPush.sliceValue !== undefined) {
           res = await apiSaveSettingsSlice(sliceToPush.sliceKey, sliceToPush.sliceValue, {
             timeout: 25000,
             isBackground: true
@@ -293,7 +300,7 @@ async function dispatchBackgroundCloudSync(cleanUpdated, options = {}) {
 }
 
 export async function smartSaveState(updatedState, options = {}) {
-  const { onSyncSuccess, onSyncFail, onQueuedOffline, waitForServer = false, sliceKey, sliceValue } = options;
+  const { onSyncSuccess, onSyncFail, onQueuedOffline, waitForServer = false, sliceKey, sliceValue, slices } = options;
   const cleanUpdated = normalizeState(updatedState);
 
   // 1. بث التغيير لكافة التبويبات فورياً في نفس الجهاز (0ms Instant Local Broadcast)
@@ -326,8 +333,8 @@ export async function smartSaveState(updatedState, options = {}) {
   }
 
   // 3. النمط التفاؤلي الفوري الافتراضي (True Optimistic UI):
-  // إطلاق الحفظ السحابي في الخلفية بصمت
-  dispatchBackgroundCloudSync(cleanUpdated, { onSyncSuccess, onSyncFail, onQueuedOffline, sliceKey, sliceValue });
+  // إطلاق الحفظ السحابي في الخلفية بصمت مع دعم الشرائح الجزئية والحزم
+  dispatchBackgroundCloudSync(cleanUpdated, { onSyncSuccess, onSyncFail, onQueuedOffline, sliceKey, sliceValue, slices });
 
   // 4. إرجاع النتيجة فوراً للواجهة والمودال (< 5ms) لتأكيد الحفظ اللحظي بدون أي انتظار
   return { success: true, queued: false, mergedState: cleanUpdated };

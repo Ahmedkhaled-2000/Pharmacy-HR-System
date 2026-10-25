@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { applyBrandIdentityToDOM } from '../../utils/brandThemeEngine';
 import { TOP_MGMT_MODULES } from '../../utils/permissionUtils';
-import { apiSaveSettingsSlice } from '../../utils/apiClient';
+import { apiSaveSettingsSlice, API_BASE_URL } from '../../utils/apiClient';
+import { saveStateLocally, broadcastStateChange } from '../../utils/offlineSync';
 
 export default function OwnerAccessAndIdentityModule({
   state,
@@ -273,7 +274,7 @@ export default function OwnerAccessAndIdentityModule({
       if (saveState) await saveState(updatedState);
 
       // مزامنة السيرفر عبر API مخصص
-      fetch('/api/auth/permissions/save-employee-access', {
+      fetch(`${API_BASE_URL}/auth/permissions/save-employee-access`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -356,7 +357,7 @@ export default function OwnerAccessAndIdentityModule({
       applyBrandIdentityToDOM(brandForm);
 
       // مزامنة السيرفر
-      fetch('/api/system/brand-identity', {
+      fetch(`${API_BASE_URL}/system/brand-identity`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(brandForm)
@@ -460,7 +461,7 @@ export default function OwnerAccessAndIdentityModule({
       }
 
       // مزامنة السيرفر
-      fetch('/api/auth/owners/manage', {
+      fetch(`${API_BASE_URL}/auth/owners/manage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -503,7 +504,7 @@ export default function OwnerAccessAndIdentityModule({
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
 
-      fetch('/api/auth/owners/manage', {
+      fetch(`${API_BASE_URL}/auth/owners/manage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'delete', ownerId: owner.id })
@@ -606,12 +607,23 @@ export default function OwnerAccessAndIdentityModule({
       };
 
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
-
+      let atomicSaved = false;
       try {
         await apiSaveSettingsSlice('orgSettings', updatedOrg);
+        atomicSaved = true;
       } catch (sliceErr) {
         console.warn('[PosTerminalManagement] Slice save warning:', sliceErr);
+      }
+
+      if (atomicSaved) {
+        try {
+          await saveStateLocally(updatedState);
+          broadcastStateChange(updatedState);
+        } catch (locErr) {
+          console.warn('[PosTerminalManagement] Local save warning:', locErr);
+        }
+      } else if (saveState) {
+        await saveState(updatedState);
       }
 
       showToast?.(`✅ تم ${editingTerminalId ? 'تعديل بيانات' : 'إضافة'} محطة نقطة البيع وتحديث صلاحيات الفرع بنجاح`);
@@ -639,11 +651,23 @@ export default function OwnerAccessAndIdentityModule({
       };
       const updatedState = { ...state, orgSettings: updatedOrg };
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
+      let atomicSaved = false;
       try {
         await apiSaveSettingsSlice('orgSettings', updatedOrg);
+        atomicSaved = true;
       } catch (sliceErr) {
         console.warn('[PosTerminalManagement] Slice save warning:', sliceErr);
+      }
+
+      if (atomicSaved) {
+        try {
+          await saveStateLocally(updatedState);
+          broadcastStateChange(updatedState);
+        } catch (locErr) {
+          console.warn('[PosTerminalManagement] Local save warning:', locErr);
+        }
+      } else if (saveState) {
+        await saveState(updatedState);
       }
       showToast?.('🗑️ تم حذف محطة نقطة البيع بنجاح');
     } catch (err) {
