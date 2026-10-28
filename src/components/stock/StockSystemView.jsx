@@ -566,6 +566,8 @@ export default function StockSystemView({
                 showToast?.(e.message || 'فشل تحديث حالة العزل', 'error');
               }
             }}
+            onBatchAdded={loadAllStockData}
+            showToast={showToast}
           />
         )}
 
