@@ -305,3 +305,4 @@ export function printThermalLabels(labelsList = [], template = {}) {
     }
   }
 }
+

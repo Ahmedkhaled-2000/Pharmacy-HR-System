@@ -246,3 +246,4 @@ export function printTransferInvoicePdf(transfer, items = [], companyInfo = {}) 
     printWin.document.close();
   }
 }
+
