@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { usePOS } from '../../context/POSContext';
 import { useAuth } from '../../context/AuthContext';
 import { useUI } from '../../context/UIContext';
+import { useData } from '../../context/DataContext';
 import {
   searchProducts,
   detectCartDrugInteractions,
@@ -12,6 +13,15 @@ import {
   FAST_OTC_CATEGORIES
 } from '../../utils/posEngine';
 import PosQuickItemsModal from './PosQuickItemsModal';
+import PosBatchSelectionModal from './PosBatchSelectionModal';
+import PosEmployeeActionAuthModal from './PosEmployeeActionAuthModal';
+import PosPromoCodeModal from './PosPromoCodeModal';
+import {
+  findEmployeeByCodeOrPhone,
+  calculateEmployeeDiscount,
+  calculateCustomerDiscount,
+  getDiscountConfig
+} from '../../services/posDiscountService';
 import { searchUnifiedCustomers } from '../../services/posCustomerService';
 import { parsePharmaFlyBarcode } from '../../utils/labelPrintService';
 import { stockSearchMedications } from '../../utils/stockApiClient';
@@ -60,6 +70,7 @@ import {
 
 export default function PosSalesWindow({ windowId }) {
   const { currentEmpUser, currentBranch } = useAuth?.() || {};
+  const { state } = useData?.() || {};
   const { showToast } = useUI?.() || {};
   const {
     productsCatalog,
@@ -74,6 +85,7 @@ export default function PosSalesWindow({ windowId }) {
     updateCartItemQuantity,
     toggleCartItemUnit,
     clearCart,
+    replaceCartItemWithProduct,
     finalizeSale,
     updateWindowCustomer,
     updateWindowInvoiceType,
@@ -104,6 +116,30 @@ export default function PosSalesWindow({ windowId }) {
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
   const barcodeInputRef = useRef(null);
   const resultsContainerRef = useRef(null);
+
+  // ── نافذة اختيار الصلاحية والتشغيلة الذكية (FEFO) ──
+  const [batchModalProduct, setBatchModalProduct] = useState(null);
+  const [batchModalUnitType, setBatchModalUnitType] = useState('base');
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+
+  // ── نافذة توثيق كود الموظف بنظام الـ HR لحركات البيع والإلغاء ──
+  const [isEmployeeAuthOpen, setIsEmployeeAuthOpen] = useState(false);
+  const [employeeAuthConfig, setEmployeeAuthConfig] = useState({
+    title: '',
+    subtitle: '',
+    actionType: 'sale',
+    callback: null
+  });
+
+  const triggerEmployeeVerifiedAction = useCallback((title, subtitle, actionType, callback) => {
+    setEmployeeAuthConfig({
+      title,
+      subtitle,
+      actionType,
+      callback
+    });
+    setIsEmployeeAuthOpen(true);
+  }, []);
 
   // إظهار نافذة تكبير صورة الروشتة
   const [isRxImageZoomed, setIsRxImageZoomed] = useState(false);
@@ -149,6 +185,17 @@ export default function PosSalesWindow({ windowId }) {
   const [discountValue, setDiscountValue] = useState(0);
   const [isDiscountModalOpen, setIsDiscountModalOpen] = useState(false);
   const discountInputRef = useRef(null);
+
+  // ── نافذة البرومو كود الأكريليكية الشفافة (Promo Code Modal Ctrl+P) ──
+  const [isPromoModalOpen, setIsPromoModalOpen] = useState(false);
+  const [appliedPromo, setAppliedPromo] = useState(null);
+
+  const handleApplyPromo = (promoRes) => {
+    setAppliedPromo(promoRes);
+    setDiscountType(promoRes.discountType);
+    setDiscountValue(promoRes.discountValue);
+    showToast?.(`🎉 ${promoRes.message}`);
+  };
 
   // التنقل بين الأصناف في الفاتورة عبر لوحة المفاتيح
   const [selectedCartIndex, setSelectedCartIndex] = useState(-1);
@@ -492,10 +539,40 @@ export default function PosSalesWindow({ windowId }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // ── البحث الفوري والآلي برقم الهاتف (مع جلب بيانات العميل بمجرد إدخال 10 أو 11 رقم) ──
+  // ── البحث الفوري والآلي برقم الهاتف أو كود الموظف (Auto-Detect Employee & Customer) ──
   const handlePhoneLookup = useCallback(async (phoneVal) => {
     updateWindowCustomer(windowId, { phone: phoneVal });
-    const cleanPhone = (phoneVal || '').replace(/\D/g, '');
+    const clean = String(phoneVal || '').trim();
+    if (!clean) return;
+
+    // 1. التعرف التلقائي على الموظف عند كتابة كوده في خانة العميل وتطبيق خصم العاملين
+    const discCfg = getDiscountConfig();
+    if (discCfg.employeeDiscount?.enabled && discCfg.employeeDiscount?.autoDetectInCustomerField) {
+      const matchedEmp = findEmployeeByCodeOrPhone(clean, state?.employees || []);
+      if (matchedEmp) {
+        const empDiscountPct = parseFloat(discCfg.employeeDiscount?.defaultPercent || 15);
+        updateWindowCustomer(windowId, {
+          name: `👤 ${matchedEmp.name} (موظف)`,
+          phone: matchedEmp.phone || matchedEmp.code || clean,
+          address: matchedEmp.branchName || matchedEmp.department || 'صيدليات المروة',
+          isChronic: false,
+          isEmployee: true,
+          employeeCode: matchedEmp.code,
+          employeeRole: matchedEmp.role || matchedEmp.jobTitle || 'عامل بالصيدلية'
+        });
+        setCustomerSearchQuery(`👤 ${matchedEmp.name} (موظف)`);
+        setShowCustomerDropdown(false);
+        setCustomerSuggestions([]);
+
+        // تطبيق خصم الموظف تلقائياً
+        setDiscountType('percent');
+        setDiscountValue(empDiscountPct);
+        showToast?.(`⭐ تم التعرف تلقائياً على الموظف [${matchedEmp.name}] وتطبيق خصم العاملين (${empDiscountPct}%)!`);
+        return;
+      }
+    }
+
+    const cleanPhone = clean.replace(/\D/g, '');
     if (cleanPhone.length >= 10) {
       try {
         const results = await searchUnifiedCustomers(cleanPhone);
@@ -514,11 +591,20 @@ export default function PosSalesWindow({ windowId }) {
             phone: matched.whatsapp_phone || matched.phone || phoneVal,
             address: custAddr,
             isChronic: isChronicCust,
-            walletBalance: walletBal
+            walletBalance: walletBal,
+            isEmployee: false
           });
           setCustomerSearchQuery(custName);
           setShowCustomerDropdown(false);
           setCustomerSuggestions([]);
+
+          // فحص وتطبيق خصومات العملاء (شريحة / أمراض مزمنة / خصم فردي مخصص)
+          const custDisc = calculateCustomerDiscount({ ...matched, isChronic: isChronicCust }, subtotal);
+          if (custDisc && custDisc.percent > 0) {
+            setDiscountType('percent');
+            setDiscountValue(custDisc.percent);
+            showToast?.(`🎁 تم تطبيق ${custDisc.reason}: ${custDisc.percent}%`);
+          }
 
           if (custAddr && invoiceType === 'delivery') {
             updateWindowDeliveryDetails(windowId, { address: custAddr, isDelivery: true });
@@ -530,7 +616,7 @@ export default function PosSalesWindow({ windowId }) {
         console.warn('Phone lookup error:', err);
       }
     }
-  }, [windowId, updateWindowCustomer, invoiceType, updateWindowDeliveryDetails, showToast]);
+  }, [windowId, updateWindowCustomer, invoiceType, updateWindowDeliveryDetails, showToast, state?.employees, subtotal]);
 
   const handleCustomerPhoneKeyDown = useCallback(async (e, phoneVal) => {
     if (e.key === 'Enter') {
@@ -538,6 +624,32 @@ export default function PosSalesWindow({ windowId }) {
       e.stopPropagation();
       const clean = (phoneVal || '').trim();
       if (!clean) return;
+
+      // 1. فحص كود الموظف أولاً
+      const discCfg = getDiscountConfig();
+      if (discCfg.employeeDiscount?.enabled && discCfg.employeeDiscount?.autoDetectInCustomerField) {
+        const matchedEmp = findEmployeeByCodeOrPhone(clean, state?.employees || []);
+        if (matchedEmp) {
+          const empDiscountPct = parseFloat(discCfg.employeeDiscount?.defaultPercent || 15);
+          updateWindowCustomer(windowId, {
+            name: `👤 ${matchedEmp.name} (موظف)`,
+            phone: matchedEmp.phone || matchedEmp.code || clean,
+            address: matchedEmp.branchName || matchedEmp.department || 'صيدليات المروة',
+            isChronic: false,
+            isEmployee: true,
+            employeeCode: matchedEmp.code,
+            employeeRole: matchedEmp.role || matchedEmp.jobTitle || 'عامل بالصيدلية'
+          });
+          setCustomerSearchQuery(`👤 ${matchedEmp.name} (موظف)`);
+          setShowCustomerDropdown(false);
+          setCustomerSuggestions([]);
+
+          setDiscountType('percent');
+          setDiscountValue(empDiscountPct);
+          showToast?.(`⭐ تم التعرف تلقائياً على الموظف [${matchedEmp.name}] وتطبيق خصم العاملين (${empDiscountPct}%)!`);
+          return;
+        }
+      }
 
       const cleanDigits = clean.replace(/\D/g, '');
       try {
@@ -548,13 +660,24 @@ export default function PosSalesWindow({ windowId }) {
         });
 
         if (matched) {
+          const isChronicCust = Boolean(matched.is_chronic ?? matched.isChronic);
           updateWindowCustomer(windowId, {
             name: matched.full_name || matched.name,
             phone: matched.whatsapp_phone || matched.phone || clean,
             address: matched.address || '',
-            isChronic: Boolean(matched.is_chronic ?? matched.isChronic),
-            walletBalance: parseFloat(matched.wallet_balance ?? matched.walletBalance ?? 0)
+            isChronic: isChronicCust,
+            walletBalance: parseFloat(matched.wallet_balance ?? matched.walletBalance ?? 0),
+            isEmployee: false
           });
+
+          // تطبيق خصم العميل (فردي أو شريحة أو مزمن)
+          const custDisc = calculateCustomerDiscount({ ...matched, isChronic: isChronicCust }, subtotal);
+          if (custDisc && custDisc.percent > 0) {
+            setDiscountType('percent');
+            setDiscountValue(custDisc.percent);
+            showToast?.(`🎁 تم تطبيق ${custDisc.reason}: ${custDisc.percent}%`);
+          }
+
           showToast?.(`✅ تم ربط العميل: ${matched.full_name || matched.name}`);
         } else {
           // عميل غير مسجل -> فتح نافذة إضافة عميل جديد فورياً داخل الشاشة
@@ -565,7 +688,7 @@ export default function PosSalesWindow({ windowId }) {
         setIsCustomerModalOpen(true);
       }
     }
-  }, [windowId, updateWindowCustomer, showToast, setIsCustomerModalOpen]);
+  }, [windowId, updateWindowCustomer, showToast, setIsCustomerModalOpen, state?.employees, subtotal]);
 
   // ── 2. اختصارات لوحة المفاتيح الفورية المحصورة داخل النافذة النشطة فقط (Scoped Shortcuts) ──
   useEffect(() => {
@@ -578,6 +701,7 @@ export default function PosSalesWindow({ windowId }) {
         e.preventDefault();
         e.stopPropagation();
         if (isQuickCashPinModalOpen) { setIsQuickCashPinModalOpen(false); return; }
+        if (isPromoModalOpen) { setIsPromoModalOpen(false); return; }
         if (isDiscountModalOpen) { setIsDiscountModalOpen(false); return; }
         if (isQuickItemsOpen) { setIsQuickItemsOpen(false); return; }
         if (isUncodedModalOpen) { setIsUncodedModalOpen(false); return; }
@@ -783,6 +907,14 @@ export default function PosSalesWindow({ windowId }) {
         return;
       }
 
+      // ⚡ نافذة إدخال البروموكود الأكريليكية الشفافة (Ctrl + P أو Alt + P)
+      if ((e.ctrlKey && (e.key === 'p' || e.key === 'P')) || (e.altKey && (e.key === 'p' || e.key === 'P'))) {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsPromoModalOpen(true);
+        return;
+      }
+
       // إظهار وإخفاء الأصناف السريعة (F8)
       if (e.key === 'F8') {
         e.preventDefault();
@@ -791,15 +923,37 @@ export default function PosSalesWindow({ windowId }) {
         return;
       }
 
-      // اختصارات السداد المعتمدة (F5 بريسيت / F6 بدون ريسيت)
+      // اختصارات السداد المعتمدة في PharmaFly (F5 نقدي بريسيت / F6 فيزا وإلكتروني) مع التوثيق
       if (e.key === 'F5') {
         e.preventDefault();
         e.stopPropagation();
-        handleOpenPayment({ printReceipt: true });
+        if (cart.length === 0) {
+          showToast?.('⚠️ سلة الفاتورة فارغة، يرجى إضافة أصناف أولاً');
+          return;
+        }
+        triggerEmployeeVerifiedAction(
+          'توثيق سداد نقدي وطباعة [F5]',
+          `المبلغ المطلوب: ${netTotal.toFixed(2)} ج.م • أدخل كود الموظف للاعتماد والطباعة`,
+          'sale',
+          (emp) => {
+            handleOpenPayment({ method: 'cash', printReceipt: true, cashierEmpCode: emp.code, cashierEmpName: emp.name });
+          }
+        );
       } else if (e.key === 'F6') {
         e.preventDefault();
         e.stopPropagation();
-        handleOpenPayment({ printReceipt: false });
+        if (cart.length === 0) {
+          showToast?.('⚠️ سلة الفاتورة فارغة، يرجى إضافة أصناف أولاً');
+          return;
+        }
+        triggerEmployeeVerifiedAction(
+          'توثيق سداد إلكتروني (فيزا / محفظة) [F6]',
+          `المبلغ المطلوب: ${netTotal.toFixed(2)} ج.م • أدخل كود الموظف للاعتماد`,
+          'sale',
+          (emp) => {
+            handleOpenPayment({ method: 'card', printReceipt: true, cashierEmpCode: emp.code, cashierEmpName: emp.name });
+          }
+        );
       }
     };
 
@@ -809,6 +963,7 @@ export default function PosSalesWindow({ windowId }) {
     activeWindowId,
     windowId,
     isQuickCashPinModalOpen,
+    isPromoModalOpen,
     isDiscountModalOpen,
     isQuickItemsOpen,
     isUncodedModalOpen,
@@ -892,9 +1047,36 @@ export default function PosSalesWindow({ windowId }) {
     return () => clearTimeout(timer);
   }, [searchQuery, productsCatalog]);
 
-  // إضافة صنف للسلة مع توريث نوع الفاتورة الحالي
+  // إضافة صنف للسلة مع فحص تعدد التشغيلات وتواريخ الصلاحية (FEFO Strategy)
   const handleSelectProduct = (product, unitType = 'base') => {
+    const batches = Array.isArray(product.batches) ? product.batches : [];
+    // إذا كان للصنف أكثر من تاريخ صلاحية أو تشغيلة، نفتح نافذة اختيار الصلاحية الفورية
+    if (batches.length > 1) {
+      setBatchModalProduct(product);
+      setBatchModalUnitType(unitType);
+      setIsBatchModalOpen(true);
+      return;
+    }
+
+    // إذا كانت تشغيلة واحدة أو محددة مسبقاً، تضاف فوراً
     addItemToActiveWindowCart(product, unitType, 1, invoiceType);
+    setSearchQuery('');
+    setSearchResults([]);
+    setSelectedResultIndex(0);
+    setTimeout(() => {
+      if (barcodeInputRef.current) barcodeInputRef.current.focus();
+    }, 40);
+  };
+
+  const handleBatchSelected = (chosenBatch) => {
+    if (!batchModalProduct) return;
+    const prodWithSpecificBatch = {
+      ...batchModalProduct,
+      batches: [chosenBatch]
+    };
+    addItemToActiveWindowCart(prodWithSpecificBatch, batchModalUnitType, 1, invoiceType);
+    setIsBatchModalOpen(false);
+    setBatchModalProduct(null);
     setSearchQuery('');
     setSearchResults([]);
     setSelectedResultIndex(0);
@@ -1005,13 +1187,52 @@ export default function PosSalesWindow({ windowId }) {
       if (searchResults.length > 0 && searchResults[selectedResultIndex]) {
         handleSelectProduct(searchResults[selectedResultIndex], 'base');
       } else if (searchQuery.trim()) {
-        // محاولة مسح الباركود المباشر الدقيق
+        // محاولة مسح الباركود المباشر الدقيق محلياً أو من الخادم
         const exactMatch = productsCatalog.find(
           (p) => p.barcode === searchQuery.trim() || (p.barcodes && p.barcodes.includes(searchQuery.trim()))
         );
         if (exactMatch) {
           handleSelectProduct(exactMatch, 'base');
+        } else {
+          // جلب مباشر من قاعدة بيانات الأدوية والمخزون المركزي
+          stockSearchMedications({ q: rawText, locationId: currentBranch?.id || '' }).then(res => {
+            if (res?.success && Array.isArray(res.medications) && res.medications.length > 0) {
+              const m = res.medications[0];
+              const newProd = {
+                id: m.id,
+                barcode: m.barcode || m.gtin_barcode || rawText,
+                tradeNameAr: m.trade_name_ar || m.trade_name_en,
+                tradeNameEn: m.trade_name_en || m.trade_name_ar,
+                genericName: m.generic_name || 'غير محدد',
+                category: m.category || 'أدوية',
+                dosageForm: m.dosage_form || 'عبوة',
+                publicPrice: parseFloat(m.public_price || 0),
+                costPrice: parseFloat(m.cost_price || (m.public_price ? m.public_price * 0.75 : 0)),
+                subUnitPrice: parseFloat(m.unit_price || (m.public_price / (m.pack_size || 1))),
+                packSize: parseInt(m.pack_size || 1, 10),
+                baseUnit: m.unit_type || 'علبة',
+                subUnit: 'شريط',
+                batches: m.batches || []
+              };
+              handleSelectProduct(newProd, 'base');
+              showToast?.(`✅ تم مسح وإضافة ${newProd.tradeNameAr}`);
+            } else {
+              showToast?.(`⚠️ لم يتم العثور على الصنف بالباركود: ${rawText}`);
+            }
+          }).catch(() => {
+            showToast?.(`⚠️ تعذر البحث عن الباركود: ${rawText}`);
+          });
         }
+      } else if (!searchQuery.trim() && cart.length > 0) {
+        // اختصار PharmaFly: ضغط Enter عند فراغ حقل البحث ينهي البيع نقداً ويوثق بكود الموظف
+        triggerEmployeeVerifiedAction(
+          'توثيق إنهاء فاتورة البيع النقدي [Enter]',
+          `المبلغ الإجمالي المطلوب: ${netTotal.toFixed(2)} ج.م • يرجى إدخال كود الموظف للاعتماد والطباعة`,
+          'sale',
+          (emp) => {
+            handleQuickCheckoutWithoutReceipt(emp.code);
+          }
+        );
       }
     } else if (e.key === 'Escape') {
       e.preventDefault();
@@ -1061,12 +1282,21 @@ export default function PosSalesWindow({ windowId }) {
   }, [cart]);
 
   // فحص البدائل للصنف
-  const handleInspectSubstitutes = (item) => {
-    const prod = productsCatalog.find((p) => p.id === item.productId);
-    if (prod) {
-      setActiveSubstituteTarget({ product: prod, windowId });
-      setIsSubstitutesModalOpen(true);
-    }
+  const handleInspectSubstitutes = (item, cartIndex = -1) => {
+    const prod = productsCatalog.find((p) => p.id === item.productId) || {
+      id: item.productId || item.id,
+      tradeNameAr: item.tradeNameAr,
+      tradeNameEn: item.tradeNameEn,
+      genericName: item.genericName,
+      publicPrice: item.publicPrice || item.unitPrice,
+      costPrice: item.costPrice || (item.publicPrice ? item.publicPrice * 0.75 : 0),
+      dosageForm: item.dosageForm,
+      strength: item.strength,
+      barcode: item.barcode,
+      batches: item.batches || []
+    };
+    setActiveSubstituteTarget({ product: prod, cartIndex, windowId });
+    setIsSubstitutesModalOpen(true);
   };
 
   // فحص رصيد الصنف عبر الفروع
@@ -1536,7 +1766,7 @@ export default function PosSalesWindow({ windowId }) {
                             {/* شارة فحص البدائل الذكية */}
                             <button
                               type="button"
-                              onClick={() => handleInspectSubstitutes(item)}
+                              onClick={() => handleInspectSubstitutes(item, idx)}
                               style={{
                                 background: 'transparent',
                                 border: 'none',
@@ -1786,11 +2016,11 @@ export default function PosSalesWindow({ windowId }) {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', position: 'relative' }} ref={customerDropdownRef}>
-            {/* حقل هاتف العميل مع الأتمتة الفورية بمجرد إدخال 11 رقم أو الضغط على Enter */}
+            {/* حقل هاتف العميل أو كود الموظف مع الأتمتة الفورية */}
             <div>
               <input
                 type="tel"
-                placeholder="رقم الهاتف (Enter لتسجيل عميل جديد)..."
+                placeholder="رقم الهاتف أو كود الموظف..."
                 value={customer.phone}
                 onChange={(e) => {
                   handlePhoneLookup(e.target.value);
@@ -1802,8 +2032,8 @@ export default function PosSalesWindow({ windowId }) {
                   width: '100%',
                   padding: '6px 8px',
                   borderRadius: '6px',
-                  border: '1.5px solid #cbd5e1',
-                  background: '#ffffff',
+                  border: customer.isEmployee ? '1.5px solid #059669' : '1.5px solid #cbd5e1',
+                  background: customer.isEmployee ? '#ecfdf5' : '#ffffff',
                   color: '#0f172a',
                   fontSize: '11.5px',
                   boxSizing: 'border-box',
@@ -1903,6 +2133,25 @@ export default function PosSalesWindow({ windowId }) {
               </div>
             )}
           </div>
+
+          {/* شارة تمييز الموظف أو البروموكود المطبق */}
+          {(customer.isEmployee || appliedPromo) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
+              {customer.isEmployee && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '6px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', fontSize: '10.5px', fontWeight: 800 }}>
+                  <ShieldCheck size={12} color="#059669" />
+                  <span>موظف معتمد: {customer.employeeCode || ''} (خصم {discountValue}%)</span>
+                </div>
+              )}
+              {appliedPromo && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '6px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', fontSize: '10.5px', fontWeight: 800 }}>
+                  <Tag size={12} color="#d97706" />
+                  <span>كود: {appliedPromo.code} (-{calculatedDiscount.toFixed(2)} ج)</span>
+                  <button type="button" onClick={() => { setAppliedPromo(null); setDiscountValue(0); }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#b45309', fontWeight: 900, padding: 0 }}>×</button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* صف المحفظة + المتابعة المزمنة + الروشتة */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
@@ -2066,9 +2315,33 @@ export default function PosSalesWindow({ windowId }) {
         {/* العمود 2: الإجماليات والخصم المزدوج (% أو ج.م) والنهائي البارز */}
         <div className="pos-dock-panel pos-dock-totals-panel">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 10px', fontSize: '11.5px', marginBottom: '6px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569' }}>
-              <span>المجموع الفرعي:</span>
-              <strong style={{ color: '#0f172a' }}>{subtotal.toFixed(2)} ج</strong>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#475569' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span>الفرعي:</span>
+                <strong style={{ color: '#0f172a' }}>{subtotal.toFixed(2)} ج</strong>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPromoModalOpen(true)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                  padding: '2px 7px',
+                  borderRadius: '6px',
+                  background: appliedPromo ? '#fef3c7' : '#f0fdf4',
+                  border: appliedPromo ? '1px solid #fde68a' : '1px solid #86efac',
+                  color: appliedPromo ? '#b45309' : '#166534',
+                  fontSize: '10.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  transition: 'all 0.12s'
+                }}
+                title="تطبيق برومو كود أو كود خصم ترويجي [Ctrl+P]"
+              >
+                <Tag size={11} />
+                <span>{appliedPromo ? appliedPromo.code : 'بروموكود [Ctrl+P]'}</span>
+              </button>
             </div>
 
             {/* الخصم المزدوج */}
@@ -2721,9 +2994,16 @@ export default function PosSalesWindow({ windowId }) {
                 <button
                   type="button"
                   onClick={() => {
-                    clearCart(windowId);
-                    setShowCancelConfirmModal(false);
-                    showToast?.('🗑️ تم إلغاء الفاتورة وتفريغ السلة بالكامل');
+                    triggerEmployeeVerifiedAction(
+                      'توثيق إلغاء وتفريغ السلة',
+                      `تفريغ ${cart.length} صنف بقيمة ${netTotal.toFixed(2)} ج.م • يلزم كود الموظف بنظام الـ HR`,
+                      'void',
+                      (emp) => {
+                        clearCart(windowId);
+                        setShowCancelConfirmModal(false);
+                        showToast?.(`🗑️ تم إلغاء الفاتورة وتفريغ السلة بواسطة: ${emp.name}`);
+                      }
+                    );
                   }}
                   style={{
                     flex: 1,
@@ -3532,6 +3812,40 @@ export default function PosSalesWindow({ windowId }) {
           </div>
         </div>
       )}
+
+      {/* ── نافذة اختيار التشغيلة وتاريخ الصلاحية الذكية (FEFO) ── */}
+      <PosBatchSelectionModal
+        isOpen={isBatchModalOpen}
+        product={batchModalProduct}
+        onSelectBatch={handleBatchSelected}
+        onClose={() => {
+          setIsBatchModalOpen(false);
+          setBatchModalProduct(null);
+        }}
+      />
+
+      {/* ── نافذة توثيق كود الموظف بنظام الـ HR بخلفية شفافة ── */}
+      <PosEmployeeActionAuthModal
+        isOpen={isEmployeeAuthOpen}
+        actionTitle={employeeAuthConfig.title}
+        actionSubtitle={employeeAuthConfig.subtitle}
+        actionType={employeeAuthConfig.actionType}
+        onVerified={(emp) => {
+          setIsEmployeeAuthOpen(false);
+          if (employeeAuthConfig.callback) {
+            employeeAuthConfig.callback(emp);
+          }
+        }}
+        onClose={() => setIsEmployeeAuthOpen(false)}
+      />
+
+      {/* ── نافذة إدخال البروموكود الأكريليكية الشفافة [Ctrl+P] ── */}
+      <PosPromoCodeModal
+        isOpen={isPromoModalOpen}
+        onClose={() => setIsPromoModalOpen(false)}
+        invoiceSubtotal={subtotal}
+        onApplyPromo={handleApplyPromo}
+      />
     </div>
   );
 }

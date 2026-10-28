@@ -89,7 +89,8 @@ export default function PosBranchStockModal() {
         const queryParams = new URLSearchParams({
           name: product.tradeNameAr || product.tradeNameEn || '',
           barcode: product.barcode || '',
-          productId: product.id || ''
+          productId: product.id || '',
+          currentBranchId: currentBranch?.id || ''
         });
 
         const res = await fetch(`/api/pos/inter-branch-stock?${queryParams.toString()}`, {

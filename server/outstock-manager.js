@@ -13384,6 +13384,38 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       res.status(500).json({ success: false, error: err.message });
     }
   });
+
+  // 5. استرجاع وحفظ سياسات الخصم والبروموكود للمالك (POS Discounts & Promo Codes API)
+  app.get('/api/pos/discounts/config', async (req, res) => {
+    try {
+      const sRes = await db.query("SELECT value_data FROM public.app_settings WHERE key_name = 'pos_discount_settings'");
+      const config = sRes.rows[0]?.value_data || null;
+      res.json({ success: true, config });
+    } catch (err) {
+      console.warn('[Get Discount Config Error]:', err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/pos/discounts/config', async (req, res) => {
+    try {
+      const { config } = req.body || {};
+      if (!config) return res.status(400).json({ success: false, error: 'بيانات الإعدادات مفقودة' });
+
+      await db.query(`
+        INSERT INTO public.app_settings (key_name, value_data, updated_at)
+        VALUES ('pos_discount_settings', $1, CURRENT_TIMESTAMP)
+        ON CONFLICT (key_name) DO UPDATE SET
+          value_data = EXCLUDED.value_data,
+          updated_at = CURRENT_TIMESTAMP;
+      `, [JSON.stringify(config)]);
+
+      res.json({ success: true, message: 'تم حفظ وتحديث سياسات الخصم والبروموكود بنجاح' });
+    } catch (err) {
+      console.warn('[Save Discount Config Error]:', err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
 }
 
 // ── دوال مساعدة لإعادة الحساب وتحديث حالات الطلبات ─────────────────────────

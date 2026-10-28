@@ -133,10 +133,10 @@ export default function PosMultiWindowManager() {
 
       // المحور الأفقي: التمدد لليمين أو لليسار
       if (resizeState.dir.includes('e')) {
-        newW = Math.max(800, Math.min(window.innerWidth - 30, resizeState.origW + deltaX));
+        newW = Math.max(720, Math.min(window.innerWidth - 30, resizeState.origW + deltaX));
       } else if (resizeState.dir.includes('w')) {
         const potentialW = resizeState.origW - deltaX;
-        if (potentialW >= 800 && resizeState.origX + deltaX >= 10) {
+        if (potentialW >= 720 && resizeState.origX + deltaX >= 10) {
           newW = potentialW;
           newX = resizeState.origX + deltaX;
         }
@@ -144,10 +144,10 @@ export default function PosMultiWindowManager() {
 
       // المحور الرأسي: التمدد لأسفل أو لأعلى
       if (resizeState.dir.includes('s')) {
-        newH = Math.max(520, Math.min(window.innerHeight - 60, resizeState.origH + deltaY));
+        newH = Math.max(460, Math.min(window.innerHeight - 60, resizeState.origH + deltaY));
       } else if (resizeState.dir.includes('n')) {
         const potentialH = resizeState.origH - deltaY;
-        if (potentialH >= 520 && resizeState.origY + deltaY >= 10) {
+        if (potentialH >= 460 && resizeState.origY + deltaY >= 10) {
           newH = potentialH;
           newY = resizeState.origY + deltaY;
         }

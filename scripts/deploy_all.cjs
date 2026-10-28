@@ -28,18 +28,22 @@ console.log('🚀 [3/6] Uploading backend files to VPS...');
 execSync(`scp -i ${sshKey} -o StrictHostKeyChecking=no server/hr-backend.js ${host}:${userHome}/hr-backend.js`, { stdio: 'inherit' });
 execSync(`scp -i ${sshKey} -o StrictHostKeyChecking=no server/biometric-manager.js ${host}:${userHome}/biometric-manager.js`, { stdio: 'inherit' });
 execSync(`scp -i ${sshKey} -o StrictHostKeyChecking=no server/outstock-manager.js ${host}:${userHome}/outstock-manager.js`, { stdio: 'inherit' });
+execSync(`scp -i ${sshKey} -o StrictHostKeyChecking=no server/stock-manager.js ${host}:${userHome}/stock-manager.js`, { stdio: 'inherit' });
 
 console.log('🚀 [4/6] Updating backend files on VPS and restarting hr-backend-server container...');
 const vpsBackendCmds = [
   `cp ${userHome}/hr-backend.js ${appDir}/server/hr-backend.js 2>/dev/null || true`,
   `cp ${userHome}/biometric-manager.js ${appDir}/server/biometric-manager.js 2>/dev/null || true`,
   `cp ${userHome}/outstock-manager.js ${appDir}/server/outstock-manager.js 2>/dev/null || true`,
+  `cp ${userHome}/stock-manager.js ${appDir}/server/stock-manager.js 2>/dev/null || true`,
   `sudo docker cp ${userHome}/hr-backend.js hr-backend-server:/app/server/hr-backend.js`,
   `sudo docker cp ${userHome}/biometric-manager.js hr-backend-server:/app/server/biometric-manager.js`,
   `sudo docker cp ${userHome}/outstock-manager.js hr-backend-server:/app/server/outstock-manager.js`,
+  `sudo docker cp ${userHome}/stock-manager.js hr-backend-server:/app/server/stock-manager.js`,
   `sudo docker cp ${userHome}/hr-backend.js hr-backend-server:/app/hr-backend.js`,
   `sudo docker cp ${userHome}/biometric-manager.js hr-backend-server:/app/biometric-manager.js`,
   `sudo docker cp ${userHome}/outstock-manager.js hr-backend-server:/app/outstock-manager.js`,
+  `sudo docker cp ${userHome}/stock-manager.js hr-backend-server:/app/stock-manager.js`,
   'sudo docker restart hr-backend-server'
 ].join(' && ');
 execSync(`ssh -i ${sshKey} -o StrictHostKeyChecking=no ${host} "${vpsBackendCmds}"`, { stdio: 'inherit' });

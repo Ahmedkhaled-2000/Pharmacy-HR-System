@@ -35,23 +35,63 @@ export function parsePharmaFlyBarcode(scannedText) {
   if (!scannedText) return null;
   const raw = String(scannedText).trim();
 
-  // نمط باركود PharmaFly: P1042-B24A-2708-U01
+  // 1. نمط باركود PharmaFly: P1042-B24A-2708-U01
   const match = raw.match(/^P([0-9a-zA-Z]+)-([a-zA-Z0-9]+)-(\d{4})-([a-zA-Z0-9]+)$/i);
-  if (!match) return null;
+  if (match) {
+    const [, medIdPart, batchPart, expYYMM, suppPart] = match;
+    const year = `20${expYYMM.slice(0, 2)}`;
+    const month = expYYMM.slice(2, 4);
 
-  const [, medIdPart, batchPart, expYYMM, suppPart] = match;
-  const year = `20${expYYMM.slice(0, 2)}`;
-  const month = expYYMM.slice(2, 4);
+    return {
+      isPharmaFly: true,
+      rawBarcode: raw,
+      medicationIdPart: medIdPart,
+      batchNumber: batchPart,
+      expiryDate: `${year}-${month}`,
+      expiryDateFormatted: `${month}/${year}`,
+      supplierCode: suppPart
+    };
+  }
 
-  return {
-    isPharmaFly: true,
-    rawBarcode: raw,
-    medicationIdPart: medIdPart,
-    batchNumber: batchPart,
-    expiryDate: `${year}-${month}`,
-    expiryDateFormatted: `${month}/${year}`,
-    supplierCode: suppPart
-  };
+  // 2. نمط باركود التشغيلة والصلاحية ثنائي الأبعاد GS1 DataMatrix للأدوية: (01)...(17)YYMMDD(10)BATCH...
+  const gs1ParenMatch = raw.match(/\(01\)(\d{14})\(17\)(\d{6})\(10\)([a-zA-Z0-9_-]+)/);
+  if (gs1ParenMatch) {
+    const [, gtin, expYYMMDD, batchPart] = gs1ParenMatch;
+    const year = `20${expYYMMDD.slice(0, 2)}`;
+    const month = expYYMMDD.slice(2, 4);
+    const day = expYYMMDD.slice(4, 6);
+    return {
+      isPharmaFly: true,
+      isGS1: true,
+      rawBarcode: raw,
+      medicationIdPart: gtin,
+      batchNumber: batchPart,
+      expiryDate: `${year}-${month}-${day}`,
+      expiryDateFormatted: `${month}/${year}`,
+      supplierCode: ''
+    };
+  }
+
+  // GS1 بدون أقواس مع معرفات التطبيق 01 و 17 و 10
+  const gs1RawMatch = raw.match(/^01(\d{14})17(\d{6})10([a-zA-Z0-9_-]+)/);
+  if (gs1RawMatch) {
+    const [, gtin, expYYMMDD, batchPart] = gs1RawMatch;
+    const year = `20${expYYMMDD.slice(0, 2)}`;
+    const month = expYYMMDD.slice(2, 4);
+    const day = expYYMMDD.slice(4, 6);
+    return {
+      isPharmaFly: true,
+      isGS1: true,
+      rawBarcode: raw,
+      medicationIdPart: gtin,
+      batchNumber: batchPart,
+      expiryDate: `${year}-${month}-${day}`,
+      expiryDateFormatted: `${month}/${year}`,
+      supplierCode: ''
+    };
+  }
+
+  return null;
 }
 
 // ── 2. مولد باركود Code 128 خفيف ودقيق (SVG Vector Renderer) ───────────────

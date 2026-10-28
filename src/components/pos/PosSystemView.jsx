@@ -21,10 +21,20 @@ import PosRightSidebar from './PosRightSidebar';
 import PosWhatsAppModal from './PosWhatsAppModal';
 import PosLabelPrintModal from './PosLabelPrintModal';
 import PosBranchTransferReceiveModal from './PosBranchTransferReceiveModal';
+import PosReceivedInvoicesModal from './PosReceivedInvoicesModal';
+import PosItemCardexModal from './PosItemCardexModal';
+import PosScrapStockModal from './PosScrapStockModal';
+import PosCustomerDebtsModal from './PosCustomerDebtsModal';
+import PosPatientHistoryModal from './PosPatientHistoryModal';
 
 function PosSystemContent() {
   const [isLabelPrintModalOpen, setIsLabelPrintModalOpen] = React.useState(false);
   const [isTransferReceiveModalOpen, setIsTransferReceiveModalOpen] = React.useState(false);
+  const [isReceivedInvoicesOpen, setIsReceivedInvoicesOpen] = React.useState(false);
+  const [isItemCardexOpen, setIsItemCardexOpen] = React.useState(false);
+  const [isScrapStockOpen, setIsScrapStockOpen] = React.useState(false);
+  const [isCustomerDebtsOpen, setIsCustomerDebtsOpen] = React.useState(false);
+  const [isPatientHistoryOpen, setIsPatientHistoryOpen] = React.useState(false);
   const {
     openNewSalesWindow,
     setIsSubstitutesModalOpen,
@@ -65,6 +75,14 @@ function PosSystemContent() {
         e.preventDefault();
         e.stopPropagation();
         window.dispatchEvent(new CustomEvent('pos:open-uncoded-modal'));
+        return;
+      }
+
+      // بوابة المالك ورادار الفروع والخصومات [Alt+O]
+      if (e.altKey && (e.key === 'o' || e.key === 'O' || e.key === 'خ' || e.key === 'ه')) {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsOwnerHubOpen((prev) => !prev);
         return;
       }
 
@@ -232,13 +250,28 @@ function PosSystemContent() {
 
     const handleOpenLabelPrint = () => setIsLabelPrintModalOpen(true);
     const handleOpenTransferReceive = () => setIsTransferReceiveModalOpen(true);
+    const handleOpenReceivedInvoices = () => setIsReceivedInvoicesOpen(true);
+    const handleOpenItemCardex = () => setIsItemCardexOpen(true);
+    const handleOpenScrapStock = () => setIsScrapStockOpen(true);
+    const handleOpenCustomerDebts = () => setIsCustomerDebtsOpen(true);
+    const handleOpenPatientHistory = () => setIsPatientHistoryOpen(true);
 
     window.addEventListener('pos:open-label-print', handleOpenLabelPrint);
     window.addEventListener('pos:open-transfer-receive', handleOpenTransferReceive);
+    window.addEventListener('pos:open-received-invoices', handleOpenReceivedInvoices);
+    window.addEventListener('pos:open-item-cardex', handleOpenItemCardex);
+    window.addEventListener('pos:open-scrap-stock', handleOpenScrapStock);
+    window.addEventListener('pos:open-customer-debts', handleOpenCustomerDebts);
+    window.addEventListener('pos:open-patient-history', handleOpenPatientHistory);
     window.addEventListener('pos:trigger-action', handleTriggerAction);
     return () => {
       window.removeEventListener('pos:open-label-print', handleOpenLabelPrint);
       window.removeEventListener('pos:open-transfer-receive', handleOpenTransferReceive);
+      window.removeEventListener('pos:open-received-invoices', handleOpenReceivedInvoices);
+      window.removeEventListener('pos:open-item-cardex', handleOpenItemCardex);
+      window.removeEventListener('pos:open-scrap-stock', handleOpenScrapStock);
+      window.removeEventListener('pos:open-customer-debts', handleOpenCustomerDebts);
+      window.removeEventListener('pos:open-patient-history', handleOpenPatientHistory);
       window.removeEventListener('pos:trigger-action', handleTriggerAction);
     };
   }, [
@@ -303,6 +336,36 @@ function PosSystemContent() {
       <PosReportsCenter
         isOpen={isReportsModalOpen}
         onClose={() => setIsReportsModalOpen(false)}
+      />
+
+      {/* سجل الفواتير وأذون الاستلام */}
+      <PosReceivedInvoicesModal
+        isOpen={isReceivedInvoicesOpen}
+        onClose={() => setIsReceivedInvoicesOpen(false)}
+      />
+
+      {/* مراجعة حركة الأصناف (Cardex) */}
+      <PosItemCardexModal
+        isOpen={isItemCardexOpen}
+        onClose={() => setIsItemCardexOpen(false)}
+      />
+
+      {/* مخزون هوالك وتوالف الفرع */}
+      <PosScrapStockModal
+        isOpen={isScrapStockOpen}
+        onClose={() => setIsScrapStockOpen(false)}
+      />
+
+      {/* حسابات الآجل والديون للعملاء */}
+      <PosCustomerDebtsModal
+        isOpen={isCustomerDebtsOpen}
+        onClose={() => setIsCustomerDebtsOpen(false)}
+      />
+
+      {/* السجل المرضي للعملاء */}
+      <PosPatientHistoryModal
+        isOpen={isPatientHistoryOpen}
+        onClose={() => setIsPatientHistoryOpen(false)}
       />
     </div>
   );

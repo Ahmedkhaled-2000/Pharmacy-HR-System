@@ -143,7 +143,11 @@ export async function saveUnifiedCustomer(customerData, branchId = 'main') {
     branchId: branchId || 'main',
     isChronic: Boolean(customerData.isChronic ?? customerData.is_chronic),
     notes: customerData.notes || '',
-    zone: customerData.zone || ''
+    zone: customerData.zone || '',
+    walletBalance: parseFloat(customerData.walletBalance ?? customerData.wallet_balance ?? 0),
+    drugAllergies: customerData.drug_allergies || customerData.drugAllergies || '',
+    chronicDiseases: customerData.chronic_diseases || customerData.chronicDiseases || '',
+    clinicalNotes: customerData.clinical_notes || customerData.clinicalNotes || ''
   };
 
   try {

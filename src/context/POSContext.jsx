@@ -11,6 +11,7 @@ import { commitLocalSale, getLocalOutbox } from '../utils/posOfflineSync';
 import { printPosSaleReceipt } from '../utils/posPrintService';
 import { playBarcodeSuccessBeep, playCashRegisterChime, playWarningAlertSound } from '../utils/posAudioService';
 import { deductCustomerWallet } from '../services/posCustomerService';
+import { stockSearchMedications } from '../utils/stockApiClient';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 
@@ -28,14 +29,42 @@ export function POSProvider({ children }) {
   const { currentBranch, currentEmpUser, authRole } = useAuth?.() || {};
   const { state, setState } = useData?.() || {};
 
-  // ── 1. الدليل الدوائي والمخزون المحلي ──
+  // ── 1. الدليل الدوائي والمخزون المحلي (خالٍ تماماً من البيانات الوهمية ومربوط بالمخزون الحقيقي) ──
   const [productsCatalog, setProductsCatalog] = useState(() => {
     try {
       const saved = localStorage.getItem('pharma_pos_products');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.id !== 'med-001') {
+          return parsed;
+        }
+      }
     } catch {}
-    return INITIAL_PHARMA_PRODUCTS;
+    return [];
   });
+
+  // مزامنة الأصناف الحقيقية الحية من مخزون الفرع
+  useEffect(() => {
+    stockSearchMedications({ locationId: currentBranch?.id || '' }).then((res) => {
+      if (res?.success && Array.isArray(res.medications) && res.medications.length > 0) {
+        const mapped = res.medications.map((m) => ({
+          id: m.id,
+          barcode: m.barcode,
+          barcodes: m.barcodes || [m.barcode].filter(Boolean),
+          tradeNameAr: m.trade_name_ar || m.tradeNameAr,
+          tradeNameEn: m.trade_name_en || m.tradeNameEn,
+          genericName: m.generic_name || m.genericName,
+          publicPrice: parseFloat(m.public_price || m.publicPrice || 0),
+          costPrice: parseFloat(m.cost_price || m.costPrice || 0),
+          packSize: parseInt(m.pack_size || m.packSize || 1, 10),
+          baseUnit: m.base_unit || 'علبة',
+          subUnit: m.sub_unit || 'شريط',
+          batches: m.batches || []
+        }));
+        setProductsCatalog(mapped);
+      }
+    }).catch(() => null);
+  }, [currentBranch?.id]);
 
   useEffect(() => {
     try {
@@ -130,18 +159,20 @@ export function POSProvider({ children }) {
     const windowNumber = salesWindows.length + 1;
     const defaultTitle = customTitle || `شاشة بيع #${windowNumber}`;
 
-    // حساب أبعاد متناسبة ومريحة تتسع لكامل عناصر النافذة وتملأ الشاشة بدقة
+    // حساب أبعاد متناسبة ومريحة تتسع لكامل عناصر النافذة (حجم مصغر بنسبة 70% لبيئة عمل مريحة وسريعة)
     const optimalW = typeof window !== 'undefined'
-      ? Math.max(1050, Math.min(1380, window.innerWidth - 380))
-      : 1180;
+      ? Math.max(780, Math.min(940, Math.round(window.innerWidth * 0.70)))
+      : 840;
     const optimalH = typeof window !== 'undefined'
-      ? Math.max(680, Math.min(880, window.innerHeight - 80))
-      : 760;
+      ? Math.max(500, Math.min(620, Math.round(window.innerHeight * 0.72)))
+      : 550;
 
-    // موضع النافذة الافتراضي
-    const offset = salesWindows.length === 0 ? 0 : (salesWindows.length % 5) * 20;
-    const newX = 16 + offset;
-    const newY = 12 + offset;
+    // موضع النافذة الافتراضي المتمركز في الشاشة
+    const offset = salesWindows.length === 0 ? 0 : (salesWindows.length % 5) * 18;
+    const screenW = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    const screenH = typeof window !== 'undefined' ? window.innerHeight : 800;
+    const newX = Math.max(20, Math.round((screenW - optimalW) / 2) + offset);
+    const newY = Math.max(16, Math.round((screenH - optimalH) / 2 - 20) + offset);
 
     const newWindow = {
       id: newId,
@@ -412,6 +443,25 @@ export function POSProvider({ children }) {
   const clearCart = useCallback((windowId) => {
     setSalesWindows((prev) =>
       prev.map((win) => (win.id === windowId ? { ...win, cart: [] } : win))
+    );
+  }, []);
+
+  // استبدال صنف في سلة النافذة بصنف بديل مباشرة
+  const replaceCartItemWithProduct = useCallback((windowId, itemIndex, newProduct, unitType = 'base', qty = 1) => {
+    setSalesWindows((prev) =>
+      prev.map((win) => {
+        if (win.id !== windowId) return win;
+        const currentCart = [...win.cart];
+        const origItem = (itemIndex >= 0 && itemIndex < currentCart.length) ? currentCart[itemIndex] : null;
+        const effectiveType = origItem?.itemType || win.invoiceType || 'otc';
+        const newLine = calculateCartItemLine(newProduct, unitType, qty, 0, effectiveType);
+        if (itemIndex >= 0 && itemIndex < currentCart.length) {
+          currentCart[itemIndex] = newLine;
+        } else {
+          currentCart.push(newLine);
+        }
+        return { ...win, cart: currentCart };
+      })
     );
   }, []);
 
@@ -739,6 +789,7 @@ export function POSProvider({ children }) {
     updateCartItemQuantity,
     toggleCartItemUnit,
     clearCart,
+    replaceCartItemWithProduct,
     finalizeSale,
     isPaymentModalOpen,
     setIsPaymentModalOpen,

@@ -26,7 +26,7 @@ export default function StockTransfersTab({
   onViewDetails,
   onDispatch,
   onOpenReceive,
-  showToast = () => {}
+  showToast = () => { }
 }) {
   const [search, setSearch] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');

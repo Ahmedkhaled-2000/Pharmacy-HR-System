@@ -13,16 +13,28 @@ const targets = [
 
 async function deploy() {
   console.log('====================================================');
-  console.log('🚀 DEPLOYING UPDATES TO BOTH VPS SERVERS');
+  console.log('🚀 DEPLOYING UPDATES TO PRODUCTION VPS (169.58.214.20)');
   console.log('====================================================\n');
 
-  console.log('📦 [1/4] Preparing frontend tar.gz package from dist...');
+  console.log('📦 [1/4] Checking & preparing frontend bundle...');
+  const distIndex = 'dist/index.html';
+  const isDistFresh = fs.existsSync(distIndex) && (Date.now() - fs.statSync(distIndex).mtimeMs < 10 * 60 * 1000);
+  if (!isDistFresh) {
+    console.log('   🔨 Building fresh frontend bundle (npm run build)...');
+    execSync('npm run build', { stdio: 'inherit' });
+  } else {
+    console.log('   ⚡ Fresh build found in dist/ (skipping redundant build).');
+  }
+
   if (fs.existsSync('frontend_update.tar.gz')) {
     fs.unlinkSync('frontend_update.tar.gz');
   }
-  execSync('tar --exclude="*.wasm" -czf frontend_update.tar.gz -C dist index.html assets registerSW.js manifest.webmanifest', { stdio: 'inherit' });
+  const filesToPack = ['index.html', 'assets', 'sw.js', 'registerSW.js', 'manifest.webmanifest'];
+  const workboxFiles = fs.readdirSync('dist').filter(f => f.startsWith('workbox-'));
+  const allPackFiles = [...filesToPack.filter(f => fs.existsSync(`dist/${f}`)), ...workboxFiles].join(' ');
+  execSync(`tar --exclude="*.wasm" -czf frontend_update.tar.gz -C dist ${allPackFiles}`, { stdio: 'inherit' });
   const archiveStats = fs.statSync('frontend_update.tar.gz');
-  console.log(`   Bundle size: ${(archiveStats.size / (1024 * 1024)).toFixed(2)} MB\n`);
+  console.log(`   📦 Frontend package size: ${(archiveStats.size / (1024 * 1024)).toFixed(2)} MB\n`);
 
   for (const target of targets) {
     console.log(`----------------------------------------------------`);
@@ -35,6 +47,7 @@ async function deploy() {
       execSync(`scp -i ${sshKey} -o StrictHostKeyChecking=no server/hr-backend.js ${target.host}:${target.userHome}/hr-backend.js`, { stdio: 'pipe' });
       execSync(`scp -i ${sshKey} -o StrictHostKeyChecking=no server/biometric-manager.js ${target.host}:${target.userHome}/biometric-manager.js`, { stdio: 'pipe' });
       execSync(`scp -i ${sshKey} -o StrictHostKeyChecking=no server/outstock-manager.js ${target.host}:${target.userHome}/outstock-manager.js`, { stdio: 'pipe' });
+      execSync(`scp -i ${sshKey} -o StrictHostKeyChecking=no server/stock-manager.js ${target.host}:${target.userHome}/stock-manager.js`, { stdio: 'pipe' });
       execSync(`scp -i ${sshKey} -o StrictHostKeyChecking=no server/backup-engine.js ${target.host}:${target.userHome}/backup-engine.js`, { stdio: 'pipe' });
       execSync(`scp -i ${sshKey} -o StrictHostKeyChecking=no server/payroll-loans-daemon.js ${target.host}:${target.userHome}/payroll-loans-daemon.js`, { stdio: 'pipe' });
 
@@ -44,16 +57,19 @@ async function deploy() {
         `cp ${target.userHome}/hr-backend.js ${target.appDir}/server/hr-backend.js 2>/dev/null || true`,
         `cp ${target.userHome}/biometric-manager.js ${target.appDir}/server/biometric-manager.js 2>/dev/null || true`,
         `cp ${target.userHome}/outstock-manager.js ${target.appDir}/server/outstock-manager.js 2>/dev/null || true`,
+        `cp ${target.userHome}/stock-manager.js ${target.appDir}/server/stock-manager.js 2>/dev/null || true`,
         `cp ${target.userHome}/backup-engine.js ${target.appDir}/server/backup-engine.js 2>/dev/null || true`,
         `cp ${target.userHome}/payroll-loans-daemon.js ${target.appDir}/server/payroll-loans-daemon.js 2>/dev/null || true`,
         `sudo docker cp ${target.userHome}/hr-backend.js hr-backend-server:/app/server/hr-backend.js 2>/dev/null || true`,
         `sudo docker cp ${target.userHome}/biometric-manager.js hr-backend-server:/app/server/biometric-manager.js 2>/dev/null || true`,
         `sudo docker cp ${target.userHome}/outstock-manager.js hr-backend-server:/app/server/outstock-manager.js 2>/dev/null || true`,
+        `sudo docker cp ${target.userHome}/stock-manager.js hr-backend-server:/app/server/stock-manager.js 2>/dev/null || true`,
         `sudo docker cp ${target.userHome}/backup-engine.js hr-backend-server:/app/server/backup-engine.js 2>/dev/null || true`,
         `sudo docker cp ${target.userHome}/payroll-loans-daemon.js hr-backend-server:/app/server/payroll-loans-daemon.js 2>/dev/null || true`,
         `sudo docker cp ${target.userHome}/hr-backend.js hr-backend-server:/app/hr-backend.js 2>/dev/null || true`,
         `sudo docker cp ${target.userHome}/biometric-manager.js hr-backend-server:/app/biometric-manager.js 2>/dev/null || true`,
         `sudo docker cp ${target.userHome}/outstock-manager.js hr-backend-server:/app/outstock-manager.js 2>/dev/null || true`,
+        `sudo docker cp ${target.userHome}/stock-manager.js hr-backend-server:/app/stock-manager.js 2>/dev/null || true`,
         `sudo docker cp ${target.userHome}/backup-engine.js hr-backend-server:/app/backup-engine.js 2>/dev/null || true`,
         `sudo docker cp ${target.userHome}/payroll-loans-daemon.js hr-backend-server:/app/payroll-loans-daemon.js 2>/dev/null || true`,
         'sudo docker restart hr-backend-server'
